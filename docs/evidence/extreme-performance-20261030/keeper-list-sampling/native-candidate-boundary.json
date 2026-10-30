@@ -1,0 +1,16 @@
+{
+  "read_at_unix": 1793348528.956973,
+  "id": 41025395547,
+  "name": "Minimal manual checks",
+  "status": "in_progress",
+  "conclusion": null,
+  "head_sha": "06e43272be3f4bec7d2798f7d8d464774536895c",
+  "head_branch": "main",
+  "event": "workflow_dispatch",
+  "html_url": "https://github.com/jeong-sik/masc/actions/runs/41025395547",
+  "path": ".github/workflows/pr-check.yml",
+  "created_at": "2026-10-30T08:16:59Z",
+  "updated_at": "2026-10-30T08:17:05Z",
+  "requested_native_source": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+  "requested_scenario": "workspace-files"
+}

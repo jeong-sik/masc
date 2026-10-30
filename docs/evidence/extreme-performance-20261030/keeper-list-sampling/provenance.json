@@ -1,0 +1,346 @@
+{
+  "scope": "Selected exact historical sampling captures. The 300-owner overall workload failed despite qualified TUI/sampler capture; post-shutdown durable states do not imply successful settlement receipts. Capture-time paths, synthetic operation bodies, selected SQLite fields, held-health response bodies and native image paths are intentional. Raw terminal output, full model/HTTP logs, credentials, binaries and complete SQLite/WAL snapshots are outside Git. Native source529 differs from candidate source and harness checkout.",
+  "measured_native_source": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+  "files": [
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/identity.json",
+      "retained": "owners-2/identity.json",
+      "source_sha256": "80bef44cb7e6d821c0b31ba1f720b906196d795c0684dc4c51dc91becf6b0f0c",
+      "retained_sha256": "80bef44cb7e6d821c0b31ba1f720b906196d795c0684dc4c51dc91becf6b0f0c",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/cleanup.json",
+      "retained": "owners-2/cleanup.json",
+      "source_sha256": "a3c9caf504e2a7087bd57608785001d399df6496c479e5a434a5e2dc572c2621",
+      "retained_sha256": "a3c9caf504e2a7087bd57608785001d399df6496c479e5a434a5e2dc572c2621",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/durable-operations.json",
+      "retained": "owners-2/durable-operations.json",
+      "source_sha256": "fa034ca1c2cf0b1b819db95695b13818f25747972c32e668d9fd8868ef3cbfca",
+      "retained_sha256": "fa034ca1c2cf0b1b819db95695b13818f25747972c32e668d9fd8868ef3cbfca",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/terminal.json",
+      "retained": "owners-2/terminal.json",
+      "source_sha256": "4a84b2c6747933683e35f68f5b510a9ef5d0f73972070deacac20cf184bb8026",
+      "retained_sha256": "4a84b2c6747933683e35f68f5b510a9ef5d0f73972070deacac20cf184bb8026",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/workload-phases.json",
+      "retained": "owners-2/workload-phases.json",
+      "source_sha256": "0bdc0a767ac1795ba5186ec6e585341a1c81718512759a10653b19fa7766635d",
+      "retained_sha256": "0bdc0a767ac1795ba5186ec6e585341a1c81718512759a10653b19fa7766635d",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/operations-admitted.json",
+      "retained": "owners-2/operations-admitted.json",
+      "source_sha256": "709c1c9162fef7bf35daf563ecd60cb74afe9ec854b008dcc4a3bd895b19f63b",
+      "retained_sha256": "709c1c9162fef7bf35daf563ecd60cb74afe9ec854b008dcc4a3bd895b19f63b",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/health-model-held.json",
+      "retained": "owners-2/health-model-held.json",
+      "source_sha256": "a4d19d2a187327169d23309b889b17128d9fbf287f0e99fc651048da0f4c3483",
+      "retained_sha256": "a4d19d2a187327169d23309b889b17128d9fbf287f0e99fc651048da0f4c3483",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/tui-observer/observation.json",
+      "retained": "owners-2/tui-observer/observation.json",
+      "source_sha256": "3085e59a777cb8230fbb34c7a4cf5ab9ea63d1ac0c65136e50f4a8aa80f72dfc",
+      "retained_sha256": "3085e59a777cb8230fbb34c7a4cf5ab9ea63d1ac0c65136e50f4a8aa80f72dfc",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/tui-observer/frame-timing.txt",
+      "retained": "owners-2/tui-observer/frame-timing.txt",
+      "source_sha256": "b23cdb74ee729d1c9bf23cc78035ef20abb5bbbb266e4def5765e679a984fc72",
+      "retained_sha256": "b23cdb74ee729d1c9bf23cc78035ef20abb5bbbb266e4def5765e679a984fc72",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/tui-observer/native-stacks.txt",
+      "retained": "owners-2/tui-observer/native-stacks.txt",
+      "source_sha256": "c8b0da79d1c036a586d74607a129453fd5bcadc0f763013b2dcd0437e19224f4",
+      "retained_sha256": "c8b0da79d1c036a586d74607a129453fd5bcadc0f763013b2dcd0437e19224f4",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/tui-observer/sample.stdout",
+      "retained": "owners-2/tui-observer/sample.stdout",
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/tui-observer/sample.stderr",
+      "retained": "owners-2/tui-observer/sample.stderr",
+      "source_sha256": "77d264963459573efc86e3653bd82cb2acbeaea169fe6999eb4092b932669b81",
+      "retained_sha256": "77d264963459573efc86e3653bd82cb2acbeaea169fe6999eb4092b932669b81",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/summary.json",
+      "retained": "owners-2/summary.json",
+      "source_sha256": "a4685ff5ef76aa3a197622df8e2d4671fb4508ca635b48c47a0632b41a068d9a",
+      "retained_sha256": "a4685ff5ef76aa3a197622df8e2d4671fb4508ca635b48c47a0632b41a068d9a",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1.analysis-v1.json",
+      "retained": "owners-2/analysis-v1.json",
+      "source_sha256": "20b5718f7e1b583815fc37216d0e9ab381908ab889d4ae997d70bae37d12e50a",
+      "retained_sha256": "20b5718f7e1b583815fc37216d0e9ab381908ab889d4ae997d70bae37d12e50a",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1.analysis-v2.json",
+      "retained": "owners-2/analysis-v2.json",
+      "source_sha256": "e0b6b0ab2a535e10673cb1b8bf1f54c0eb1883454aa52814302d4db067d2e5e2",
+      "retained_sha256": "e0b6b0ab2a535e10673cb1b8bf1f54c0eb1883454aa52814302d4db067d2e5e2",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1.execution.json",
+      "retained": "owners-2/execution.json",
+      "source_sha256": "17876c462a5ecbfaffdc83733a492c5e046cb383ebaf657d017f760790d41822",
+      "retained_sha256": "17876c462a5ecbfaffdc83733a492c5e046cb383ebaf657d017f760790d41822",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/identity.json",
+      "retained": "owners-300/identity.json",
+      "source_sha256": "90cdf9b8b06dc7161bb4596b296fdf38f85b0a9f51f810bf24f7657179d173b0",
+      "retained_sha256": "90cdf9b8b06dc7161bb4596b296fdf38f85b0a9f51f810bf24f7657179d173b0",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/cleanup.json",
+      "retained": "owners-300/cleanup.json",
+      "source_sha256": "92d3844f018328b85fee2b354fca5ca264941dcebebc1271f762a0ffa543dfe3",
+      "retained_sha256": "92d3844f018328b85fee2b354fca5ca264941dcebebc1271f762a0ffa543dfe3",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/durable-operations.json",
+      "retained": "owners-300/durable-operations.json",
+      "source_sha256": "f6225d12cb059d7d380f9878d9cdf65da69c5dd3a08eb95fe096606bc880c2a7",
+      "retained_sha256": "f6225d12cb059d7d380f9878d9cdf65da69c5dd3a08eb95fe096606bc880c2a7",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/terminal.json",
+      "retained": "owners-300/terminal.json",
+      "source_sha256": "8775387f1c4307d87ccfe1da60e6b9dca843b18a8379d4f14915d26d45eca99b",
+      "retained_sha256": "8775387f1c4307d87ccfe1da60e6b9dca843b18a8379d4f14915d26d45eca99b",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/workload-phases.json",
+      "retained": "owners-300/workload-phases.json",
+      "source_sha256": "c803a8a1570446593fbb421991a8f047d4805c160d65a15882d200b193794eae",
+      "retained_sha256": "c803a8a1570446593fbb421991a8f047d4805c160d65a15882d200b193794eae",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/operations-admitted.json",
+      "retained": "owners-300/operations-admitted.json",
+      "source_sha256": "09ec5a0271f94ab0347498917c69e1127dd1b7f6f84f6518a5e126e1dffedee3",
+      "retained_sha256": "09ec5a0271f94ab0347498917c69e1127dd1b7f6f84f6518a5e126e1dffedee3",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/health-model-held.json",
+      "retained": "owners-300/health-model-held.json",
+      "source_sha256": "4b9e7035832859e90eebff0d9fe566453f8ff713bcec5c4d6868dabd82e3e0c5",
+      "retained_sha256": "4b9e7035832859e90eebff0d9fe566453f8ff713bcec5c4d6868dabd82e3e0c5",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/tui-observer/observation.json",
+      "retained": "owners-300/tui-observer/observation.json",
+      "source_sha256": "16ac5327d9ccc6cbdb7d9ec55bab6b48b234e95d0a231de3fdbe2f20a4e860ae",
+      "retained_sha256": "16ac5327d9ccc6cbdb7d9ec55bab6b48b234e95d0a231de3fdbe2f20a4e860ae",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/tui-observer/frame-timing.txt",
+      "retained": "owners-300/tui-observer/frame-timing.txt",
+      "source_sha256": "0aff620915a9ccbc2b34c3876899a45c30ac71b33a121efe7657ddc88a0754db",
+      "retained_sha256": "0aff620915a9ccbc2b34c3876899a45c30ac71b33a121efe7657ddc88a0754db",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/tui-observer/native-stacks.txt",
+      "retained": "owners-300/tui-observer/native-stacks.txt",
+      "source_sha256": "cdd8cd188ec842d7ec47c4fb17d8a8f670d41d5a38b2d754f88d35ed4f7c9259",
+      "retained_sha256": "cdd8cd188ec842d7ec47c4fb17d8a8f670d41d5a38b2d754f88d35ed4f7c9259",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/tui-observer/sample.stdout",
+      "retained": "owners-300/tui-observer/sample.stdout",
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/tui-observer/sample.stderr",
+      "retained": "owners-300/tui-observer/sample.stderr",
+      "source_sha256": "6a570b56c1f90cca976b399ba2f941308b4e6ae9a40c3658831cf02d923f2143",
+      "retained_sha256": "6a570b56c1f90cca976b399ba2f941308b4e6ae9a40c3658831cf02d923f2143",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/failure.json",
+      "retained": "owners-300/failure.json",
+      "source_sha256": "3045f04525bb812c1b1976a2f18bbc736ae8d62741c142ced5a7339c4a6034af",
+      "retained_sha256": "3045f04525bb812c1b1976a2f18bbc736ae8d62741c142ced5a7339c4a6034af",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/operation-observation-failures.jsonl",
+      "retained": "owners-300/operation-observation-failures.jsonl",
+      "source_sha256": "70cacf01ee27db615f15c7fff96887883f40384eb102cc271ada759f3f5a1e7e",
+      "retained_sha256": "70cacf01ee27db615f15c7fff96887883f40384eb102cc271ada759f3f5a1e7e",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/fallback-cleanup.json",
+      "retained": "owners-300/fallback-cleanup.json",
+      "source_sha256": "5c713065e17132837f9afa7d4a10f282ad6bdc0a83e9ec75eedaaff25915b42b",
+      "retained_sha256": "5c713065e17132837f9afa7d4a10f282ad6bdc0a83e9ec75eedaaff25915b42b",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1.analysis-v1.json",
+      "retained": "owners-300/analysis-v1.json",
+      "source_sha256": "270f43e440aeead72cda5735f86b9bcd090a035310ec76a0c1977f1e8adec2b6",
+      "retained_sha256": "270f43e440aeead72cda5735f86b9bcd090a035310ec76a0c1977f1e8adec2b6",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1.analysis-v2.json",
+      "retained": "owners-300/analysis-v2.json",
+      "source_sha256": "45f5a42260b5a69e6671fb0f07837d51551583d7a595ae5bafd8f37d41426921",
+      "retained_sha256": "45f5a42260b5a69e6671fb0f07837d51551583d7a595ae5bafd8f37d41426921",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1.execution.json",
+      "retained": "owners-300/execution.json",
+      "source_sha256": "8e0926413fa0f6e43816af6d366b6da42c5729bdd84294540f930bb32aafb957",
+      "retained_sha256": "8e0926413fa0f6e43816af6d366b6da42c5729bdd84294540f930bb32aafb957",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/tui-owner-profile-v1/identity.json",
+      "retained": "probe/identity.json",
+      "source_sha256": "f0d58244772b58cc76a7efd006a9746b3977ad1368d500354d632975296528e8",
+      "retained_sha256": "f0d58244772b58cc76a7efd006a9746b3977ad1368d500354d632975296528e8",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/tui-owner-profile-v1/tui_observer.py",
+      "retained": "probe/tui_observer.py",
+      "source_sha256": "da908b4681479ff37c44c94bc6d73a927e71a6f932c3617d013c8c3640691477",
+      "retained_sha256": "da908b4681479ff37c44c94bc6d73a927e71a6f932c3617d013c8c3640691477",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py",
+      "retained": "probe/keeper_scale_session.py",
+      "source_sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "retained_sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_trace.py",
+      "retained": "probe/keeper_scale_trace.py",
+      "source_sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd",
+      "retained_sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-profile-analysis-v1.py",
+      "retained": "analysis-v1.py",
+      "source_sha256": "08b2675bdbf93aafb7fda2d2337dc8fb63cdd3ef3dc2b88f3f9c1dfda2ff4eb8",
+      "retained_sha256": "08b2675bdbf93aafb7fda2d2337dc8fb63cdd3ef3dc2b88f3f9c1dfda2ff4eb8",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-profile-analysis-v2.py",
+      "retained": "analysis-v2.py",
+      "source_sha256": "09cf3fc09b59bf37beb2e9087a58fbbc6ad792b1891ecca6fb2f2e00d6ae97ed",
+      "retained_sha256": "09cf3fc09b59bf37beb2e9087a58fbbc6ad792b1891ecca6fb2f2e00d6ae97ed",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-frame-native-dispatch-v1.json",
+      "retained": "native-candidate-dispatch.json",
+      "source_sha256": "91f5fc3e79dbe41d55dee2f337f2c53cba82407ed47f5cc08862d1f05a954a97",
+      "retained_sha256": "91f5fc3e79dbe41d55dee2f337f2c53cba82407ed47f5cc08862d1f05a954a97",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-list-frame-native-boundary-v1.json",
+      "retained": "native-candidate-boundary.json",
+      "source_sha256": "08a1408fb68b85ea5333004965f571597897eeff0268c81767e1e5846564926a",
+      "retained_sha256": "08a1408fb68b85ea5333004965f571597897eeff0268c81767e1e5846564926a",
+      "derivative": false
+    }
+  ],
+  "classification_inputs": {
+    "2": [
+      {
+        "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/summary.json",
+        "sha256": "a4685ff5ef76aa3a197622df8e2d4671fb4508ca635b48c47a0632b41a068d9a",
+        "present_at_provenance_recheck": true
+      },
+      {
+        "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1/failure.json",
+        "sha256": null,
+        "present_at_provenance_recheck": false
+      },
+      {
+        "source": "artifacts/extreme-perf-20261030/native-tui-profile2-v1.execution.json",
+        "sha256": "17876c462a5ecbfaffdc83733a492c5e046cb383ebaf657d017f760790d41822",
+        "present_at_provenance_recheck": true
+      }
+    ],
+    "300": [
+      {
+        "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/summary.json",
+        "sha256": null,
+        "present_at_provenance_recheck": false
+      },
+      {
+        "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1/failure.json",
+        "sha256": "3045f04525bb812c1b1976a2f18bbc736ae8d62741c142ced5a7339c4a6034af",
+        "present_at_provenance_recheck": true
+      },
+      {
+        "source": "artifacts/extreme-perf-20261030/native-tui-profile300-v1.execution.json",
+        "sha256": "8e0926413fa0f6e43816af6d366b6da42c5729bdd84294540f930bb32aafb957",
+        "present_at_provenance_recheck": true
+      }
+    ]
+  },
+  "classification_rechecked_at_unix": 1793348365.7659001,
+  "classification_scope": "Current original files were rechecked while constructing provenance. These presence/digest observations do not retroactively bind the original v1/v2 classification inputs at their earlier execution time. The retained execution receipt and current values can be compared independently.",
+  "bounded_credential_check": {
+    "owned_fixture_values_checked": 6,
+    "bundle_files_checked": 44,
+    "literal_matches": 0,
+    "unpinned_scanner_shapes": 0,
+    "scope": "Private exact owned fixture auth-file values and repository scanner patterns only; values are never retained and this is not a proof of absence of every secret.",
+    "checked_at_unix": 1793348780.008832
+  }
+}

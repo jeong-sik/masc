@@ -1,0 +1,73 @@
+{
+  "scope": "Native source 529 profile with stack-sampler overhead. Inclusive main-thread stack sample occurrences are not exclusive CPU, call counts, loaded Keeper cardinality or uninstrumented latency. Tail-call/unwind ancestry does not bind the named samples to a specific render, Build or eliminated duplicate call. Cleanup cancels live turns; post-shutdown store states are separate from settlement API receipts.",
+  "analyzer_sha256": "09cf3fc09b59bf37beb2e9087a58fbbc6ad792b1891ecca6fb2f2e00d6ae97ed",
+  "population": 2,
+  "capture_qualified": true,
+  "profiler": {
+    "command": [
+      "/usr/bin/sample",
+      "73856",
+      "5",
+      "1",
+      "-mayDie",
+      "-file",
+      "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-profile2-v1/tui-observer/native-stacks.txt"
+    ],
+    "returncode": 0,
+    "started_ns": "495625194386125",
+    "ended_ns": "495637149880583",
+    "forced": false,
+    "report_sha256": "c8b0da79d1c036a586d74607a129453fd5bcadc0f763013b2dcd0437e19224f4"
+  },
+  "main_thread_sample_count": 4089,
+  "named_inclusive_sample_occurrences": {
+    "camlMasc_tui_types$keeper_reading_": {
+      "sample_occurrences": 0,
+      "occurrences": []
+    },
+    "camlMasc_tui_keeper_control$liveness_of_roster_": {
+      "sample_occurrences": 0,
+      "occurrences": []
+    },
+    "camlMasc_tui_types$selected_keeper_": {
+      "sample_occurrences": 0,
+      "occurrences": []
+    },
+    "camlDune__exe__Masc_tui_render_keepers$render_keeper_list_": {
+      "sample_occurrences": 1,
+      "occurrences": [
+        {
+          "call_graph_relative_line": 222,
+          "report_line": 245,
+          "prefix_width": 8,
+          "count": 1,
+          "symbol": "camlDune__exe__Masc_tui_render_keepers$render_keeper_list_5315  (in masc-tui) + 1952  [0x104b17b68]",
+          "thread": "Thread_131502054   DispatchQueue_1: com.apple.main-thread  (serial)"
+        }
+      ]
+    }
+  },
+  "keeper_list_builds": {
+    "count": 113,
+    "p50_ns": "254167",
+    "p95_ns": "551583",
+    "max_ns": "10767625"
+  },
+  "post_shutdown_store_states": {
+    "succeeded": 4
+  },
+  "post_shutdown_store_failure_kinds": {
+    "None": 4
+  },
+  "settlement_api_terminal_receipts": 4,
+  "failure": null,
+  "workload_success": true,
+  "inputs": {
+    "tui-observer/native-stacks.txt": "c8b0da79d1c036a586d74607a129453fd5bcadc0f763013b2dcd0437e19224f4",
+    "tui-observer/observation.json": "3085e59a777cb8230fbb34c7a4cf5ab9ea63d1ac0c65136e50f4a8aa80f72dfc",
+    "tui-observer/frame-timing.txt": "b23cdb74ee729d1c9bf23cc78035ef20abb5bbbb266e4def5765e679a984fc72",
+    "durable-operations.json": "fa034ca1c2cf0b1b819db95695b13818f25747972c32e668d9fd8868ef3cbfca",
+    "terminal.json": "4a84b2c6747933683e35f68f5b510a9ef5d0f73972070deacac20cf184bb8026",
+    "cleanup.json": "a3c9caf504e2a7087bd57608785001d399df6496c479e5a434a5e2dc572c2621"
+  }
+}

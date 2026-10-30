@@ -73,7 +73,16 @@ type error =
   | Counterpart_interval_non_monotone of
       { after : float
       ; before : float
+      ; first_boundary_line : int
+      ; end_boundary_line : int
+      ; end_turn_ref : Ids.Turn_ref.t
+      ; atom_bound : (int * float) option
+      ; official_bound : (int * float) option
       }
+      (** Lines in the Keeper's turn-boundary log identify the selected range
+          and preceding cursor witnesses that formed its inverted counterpart
+          interval. A bound is absent if there is no cursor, or its witness
+          does not precede the selected range. *)
   | Counterpart_observations_unreadable of Keeper_librarian_input_sources.read_error
   | Progress_write_failed of Keeper_librarian_progress.write_error
   | Official_progress_unreadable of Keeper_librarian_official_progress.read_error

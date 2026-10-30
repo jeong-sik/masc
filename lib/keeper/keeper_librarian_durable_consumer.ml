@@ -44,6 +44,11 @@ type error =
   | Counterpart_interval_non_monotone of
       { after : float
       ; before : float
+      ; first_boundary_line : int
+      ; end_boundary_line : int
+      ; end_turn_ref : Ids.Turn_ref.t
+      ; atom_bound : (int * float) option
+      ; official_bound : (int * float) option
       }
   | Counterpart_observations_unreadable of Keeper_librarian_input_sources.read_error
   | Progress_write_failed of P.write_error
@@ -135,11 +140,18 @@ let error_to_string = function
       position.last_atom_digest
   | Memory_snapshot_unreadable detail ->
     "current Memory OS snapshot is unreadable: " ^ detail
-  | Counterpart_interval_non_monotone { after; before } ->
+  | Counterpart_interval_non_monotone
+      { after; before; first_boundary_line; end_boundary_line; end_turn_ref
+      ; atom_bound; official_bound } ->
+    let show_bound = function
+      | None -> "none"
+      | Some (line, recorded_at) ->
+        Printf.sprintf "(line=%d,recorded_at=%.17g)" line recorded_at
+    in
     Printf.sprintf
-      "counterpart interval is not monotone: after=%.06f before=%.06f"
-      after
-      before
+      "counterpart interval is not monotone: after=%.17g before=%.17g first_boundary_line=%d end_boundary_line=%d end_turn=%s atom_bound=%s official_bound=%s"
+      after before first_boundary_line end_boundary_line
+      (Ids.Turn_ref.to_string end_turn_ref) (show_bound atom_bound) (show_bound official_bound)
   | Counterpart_observations_unreadable error ->
     Keeper_librarian_input_sources.read_error_to_string error
   | Progress_write_failed error -> P.write_error_to_string error
@@ -1390,13 +1402,13 @@ let consume_one_with_extent
        backwards. *)
     let cursor_bound cursor =
       match cursor with
-      | Some (line, recorded_at) when line < step_line first_step -> Some recorded_at
+      | Some (line, _) when line < step_line first_step -> cursor
       | Some _ | None -> None
     in
     let atom_bound = cursor_bound after_atom in
     let official_bound = cursor_bound after_official in
     let after =
-      List.filter_map Fun.id [ atom_bound; official_bound ]
+      List.filter_map (Option.map snd) [ atom_bound; official_bound ]
       |> List.fold_left (fun after recorded_at ->
         match after with
         | None -> Some recorded_at
@@ -1491,7 +1503,7 @@ let consume_one_with_extent
       carried_from_another_trace
       && (match official_bound with
           | None -> true
-          | Some official_bound -> official_bound <= ended_at)
+          | Some (_, recorded_at) -> recorded_at <= ended_at)
     in
     let* counterparts =
       Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
@@ -1505,7 +1517,10 @@ let consume_one_with_extent
       match after with
       | Some after when after > ended_at && not inverted_by_the_carried_bound_alone
           && external_through = Keeper_external_read_cursor.offset external_cursor ->
-        Error (Counterpart_interval_non_monotone { after; before = ended_at })
+        Error (Counterpart_interval_non_monotone
+          { after; before = ended_at; first_boundary_line = step_line first_step
+          ; end_boundary_line = step_line last_step; end_turn_ref = turn_ref
+          ; atom_bound; official_bound })
       | None | Some _ -> Ok ()
     in
     if selected_messages = [] && observations = [] && counterpart_observations = []

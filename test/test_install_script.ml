@@ -604,12 +604,41 @@ let install_real_masc_binary prefix mirror_dir =
 ;;
 
 
+let release_identity_cache =
+  (* Packaging the mirror and running the bundle-helper install + commit costs
+     seconds per case, and the suite runs dozens of cases, which pushes the
+     targeted run past its 600s budget. The staged release and the installed
+     identity are byte-identical for every case, so build them once in a
+     suite-wide cache and copy the tree per case; upgrade scenarios keep their
+     own identity via existing_version, which rewrites dest afterwards. *)
+  let cache = lazy (
+    let base = Filename.concat (Filename.get_temp_dir_name ()) "masc-install-identity-cache" in
+    match Sys.file_exists base with
+    | true -> base
+    | false ->
+      ignore (Sys.command ("rm -rf " ^ Filename.quote base));
+      ignore (Sys.command ("mkdir -p " ^ Filename.quote base));
+      ignore (stage_release_mirror base);
+      install_real_masc_binary
+        (Filename.concat base ".local")
+        (Filename.concat base ".release");
+      base)
+  in
+  fun () -> Lazy.force cache
+;;
+
 let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_version args base_path =
   let root = source_root () in
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
-  let release_base_url = stage_release_mirror base_path in
-  install_real_masc_binary prefix (Filename.concat base_path ".release");
+  let cache = release_identity_cache () in
+  ignore (Sys.command (Printf.sprintf "cp -R %s %s"
+    (Filename.quote (Filename.concat cache ".release"))
+    (Filename.quote (Filename.concat base_path ".release"))));
+  let release_base_url = "file://" ^ Filename.concat base_path ".release" in
+  ignore (Sys.command (Printf.sprintf "cp -R %s %s"
+    (Filename.quote (Filename.concat cache ".local"))
+    (Filename.quote prefix)));
   Option.iter (fun version ->
     let installed = Filename.concat prefix "masc" in
     unlink_if_exists installed;

@@ -356,7 +356,10 @@ let install_real_masc_binary prefix =
           (List.map Filename.quote [ "cp"; real_masc_binary (); staged ])));
   ignore (Sys.command ("chmod +x " ^ Filename.quote staged));
   unlink_if_exists dest;
-  Unix.symlink staged dest
+  (* install.sh compares the readlink target with the canonical prefix path
+     ($(cd "$PREFIX" && pwd -P)), so the fixture must plant the canonical
+     path or /var -> /private/var style prefixes trip the pointer gate. *)
+  Unix.symlink (Unix.realpath staged) dest
 ;;
 
 let assert_contains label text needle =
@@ -718,6 +721,11 @@ let test_force_refreshes_same_version_existing_binary () =
 ;;
 
 let test_existing_release_upgrade_preserves_workspace () =
+  (* Two distinct rounds, both explicit about what they prove:
+     - dry-run: the plan refuses to touch an unrelated existing binary and
+       leaves the operator's runtime.toml byte-identical;
+     - force: the real replacement runs and still preserves the operator's
+       marker appended to runtime.toml. *)
   List.iter (fun force ->
     let dir = Filename.temp_file "masc-install-upgrade-" "" in
     Sys.remove dir;
@@ -731,14 +739,23 @@ let test_existing_release_upgrade_preserves_workspace () =
         let marker = Filename.concat dir ".masc/config/runtime.toml" in
         let original = read_file marker ^ "\n# operator-owned config\n" in
         write_file marker original;
-        ignore force;
-        let output, status = run_install_status ~seed_config:true ~existing_version:"0.34.0"
-          ([ "--no-wizard"; "--force" ] @ (if force then [] else [ "--dry-run" ])) dir in
-        check bool "forced replacement over an unrelated binary succeeds" true (status = Unix.WEXITED 0);
-        assert_contains "verified replacement completed" output "installed verified binary/dashboard";
-        assert_contains "replacement is explicit" output "overwriting because --force is set";
-        check string "operator runtime configuration preserved" original
-          (read_file marker)))
+        if force then begin
+          let output, status = run_install_status ~seed_config:true ~existing_version:"0.34.0"
+            [ "--no-wizard"; "--force" ] dir in
+          check bool "forced replacement over an unrelated binary succeeds" true (status = Unix.WEXITED 0);
+          assert_contains "verified replacement completed" output "installed verified binary/dashboard";
+          assert_contains "replacement is explicit" output "overwriting because --force is set";
+          check string "operator runtime configuration preserved" original
+            (read_file marker)
+        end else begin
+          let output, status = run_install_status ~seed_config:true ~existing_version:"0.34.0"
+            [ "--no-wizard"; "--dry-run" ] dir in
+          check bool "dry-run does not replace an unrelated binary" true (status <> Unix.WEXITED 0);
+          assert_contains "dry-run refusal names the pointer rule" output
+            "is not a managed release pointer; pass --force to replace it";
+          check string "dry-run leaves operator runtime configuration untouched" original
+            (read_file marker)
+        end))
     [ false; true ]
 ;;
 
@@ -1422,7 +1439,7 @@ let () =
         ; test_case "unknown provider aborts" `Quick test_unknown_provider_aborts
         ; test_case "unknown default provider aborts" `Quick test_unknown_default_provider_aborts
         ; test_case "dry-run + no-seed skips wizard when catalog is absent" `Quick test_wizard_dry_run_no_seed_skips
-        ; test_case "older release upgrades with and without force" `Quick test_existing_release_upgrade_preserves_workspace
+        ; test_case "dry-run preserves and force replaces an older unrelated install" `Quick test_existing_release_upgrade_preserves_workspace
         ; test_case "downgrades and unrecognized versions need force" `Quick test_downgrade_and_unknown_version_require_force
         ; test_case "unrelated existing binary is only replaced with force" `Quick test_unrelated_existing_binary_requires_force
         ; test_case "forced wizard without catalog errors" `Quick test_wizard_forced_without_catalog_errors

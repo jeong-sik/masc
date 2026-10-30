@@ -260,6 +260,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_tui_decode_keeper_efficiency)
+ (modules test_tui_decode_keeper_efficiency)
+ (libraries masc_test_deps))
+
+(test
  (name test_keeper_producer_route)
  (modules test_keeper_producer_route)
  (libraries masc_test_deps))

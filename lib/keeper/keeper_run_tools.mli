@@ -32,8 +32,6 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable receipt_actionable_signal :
       Keeper_contract_classifier.actionable_signal option
   ; mutable prompt_blocks : Turn_record.prompt_block list
-  ; mutable extra_system_context_digest : string option
-  ; mutable extra_system_context_size : int option
   ; mutable extra_system_context_assembly : Keeper_context_assembly.t option
   ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
   }

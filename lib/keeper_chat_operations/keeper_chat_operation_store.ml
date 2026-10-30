@@ -920,26 +920,15 @@ let input_checkpoint_rows db =
         else Error (Store_unavailable (sqlite_error db "inspect input checkpoints" rc))
       in read [])
 
-(* Executions whose checkpoint references keep retained files alive: every
-   nonterminal execution, and a settled one that still holds a native-call
-   receipt. The startup sweep's inspection and a native-call commit's release
-   both select with this, so they treat the same files as live. *)
-let owns_checkpoint_references (execution : Semantic.t) =
-  not (Semantic.is_terminal execution) || match execution.native_call with
-  | Keeper_native_call.No_native_call -> false
-  | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ -> true
-;;
-
-(* The executions that own checkpoint references, for a commit's release.
-   Settled rows are never deleted, so this does not decode them all: SQL skips
-   a row whose stored record is settled and has no native call, which names no
-   checkpoint. It reads the record itself, not the denormalized phase column,
-   and [owns_checkpoint_references] stays the authority on what is decoded. *)
+(* The executions that own checkpoint references, for a commit's release:
+   the nonterminal ones, as the startup sweep's inspection selects. Settled
+   rows are never deleted, so this does not decode them all: SQL skips a row
+   whose stored record is settled. It reads the record itself, not the
+   denormalized phase column, and the decoded phase stays the authority. *)
 let owning_semantic_rows db =
   read_semantic_rows db ~operation:"read semantic executions owning checkpoints"
-    ~where:" WHERE json_extract(record_json, '$.phase.kind') IS NOT 'settled' \
-            OR json_extract(record_json, '$.native_call') IS NOT NULL"
-    ~keep:owns_checkpoint_references
+    ~where:" WHERE json_extract(record_json, '$.phase.kind') IS NOT 'settled'"
+    ~keep:(fun execution -> not (Semantic.is_terminal execution))
 ;;
 
 (* [update_semantic] records the references one write stopped naming. *)
@@ -1053,18 +1042,13 @@ let update_input_checkpoint ?(allow_turn_reset = false) store ~observed ~checkpo
       let* () = install_input_checkpoint_with_db store ~previous checkpoint in
       Ok Input_checkpoint_updated)
 
-(* A terminal semantic phase alone cannot settle a native effect. Read every
-   original record so unknown-effect calls on terminal rows are not hidden. *)
+(* A settled record never resumes. The native receipt a restart or a stop
+   leaves on it records the call and does not hold the clear back. *)
 let require_history_clear_quiescence store =
   let* inventory = inventory store in
-  let* rows = semantic_rows store.db ~active_only:false in
-  let unsettled execution =
-    not (Semantic.is_terminal execution) ||
-    match execution.Semantic.native_call with
-    | Keeper_native_call.No_native_call -> false
-    | Active _ | Terminal_unacknowledged _ -> true in
-  if Option.is_some inventory.running_operation_id || List.exists unsettled rows then
-    Error (Invalid_input "history clear requires settled semantic and native execution; reconcile outstanding effects first")
+  let* outstanding = semantic_rows store.db ~active_only:true in
+  if Option.is_some inventory.running_operation_id || not (List.is_empty outstanding) then
+    Error (Invalid_input "history clear requires every operation and semantic execution to be settled")
   else Ok ()
 
 let history_clear_input_checkpoint store ~trace_id =
@@ -1172,8 +1156,7 @@ let inspect_store_with ~scope ~path =
     let* semantic_executions = match scope with
       | Pending_inputs -> Ok []
       | All_durable_records -> semantic_rows db ~active_only:false
-      | Outstanding_integrity_audit -> let* rows = semantic_rows db ~active_only:false in
-        Ok (List.filter owns_checkpoint_references rows) in
+      | Outstanding_integrity_audit -> semantic_rows db ~active_only:true in
     let* input_history = input_history_with_db db in
     let* input_checkpoints = match scope with
       | Pending_inputs -> Ok []

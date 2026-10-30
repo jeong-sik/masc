@@ -327,7 +327,10 @@ let phase_checkpoints execution = match execution.phase with
      | Input_wait waiting -> [waiting.checkpoint])
 let branch_checkpoints execution = match execution.input_branch with
   | None -> [] | Some branch -> [branch.origin.checkpoint;branch.checkpoint]
+(* A settled record never resumes, so it names no checkpoint. The native
+   receipt a restart or a stop leaves on it keeps the call's identity only. *)
 let checkpoint_references execution =
+  if is_terminal execution then [] else
   Keeper_native_call.checkpoint_references execution.native_call @ phase_checkpoints execution
   @ branch_checkpoints execution
   @ (match execution.input_response_intent with

@@ -456,6 +456,19 @@ let test_native_seed_is_history_not_current_input_authority () =
         | Ok _ -> fail "unsafe native history was accepted"))
     [None,false;Some (Core.Agent.Operator_repair_required Core.Agent.Effect_outcome_unknown),false;
      Some Core.Agent.Retire,true]
+(* A restart settles the execution and keeps its native receipt. A settled
+   execution never resumes, so neither a retired receipt, even one whose seed
+   history conflicts, nor one with an unknown effect holds the selection back. *)
+let test_a_settled_native_receipt_does_not_block_selection () =
+  List.iter (fun (recovery, conflicting_seed) -> with_input_result ~pending:true
+    ~before_close:(fun ~base_path ~store ~snapshot ->
+      native_input_fixture ~terminal:(Some recovery) ~conflicting_seed ~base_path ~store ~snapshot;
+      ignore (Store.settle_running_after_restart store ~now:4. |> store_ok))
+    (fun ~base_path ~run_dir ~path:_ ~session_dir:_ ~canonical:_ ~metadata:_ ~snapshot:_ ~bundle:_ result ->
+      let receipt = adopt run_dir (ok result) |> ok |> adopted in
+      ignore (Journal.load_input_adoption ~base_path ~adoption_id:(Journal.input_adoption_id receipt) |> ok)))
+    [Core.Agent.Retire, false; Core.Agent.Retire, true;
+     Core.Agent.Operator_repair_required Core.Agent.Effect_outcome_unknown, false]
 let test_native_adoption_rechecks_retained_evidence () =
   List.iter (fun edit -> with_input_result ~pending:true
     ~before_close:(native_input_fixture ~terminal:(Some Core.Agent.Retire) ~conflicting_seed:false)
@@ -727,6 +740,7 @@ let () = run "Keeper journal offline bundles"
     test_case "corrupt retained input is never repaired" `Quick test_input_corrupt_retention_is_not_repaired;
     test_case "rehashed derivative cannot hide changed source cells" `Quick test_input_rehash_cannot_hide_changed_derivative;
     test_case "native seed history differs from current input authority" `Quick test_native_seed_is_history_not_current_input_authority;
+    test_case "a settled native receipt does not block selection" `Quick test_a_settled_native_receipt_does_not_block_selection;
     test_case "native adoption refuses late retained payload and identity edits" `Quick test_native_adoption_rechecks_retained_evidence;
     test_case "post-commit cancellation preserves exception and durable artifact" `Quick test_retention_post_commit_cancel_propagates_with_evidence];
    "offline installation",[

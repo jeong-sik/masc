@@ -224,7 +224,9 @@ messages as an exact prefix of the selected canonical history. An immutable
 native admission seed is checked separately for preserved seed-to-latest message
 history; its older pending field is not current input authority. A phase that
 independently names that seed still receives the full pending check. Conflicting history, an active
-native call, or unknown native effects require explicit repair. This command
+native call, or an unknown native effect on an execution that has not settled
+requires explicit repair. A settled execution never resumes, so the native receipt
+it keeps does not block the selection. This command
 does not choose the newest file, infer acceptance from empty pending input, or
 reconstruct an earlier consumed answer from the old journal.
 
@@ -408,11 +410,11 @@ remaining #38005 product acceptance.
 `masc_keeper_clear` captures a fresh authority inside its original Owner
 Maintenance child before removing the official-client session. The Owner binds
 that authority to its trace, original workspace session root and exact input
-predecessor. Admission and publication both check every semantic record, including
-terminal records with active or unacknowledged native evidence. Running operations,
-unavailable prior input and either canonical or retained pending input refuse the
-clear before official-session effects. Normal native terminal acceptance first
-acknowledges `Retire`; a terminal unknown effect is not equivalent to that receipt.
+predecessor. Admission and publication both refuse while any operation runs or any
+semantic execution has not settled. A settled execution keeps the native receipt a
+restart or a stop left on it; that receipt records the call and does not block the
+clear. Unavailable prior input and either canonical or retained pending input also
+refuse the clear before official-session effects.
 
 The plan freezes its candidate bytes. It keeps only System messages when requested
 and resets the existing repetition history generation while preserving the ledger

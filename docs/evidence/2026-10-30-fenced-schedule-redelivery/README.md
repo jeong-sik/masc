@@ -4,6 +4,7 @@
 익명 파생 집계다. 서버 health가 보고한 실행 바이너리는
 `a97919872890eb9b4e730f65b745ab094ed8ce12`, 시작 시각은 19:49:39 KST다.
 Keeper 이름, event·trace ID, 메시지·prompt 원문과 자격증명은 싣지 않았다.
+시각과 크기 조합을 다른 원장과 대조하면 연결될 가능성까지 제거한 것은 아니다.
 
 - [context-aggregate.json](context-aggregate.json): provider의 400 context
   초과 관측과 turn 영수증, 해당 turn의 MASC 입력 구성. 최초 집계와 뒤의 입력

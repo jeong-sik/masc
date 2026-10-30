@@ -2400,6 +2400,12 @@ let fetch_keeper_runtimes ~(host : string) ~(port : int)
     ^ "&expected_masc_root="
     ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root))
 
+let keeper_workspace_headers (identity : Masc.Tui_decode.server_identity) =
+  [ Masc.Request_workspace_precondition.expected_base_path_header,
+    Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path
+  ; Masc.Request_workspace_precondition.expected_masc_root_header,
+    Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root ]
+
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 
     Returns the HTTP status alongside the body: a paused owner refuses [boot]
@@ -2433,10 +2439,11 @@ let post_keeper_directive ~(host : string) ~(port : int)
 (** POST the keeper purge the web dashboard uses. Not under [/api/v1/keepers/]:
     the route is a dashboard action and reads the keeper from the body. *)
 let post_keeper_purge ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(expected_workspace : Masc.Tui_decode.server_identity)
     : (int * string, string) result =
-  http_post ~headers:(auth_headers ()) ~host ~port
+  http_post ~headers:(keeper_workspace_headers expected_workspace @ auth_headers ()) ~host ~port
     ~path:"/api/v1/dashboard/agents/purge"
-    ~body:(Masc_tui_keeper_control.purge_body keeper_name)
+    ~body:(Masc_tui_keeper_control.purge_body ~expected_workspace keeper_name)
 
 (** Fetch /api/v1/dashboard/briefing (Mission / Overview snapshot). *)
 let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

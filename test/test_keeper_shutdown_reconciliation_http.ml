@@ -194,8 +194,108 @@ let test_commit_rechecks_preview_and_records_verified_actor () =
     check bool "retry leaves evidence unchanged" true (load ~config operation = acknowledged))
 ;;
 
+let test_purge_workspace_admission_and_retry () =
+  with_fixture (fun ~config ~router ~operation:_ ~admin ~worker:_ ->
+    let existing_name = "http-existing-purge" in
+    let new_keeper_name = "http-new-purge" in
+    let agent_name = "http-plain-agent" in
+    let legacy_agent_name = "http-legacy-agent" in
+    let existing =
+      { (operation_fixture existing_name) with
+        revision = 0
+      ; cleanup_intent =
+          { reason = Dashboard_keeper_purge { requested_name = existing_name }
+          ; remove_session = true }
+      ; join_evidence = None
+      ; phase = Prepared }
+    in
+    store_ok (Keeper_shutdown_store.persist_new ~config existing);
+    (match Keeper_shutdown_intake_fence.restore_shutdown
+       ~base_path:config.base_path ~keeper_name:existing_name
+       ~operation_id:existing.operation_id with
+     | Keeper_shutdown_intake_fence.Restored -> ()
+     | Already_restored | Restore_conflict _ -> fail "could not seed existing purge");
+    let meta = require_ok Fun.id (Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String new_keeper_name; "trace_id", `String "http-purge-original" ])) in
+    ignore (require_ok Fun.id (Keeper_meta_store.replace_snapshot config meta));
+    (match Keeper_dashboard_purge.resolve config new_keeper_name with
+     | Ok (Some (Keeper_dashboard_purge.Runtime_keeper _)) -> ()
+     | Ok (Some (Keeper_dashboard_purge.Configuration_only _)) | Ok None | Error _ ->
+       fail "new Keeper fixture did not resolve as a runtime Keeper");
+    let meta_path = Keeper_types_profile.keeper_meta_path config new_keeper_name in
+    let meta_before = In_channel.with_open_bin meta_path In_channel.input_all in
+    let agent_path = Filename.concat (Workspace.agents_dir config)
+      (Workspace.safe_filename agent_name ^ ".json") in
+    let legacy_agent_path = Filename.concat (Workspace.agents_dir config)
+      (Workspace.safe_filename legacy_agent_name ^ ".json") in
+    Out_channel.with_open_bin agent_path (fun channel -> output_string channel "agent fixture");
+    Out_channel.with_open_bin legacy_agent_path (fun channel -> output_string channel "legacy fixture");
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Workspace.masc_dir config) in
+    let expected base_path masc_root =
+      `Assoc [ "base_path", `String base_path; "masc_root", `String masc_root ] in
+    let post name fields =
+      http ~router ~token:admin ~meth:"POST" ~path:"/api/v1/dashboard/agents/purge"
+        ~body:(Yojson.Safe.to_string (`Assoc (("agent_name", `String name) :: fields))) () in
+    let assert_unchanged () =
+      check bool "existing purge is unchanged" true (load ~config existing = existing);
+      check bool "existing purge has no duplicate" true
+        (store_ok (Keeper_shutdown_store.list_for_keeper ~config ~keeper_name:existing_name) = [ existing ]);
+      check bool "no new Keeper purge was created" true
+        (store_ok (Keeper_shutdown_store.list_for_keeper ~config ~keeper_name:new_keeper_name) = []);
+      check bool "no new Keeper intake fence was reserved" true
+        (Option.is_none (Keeper_shutdown_intake_fence.shutdown_operation_id
+          ~base_path:config.base_path ~keeper_name:new_keeper_name));
+      check bool "new Keeper metadata is unchanged" true
+        (In_channel.with_open_bin meta_path In_channel.input_all = meta_before);
+      check bool "plain agent artifact is unchanged" true
+        (Sys.file_exists agent_path
+         && In_channel.with_open_bin agent_path In_channel.input_all = "agent fixture")
+    in
+    List.iter (fun expected_workspace ->
+      List.iter (fun name ->
+        let status, response = post name [ "expected_workspace", expected_workspace ] in
+        check int "foreign workspace is refused" 409 status;
+        check string "refusal identifies workspace mismatch" "workspace_precondition_failed"
+          Yojson.Safe.Util.(response |> member "code" |> to_string);
+        assert_unchanged ()) [ existing_name; new_keeper_name; agent_name ])
+      [ expected (base ^ "-other") root; expected base (root ^ "-other") ];
+    List.iter (fun fields ->
+      let status, _ = post existing_name fields in
+      check int "malformed workspace is refused" 400 status;
+      assert_unchanged ())
+      [ [ "expected_workspace", `Null ]
+      ; [ "expected_workspace", `Assoc [ "base_path", `String base ] ]
+      ; [ "expected_workspace", expected "" root ]
+      ; [ "expected_workspace", expected base root; "expected_workspace", expected base root ] ];
+    let status, _ = http ~router ~token:admin ~meth:"POST"
+      ~path:"/api/v1/dashboard/agents/purge" ~body:"{}" () in
+    check int "missing agent name remains invalid" 400 status;
+    let status, _ = post "" [] in
+    check int "empty agent name remains invalid" 400 status;
+    assert_unchanged ();
+    let assert_existing status response =
+      check int "existing operation remains retryable" 202 status;
+      check string "retry names the same operation" (Operation_id.to_string existing.operation_id)
+        Yojson.Safe.Util.(response |> member "operation_id" |> to_string);
+      assert_unchanged ()
+    in
+    let status, response = post existing_name [ "expected_workspace", expected base root ] in
+    assert_existing status response;
+    let status, response = post existing_name [] in
+    assert_existing status response;
+    let status, _ = post agent_name [ "expected_workspace", expected base root ] in
+    check int "matching workspace can delete the fixture agent" 200 status;
+    check bool "matching purge removed its agent artifact" false (Sys.file_exists agent_path);
+    let status, _ = post legacy_agent_name [] in
+    check int "a client without a precondition can still purge" 200 status;
+    check bool "legacy purge removed its agent artifact" false (Sys.file_exists legacy_agent_path))
+;;
+
 let () = run "keeper shutdown acknowledgement HTTP"
   [ "actual router", [ test_case "admin authorization and observational preview" `Quick
         test_real_router_requires_admin_for_preview_and_commit
     ; test_case "preview recheck and verified actor commit" `Quick
-        test_commit_rechecks_preview_and_records_verified_actor ] ]
+        test_commit_rechecks_preview_and_records_verified_actor
+    ; test_case "purge admits the captured workspace before existing and new work" `Quick
+        test_purge_workspace_admission_and_retry ] ]

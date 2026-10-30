@@ -367,10 +367,6 @@ let test_delete_is_confirmed_and_irreversible () =
   Alcotest.(check (option (list step_testable)))
     "and a conflict on it is a rejection, not a detour" None
     (Control.recovers_from_conflict Control.Delete);
-  (* The keeper travels in the body under the name the route reads. *)
-  Alcotest.(check string) "the body names the keeper"
-    {|{"agent_name":"analyst"}|}
-    (Control.purge_body "analyst");
   (* Not "d": masc_tui.ml binds that on this surface to repository changes. *)
   Alcotest.(check string) "delete takes x" "x"
     (Control.action_key Control.Delete);
@@ -428,6 +424,15 @@ let check_directive_workspace fields =
     (List.assoc_opt "expected_workspace" fields = Some (`Assoc
       [ "base_path", `String (Decode.Canonical_path.to_string directive_workspace.sid_base_path)
       ; "masc_root", `String (Decode.Canonical_path.to_string directive_workspace.sid_masc_root) ]))
+
+let test_purge_body_carries_keeper_and_workspace () =
+  let body = Control.purge_body ~expected_workspace:directive_workspace "analyst" in
+  match Yojson.Safe.from_string body with
+  | `Assoc fields ->
+      check_directive_workspace fields;
+      Alcotest.(check bool) "the purge names its target" true
+        (List.assoc_opt "agent_name" fields = Some (`String "analyst"))
+  | _ -> Alcotest.fail "purge body must be a JSON object"
 
 let test_resume_body_carries_the_operation_id () =
   let operation_id = Control.mint_operation_id () in
@@ -1347,6 +1352,8 @@ let () =
             test_plans_name_their_endpoints
         ; Alcotest.test_case "delete is confirmed and irreversible" `Quick
             test_delete_is_confirmed_and_irreversible
+        ; Alcotest.test_case "purge body carries the observed workspace" `Quick
+            test_purge_body_carries_keeper_and_workspace
         ; Alcotest.test_case "delete is not offered to a live fiber" `Quick
             test_delete_is_offered_with_shutdown_confirmation
         ; Alcotest.test_case "boot recovers a paused owner" `Quick

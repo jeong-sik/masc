@@ -336,10 +336,16 @@ let gate_transition ~inflight ~pending ~keeper action =
 
 let lifecycle_body = "{}"
 
+let workspace_field (expected_workspace : Decode.server_identity) =
+  "expected_workspace", `Assoc
+    [ "base_path", `String (Decode.Canonical_path.to_string expected_workspace.sid_base_path)
+    ; "masc_root", `String (Decode.Canonical_path.to_string expected_workspace.sid_masc_root) ]
+
 (* The purge route takes the keeper in the body rather than the path, under the
    name the dashboard sends. *)
-let purge_body keeper_name =
-  Yojson.Safe.to_string (`Assoc [ ("agent_name", `String keeper_name) ])
+let purge_body ~expected_workspace keeper_name =
+  Yojson.Safe.to_string (`Assoc
+    [ "agent_name", `String keeper_name; workspace_field expected_workspace ])
 
 let directive_body ~(expected_workspace : Decode.server_identity) ~operator_operation_id action =
   let fields =
@@ -350,11 +356,7 @@ let directive_body ~(expected_workspace : Decode.server_identity) ~operator_oper
         ]
     | _ -> [ ("action", `String action) ]
   in
-  Yojson.Safe.to_string (`Assoc
-    (("expected_workspace", `Assoc
-      [ "base_path", `String (Decode.Canonical_path.to_string expected_workspace.sid_base_path)
-      ; "masc_root", `String (Decode.Canonical_path.to_string expected_workspace.sid_masc_root) ])
-     :: fields))
+  Yojson.Safe.to_string (`Assoc (workspace_field expected_workspace :: fields))
 
 let mint_operation_id () =
   "masc-tui-resume-" ^ Random_id.uuid_v7 ()

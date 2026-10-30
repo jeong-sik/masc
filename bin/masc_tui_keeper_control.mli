@@ -259,9 +259,10 @@ val directive_body :
 val lifecycle_body : string
 (** JSON body for a lifecycle step. *)
 
-val purge_body : string -> string
-(** JSON body for a {!Purge} step: the keeper travels as [agent_name], the
-    field the route reads and the one the dashboard sends. *)
+val purge_body :
+  expected_workspace:Masc.Tui_decode.server_identity -> string -> string
+(** JSON body for a {!Purge} step, binding [agent_name] and the observed
+    workspace to the same request. *)
 
 val mint_operation_id : unit -> string
 (** A fresh resume operation id for one attempt. Retain the returned value

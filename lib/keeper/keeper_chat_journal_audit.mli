@@ -140,6 +140,12 @@ val audit_operation :
     through {!Keeper_chat_event_log.journal_path}) are outside the audit and
     skipped, as are journals that vanish between readdir and read.
 
+    The directory walk with its per-file stat, and then the journal and store
+    reads, each run as a CPU job of the shared pool
+    ({!Domain_pool_ref.submit_cpu_or_inline}). [liveness] is called between
+    the two on the caller's domain, once per selected file. Without a pool,
+    outside Eio, or inside a pool job, both run in place.
+
     Never raises except [Eio.Cancel.Cancelled]: per-file failures become
     [Journal_corrupt] verdicts. *)
 val sweep :

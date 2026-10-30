@@ -449,6 +449,63 @@ let test_sweep_reads_by_registry_liveness_not_file_age () =
             "expected one Journal_truncated, got %d verdicts"
             (List.length other)))
 
+(* Pool jobs whose name ends with [suffix], over every lane: [Pool_wait]
+   records a job when a worker takes it, so work run in place is not counted. *)
+let pool_jobs_named suffix =
+  let open Yojson.Safe.Util in
+  let json = Pool_wait.to_json () in
+  List.fold_left
+    (fun acc lane ->
+       match member lane json with
+       | `Null -> acc
+       | lane_json ->
+         List.fold_left
+           (fun acc entry ->
+              if String.ends_with ~suffix (to_string (member "name" entry))
+              then acc + to_int (member "count" entry)
+              else acc)
+           acc
+           (to_list (member "by_name" lane_json)))
+    0
+    [ "read"; "background" ]
+
+(* Issue #46816: the walk and the reads are pool jobs, and the registry is
+   asked between them on the caller's domain. *)
+let test_sweep_walks_on_the_pool_and_asks_liveness_here () =
+  let base_dir = temp_base_path "keeper-chat-journal-audit-pool" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let keeper_name = "pool-keeper" in
+       let operation_id = "op-pool" in
+       write_journal ~base_dir ~keeper_name ~operation_id match_events;
+       write_store_rows ~base_dir ~keeper_name ~delivery_key:(delivery_key_of operation_id);
+       Eio_main.run @@ fun env ->
+       Eio.Switch.run @@ fun sw ->
+       let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+       Domain_pool_ref.set pool;
+       Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+       let caller = Domain.self () in
+       let asked_on = ref [] in
+       let liveness ~keeper_name:_ ~operation_id:_ =
+         asked_on := Domain.self () :: !asked_on;
+         Audit.Turn_settled
+       in
+       let suffix = "Keeper_chat_journal_audit.sweep" in
+       let jobs_before = pool_jobs_named suffix in
+       (match sweep ~liveness base_dir with
+        | [ (_, _, Audit.Match) ], _ -> ()
+        | other, _ -> Alcotest.failf "expected one Match, got %d verdicts" (List.length other));
+       Alcotest.(check int) "the registry was asked once" 1 (List.length !asked_on);
+       Alcotest.(check bool)
+         "on the caller's domain"
+         true
+         (List.for_all (fun domain -> domain = caller) !asked_on);
+       Alcotest.(check int)
+         "the walk and the reads ran as two pool jobs"
+         2
+         (pool_jobs_named suffix - jobs_before))
+
 let test_sweep_audits_each_operation_once () =
   let base_dir = temp_base_path "keeper-chat-journal-audit-once" in
   Fun.protect
@@ -638,5 +695,9 @@ let () =
             "non-canonical stems are skipped without side effects"
             `Quick
             test_sweep_skips_non_canonical_stem
+        ; Alcotest.test_case
+            "walks on the pool and asks liveness on the caller's domain"
+            `Quick
+            test_sweep_walks_on_the_pool_and_asks_liveness_here
         ] )
     ]

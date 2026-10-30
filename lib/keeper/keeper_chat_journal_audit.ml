@@ -493,7 +493,7 @@ type sweep_step =
   | Report of verdict
 
 let sweep_file ~base_dir ~keeper_name ~operation_id ~path ~liveness ~rows =
-  match liveness ~keeper_name ~operation_id with
+  match liveness with
   | Turn_running -> Leave
   | Registry_unanswered detail -> Report (Liveness_unknown detail)
   | Turn_settled ->
@@ -520,10 +520,17 @@ let sweep_file ~base_dir ~keeper_name ~operation_id ~path ~liveness ~rows =
      | exn -> Report (Journal_corrupt (Printexc.to_string exn)))
 ;;
 
-let sweep ~base_dir ~lookback_sec ~liveness ~audited () =
+(* One journal file that passed every filter needing no registry answer. *)
+type candidate =
+  { keeper_name : string
+  ; operation_id : string
+  ; path : string
+  }
+
+let candidates ~base_dir ~lookback_sec ~audited =
   let root = Journal.events_dir ~base_dir in
   if not (Sys.file_exists root)
-  then [], audited
+  then []
   else begin
     let now = Unix.gettimeofday () in
     let keeper_names =
@@ -547,19 +554,15 @@ let sweep ~base_dir ~lookback_sec ~liveness ~audited () =
       try now -. (Unix.stat path).st_mtime <= lookback_sec with
       | Unix.Unix_error _ -> false
     in
-    List.fold_left
-      (fun (results, audited) keeper_name ->
+    List.concat_map
+      (fun keeper_name ->
          let dir = Filename.concat root keeper_name in
          let files =
            try Array.to_list (Sys.readdir dir) with
            | Sys_error _ -> []
          in
-         (* One store load per keeper per pass, and only when that keeper has
-            an auditable journal; auditing each file against its own load was
-            O(files x store size). *)
-         let rows = lazy (Store.load_all ~base_dir ~keeper_name) in
-         List.fold_left
-           (fun (results, audited) file ->
+         List.filter_map
+           (fun file ->
               let operation_id = Filename.remove_extension file in
               let path = Filename.concat dir file in
               (* [sanitize_namespace_segment] is not idempotent for
@@ -570,30 +573,75 @@ let sweep ~base_dir ~lookback_sec ~liveness ~audited () =
                  || (not (stem_is_canonical operation_id))
                  || Audited.mem (keeper_name, operation_id) audited
                  || not (within_lookback path)
-              then results, audited
-              else begin
-                match
-                  sweep_file ~base_dir ~keeper_name ~operation_id ~path ~liveness ~rows
-                with
-                | Leave -> results, audited
-                | Report (Liveness_unknown _ as verdict) ->
-                  (keeper_name, operation_id, verdict) :: results, audited
-                | Report
-                    (( Match
-                     | Mismatch _
-                     | Journal_missing
-                     | Journal_unreadable _
-                     | Journal_truncated
-                     | Journal_unsupported_version _
-                     | Journal_corrupt _
-                     | Store_unreadable _ ) as verdict) ->
-                  ( (keeper_name, operation_id, verdict) :: results
-                  , Audited.add (keeper_name, operation_id) audited )
-              end)
-           (results, audited)
+              then None
+              else Some { keeper_name; operation_id; path })
            files)
-      ([], audited)
       keeper_names
-    |> fun (results, audited) -> List.rev results, audited
   end
+;;
+
+let audit_answered ~base_dir ~audited answered =
+  (* One store load per keeper per pass, and only when that keeper has an
+     auditable journal; auditing each file against its own load was
+     O(files x store size). *)
+  let stores = Hashtbl.create 8 in
+  let rows_of keeper_name =
+    match Hashtbl.find_opt stores keeper_name with
+    | Some rows -> rows
+    | None ->
+      let rows = lazy (Store.load_all ~base_dir ~keeper_name) in
+      Hashtbl.replace stores keeper_name rows;
+      rows
+  in
+  List.fold_left
+    (fun (results, audited) ({ keeper_name; operation_id; path }, liveness) ->
+       match
+         sweep_file ~base_dir ~keeper_name ~operation_id ~path ~liveness
+           ~rows:(rows_of keeper_name)
+       with
+       | Leave -> results, audited
+       | Report (Liveness_unknown _ as verdict) ->
+         (keeper_name, operation_id, verdict) :: results, audited
+       | Report
+           (( Match
+            | Mismatch _
+            | Journal_missing
+            | Journal_unreadable _
+            | Journal_truncated
+            | Journal_unsupported_version _
+            | Journal_corrupt _
+            | Store_unreadable _ ) as verdict) ->
+         ( (keeper_name, operation_id, verdict) :: results
+         , Audited.add (keeper_name, operation_id) audited ))
+    ([], audited)
+    answered
+  |> fun (results, audited) -> List.rev results, audited
+;;
+
+(* Issue #46816. The hourly maintenance pass ran this whole sweep on the main
+   domain: one [Unix.stat] per journal under retention (8,133 files under 50
+   keepers on 2026-10-30), [Sys.readdir] per keeper, then journal and store
+   reads and their parse, all blocking calls outside Eio. A thread sample of
+   one such pass found the main thread 2.9 s of 10 s in [stat] under
+   [within_lookback], and [/health] took 3.3 s: nothing else on that domain,
+   HTTP accept included, ran meanwhile.
+
+   The walk and the reads now run as pool jobs. [liveness] is still asked
+   between them, on the caller's domain, because the chat operation registry
+   it consults is not shown to be safe from a pool worker. An answer is a
+   point-in-time reading either way: a settled operation stays settled, and a
+   running one is left for a later pass. *)
+let sweep ~base_dir ~lookback_sec ~liveness ~audited () =
+  let candidates =
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      candidates ~base_dir ~lookback_sec ~audited)
+  in
+  let answered =
+    List.map
+      (fun ({ keeper_name; operation_id; _ } as candidate) ->
+         candidate, liveness ~keeper_name ~operation_id)
+      candidates
+  in
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+    audit_answered ~base_dir ~audited answered)
 ;;

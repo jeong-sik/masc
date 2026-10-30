@@ -350,8 +350,18 @@ let seed_ambiguous_resumed_session ~base_path ~tool =
 
 let test_keeper_projects_mcp_tool_and_settles () =
   let base_path = temp_workspace () |> Unix.realpath in
+  let workspace_key = Prompt_names.keeper_antigravity_workspace_shared in
+  let workspace_template = "MANAGED_SHARED_WORKSPACE {{host_workspace}} / {{keeper_workspace}}" in
+  let directory_label_key = Prompt_names.keeper_antigravity_additional_directories_label in
+  let install_workspace_guidance () =
+    List.iter (fun (key, text) -> match Prompt_registry.set_override key text with
+      | Ok () -> () | Error detail -> fail detail)
+      [workspace_key, workspace_template; directory_label_key, "MANAGED_EXTRA_DIRS"] in
+  install_workspace_guidance ();
   Fun.protect
-    ~finally:(fun () -> cleanup_tree base_path)
+    ~finally:(fun () ->
+      List.iter Prompt_registry.clear_prompt_override [workspace_key; directory_label_key];
+      cleanup_tree base_path)
     (fun () ->
       let mascot_root = Filename.concat base_path ".masc" in
       Unix.mkdir mascot_root 0o700;
@@ -660,13 +670,16 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          provider counts differ from the local ordinal, then
                          increments on later resumes. Fresh starts reset to 1.
                          The final control is a first resume, settled at 73. *)
-                      let run_context ?official_client_composed_context ?(hooks = hooks) ~goal (system_prompt, initial_messages) =
-                        match Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                      let run_context_result ?official_client_composed_context ?(hooks = hooks) ~goal (system_prompt, initial_messages) =
+                        Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "antigravity-fixture" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
                           ~runtime_id:"antigravity.gemini" ~keeper_name:"antigravity-fixture"
                           ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path) ~goal ?official_client_composed_context
                           ~system_prompt ~tools:[tool] ~agent_core_tools:[tool]
                           ~initial_messages ~hooks ~context:(Agent_core.Context.create ())
-                          ~sw ~net:(Eio.Stdenv.net env) () with
+                          ~sw ~net:(Eio.Stdenv.net env) ()
+                      in
+                      let run_context ?official_client_composed_context ?hooks ~goal source =
+                        match run_context_result ?official_client_composed_context ?hooks ~goal source with
                         | Error error -> fail (Agent_core.Error.to_string error)
                         | Ok run -> run.Keeper_turn_driver.run_result.turns
                       in
@@ -768,9 +781,46 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         (Filename.concat base_path "antigravity-prompt.txt") In_channel.input_all in
                       check bool "hook override reaches the native client" true
                         (String_util.contains_substring final_prompt "FIRST_EFFECTIVE_INSTRUCTION");
-                      check bool "mandatory workspace note survives hook override" true
+                      check bool "managed workspace guidance survives hook override" true
+                        (String_util.contains_substring final_prompt "MANAGED_SHARED_WORKSPACE");
+                      let shared_path = Filename.concat base_path
+                          (Keeper_sandbox.host_root_rel_of_profile
+                             Keeper_types_profile_sandbox.Docker "antigravity-fixture") in
+                      check bool "shared workspace guidance receives the typed host path" true
+                        (String_util.contains_substring final_prompt shared_path);
+                      check bool "shared workspace guidance receives the Keeper mount path" true
                         (String_util.contains_substring final_prompt
-                          "the same files mounted at");
+                           (Keeper_sandbox.container_root "antigravity-fixture"));
+                      check bool "editable label retains the explicit additional-directory JSON" true
+                        (String_util.contains_substring final_prompt "MANAGED_EXTRA_DIRS []");
+                      let module Store = Keeper_official_client_session_store in
+                      let session_before = match Store.load ~base_path ~keeper_name:"antigravity-fixture" with
+                        | Ok (Some {phase=Store.Ready; _}) as observed -> observed
+                        | Ok _ -> fail "fixture has no settled native session"
+                        | Error detail -> fail (Store.read_error_to_string detail) in
+                      let empty_prompts = Filename.concat base_path "empty-prompts" in
+                      Unix.mkdir empty_prompts 0o700;
+                      let preparation_calls = ref 0 in
+                      let missing_policy_hooks = {Agent_core.Hooks.empty with
+                        before_turn_params=Some (fun _ -> incr preparation_calls; Agent_core.Hooks.Continue)} in
+                      Prompt_registry.clear ();
+                      Prompt_registry.set_markdown_dir empty_prompts;
+                      Fun.protect ~finally:(fun () ->
+                        Prompt_registry.clear ();
+                        Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+                        install_workspace_guidance ()) (fun () ->
+                        (match run_context_result ~hooks:missing_policy_hooks
+                            ~goal:"Missing workspace guidance" unchanged with
+                         | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
+                           check string "missing managed policy is a typed configuration error"
+                             "antigravity.native_workspace_guidance" field
+                         | Error error -> fail (Agent_core.Error.to_string error)
+                         | Ok _ -> fail "missing workspace guidance launched a native turn");
+                        check int "policy resolves before hooks and session claim" 0 !preparation_calls;
+                        check bool "missing policy preserves the settled native session" true
+                          (Store.load ~base_path ~keeper_name:"antigravity-fixture" = session_before);
+                        check string "missing policy never launches the native CLI" final_prompt
+                          (Fs_compat.load_file (Filename.concat base_path "antigravity-prompt.txt")));
                       effective "SECOND_EFFECTIVE_INSTRUCTION" 1;
                       effective "SECOND_EFFECTIVE_INSTRUCTION" 73;
                       effective "SECOND_EFFECTIVE_INSTRUCTION" ~nudge:"first correction" ~hook_turn:74 1;
@@ -2225,6 +2275,7 @@ let test_original_result_survives_a_vendor_session_change () =
 ;;
 
 let () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
     "keeper_antigravity_runtime"
     [ ( "async result outbox"

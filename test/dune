@@ -1090,7 +1090,9 @@
   test_workspace_handoff_boundary
   test_exec_command_gate_log_sink
   )
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
+ masc.prompt_registry
  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   ;; The workspace file-save HTTP fixture creates real role-scoped tokens.
   masc.auth

@@ -215,6 +215,58 @@ let overlay_add_form_applies_to_draft () =
        | Ok _ | Error _ -> fail "submitted grant did not parse")
   | Ok (Updated _ | Cancel) | Error _ -> fail "expected a staged edit"
 
+let overlay_string_array_guidance_and_input () =
+  let step key overlay = match Records.handle ~key overlay with
+    | Ok (Records.Updated next) -> next
+    | Ok (Apply _ | Cancel) -> fail ("unexpected event on " ^ key)
+    | Error detail -> fail (key ^ ": " ^ detail) in
+  let open_form () =
+    match Records.open_ ~title:"x" ~text:"[binding]\nsources = []\n" with
+    | Error detail -> fail detail
+    | Ok overlay -> step "a" overlay in
+  let visible overlay = String.concat "\n" (Records.lines overlay) in
+  let type_text text overlay =
+    String.fold_left (fun overlay char -> step (String.make 1 char) overlay) overlay text in
+  let no_object_array_hint overlay =
+    check bool "primitive array does not advertise Ctrl-E" false
+      (Option.is_some (index_of (visible overlay) "Ctrl-E:array items")) in
+  let submit overlay =
+    match Records.handle ~key:"enter" (step "\019" overlay) with
+    | Ok (Records.Apply (_, text)) -> (match Records.parse text with
+        | Ok [record] -> record
+        | Ok _ | Error _ -> fail "submitted grant did not parse")
+    | Ok (Updated _ | Cancel) | Error _ -> fail "expected a staged edit" in
+  let board = open_form () in
+  check_contains (visible board) "Unique name, e.g. wkbl";
+  let quoted_source = board |> Records.insert_text ~text:{|news"desk|} in
+  check_contains (visible quoted_source) {|> source_id *: "news\"desk"|};
+  let board = board |> Records.insert_text ~text:"news" |> step "tab" in
+  check_contains (visible board) "What the installation may read";
+  let board = board |> step "right" |> step "tab" in
+  check_contains (visible board) {|["public", "internal"]|};
+  check_contains (visible board) "Allowed: public, unlisted, internal, direct";
+  no_object_array_hint board;
+  let incomplete = board |> type_text {|["public"|} in
+  check_contains (visible incomplete) {|> visibilities: "[\"public\""|};
+  check bool "incomplete JSON is still refused" true
+    (Result.is_error (Records.handle ~key:"tab" incomplete));
+  let invalid = board |> type_text "[oops]" in
+  check_contains (visible invalid) {|> visibilities: "[oops]"|};
+  check bool "invalid JSON is still refused" true
+    (Result.is_error (Records.handle ~key:"tab" invalid));
+  let board = board |> type_text {|["public", "internal"]|} in
+  check_contains (visible board) {|> visibilities: ["public","internal"]|};
+  let board = submit board in
+  check (list string) "board example is accepted" ["public"; "internal"] board.visibilities;
+  let repository = open_form () |> Records.insert_text ~text:"code" |> step "tab"
+    |> step "right" |> step "right" |> step "tab" |> step "tab" in
+  check_contains (visible repository) "registered repository id";
+  let repository = repository |> Records.insert_text ~text:"repo" |> step "tab" in
+  check_contains (visible repository) {|["src/", "README.md"]|};
+  no_object_array_hint repository;
+  let repository = repository |> Records.insert_text ~text:{|["src/", "README.md"]|} |> submit in
+  check (list string) "repository example is accepted" ["src/"; "README.md"] repository.paths
+
 let () =
   run "tui lane records"
     [
@@ -237,5 +289,6 @@ let () =
           test_case "subtables and header comments" `Quick preserves_subtables_and_header_comments;
           test_case "form and large list" `Quick overlay_form_and_large_list;
           test_case "add through form" `Quick overlay_add_form_applies_to_draft;
+          test_case "string array guidance and input" `Quick overlay_string_array_guidance_and_input;
         ] );
     ]

@@ -893,7 +893,11 @@ let object_array_fields () =
   let edit key form = match Form.handle ~key form |> ok with
     | Form.Updated form -> form | _ -> fail "array editing must not submit the enclosing form" in
   let add text form = form |> edit "a" |> Form.insert_text ~text |> edit "\019" |> edit "enter" in
+  let advertises_array_editor form = List.exists (fun line ->
+    List.mem "Ctrl-E:array" (String.split_on_char ' ' line)) (Form.lines form) in
   let initial = Form.create ~schema ~initial:(`Assoc []) |> ok in
+  check bool "object array advertises its item editor" true
+    (advertises_array_editor initial);
   let array = edit "\005" initial in
   check bool "opening an array does not create a required value" true
     (Result.is_error (Form.value (edit "esc" array)));
@@ -929,9 +933,14 @@ let object_array_fields () =
   let primitive_schema = Yojson.Safe.from_string
     {|{"type":"object","properties":{"values":{"type":"array","items":{"type":"string"}}},"required":["values"],"additionalProperties":false}|} in
   let primitive = Form.create ~schema:primitive_schema ~initial:(`Assoc []) |> ok in
+  check bool "primitive array does not advertise an item editor" false
+    (advertises_array_editor primitive);
   check bool "primitive arrays remain direct JSON input" true
     (Result.is_error (Form.handle ~key:"\005" primitive));
-  let primitive = primitive |> Form.insert_text ~text:"[\"one\",\"two\"]" |> edit "\019" in
+  let primitive = primitive |> Form.insert_text ~text:"[\"one\",\"two\"]" in
+  check bool "primitive array draft displays as JSON" true
+    (List.mem {|> values *: ["one","two"]|} (Form.lines primitive));
+  let primitive = primitive |> edit "\019" in
   check bool "primitive array JSON remains valid" true
     ((Form.value primitive |> ok)=`Assoc ["values",`List [`String "one";`String "two"]])
 

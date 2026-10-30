@@ -116,7 +116,7 @@ let item_schema =
                 [
                   ("type", `String "array");
                   ("items", `Assoc [("type", `String "string")]);
-                  ("description", `String "board only: any of public, unlisted, internal, direct");
+                  ("description", `String "board only: enter a non-empty JSON array, e.g. [\"public\", \"internal\"]. Allowed: public, unlisted, internal, direct.");
                 ] );
             ( "repository_id",
               `Assoc
@@ -126,7 +126,7 @@ let item_schema =
                 [
                   ("type", `String "array");
                   ("items", `Assoc [("type", `String "string")]);
-                  ("description", `String "repository only: relative paths; a trailing / covers a directory");
+                  ("description", `String "repository only: enter a non-empty JSON array, e.g. [\"src/\", \"README.md\"]. Paths are relative; a trailing / covers a directory.");
                 ] );
           ] );
     ]
@@ -395,5 +395,5 @@ let lines overlay =
          | Some record -> [Printf.sprintf "> %d/%d · %s" (overlay.cursor + 1) (List.length records) (describe record)]
          | None -> ["No selected record"]) in
   let message = match overlay.message with None -> [] | Some text -> [""; text] in
-  let form = match overlay.form with None -> [] | Some form -> "" :: Masc_tui_schema_form.lines form in
+  let form = match overlay.form with None -> [] | Some form -> "" :: Masc_tui_schema_form.lines ~show_description:true form in
   header @ rows @ message @ form @ [""; "a:add  d:remove  j/k:move  PageUp/Down:scroll  Esc:back · then s saves"]

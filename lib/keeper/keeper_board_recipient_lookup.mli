@@ -12,9 +12,9 @@
 val make : base_path:string -> Recipient_lookup.t
 (** [make ~base_path] answers for each candidate:
 
-    - A name that cannot be a Keeper name ({!Keeper_id.Keeper_name.of_string}:
-      a path component of at most 128 bytes) is not declared.  No file name is
-      built from it.
+    - A candidate that cannot be a Keeper name ({!Keeper_id.Keeper_name.of_string}:
+      a path component of at most 128 bytes) is never used to build an own-name
+      file path. It can still be a declared alias, which is found by the scan.
     - A Keeper's own name is declared when that Keeper answers to it. Keeper
       identity is case-folded, including when the persisted filename retains
       uppercase letters on a case-sensitive filesystem. A Keeper whose
@@ -39,4 +39,5 @@ val make : base_path:string -> Recipient_lookup.t
       the lookup the same way.
     - A Keeper file this build cannot decode as the current schema fails the
       lookup too, whether the name is that Keeper's or a scan reaches it, and so
-      does a read that raises: neither is taken for "no such Keeper". *)
+      do filesystem errors from a read: neither is taken for "no such Keeper".
+      Cancellation and other non-filesystem exceptions propagate. *)

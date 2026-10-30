@@ -40,4 +40,5 @@ val make : base_path:string -> Recipient_lookup.t
     - A Keeper file this build cannot decode as the current schema fails the
       lookup too, whether the name is that Keeper's or a scan reaches it, and so
       do filesystem errors from a read: neither is taken for "no such Keeper".
-      Cancellation and other non-filesystem exceptions propagate. *)
+      The lookup's read wrapper catches [Sys_error] and [Unix.Unix_error]; it
+      does not catch cancellation. *)

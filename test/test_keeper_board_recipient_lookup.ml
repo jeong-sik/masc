@@ -519,7 +519,9 @@ let test_a_unix_read_that_raises_fails_the_lookup () =
     (fun () ->
       Fs_compat.clear_fs ();
       let config = Workspace.default_config (Filename.concat file "base") in
-      expect_error "Unix filesystem error" ~mentioning:[ "@someone" ] (ask config "someone"))
+      expect_error "Unix filesystem error"
+        ~mentioning:[ "@someone"; "mkdir"; Unix.error_message Unix.ENOTDIR ]
+        (ask config "someone"))
 ;;
 
 (* The broadcast path finds a Keeper by alias with

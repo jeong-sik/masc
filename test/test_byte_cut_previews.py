@@ -282,11 +282,11 @@ def findings(text):
     return found
 
 
-def source_files(roots):
+def source_files(roots, *, onerror=None):
     for root in roots:
         if not os.path.isdir(root):
             sys.exit(f"source root {root} is not a directory")
-        for directory, names, files in os.walk(root):
+        for directory, names, files in os.walk(root, onerror=onerror):
             names[:] = [name for name in names if name not in SKIPPED_DIRECTORIES]
             for name in files:
                 if name.endswith(".ml"):

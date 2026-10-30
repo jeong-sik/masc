@@ -19,14 +19,17 @@
  (alias runtest-test_file_owned_env_reads)
  (deps
   test_file_owned_env_reads.py
+  test_file_owned_env_reads_walk_test.py
   test_byte_cut_previews.py
   file_owned_env_names.txt
   (source_tree %{workspace_root}/lib)
   (source_tree %{workspace_root}/bin))
  (action
-  (run python3 %{dep:test_file_owned_env_reads.py}
-   %{dep:file_owned_env_names.txt}
-   %{workspace_root}/lib %{workspace_root}/bin)))
+  (progn
+   (run python3 %{dep:test_file_owned_env_reads_walk_test.py})
+   (run python3 %{dep:test_file_owned_env_reads.py}
+    %{dep:file_owned_env_names.txt}
+    %{workspace_root}/lib %{workspace_root}/bin))))
 
 (alias
  (name runtest)

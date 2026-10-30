@@ -541,7 +541,13 @@ let install_real_masc_binary prefix mirror_dir =
   ignore (Sys.command ("mkdir -p " ^ Filename.quote prefix));
   let canonical_prefix = Unix.realpath prefix in
   let dest = Filename.concat canonical_prefix "masc" in
-  let archive = Filename.concat mirror_dir (masc_dashboard_archive ()) in
+  (* The mirror stages the dashboard tarball under <base>/.release/<tag>/
+     next to the binary asset; the helper --archive wants that exact path. *)
+  let archive =
+    Filename.concat
+      (Filename.concat mirror_dir (release_tag ()))
+      (masc_dashboard_archive ())
+  in
   let bundle_helper =
     Filename.concat (source_root ()) "scripts/release-dashboard-bundle.py"
   in

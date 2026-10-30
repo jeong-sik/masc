@@ -708,16 +708,18 @@ let test_fleet_schedule_reprioritized_occurrence () =
 let test_fleet_duplicate_scheduled_queue_entries_require_attention () =
   let original = schedule_due_stimulus () in
   let other = { original with urgency = Keeper_event_queue.Low } in
-  let malformed_occurrence = match other.payload with
+  let malformed_occurrence (stimulus : Keeper_event_queue.stimulus) = match stimulus.payload with
     | Keeper_event_queue.Schedule_due wake ->
-      { other with payload = Schedule_due { wake with occurrence_id = "different-occurrence" } }
+      { stimulus with payload = Schedule_due { wake with occurrence_id = "different-occurrence" } }
     | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Connector_attention _ | Hitl_resolved _ | Ask_answered _
     | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
     | Workspace_message _ | Delegate_completed _ | Composition_completed _
     | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
       fail "schedule fixture has a non-schedule payload" in
-  List.iter (fun (label, entries) ->
+  let malformed_immediate = malformed_occurrence original in
+  let malformed_low = malformed_occurrence other in
+  List.iter (fun (label, entries, expected_order) ->
     with_temp_base @@ fun base_path ->
     let keeper_name = "duplicate-scheduled-queue-entries" in
     Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name original;
@@ -729,15 +731,22 @@ let test_fleet_duplicate_scheduled_queue_entries_require_attention () =
     let pending = Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
       |> require_ok "load pending selections" in
     check int "both durable entries were observed" 2 (List.length pending);
+    let observed_order = List.map
+      (fun (selection : Keeper_event_queue_state.pending_selection) -> selection.source)
+      pending in
+    check bool (label ^ ": pending selections in urgency order") true
+      (observed_order = expected_order);
     let fleet = Keeper_reaction_ledger.fleet_summary_json
       ~base_path ~keeper_names:[keeper_name]
       ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
       ~limit_per_keeper:10 in
     check int label 1 (fleet |> member "attention_required_stimulus_count" |> to_int))
-    [ "different priorities", [original; other]
-    ; "different priorities reversed", [other; original]
-    ; "bad payload alongside matching occurrence", [original; malformed_occurrence]
-    ; "bad payload first", [malformed_occurrence; original]
+    [ "different priorities", [original; other], [original; other]
+    ; "different priorities inserted reversed", [other; original], [original; other]
+    ; "valid immediate then invalid low", [original; malformed_low], [original; malformed_low]
+    ; "invalid low inserted first", [malformed_low; original], [original; malformed_low]
+    ; "invalid immediate then valid low", [malformed_immediate; other], [malformed_immediate; other]
+    ; "valid low inserted first", [other; malformed_immediate], [malformed_immediate; other]
     ]
 ;;
 

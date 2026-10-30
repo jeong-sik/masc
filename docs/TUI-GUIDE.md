@@ -2941,6 +2941,9 @@ example is one last-observed item rather than a promise that it is the next due.
 An inventory with a source read error is marked partial.
 `K` opens a read-only relationship view for the selected Keeper: each arrow
 comes from the recorded Keeper sender of a request queued for that recipient.
+The server must attest that the source survived redaction intact before the
+reader names an edge. Redacted sources and older servers without that
+attestation are counted as unknown rather than guessed as Keeper identities.
 Use `<` and `>` to read earlier or later server pages, and `r` to refresh the
 current page, or retry the failed page after an error; `R` starts again from
 the first page. Each page is a separate observation of a changing queue; a

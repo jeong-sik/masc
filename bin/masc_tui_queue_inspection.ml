@@ -9,7 +9,12 @@ type peer_relation = {
   recipient : string;
   reply_to : string option;
 }
-type peer_snapshot = { queued_count : int; relations : peer_relation list }
+type peer_snapshot = {
+  queued_count : int;
+  relations : peer_relation list;
+  source_redacted_count : int;
+  source_unverified_count : int;
+}
 type peer_page = { snapshot : peer_snapshot; next_sequence : string option }
 
 type item_id =
@@ -54,7 +59,11 @@ let parse text =
     else Ok (Edit (Keeper_chat_operation.Operation_id.to_string id, message))
   | _ -> Error ("Use " ^ Masc_tui_command.usage Masc_tui_command.queue_help)
 let field key = function
-  | `Assoc fields -> (match List.assoc_opt key fields with Some value -> Ok value | None -> Error ("Queue response missing " ^ key))
+  | `Assoc fields ->
+      (match List.filter (fun (name, _) -> String.equal name key) fields with
+       | [_, value] -> Ok value
+       | [] -> Error ("Queue response missing " ^ key)
+       | _ -> Error ("Queue response has duplicate " ^ key))
   | _ -> Error "Queue response must be an object"
 let string key json =
   let* value = field key json in
@@ -69,9 +78,32 @@ let safe = Masc.Tui_terminal_text.sanitize_terminal_text
 
 module Operation_ids = Set.Make (String)
 
+type source_integrity = Intact | Redacted | Unverified
+type peer_sender_observation = Peer of peer_relation | No_peer | Masked_source | Unknown_source
+
+let source_integrity = function
+  | `Assoc fields ->
+      (match List.filter (fun (key, _) -> String.equal key "source_integrity") fields with
+       | [] -> Ok Unverified
+       | [_, `String "intact"] -> Ok Intact
+       | [_, `String "redacted"] -> Ok Redacted
+       | [_, `String "unavailable"] -> Ok Unverified
+       | _ -> Error "Queue source integrity is invalid")
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error "Queue response must be an object"
+
 let peer_snapshot ~keeper_name json =
+  let* schema = string "schema" json in
+  let* () = if String.equal schema "masc.keeper_chat_operations.list.v1" then Ok ()
+    else Error "Queue response has an unsupported list schema" in
+  let* list_state = string "state" json in
+  let* () = if String.equal list_state "Queued" then Ok ()
+    else Error "Queue response is not a queued operation list" in
   let* operations = list "operations" json in
   let* decoded = map_result (fun operation ->
+    let* schema = string "schema" operation in
+    let* () = if String.equal schema "masc.keeper_chat_operation.v1" then Ok ()
+      else Error "Queue response contains an unsupported operation schema" in
     let* id = string "operation_id" operation in
     let* id = Keeper_chat_operation.Operation_id.of_string id in
     let operation_id = Keeper_chat_operation.Operation_id.to_string id in
@@ -79,24 +111,36 @@ let peer_snapshot ~keeper_name json =
     let* () = if String.equal state "Queued" then Ok ()
       else Error "Queue response contains an operation that is not queued" in
     let* source = field "source" operation in
-    let* source = Masc.Keeper_chat_operation_payload.source_of_json source in
-    let reply_to = match source.continuation_channel with
-      | Keeper_continuation_channel.Keeper { keeper_name } -> Some keeper_name
-      | Dashboard _ | Discord _ | Slack _ | Telegram _ | Imessage _ | Unrouted _ -> None in
-    Ok (operation_id, Option.map (fun sender ->
-      { operation_id;
-        sender = Masc.Keeper_identity.Keeper_id.to_string sender;
-        recipient = keeper_name; reply_to }) source.sender_keeper)) operations in
-  let rec unique seen relations = function
-    | [] -> Ok (List.rev relations)
-    | (id, relation) :: rest ->
+    let* integrity = source_integrity operation in
+    let* observation = match integrity with
+      | Redacted -> Ok Masked_source
+      | Unverified -> Ok Unknown_source
+      | Intact ->
+        let* source = Masc.Keeper_chat_operation_payload.source_of_json source in
+        let reply_to = match source.continuation_channel with
+          | Keeper_continuation_channel.Keeper { keeper_name } -> Some keeper_name
+          | Dashboard _ | Discord _ | Slack _ | Telegram _ | Imessage _ | Unrouted _ -> None in
+        Ok (match source.sender_keeper with
+          | None -> No_peer
+          | Some sender -> Peer { operation_id;
+              sender = Masc.Keeper_identity.Keeper_id.to_string sender;
+              recipient = keeper_name; reply_to }) in
+    Ok (operation_id, observation)) operations in
+  let rec unique seen relations redacted unverified = function
+    | [] -> Ok (List.rev relations, redacted, unverified)
+    | (id, observation) :: rest ->
         if Operation_ids.mem id seen then
           Error "Queue response contains a duplicate operation ID; reopen to read it again"
         else
-          unique (Operation_ids.add id seen)
-            (match relation with Some value -> value :: relations | None -> relations) rest in
-  let* relations = unique Operation_ids.empty [] decoded in
-  Ok { queued_count = List.length operations; relations }
+          let relations, redacted, unverified = match observation with
+            | Peer relation -> relation :: relations, redacted, unverified
+            | No_peer -> relations, redacted, unverified
+            | Masked_source -> relations, redacted + 1, unverified
+            | Unknown_source -> relations, redacted, unverified + 1 in
+          unique (Operation_ids.add id seen) relations redacted unverified rest in
+  let* relations, source_redacted_count, source_unverified_count =
+    unique Operation_ids.empty [] 0 0 decoded in
+  Ok { queued_count = List.length operations; relations; source_redacted_count; source_unverified_count }
 
 let next_sequence_after ~after_sequence json =
   let* operations = list "operations" json in
@@ -131,6 +175,10 @@ let peer_lines ~page_number { snapshot; next_sequence } =
   let scope = Printf.sprintf "Page %d · observed %d queued requests; %d from Keepers"
       page_number
       snapshot.queued_count (List.length snapshot.relations) in
+  let coverage =
+    if snapshot.source_redacted_count = 0 && snapshot.source_unverified_count = 0 then []
+    else [Printf.sprintf "%d source(s) redacted · %d unverified; relationships unknown"
+            snapshot.source_redacted_count snapshot.source_unverified_count] in
   let lines = List.map (fun relation ->
     Printf.sprintf "%s → %s · queued · %s%s"
       (safe relation.sender) (safe relation.recipient) (safe relation.operation_id)
@@ -140,7 +188,7 @@ let peer_lines ~page_number { snapshot; next_sequence } =
     | Some _ -> "> reads later queued requests"
     | None when page_number = 1 -> "No queued requests in this read"
     | None -> "No requests after this cursor in this read" in
-  scope :: (("< previous · " ^ next ^ " · r refresh/retry · R start over. Pages are separate observations; running and completed requests are not listed.") :: lines)
+  scope :: coverage @ (("< previous · " ^ next ^ " · r refresh/retry · R start over. Pages are separate observations; running and completed requests are not listed.") :: lines)
 
 let clock_text at =
   let time = Unix.localtime at in

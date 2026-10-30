@@ -1111,7 +1111,8 @@ let test_keeper_preference_cancelled_submission_and_exit () =
 let test_keeper_peer_reading_keeps_its_target_and_epoch () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   let page next_sequence : Masc_tui_queue_inspection.peer_page =
-    { snapshot = {queued_count = 1; relations = []}; next_sequence } in
+    { snapshot = {queued_count = 1; relations = [];
+                  source_redacted_count = 0; source_unverified_count = 0}; next_sequence } in
   state.view <- Keepers Keeper_list;
   let old = begin_keeper_peer_reading state ~keeper_name:"alpha" in
   let current = begin_keeper_peer_reading state ~keeper_name:"beta" in
@@ -1197,7 +1198,8 @@ let test_keeper_peer_page_preserves_scroll_intent () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Keepers Keeper_list;
   let page next_sequence : Masc_tui_queue_inspection.peer_page =
-    { snapshot = {queued_count = 1; relations = []}; next_sequence } in
+    { snapshot = {queued_count = 1; relations = [];
+                  source_redacted_count = 0; source_unverified_count = 0}; next_sequence } in
   let reading () = match current_detail_reading state with
     | Some reading -> reading
     | None -> Alcotest.fail "peer reader disappeared" in
@@ -1284,7 +1286,8 @@ let test_keeper_peer_staged_response_keeps_its_owner () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Keepers Keeper_list;
   let page next_sequence : Masc_tui_queue_inspection.peer_page =
-    {snapshot = {queued_count = 1; relations = []}; next_sequence} in
+    {snapshot = {queued_count = 1; relations = [];
+                 source_redacted_count = 0; source_unverified_count = 0}; next_sequence} in
   let initial = begin_keeper_peer_reading state ~keeper_name:"beta" in
   ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:initial (Ok (page (Some "10"))));
   let request move = match request_keeper_peer_page state move with
@@ -1308,7 +1311,8 @@ let test_keeper_peer_staged_failure_preserves_visible_page () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Keepers Keeper_list;
   let page : Masc_tui_queue_inspection.peer_page =
-    {snapshot = {queued_count = 1; relations = []}; next_sequence = Some "10"} in
+    {snapshot = {queued_count = 1; relations = [];
+                 source_redacted_count = 0; source_unverified_count = 0}; next_sequence = Some "10"} in
   let first = begin_keeper_peer_reading state ~keeper_name:"beta" in
   ignore (stage_keeper_peer_reading state ~keeper_name:"beta" ~token:first (Error "offline"));
   Alcotest.(check bool) "an unpresented initial response keeps its request" true
@@ -1430,7 +1434,8 @@ let test_keeper_peer_presented_owner_barrier () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Keepers Keeper_list;
   let page next_sequence : Masc_tui_queue_inspection.peer_page =
-    {snapshot = {queued_count = 1; relations = []}; next_sequence} in
+    {snapshot = {queued_count = 1; relations = [];
+                 source_redacted_count = 0; source_unverified_count = 0}; next_sequence} in
   let reading () = match current_detail_reading state with
     | Some reading -> reading
     | None -> Alcotest.fail "peer reader disappeared" in

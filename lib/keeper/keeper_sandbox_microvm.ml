@@ -2129,40 +2129,24 @@ let build_scan_argv_for backend ~container_name ~keeper_work_root ~uid ~gid =
     ~command_argv:[ "sh"; "-c"; build_scan_script ]
 ;;
 
-(** The refusal a caller reports for a row whose plan is
-    {!Link_refused_real_directory}: a real [_build] the live guest keeps
-    until the next boot's helper removes it. *)
-let build_link_refusal_message ~checkout =
-  Printf.sprintf
-    "%s/%s is a real directory, so it stays on the unified work volume while \
-     this guest runs. The next guest boot removes it before the guest starts \
-     and this scan then links the checkout to the build volume; a checkout \
-     holding %s keeps it."
-    checkout
-    build_output_dir_name
-    build_keep_marker
-;;
-
-let build_link_preserved_symlink_message () =
-  "A checkout's _build link points elsewhere and was left unchanged; if its target is missing, builds can fail. Inspect guest links and verify ownership before repair; see the Keeper User Manual's Apple MicroVM section."
-;;
-
-(** The refusal a caller reports for {!Link_refused_invalid_path}. The path
-    names no build target, so this scan never links the checkout. A real
-    [_build] it holds is still removed by the next boot's helper unless the
-    checkout holds the keep marker, so that removal is reported too. *)
-let build_link_invalid_path_message ~checkout ~detail = function
-  | Build_real_directory ->
+(** Scan reports an existing non-symlink entry as [real] without determining
+    its file type. The first-handoff helper removes only real directories. *)
+let build_link_warning plan =
+  let real_entry_risk =
     Printf.sprintf
-      "Build link refused for checkout %S: %s. Its %s is a real directory that \
-       stays on the unified work volume while this guest runs; the next guest \
-       boot removes it unless the checkout holds %s."
-      checkout
-      detail
-      build_output_dir_name
+      "If the entry is a real directory, a later first owned handoff, including after a server restart, can stage and delete it. A %s marker that resolves as present in the checkout prevents that staging; see Keeper User Manual: Inspecting _build entries."
       build_keep_marker
-  | Build_absent | Build_symlink _ ->
-    Printf.sprintf "Build link refused for checkout %S: %s" checkout detail
+  in
+  match plan with
+  | Link_refused_real_directory ->
+    Some ("A checkout has a non-symlink _build entry; its build link was not changed. " ^ real_entry_risk)
+  | Link_refused_invalid_path { state = Build_real_directory; _ } ->
+    Some ("A checkout path cannot be represented as a build link; its non-symlink _build entry was not changed. " ^ real_entry_risk)
+  | Link_refused_invalid_path { state = (Build_absent | Build_symlink _); _ } ->
+    Some "A checkout path cannot be represented as a build link; it was not changed."
+  | Link_preserve_symlink _ ->
+    Some "A checkout's _build link points elsewhere and was left unchanged; if its target is missing, builds can fail. Inspect guest links and verify ownership before repair; see the Keeper User Manual's Apple MicroVM section."
+  | Link_already_correct | Link_create _ -> None
 ;;
 
 (** Input paths are passed on stdin, not as host CLI arguments. The guest

@@ -1,0 +1,21 @@
+{
+  "scope": "sanitized summary of source-extracted OCaml checks and a host-only manual scan fixture; not a MASC build or guest test",
+  "source_sha256": {
+    "lib/keeper/keeper_microvm_build_plan.ml": "f84271a51566959d162ca60d3fd11660d4e49a7d7e831dd7fd5be903ce5db4e9",
+    "lib/keeper/keeper_sandbox_microvm.ml": "78925e61a94a38983c9443a1e6c121cc6a8567727519d9a7d949da2ca195c03d",
+    "lib/keeper/keeper_turn_sandbox_runtime.ml": "cbfa1dc7caccb61c08bc3dd8db7e7e69d1e28a83206bb97802de3dc2195745a8",
+    "test/test_keeper_sandbox_microvm.ml": "74a819035364ae11b1a5ea5a76089b6c79832c0c52088ef9c1264bb45b794441",
+    "docs/KEEPER-USER-MANUAL.md": "c29ee198d6a827353e08ec96e30684a232464956f472296dae5f360df8d23557",
+    "docs/KEEPER-USER-MANUAL.ko.md": "3e58093877ae5e6833091848edf0ff9a586f43cff96069e0e2a8adb2d4323bf5"
+  },
+  "original_output_sha256": {
+    "unit-output.txt": "dadf08588079883cac2eda106c1c579ca34c3cd4976097d21410cea81dfb38e9",
+    "runtime-output.txt": "f7e0e2b5c9c567b21f904330275e956631cf2ddfd48907a003d950fde4cbd97f",
+    "build-real-warning-manual-output-20261030.txt": "78eea946fa35fefdc6dadbd286193161f828cb93280b8bf1f4b36364d1617fbb"
+  },
+  "results": {
+    "static_warning_alcotest": "pass, 1 case",
+    "extracted_runtime_warning_route": "pass, four synthetic states",
+    "english_and_korean_manual_scan": "pass, matching scripts and preserved fixture bytes/inodes"
+  }
+}

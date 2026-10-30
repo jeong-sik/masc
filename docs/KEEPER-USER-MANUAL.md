@@ -151,6 +151,107 @@ Python at one of those paths. Remote checkout discovery and scheduled attached
 build cleanup separately invoke `python3` through the guest's `PATH`; a fixed
 path check alone does not establish that those commands can run.
 
+#### Inspecting `_build` entries
+
+A link warning does not name the affected checkout. An existing non-symlink
+`_build` may be a directory or another kind of entry. The link scan leaves it
+unchanged. For a checkout with `dune-project`, a later first owned handoff in a
+new server process can stage and delete an actual `_build` directory if the
+checkout's `.masc-keep-build` does not resolve as present when checked. The
+marker prevents that staging for the checkout; it does not recover output
+already staged in `.masc-build-removing` or fence another writer. Coordinate
+with all affected owners before changing anything, and do not restart the
+service or guest merely to investigate the warning.
+
+From an authorized route in a trusted guest, use the Keeper uid and gid that
+run the first handoff and enter its actual work root; replace `reviewer` with
+the sanitized Keeper name. A root-only check does not establish what the
+Keeper can read. This read-only scan reports
+`_build` symlinks, real directories and other entries up to three directory
+levels below the root. It skips `.git`, `_build`, and the root's reserved
+`.masc-build-removing` tree and follows no directory symlinks. The root itself
+and deeper directories are outside the checkout scan. `dune-project: True`
+means the marker resolves as present; `.masc-keep-build: True` means the keep
+marker resolves as present at that instant. A dangling marker is `False`;
+marker read errors are `unverified`. Other errors are printed to stderr and
+can leave the listing incomplete. The pending status does not inspect staged
+contents. All results can become stale while inspected.
+
+The output can expose paths and link targets from a shared volume; view, retain
+and share it only within a boundary authorized by all affected workspace owners.
+The fixed interpreter must come from a trusted guest image; isolated flags do
+not make an untrusted executable safe. The root check is an observation, not
+a fence against later replacement.
+
+```sh
+keeper_work_root=/masc-work/reviewer  # replace with the actual guest path
+[ ! -L "$keeper_work_root" ] || { printf '%s\n' 'Work root is a symlink; stop.' >&2; exit 1; }
+cd -- "$keeper_work_root" || exit 1
+if [ -x /usr/bin/python3 ]; then
+  guest_python=/usr/bin/python3
+elif [ -x /usr/local/bin/python3 ]; then
+  guest_python=/usr/local/bin/python3
+else
+  printf '%s\n' 'No supported Python; ask the operator.' >&2
+  exit 1
+fi
+"$guest_python" -I -S -B - <<'PY'
+import os, stat, sys
+
+def report(error):
+    print("cannot inspect:", repr(error.filename), repr(error), file=sys.stderr)
+
+def exists(path):
+    try:
+        os.stat(path)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        report(error)
+        return "unverified"
+
+try:
+    os.lstat("./.masc-build-removing")
+    print("pending cleanup: present; contents not inspected")
+except FileNotFoundError:
+    print("pending cleanup: absent")
+except OSError as error:
+    report(error)
+    print("pending cleanup: unverified")
+
+for base, dirs, _ in os.walk(".", topdown=True, followlinks=False, onerror=report):
+    rel = os.path.relpath(base, ".")
+    depth = 0 if rel == "." else len(rel.split(os.sep))
+    dirs[:] = [] if depth >= 3 else [d for d in dirs if d not in (".git", "_build")]
+    if rel == ".":
+        dirs[:] = [d for d in dirs if d != ".masc-build-removing"]
+        continue
+    entry = os.path.join(base, "_build")
+    try:
+        mode = os.lstat(entry).st_mode
+    except FileNotFoundError:
+        continue
+    except OSError as error:
+        report(error)
+        continue
+    if stat.S_ISLNK(mode):
+        kind = "symlink"
+        try:
+            target = repr(os.readlink(entry))
+        except OSError as error:
+            report(error)
+            target = "<unverified>"
+    elif stat.S_ISDIR(mode):
+        kind, target = "directory", "-"
+    else:
+        kind, target = "other", "-"
+    print("checkout:", repr(rel), "_build:", kind, "target:", target,
+          "dune-project:", exists(os.path.join(base, "dune-project")),
+          ".masc-keep-build:", exists(os.path.join(base, ".masc-keep-build")))
+PY
+```
+
 #### A preserved `_build` link after moving a checkout
 
 MASC leaves an `_build` symlink pointing somewhere other than the current
@@ -161,62 +262,8 @@ can become dangling and a Dune build can fail. MASC does not create the old
 target or retarget the link automatically. For a checkout named `new` directly
 under the Keeper work root, the expected target is `/masc-build/new`; for
 `repos/new` it is `/masc-build/repos:new`. A name containing `:` cannot be
-mapped by this scheme, so ask the operator instead of guessing a target.
-
-The warning does not identify the checkout. First enter the actual Keeper work
-root inside the guest; replace `reviewer` below with that Keeper's sanitized
-name. This read-only scan lists `_build` links up to three directory levels
-below the root, skips `.git` and `_build` trees, and does not follow directory
-symlinks. Paths and targets use Python's escaped representation. A
-`dune-project: True` row is eligible for MASC's checkout scan; the root itself
-and deeper directories are outside that scan. Read errors are printed to stderr
-and mean the listing may be incomplete. Output can expose paths and link targets
-from a shared volume: view, retain and share it only within a boundary authorized
-by all affected workspace owners. The fixed interpreter must come from a trusted
-guest image; isolated flags do not make an untrusted executable safe.
-
-```sh
-keeper_work_root=/masc-work/reviewer  # replace with the actual guest path
-cd -- "$keeper_work_root" || exit 1
-if [ -x /usr/bin/python3 ]; then
-  guest_python=/usr/bin/python3
-elif [ -x /usr/local/bin/python3 ]; then
-  guest_python=/usr/local/bin/python3
-else
-  printf '%s\n' 'No supported Python; ask the operator.' >&2
-  exit 1
-fi
-"$guest_python" -I -S - <<'PY'
-import os, stat, sys
-
-def report(error):
-    print("cannot inspect:", repr(error.filename), repr(error), file=sys.stderr)
-
-for base, dirs, _ in os.walk(".", topdown=True, followlinks=False, onerror=report):
-    rel = os.path.relpath(base, ".")
-    depth = 0 if rel == "." else len(rel.split(os.sep))
-    dirs[:] = [] if depth >= 3 else [d for d in dirs if d not in (".git", "_build")]
-    if rel == ".":
-        continue
-    link = os.path.join(base, "_build")
-    try:
-        if stat.S_ISLNK(os.lstat(link).st_mode):
-            try:
-                os.stat(os.path.join(base, "dune-project"))
-                candidate = True
-            except FileNotFoundError:
-                candidate = False
-            except OSError as error:
-                report(error)
-                candidate = "unverified"
-            print("checkout:", repr(rel), "target:", repr(os.readlink(link)),
-                  "dune-project:", candidate)
-    except FileNotFoundError:
-        continue
-    except OSError as error:
-        report(error)
-PY
-```
+mapped by this scheme, so ask the operator instead of guessing a target. Use
+the read-only scan above to identify affected links.
 
 Inspect the affected checkout **inside that Keeper's guest**, using the
 Keeper's execution route or an authorized guest shell. Select the exact path

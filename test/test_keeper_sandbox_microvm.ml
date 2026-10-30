@@ -2081,8 +2081,8 @@ let test_invalid_build_link_path_keeps_its_refusal_reason () =
   Alcotest.(check bool) "no guest target directory" true (M.build_link_targets rows = [])
 ;;
 
-(* An invalid path over a real [_build]: the path reason and the scanned
-   state both survive, so the caller can still report the next-boot removal. *)
+(* An invalid path over a non-symlink [_build] keeps the scanned state, so the
+   caller can warn about a later handoff without logging the checkout. *)
 let test_invalid_build_link_path_keeps_a_real_directory () =
   let checkout = "repos/ambiguous:name" in
   let rows = M.build_link_rows_of_scan [ { M.checkout; state = M.Build_real_directory } ] in
@@ -2090,21 +2090,40 @@ let test_invalid_build_link_path_keeps_a_real_directory () =
    | [ { target = None; plan = M.Link_refused_invalid_path { state = M.Build_real_directory; _ }; _ } ] -> ()
    | _ -> Alcotest.fail "the real directory under an invalid path was dropped");
   Alcotest.(check bool) "no guest link action" true (M.build_link_actions rows = []);
-  let message state = M.build_link_invalid_path_message ~checkout ~detail:"d" state in
+  let message state = M.build_link_warning
+      (M.Link_refused_invalid_path {detail="private-detail"; state}) in
   Alcotest.(check bool) "only the real directory reports its removal" true
     (message M.Build_real_directory <> message M.Build_absent)
 ;;
 
-let test_build_link_refusal_message_names_the_checkout () =
-  let message = M.build_link_refusal_message ~checkout:"repos/wt-370" in
+let test_build_link_warning_is_static_and_state_aware () =
+  let warning plan = match M.build_link_warning plan with
+    | Some message -> message
+    | None -> Alcotest.fail "refusal must report a warning" in
+  let message = warning M.Link_refused_real_directory in
   Alcotest.(check bool)
-    "names the checkout's _build"
+    "warns that a real directory can be deleted on a later handoff"
     true
-    (Astring.String.is_infix ~affix:"repos/wt-370/_build" message);
+    (Astring.String.is_infix ~affix:"can stage and delete it" message);
   Alcotest.(check bool)
-    "names the marker that keeps it through a boot"
+    "names the keep marker"
     true
-    (Astring.String.is_infix ~affix:M.build_keep_marker message)
+    (Astring.String.is_infix ~affix:M.build_keep_marker message);
+  let detail = "private-detail-should-not-appear" in
+  let invalid state = warning (M.Link_refused_invalid_path {detail; state}) in
+  let real = invalid M.Build_real_directory and absent = invalid M.Build_absent in
+  let symlink = invalid (M.Build_symlink "/private-target-should-not-appear") in
+  Alcotest.(check bool) "invalid non-symlink gets the same preservation warning" true
+    (Astring.String.is_infix ~affix:M.build_keep_marker real);
+  Alcotest.(check bool) "absent entry has no directory removal warning" false
+    (Astring.String.is_infix ~affix:M.build_keep_marker absent);
+  Alcotest.(check bool) "symlink has no directory removal warning" false
+    (Astring.String.is_infix ~affix:M.build_keep_marker symlink);
+  List.iter (fun text ->
+    Alcotest.(check bool) "warning excludes private detail and target" false
+      (Astring.String.is_infix ~affix:detail text
+       || Astring.String.is_infix ~affix:"/private-target-should-not-appear" text))
+    [real; absent; symlink]
 ;;
 
 (* The boot helper's removal runs against a real tree: which directories it
@@ -4768,8 +4787,8 @@ let () =
             test_invalid_build_link_path_keeps_its_refusal_reason
         ; Alcotest.test_case "invalid path keeps a real directory" `Quick
             test_invalid_build_link_path_keeps_a_real_directory
-        ; Alcotest.test_case "build link refusal message names the checkout" `Quick
-            test_build_link_refusal_message_names_the_checkout
+        ; Alcotest.test_case "build link warning is static and state aware" `Quick
+            test_build_link_warning_is_static_and_state_aware
         ; Alcotest.test_case "boot removal deletes only unkept dune build output" `Quick
             test_build_output_removal_script_removes_only_unkept_dune_output
         ; Alcotest.test_case "boot removal skips a keeper root that does not exist" `Quick

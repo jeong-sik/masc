@@ -513,6 +513,31 @@ let test_differently_targeted_build_link_is_preserved_without_effects () = with_
     List.mem "masc-build-link" args || List.mem "masc-build-mkdir" args) in
   check int "no target directory or link operation is sent" 0 (List.length effects)
 
+let test_real_build_warning_on_the_actual_scan_path () =
+  let cases =
+    [ "private-valid", "real", "", true
+    ; "private:invalid-real", "real", "", true
+    ; "private:invalid-absent", "absent", "", false
+    ; "private:invalid-link", "symlink", "/private-target", false ] in
+  List.iter (fun (checkout, kind, target, has_risk) -> with_fixture (fun root ->
+    write (Filename.concat root "scan-output") (checkout ^ "\000" ^ kind ^ "\000" ^ target ^ "\000");
+    let status, stderr = step_captured root "scan-retry" in
+    check bool "the real scan path reports a usable turn" true (status = Unix.WEXITED 0);
+    check bool "the warning is emitted" true
+      (Astring.String.is_infix ~affix:"was not changed" stderr);
+    List.iter (fun expected ->
+      check bool ("warning includes " ^ expected) has_risk
+        (Astring.String.is_infix ~affix:expected stderr))
+      ["first owned handoff"; "can stage and delete it"; ".masc-keep-build";
+       "Keeper User Manual: Inspecting _build entries"];
+    check bool "guest checkout and target never enter the warning" false
+      (Astring.String.is_infix ~affix:checkout stderr
+       || Astring.String.is_infix ~affix:"/private-target" stderr);
+    check int "the refusal is scanned once" 1 (List.length (build_scan_calls root));
+    let effects = calls root |> List.filter (fun args ->
+      List.mem "masc-build-link" args || List.mem "masc-build-mkdir" args) in
+    check int "no target directory or link operation is sent" 0 (List.length effects))) cases
+
 let test_invalid_or_oversized_scan_never_dispatches_link_effects () =
   List.iter (fun output -> with_fixture (fun root ->
     write (Filename.concat root "scan-output") output;
@@ -860,6 +885,7 @@ let () =
         test_case "uncertain link effect is not replayed" `Quick test_uncertain_link_effect_is_not_replayed_in_the_same_process;
         test_case "build effect failure is not replayed" `Quick test_build_effect_failure_is_not_replayed_in_the_same_process;
         test_case "differently targeted build link is preserved without effects" `Quick test_differently_targeted_build_link_is_preserved_without_effects;
+        test_case "real build warnings reach the actual scan path" `Quick test_real_build_warning_on_the_actual_scan_path;
         test_case "invalid or oversized scan dispatches no link effects" `Quick test_invalid_or_oversized_scan_never_dispatches_link_effects;
         test_case "forgotten guest rejects old scan completion" `Quick test_forgotten_guest_rejects_old_scan_completion;
         test_case "helper uncertainty preserves guest on adopt and replace" `Quick test_helper_uncertainty_preserves_guest_on_adopt_and_replace;

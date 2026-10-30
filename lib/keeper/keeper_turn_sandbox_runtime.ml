@@ -1340,18 +1340,9 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation 
        let rows = Keeper_sandbox_microvm.build_link_rows_of_scan scanned in
        List.iter
          (fun (row : Keeper_sandbox_microvm.build_link_row) ->
-           match row.plan with
-           | Link_refused_real_directory ->
-             Log.Keeper.warn ~keeper_name:t.meta.name
-               "A checkout has a real _build directory; the link was not changed."
-           | Link_refused_invalid_path _ ->
-             Log.Keeper.warn ~keeper_name:t.meta.name
-               "A checkout path cannot be represented as a build link; it was not changed."
-           | Link_preserve_symlink _ ->
-             Log.Keeper.warn ~keeper_name:t.meta.name
-               "%s"
-               (Keeper_sandbox_microvm.build_link_preserved_symlink_message ())
-           | Link_already_correct | Link_create _ -> ())
+           match Keeper_sandbox_microvm.build_link_warning row.plan with
+           | Some message -> Log.Keeper.warn ~keeper_name:t.meta.name "%s" message
+           | None -> ())
          rows;
        let actions = Keeper_sandbox_microvm.build_link_actions rows in
        (* Already-correct links need their target too: a fresh boot recreates

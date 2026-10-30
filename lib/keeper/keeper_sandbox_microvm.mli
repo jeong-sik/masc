@@ -766,21 +766,11 @@ val build_link_rows_of_scan : build_scan_row list -> build_link_row list
 (** Every scanned checkout's target and plan, decided purely
     ({!plan_build_link}) -- touches no guest state. *)
 
-val build_link_refusal_message : checkout:string -> string
-(** The message a caller reports for a row whose plan is
-    {!Link_refused_real_directory}: a real [_build] the live guest keeps
-    until the next boot's helper removes it, unless the checkout holds
-    {!build_keep_marker}. *)
-
-val build_link_preserved_symlink_message : unit -> string
-(** Explain that a differently targeted [_build] symlink was preserved,
-    without logging the guest-controlled path or target. *)
-
-val build_link_invalid_path_message :
-  checkout:string -> detail:string -> build_link_state -> string
-(** The message a caller reports for {!Link_refused_invalid_path}. A real
-    [_build] adds its next-boot removal, since the refused path is never
-    linked but the boot helper still removes the directory. *)
+val build_link_warning : build_link_plan -> string option
+(** Static warning for preserved or refused entries, without guest-provided
+    paths, targets or refusal details. A scanned [Build_real_directory] can be
+    any existing non-symlink entry; warn that a later first owned handoff can
+    remove it if it is a directory and the keep marker is absent. *)
 
 val build_link_actions : build_link_row list -> (string * string) list
 (** The [(checkout, target)] pairs that actually need a guest command --

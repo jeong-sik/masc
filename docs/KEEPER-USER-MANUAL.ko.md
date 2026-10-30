@@ -138,29 +138,37 @@ guest를 교체하고, 서비스를 재시작하거나 재시도하지 마세요
 attached build 정리는 별도로 guest의 `PATH`에서 `python3`를 호출하므로, 고정 경로 확인만으로
 이 명령들의 실행 가능성을 판단할 수 없습니다.
 
-#### 체크아웃을 옮긴 뒤 보존된 `_build` 링크
+#### `_build` 항목 확인하기
 
-MASC는 `_build` 심볼릭 링크가 현재 체크아웃에 기대되는 빌드 대상과 다르면 소유자를
-확인할 수 없어 그대로 둡니다. 예를 들어 체크아웃을 `old`에서 `new`로 옮겨도 링크는
-`/masc-build/old`를 가리킬 수 있습니다. 새 부팅 때 build volume이 비워져 링크가
-끊기면 Dune 빌드가 실패할 수 있습니다. MASC는 이전 대상을 만들거나 링크를 자동으로
-바꾸지 않습니다. Keeper 작업 루트 바로 아래 `new`의 기대 대상은 `/masc-build/new`,
-`repos/new`의 기대 대상은 `/masc-build/repos:new`입니다. 이름에 `:`이 들어가면 이
-방식으로 매핑할 수 없으므로 대상을 추측하지 말고 운영자에게 확인하세요.
+링크 경고에는 체크아웃 경로가 나오지 않습니다. 심볼릭 링크가 아닌 기존 `_build`는
+디렉터리일 수도, 다른 종류의 항목일 수도 있습니다. 링크 탐색은 이를 바꾸지 않습니다.
+`dune-project`가 있는 체크아웃의 실제 `_build` 디렉터리는 새 서버 프로세스의 첫 소유
+handoff 등 이후 handoff에서, 검사 시 체크아웃의 `.masc-keep-build`가 존재하는 것으로
+확인되지 않으면 staging된 뒤 삭제될 수 있습니다. 이 마커는 해당 체크아웃의 staging을
+막지만 이미 `.masc-build-removing`에 옮겨진 출력을 되살리거나 다른 쓰기 작업을 막지는
+못합니다. 변경 전 영향받는 모든 소유자와 조율하고, 경고 확인만을 위해 서비스나 guest를
+재시작하지 마세요.
 
-경고에는 체크아웃 경로가 나오지 않습니다. 먼저 guest 안에서 해당 Keeper의 실제 작업
-루트로 이동하세요. 아래 `reviewer`는 그 Keeper의 정규화된 이름으로 바꿉니다. 이 읽기
-전용 탐색은 루트 아래 세 단계까지 `_build` 링크를 나열하고, `.git`과 `_build` 트리는
-건너뛰며 디렉터리 심볼릭 링크를 따라가지 않습니다. 경로와 대상은 특수 문자를 이스케이프해
-표시합니다. `dune-project: True`인 항목이 MASC의 체크아웃 탐색 대상이며, 루트 자체와
-더 깊은 디렉터리는 그 범위 밖입니다. 읽기 오류는 stderr에 표시되며, 오류가 있으면 목록이
-완전하지 않을 수 있습니다. 출력에는 공유 볼륨의 경로와 링크 대상이 드러날 수 있으므로
-영향받는 모든 작업 공간 소유자가 허용한 공유 범위 안에서만 보고, 보관하고, 전달하세요.
-고정 경로의 인터프리터도 신뢰할 수 있는 guest 이미지에 있어야 합니다. 격리 옵션이 신뢰할
-수 없는 실행 파일을 안전하게 만들지는 않습니다.
+신뢰할 수 있는 guest의 허가된 실행 경로에서 첫 handoff를 수행하는 Keeper uid·gid로
+실제 작업 루트에 접근하세요. root로만 확인해서는 Keeper가 무엇을 읽을 수 있는지 알 수
+없습니다. 아래 `reviewer`는 해당 Keeper의 정규화된 이름으로 바꿉니다. 이 읽기 전용 탐색은 루트 아래
+세 단계까지 `_build` 심볼릭 링크, 실제 디렉터리와 다른 항목을 구분해 표시합니다. `.git`,
+`_build`와 루트의 예약된 `.masc-build-removing` 트리는 건너뛰고 디렉터리 심볼릭 링크는
+따라가지 않습니다. 루트 자체와 더 깊은 디렉터리는 체크아웃 탐색 범위 밖입니다.
+`dune-project: True`는 해당 표시가 존재하는 것으로 해석됐다는 뜻이고,
+`.masc-keep-build: True`는 그 시점에 보존 표시가 존재하는 것으로 해석됐다는 뜻입니다.
+대상이 없는 표시 링크는 `False`, 표시 읽기 오류는 `unverified`입니다. 다른 오류는
+stderr에 표시되며 목록이 불완전할 수 있습니다. pending 상태는 staging된 내용물을 열어
+보지 않습니다. 확인 직후에도 상태는 바뀔 수 있습니다.
+
+출력에 공유 볼륨의 경로와 링크 대상이 드러날 수 있으므로 영향받는 모든 작업 공간
+소유자가 허용한 공유 범위 안에서만 보고, 보관하고, 전달하세요. 고정 경로의 인터프리터는
+신뢰할 수 있는 guest 이미지에 있어야 합니다. 격리 옵션은 신뢰할 수 없는 실행 파일을
+안전하게 만들지 않습니다. 루트 확인은 한 시점의 관측이며 이후 교체를 막지 않습니다.
 
 ```sh
 keeper_work_root=/masc-work/reviewer  # replace with the actual guest path
+[ ! -L "$keeper_work_root" ] || { printf '%s\n' 'Work root is a symlink; stop.' >&2; exit 1; }
 cd -- "$keeper_work_root" || exit 1
 if [ -x /usr/bin/python3 ]; then
   guest_python=/usr/bin/python3
@@ -170,37 +178,73 @@ else
   printf '%s\n' 'No supported Python; ask the operator.' >&2
   exit 1
 fi
-"$guest_python" -I -S - <<'PY'
+"$guest_python" -I -S -B - <<'PY'
 import os, stat, sys
 
 def report(error):
     print("cannot inspect:", repr(error.filename), repr(error), file=sys.stderr)
+
+def exists(path):
+    try:
+        os.stat(path)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        report(error)
+        return "unverified"
+
+try:
+    os.lstat("./.masc-build-removing")
+    print("pending cleanup: present; contents not inspected")
+except FileNotFoundError:
+    print("pending cleanup: absent")
+except OSError as error:
+    report(error)
+    print("pending cleanup: unverified")
 
 for base, dirs, _ in os.walk(".", topdown=True, followlinks=False, onerror=report):
     rel = os.path.relpath(base, ".")
     depth = 0 if rel == "." else len(rel.split(os.sep))
     dirs[:] = [] if depth >= 3 else [d for d in dirs if d not in (".git", "_build")]
     if rel == ".":
+        dirs[:] = [d for d in dirs if d != ".masc-build-removing"]
         continue
-    link = os.path.join(base, "_build")
+    entry = os.path.join(base, "_build")
     try:
-        if stat.S_ISLNK(os.lstat(link).st_mode):
-            try:
-                os.stat(os.path.join(base, "dune-project"))
-                candidate = True
-            except FileNotFoundError:
-                candidate = False
-            except OSError as error:
-                report(error)
-                candidate = "unverified"
-            print("checkout:", repr(rel), "target:", repr(os.readlink(link)),
-                  "dune-project:", candidate)
+        mode = os.lstat(entry).st_mode
     except FileNotFoundError:
         continue
     except OSError as error:
         report(error)
+        continue
+    if stat.S_ISLNK(mode):
+        kind = "symlink"
+        try:
+            target = repr(os.readlink(entry))
+        except OSError as error:
+            report(error)
+            target = "<unverified>"
+    elif stat.S_ISDIR(mode):
+        kind, target = "directory", "-"
+    else:
+        kind, target = "other", "-"
+    print("checkout:", repr(rel), "_build:", kind, "target:", target,
+          "dune-project:", exists(os.path.join(base, "dune-project")),
+          ".masc-keep-build:", exists(os.path.join(base, ".masc-keep-build")))
 PY
 ```
+
+#### 체크아웃을 옮긴 뒤 보존된 `_build` 링크
+
+MASC는 `_build` 심볼릭 링크가 현재 체크아웃에 기대되는 빌드 대상과 다르면 소유자를
+확인할 수 없어 그대로 둡니다. 예를 들어 체크아웃을 `old`에서 `new`로 옮겨도 링크는
+`/masc-build/old`를 가리킬 수 있습니다. 새 부팅 때 build volume이 비워져 링크가
+끊기면 Dune 빌드가 실패할 수 있습니다. MASC는 이전 대상을 만들거나 링크를 자동으로
+바꾸지 않습니다. Keeper 작업 루트 바로 아래 `new`의 기대 대상은 `/masc-build/new`,
+`repos/new`의 기대 대상은 `/masc-build/repos:new`입니다. 이름에 `:`이 들어가면 이
+방식으로 매핑할 수 없으므로 대상을 추측하지 말고 운영자에게 확인하세요. 위 읽기 전용
+탐색에서 영향받는 링크를 찾을 수 있습니다.
 
 해당 Keeper의 실행 경로 또는 허가된 guest 셸로 **해당 guest 안의 체크아웃**에서
 탐색에 나온 정확한 경로를 선택하고 다음을 실행해 확인하세요. 경로는 하나의 인자로

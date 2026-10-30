@@ -3,7 +3,9 @@
 Captured on 2026-10-30 on Darwin 25.6.0 arm64 with OCaml 5.5.1 and Python
 3.14.4. The input source was an uncommitted change on top of
 `0ef0fdbb56423ae2e48828d981c5eea18cf90cf9`; the input file SHA-256 values
-are in `summary.json`. The source-extracted test runner used `ocamlfind`,
+are in `summary.json`. A later warning-only change altered the whole source
+and test files; these hashes identify the captured inputs, not those later files. The
+source-extracted test runner used `ocamlfind`,
 `digestif.c` and `alcotest`; findlib warned that it found multiple digestif
 interfaces.
 

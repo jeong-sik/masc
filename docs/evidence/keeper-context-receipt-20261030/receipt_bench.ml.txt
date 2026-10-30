@@ -1,0 +1,39 @@
+module Assembly = Keeper_context_assembly
+
+let sink = ref 0
+let sha text = Agent_core_sha256.(digest_string text |> to_hex)
+let old_facts assembly =
+  Option.map sha assembly.Assembly.extra_system_context,
+  Option.map String.length assembly.extra_system_context
+let new_facts assembly =
+  Option.map (fun (receipt : Assembly.receipt) -> receipt.sha256) assembly.Assembly.receipt,
+  Option.map (fun (receipt : Assembly.receipt) -> receipt.bytes) assembly.receipt
+let scenarios = [
+  "absent", None, 50000;
+  "empty", Some "", 50000;
+  "4k", Some (String.make 4096 'x'), 2000;
+  "64k", Some (String.make 65536 'x'), 150;
+  "1m", Some (String.make 1048576 'x'), 12;
+]
+let sample role facts label prefix count =
+  Gc.full_major ();
+  let alloc = Gc.allocated_bytes () and cpu = Sys.time () and wall = Unix.gettimeofday () in
+  for _ = 1 to count do
+    let assembly = Assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:prefix ~blocks:[] in
+    let hash, size = facts assembly in
+    sink := !sink lxor Option.value ~default:0 size lxor
+      Option.value ~default:0 (Option.map String.length hash)
+  done;
+  Printf.printf "%s,%s,%d,%.6f,%.6f,%.0f\n%!" label role count
+    (Sys.time () -. cpu) (Unix.gettimeofday () -. wall) (Gc.allocated_bytes () -. alloc)
+let () =
+  List.iter (fun (_, prefix, _) ->
+    let assembly = Assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:prefix ~blocks:[] in
+    if old_facts assembly <> new_facts assembly then failwith "receipt differs from old computed facts") scenarios;
+  Printf.printf "scenario,implementation,iterations,cpu_s,wall_s,allocated_bytes\n%!";
+  List.iter (fun (label, prefix, count) ->
+    for round = 0 to 6 do
+      if round mod 2 = 0 then (sample "old" old_facts label prefix count; sample "new" new_facts label prefix count)
+      else (sample "new" new_facts label prefix count; sample "old" old_facts label prefix count)
+    done) scenarios;
+  ignore (Sys.opaque_identity !sink)

@@ -3092,11 +3092,13 @@ let fetch_board_post ?comment_offset ?comment_limit ~(host : string)
       (Printf.sprintf "/api/v1/board/%s?format=flat%s"
          (percent_encode_path_segment post_id) page_query)
 
-(** Fetch /api/v1/dashboard/scheduled-automation (schedule list projection).
-    The server sorts active-first by due time and caps rows at its own limit,
-    so the path alone is the whole request. *)
-let fetch_schedules ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/dashboard/scheduled-automation"
+(** Fetch one fleet page. The cursor is opaque and comes from the server. *)
+let fetch_schedules ~(host : string) ~(port : int) ~(cursor : string option) :
+    (Yojson.Safe.t, string) result =
+  let query = match cursor with
+    | None -> ""
+    | Some value -> "?cursor=" ^ percent_encode_query_value value in
+  get_json ~host ~port ~path:("/api/v1/dashboard/scheduled-automation" ^ query)
 
 (** Fetch one schedule's exact projection, which carries its wake history. The
     aggregate above sends one wake per row; this route reads the same ledger
@@ -3111,12 +3113,15 @@ let fetch_schedule_detail ~(host : string) ~(port : int) ~(schedule_id : string)
     limit with active rows first, so a Keeper whose schedules are terminal or
     further down does not appear on it; this asks for that Keeper's own page. *)
 let fetch_schedules_for_target ~(host : string) ~(port : int)
-    ~(payload_target : string) : (Yojson.Safe.t, string) result =
+    ~(payload_target : string) ~(cursor : string option) : (Yojson.Safe.t, string) result =
+  let page = match cursor with
+    | None -> ""
+    | Some value -> "&cursor=" ^ percent_encode_query_value value in
   get_json ~host ~port
     ~path:
       (Printf.sprintf
-         "/api/v1/dashboard/scheduled-automation?payload_target=%s"
-         (percent_encode_query_value payload_target))
+         "/api/v1/dashboard/scheduled-automation?payload_target=%s%s"
+         (percent_encode_query_value payload_target) page)
 
 (** Create or atomically modify a schedule from the JSON form the TUI handed
     to [$EDITOR]. The server validates each against its canonical Tool schema;

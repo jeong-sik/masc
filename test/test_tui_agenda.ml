@@ -219,14 +219,15 @@ let test_failed_schedule_snapshot_uses_the_same_display_boundary () =
          Masc_tui_types.create_state ~workspace:"test" ~port:8935
            ~refresh_interval:2.0 ()
        in
-       state.schedules <- Some
+       state.schedules_agenda <- Some
          { scs_status = "unknown"; scs_read_error = reason
          ; scs_request_count = None; scs_truncated = false
+         ; scs_payload_target = None; scs_paging = Schedule_paging_unavailable
          ; scs_next_due_iso = None; scs_counts = None; scs_rows = []
          ; scs_observed_at_iso = "2026-10-26T08:59:00Z"
          ; scs_runner_status = Masc.Tui_decode.Runner_unrecognised "unknown"
          };
-       state.schedules_error <- Some "older transport failure";
+       state.schedules_agenda_error <- Some "older transport failure";
        let projection = Masc_tui_types.agenda state in
        check int "a failed store snapshot has no strip" 0 (Agenda.rows_taken projection);
        let failures = tones_of (overlay_of ~cols:120 projection) Agenda.Failed in

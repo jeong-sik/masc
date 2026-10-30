@@ -895,14 +895,28 @@ let decode_board_comments json_list =
 
 let memo_schedules = json_memo ()
 
-(** Load the schedule list from /api/v1/dashboard/scheduled-automation. *)
-let load_schedules ~(host : string) ~(port : int) :
+let validate_schedule_page ~payload_target ~cursor snapshot =
+  if not (Option.equal String.equal snapshot.scs_payload_target payload_target) then
+    Error "schedule page belongs to a different target"
+  else if Option.is_none snapshot.scs_request_count then
+    Error (Option.value ~default:"schedule store unreadable" snapshot.scs_read_error)
+  else match snapshot.scs_paging, cursor with
+    | Schedule_paging_unavailable, None -> Ok snapshot
+    | Schedule_paging_unavailable, Some _ -> Error "server did not return schedule paging metadata"
+    | Schedule_paging { page_cursor; next_cursor = _ }, _ ->
+        if Option.equal String.equal page_cursor cursor then Ok snapshot
+        else Error "schedule page does not match the requested cursor"
+
+(** Load one fleet page from /api/v1/dashboard/scheduled-automation. *)
+let load_schedules ~(host : string) ~(port : int) ~(cursor : string option) :
     (schedule_snapshot, string) result =
-  match fetch_schedules ~host ~port with
+  match fetch_schedules ~host ~port ~cursor with
   | Error err -> Error ("schedule load failed: " ^ err)
   | Ok json ->
-      decode_offloaded memo_schedules ~name:"schedules.decode_wait"
-        Masc_tui_schedule_decode.snapshot_of_json json
+      Result.bind
+        (decode_offloaded memo_schedules ~name:"schedules.decode_wait"
+           Masc_tui_schedule_decode.snapshot_of_json json)
+        (validate_schedule_page ~payload_target:None ~cursor)
 
 let memo_schedule_wake_history = json_memo ()
 
@@ -920,12 +934,15 @@ let memo_schedules_for_target = json_memo ()
 (** Load one target's schedules. Same envelope as the fleet page, so the same
     decoder reads it and the pane keeps its truncation reading. *)
 let load_schedules_for_target ~(host : string) ~(port : int)
-    ~(payload_target : string) : (schedule_snapshot, string) result =
+    ~(payload_target : string) ~(cursor : string option) : (schedule_snapshot, string) result =
   Result.bind
-    (fetch_schedules_for_target ~host ~port ~payload_target)
-    (decode_offloaded memo_schedules_for_target
-       ~name:"schedules.target.decode_wait"
-       Masc_tui_schedule_decode.snapshot_of_json)
+    (fetch_schedules_for_target ~host ~port ~payload_target ~cursor)
+    (fun json ->
+       Result.bind
+         (decode_offloaded memo_schedules_for_target
+            ~name:"schedules.target.decode_wait"
+            Masc_tui_schedule_decode.snapshot_of_json json)
+         (validate_schedule_page ~payload_target:(Some payload_target) ~cursor))
 
 let memo_board_list = json_memo ()
 

@@ -4682,6 +4682,96 @@ let test_unconsumed_grant_replay_stays_actionable () =
      |> Keeper_event_queue.length)
 ;;
 
+let test_dashboard_schedule_pages_bind_the_selector () =
+  with_workspace @@ fun config ->
+  let expected =
+    List.init 25 (fun index ->
+      let schedule_id = Printf.sprintf "page-schedule-%02d" index in
+      let keeper_name = if index < 22 then "alpha" else "beta" in
+      ignore (create_named_keeper_wake_schedule config ~schedule_id ~keeper_name
+              : Schedule_domain.schedule_request);
+      schedule_id)
+  in
+  let open Yojson.Safe.Util in
+  let first = Server_dashboard_schedule_projection.scheduled_automation_dashboard_json config in
+  let rows page =
+    page |> member "requests" |> to_list
+    |> List.map (fun row -> row |> member "schedule_id" |> to_string)
+  in
+  let cursor = first |> member "next_cursor" |> to_string in
+  let second =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~cursor config
+  in
+  check string "second page echoes its cursor" cursor
+    (second |> member "page_cursor" |> to_string);
+  check bool "last page has no successor" true (second |> member "next_cursor" = `Null);
+  check (list string) "both pages cover each unchanged schedule exactly once"
+    (List.sort String.compare expected)
+    (List.sort String.compare (rows first @ rows second));
+  check int "target page reads only its Keeper" 22
+    (Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+       ~payload_target:"keeper:alpha" config
+     |> member "request_count" |> to_int);
+  let wrong_target =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:alpha" ~cursor config
+  in
+  check string "fleet cursor is refused on a Keeper page" "invalid_cursor"
+    (wrong_target |> member "status" |> to_string);
+  let extra =
+    List.init 179 (fun index ->
+      let schedule_id = Printf.sprintf "target-extra-%03d" index in
+      ignore (create_named_keeper_wake_schedule config ~schedule_id ~keeper_name:"alpha"
+              : Schedule_domain.schedule_request);
+      schedule_id)
+  in
+  let alpha_expected =
+    List.filteri (fun index _ -> index < 22) expected @ extra |> List.sort String.compare
+  in
+  let alpha_first =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:alpha" config
+  in
+  check int "a Keeper page is capped at 200" 200 (List.length (rows alpha_first));
+  let alpha_cursor = alpha_first |> member "next_cursor" |> to_string in
+  let alpha_second =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:alpha" ~cursor:alpha_cursor config
+  in
+  check (list string) "201 target rows traverse the boundary exactly once"
+    alpha_expected (List.sort String.compare (rows alpha_first @ rows alpha_second));
+  let wrong_keeper =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:beta" ~cursor:alpha_cursor config
+  in
+  check string "a cursor cannot cross Keeper targets" "invalid_cursor"
+    (wrong_keeper |> member "status" |> to_string);
+  let tail_id = match rows alpha_second with
+    | [id] -> id
+    | _ -> fail "expected one row after the Keeper's first page" in
+  (match Schedule_service.update config ~authority:Schedule_store.Operator_authority
+           ~now:100.0 ~runner_tick_sec ~schedule_id:tail_id
+           ~requested_at:100.0 ~requested_by:(human "operator")
+           ~scheduled_by:(automated "scheduler-agent") ~due_at:150.0
+           ~payload:(keeper_wake_payload_for "alpha")
+           ~source:Schedule_domain.Operator_request () with
+   | Ok _ -> ()
+   | Error error -> fail (Schedule_service.service_error_to_string error));
+  let moved =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:alpha" ~cursor:alpha_cursor config
+  in
+  check (list string) "moving the tail before the cursor may leave an empty page" [] (rows moved);
+  check bool "an empty page has no next cursor" true (moved |> member "next_cursor" = `Null);
+  let invalid =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~cursor:"not-a-page" config
+  in
+  check string "malformed cursor is not an empty page" "invalid_cursor"
+    (invalid |> member "status" |> to_string)
+;;
+
 let () =
   run "Schedule_consumer_dispatch"
     [ ( "keeper_wake"
@@ -4806,6 +4896,8 @@ let () =
             test_maintenance_retains_pending_across_finish_and_post_tick_clock_failures
         ; test_case "a runner tick refreshes the cached schedule list" `Quick
             test_a_runner_tick_refreshes_the_cached_schedule_list
+        ; test_case "dashboard schedule pages bind the selector" `Quick
+            test_dashboard_schedule_pages_bind_the_selector
         ; test_case "dashboard projects quarantined and unreadable reaction evidence"
             `Quick
             test_dashboard_projects_quarantined_and_unreadable_reaction_evidence

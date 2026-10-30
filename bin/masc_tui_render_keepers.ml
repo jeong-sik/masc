@@ -2196,11 +2196,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                   | Some total -> Printf.sprintf " -- %d of %d requests" shown total
                   | None -> ""
                 in
+                let next_step = match state.keeper_schedules_page with
+                  | Some (name, { sp_previous = _ :: _; _ }) when String.equal name k.k_name ->
+                      "use < for the previous page"
+                  | Some _ | None -> "refresh to read again"
+                in
                 [ Ansi.dim
                   ^ Printf.sprintf
-                      "  (none on the page the server sent%s; open Schedules \
-                       for the full list)"
-                      of_total
+                      "  (none on this page%s; %s)" of_total next_step
                   ^ Ansi.reset
                 ]
           else
@@ -2210,7 +2213,16 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                this line a reader learns that only by scrolling to the end.
                The counts describe the whole store, so they stay right when
                the page below them is capped. *)
-            (match snapshot.scs_counts with
+            (match snapshot.scs_paging, state.keeper_schedules_page with
+             | Schedule_paging _, Some (name, page) when String.equal name k.k_name
+                   && (snapshot.scs_truncated || Option.is_some page.sp_cursor) ->
+                 [ Ansi.dim ^ Printf.sprintf
+                     "  page %d · < / > pages · pages may change between reads"
+                     (List.length page.sp_previous + 1) ^ Ansi.reset ]
+             | Schedule_paging_unavailable, _ when snapshot.scs_truncated ->
+                 [ Ansi.dim ^ "  first page only · server paging unavailable" ^ Ansi.reset ]
+             | (Schedule_paging_unavailable | Schedule_paging _), (Some _ | None) -> [])
+            @ (match snapshot.scs_counts with
              | None -> []
              | Some counts ->
                  [ Ansi.dim ^ "  "

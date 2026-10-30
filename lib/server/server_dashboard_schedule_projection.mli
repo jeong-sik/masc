@@ -11,7 +11,7 @@ val schedule_projection_target_request_limit : int
     bound that exists to keep a whole-store scan small. *)
 
 val scheduled_automation_dashboard_json :
-  ?payload_target:string -> Workspace.config -> Yojson.Safe.t
+  ?payload_target:string -> ?cursor:string -> Workspace.config -> Yojson.Safe.t
 (** Renders the read-only dashboard projection for scheduled internal
     automation. This summarizes the schedule store as a small FSM envelope
     plus recent request rows; it does not refresh due state or run work.
@@ -20,8 +20,14 @@ val scheduled_automation_dashboard_json :
     rows, counts, FSM envelope, and signals -- to the schedules aimed at that
     target, and the response echoes it in [payload_target_selector] so a
     scoped page cannot be read as the fleet's. The fleet page caps at 20 rows
-    with active ones first, which is why a Keeper whose schedules are terminal
-    or further down is absent from it; a scoped page is where those are read.
+    with active ones first; target-scoped pages use their own limit.
+    [next_cursor], when present, continues the same target's ordering. A cursor
+    from another target or a malformed cursor yields [status=invalid_cursor]
+    rather than an empty page. Pages are independent store observations, not
+    a snapshot: a schedule changed or created between reads can move across
+    the boundary. [page_cursor] echoes the accepted cursor, or null on the
+    first page. [truncated] says the page does not contain the whole selection,
+    not that a next page exists; use [next_cursor] for that decision.
 
     Reads the schedule ledger from disk, so callers on an Eio fiber wrap this
     in [Domain_pool_ref.submit_io_or_inline].

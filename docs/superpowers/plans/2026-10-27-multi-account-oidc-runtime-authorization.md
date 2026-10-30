@@ -253,6 +253,8 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - D2와 D3은 `Single_user`에서 동작을 바꾸지 않도록 `Runtime.authorize`가 모드에 따라 근거를 달리 발급해야 한다. 설계 §6.1이 이 점을 정한다. 이 근거가 없으면 D2는 시작하지 않는다.
 - 설계 §11의 readiness가 복구 리허설과 official lane 격리 증거를 요구하고, 설계 §10.5가 최초 활성화 때 미분류 0을 요구한다. 그래서 F1~F4와 E3 없이는 원격 다계정을 열 수 없다. 그 앞까지의 층은 다계정을 켜지 않은 채 main에 들어갈 수 있다.
 - 첫 마일스톤은 A~D3이다(2026-10-27 사용자 결정). `Single_user` 동작은 그대로이고 타입과 저장소와 로그인 경로만 들어간다. C5는 OAuth 스택이 병합된 뒤에만 열리므로 병합 시점에 따라 이 마일스톤 안이나 밖에 놓인다. D4~D6, E, F는 이 마일스톤이 병합된 뒤에 연다.
+- C6은 C2의 로그인 경로와 C3의 세션·CSRF만 쓰고 `Auth_gate.decide`(C4)를 호출하지 않는다. 그래서 C4와 C6은 서로의 선행이 아니고, 둘 다 C3 뒤에 어느 쪽을 먼저 열어도 된다. 다만 다계정을 켜려면 C4가 필요하다(설계 §11 readiness의 `legacy_workspace_secret_callers=[]`·`agent_credential_callers=[]`가 C4 몫이다). 화면만 먼저 병합돼도 다계정은 켜지지 않는다.
+- C6 ①의 "거부"는 HTTP 401이다. 현재 `server_auth.ml`의 strict 경로는 자격이 없는 요청을 `Missing_token` 등으로 거절하고 `www-authenticate: Bearer`를 붙인다(`http_status_of_auth_error`, `auth_error_headers`). HTTP strict는 `MASC_HTTP_AUTH_STRICT`가 켜져 있거나, 비 loopback으로 바인드하거나, `MASC_HTTP_BASE_URL`이 비 loopback 주소일 때 켜진다. A2가 `Multi_account`에서 `enabled=false`, `require_token=false`, `MASC_ALLOW_ANONYMOUS_MUTATIONS=true`를 부팅 때 거부해도 strict가 항상 켜지는 것은 아니다. `with_public_read`는 strict에서도 `is_public_read_path`의 공개 경로를 열고, strict가 꺼진 loopback에서는 다른 읽기에도 인증 검사를 하지 않는다. 자격 없는 요청의 401 여부는 경로와 C3·C4의 구현에 따라 확인한다. Dashboard의 기존 401 처리(`dashboard/src/api/core.ts`의 `reportRejectedCredential`)는 bearer를 보낸 요청에만 반응하므로, 자격 없는 요청이 401을 받으면 로그인으로 이동하는 부분은 C6이 새로 만든다. C4가 들어오기 전 C6의 상태 전이 시험은 서버 fixture 응답으로 하고, 실제 서버의 Reject 경로와 엮은 증거는 C4 뒤에 만든다.
 - readiness 증거는 층이 만든다. 각 층의 PR 본문이 자기 증거를 적고, F5는 그 증거를 모아 표면 digest에 결속하는 실행기만 만든다.
 
 | 설계 §11 readiness 증거 | 만드는 층 |

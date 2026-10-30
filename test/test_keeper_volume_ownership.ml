@@ -5,7 +5,7 @@
    probe (inspect + reading the marker off the volume image) is a later
    layer; its contract is exactly [interpret_marker_bytes] below. *)
 
-module Kvo = Keeper_volume_ownership
+module Kvo = Masc.Keeper_volume_ownership
 
 let ownership_case =
   let open Alcotest in

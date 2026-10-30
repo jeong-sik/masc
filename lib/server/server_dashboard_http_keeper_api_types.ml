@@ -243,15 +243,12 @@ let truncate_text ~max_chars text =
     String_util.utf8_safe ~max_bytes:max_chars ~suffix:"…" text
     |> String_util.to_string
 
-let latest_preview_of_messages (messages : Agent_core.Types.message list) =
-  messages
-  |> List.rev
-  |> List.find_map (fun (message : Agent_core.Types.message) ->
-       if message.role = Agent_core.Types.System then None
-       else
-         Agent_core.Types.text_of_message message
-         |> trim_to_opt
-         |> Option.map (truncate_text ~max_chars:180))
+let preview_of_message (message : Agent_core.Types.message) =
+  if message.role = Agent_core.Types.System then None
+  else
+    Agent_core.Types.text_of_message message
+    |> trim_to_opt
+    |> Option.map (truncate_text ~max_chars:180)
 
 let manifest_row_matches ?turn_id keeper_name trace_id
     (row : Keeper_runtime_manifest.t) =

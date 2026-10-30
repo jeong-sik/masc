@@ -68,6 +68,7 @@ type segment =
 type header =
   { session_id : string
   ; turn_count : int
+  ; created_at : float
   }
 
 (** The objects that hold the header's system prompt and tools, each the
@@ -221,3 +222,22 @@ val load
   -> read_object:(digest -> (string option, string) result)
   -> head
   -> (Checkpoint_types.t, load_error) result
+
+(** The header's system prompt, read from its header object alone. *)
+val system_prompt
+  :  read_object:(digest -> (string option, string) result)
+  -> head
+  -> (string option, load_error) result
+
+(** The first [Some] that [find] gives for [head]'s messages, last message
+    first. Objects are read only as far back as needed: the open messages,
+    then each turn's bundle from the last, then each segment and its turns.
+    Every object read is checked against its digest and every bundle against
+    its turn's message count; the chains are not, since they run from the
+    first message. So this is for showing a checkpoint, not for using it:
+    {!load} is. *)
+val find_last
+  :  read_object:(digest -> (string option, string) result)
+  -> head
+  -> (Types.message -> 'a option)
+  -> ('a option, load_error) result

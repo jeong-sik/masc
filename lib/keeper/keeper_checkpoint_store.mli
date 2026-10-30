@@ -24,6 +24,10 @@ val agent_core_history_path :
 val agent_core_history_snapshot_id_of_checkpoint :
   Agent_core.Checkpoint.t -> string
 
+(** The same id from the checkpoint's [created_at] alone, as a head's header
+    gives it. *)
+val agent_core_history_snapshot_id_of_created_at : float -> string
+
 (** One input-ordered result from an explicit history deletion request. *)
 type history_delete_result =
   | History_deleted of string
@@ -266,6 +270,36 @@ val canonical_message_count :
   session_dir:string ->
   session_id:string ->
   (int option, checkpoint_load_error) result
+
+(** What a checkpoint list shows, read from the head and as few objects as
+    it takes: the header's creation time, the message count, the system
+    prompt from its header object, and [latest] of the last message it gives
+    [Some] for ({!Agent_core.Checkpoint_objects.find_last}). It is for
+    showing a checkpoint: the chains are not checked, as a load checks them
+    (RFC-0476 §3.5). *)
+type 'a checkpoint_summary =
+  { created_at : float
+  ; message_count : int
+  ; system_prompt : string option
+  ; latest : 'a option
+  }
+
+(** The canonical checkpoint's {!checkpoint_summary}; [Error Not_found] when
+    there is none. A canonical whose header names another session is
+    refused. *)
+val summarize_canonical :
+  session_dir:string ->
+  session_id:string ->
+  latest:(Agent_core.Types.message -> 'a option) ->
+  ('a checkpoint_summary, checkpoint_load_error) result
+
+(** A history archive entry's {!checkpoint_summary}, as
+    {!load_agent_core_history_file} names and refuses entries. *)
+val summarize_agent_core_history_file :
+  session_dir:string ->
+  snapshot_id:string ->
+  latest:(Agent_core.Types.message -> 'a option) ->
+  ('a checkpoint_summary, checkpoint_load_error) result
 
 (** Byte length of the canonical head for [session_id]: the summary's
     identity while the file on disk is the one this process last parsed or

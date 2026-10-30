@@ -380,18 +380,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                        error) )
               ]
       in
-      let base_dir = session_base_dir config in
-         let ctx_opt =
-           if include_context then
-             let (_session, ctx_opt) =
-               Keeper_context_core.load_context_from_checkpoint
-                 ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
-                 ~base_dir
-             in
-             ctx_opt
-           else
-             None
-         in
+         (* The message count is the head's (RFC-0476 §3.5): no message is
+            read for it. *)
          let ctx_stats =
            if not include_context then
              `Assoc [
@@ -400,9 +390,20 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                ("has_checkpoint", `Null);
              ]
            else
-             match ctx_opt with
-             | None -> `Assoc [("has_checkpoint", `Bool false)]
-             | Some c ->
+             let trace_id = Keeper_id.Trace_id.to_string m.runtime.trace_id in
+             match
+               Keeper_checkpoint_store.canonical_message_count
+                 ~session_dir:(Keeper_types_support.keeper_session_dir config trace_id)
+                 ~session_id:trace_id
+             with
+             | Ok None -> `Assoc [("has_checkpoint", `Bool false)]
+             | Error error ->
+               `Assoc
+                 [ ("has_checkpoint", `Bool false);
+                   ( "checkpoint_error",
+                     `String (Keeper_checkpoint_store.checkpoint_load_error_to_string error) );
+                 ]
+             | Ok (Some message_count) ->
                let checkpoint_bytes, byte_count_error =
                  match Keeper_post_turn.durable_checkpoint_bytes ~config ~meta:m with
                  | Ok bytes -> bytes, []
@@ -411,7 +412,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                `Assoc
                  ([ ("has_checkpoint", `Bool true);
                     ("checkpoint_bytes", Json_util.int_opt_to_json checkpoint_bytes);
-                    ("message_count", `Int (Keeper_context_runtime.message_count c));
+                    ("message_count", `Int message_count);
                   ]
                   @ byte_count_error)
          in

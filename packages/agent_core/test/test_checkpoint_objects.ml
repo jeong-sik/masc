@@ -490,6 +490,52 @@ let close_turns ~store ~memo count =
   close 1 None [] []
 ;;
 
+(* A list shows a checkpoint from its head and the objects it takes: the
+   newest message is one object, an old one is found walking back through the
+   head's turns and every segment, and the header gives the creation time and
+   the system prompt. *)
+let test_a_list_reads_back_only_as_far_as_it_finds () =
+  let store = store () in
+  let memo = O.create_memo () in
+  let plans, closed = close_turns ~store ~memo 200 in
+  let last = List.nth plans (List.length plans - 1) in
+  let open_plan =
+    plan_ok ~previous:last.head memo O.Turn_continues
+      (checkpoint (closed @ [ user "open ask"; assistant "open answer" ]))
+  in
+  write store open_plan;
+  let head =
+    match O.head_of_string open_plan.head_bytes with
+    | Ok head -> head
+    | Error error -> Alcotest.fail (O.load_error_to_string error)
+  in
+  let reads = ref 0 in
+  let counted digest =
+    incr reads;
+    read store digest
+  in
+  let said text (message : Types.message) =
+    if String.equal (Types.text_of_message message) text then Some text else None
+  in
+  let find text =
+    reads := 0;
+    match O.find_last ~read_object:counted head (said text) with
+    | Ok found -> found
+    | Error error -> Alcotest.fail (O.load_error_to_string error)
+  in
+  Alcotest.(check (option string)) "the newest message" (Some "open answer") (find "open answer");
+  Alcotest.(check int) "is one object" 1 !reads;
+  Alcotest.(check (option string)) "the oldest message" (Some "ask 1") (find "ask 1");
+  Alcotest.(check int) "reads every open message, bundle and segment once"
+    (2 + 200 + (200 / O.turns_per_segment))
+    !reads;
+  Alcotest.(check (option string)) "a message nobody said" None (find "never said");
+  Alcotest.(check (float 0.)) "the header gives the creation time" 1000.0 head.header.created_at;
+  match O.system_prompt ~read_object:(read store) head with
+  | Ok prompt -> Alcotest.(check (option string)) "and the system prompt" (Some "be brief") prompt
+  | Error error -> Alcotest.fail (O.load_error_to_string error)
+;;
+
 (* However many turns close, a head names fewer than a segment's worth of
    them; the rest are segments, each written once, and the history loads
    back whole. *)
@@ -706,6 +752,8 @@ let () =
             test_a_rich_checkpoint_keeps_its_digest_and_bytes
         ; Alcotest.test_case "a memo gives the plan a fresh memo gives" `Quick
             test_a_memo_gives_the_plan_a_fresh_memo_gives
+        ; Alcotest.test_case "a list reads back only as far as it finds" `Quick
+            test_a_list_reads_back_only_as_far_as_it_finds
         ; Alcotest.test_case "a head names fewer turns than a segment" `Quick
             test_a_head_names_fewer_turns_than_a_segment
         ; Alcotest.test_case "a header object is written when it changes" `Quick

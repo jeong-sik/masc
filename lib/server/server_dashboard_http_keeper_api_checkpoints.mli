@@ -7,7 +7,7 @@ val agent_core_checkpoint_summary_json :
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
-  Agent_core.Checkpoint.t ->
+  string Keeper_checkpoint_store.checkpoint_summary ->
   Yojson.Safe.t
 
 (** Total dashboard projection of a typed checkpoint load failure. [Not_found]

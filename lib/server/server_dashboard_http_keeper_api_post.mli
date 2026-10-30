@@ -47,7 +47,7 @@ val agent_core_checkpoint_summary_json :
   snapshot_id:string ->
   path:string ->
   is_current:bool ->
-  Agent_core.Checkpoint.t ->
+  string Keeper_checkpoint_store.checkpoint_summary ->
   Yojson.Safe.t
 val keeper_checkpoint_inventory_json :
   Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t

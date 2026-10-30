@@ -811,6 +811,59 @@ let test_checkpoint_inventory_preserves_partial_load_failures () =
     (failed |> member "error_detail" |> to_string |> String.length > 0)
 ;;
 
+(* The rows come from the heads and the newest message with text
+   (RFC-0476 §3.5). The archive entry of the current checkpoint is not listed
+   again. *)
+let test_checkpoint_inventory_rows_come_from_the_heads () =
+  with_temp_dir @@ fun dir ->
+  let config = Workspace.default_config dir in
+  let keeper_name = "checkpoint-rows" in
+  let trace_id = "trace-checkpoint-rows" in
+  Keeper_meta_store.replace_snapshot config (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
+  |> Result.map_error (fun detail -> fail ("checkpoint inventory meta write failed: " ^ detail))
+  |> Result.get_ok;
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  let older =
+    { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:1.0) with
+      Agent_core.Checkpoint.messages = [ Agent_core.Types.user_msg "older question" ] }
+  in
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir
+       ~path:
+         (Keeper_checkpoint_store.agent_core_history_path ~session_dir
+            ~snapshot_id:(Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint older))
+       older
+     : string);
+  let current =
+    { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:2 ~created_at:2.0) with
+      Agent_core.Checkpoint.system_prompt = Some "be brief"
+    ; messages =
+        [ Agent_core.Types.user_msg "a question"; Agent_core.Types.assistant_msg "the newest reply" ]
+    }
+  in
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified
+       ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~history_retained:3 ~session_dir current
+   with
+   | Ok _ -> ()
+   | Error detail -> fail ("checkpoint inventory current save failed: " ^ detail));
+  let status, json = Checkpoints.inventory_json config keeper_name in
+  check bool "inventory is HTTP 200" true (status = `OK);
+  let open Yojson.Safe.Util in
+  let row = json |> member "current" in
+  check int "current message count" 2 (row |> member "message_count" |> to_int);
+  check string "current newest text" "the newest reply" (row |> member "latest_preview" |> to_string);
+  check bool "current system prompt" true (row |> member "system_prompt_present" |> to_bool);
+  check (float 0.) "current creation time" 2.0 (row |> member "created_at" |> to_number);
+  match json |> member "history" |> to_list with
+  | [ archived ] ->
+    check int "archived message count" 1 (archived |> member "message_count" |> to_int);
+    check string "archived newest text" "older question"
+      (archived |> member "latest_preview" |> to_string);
+    check bool "archived system prompt" false (archived |> member "system_prompt_present" |> to_bool)
+  | rows -> failf "expected the older archive entry alone, got %d rows" (List.length rows)
+;;
+
 let test_checkpoint_inventory_projects_missing_current () =
   with_temp_dir @@ fun dir ->
   let config = Workspace.default_config dir in
@@ -1708,6 +1761,8 @@ let () =
             "projects missing current without failing inventory"
             `Quick
             test_checkpoint_inventory_projects_missing_current
+        ; test_case "rows come from the heads" `Quick
+            test_checkpoint_inventory_rows_come_from_the_heads
         ; test_case
             "input wait follows exact same-turn replacement and settlement"
             `Quick

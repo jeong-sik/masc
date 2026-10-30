@@ -1658,6 +1658,11 @@ type observer_error =
   | Transport_failed of string
   | Http_refused of { status : int; detail : string }
 
+type execute_output_stream_error =
+  | Execute_transport_failed of string
+  | Execute_http_refused of { status : int; detail : string }
+  | Execute_unattested of { status : int; detail : string }
+
 (** Stream headers are delivered before body chunks. A transport disconnect
     and an explicit HTTP refusal remain distinct so a quiet connection does
     not invalidate an otherwise usable MCP session or scoped replay cursor. *)
@@ -1741,16 +1746,19 @@ let execute_output_stream_idle_timeout_sec =
     <keeper>] answers with Server-Sent Events, a snapshot first and one event
     for each row or command boundary after it. [on_chunk] reads the bytes as
     they arrive, and an exception it raises ends the connection. A refusal
-    comes back as [Http_refused] with [on_chunk] never called.
+    comes back with [on_chunk] never called. A missing workspace receipt is
+    distinct from an ordinary HTTP refusal.
 
     The two query fields bind the read to [expected_workspace]: the server
     answers 409 unless it is that workspace, and the stream is refused when its
     response lacks the server's receipt. The polled read of the same output
     carries the same binding. *)
-let observe_execute_output_stream ~clock
+(* [refusal_body_timeout_s] is supplied by the wrapper below, not a setting;
+   the argument also lets the transport test exercise the deadline promptly. *)
+let observe_execute_output_stream_with_refusal_timeout ~refusal_body_timeout_s ~clock
     ~(expected_workspace : Masc.Tui_decode.server_identity) ~(host : string)
     ~(port : int) ~(keeper : string) ~(on_chunk : string -> unit)
-    : (unit, observer_error) result =
+    : (unit, execute_output_stream_error) result =
   let exception Not_attested of int in
   let url =
     url_of ~host ~port
@@ -1760,25 +1768,61 @@ let observe_execute_output_stream ~clock
            (expected_workspace_query expected_workspace))
   in
   let headers = ("Accept", "text/event-stream") :: auth_headers () in
+  (* The pool reads a non-success body before returning [Buffered]. Retain
+     the status if that read fails, and bound the whole refusal-body read by
+     this stream's existing idle window: a peer can otherwise send a little
+     forever without becoming idle. A completed body keeps the ordinary
+     refusal decoder; this deadline is never armed for a successful stream. *)
+  let refused_status = ref None in
+  let refusal_received, signal_refusal = Eio.Promise.create () in
   let on_response ~status ~headers =
-    if Masc.Tui_decode.is_success_http_status status
-       && not (workspace_read_attested headers)
-    then raise (Not_attested status)
+    if Masc.Tui_decode.is_success_http_status status then (
+      if not (workspace_read_attested headers) then raise (Not_attested status)
+    ) else (
+      refused_status := Some status;
+      ignore (Eio.Promise.try_resolve signal_refusal status : bool))
   in
   match
-    Masc_http_client.get_stream ~clock
-      ~idle_timeout_sec:execute_output_stream_idle_timeout_sec ~url ~headers
-      ~on_response ~on_chunk ()
+    Eio.Fiber.first
+      ~combine:(fun first later ->
+        match first, later with
+        | `Returned result, _ | _, `Returned result -> `Returned result
+        | `Refusal_timeout status, `Refusal_timeout _ -> `Refusal_timeout status)
+      (fun () ->
+        `Returned (Masc_http_client.get_stream ~clock
+          ~idle_timeout_sec:execute_output_stream_idle_timeout_sec ~url ~headers
+          ~on_response ~on_chunk ()))
+      (fun () ->
+        let status = Eio.Promise.await refusal_received in
+        Eio.Time.sleep clock refusal_body_timeout_s;
+        `Refusal_timeout status)
   with
   | exception Not_attested status ->
       Error
-        (Http_refused
+        (Execute_unattested
            { status; detail = "Server did not attest the requested workspace read" })
-  | Error detail ->
-      Error (Transport_failed (report_err "Execute output stream failed" detail))
-  | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
-      Error (Http_refused { status; detail = named_refusal "Execute output stream" ~status ~body })
-  | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
+  | `Refusal_timeout status ->
+      Error (Execute_http_refused
+        { status
+        ; detail = Printf.sprintf "Execute output stream: HTTP %d (refusal body did not finish in time)" status
+        })
+  | `Returned (Error detail) ->
+      (match !refused_status with
+       | None -> Error (Execute_transport_failed (report_err "Execute output stream failed" detail))
+       | Some status ->
+           Error (Execute_http_refused
+             { status
+             ; detail = Printf.sprintf "Execute output stream: HTTP %d (refusal body unreadable: %s)"
+                 status detail
+             }))
+  | `Returned (Ok (Masc_http_client.Pool.Buffered { status; body; _ })) ->
+      Error (Execute_http_refused { status; detail = named_refusal "Execute output stream" ~status ~body })
+  | `Returned (Ok (Masc_http_client.Pool.Streamed _)) -> Ok ()
+
+let observe_execute_output_stream ~clock ~expected_workspace ~host ~port ~keeper ~on_chunk =
+  observe_execute_output_stream_with_refusal_timeout
+    ~refusal_body_timeout_s:execute_output_stream_idle_timeout_sec
+    ~clock ~expected_workspace ~host ~port ~keeper ~on_chunk
 
 (** One MCP [tools/call] under an existing session.
 

@@ -464,3 +464,5 @@ let view t =
 ;;
 
 let version t = t.version
+
+let synchronized t = t.synced

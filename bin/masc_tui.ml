@@ -15466,19 +15466,19 @@ let launch_keeper_execute_read state ~mailbox ~intent keeper =
 (* The Terminal tab follows a Keeper's Execute output over its stream, so a row
    reaches the screen when the server logs it rather than at the next poll. The
    job owns the connection and the reader, and posts the reader's view to the
-   mailbox; the render fiber owns all state. A connection that ends is opened
-   again after [keeper_execute_stream_reconnect_s], the interval the fleet
-   stream reconnects at. *)
+   mailbox; the render fiber owns all state. Retriable failures back off; a
+   permanent refusal stops until the tab is reopened. *)
 let keeper_execute_stream_reconnect_s = 2.0
+let keeper_execute_stream_max_reconnect_s = 30.0
 
 (* The reader is posted at most this often. A command that prints faster draws
    every row all the same; they arrive together. *)
 let keeper_execute_stream_post_interval_s = 0.05
 
-(* The job ends only when the workspace withdraws it or [stop] is called, or on
-   an exception, which it reports as the stream going down. An ended job stays
-   registered until the tab is left, so a bug does not turn into a reconnect
-   loop; leaving the tab and coming back opens a new one. *)
+(* The job ends when the workspace withdraws it, [stop] is called, a permanent
+   refusal occurs, or an exception is reported as the stream going down. An
+   ended job stays registered until the tab is left, so a bug does not turn
+   into a reconnect loop; leaving the tab and coming back opens a new one. *)
 let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
   let stream =
     { kxf_key = key; kxf_reading = state.workspace_read_authority; kxf_owner = ref () } in
@@ -15497,14 +15497,19 @@ let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
      mailbox, so a job that cannot start is reported to the state directly:
      queueing it could wait on a full mailbox that only this fiber empties. *)
   let report_unstarted detail =
-    ignore (take_keeper_execute_stream state stream (Execute_stream_down detail) : bool) in
+    ignore (take_keeper_execute_stream state stream
+      (Execute_stream_down (Execute_stream_stopped { reason = Unexpected_error; detail })) : bool) in
   let host = server_peer_host and port = state.port in
   let run () =
     match Eio_context.get_clock_opt () with
-    | None -> deliver (Execute_stream_down "Eio clock is unavailable")
+    | None -> deliver (Execute_stream_down (Execute_stream_stopped
+        { reason = Unexpected_error; detail = "Eio clock is unavailable" }))
     | Some clock ->
         Masc_tui_execute_stream_job.run ~clock
           ~reconnect_s:keeper_execute_stream_reconnect_s
+          ~max_reconnect_s:keeper_execute_stream_max_reconnect_s
+          ~stable_s:Server_routes_http_routes_dashboard.execute_output_heartbeat_s
+          ~monotonic_now:(fun () -> Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9)
           ~post_interval_s:keeper_execute_stream_post_interval_s
           ~reader:(Masc_tui_execute_stream.create ~keeper:key.klk_keeper ~capacity:key.klk_limit)
           ~observe:(fun ~on_chunk ->
@@ -15513,16 +15518,24 @@ let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
                 ~keeper:key.klk_keeper ~on_chunk
             with
             | Ok () -> Ok ()
-            | Error (Masc_tui_http.Http_refused { detail; _ }) -> Error detail
-            | Error (Masc_tui_http.Transport_failed detail) -> Error detail)
+            | Error (Masc_tui_http.Execute_http_refused { status; detail }) ->
+              Error (Masc_tui_execute_stream_job.Http_refusal { status; detail })
+            | Error (Masc_tui_http.Execute_unattested { status; detail }) ->
+              Error (Masc_tui_execute_stream_job.Unattested { status; detail })
+            | Error (Masc_tui_http.Execute_transport_failed detail) ->
+              Error (Masc_tui_execute_stream_job.Transport_failure detail))
           ~on_view:(fun view ->
             Option.iter
               (fun (reading, observed_at) ->
                  deliver (Execute_stream_reading (reading, observed_at)))
               (keeper_execute_reading_of_stream ~now:(Eio.Time.now clock) view))
-          ~on_ended:(fun detail ->
+          ~on_ended:(fun ending ->
+            let failure = match ending with
+              | Masc_tui_execute_stream_job.Retry_after { detail; _ } -> Execute_stream_retrying detail
+              | Reopen_required { reason; detail } -> Execute_stream_stopped { reason; detail } in
+            let detail = keeper_execute_failure_detail failure in
             Log.Transport.warn "tui_execute_stream_ended keeper=%s detail=%s" key.klk_keeper detail;
-            deliver (Execute_stream_down detail))
+            deliver (Execute_stream_down failure))
   in
   match Eio_context.get_switch_opt () with
   | None -> report_unstarted "Eio switch is unavailable"
@@ -15531,7 +15544,8 @@ let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
          fork_workspace_job ~observation:true state ~sw (fun () ->
            try Eio.Fiber.first run (fun () -> Eio.Promise.await stopped) with
            | Eio.Cancel.Cancelled _ as exn -> raise exn
-           | exn -> deliver (Execute_stream_down (Printexc.to_string exn)))
+           | exn -> deliver (Execute_stream_down (Execute_stream_stopped
+               { reason = Unexpected_error; detail = Printexc.to_string exn })))
        with
        | () -> ()
        | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
@@ -15594,7 +15608,7 @@ let reconcile_keeper_logs state ~mailbox =
       | Workspace_identity_mismatch _ | Workspace_identity_match_unconfirmed _) ->
       let held = Option.is_some state.keeper_execute_read in
       if held then begin
-        state.keeper_execute_output <- Masc_tui_fetched.suspend state.keeper_execute_output;
+        state.keeper_execute_output <- suspend_keeper_execute state.keeper_execute_output;
         state.keeper_execute_read <- None;
         Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
         state.keeper_execute_cancel <- None

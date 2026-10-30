@@ -1125,11 +1125,22 @@ seconds, so that time moves even when the Keeper is idle. When commands
 overlap their rows interleave, and each row then starts with its stream number
 as `[3] `, or `[?] ` for a row the server did not attribute to a stream.
 
-When the connection ends the rows stay, and the row under them adds `stale:`
-and the reason. Two seconds later the TUI opens a new connection, and what the
-server sends first replaces the rows. The TUI does the same when it falls so
-far behind that the server has dropped events it never sent. The server keeps
-only the newest 5,000 events per Keeper, and says so when it skips some.
+When a connection ends the last rows stay, marked stale with the reason. The
+TUI retries a lost connection or unreadable frame after two seconds, increasing
+the wait up to 30 seconds if failures continue. HTTP 408, 425, 429 and 5xx
+responses are retried the same way. Once an accepted initial frame has stayed
+connected for a heartbeat interval, the next retry starts at two seconds again.
+The first frame from a new connection replaces the rows. A gap in the stream
+also requests a new connection. The server keeps only the newest 5,000 events
+per Keeper, and says so when it skips some.
+
+Other HTTP refusals, including a successful HTTP status without the required
+workspace receipt, stop the stream and show the reason. After correcting the
+underlying problem, press `[` then `]` to leave and reopen Terminal and retry.
+The last rows remain available while the stream is stopped. The TUI sets a
+three-heartbeat-interval deadline for a refusal's body; if the deadline wins,
+the status is shown without the server's body. This deadline does not end a
+successful output stream.
 
 `k`, `PgUp`, `Home`, or the mouse wheel stops following and holds the screen as
 it was, so output that arrives meanwhile does not move the rows you are

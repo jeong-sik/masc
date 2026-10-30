@@ -126,9 +126,11 @@ let test_an_attested_stream_is_read_to_its_end env =
     let received = Buffer.create 256 in
     (match observe env ~port ~on_chunk:(Buffer.add_string received) () with
      | Ok () -> ()
-     | Error (Http.Http_refused { status; detail }) ->
+     | Error (Http.Execute_http_refused { status; detail }) ->
        Alcotest.failf "the stream was refused (%d): %s" status detail
-     | Error (Http.Transport_failed detail) ->
+     | Error (Http.Execute_unattested { status; detail }) ->
+       Alcotest.failf "the stream was unattested (%d): %s" status detail
+     | Error (Http.Execute_transport_failed detail) ->
        Alcotest.failf "the transport failed: %s" detail);
     Alcotest.(check string) "the bytes the server wrote" frames (Buffer.contents received);
     let uri = Uri.of_string !target in
@@ -152,14 +154,16 @@ let test_a_stream_without_the_receipt_is_refused_before_a_byte_is_read env =
        with_server env ~handler (fun ~port ->
          let chunks = ref 0 in
          match observe env ~port ~on_chunk:(fun _ -> incr chunks) () with
-         | Error (Http.Http_refused { status; detail }) ->
+         | Error (Http.Execute_unattested { status; detail }) ->
            Alcotest.(check int) (label ^ ": the status is the stream's") 200 status;
            Alcotest.(check bool)
              (label ^ ": it says the read was not attested")
              true
              (String_util.contains_substring detail "attest");
            Alcotest.(check int) (label ^ ": nothing was read") 0 !chunks
-         | Error (Http.Transport_failed detail) ->
+         | Error (Http.Execute_http_refused { status; detail }) ->
+           Alcotest.failf "%s: ordinary HTTP refusal %d: %s" label status detail
+         | Error (Http.Execute_transport_failed detail) ->
            Alcotest.failf "%s: the transport failed instead: %s" label detail
          | Ok () -> Alcotest.failf "%s: the stream was accepted" label))
     [ "no receipt", []
@@ -177,14 +181,16 @@ let test_a_workspace_mismatch_is_refused_with_its_status env =
   with_server env ~handler (fun ~port ->
     let chunks = ref 0 in
     match observe env ~port ~on_chunk:(fun _ -> incr chunks) () with
-    | Error (Http.Http_refused { status; detail }) ->
+    | Error (Http.Execute_http_refused { status; detail }) ->
       Alcotest.(check int) "the status" 409 status;
       Alcotest.(check bool)
         "it names the stream that was refused"
         true
         (String_util.contains_substring detail "Execute output stream");
       Alcotest.(check int) "nothing was read" 0 !chunks
-    | Error (Http.Transport_failed detail) ->
+    | Error (Http.Execute_unattested { status; detail }) ->
+      Alcotest.failf "unexpected unattested status %d: %s" status detail
+    | Error (Http.Execute_transport_failed detail) ->
       Alcotest.failf "the transport failed instead: %s" detail
     | Ok () -> Alcotest.fail "a refusal was read as a stream")
 ;;
@@ -197,11 +203,143 @@ let test_a_keeper_name_is_encoded_in_the_path env =
   in
   with_server env ~handler (fun ~port ->
     ignore
-      (observe env ~port ~keeper:"a b" ~on_chunk:ignore () : (unit, Http.observer_error) result);
+      (observe env ~port ~keeper:"a b" ~on_chunk:ignore () : (unit, Http.execute_output_stream_error) result);
     Alcotest.(check string)
       "the path"
       "/api/v1/dashboard/execute-output/a%20b"
       (List.hd (String.split_on_char '?' !target)))
+;;
+
+(* A raw peer can advertise a body longer than it sends, something the HTTP
+   server helper deliberately prevents. It also observes the client closing
+   its socket after a timeout, refusal, or cancellation. *)
+let with_raw_peer env ~status ~attest ~truncate body =
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run (fun sw ->
+    let listener =
+      Eio.Net.listen ~reuse_addr:true ~backlog:4 ~sw (Eio.Stdenv.net env)
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0)) in
+    let port = match Eio.Net.listening_addr listener with
+      | `Tcp (_, port) -> port | `Unix _ -> assert false in
+    let closed = ref false and writes = ref 0 in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      (* Pool establishment uses a separate TCP reachability probe first. *)
+      let rec accept_request () =
+        let flow, _ = Eio.Net.accept ~sw listener in
+        let input = Eio.Buf_read.of_flow ~max_size:65536 flow in
+        match Eio.Buf_read.line input with
+        | _ -> flow, input
+        | exception End_of_file -> Eio.Flow.close flow; accept_request () in
+      let flow, input = accept_request () in
+      let rec skip_headers () =
+        if not (String.equal (Eio.Buf_read.line input) "") then skip_headers () in
+      skip_headers ();
+      Eio.Flow.copy_string
+        (Printf.sprintf "HTTP/1.1 %d Test\r\nContent-Length: 1000000\r\n%s\r\n"
+          status (if attest then "x-masc-workspace-read: matched-v1\r\n" else "")) flow;
+      if truncate then (
+        Eio.Flow.copy_string "partial" flow;
+        Eio.Flow.close flow
+      ) else (
+        Eio.Fiber.fork_daemon ~sw (fun () ->
+          (try
+             while true do
+               Eio.Flow.copy_string "x" flow;
+               incr writes;
+               Eio.Time.sleep clock 0.02
+             done
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | Eio.Io _ | Unix.Unix_error _ -> ());
+          `Stop_daemon);
+        (try ignore (Eio.Buf_read.take_all input); closed := true with
+         | Eio.Io (Eio.Net.E (Eio.Net.Connection_reset _), _)
+         | Unix.Unix_error ((Unix.ECONNRESET | Unix.EPIPE), _, _) -> closed := true));
+      `Stop_daemon);
+    Eio.Switch.run (fun pool_sw ->
+      Masc_http_client.with_scoped_pool ~sw:pool_sw ~env (fun () ->
+        body ~port ~closed ~writes)))
+;;
+
+let wait_for_peer_close env closed =
+  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 (fun () ->
+    while not !closed do Eio.Time.sleep (Eio.Stdenv.clock env) 0.01 done)
+;;
+
+let observe_with_refusal_timeout env ~port ~on_chunk =
+  Http.observe_execute_output_stream_with_refusal_timeout
+    ~refusal_body_timeout_s:0.15
+    ~clock:(Eio.Stdenv.clock env) ~expected_workspace:identity
+    ~host:"127.0.0.1" ~port ~keeper:"alpha" ~on_chunk
+;;
+
+let test_refusal_body_disconnect_keeps_the_status env =
+  with_raw_peer env ~status:401 ~attest:false ~truncate:true (fun ~port ~closed:_ ~writes:_ ->
+    let chunks = ref 0 in
+    match observe_with_refusal_timeout env ~port ~on_chunk:(fun _ -> incr chunks) with
+    | Error (Http.Execute_http_refused { status = 401; detail }) ->
+      Alcotest.(check bool) "the body read failed" true
+        (String_util.contains_substring detail "refusal body unreadable");
+      Alcotest.(check int) "no refusal body entered the stream" 0 !chunks
+    | Error (Http.Execute_http_refused { status; _ }) -> Alcotest.failf "wrong status: %d" status
+    | Error (Http.Execute_unattested { status; detail }) ->
+      Alcotest.failf "unexpected unattested status %d: %s" status detail
+    | Error (Http.Execute_transport_failed detail) -> Alcotest.failf "lost status: %s" detail
+    | Ok () -> Alcotest.fail "a refusal was accepted")
+;;
+
+let test_dribbling_refusal_has_a_whole_body_deadline env =
+  List.iter (fun status ->
+    with_raw_peer env ~status ~attest:false ~truncate:false (fun ~port ~closed ~writes ->
+      let chunks = ref 0 in
+      let started = Eio.Time.now (Eio.Stdenv.clock env) in
+      let result = observe_with_refusal_timeout env ~port ~on_chunk:(fun _ -> incr chunks) in
+      let elapsed = Eio.Time.now (Eio.Stdenv.clock env) -. started in
+      (match result with
+       | Error (Http.Execute_http_refused { status = received; detail }) ->
+         Alcotest.(check int) "status retained" status received;
+         Alcotest.(check bool) "deadline explained" true
+           (String_util.contains_substring detail "did not finish in time")
+       | Error (Http.Execute_unattested { status; detail }) ->
+         Alcotest.failf "unexpected unattested status %d: %s" status detail
+       | Error (Http.Execute_transport_failed detail) -> Alcotest.failf "lost status: %s" detail
+       | Ok () -> Alcotest.fail "a refusal was accepted");
+      Alcotest.(check bool) "the body was still making progress" true (!writes >= 2);
+      Alcotest.(check bool) "the deadline was armed" true (elapsed >= 0.12);
+      Alcotest.(check int) "no refusal body entered the stream" 0 !chunks;
+      wait_for_peer_close env closed))
+    [ 401; 408; 425; 429; 503 ]
+;;
+
+let test_the_refusal_deadline_does_not_end_a_successful_stream env =
+  with_raw_peer env ~status:200 ~attest:true ~truncate:false (fun ~port ~closed ~writes ->
+    let chunks = ref 0 in
+    let clock = Eio.Stdenv.clock env in
+    (match
+       try `Result (Eio.Time.with_timeout_exn clock 0.35 (fun () ->
+         observe_with_refusal_timeout env ~port ~on_chunk:(fun _ -> incr chunks)))
+       with Eio.Time.Timeout -> `Timeout
+     with
+     | `Timeout -> ()
+     | `Result (Ok ()) -> Alcotest.fail "the server did not close the stream"
+     | `Result (Error (Http.Execute_http_refused { detail; _ } | Http.Execute_unattested { detail; _ } | Http.Execute_transport_failed detail)) ->
+       Alcotest.failf "healthy stream ended at refusal deadline: %s" detail);
+    Alcotest.(check bool) "stream continued past the refusal deadline" true (!writes >= 5 && !chunks > 0);
+    wait_for_peer_close env closed)
+;;
+
+let test_cancelling_a_refusal_body_still_cancels_the_request env =
+  with_raw_peer env ~status:401 ~attest:false ~truncate:false (fun ~port ~closed ~writes:_ ->
+    (match
+       try `Result (Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 0.05 (fun () ->
+         observe_with_refusal_timeout env ~port ~on_chunk:ignore))
+       with Eio.Time.Timeout -> `Timeout
+     with
+     | `Timeout -> ()
+     | `Result (Ok ()) -> Alcotest.fail "a refusal was accepted"
+     | `Result (Error (Http.Execute_http_refused _ | Http.Execute_unattested _ | Http.Execute_transport_failed _)) ->
+       Alcotest.fail "cancellation was reported as a stream outcome");
+    wait_for_peer_close env closed)
 ;;
 
 let () =
@@ -223,6 +361,12 @@ let () =
         ; case
             "a workspace mismatch is refused with its status"
             test_a_workspace_mismatch_is_refused_with_its_status
+        ; case "a disconnected refusal body keeps its status" test_refusal_body_disconnect_keeps_the_status
+        ; case "a dribbling refusal has a whole-body deadline" test_dribbling_refusal_has_a_whole_body_deadline
+        ; case "the refusal deadline does not end a successful stream"
+            test_the_refusal_deadline_does_not_end_a_successful_stream
+        ; case "cancelling a refusal body still cancels the request"
+            test_cancelling_a_refusal_body_still_cancels_the_request
         ] )
     ]
 ;;

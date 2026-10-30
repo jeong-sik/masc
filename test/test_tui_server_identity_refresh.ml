@@ -3476,7 +3476,7 @@ let test_keeper_execute_reads_are_independent_and_scoped () =
   Alcotest.(check bool) "failed reread settles" true
     (take_keeper_execute_read state refresh (Error "offline"));
   (match keeper_execute_view state with
-   | Masc_tui_fetched.Stale ((Keeper_execute_none, 100.0), "offline") -> ()
+   | Masc_tui_fetched.Stale ((Keeper_execute_none, 100.0), Execute_read_failed "offline") -> ()
    | _ -> Alcotest.fail "last observation and failure were not retained");
   let stale = start first Snapshot_read.Poll in
   state.keeper_cursor <- 1;

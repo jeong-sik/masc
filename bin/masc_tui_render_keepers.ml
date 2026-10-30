@@ -1116,17 +1116,28 @@ let terminal_drawing (state : state) ~width =
   let rows = match observation with
     | Masc_tui_fetched.Absent -> note "Execute output has not been read."
     | Loading -> note "Reading Execute output\xe2\x80\xa6"
-    | Failed detail -> wrapped (Theme.bad () ^ sanitize ("Execute output unavailable: " ^ detail))
+    | Failed detail ->
+        wrapped (Theme.bad () ^ sanitize
+          ("Execute output unavailable: " ^ keeper_execute_failure_detail detail))
     | Ready (reading, _) | Stale ((reading, _), _) -> drawn_rows reading in
+  (* The live stream can stop while a historical view is held. Put recovery
+     in the fixed status row, leaving the output and its scroll math alone. *)
+  let stopped = match live with
+    | Masc_tui_fetched.Failed (Execute_stream_stopped { reason; detail })
+    | Stale (_, Execute_stream_stopped { reason; detail })
+      when not (Masc_tui_fetched.in_flight state.keeper_execute_output) -> Some (reason, detail)
+    | Failed (Execute_stream_stopped _) | Stale (_, Execute_stream_stopped _) -> None
+    | Absent | Loading | Ready _
+    | Failed (Execute_read_failed _ | Execute_stream_retrying _)
+    | Stale (_, (Execute_read_failed _ | Execute_stream_retrying _)) -> None in
   let newer = match hold, Masc_tui_fetched.value live with
     | Execute_terminal.Paused { frozen; _ }, Some (live_reading, _) ->
         Execute_terminal.unseen ~seen:(lines_of frozen.ktf_reading) ~latest:(lines_of live_reading)
     | (Execute_terminal.Paused _ | Execute_terminal.Following), (Some _ | None) -> 0 in
-  let mode = match hold with
-    | Execute_terminal.Following -> "following"
+  let mode, mode_facts = match hold with
+    | Execute_terminal.Following -> "following", []
     | Paused _ ->
-        Printf.sprintf "paused \xc2\xb7 %s \xc2\xb7 End:follow"
-          (Message_layout.count_noun newer "newer row") in
+        "paused", [ Message_layout.count_noun newer "newer row"; "End:follow" ] in
   let facts = match observation with
     | Masc_tui_fetched.Ready (Keeper_execute_snapshot snapshot, observed_at)
     | Stale ((Keeper_execute_snapshot snapshot, observed_at), _) ->
@@ -1136,12 +1147,30 @@ let terminal_drawing (state : state) ~width =
         ; Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.tm_min time.tm_sec ]
     | Ready (Keeper_execute_none, _) | Stale ((Keeper_execute_none, _), _)
     | Absent | Loading | Failed _ -> [] in
+  let facts = mode_facts @ facts in
   let stale = match observation with
-    | Masc_tui_fetched.Stale (_, detail) -> [ Theme.bad () ^ "stale: " ^ sanitize detail ^ Ansi.reset ]
+    | Masc_tui_fetched.Stale (_, Execute_stream_stopped _) when Option.is_some stopped -> []
+    | Masc_tui_fetched.Stale
+        (_, ((Execute_stream_stopped _ | Execute_read_failed _ | Execute_stream_retrying _) as detail)) ->
+        [ Theme.bad () ^ "stale: " ^ sanitize (keeper_execute_failure_detail detail) ^ Ansi.reset ]
     | Ready _ | Absent | Loading | Failed _ -> [] in
-  { terminal_rows = rows;
-    terminal_status = Theme.recede () ^ String.concat " \xc2\xb7 " (mode :: facts) ^ Ansi.reset
-                      ^ String.concat "" (List.map (fun part -> " \xc2\xb7 " ^ part) stale) }
+  let status = Theme.recede () ^ String.concat " \xc2\xb7 " (mode :: facts) ^ Ansi.reset
+    ^ String.concat "" (List.map (fun part -> " \xc2\xb7 " ^ part) stale) in
+  let status = match stopped with
+    | None -> status
+    | Some (reason, detail) ->
+      let cause = match reason with
+        | Masc_tui_execute_stream_job.Http_status status -> Printf.sprintf "HTTP %d" status
+        | Unattested_response _ -> "unattested"
+        | Unexpected_error -> "error" in
+      let prefix = "Retry[] " ^ cause in
+      let lead = Theme.bad () ^ prefix ^ Ansi.reset in
+      (* A truncation mark consumes a cell. At exactly the prefix width,
+         leave the prefix whole instead of cutting its last character. *)
+      if width <= Message_layout.display_width prefix then lead
+      else lead ^ " \xc2\xb7 " ^ status
+        ^ " \xc2\xb7 " ^ Theme.bad () ^ sanitize detail ^ Ansi.reset in
+  { terminal_rows = rows; terminal_status = status }
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     ~origin:(origin_row, origin_col) buf =
@@ -2512,12 +2541,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
     in
     let visible_lines = min content_height total_lines in
     (* How far back from the bottom this window can go, and how far it is. *)
-    let terminal_back =
-      min (Masc_tui_execute_terminal.back (Masc_tui_types.keeper_terminal_hold state))
-        (max 0 (total_lines - content_height))
+    let terminal_scroll, terminal_back =
+      if terminal_tab then
+        Masc_tui_execute_terminal.window ~content_height ~total_rows:total_lines
+          (Masc_tui_types.keeper_terminal_hold state)
+      else 0, 0
     in
     let scroll =
-      if terminal_tab then max 0 (total_lines - content_height) - terminal_back
+      if terminal_tab then terminal_scroll
       else
         Render_schedule.normalize_keeper_detail_scroll ~line_count:total_lines
           ~content_height state.detail_scroll

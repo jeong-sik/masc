@@ -157,6 +157,12 @@ let back = function
   | Paused { back; _ } -> back
 ;;
 
+let window ~content_height ~total_rows hold =
+  let last_start = max 0 (total_rows - content_height) in
+  let back = min (back hold) last_start in
+  last_start - back, back
+;;
+
 let scroll_to ~live ~back hold =
   if back <= 0
   then Following

@@ -4682,9 +4682,26 @@ type keeper_execute_follow = {
   kxf_owner : unit ref;
 }
 
+type keeper_execute_failure =
+  | Execute_read_failed of string
+  | Execute_stream_retrying of string
+  | Execute_stream_stopped of
+      { reason : Masc_tui_execute_stream_job.stop_reason
+      ; detail : string
+      }
+
+let keeper_execute_failure_detail = function
+  | Execute_read_failed detail | Execute_stream_retrying detail
+  | Execute_stream_stopped { detail; _ } ->
+    detail
+
+let suspend_keeper_execute source =
+  Masc_tui_fetched.suspend_with
+    ~reason:(Execute_read_failed "Reading suspended; waiting for workspace identity.") source
+
 type keeper_execute_follow_event =
   | Execute_stream_reading of keeper_execute_reading * float
-  | Execute_stream_down of string
+  | Execute_stream_down of keeper_execute_failure
       (** The connection ended, or the server refused it. The last reading
           stays on screen, marked stale. *)
 
@@ -9698,7 +9715,7 @@ type state = {
   mutable keeper_calls_generation: int;
   mutable keeper_calls_scroll: int;
   mutable keeper_logs: (keeper_log_key, Metrics_tail.snapshot) Masc_tui_fetched.t;
-  mutable keeper_execute_output: (keeper_log_key, keeper_execute_reading * float) Masc_tui_fetched.t;
+  mutable keeper_execute_output: (keeper_log_key, keeper_execute_reading * float, keeper_execute_failure) Masc_tui_fetched.source;
   mutable keeper_execute_read: keeper_execute_request option;
   mutable keeper_execute_cancel: (unit ref * (unit -> unit)) option;
   mutable keeper_execute_stream: (keeper_execute_follow * (unit -> unit)) option;
@@ -11653,7 +11670,7 @@ let clear_keeper_logs state =
 
 let suspend_keeper_logs state =
   state.keeper_logs <- Masc_tui_fetched.suspend state.keeper_logs;
-  state.keeper_execute_output <- Masc_tui_fetched.suspend state.keeper_execute_output;
+  state.keeper_execute_output <- suspend_keeper_execute state.keeper_execute_output;
   state.keeper_execute_read <- None;
   Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
   state.keeper_execute_cancel <- None;
@@ -11782,7 +11799,8 @@ let take_keeper_execute_read state request result =
       when let key = Masc_tui_fetched.request_key request.ker_request in
            keeper_log_equal_key key (keeper_log_key state ~limit:key.klk_limit keeper) ->
         state.keeper_execute_output <- Masc_tui_fetched.complete ~equal:keeper_log_equal_key
-            state.keeper_execute_output request.ker_request result;
+            state.keeper_execute_output request.ker_request
+            (Result.map_error (fun detail -> Execute_read_failed detail) result);
         true
     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
       | Workspace_identity_match_unconfirmed _), (Some _ | None) -> false
@@ -11821,7 +11839,7 @@ let stop_keeper_execute_stream state =
     state.keeper_execute_stream <- None;
     (match Masc_tui_fetched.current_key state.keeper_execute_output with
      | Some key when keeper_log_equal_key key stream.kxf_key ->
-       state.keeper_execute_output <- Masc_tui_fetched.suspend state.keeper_execute_output
+       state.keeper_execute_output <- suspend_keeper_execute state.keeper_execute_output
      | Some _ | None -> ());
     true
 
@@ -11856,9 +11874,9 @@ let keeper_execute_view state =
        Masc_tui_fetched.view_for ~equal:keeper_log_equal_key state.keeper_execute_output ~key
      | Some _ | None -> Masc_tui_fetched.Absent)
   | Workspace_identity_match_unconfirmed _, (Some _ | None) ->
-    Masc_tui_fetched.Failed "Workspace identity is unconfirmed"
+    Masc_tui_fetched.Failed (Execute_read_failed "Workspace identity is unconfirmed")
   | (Workspace_identity_mismatch _ | Workspace_identity_unread), (Some _ | None) ->
-    Masc_tui_fetched.Failed "Workspace identity is unavailable"
+    Masc_tui_fetched.Failed (Execute_read_failed "Workspace identity is unavailable")
   | Workspace_identity_match, None -> Masc_tui_fetched.Absent
 
 (* The reading on screen, in the form the Terminal tab holds still. *)
@@ -19761,10 +19779,10 @@ let keeper_log_rows (state : state) ~cols =
     match keeper_execute_view state with
     | Masc_tui_fetched.Absent -> text_rows Keeper_log_notice "Execute output has not been read."
     | Loading -> text_rows Keeper_log_notice "Reading Execute output…"
-    | Failed detail -> text_rows Keeper_log_failure ("Execute output unavailable: " ^ detail)
+    | Failed detail -> text_rows Keeper_log_failure ("Execute output unavailable: " ^ keeper_execute_failure_detail detail)
     | Ready (reading, at) -> render_reading reading at
     | Stale ((reading, at), detail) ->
-      text_rows Keeper_log_failure ("Last Execute output observation is stale: " ^ detail)
+      text_rows Keeper_log_failure ("Last Execute output observation is stale: " ^ keeper_execute_failure_detail detail)
       @ render_reading reading at
   in
   let diagnostics = keeper_log_diagnostics state

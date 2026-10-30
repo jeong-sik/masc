@@ -109,8 +109,8 @@ let describe state =
   | Loading -> "loading"
   | Ready (reading, at) -> Printf.sprintf "ready [%s] at %.0f" (texts_of reading) at
   | Stale ((reading, at), detail) ->
-    Printf.sprintf "stale [%s] at %.0f: %s" (texts_of reading) at detail
-  | Failed detail -> "failed: " ^ detail
+    Printf.sprintf "stale [%s] at %.0f: %s" (texts_of reading) at (Tui_types.keeper_execute_failure_detail detail)
+  | Failed detail -> "failed: " ^ Tui_types.keeper_execute_failure_detail detail
 ;;
 
 let reading_message ~at texts = Tui_types.Execute_stream_reading (reading_of texts, at)
@@ -216,7 +216,7 @@ let test_a_lost_connection_keeps_the_last_reading_and_says_so () =
   let job, _ = start_stream state in
   ignore (Tui_types.take_keeper_execute_stream state job (reading_message ~at:5. [ "a" ]));
   check Alcotest.bool "the loss is taken" true
-    (Tui_types.take_keeper_execute_stream state job (Tui_types.Execute_stream_down "the server closed it"));
+    (Tui_types.take_keeper_execute_stream state job (Tui_types.Execute_stream_down (Execute_stream_retrying "the server closed it")));
   check Alcotest.string "the reading stays, marked stale"
     "stale [a] at 5: the server closed it" (describe state);
   ignore (Tui_types.take_keeper_execute_stream state job (reading_message ~at:8. [ "a"; "b" ]));
@@ -226,8 +226,67 @@ let test_a_lost_connection_keeps_the_last_reading_and_says_so () =
 let test_a_stream_that_never_connected_is_a_failure_not_an_empty_log () =
   let state = terminal_state () in
   let job, _ = start_stream state in
-  ignore (Tui_types.take_keeper_execute_stream state job (Tui_types.Execute_stream_down "refused (401)"));
+  ignore (Tui_types.take_keeper_execute_stream state job (Tui_types.Execute_stream_down (Execute_stream_stopped { reason = Http_status 401; detail = "refused (401)" })));
   check Alcotest.string "unavailable, with the reason" "failed: refused (401)" (describe state)
+;;
+
+let test_stopped_reasons_survive_with_and_without_a_reading () =
+  List.iter (fun reason ->
+    let state = terminal_state () in
+    let job, _ = start_stream state in
+    let stop () =
+      ignore (Tui_types.take_keeper_execute_stream state job
+        (Tui_types.Execute_stream_down (Execute_stream_stopped { reason; detail = "detail" }))) in
+    stop ();
+    (match Tui_types.keeper_execute_view state with
+     | Masc_tui_fetched.Failed (Execute_stream_stopped { reason = actual; detail = "detail" })
+       when actual = reason -> ()
+     | _ -> Alcotest.fail "failure lost its typed cause");
+    ignore (Tui_types.take_keeper_execute_stream state job (reading_message ~at:5. [ "a" ]));
+    stop ();
+    (match Tui_types.keeper_execute_view state with
+     | Masc_tui_fetched.Stale ((_, 5.), Execute_stream_stopped { reason = actual; detail = "detail" })
+       when actual = reason -> ()
+     | _ -> Alcotest.fail "stale reading lost its typed cause"))
+    [ Masc_tui_execute_stream_job.Http_status 401
+    ; Unattested_response 204
+    ; Unexpected_error ]
+;;
+
+let test_stopped_stream_keeps_its_owner_until_tab_reentry () =
+  let state = terminal_state () in
+  let job, stopped = start_stream state in
+  ignore (Tui_types.take_keeper_execute_stream state job (reading_message ~at:5. [ "a" ]));
+  ignore (Tui_types.take_keeper_execute_stream state job
+    (Tui_types.Execute_stream_down (Execute_stream_stopped { reason = Http_status 401; detail = "refused" })));
+  (match Tui_types.keeper_execute_view state with
+   | Masc_tui_fetched.Stale ((_, 5.), Execute_stream_stopped { reason = Http_status 401; detail = "refused" }) -> ()
+   | _ -> Alcotest.fail "stopped failure and last reading were not retained");
+  (match Tui_types.plan_keeper_execute_stream state with
+   | Stream_stays -> ()
+   | _ -> Alcotest.fail "a stopped owner must not immediately reconnect");
+  state.detail_tab <- Tui_types.Detail_info;
+  (match Tui_types.plan_keeper_execute_stream state with
+   | Stream_ends -> ()
+   | _ -> Alcotest.fail "leaving the tab must retire the owner");
+  check Alcotest.bool "the owner stopped" true (Tui_types.stop_keeper_execute_stream state);
+  check Alcotest.bool "stop was requested" true !stopped;
+  state.detail_tab <- Tui_types.Detail_terminal;
+  (match Tui_types.plan_keeper_execute_stream state with
+   | Stream_follows _ -> ()
+   | _ -> Alcotest.fail "reentering must request a new owner");
+  let replacement, _ = start_stream state in
+  (match Masc_tui_fetched.refresh ~equal:Tui_types.keeper_log_equal_key
+      state.keeper_execute_output ~key:replacement.kxf_key with
+   | Started (next, _) -> state.keeper_execute_output <- next
+   | Already_loading -> Alcotest.fail "replacement did not mark a new read");
+  check Alcotest.bool "the replacement is in flight" true
+    (Masc_tui_fetched.in_flight state.keeper_execute_output);
+  check Alcotest.bool "old owner cannot update the cell" false
+    (Tui_types.take_keeper_execute_stream state job (reading_message ~at:6. [ "old" ]));
+  check Alcotest.bool "replacement can update the cell" true
+    (Tui_types.take_keeper_execute_stream state replacement (reading_message ~at:7. [ "new" ]));
+  check Alcotest.string "replacement clears the stopped state" "ready [new] at 7" (describe state)
 ;;
 
 (* The cell has two writers: the one-shot read the logs view uses, and the
@@ -377,6 +436,10 @@ let () =
             test_a_lost_connection_keeps_the_last_reading_and_says_so
         ; Alcotest.test_case "a stream that never connected is a failure, not an empty log" `Quick
             test_a_stream_that_never_connected_is_a_failure_not_an_empty_log
+        ; Alcotest.test_case "stopped reasons survive with and without a reading" `Quick
+            test_stopped_reasons_survive_with_and_without_a_reading
+        ; Alcotest.test_case "a stopped stream is reopened only after tab reentry" `Quick
+            test_stopped_stream_keeps_its_owner_until_tab_reentry
         ] )
     ; ( "starting and stopping"
       , [ Alcotest.test_case "the plan follows what the tab shows" `Quick

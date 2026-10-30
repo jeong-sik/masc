@@ -22,13 +22,20 @@ let poll_s = 0.002
 
 type event =
   | Viewed of string list
-  | Ended of string
+  | Ended of Job.ending
 
 let event =
   Alcotest.testable
     (fun ppf -> function
        | Viewed texts -> Format.fprintf ppf "Viewed [%s]" (String.concat "; " texts)
-       | Ended reason -> Format.fprintf ppf "Ended %S" reason)
+       | Ended (Retry_after { detail; delay_s }) ->
+         Format.fprintf ppf "Retry_after (%S, %g)" detail delay_s
+       | Ended (Reopen_required { reason; detail }) ->
+         let label = match reason with
+           | Http_status status -> Printf.sprintf "http-%d" status
+           | Unattested_response status -> Printf.sprintf "unattested-%d" status
+           | Unexpected_error -> "unexpected" in
+         Format.fprintf ppf "Reopen_required (%s, %S)" label detail)
     ( = )
 ;;
 
@@ -102,14 +109,17 @@ let wait_until env what predicate =
 
 (* Runs the job beside [body] with [observe] for the socket, and ends it when
    [body] returns. *)
-let with_job env ~observe body =
+let with_job ?(stable_s = 15.) ?monotonic_now ?(before_post = fun () -> ()) env ~observe body =
   let clock = Eio.Stdenv.clock env in
+  let monotonic_now = Option.value monotonic_now ~default:(fun () -> Eio.Time.now clock) in
   let events = ref [] in
-  let on_view, on_ended = recorded events in
+  let record_view, on_ended = recorded events in
+  let on_view view = before_post (); record_view view in
   let reader = S.create ~keeper ~capacity:500 in
   Eio.Switch.run (fun sw ->
     Eio.Fiber.fork_daemon ~sw (fun () ->
-      Job.run ~clock ~reconnect_s ~post_interval_s ~reader ~observe ~on_view ~on_ended;
+      Job.run ~clock ~reconnect_s ~max_reconnect_s:0.2 ~stable_s ~monotonic_now
+        ~post_interval_s ~reader ~observe ~on_view ~on_ended;
       `Stop_daemon);
     body (fun () -> List.rev !events))
 ;;
@@ -124,7 +134,7 @@ let test_rows_are_shown_and_the_end_is_reported_before_the_next_connection env =
     match List.length !started with
     | 1 ->
       on_chunk head_one;
-      Error "the network went away"
+      Error (Job.Transport_failure "the network went away")
     | 2 ->
       on_chunk head_two;
       Ok ()
@@ -135,9 +145,9 @@ let test_rows_are_shown_and_the_end_is_reported_before_the_next_connection env =
     Alcotest.(check (list event))
       "the rows, then why the connection ended, for each connection"
       [ Viewed [ "run"; "one" ]
-      ; Ended "the network went away"
+      ; Ended (Job.Retry_after { detail = "the network went away"; delay_s = reconnect_s })
       ; Viewed [ "run"; "two" ]
-      ; Ended "the server closed the Execute output stream"
+      ; Ended (Job.Retry_after { detail = "the server closed the Execute output stream"; delay_s = 2. *. reconnect_s })
       ]
       (events ());
     match List.rev !started with
@@ -168,8 +178,8 @@ let test_a_frame_the_reader_refuses_ends_the_connection env =
     (match
        List.filter_map
          (function
-           | Ended reason -> Some reason
-           | Viewed _ -> None)
+           | Ended (Job.Retry_after { detail; _ }) -> Some detail
+           | Ended (Reopen_required _) | Viewed _ -> None)
          (events ())
      with
      | [ reason ] ->
@@ -223,7 +233,9 @@ let test_stopping_the_job_cancels_the_connection_and_reports_nothing env =
     Eio.Fiber.fork ~sw (fun () ->
       Eio.Fiber.first
         (fun () ->
-           Job.run ~clock ~reconnect_s ~post_interval_s ~reader ~observe ~on_view ~on_ended)
+           Job.run ~clock ~reconnect_s ~max_reconnect_s:0.2 ~stable_s:15.
+             ~monotonic_now:(fun () -> Eio.Time.now clock)
+             ~post_interval_s ~reader ~observe ~on_view ~on_ended)
         (fun () -> Eio.Promise.await stopped));
     wait_until env "the rows to be posted" (fun () -> !events <> []);
     Eio.Promise.resolve stop ();
@@ -238,6 +250,123 @@ let test_stopping_the_job_cancels_the_connection_and_reports_nothing env =
     Alcotest.(check int) "no connection was opened after the stop" 1 !started)
 ;;
 
+let test_permanent_refusals_stop env =
+  List.iter (fun status ->
+    let started = ref 0 in
+    let observe ~on_chunk:_ =
+      incr started;
+      Error (Job.Http_refusal { status; detail = "refused" }) in
+    with_job env ~observe (fun events ->
+      wait_until env "permanent refusal" (fun () -> events () <> []);
+      Eio.Time.sleep (Eio.Stdenv.clock env) (3. *. reconnect_s);
+      Alcotest.(check int) "one connection" 1 !started;
+      Alcotest.(check (list event)) "the owner must reopen"
+        [ Ended (Job.Reopen_required { reason = Http_status status; detail = "refused" }) ] (events ())))
+    [ 200; 400; 401; 403; 404; 409 ]
+;;
+
+let test_unattested_response_stops_with_its_typed_reason env =
+  let started = ref 0 in
+  let observe ~on_chunk:_ =
+    incr started;
+    Error (Job.Unattested { status = 200; detail = "missing receipt" }) in
+  with_job env ~observe (fun events ->
+    wait_until env "unattested response" (fun () -> events () <> []);
+    Eio.Time.sleep (Eio.Stdenv.clock env) (2. *. reconnect_s);
+    Alcotest.(check int) "one connection" 1 !started;
+    Alcotest.(check (list event)) "attestation and status retained"
+      [ Ended (Job.Reopen_required
+          { reason = Unattested_response 200; detail = "missing receipt" }) ]
+      (events ()))
+;;
+
+let test_retriable_statuses_and_bounded_delay env =
+  let statuses = [| 408; 425; 429; 500; 503 |] in
+  let started = ref 0 in
+  let observe ~on_chunk:_ =
+    let index = !started in
+    incr started;
+    if index < Array.length statuses
+    then Error (Job.Http_refusal { status = statuses.(index); detail = "transient" })
+    else Eio.Fiber.await_cancel () in
+  with_job env ~observe (fun events ->
+    wait_until env "all retries" (fun () -> !started > Array.length statuses);
+    let expected = List.map (fun delay_s ->
+      Ended (Job.Retry_after { detail = "transient"; delay_s }))
+      [ 0.05; 0.1; 0.2; 0.2; 0.2 ] in
+    Alcotest.(check (list event)) "bounded exponential delay" expected (events ()))
+;;
+
+let test_only_a_stable_valid_connection_resets_delay env =
+  let now = ref 0. in
+  let started = ref 0 in
+  let snapshot = head ~rows:[ "one" ] in
+  let observe ~on_chunk =
+    incr started;
+    (match !started with
+     | 1 -> ()
+     | 2 -> on_chunk snapshot
+     | 3 -> on_chunk "data: "; now := !now +. 20.
+     | 4 -> on_chunk snapshot; now := !now +. 15.
+     | _ -> ());
+    if !started <= 4 then Error (Job.Transport_failure "offline")
+    else Error (Job.Http_refusal { status = 401; detail = "refused" }) in
+  with_job ~stable_s:15. ~monotonic_now:(fun () -> !now) env ~observe (fun events ->
+    wait_until env "all connections" (fun () -> !started = 5);
+    let endings = List.filter (function Ended _ -> true | Viewed _ -> false) (events ()) in
+    let expected = List.map (fun delay_s ->
+      Ended (Job.Retry_after { detail = "offline"; delay_s })) [ 0.05; 0.1; 0.2; 0.05 ]
+      @ [ Ended (Job.Reopen_required { reason = Http_status 401; detail = "refused" }) ] in
+    Alcotest.(check (list event)) "short snapshot and partial frame cannot reset" expected endings)
+;;
+
+let test_stopping_during_backoff_prevents_a_retry env =
+  let clock = Eio.Stdenv.clock env in
+  let started = ref 0 in
+  let events = ref [] in
+  let on_view, on_ended = recorded events in
+  let observe ~on_chunk:_ =
+    incr started;
+    Error (Job.Transport_failure "offline") in
+  let reader = S.create ~keeper ~capacity:500 in
+  let stopped, stop = Eio.Promise.create () in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Fiber.first
+        (fun () ->
+          Job.run ~clock ~reconnect_s ~max_reconnect_s:0.2 ~stable_s:15.
+            ~monotonic_now:(fun () -> Eio.Time.now clock)
+            ~post_interval_s ~reader ~observe ~on_view ~on_ended)
+        (fun () -> Eio.Promise.await stopped));
+    wait_until env "the failed connection" (fun () -> !events <> []);
+    Eio.Promise.resolve stop ();
+    Eio.Time.sleep clock (3. *. reconnect_s);
+    Alcotest.(check int) "no retry after stopping" 1 !started;
+    Alcotest.(check (list event)) "no later end is reported"
+      [ Ended (Job.Retry_after { detail = "offline"; delay_s = reconnect_s }) ]
+      (List.rev !events))
+;;
+
+let test_post_delay_is_not_connection_uptime env =
+  let now = ref 0. in
+  let started = ref 0 in
+  let snapshot = head ~rows:[ "one" ] in
+  let observe ~on_chunk =
+    incr started;
+    (match !started with 2 -> on_chunk snapshot | _ -> ());
+    if !started <= 2 then Error (Job.Transport_failure "offline")
+    else Error (Job.Http_refusal { status = 401; detail = "refused" }) in
+  with_job ~stable_s:15. ~monotonic_now:(fun () -> !now)
+    ~before_post:(fun () -> now := !now +. 20.) env ~observe (fun events ->
+      wait_until env "all connections" (fun () -> !started = 3);
+      let endings = List.filter (function Ended _ -> true | Viewed _ -> false) (events ()) in
+      Alcotest.(check (list event)) "a delayed post cannot reset backoff"
+        [ Ended (Job.Retry_after { detail = "offline"; delay_s = 0.05 })
+        ; Ended (Job.Retry_after { detail = "offline"; delay_s = 0.1 })
+        ; Ended (Job.Reopen_required { reason = Http_status 401; detail = "refused" }) ]
+        endings)
+;;
+
 let () =
   let case name test = Alcotest.test_case name `Quick (with_env test) in
   Alcotest.run
@@ -249,6 +378,12 @@ let () =
         ; case
             "a frame the reader refuses ends the connection"
             test_a_frame_the_reader_refuses_ends_the_connection
+        ; case "permanent refusals stop" test_permanent_refusals_stop
+        ; case "unattested response stops with its typed reason"
+            test_unattested_response_stops_with_its_typed_reason
+        ; case "retriable statuses and bounded delay" test_retriable_statuses_and_bounded_delay
+        ; case "only a stable valid connection resets" test_only_a_stable_valid_connection_resets_delay
+        ; case "post delay is not connection uptime" test_post_delay_is_not_connection_uptime
         ] )
     ; ( "posting"
       , [ case
@@ -259,6 +394,7 @@ let () =
       , [ case
             "stopping the job cancels the connection and reports nothing"
             test_stopping_the_job_cancels_the_connection_and_reports_nothing
+        ; case "stopping during backoff prevents a retry" test_stopping_during_backoff_prevents_a_retry
         ] )
     ]
 ;;

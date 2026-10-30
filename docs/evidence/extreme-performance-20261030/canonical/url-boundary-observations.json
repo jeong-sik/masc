@@ -1,0 +1,62 @@
+[
+  {
+    "variant": "before",
+    "userinfo_case": "",
+    "result": "connection_boundary_reached",
+    "artifact_exists": false
+  },
+  {
+    "variant": "before",
+    "userinfo_case": "@",
+    "result": "connection_boundary_reached",
+    "artifact_exists": false
+  },
+  {
+    "variant": "before",
+    "userinfo_case": ":@",
+    "result": "connection_boundary_reached",
+    "artifact_exists": false
+  },
+  {
+    "variant": "before",
+    "userinfo_case": ":placeholder@",
+    "result": "connection_boundary_reached",
+    "artifact_exists": false
+  },
+  {
+    "variant": "before",
+    "userinfo_case": "name:placeholder@",
+    "result": "rejected_before_connection",
+    "artifact_exists": false
+  },
+  {
+    "variant": "after",
+    "userinfo_case": "",
+    "result": "connection_boundary_reached",
+    "artifact_exists": false
+  },
+  {
+    "variant": "after",
+    "userinfo_case": "@",
+    "result": "rejected_before_connection",
+    "artifact_exists": false
+  },
+  {
+    "variant": "after",
+    "userinfo_case": ":@",
+    "result": "rejected_before_connection",
+    "artifact_exists": false
+  },
+  {
+    "variant": "after",
+    "userinfo_case": ":placeholder@",
+    "result": "rejected_before_connection",
+    "artifact_exists": false
+  },
+  {
+    "variant": "after",
+    "userinfo_case": "name:placeholder@",
+    "result": "rejected_before_connection",
+    "artifact_exists": false
+  }
+]

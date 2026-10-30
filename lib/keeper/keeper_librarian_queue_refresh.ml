@@ -119,6 +119,10 @@ let merge_not_committed earlier (outcome : Keeper_librarian_runtime.not_committe
     { outcome with
       Keeper_librarian_runtime.message_descent =
         Keeper_librarian_runtime.merge_message_descent earlier.message_descent outcome.message_descent
+    ; input_capacity_evidence =
+        (match earlier.input_capacity_evidence,outcome.input_capacity_evidence with
+         | Input_capacity_refused,_ | _,Input_capacity_refused -> Input_capacity_refused
+         | No_input_capacity_refusal,No_input_capacity_refusal -> No_input_capacity_refusal)
     ; Keeper_librarian_runtime.walk_shows_size =
         earlier.Keeper_librarian_runtime.walk_shows_size
         || outcome.Keeper_librarian_runtime.walk_shows_size
@@ -560,7 +564,11 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
          the source mode stands. A pass can end without one -- a snapshot commit
          that failed on disk, a raise before any request was composed -- and
          reading less would answer a local failure by shrinking the source. *)
-      let may_descend = Runtime.may_descend_messages (Option.to_list !cause) in
+      let named_input_refusal = match !cause with
+        | Some {Runtime.input_capacity_evidence=Input_capacity_refused;_} -> true
+        | Some {Runtime.input_capacity_evidence=No_input_capacity_refusal;_} | None -> false in
+      let may_descend = named_input_refusal
+        && Runtime.may_descend_messages (Option.to_list !cause) in
       match !cli_limit with
       | (None | Some _) when not may_descend ->
         (* The complete walk either has no descent evidence or contains an

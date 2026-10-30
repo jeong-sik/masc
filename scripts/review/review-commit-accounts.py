@@ -52,7 +52,7 @@ def inspect_pages(base, pages):
                     account_names.setdefault(actor_id, key)
     if len(commits) != total:
         complete = False
-        problems.append(f"comparison returned {len(commits)} of {total} commits")
+        problems.insert(0, f"comparison returned {len(commits)} of {total} commits")
     return tuple(accounts[k] for k in sorted(accounts)), complete, problems
 
 
@@ -77,7 +77,10 @@ def main():
         print(f"approve-guard: commit identities unavailable: {error}", file=sys.stderr)
         return 1
     if not complete:
-        detail = "; ".join(dict.fromkeys(problems[:5]))
+        unique = list(dict.fromkeys(problems))
+        detail = "; ".join(unique[:5])
+        if len(unique) > 5:
+            detail += f"; {len(unique) - 5} more identity problems"
         print(f"approve-guard: commit author or committer identity is incomplete: {detail}", file=sys.stderr)
         return 2
     print(json.dumps({"accounts": accounts}, separators=(",", ":")))

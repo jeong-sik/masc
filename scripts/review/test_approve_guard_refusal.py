@@ -175,6 +175,17 @@ class CommitIndependence(GuardHarness):
                     self.assertIn(f"{HEAD} {'author' if author_role is None else 'committer'} account unavailable", result.stderr)
                     self.assertEqual(result.stdout, "")
 
+    def test_diagnostic_reports_omitted_identity_problems(self):
+        self.review(footer_line())
+        author = {"login": "content-author", "id": 555}
+        commits = [self.commit(f"{n:040x}", None, author) for n in range(1, 7)]
+        self.set_pages([self.page(commits, total=7)])
+        result = self.run_guard("--source-receipt")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("comparison returned 6 of 7 commits", result.stderr)
+        self.assertIn(f"{1:040x} author account unavailable", result.stderr)
+        self.assertIn("2 more identity problems", result.stderr)
+
     def test_matching_account_is_not_admitted_or_allowed_to_publish(self):
         self.review(footer_line())
         # Different spelling cannot defeat matching the immutable account id.

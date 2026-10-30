@@ -1,0 +1,9 @@
+{
+  "scope": "actual extracted container-name and base-path hash functions with dependency stubs; synthetic paths only, no runtime action",
+  "source_sha256": "3956fef9c6f507fd143c4cc942e21e0e05f900e6ae810d74e95f8acb58d872eb",
+  "setup_source_sha256": "63796281af168f12e63db25d51129ee69457a158bfa10b4a6874a7cf437f9f49",
+  "compile_exit": 0,
+  "compile_stderr": "",
+  "run_exit": 0,
+  "stdout": "/synthetic-workspaces/workspace-36434 ff1829aeb0b2c2241a7f1d3a3e61e9b5 masc-keeper-vm-shared-inherit-ff1829ae\n/synthetic-workspaces/workspace-83774 ff1829ae702ebee4ebcf998baaf17734 masc-keeper-vm-shared-inherit-ff1829ae\n"
+}

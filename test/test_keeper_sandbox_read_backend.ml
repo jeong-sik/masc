@@ -498,6 +498,20 @@ exit 0
        ; observed_syscalls = []
        })
 
+(* Publish the identity against an empty inventory first; afterwards inspect
+   reports the exact guest and full facts while exec retains the shim fixture. *)
+let fake_apple_attached_script ~base ~(config : Workspace.config)
+    ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
+  let guest = Keeper_turn_sandbox_runtime.For_testing_microvm.microvm_container_name
+      ~config ~keeper_name:meta.name ~network_mode:meta.network_mode in
+  Printf.sprintf {|#!/bin/sh
+if [ "$1" = inspect ]; then
+  if [ "$2" = %s ] && [ -f %s ]; then /bin/cat %s; exit 0; fi
+  exit 1
+fi
+%s|} (Filename.quote guest) (Filename.quote (Filename.concat base "guest-inspect.json"))
+    (Filename.quote (Filename.concat base "guest-inspect.json")) fake_ssh_success_script
+
 let initialize_apple_attached_read_fixture
     ~base ~(config : Workspace.config) ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
   let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
@@ -524,7 +538,26 @@ let initialize_apple_attached_read_fixture
         ~timeout_sec:5. captured
     with
     | Ok _ -> ()
-    | Error error -> Alcotest.fail (Masc.Keeper_microvm_github_identity.error_message error))
+    | Error error -> Alcotest.fail (Masc.Keeper_microvm_github_identity.error_message error));
+  let guest = Keeper_turn_sandbox_runtime.For_testing_microvm.microvm_container_name
+      ~config ~keeper_name:meta.name ~network_mode:meta.network_mode in
+  let labels = Masc.Keeper_sandbox_runtime_setup.stable_labels ~base_path:base
+      ~keeper_name:meta.name ~container_kind:Keeper_sandbox_microvm.keeper_vm_container_kind
+      ~network_label:(Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode)
+    @ [Keeper_sandbox_microvm.microvm_backend_label_key,
+       Keeper_microvm_backend.to_string Keeper_microvm_backend.Apple_container] in
+  let inspect = `List [`Assoc ["id", `String guest; "status", `Assoc ["state", `String "running"];
+    "configuration", `Assoc ["id", `String guest;
+      "image", `Assoc ["reference", `String "fixture:image";
+        "descriptor", `Assoc ["digest", `String ("sha256:" ^ String.make 64 'a')]];
+      "platform", `Assoc ["architecture", `String "arm64"; "os", `String "linux"];
+      "resources", `Assoc ["cpus", `Int 1; "memoryInBytes", `Int 1048576];
+      "initProcess", `Assoc ["user", `Assoc ["raw", `Assoc ["userString", `String "0:0"]];
+        "workingDirectory", `String "/masc-work"; "executable", `String "tail";
+        "arguments", `List [`String "-f"; `String "/dev/null"]; "environment", `List []];
+      "mounts", `List []; "readOnly", `Bool true; "capDrop", `List []; "capAdd", `List [];
+      "networks", `List []; "labels", `Assoc (List.map (fun (key, value) -> key, `String value) labels)]]] in
+  write_file (Filename.concat base "guest-inspect.json") (Yojson.Safe.to_string inspect)
 ;;
 
 let test_attached_guest_endpoint_names_the_derived_guest () =
@@ -542,7 +575,7 @@ let test_attached_guest_endpoint_names_the_derived_guest () =
   in
   let bin_dir = temp_dir () in
   let cli_path = Filename.concat bin_dir "container" in
-  write_file cli_path fake_ssh_success_script;
+  write_file cli_path (fake_apple_attached_script ~base ~config ~meta:microvm);
   Unix.chmod cli_path 0o755;
   let path = bin_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
   Fun.protect
@@ -551,7 +584,8 @@ let test_attached_guest_endpoint_names_the_derived_guest () =
       cleanup_fixture_dir base;
       cleanup_dir bin_dir)
   @@ fun () ->
-  with_env "PATH" path (fun () -> initialize_apple_attached_read_fixture ~base ~config ~meta:microvm);
+  with_env "PATH" path @@ fun () ->
+  initialize_apple_attached_read_fixture ~base ~config ~meta:microvm;
   match
     Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta:microvm ()
   with
@@ -1542,7 +1576,7 @@ sandbox_profile = "microvm"
   let cli_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir cli_dir) @@ fun () ->
   let cli_path = Filename.concat cli_dir "container" in
-  write_file cli_path fake_ssh_success_script;
+  write_file cli_path (fake_apple_attached_script ~base ~config ~meta);
   Unix.chmod cli_path 0o755;
   let path = cli_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
   let context = Eio_context.snapshot_state () in

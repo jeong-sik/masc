@@ -94,10 +94,32 @@ Apple 부팅은 이미지의 entrypoint를 요청한 실행 파일로 덮어씁�
 거부하며, 교체를 허가하지 않습니다. 요청이 같은 guest는 plan label을 바꾸지 않고
 재사용할 수 있습니다.
 
+`microvm_guest_ownership_unverified`는 예상한 이름의 Apple guest에서 작업 공간,
+Keeper, 종류, 네트워크 또는 백엔드 라벨이 없거나 다르다는 뜻입니다. MASC는 해당
+guest를 보존하고 요청을 거부합니다. inspect 결과를 읽을 수 없을 때도 guest를
+보존합니다. 이 확인은 부팅 plan 라벨과 다릅니다. plan 라벨만 없거나 다른 경우에는
+다른 허용 조건을 모두 통과한 뒤 교체될 수 있지만, 소유 범위 라벨이 없으면 거부합니다.
+
+운영자는 전체 목록과 MASC가 보고한 정확한 guest 이름을 변경 없이 확인할 수 있습니다.
+
+```sh
+container list --all --format json
+container inspect "$guest_name"  # 먼저 확인된 정확한 이름을 guest_name에 넣으세요
+```
+
+guest의 상태와 `masc.mcp.component`, `masc.mcp.base_path_hash`,
+`masc.mcp.keeper`, `masc.mcp.kind`, `masc.mcp.network`,
+`masc.mcp.microvm_backend` 라벨을 실제 작업 공간과 Keeper 설정에 대조하세요.
+해시와 라벨은 관측값이며 소유권 증명이나 조회 이후 교체를 막는 장치가 아닙니다.
+inspect 출력에는 환경 변수와 마운트 정보가 들어갈 수 있으므로 관련 소유자가 허용한
+범위에서만 공유하세요. 독립 근거로 소유자를 확인할 수 없다면 guest와 볼륨을 보존하고,
+경고를 없애기 위해 라벨을 바꾸거나 삭제·재시작하지 마세요.
+
 공유 exec shim 설정은 endpoint를 받기 전에 초기화합니다. 설치가 없거나 잘못되면
 오류를 표시합니다. 시작 시 초기화가 실패했다면 설치를 수리한 뒤 서버를 재시작하세요.
-외부 파일 읽기는 마운트된 인증 사본과 shim을 검증하며 VM 시작이나 빌드 삭제를 하지
-않습니다. 서버 프로세스의 첫 소유 턴 접속은 보존 표시가 없는 실제 `_build`를 별도
+외부 파일 읽기는 호스트의 인증 사본과 shim을 검증하며 VM 시작이나 빌드 삭제를 하지
+않습니다. Apple에서는 guest의 범위 라벨도 확인하지만, 실제 마운트된 인증 inode를
+증명하거나 확인 이후 guest 교체를 막지는 않습니다. 서버 프로세스의 첫 소유 턴 접속은 보존 표시가 없는 실제 `_build`를 별도
 디렉토리로 옮긴 뒤 삭제합니다. `.masc-keep-build`가 있으면 해당 출력을 보존합니다.
 
 #### 빌드 준비가 실패를 보고할 때

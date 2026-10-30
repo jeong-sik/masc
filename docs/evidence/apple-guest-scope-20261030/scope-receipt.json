@@ -1,0 +1,10 @@
+{
+  "scope": "actual scope/stop/preflight functions compiled against fake labels, names, provider, errors and effects; no repository runtime or VM",
+  "source_sha256": "b327c4d7251d8bcd00b4a098280889390588f4cca46f283a3217f64add663291",
+  "program_sha256": "675dc1a1303a2918a07c05384747be8e36945f0e4ab5333d47ca609533a31d53",
+  "compile_exit": 0,
+  "compile_stderr": "",
+  "run_exit": 0,
+  "stdout": "PASS matching labels accepted\nPASS missing base refused\nPASS different base refused\nPASS missing keeper refused\nPASS different keeper refused\nPASS missing kind refused\nPASS different kind refused\nPASS missing network refused\nPASS different network refused\nPASS missing component refused\nPASS different component refused\nPASS missing backend refused\nPASS different backend refused\nPASS unreadable refused\nPASS absent observation accepted\nPASS owned stopped accepted\nPASS owned running accepted\nPASS foreign stopped refused\nPASS foreign running refused\nPASS absent stop has no effect\nPASS foreign stop has no effect\nPASS all-mode preflight refuses foreign guest before effects\nPASS all-mode preflight accepts owned or absent\nPASS stop rechecks after preflight\nPASS owned stop attempts effect\nPASS stub reads receive requested timeout\n",
+  "stderr": ""
+}

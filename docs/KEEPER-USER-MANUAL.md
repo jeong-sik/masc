@@ -101,10 +101,36 @@ exact platform, and the actual command must match the requested command.
 Missing or ambiguous image metadata refuses reuse; it never authorizes guest
 replacement. An unchanged guest can keep its plan label.
 
+`microvm_guest_ownership_unverified` means that an Apple guest at the expected
+name has missing or different workspace, Keeper, kind, network or backend
+labels. MASC preserves it and refuses the affected operation. An unreadable
+inspect also preserves the guest. This scope check is separate from the boot
+plan label: a missing or different plan label can lead to replacement only
+after the other admission checks succeed; missing ownership labels refuse it.
+
+An operator can read the complete inventory and inspect the exact guest name
+reported by MASC without changing it:
+
+```sh
+container list --all --format json
+container inspect "$guest_name"  # set guest_name to the exact observed name first
+```
+
+Compare the guest state and `masc.mcp.component`, `masc.mcp.base_path_hash`,
+`masc.mcp.keeper`, `masc.mcp.kind`, `masc.mcp.network` and
+`masc.mcp.microvm_backend` labels with the effective workspace and Keeper
+configuration. The hash and labels are observations, not proof of an owner or
+a guard against replacement after inspection. Inspect output can contain
+environment and mount details; share it only with affected owners. If
+independent evidence does not establish ownership, preserve the guest and its
+volumes; do not relabel, remove or restart it merely to clear the warning.
+
 The shared exec shim configuration is initialized before endpoint admission.
 A missing or invalid installation is reported; repair it and restart the server
-if startup initialization failed. Attached file reads validate the mounted
-identity and shim without starting a guest or cleaning build output. The first
+if startup initialization failed. Attached file reads validate the host-side
+identity snapshot and shim without starting a guest or cleaning build output.
+For Apple they also inspect the guest's scope labels, but this does not prove
+which identity inode the guest mounted or fence a later replacement. The first
 owned turn handoff per server process stages unkept real `_build` directories
 before deleting them. `.masc-keep-build` preserves a checkout's output.
 

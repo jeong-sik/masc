@@ -493,15 +493,7 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
        lifetime has no playground to inspect — absence, not a failure. *)
     Error (Keeper_playground_checkouts.Root_missing { root })
   else
-    match (match read_authority with
-      | None -> Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta ()
-      | Some authority -> Keeper_sandbox_remote_lane.read_authority_endpoint authority ~config ~meta) with
-    | Error err ->
-      (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~config ~meta () with
-       | Some _ -> Error (Keeper_playground_checkouts.Root_missing { root })
-       | None ->
-         Error (Keeper_playground_checkouts.Root_unreadable { root; detail = err }))
-    | Ok endpoint ->
+    let execute endpoint =
       let root = Keeper_sandbox_remote.workspace_root endpoint in
       let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
       let catalog_arg = catalog_to_json_arg catalog in
@@ -534,13 +526,25 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
           ~env:[||]
           ~cwd:(Some root)
       in
+      Ok (root, outcome)
+    in
+    let dispatched = match read_authority with
+      | None -> Result.bind (Keeper_sandbox_remote_lane.attached_guest_endpoint ~timeout_sec ~config ~meta ()) execute
+      | Some authority ->
+        Keeper_sandbox_remote_lane.with_read_authority_endpoint ~timeout_sec authority ~config ~meta execute in
+    match dispatched with
+    | Error err ->
+      (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~timeout_sec ~config ~meta () with
+       | Some _ -> Error (Keeper_playground_checkouts.Root_missing { root })
+       | None ->
+         Error (Keeper_playground_checkouts.Root_unreadable { root; detail = err }))
+    | Ok (root, outcome) ->
       match outcome with
       | Masc_exec.Sandbox_target.Transport_failed { reason; _ } -> (
         (* A guest that has gone away is absence, the same answer the exit
            arms give it, and the booted flag has to be dropped either way. *)
-        match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~config ~meta () with
+        match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~timeout_sec ~config ~meta () with
         | Some _ ->
-          Keeper_turn_sandbox_runtime.forget_microvm_guest_booted ~config ~meta ();
           Error (Keeper_playground_checkouts.Root_missing { root })
         | None ->
           Error (Keeper_playground_checkouts.Root_probe_unreachable { root; reason }))
@@ -552,9 +556,8 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
          | Error err ->
            Error (Keeper_playground_checkouts.Root_unreadable { root; detail = err }))
       | Unix.WEXITED code ->
-        (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~config ~meta () with
+        (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~timeout_sec ~config ~meta () with
          | Some _ ->
-           Keeper_turn_sandbox_runtime.forget_microvm_guest_booted ~config ~meta ();
            Error (Keeper_playground_checkouts.Root_missing { root })
          | None ->
            let detail =
@@ -562,9 +565,8 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
            in
            Error (Keeper_playground_checkouts.Root_unreadable { root; detail }))
       | Unix.WSIGNALED signal ->
-        (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~config ~meta () with
+        (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~timeout_sec ~config ~meta () with
          | Some _ ->
-           Keeper_turn_sandbox_runtime.forget_microvm_guest_booted ~config ~meta ();
            Error (Keeper_playground_checkouts.Root_missing { root })
          | None ->
            let detail =

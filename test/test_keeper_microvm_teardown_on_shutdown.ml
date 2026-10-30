@@ -68,11 +68,21 @@ esac
          (List.mem "list --all --format json" calls);
        List.iter (fun network_mode ->
          let guest = Runtime.For_testing_microvm.microvm_container_name ~config ~keeper_name ~network_mode in
-         Alcotest.(check bool) ("actual stop reached " ^ guest) true
-           (List.mem ("stop " ^ guest) calls);
-         Alcotest.(check bool) ("actual delete reached " ^ guest) true
-           (List.mem ("delete --force " ^ guest) calls))
+         Alcotest.(check bool) ("actual inspect reached " ^ guest) true
+           (List.mem ("inspect " ^ guest) calls))
          Keeper_types_profile_sandbox.all_network_modes;
+       let rec unanswered_inspects_have_inventory = function
+         | inspect :: inventory :: rest when String.starts_with ~prefix:"inspect " inspect ->
+           String.equal inventory "list --all --format json"
+           && unanswered_inspects_have_inventory (inventory :: rest)
+         | [inspect] when String.starts_with ~prefix:"inspect " inspect -> false
+         | _ :: rest -> unanswered_inspects_have_inventory rest
+         | [] -> true in
+       Alcotest.(check bool) "a complete inventory immediately follows each unanswered inspect" true
+         (unanswered_inspects_have_inventory calls);
+       Alcotest.(check bool) "confirmed absent guests are not stopped or deleted" false
+         (List.exists (fun call -> String.starts_with ~prefix:"stop " call
+           || String.starts_with ~prefix:"delete " call) calls);
        Out_channel.with_open_bin calls_path (fun _ -> ());
        let remove_volumes () = Runtime.remove_keeper_volumes_by_name ~timeout_sec:30.
            ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm

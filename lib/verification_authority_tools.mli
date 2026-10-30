@@ -45,10 +45,15 @@ val task_review_tools : task_review -> t
 val task_review_subject : task_review -> Workspace_verification_store.request_header
 val validate_task_review : task_review -> (unit, string) result
 val task_review_lookup : task_review -> Task.Anti_rationalization.lookup_surface
-(** Recheck route configuration before execution and each lookup. Actual file
-    containment and endpoint dispatch remain owned by the existing backend,
+(** Recheck route configuration before execution and each lookup. Apple route
+    admission observes the host-side snapshot without inspecting the guest.
+    Each guest lookup rechecks scope labels and the process-local captured
+    snapshot revision and route before use. Actual file containment and
+    endpoint dispatch remain owned by the existing backend,
     using the same captured endpoint for path translation, Read, Grep, media
-    and layout. Configuration changes cannot redirect an admitted lookup. *)
+    and layout. Configuration changes cannot redirect an admitted lookup.
+    Apple inspection proves neither the guest's mounted inode nor a fence
+    against replacement before subsequent use. *)
 
 (** {1 Goal proof authority}
 

@@ -401,7 +401,7 @@ let remove_snapshot_fixture base =
   Fs_compat.remove_tree base
 ;;
 
-let with_fake_apple_inventory ~base use =
+let with_fake_apple_inventory ?(on_inspect = ":") ~base use =
   let bin = Filename.concat base "bin" in
   Unix.mkdir bin 0o700;
   let listing = Filename.concat base "inventory.json" in
@@ -414,14 +414,34 @@ let with_fake_apple_inventory ~base use =
 printf '%%s\n' "$*" >> %s
 case "$*" in
   "list --all --format json") /bin/cat %s ;;
+  "inspect "*) %s; if [ -f %s ]; then /bin/cat %s; else exit 99; fi ;;
   *) exit 99 ;;
 esac
-|} (Filename.quote calls) (Filename.quote listing));
+|} (Filename.quote calls) (Filename.quote listing) on_inspect
+    (Filename.quote (Filename.concat base "guest-inspect.json"))
+    (Filename.quote (Filename.concat base "guest-inspect.json")));
   Unix.chmod cli 0o700;
   let previous = Sys.getenv "PATH" in
   Unix.putenv "PATH" (bin ^ ":" ^ previous);
   Fun.protect ~finally:(fun () -> Unix.putenv "PATH" previous)
     (fun () -> use ~listing ~calls)
+;;
+
+let fake_apple_guest_inspect ~container_name ~labels =
+  `List [`Assoc
+    ["id", `String container_name; "status", `Assoc ["state", `String "running"];
+     "configuration", `Assoc
+       ["id", `String container_name;
+        "image", `Assoc ["reference", `String "fixture:image";
+          "descriptor", `Assoc ["digest", `String ("sha256:" ^ String.make 64 'a')]];
+        "platform", `Assoc ["architecture", `String "arm64"; "os", `String "linux"];
+        "resources", `Assoc ["cpus", `Int 1; "memoryInBytes", `Int 1048576];
+        "initProcess", `Assoc ["user", `Assoc ["raw", `Assoc ["userString", `String "0:0"]];
+          "workingDirectory", `String "/masc-work"; "executable", `String "tail";
+          "arguments", `List [`String "-f"; `String "/dev/null"]; "environment", `List []];
+        "mounts", `List []; "readOnly", `Bool true; "capDrop", `List [];
+        "capAdd", `List []; "networks", `List [];
+        "labels", `Assoc (List.map (fun (key, value) -> key, `String value) labels)]]]
 ;;
 
 let initialize_fixture_shim ~base =
@@ -1391,6 +1411,108 @@ let test_runtime_sweep_preserves_declared_guest () =
   List.iter (fun (_, (outcome : M.sweep_outcome)) ->
     Alcotest.(check (list string)) "declared guest survives its dead owner" [] outcome.removed;
     Alcotest.(check int) "no sweep failure" 0 (List.length outcome.failed)) outcomes
+;;
+
+let test_runtime_sweep_rechecks_guest_owner () =
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  let base = temp_dir "microvm-owner-sweep-" in
+  let old_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.putenv "MASC_CONFIG_DIR" (Filename.concat base "config");
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    (match old_config with Some value -> Unix.putenv "MASC_CONFIG_DIR" value | None -> Unix.unsetenv "MASC_CONFIG_DIR");
+    remove_snapshot_fixture base)
+  @@ fun () ->
+  Unix.mkdir (Filename.concat base "config") 0o700;
+  Unix.mkdir (Config_dir_resolver.keepers_dir_for_base_path ~base_path:base) 0o700;
+  with_fake_apple_inventory ~base @@ fun ~listing ~calls ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let keeper = "removed-keeper" in
+  let name = Masc.Keeper_sandbox_container_name.make
+      (Masc.Keeper_sandbox_container_name.Micro_vm_persistent
+         {base_path=base; keeper_name=keeper; network_mode=Profile.Network_none})
+    |> Masc.Keeper_sandbox_container_name.to_string in
+  Out_channel.with_open_bin listing (fun out -> output_string out
+    (Yojson.Safe.to_string (`List [entry ~base_path:base ~keeper name])));
+  let labels = Masc.Keeper_sandbox_runtime_setup.stable_labels ~base_path:base ~keeper_name:keeper
+      ~container_kind:M.keeper_vm_container_kind ~network_label:"none"
+    @ [M.microvm_backend_label_key, Backend.to_string Backend.Apple_container] in
+  let key = Masc.Keeper_sandbox_runtime_setup.sandbox_base_path_hash_label_key in
+  let labels = (key, "foreign-workspace") :: List.remove_assoc key labels in
+  Out_channel.with_open_bin (Filename.concat base "guest-inspect.json") (fun out ->
+    output_string out (Yojson.Safe.to_string (fake_apple_guest_inspect ~container_name:name ~labels)));
+  let outcomes = Masc.Keeper_turn_sandbox_runtime.sweep_abandoned_microvm_guests
+      ~base_path:base ~command_available:(String.equal "container") ~timeout_sec:5.
+      ~is_pid_alive ~run_argv:(fun ~timeout_sec:_ _ ->
+        Alcotest.fail "Apple sweep must use the canonical complete-output transport") in
+  let commands = Fs_compat.load_file calls |> String.split_on_char '\n'
+      |> List.filter (fun line -> line <> "") in
+  Alcotest.(check bool) "the candidate is inspected again" true
+    (List.mem ("inspect " ^ name) commands);
+  Alcotest.(check bool) "the foreign guest is never deleted" true
+    (List.for_all (fun command -> not (String.starts_with ~prefix:"delete " command)) commands);
+  List.iter (fun (_, (outcome : M.sweep_outcome)) ->
+    Alcotest.(check (list string)) "no guest is removed" [] outcome.removed;
+    Alcotest.(check int) "the ownership failure is reported" 1 (List.length outcome.failed)) outcomes
+;;
+
+let test_runtime_sweep_rechecks_roster_after_inspect () =
+  List.iter (fun remove_roster ->
+  with_eio_fs @@ fun () ->
+  let context = Eio_context.snapshot_state () in
+  let base = temp_dir "microvm-roster-sweep-" in
+  let old_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Unix.putenv "MASC_CONFIG_DIR" (Filename.concat base "config");
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    (match old_config with Some value -> Unix.putenv "MASC_CONFIG_DIR" value | None -> Unix.unsetenv "MASC_CONFIG_DIR");
+    remove_snapshot_fixture base)
+  @@ fun () ->
+  Unix.mkdir (Filename.concat base "config") 0o700;
+  let roster = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  Unix.mkdir roster 0o700;
+  let declaration_source = Filename.concat base "new-declaration" in
+  Out_channel.with_open_bin declaration_source (fun out ->
+    output_string out "[keeper]\nname = \"removed-keeper\"\nsandbox_profile = \"microvm\"\nsandbox_image = \"base\"\nmicrovm_backend = \"apple_container\"\nnetwork_mode = \"none\"\n");
+  let destination = Filename.concat roster "new.toml" in
+  let on_inspect = if remove_roster then Printf.sprintf "/bin/rmdir %s" (Filename.quote roster)
+    else Printf.sprintf "/bin/cp %s %s"
+      (Filename.quote declaration_source) (Filename.quote destination) in
+  with_fake_apple_inventory ~on_inspect ~base @@ fun ~listing ~calls ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.set_switch sw;
+  let keeper = "removed-keeper" in
+  let name = Masc.Keeper_sandbox_container_name.make
+      (Masc.Keeper_sandbox_container_name.Micro_vm_persistent
+         {base_path=base; keeper_name=keeper; network_mode=Profile.Network_none})
+    |> Masc.Keeper_sandbox_container_name.to_string in
+  Out_channel.with_open_bin listing (fun out -> output_string out
+    (Yojson.Safe.to_string (`List [entry ~base_path:base ~keeper name])));
+  let labels = Masc.Keeper_sandbox_runtime_setup.stable_labels ~base_path:base ~keeper_name:keeper
+      ~container_kind:M.keeper_vm_container_kind ~network_label:"none"
+    @ [M.microvm_backend_label_key, Backend.to_string Backend.Apple_container] in
+  Out_channel.with_open_bin (Filename.concat base "guest-inspect.json") (fun out ->
+    output_string out (Yojson.Safe.to_string (fake_apple_guest_inspect ~container_name:name ~labels)));
+  let outcomes = Masc.Keeper_turn_sandbox_runtime.sweep_abandoned_microvm_guests
+      ~base_path:base ~command_available:(String.equal "container") ~timeout_sec:5.
+      ~is_pid_alive ~run_argv:(fun ~timeout_sec:_ _ ->
+        Alcotest.fail "Apple sweep must use the canonical complete-output transport") in
+  let commands = Fs_compat.load_file calls |> String.split_on_char '\n'
+      |> List.filter (fun line -> line <> "") in
+  Alcotest.(check bool) "inspect changed or removed the roster" true
+    (if remove_roster then not (Sys.file_exists roster) else Sys.file_exists destination);
+  Alcotest.(check bool) "candidate was inspected" true (List.mem ("inspect " ^ name) commands);
+  Alcotest.(check bool) "changed roster prevents delete" true
+    (List.for_all (fun command -> not (String.starts_with ~prefix:"delete " command)) commands);
+  match outcomes with
+  | [_, (outcome : M.sweep_outcome)] ->
+    Alcotest.(check (list string)) "no guest was removed" [] outcome.removed;
+    Alcotest.(check (list (pair string string))) "roster change is reported"
+      [name, (if remove_roster then "keeper declaration filesystem unavailable"
+        else "keeper declaration roster changed during observation")] outcome.failed
+  | _ -> Alcotest.fail "expected one Apple sweep outcome") [false; true]
 ;;
 
 let test_sweep_exception_does_not_poison_lifecycle raise_error =
@@ -2940,6 +3062,9 @@ esac
   Eio.Switch.run @@ fun sw ->
   Eio_context.set_switch sw;
   let config = Masc.Workspace.default_config dir in
+  let guests = List.map (fun network_mode ->
+    Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.microvm_container_name
+      ~config ~keeper_name ~network_mode) Profile.all_network_modes in
   let teardown () =
     Masc.Keeper_turn_sandbox_runtime.teardown_keeper_sandbox_by_name
       ~timeout_sec:5. ~config ~keeper_name ~backend:Masc.Keeper_sandbox.Micro_vm
@@ -2956,23 +3081,36 @@ esac
      | Ok () -> Alcotest.fail "a present helper was reported absent");
     Alcotest.(check bool) "unowned helper is preserved" true (Sys.file_exists marker);
     let calls = In_channel.with_open_bin log In_channel.input_all |> String.split_on_char '\n' in
-    Alcotest.(check bool) "teardown never deletes this helper" false
-      (List.mem ("delete --force " ^ name) calls)) [ trim; repair ];
+    Alcotest.(check bool) "teardown reads complete inventory" true
+      (List.mem "list --all --format json" calls);
+    List.iter (fun guest -> Alcotest.(check bool) ("inspect " ^ guest) true
+      (List.mem ("inspect " ^ guest) calls)) guests;
+    Alcotest.(check bool) "neither absent guests nor helper receive effects" false
+      (List.exists (fun call -> String.starts_with ~prefix:"stop " call
+        || String.starts_with ~prefix:"delete " call) calls)) [ trim; repair ];
   Out_channel.with_open_bin marker (fun out -> output_string out "[{}]");
+  Out_channel.with_open_bin log (fun _ -> ());
   (match teardown () with
    | Error detail ->
      Alcotest.(check bool) "malformed inventory also leaves guest teardown unknown" true
-       (Astring.String.is_infix ~affix:"microvm_teardown_failed" detail)
+       (Astring.String.is_infix ~affix:"full guest inventory could not be read" detail)
    | Ok () -> Alcotest.fail "malformed helper inventory was accepted");
+  let malformed_calls = In_channel.with_open_bin log In_channel.input_all |> String.split_on_char '\n' in
+  Alcotest.(check bool) "malformed inventory was read during guest preflight" true
+    (List.mem "list --all --format json" malformed_calls
+     && List.exists (String.starts_with ~prefix:"inspect ") malformed_calls);
+  Alcotest.(check bool) "malformed inventory prevents all guest and helper effects" false
+    (List.exists (fun call -> String.starts_with ~prefix:"stop " call
+      || String.starts_with ~prefix:"delete " call) malformed_calls);
+  Alcotest.(check bool) "malformed inventory fixture is preserved" true (Sys.file_exists marker);
   Sys.remove marker;
   (match teardown () with
    | Ok () -> ()
    | Error detail -> Alcotest.failf "absent helpers refused teardown: %s" detail)
 ;;
 
-(* An unowned helper must not spare ordinary guests: every guest name is
-   attempted, and the helper uncertainty surfaces only if guest removal
-   succeeds. A guest that refuses deletion remains in the inventory. *)
+(* An unowned helper must not spare owned guests, while an unverified guest
+   blocks the whole preflight before any guest or helper effect. *)
 let test_teardown_removes_guests_despite_unowned_helper () =
   with_eio_fs @@ fun () ->
   let module Turn = Masc.Keeper_turn_sandbox_runtime in
@@ -2981,19 +3119,29 @@ let test_teardown_removes_guests_despite_unowned_helper () =
   let cli = Filename.concat dir "container" in
   let log = Filename.concat dir "calls" in
   let stuck = Filename.concat dir "guest-stuck" in
+  let guest_dir = Filename.concat dir "guests" in
+  Unix.mkdir guest_dir 0o700;
   let keeper_name = "trim-teardown-sweep" in
   let config = Masc.Workspace.default_config dir in
-  let guests =
-    List.map
-      (fun network_mode ->
-         Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name ~network_mode)
-      Profile.all_network_modes
-  in
-  let stuck_guest =
-    match guests with
-    | first :: _ -> first
-    | [] -> Alcotest.fail "all_network_modes names no guest"
-  in
+  let guests = List.map (fun mode -> mode,
+    Turn.For_testing_microvm.microvm_container_name ~config ~keeper_name ~network_mode:mode)
+    Profile.all_network_modes in
+  let first, second = match guests with
+    | first :: second :: _ -> first, second
+    | _ -> Alcotest.fail "fixture needs at least two network modes" in
+  let stuck_guest = snd first in
+  let path guest = Filename.concat guest_dir (guest ^ ".json") in
+  let write_guest (network_mode, guest) ~base_path ~state =
+    let labels = Masc.Keeper_sandbox_runtime_setup.stable_labels ~base_path ~keeper_name
+      ~container_kind:M.keeper_vm_container_kind
+      ~network_label:(Profile.network_mode_to_string network_mode)
+      @ [M.microvm_backend_label_key, Backend.to_string Backend.Apple_container] in
+    let inspect = match fake_apple_guest_inspect ~container_name:guest ~labels with
+      | `List [`Assoc fields] -> `List [`Assoc
+          (("status", `Assoc ["state", `String state]) :: List.remove_assoc "status" fields)]
+      | _ -> Alcotest.fail "fixture inspect shape" in
+    Out_channel.with_open_bin (path guest) (fun out ->
+      output_string out (Yojson.Safe.to_string inspect)) in
   let trim = M.work_volume_trim_name ~keeper_name in
   let previous_path = Sys.getenv "PATH" in
   let oc = open_out cli in
@@ -3002,21 +3150,27 @@ log=%s
 trim=%s
 stuck_guest=%s
 stuck=%s
+guest_dir=%s
 printf '%%s\n' "$*" >> "$log"
 case "$*" in
   "list --all --format json")
-    if [ -e "$stuck" ]; then
-      printf '[{"id":"%%s"},{"id":"%%s"}]\n' "$trim" "$stuck_guest"
-    else
-      printf '[{"id":"%%s"}]\n' "$trim"
-    fi ;;
-  "inspect $stuck_guest")
-    if [ -e "$stuck" ]; then printf '[{"status":{"state":"running"}}]\n'; exit 0; else exit 1; fi ;;
-  inspect\ *) exit 1 ;;
-  stop\ *|delete\ --force\ *) exit 0 ;;
+    printf '[{"id":"%%s"}' "$trim"
+    for file in "$guest_dir"/*.json; do
+      [ -f "$file" ] || continue
+      name=${file##*/}; name=${name%%.json}
+      printf ',{"id":"%%s"}' "$name"
+    done
+    printf ']\n' ;;
+  inspect\ *)
+    if [ -f "$guest_dir/$2.json" ]; then /bin/cat "$guest_dir/$2.json"; else exit 1; fi ;;
+  stop\ *) exit 0 ;;
+  delete\ --force\ *)
+    if [ "$3" = "$stuck_guest" ] && [ -e "$stuck" ]; then exit 0; fi
+    /bin/rm -f "$guest_dir/$3.json" ;;
   *) exit 99 ;;
 esac
-|} (Filename.quote log) (Filename.quote trim) (Filename.quote stuck_guest) (Filename.quote stuck);
+|} (Filename.quote log) (Filename.quote trim) (Filename.quote stuck_guest)
+    (Filename.quote stuck) (Filename.quote guest_dir);
   close_out oc;
   Unix.chmod cli 0o755;
   Unix.putenv "PATH" (dir ^ ":" ^ previous_path);
@@ -3040,21 +3194,65 @@ esac
   let attempted lines name =
     List.mem ("stop " ^ name) lines && List.mem ("delete --force " ^ name) lines
   in
-  (* The helper remains, guests removable: every guest is attempted and the
-     helper uncertainty is the result. *)
+  let other_base = Filename.concat dir "other-workspace" in
+  Unix.mkdir other_base 0o700;
+  initialize_fixture_shim ~base:dir;
+  initialize_fixture_shim ~base:other_base;
+  let verify base_path backend = Masc.Keeper_microvm_shim_readiness.verify
+      ~base_path ~backend ~guest_name:stuck_guest in
+  List.iter (fun base_path ->
+    Turn.For_testing_microvm.mark_microvm_work_root_ready
+      ~base_path ~backend:Backend.Apple_container ~container_name:stuck_guest;
+    match verify base_path Backend.Apple_container with
+    | Ok () -> ()
+    | Error error -> Alcotest.fail (Masc.Keeper_microvm_shim_readiness.error_message error))
+    [dir; other_base];
+  Turn.For_testing_microvm.mark_microvm_work_root_ready
+    ~base_path:dir ~backend:Backend.Nerdctl_kata ~container_name:stuck_guest;
+  (match verify dir Backend.Nerdctl_kata with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Masc.Keeper_microvm_shim_readiness.error_message error));
+  write_guest first ~base_path:dir ~state:"running";
+  write_guest second ~base_path:dir ~state:"stopped";
   (match teardown () with
    | Error detail ->
      Alcotest.(check bool) "helper uncertainty surfaces when guests are removed" true
        (Astring.String.is_infix ~affix:"microvm_volume_helper_ownership_unverified" detail)
      | Ok () -> Alcotest.fail "an unowned helper was reported absent");
   let first_calls = calls () in
-  List.iter
-    (fun guest ->
-       Alcotest.(check bool) ("teardown attempts " ^ guest) true
-         (attempted first_calls guest))
-    guests;
-  (* The first guest stuck running: the guest failure is reported, and the
-     names after it are still attempted. *)
+  List.iter (fun (_, guest) ->
+    Alcotest.(check bool) ("owned guest is stopped and deleted: " ^ guest) true
+      (attempted first_calls guest);
+    Alcotest.(check bool) "deleted guest is absent" false (Sys.file_exists (path guest)))
+    [first; second];
+  List.iter (fun (_, guest) ->
+    if guest <> snd first && guest <> snd second then (
+      Alcotest.(check bool) ("absent guest inspected: " ^ guest) true
+        (List.mem ("inspect " ^ guest) first_calls);
+      Alcotest.(check bool) "absent guest is never stopped" false
+        (List.mem ("stop " ^ guest) first_calls);
+      Alcotest.(check bool) "absent guest is never deleted" false
+        (List.mem ("delete --force " ^ guest) first_calls))) guests;
+  Alcotest.(check bool) "unowned helper is not deleted" false
+    (List.mem ("delete --force " ^ trim) first_calls);
+  List.iter (fun base_path ->
+    Alcotest.(check bool) "deletion clears every colliding Apple work root" false
+      (Turn.For_testing_microvm.microvm_work_root_ready
+        ~base_path ~backend:Backend.Apple_container ~container_name:stuck_guest);
+    let binary = Filename.concat (Config_dir_resolver.microvm_shim_dir ~base_path) M.shim_binary_name in
+    Unix.chmod binary 0o600;
+    Alcotest.(check bool) "deletion clears every colliding Apple shim" true
+      (Result.is_error (verify base_path Backend.Apple_container));
+    Unix.chmod binary 0o700) [dir; other_base];
+  Alcotest.(check bool) "deletion preserves same-name Kata work root" true
+    (Turn.For_testing_microvm.microvm_work_root_ready
+      ~base_path:dir ~backend:Backend.Nerdctl_kata ~container_name:stuck_guest);
+  let binary = Filename.concat (Config_dir_resolver.microvm_shim_dir ~base_path:dir) M.shim_binary_name in
+  Unix.chmod binary 0o600;
+  Alcotest.(check bool) "deletion preserves same-name Kata shim" true
+    (Result.is_ok (verify dir Backend.Nerdctl_kata));
+  Unix.chmod binary 0o700;
+  write_guest first ~base_path:dir ~state:"running";
   close_out (open_out stuck);
   close_out (open_out log);
   (match teardown () with
@@ -3067,11 +3265,43 @@ esac
   let second_calls = calls () in
   Alcotest.(check bool) "teardown requested full inventory before reporting presence" true
     (List.mem "list --all --format json" second_calls);
-  List.iter
-    (fun guest ->
-       Alcotest.(check bool) ("teardown still attempts " ^ guest) true
-         (attempted second_calls guest))
-    guests
+  Alcotest.(check bool) "owned stuck guest is actually stopped and deleted" true
+    (attempted second_calls stuck_guest);
+  List.iter (fun (_, guest) ->
+    if guest <> stuck_guest then (
+      Alcotest.(check bool) ("other mode inspected: " ^ guest) true
+        (List.mem ("inspect " ^ guest) second_calls);
+      Alcotest.(check bool) "absent mode has no stop or delete" false
+        (List.mem ("stop " ^ guest) second_calls || List.mem ("delete --force " ^ guest) second_calls))) guests;
+  Sys.remove stuck;
+  Sys.remove (path stuck_guest);
+  List.iter (fun (kind, make_bad, prefix) ->
+    write_guest first ~base_path:dir ~state:"running";
+    make_bad ();
+    let first_bytes = In_channel.with_open_bin (path (snd first)) In_channel.input_all in
+    let bad_bytes = In_channel.with_open_bin (path (snd second)) In_channel.input_all in
+    close_out (open_out log);
+    (match teardown () with
+     | Error detail -> Alcotest.(check bool) (kind ^ " refusal") true
+         (Astring.String.is_infix ~affix:prefix detail)
+     | Ok () -> Alcotest.failf "%s guest was accepted" kind);
+    let observed = calls () in
+    Alcotest.(check bool) (kind ^ " guest was inspected") true
+      (List.mem ("inspect " ^ snd second) observed);
+    Alcotest.(check bool) (kind ^ " preflight has no stop or delete") false
+      (List.exists (fun call -> String.starts_with ~prefix:"stop " call
+        || String.starts_with ~prefix:"delete " call) observed);
+    Alcotest.(check string) "owned guest bytes survive preflight refusal" first_bytes
+      (In_channel.with_open_bin (path (snd first)) In_channel.input_all);
+    Alcotest.(check string) (kind ^ " guest bytes survive") bad_bytes
+      (In_channel.with_open_bin (path (snd second)) In_channel.input_all);
+    Sys.remove (path (snd first)); Sys.remove (path (snd second)))
+    [ "foreign", (fun () -> write_guest second ~base_path:(dir ^ "-foreign") ~state:"running"),
+        "microvm_guest_ownership_unverified";
+      "malformed", (fun () -> Out_channel.with_open_bin (path (snd second))
+        (fun out -> output_string out (Yojson.Safe.to_string
+          (`List [`Assoc ["id", `String (snd second); "status", `Assoc ["state", `String "running"]]])))),
+        "container inspect: invalid or missing configuration" ]
 ;;
 
 (* Drive the real boot entrypoint on the process-bound Nerdctl lane while
@@ -3710,6 +3940,12 @@ let test_running_guest_is_a_remote_endpoint () =
   let snapshot_path = Masc.Keeper_microvm_github_identity.path snapshot in
   let container_name = Masc.Keeper_turn_sandbox_runtime.For_testing_microvm.microvm_container_name
       ~config ~keeper_name:meta.name ~network_mode:meta.network_mode in
+  let labels = Masc.Keeper_sandbox_runtime_setup.stable_labels ~base_path:base ~keeper_name:meta.name
+      ~container_kind:M.keeper_vm_container_kind ~network_label:"none"
+    @ [ M.microvm_backend_label_key, Backend.to_string Backend.Apple_container ] in
+  let inspect = fake_apple_guest_inspect ~container_name ~labels in
+  Out_channel.with_open_bin (Filename.concat base "guest-inspect.json") (fun output ->
+    output_string output (Yojson.Safe.to_string inspect));
   let runtime =
     Masc.Keeper_turn_sandbox_runtime.For_testing.create_minimal
       ~config ~meta ~state:(Running { container_name })
@@ -4252,6 +4488,39 @@ let test_live_a_moved_proxy_port_replaces_the_guest () =
       "which means it was replaced, not adopted"
       true
       (not (String.equal first after))
+let test_colliding_guest_names_keep_readiness_scoped () =
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let base_a = "/synthetic-workspaces/workspace-36434" in
+  let base_b = "/synthetic-workspaces/workspace-83774" in
+  let config_a = Masc.Workspace.default_config base_a in
+  let config_b = Masc.Workspace.default_config base_b in
+  let apple = microvm_meta ~name:"collision-test" in
+  let kata = {apple with microvm_backend = Some Backend.Nerdctl_kata} in
+  let name config = Turn.For_testing_microvm.microvm_container_name
+      ~config ~keeper_name:apple.name ~network_mode:apple.network_mode in
+  Alcotest.(check string) "the shortened names collide" (name config_a) (name config_b);
+  Alcotest.(check bool) "the full ownership hashes differ" true
+    (Runtime.base_path_hash base_a <> Runtime.base_path_hash base_b);
+  let ready config meta = Turn.is_microvm_guest_booted ~config ~meta () in
+  let mark config meta = Turn.For_testing_microvm.mark_microvm_guest_booted ~config ~meta () in
+  let forget config meta = Turn.forget_microvm_guest_booted ~config ~meta () in
+  Fun.protect ~finally:(fun () -> forget config_a apple; forget config_b apple; forget config_a kata)
+    (fun () ->
+      mark config_a apple;
+      Alcotest.(check bool) "first workspace is ready" true (ready config_a apple);
+      Alcotest.(check bool) "colliding workspace is not ready" false (ready config_b apple);
+      Alcotest.(check bool) "same-name Kata guest is not ready" false (ready config_a kata);
+      mark config_b apple;
+      mark config_a kata;
+      forget config_a apple;
+      Alcotest.(check bool) "first Apple key was forgotten" false (ready config_a apple);
+      Alcotest.(check bool) "colliding workspace is also forgotten" false (ready config_b apple);
+      Alcotest.(check bool) "Kata readiness is retained" true (ready config_a kata);
+      mark config_b apple;
+      Alcotest.(check bool) "re-admitted workspace becomes ready" true (ready config_b apple);
+      Alcotest.(check bool) "re-admission does not mark the first workspace" false (ready config_a apple))
+;;
+
 let test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan () =
   with_eio_fs @@ fun () ->
   let base = temp_dir "microvm_freshness_" in
@@ -4629,6 +4898,10 @@ let () =
             test_startup_maintenance_is_owned_by_its_switch
         ; Alcotest.test_case "runtime sweep preserves a declared guest with a dead owner" `Quick
             test_runtime_sweep_preserves_declared_guest
+        ; Alcotest.test_case "runtime sweep rechecks guest ownership" `Quick
+            test_runtime_sweep_rechecks_guest_owner
+        ; Alcotest.test_case "runtime sweep rechecks roster after inspect" `Quick
+            test_runtime_sweep_rechecks_roster_after_inspect
         ; Alcotest.test_case "skips listing when CLI is unavailable" `Quick
             test_sweep_skips_listing_when_cli_is_unavailable
         ] )
@@ -4671,6 +4944,8 @@ let () =
             test_inspect_state_parser
         ; Alcotest.test_case "unbooted microvm guest skips freshness scan" `Quick
             test_unbooted_microvm_guest_is_not_booted_and_skips_freshness_scan
+        ; Alcotest.test_case "colliding guest names keep readiness scoped" `Quick
+            test_colliding_guest_names_keep_readiness_scoped
         ; Alcotest.test_case "live guest cat (MASC_MICROVM_LIVE=1)" `Slow
             test_live_turn_runtime_cat
         ] )

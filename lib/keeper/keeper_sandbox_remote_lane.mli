@@ -7,20 +7,35 @@ type read_authority
 val capture_read_authority :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> unit ->
   (read_authority option, string) result
-(** [None] for a shared Docker tree. SSH captures the actual typed declaration;
-    MicroVM captures its already attached endpoint without booting it. *)
+(** [None] for a shared Docker tree. SSH captures the actual typed declaration.
+    Apple captures a route and host snapshot without observing the guest;
+    guest use must go through {!with_read_authority_endpoint}. Other MicroVMs
+    capture the attached endpoint without booting it. *)
 
-val read_authority_endpoint :
-  read_authority -> config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
-  (Keeper_sandbox_remote.t, string) result
-(** Check the owning workspace, Keeper and profile before returning the same
-    endpoint captured above. Reads no current endpoint configuration. *)
+val with_read_authority_endpoint :
+  ?timeout_sec:float -> read_authority -> config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  (Keeper_sandbox_remote.t -> ('a, string) result) -> ('a, string) result
+(** Use the captured endpoint within the callback. Check the owning
+    workspace, Keeper, profile and captured microVM backend/network. Apple
+    additionally checks observed ownership labels, the host-side credential
+    snapshot revision and the route under the process-local Keeper lifecycle
+    owner, then releases that owner before the callback. This does not prove
+    the observed guest's mounted inode. The timeout bounds the Apple inspect,
+    not the entire call. SSH keeps the captured endpoint without reading
+    current configuration. Any process may replace a guest between inspection
+    and use. *)
 
 val read_authority_identity : read_authority -> Yojson.Safe.t
+(** The existing durable projection. It does not bind the Apple host snapshot
+    revision; a reconstructed authority may have the same identity after that
+    revision changes. *)
 val read_authority_route : read_authority -> Yojson.Safe.t
 (** Configuration route of this same captured endpoint, in the Task review's
     route vocabulary. The host compares current configuration with this value;
     it must not recapture a different route after acquiring the endpoint. *)
+val apple_snapshot_route :
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> (Yojson.Safe.t, string) result
+(** Observe the host snapshot and route without observing or executing the guest. *)
 val read_authority_workspace_root : read_authority -> string
 val read_authority_declared_path : read_authority -> string -> string option
 val read_authority_declared_path_of_args :
@@ -55,6 +70,7 @@ val endpoint :
     ([docker_has_no_remote_lane]). *)
 
 val attached_guest_endpoint :
+  ?timeout_sec:float ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   unit ->

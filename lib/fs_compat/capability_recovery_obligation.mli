@@ -298,6 +298,15 @@ val open_registry
   -> registry_root:Eio.Fs.dir_ty Eio.Path.t
   -> (registry, transition_error) result
 
+(** Open an isolated registry below a durable 0700 namespace directory,
+    rejecting an observed symlink and checking the opened directory identity.
+    The namespace must be a single valid capability leaf. *)
+val open_namespaced_registry
+  :  sw:Eio.Switch.t
+  -> registry_root:Eio.Fs.dir_ty Eio.Path.t
+  -> namespace:string
+  -> (registry, transition_error) result
+
 type owner_discovery_row =
   | Discovered_owner of owner
   | Invalid_owner_name of string

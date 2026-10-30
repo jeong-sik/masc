@@ -716,6 +716,15 @@ module Publication_recovery : sig
     -> registry_root:Eio.Fs.dir_ty Eio.Path.t
     -> (registry, registry_error) result
 
+  (** An independent registry below a durable private namespace. An observed
+      symlink is rejected and the opened directory identity is checked. *)
+  val open_namespaced_registry
+    :  sw:Eio.Switch.t
+    -> fs:Eio.Fs.dir_ty Eio.Path.t
+    -> registry_root:Eio.Fs.dir_ty Eio.Path.t
+    -> namespace:string
+    -> (registry, registry_error) result
+
   val discover_owners
     :  registry
     -> (owner_discovery_row list, discovery_error) result
@@ -736,6 +745,11 @@ module Publication_recovery : sig
   val lane_open_error_to_string : lane_open_error -> string
   val lane_release_failure_to_string : lane_release_failure -> string
   val lane_open_error_category : lane_open_error -> lane_open_error_category
+
+  (** Path-free operational diagnostics for errors exposed outside the host. *)
+  val safe_registry_error : registry_error -> string
+  val safe_lane_open_error : lane_open_error -> string
+  val safe_lane_release_failure : lane_release_failure -> string
 end
 
 (** Build the immutable recovery locator projection used by replacement and

@@ -1098,11 +1098,16 @@ let microvm_shim_host_dir (t : t) =
   Config_dir_resolver.microvm_shim_dir ~base_path:t.config.base_path
 ;;
 
+let verify_microvm_shim ~base_path ~backend ~guest_name =
+  Result.bind (Keeper_microvm_shim_readiness.current_fs ()) (fun fs ->
+    Keeper_microvm_shim_readiness.verify ~fs ~base_path ~backend ~guest_name)
+;;
+
 (* Startup installs the shared config before endpoint admission. Every guest
    reaches the same once-per-process verification authority, including adoption
    and attached reads; provisioning does not rewrite the mounted config. *)
 let prepare_microvm_shim_dir (t : t) ~backend =
-  Keeper_microvm_shim_readiness.verify ~base_path:t.config.base_path ~backend
+  verify_microvm_shim ~base_path:t.config.base_path ~backend
     ~guest_name:(keeper_vm_name t)
   |> Result.map (fun () -> microvm_shim_host_dir t)
   |> Result.map_error Keeper_microvm_shim_readiness.error_message
@@ -2264,7 +2269,7 @@ let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
   let backend = Keeper_microvm_backend.Apple_container in
   let* () = ensure_apple_volume_helpers_absent ~keeper_name:t.meta.name ~timeout_sec
     |> Result.map_error (fun detail -> Adopted_guest_volume_unverified detail) in
-  let* () = Keeper_microvm_shim_readiness.verify ~base_path:t.config.base_path
+  let* () = verify_microvm_shim ~base_path:t.config.base_path
       ~backend ~guest_name:container_name
     |> Result.map_error (fun error -> Guest_provisions_unavailable
         (Keeper_microvm_shim_readiness.error_message error)) in
@@ -3056,7 +3061,7 @@ let apple_endpoint_of_snapshot_owned ~fs ~scope
            if require_ready && not (microvm_work_root_ready ~base_path:config.base_path ~backend ~container_name)
            then Error "microvm guest readiness changed; retry to prepare it before execution"
            else Ok ()) in
-    let* () = Keeper_microvm_shim_readiness.verify ~base_path:config.base_path
+    let* () = Keeper_microvm_shim_readiness.verify ~fs ~base_path:config.base_path
         ~backend ~guest_name:container_name
       |> Result.map_error Keeper_microvm_shim_readiness.error_message in
     let identity_environment = Keeper_microvm_github_identity.environment snapshot ~container_config_dir in
@@ -3077,7 +3082,7 @@ let microvm_remote_endpoint_of_running_fields
       ~container_masc_dir:(Keeper_sandbox_runtime_setup.container_masc_dir ~container_root)
       ~keeper_name:meta.name in
   let build identity_environment =
-    let* () = Keeper_microvm_shim_readiness.verify ~base_path:config.base_path
+    let* () = verify_microvm_shim ~base_path:config.base_path
         ~backend ~guest_name:container_name
       |> Result.map_error Keeper_microvm_shim_readiness.error_message in
     build_microvm_endpoint ~config ~meta ~container_root ~uid ~gid ~container_name ~identity_environment in

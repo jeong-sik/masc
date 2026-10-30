@@ -225,6 +225,13 @@ val open_registry
   -> registry_root:Eio.Fs.dir_ty Eio.Path.t
   -> (registry, Capability_recovery_obligation.transition_error) result
 
+val open_namespaced_registry
+  :  sw:Eio.Switch.t
+  -> fs:Eio.Fs.dir_ty Eio.Path.t
+  -> registry_root:Eio.Fs.dir_ty Eio.Path.t
+  -> namespace:string
+  -> (registry, Capability_recovery_obligation.transition_error) result
+
 (** Discover exact child names without inspecting any child. Discovery rows
     remain observational and never populate the exact-demand registry. Root
     discovery failure is retained as a typed degraded observation; it never

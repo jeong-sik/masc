@@ -450,7 +450,8 @@ let initialize_fixture_shim ~base =
   let binary = Filename.concat shim_dir M.shim_binary_name in
   Out_channel.with_open_bin binary (fun out -> output_string out "#!/bin/sh\nexit 0\n");
   Unix.chmod binary 0o700;
-  match Masc.Keeper_microvm_shim_readiness.initialize ~base_path:base ~payload_path:"/usr/bin:/bin" with
+  let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
+  match Masc.Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin" with
   | Ok () -> ()
   | Error error -> Alcotest.fail (Masc.Keeper_microvm_shim_readiness.error_message error)
 ;;
@@ -945,7 +946,8 @@ let install_shim ~base =
     output_string oc body;
     close_out oc;
     Unix.chmod target 0o755;
-    (match Masc.Keeper_microvm_shim_readiness.initialize ~base_path:base
+    let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
+    (match Masc.Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base
         ~payload_path:(Env_config_sandbox.Runtime.microvm_payload_path ()) with
      | Ok () -> ()
      | Error error -> Alcotest.fail (Masc.Keeper_microvm_shim_readiness.error_message error))
@@ -3198,8 +3200,9 @@ esac
   Unix.mkdir other_base 0o700;
   initialize_fixture_shim ~base:dir;
   initialize_fixture_shim ~base:other_base;
+  let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
   let verify base_path backend = Masc.Keeper_microvm_shim_readiness.verify
-      ~base_path ~backend ~guest_name:stuck_guest in
+      ~fs ~base_path ~backend ~guest_name:stuck_guest in
   List.iter (fun base_path ->
     Turn.For_testing_microvm.mark_microvm_work_root_ready
       ~base_path ~backend:Backend.Apple_container ~container_name:stuck_guest;
@@ -3522,7 +3525,8 @@ esac
     @@ fun () ->
     Eio.Switch.run @@ fun sw ->
     Eio_context.set_switch sw;
-    (match Masc.Keeper_microvm_shim_readiness.initialize ~base_path:base ~payload_path:"/usr/bin:/bin" with
+    let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
+    (match Masc.Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin" with
      | Ok () -> ()
      | Error error -> Alcotest.fail (Masc.Keeper_microvm_shim_readiness.error_message error));
     let config = Masc.Workspace.default_config base in

@@ -383,7 +383,7 @@ let describe record =
 
 let lines overlay =
   let header = ["Record grants · " ^ overlay.title;
-    "Fields checked only; the host requires an operator-owned declaration."; ""] in
+    "New grant fields checked only; the host requires an operator-owned declaration."; ""] in
   let rows =
     match overlay.form, overlay.records with
     | Some _, _ ->

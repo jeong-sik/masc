@@ -457,17 +457,18 @@ let test_native_seed_is_history_not_current_input_authority () =
     [None,false;Some (Core.Agent.Operator_repair_required Core.Agent.Effect_outcome_unknown),false;
      Some Core.Agent.Retire,true]
 (* A restart settles the execution and keeps its native receipt. A settled
-   execution never resumes, so neither a retired receipt nor one with an
-   unknown effect holds the selection back. *)
+   execution never resumes, so neither a retired receipt, even one whose seed
+   history conflicts, nor one with an unknown effect holds the selection back. *)
 let test_a_settled_native_receipt_does_not_block_selection () =
-  List.iter (fun recovery -> with_input_result ~pending:true
+  List.iter (fun (recovery, conflicting_seed) -> with_input_result ~pending:true
     ~before_close:(fun ~base_path ~store ~snapshot ->
-      native_input_fixture ~terminal:(Some recovery) ~conflicting_seed:false ~base_path ~store ~snapshot;
+      native_input_fixture ~terminal:(Some recovery) ~conflicting_seed ~base_path ~store ~snapshot;
       ignore (Store.settle_running_after_restart store ~now:4. |> store_ok))
     (fun ~base_path ~run_dir ~path:_ ~session_dir:_ ~canonical:_ ~metadata:_ ~snapshot:_ ~bundle:_ result ->
       let receipt = adopt run_dir (ok result) |> ok |> adopted in
       ignore (Journal.load_input_adoption ~base_path ~adoption_id:(Journal.input_adoption_id receipt) |> ok)))
-    [Core.Agent.Retire; Core.Agent.Operator_repair_required Core.Agent.Effect_outcome_unknown]
+    [Core.Agent.Retire, false; Core.Agent.Retire, true;
+     Core.Agent.Operator_repair_required Core.Agent.Effect_outcome_unknown, false]
 let test_native_adoption_rechecks_retained_evidence () =
   List.iter (fun edit -> with_input_result ~pending:true
     ~before_close:(native_input_fixture ~terminal:(Some Core.Agent.Retire) ~conflicting_seed:false)

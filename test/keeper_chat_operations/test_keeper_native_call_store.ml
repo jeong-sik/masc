@@ -624,6 +624,29 @@ let test_history_clear_guards_and_exact_commit () = with_store @@ fun path store
   Store.commit_history_clear_input_checkpoint reopened ~trace_id ~observed:(Some cleared)
     ~checkpoint:(Some (checkpoint 2)) |> ok |> input_updated
 
+(* With no operation running, an execution that has not settled still refuses
+   the clear: a call a restart left to resume, and a suspended continuation. *)
+let test_an_unsettled_execution_refuses_history_clear () =
+  let trace_id=(checkpoint 1).Keeper_checkpoint_ref.trace_id in
+  let refused label store =
+    rejected (label ^ " admitted the clear") (Store.history_clear_input_checkpoint store ~trace_id);
+    rejected (label ^ " published the clear") (Store.commit_history_clear_input_checkpoint store
+      ~trace_id ~observed:(Some (checkpoint 1)) ~checkpoint:(Some (checkpoint 2)));
+    check_input (label ^ " keeps the input") (Some (checkpoint 1)) store in
+  (with_store @@ fun path store operation ->
+   Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
+   bind store operation (make_call operation);
+   with_reopened path store @@ fun reopened ->
+   check int "the restart leaves the active call to resume" 0
+     (List.length (Store.settle_running_after_restart reopened ~now:4. |> ok));
+   refused "a call left to resume" reopened);
+  with_store @@ fun _path store operation ->
+  Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
+  ignore (Store.defer_direct_checkpoint store ~now:4. ~operation_id
+            ~execution_digest:operation.Operation.execution_digest
+            ~checkpoint:(Keeper_semantic_execution.Agent_core (checkpoint 3)) |> ok);
+  refused "a suspended continuation" store
+
 let test_a_settled_unknown_effect_admits_history_clear () = with_store @@ fun _path store operation ->
   let trace_id=(checkpoint 1).Keeper_checkpoint_ref.trace_id in
   Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
@@ -642,6 +665,7 @@ let test_a_settled_unknown_effect_admits_history_clear () = with_store @@ fun _p
 
 let () = run "native-call-owner-store" ["input ownership", [
   test_case "history clear requires actual settlement and preserves commit uncertainty" `Quick test_history_clear_guards_and_exact_commit;
+  test_case "an unsettled execution refuses history clear" `Quick test_an_unsettled_execution_refuses_history_clear;
   test_case "a settled unknown effect admits history clear" `Quick test_a_settled_unknown_effect_admits_history_clear;
   test_case "retired response cut binds input and native authority atomically" `Quick test_retired_cut_bind_and_input_owner_are_atomic;
   test_case "stale native and unknown effects preserve input" `Quick test_retired_cut_native_refusals_keep_input;

@@ -811,10 +811,14 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         install_workspace_guidance ()) (fun () ->
                         (match run_context_result ~hooks:missing_policy_hooks
                             ~goal:"Missing workspace guidance" unchanged with
-                         | Error (Agent_core.Error.Config (InvalidConfig {field; _})) ->
-                           check string "missing managed policy is a typed configuration error"
-                             "antigravity.native_workspace_guidance" field
-                         | Error error -> fail (Agent_core.Error.to_string error)
+                         | Error error ->
+                           check bool "managed render returns a positive preparation failure" true
+                             (Option.is_some (Keeper_internal_error.guidance_preparation_failure error));
+                           (match Keeper_internal_error.without_guidance_preparation_authority error with
+                            | Agent_core.Error.Config (InvalidConfig {field;_}) ->
+                              check string "original configuration field is retained"
+                                "antigravity.native_workspace_guidance" field
+                            | cause -> fail (Agent_core.Error.to_string cause))
                          | Ok _ -> fail "missing workspace guidance launched a native turn");
                         check int "policy resolves before hooks and session claim" 0 !preparation_calls;
                         check bool "missing policy preserves the settled native session" true

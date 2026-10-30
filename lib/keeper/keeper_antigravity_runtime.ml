@@ -495,7 +495,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     let render_guidance key vars =
       Prompt_registry.render_prompt_template key vars
       |> Result.map String.trim
-      |> Result.map_error (config_error ~field:"antigravity.native_workspace_guidance") in
+      |> Result.map_error (Keeper_internal_error.guidance_preparation_unavailable
+          ~field:"antigravity.native_workspace_guidance") in
     let* native_workspace_note = render_guidance workspace_guidance workspace_vars in
     let* additional_directories_label = render_guidance
         Prompt_names.keeper_antigravity_additional_directories_label [] in

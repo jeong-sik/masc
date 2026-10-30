@@ -334,6 +334,17 @@ let record_stream_end ~keeper_name ~stream_id ~task_id ~status =
         Task_closed_event { keeper; seq; stream_id = Some stream_id; task_id; status; active_count; generated_at });
       wake_subscribers_locked keeper))
 
+let closed_status_text status =
+  let text = Yojson.Safe.to_string status in
+  if String.length text <= max_line_bytes
+  then text
+  else
+    Yojson.Safe.to_string
+      (`Assoc
+          [ "outcome", `String "unknown"
+          ; "reason", `String "status_exceeds_display_limit"
+          ])
+
 let retained_lines_locked ?(include_status = false) keeper =
   match Hashtbl.find_opt logs keeper with
   | None -> []
@@ -349,10 +360,7 @@ let retained_lines_locked ?(include_status = false) keeper =
           (* Project the retained close into the snapshot. A live subscriber
              already receives this same numbered close as an event; a new
              viewer must also see earlier unknown results after a later close. *)
-          let text = Yojson.Safe.to_string status in
-          let text = if String.length text <= max_line_bytes then text else
-              Yojson.Safe.to_string (`Assoc [ "outcome", `String "unknown"
-                                           ; "reason", `String "status_exceeds_display_limit" ]) in
+          let text = closed_status_text status in
           let line = { seq; stream_id; task_id; ts_ms = ts_ms_of_unix generated_at
                      ; stream = "status"; text; ansi = false } in
           collect (seq - 1) (line :: acc)

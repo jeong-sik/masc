@@ -4672,6 +4672,22 @@ type keeper_execute_reading =
       kes_observed_at : float;
     }
 
+(* The Execute output stream the Terminal tab follows. The key says whose
+   output and for which window; [kxf_reading] is the workspace reading the
+   stream was opened under; [kxf_owner] tells this job from the next one for
+   the same key. *)
+type keeper_execute_follow = {
+  kxf_key : keeper_log_key;
+  kxf_reading : unit ref;
+  kxf_owner : unit ref;
+}
+
+type keeper_execute_follow_event =
+  | Execute_stream_reading of keeper_execute_reading * float
+  | Execute_stream_down of string
+      (** The connection ended, or the server refused it. The last reading
+          stays on screen, marked stale. *)
+
 (* Decode this observation before it reaches the pane. An incomplete response
    is unavailable, not an empty log or a claim that the command stopped. *)
 let decode_keeper_execute_output ~keeper json =
@@ -4720,6 +4736,30 @@ type keeper_terminal_frozen = {
 let terminal_line_of_execute_line (line : keeper_execute_line) : Masc_tui_execute_terminal.line =
   { seq = line.kel_seq; stream_id = line.kel_stream_id; stream = line.kel_stream;
     text = line.kel_text }
+
+(* What the stream's reader holds, as the reading the screens draw. [now] stamps
+   a Keeper with no Execute output, which has no time of its own. *)
+let keeper_execute_reading_of_stream ~now (view : Masc_tui_execute_stream.view) =
+  match view with
+  | Masc_tui_execute_stream.Awaiting_first_frame -> None
+  | Masc_tui_execute_stream.Nothing_observed -> Some (Keeper_execute_none, now)
+  | Masc_tui_execute_stream.Observed reading ->
+    let line (row : Masc_tui_execute_stream.line) =
+      { kel_seq = row.seq; kel_stream_id = row.stream_id; kel_task_id = row.task_id;
+        kel_stream = row.stream; kel_text = row.text } in
+    let running (active : Masc_tui_execute_stream.active) =
+      { kes_id = active.id; kes_task = active.task; kes_command = active.command } in
+    Some
+      ( Keeper_execute_snapshot
+          { kes_lines = List.map line reading.lines;
+            kes_active = List.map running reading.active;
+            kes_lines_omitted = reading.lines_omitted;
+            kes_first_seq = reading.first_seq;
+            kes_active_count = reading.active_count;
+            kes_closed = reading.closed;
+            kes_status = reading.status;
+            kes_observed_at = reading.observed_at },
+        reading.observed_at )
 
 (* An explicit edit intent owns its readonly preparation separately from the
    external editor and the later guarded write. *)
@@ -9661,6 +9701,7 @@ type state = {
   mutable keeper_execute_output: (keeper_log_key, keeper_execute_reading * float) Masc_tui_fetched.t;
   mutable keeper_execute_read: keeper_execute_request option;
   mutable keeper_execute_cancel: (unit ref * (unit -> unit)) option;
+  mutable keeper_execute_stream: (keeper_execute_follow * (unit -> unit)) option;
   mutable keeper_terminal: keeper_terminal_frozen Masc_tui_execute_terminal.hold;
   mutable keeper_log_read: keeper_log_request option;
   mutable keeper_log_cancel: (unit ref * (unit -> unit)) option;
@@ -11688,6 +11729,10 @@ let take_keeper_log_read state request result =
         clear_keeper_logs state;
         None
 
+(* The Terminal tab reads further back than the logs view does. Following a
+   build means seeing where it began, and a build prints more than 200 rows. *)
+let keeper_terminal_window = 500
+
 (* The Keeper detail view on its Terminal tab. *)
 let keeper_terminal_on_screen state =
   state.view = Keepers Keeper_detail && state.detail_tab = Detail_terminal
@@ -11741,6 +11786,67 @@ let take_keeper_execute_read state request result =
         true
     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
       | Workspace_identity_match_unconfirmed _), (Some _ | None) -> false
+
+(* Settle the Execute output on a result that arrives by itself, such as a
+   reading the stream pushes, rather than as the answer to a request. One
+   request is taken and settled in a step, so the cell reads as a polled answer
+   reads, and a poll still in flight for this key is dropped as older. *)
+let settle_keeper_execute state ~key result =
+  match Masc_tui_fetched.refresh ~equal:keeper_log_equal_key state.keeper_execute_output ~key with
+  | Masc_tui_fetched.Started (next, ticket) ->
+    state.keeper_execute_output <-
+      Masc_tui_fetched.complete ~equal:keeper_log_equal_key next ticket result
+  | Masc_tui_fetched.Already_loading ->
+    (* [refresh] supersedes a request in flight and never answers this. *)
+    ()
+
+(* Stop the one-shot read of Execute output, if one is held; whether one was. *)
+let stop_keeper_execute_poll state =
+  let held = Option.is_some state.keeper_execute_read in
+  state.keeper_execute_read <- None;
+  Option.iter (fun (_, cancel) -> cancel ()) state.keeper_execute_cancel;
+  state.keeper_execute_cancel <- None;
+  held
+
+(* Stop following the stream; whether one was running. What the tab drew from
+   it stays in the cell. A wait the stream opened and never settled ends with
+   it, but only while the cell still holds the stream's own window: leaving the
+   Terminal for the logs view starts the logs read, which asks for another
+   window of the same cell, before the loop stops the stream. *)
+let stop_keeper_execute_stream state =
+  match state.keeper_execute_stream with
+  | None -> false
+  | Some (stream, stop) ->
+    stop ();
+    state.keeper_execute_stream <- None;
+    (match Masc_tui_fetched.current_key state.keeper_execute_output with
+     | Some key when keeper_log_equal_key key stream.kxf_key ->
+       state.keeper_execute_output <- Masc_tui_fetched.suspend state.keeper_execute_output
+     | Some _ | None -> ());
+    true
+
+(* One message of the stream the Terminal tab follows. A message from a job
+   that is no longer the current one, from a reading of the workspace that was
+   left, or for output the tab no longer shows is not what is on screen, and is
+   dropped. *)
+let take_keeper_execute_stream state (stream : keeper_execute_follow) event =
+  match state.keeper_execute_stream with
+  | Some (current, _)
+    when current.kxf_owner == stream.kxf_owner
+         && stream.kxf_reading == state.workspace_read_authority ->
+    (match state.workspace_identity, keeper_execute_target state with
+     | Workspace_identity_match, Some keeper
+       when keeper_terminal_on_screen state
+            && keeper_log_equal_key stream.kxf_key
+                 (keeper_log_key state ~limit:stream.kxf_key.klk_limit keeper) ->
+       settle_keeper_execute state ~key:stream.kxf_key
+         (match event with
+          | Execute_stream_reading (reading, observed_at) -> Ok (reading, observed_at)
+          | Execute_stream_down detail -> Error detail);
+       true
+     | (Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
+       | Workspace_identity_match_unconfirmed _), (Some _ | None) -> false)
+  | Some _ | None -> false
 
 let keeper_execute_view state =
   match state.workspace_identity, keeper_execute_target state with
@@ -12161,6 +12267,35 @@ let server_authority_ready state =
       && not (Canonical_path.is_empty identity.sid_base_path)
       && not (Canonical_path.is_empty identity.sid_masc_root)
   | None -> false
+
+(* The key the Terminal tab's stream follows: the Keeper under the cursor, while
+   the tab is on screen for a workspace this terminal confirmed. [None] means no
+   stream should run. *)
+let keeper_terminal_stream_key state =
+  match state.workspace_identity with
+  | Workspace_identity_match when server_authority_ready state && keeper_terminal_on_screen state ->
+    Option.map (keeper_log_key state ~limit:keeper_terminal_window) (keeper_execute_target state)
+  | Workspace_identity_match | Workspace_identity_unread | Workspace_identity_mismatch _
+  | Workspace_identity_match_unconfirmed _ -> None
+
+(* What the Terminal tab's stream needs on this pass of the loop. A running
+   stream is the right one only if it was opened for this key under the
+   workspace reading that is current: a stream opened before the workspace
+   changed, or for another Keeper, is not. *)
+type keeper_execute_stream_plan =
+  | Stream_stays
+  | Stream_follows of keeper_log_key
+      (** Open one for this key, after stopping any that runs. *)
+  | Stream_ends  (** None is wanted and one runs. *)
+
+let plan_keeper_execute_stream state =
+  match keeper_terminal_stream_key state, state.keeper_execute_stream with
+  | Some key, Some (stream, _)
+    when stream.kxf_reading == state.workspace_read_authority
+         && keeper_log_equal_key stream.kxf_key key -> Stream_stays
+  | Some key, (Some _ | None) -> Stream_follows key
+  | None, Some _ -> Stream_ends
+  | None, None -> Stream_stays
 
 let record_resource_share_observation state entry =
   let rec record () =
@@ -17740,6 +17875,7 @@ let create_state
   keeper_execute_output = Masc_tui_fetched.initial;
   keeper_execute_read = None;
   keeper_execute_cancel = None;
+  keeper_execute_stream = None;
   keeper_terminal = Masc_tui_execute_terminal.Following;
   keeper_log_read = None;
   keeper_log_cancel = None;

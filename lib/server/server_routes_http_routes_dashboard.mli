@@ -11,6 +11,11 @@ val exact_lane_run_page_max : int
     bound below this would let the monitor's cursor page off the end of the
     store; a test pins the relation. *)
 
+val execute_output_heartbeat_s : float
+(** Seconds of silence after which [GET /api/v1/dashboard/execute-output/<keeper>]
+    writes a keepalive comment. Exposed so the terminal's idle timeout is
+    counted in these intervals rather than in a number of its own. *)
+
 val add_routes :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

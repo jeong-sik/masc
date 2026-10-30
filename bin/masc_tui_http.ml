@@ -1680,15 +1680,15 @@ let observe_runtime_events ~clock ~(host : string) ~(port : int)
       Error (Http_refused { status; detail = body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
-(* The server writes a keepalive comment every [sse_ping_interval_s] when the
-   fleet has nothing to say. The idle watcher compares the last chunk only at
-   the end of each window of [fleet_stream_missed_keepalives] intervals, so a
-   connection that goes quiet is ended between one and two windows later:
-   90 to 180 s. *)
-let fleet_stream_missed_keepalives = 3.0
+(* A stream's server writes a keepalive comment at a fixed interval when it has
+   nothing to say. The idle watcher compares the last chunk only at the end of
+   each window of [stream_missed_keepalives] intervals, so a connection that
+   goes quiet is ended between one and two windows later: for the fleet stream,
+   whose interval is [sse_ping_interval_s], 90 to 180 s. *)
+let stream_missed_keepalives = 3.0
 
 let fleet_stream_idle_timeout_sec =
-  fleet_stream_missed_keepalives
+  stream_missed_keepalives
   *. Server_mcp_transport_http_headers.sse_ping_interval_s
 
 (** The fleet stream (RFC-0477): [GET Fleet_stream.stream_path] answers with
@@ -1716,6 +1716,68 @@ let observe_fleet_stream ~clock ~(expected_workspace : Masc.Tui_decode.server_id
   | Error detail -> Error (Transport_failed (report_err "fleet stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })
+  | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
+
+(* The server compares the two query fields with its own workspace and says so
+   in [x-masc-workspace-read]. A server that does not know the fields would
+   answer for whichever workspace it holds, so a stream that comes back without
+   the receipt is not read, as a bound read without it is not. *)
+let workspace_read_attested headers =
+  let name, expected = Masc.Workspace.read_precondition_admission_header in
+  match
+    List.filter_map
+      (fun (key, value) ->
+        if String.equal (String.lowercase_ascii key) name then Some value else None)
+      headers
+  with
+  | [ value ] -> String.equal value expected
+  | [] | _ :: _ :: _ -> false
+
+let execute_output_stream_idle_timeout_sec =
+  stream_missed_keepalives
+  *. Server_routes_http_routes_dashboard.execute_output_heartbeat_s
+
+(** One Keeper's Execute output stream: [GET /api/v1/dashboard/execute-output/
+    <keeper>] answers with Server-Sent Events, a snapshot first and one event
+    for each row or command boundary after it. [on_chunk] reads the bytes as
+    they arrive, and an exception it raises ends the connection. A refusal
+    comes back as [Http_refused] with [on_chunk] never called.
+
+    The two query fields bind the read to [expected_workspace]: the server
+    answers 409 unless it is that workspace, and the stream is refused when its
+    response lacks the server's receipt. The polled read of the same output
+    carries the same binding. *)
+let observe_execute_output_stream ~clock
+    ~(expected_workspace : Masc.Tui_decode.server_identity) ~(host : string)
+    ~(port : int) ~(keeper : string) ~(on_chunk : string -> unit)
+    : (unit, observer_error) result =
+  let exception Not_attested of int in
+  let url =
+    url_of ~host ~port
+      ~path:
+        (Printf.sprintf "/api/v1/dashboard/execute-output/%s?%s"
+           (percent_encode_path_segment keeper)
+           (expected_workspace_query expected_workspace))
+  in
+  let headers = ("Accept", "text/event-stream") :: auth_headers () in
+  let on_response ~status ~headers =
+    if Masc.Tui_decode.is_success_http_status status
+       && not (workspace_read_attested headers)
+    then raise (Not_attested status)
+  in
+  match
+    Masc_http_client.get_stream ~clock
+      ~idle_timeout_sec:execute_output_stream_idle_timeout_sec ~url ~headers
+      ~on_response ~on_chunk ()
+  with
+  | exception Not_attested status ->
+      Error
+        (Http_refused
+           { status; detail = "Server did not attest the requested workspace read" })
+  | Error detail ->
+      Error (Transport_failed (report_err "Execute output stream failed" detail))
+  | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
+      Error (Http_refused { status; detail = named_refusal "Execute output stream" ~status ~body })
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
 
 (** One MCP [tools/call] under an existing session.

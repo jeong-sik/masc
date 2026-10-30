@@ -15368,10 +15368,6 @@ let apply_http_refresh_outcome state ~mailbox = function
 (* Preserve the existing physical metrics window, shared by every entry path. *)
 let keeper_log_window = 200
 
-(* The Terminal tab reads further back than the Logs view does. Following a
-   build means seeing where it began, and a build prints more than 200 rows. *)
-let keeper_terminal_window = 500
-
 (* The Execute output both views read is one reading with one key, and the
    key holds its row limit: the view on screen says which limit it asks for. *)
 let keeper_execute_window state =
@@ -15467,13 +15463,104 @@ let launch_keeper_execute_read state ~mailbox ~intent keeper =
           deliver (Error (Printexc.to_string exn))));
     true
 
+(* The Terminal tab follows a Keeper's Execute output over its stream, so a row
+   reaches the screen when the server logs it rather than at the next poll. The
+   job owns the connection and the reader, and posts the reader's view to the
+   mailbox; the render fiber owns all state. A connection that ends is opened
+   again after [keeper_execute_stream_reconnect_s], the interval the fleet
+   stream reconnects at. *)
+let keeper_execute_stream_reconnect_s = 2.0
+
+(* The reader is posted at most this often. A command that prints faster draws
+   every row all the same; they arrive together. *)
+let keeper_execute_stream_post_interval_s = 0.05
+
+(* The job ends only when the workspace withdraws it or [stop] is called, or on
+   an exception, which it reports as the stream going down. An ended job stays
+   registered until the tab is left, so a bug does not turn into a reconnect
+   loop; leaving the tab and coming back opens a new one. *)
+let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
+  let stream =
+    { kxf_key = key; kxf_reading = state.workspace_read_authority; kxf_owner = ref () } in
+  let stopped, stop = Eio.Promise.create () in
+  state.keeper_execute_stream <-
+    Some (stream, fun () -> ignore (Eio.Promise.try_resolve stop ()));
+  (* A poll still out for this Keeper would answer into the cell the stream
+     now fills. *)
+  ignore (stop_keeper_execute_poll state);
+  (match Masc_tui_fetched.refresh ~equal:keeper_log_equal_key state.keeper_execute_output ~key with
+   | Masc_tui_fetched.Started (next, _) -> state.keeper_execute_output <- next
+   | Masc_tui_fetched.Already_loading -> ());
+  let enqueue_async = workspace_enqueue state in
+  let deliver event = enqueue_async mailbox (Keeper_execute_streamed (stream, event)) in
+  (* The fiber that launches the job is also the only one that drains the
+     mailbox, so a job that cannot start is reported to the state directly:
+     queueing it could wait on a full mailbox that only this fiber empties. *)
+  let report_unstarted detail =
+    ignore (take_keeper_execute_stream state stream (Execute_stream_down detail) : bool) in
+  let host = server_peer_host and port = state.port in
+  let run () =
+    match Eio_context.get_clock_opt () with
+    | None -> deliver (Execute_stream_down "Eio clock is unavailable")
+    | Some clock ->
+        Masc_tui_execute_stream_job.run ~clock
+          ~reconnect_s:keeper_execute_stream_reconnect_s
+          ~post_interval_s:keeper_execute_stream_post_interval_s
+          ~reader:(Masc_tui_execute_stream.create ~keeper:key.klk_keeper ~capacity:key.klk_limit)
+          ~observe:(fun ~on_chunk ->
+            match
+              Masc_tui_http.observe_execute_output_stream ~clock ~expected_workspace ~host ~port
+                ~keeper:key.klk_keeper ~on_chunk
+            with
+            | Ok () -> Ok ()
+            | Error (Masc_tui_http.Http_refused { detail; _ }) -> Error detail
+            | Error (Masc_tui_http.Transport_failed detail) -> Error detail)
+          ~on_view:(fun view ->
+            Option.iter
+              (fun (reading, observed_at) ->
+                 deliver (Execute_stream_reading (reading, observed_at)))
+              (keeper_execute_reading_of_stream ~now:(Eio.Time.now clock) view))
+          ~on_ended:(fun detail ->
+            Log.Transport.warn "tui_execute_stream_ended keeper=%s detail=%s" key.klk_keeper detail;
+            deliver (Execute_stream_down detail))
+  in
+  match Eio_context.get_switch_opt () with
+  | None -> report_unstarted "Eio switch is unavailable"
+  | Some sw ->
+      (match
+         fork_workspace_job ~observation:true state ~sw (fun () ->
+           try Eio.Fiber.first run (fun () -> Eio.Promise.await stopped) with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> deliver (Execute_stream_down (Printexc.to_string exn)))
+       with
+       | () -> ()
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn -> report_unstarted (Printexc.to_string exn))
+
+(* Keep the stream running for what the Terminal tab shows: one for the Keeper
+   under the cursor while the tab is on screen, none otherwise. True when this
+   changed what is running, so the screen is redrawn. *)
+let reconcile_keeper_execute_stream state ~mailbox =
+  match plan_keeper_execute_stream state, state.server_identity with
+  | Stream_stays, _ -> false
+  | Stream_ends, _ -> stop_keeper_execute_stream state
+  | Stream_follows key, Some expected_workspace ->
+      ignore (stop_keeper_execute_stream state : bool);
+      launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key;
+      true
+  | Stream_follows _, None -> stop_keeper_execute_stream state
+
 let launch_current_keeper_logs state ~mailbox ~intent =
   let metrics = match keeper_log_target state with
     | Some keeper -> launch_keeper_log_read state ~mailbox ~intent keeper
     | None -> false in
+  (* The Terminal tab follows its Keeper's output over the stream that
+     [reconcile_keeper_logs] opens, so a read of the same output would only
+     race it. *)
   let execute = match keeper_execute_target state with
-    | Some keeper -> launch_keeper_execute_read state ~mailbox ~intent keeper
-    | None -> false in
+    | Some keeper when not (keeper_terminal_on_screen state) ->
+      launch_keeper_execute_read state ~mailbox ~intent keeper
+    | Some _ | None -> false in
   metrics || execute
 
 let reconcile_keeper_logs state ~mailbox =
@@ -15493,6 +15580,10 @@ let reconcile_keeper_logs state ~mailbox =
       if held then suspend_keeper_logs state;
       held in
   let execute = match keeper_execute_target state, state.workspace_identity with
+    | Some _, Workspace_identity_match when keeper_terminal_on_screen state ->
+      (* The stream fills the cell; a poll still held from the logs view is no
+         longer wanted. *)
+      stop_keeper_execute_poll state
     | Some keeper, Workspace_identity_match ->
       let key = keeper_log_key state ~limit:(keeper_execute_window state) keeper in
       (match state.keeper_execute_read with
@@ -15509,7 +15600,8 @@ let reconcile_keeper_logs state ~mailbox =
         state.keeper_execute_cancel <- None
       end;
       held in
-  metrics || execute
+  let stream = reconcile_keeper_execute_stream state ~mailbox in
+  metrics || execute || stream
 ;;
 
 (* What a detail tab reads on the way in, for the Keeper it is opened on.
@@ -15575,7 +15667,9 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
   | Detail_runs -> launch_fusion_runs_load state ~mailbox
   | Detail_terminal ->
-      ignore (launch_keeper_execute_read state ~mailbox ~intent:Snapshot_read.Refresh keeper)
+      (* The tab follows the Keeper's output over a stream that
+         [reconcile_keeper_logs] opens on the next pass of the loop. *)
+      ()
 ;;
 
 (* Authority loss revokes every detail ticket. Resume the pane's current
@@ -19166,7 +19260,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Keeper_chat_journal_loaded _ | Keeper_native_tasks_loaded (_, _)
         | Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | Context_inspector_loaded (_, _, _)
         | Context_inspector_part_loaded (_, _)
-        | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | (Keeper_logs_loaded _ | Keeper_execute_loaded _) | Lanes_loaded (_, _)
+        | Keeper_chat_older_loaded (_, _, _, _) | Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Lanes_loaded (_, _)
         | Lane_inventory_loaded (_, _) | Clients_loaded (_, _) | Lane_runs_loaded (_, _, _, _)
         | Lane_run_detail_loaded (_, _, _) | Measurement_artifact_loaded (_, _, _)
         | Verification_loaded _ | Harness_loaded _ | Fusion_runs_loaded (_, _)
@@ -20569,7 +20663,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | Runtime_form_save_changed _, _ | Keeper_settings_save_changed _, _
        | Keeper_queue_action_received _, _ -> ()
        | (Goal_confirmation_submitted _, Goal_confirmation.Inspecting _)
-       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_,_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Keeper_logs_loaded _ | Keeper_execute_loaded _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( (Fusion_launch_options_loaded (_, _) | Memory_recall_standing_loaded (_, _)) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_,_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
+       | ((Approvals_listing_superseded | (Surface_composer_released | (Chat_search_finished (_, _, _, _) | (Workspace_scoped (_, _, _) | (Workspace_operation _ | (Chat_command_read_completed (_, _) | (Workspace_identity_unconfirmed _ | (Schedule_form_authority_refused _ | (Lane_package_catalog_loaded (_, _, _) | (Lane_package_preview_loaded (_, _, _) | (Keeper_queue_resume_confirmed (_,_, _, _) | (Keeper_queue_loaded (_, _, _, _) | (Lane_addons_loaded (_, _, _) | (Lane_application_loaded (_, _) | (Lane_subscriptions_loaded (_, _) | (Lane_declaration_loaded (_, _, _, _, _) | (Keeper_deletions_loaded (_, _) | (Msx_tick_withdrawn (_, _) | (Keeper_deletion_retry_done (_, _) | (Msx_frame_loaded (_, _) | (Msx_activity_loaded (_, _) | (Msx_live_loaded (_, _) | ( Dos_live_loaded (_, _) | ( Voice_wizard_saved (_, _) | ( Voice_agent_voices_loaded _ | ( Voice_agent_voice_saved _ | ( Voice_wizard_probed (_, _) | ( Voice_wizard_reread (_, _) | ( Voice_config_loaded (_, _, _) | ( Voice_calibrated _ | Voice_level _ | ( Voice_transcribed _ | ( Voice_silent _ | ( Voice_discarded _ | ( Voice_failed _ | ( (Http_keeper_roster_loaded _ | Http_dataset_loaded _ | Http_surface_read_completed _ | Http_initial_identity_read _ | Http_overview_loaded _ | Http_asks_loaded _ | Http_approvals_loaded _ | Ask_answer_receipt_ready _ | Ask_followup_observed _ | Ask_followup_finished _ | Http_refresh_done _) | ( Http_refresh_failed (_, _, _) | ( Approvals_summary_loaded (_, _, _, _) | ( Http_scoped_refresh_done (_, _, _) | ( Http_scoped_refresh_failed (_, _, _, _, _, _) | ( Board_post_refresh_done (_, _) | ( Approval_decision_done (_, _, _, _, _) | ( Ask_answer_done (_, _, _) | ( Keeper_chat_dispatch_started (_, _, _) | ( Keeper_chat_done (_, _, _, _) | ( Keeper_chat_stream_deltas (_, _) | ( Keeper_chat_stream_unavailable (_, _) | ( Keeper_run_next_done (_, _) | ( Keeper_observed_interrupt_done (_, _, _, _) | ( Keeper_chat_interrupt_done (_, _, _) | ( (Keeper_chat_history_loaded (_, _, _) | Keeper_chat_first_page_loaded (_, _)) | ( Keeper_chat_copy_loaded (_, _, _) | ( Keeper_chat_operation_loaded _ | ( Keeper_chat_journal_loaded _ | ( Keeper_native_tasks_loaded (_, _) | ( Keeper_child_content_loaded (_, _) | Keeper_preparation_loaded (_, _) | ( Context_inspector_part_loaded (_, _) | Context_inspector_loaded (_, _, _) | ( Keeper_chat_older_loaded (_, _, _, _) | ( Local_workspace_read (_, _) | Local_keepers_read (_, _) | Live_context_loaded (_, _, _) | ( Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | ( Lanes_loaded (_, _) | ( Lane_inventory_loaded (_, _) | ( Clients_loaded (_, _) | ( Lane_runs_loaded (_, _, _, _) | ( Lane_run_detail_loaded (_, _, _) | ( Measurement_artifact_loaded (_, _, _) | ( Verification_loaded _ | ( Harness_loaded _ | ( Fusion_runs_loaded (_, _) | ( Fusion_detail_loaded (_, _, _) | ( Fusion_historical_detail_loaded (_, _, _) | ( (Fusion_launch_options_loaded (_, _) | Memory_recall_standing_loaded (_, _)) | ( Fusion_launched (_, _) | ( Repositories_loaded _ | ( Workspace_activity_loaded (_, _) | ( Memory_loaded _ | ( Memory_input_loaded (_, _) | ( Memory_facts_loaded (_, _) | ( Repository_changes_loaded (_, _) | ( Repository_changes_diff_loaded (_, _) | ( File_changes_loaded (_, _) | ( Keeper_chat_file_changes_loaded (_, _, _) | ( Git_diff_loaded (_, _) | ( Browser_history_list_loaded (_, _) | ( Browser_history_page_loaded (_, _) | ( Browser_lane_clients_loaded (_, _) | ( Browser_lane_loaded (_, _) | ( Browser_lane_action_done (_, _) | ( Browser_lane_scene_loaded (_, _) | ( Browser_lane_follow_loaded (_, _) | ( Browser_lane_screenshot_ready _ | ( (Connectors_status_loaded (_, _) | Connectors_loaded (_, _)) | ( Connector_unbind_all_done _ | ( Runtime_surface_loaded (_, _) | ( Tools_loaded (_, _, _) | ( Skills_catalog_loaded (_, _) | ( Skill_evidence_loaded (_, _, _) | ( (Tools_async_observation_loaded (_, _) | ((Tools_async_detail_loaded _ | Task_document_prepared _) | Tools_async_task_body_loaded _ | Tools_async_task_history_loaded _)) | ( Runtime_lane_slots_written (_, _, _) | ( Runtime_catalog_loaded (_, _) | ( Runtime_assignment_changed (_, _, _) | ( Keeper_chat_approval_answered (_, _, _, _) | ( Keeper_tool_approvals_loaded (_, _, _) | ( Listen_prepared _ | Sent_image_ready _ | ( Image_render_ready _ | ( Keeper_turns_loaded (_, _) | ( Keeper_chat_control_received (_, _, _) | ( Gate_snapshot_loaded (_, _, _) | ( Gate_approval_resolved (_, _, _, _, _) | ( Gate_auto_judge_retried (_, _, _, _) | ( Gate_mode_set (_, _, _) | ( Surface_tool_approval_answered (_, _, _, _, _) | ( Keeper_gate_settings_loaded _ | ( Keeper_tool_modes_loaded (_, _) | ( Keeper_tool_mode_set (_, _, _, _) | ( Keeper_chat_dispatch_blocked (_, _) | ( Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | ( Board_new_post_done _ | ( (Board_vote_done _ | Artifact_check_changed _) | ( Goal_transition_done _ | ( Goal_confirmation_loaded (_, _) | ( Schedules_loaded (_, _) | ( Schedule_wake_history_loaded (_, _) | ( Keeper_schedules_loaded (_, _) | ( System_logs_loaded _ | ( Schedule_cancel_done (_, _) | ( Verification_verdict_done _ | ( Harness_label_done _ | ( Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _ | Chat_call_loaded _ | Keeper_calls_loaded (_, _, _) | ( Goal_timeline_loaded (_, _) | ( Task_history_loaded (_, _) | ( Task_cancel_done (_, _, _) | ( (Verification_evidence_loaded (_, _) | Verification_evidence_exported _) | ( Keeper_settings_editor_loaded _ | Keeper_config_view_loaded (_, _) | ( Keeper_items_loaded (_, _) | ( Keeper_sandbox_view_loaded (_, _) | ( Keeper_sandbox_logs_loaded (_, _, _) | ( Exact_activity_read (_, _) | ( Exact_activity_saved (_, _) | ( Machine_activity_read (_, _) | ( Machine_activity_saved (_, _) | ( Runtime_config_view_loaded (_, _, _, _, _) | ( Runtime_params_loaded _ | ( Runtime_param_written (_, _) | ( Prompts_loaded (_, _) | ( Keeper_board_quarantines_loaded (_, _) | ( Board_quarantine_requeued (_, _, _) | ( Board_quarantines_bulk_progress (_, _, _, _, _, _) | ( Board_quarantines_bulk_requeued (_, _) | ( Presets_listed (_, _) | ( Preset_detail_loaded (_, _) | ( Preset_contents_shown (_, _) | ( Preset_saved (_, _) | ( Preset_restored (_, _) | ( Preset_deleted (_, _) | ( Play_room_received (_, _) | ( Play_invites_listed (_, _) | ( Play_invite_issued (_, _, _) | ( Play_invite_revoked (_, _, _, _) | ( Librarian_input_loaded (_, _) | ( (Resources_listed _ | Artifact_checks_loaded _) | ( Code_draft_saved _ | Code_catalog_loaded (_, _) | Code_finder_file_loaded (_, _) | Code_entries_loaded (_, _) | ( Code_file_loaded (_, _, _) | ( Code_history_loaded (_, _) | ( Code_diff_loaded (_, _) | ( Acting_pane_changes_loaded (_, _) | ( Code_blame_loaded (_, _) | ( Code_lsp_answered (_, _) | ( Resource_exported _ | Resource_share_changed _ | Resource_share_recovery_loaded _ | Resource_read (_,_, _) | Resource_diagram_ready _ | ( Github_identity_view_loaded (_, _) | ( Identity_providers_loaded (_, _, _) | Identity_disconnected (_, _, _) | ( Identity_switch_set (_, _, _, _) | ( Identity_login_started (_, _) | ( Identity_refreshed (_, _) | ( Identity_app_saved (_, _, _) | ( Account_login_event (_, _, _) | ( Account_login_json (_, _, _, _) | ( Account_login_removal (_, _, _, _, _) | ( Github_login_lines (_, _) | ( Github_login_finished (_, _) | ( Github_token_saved (_, _) | ( Observer_opened _ | ( Observer_received (_, _) | ( Observer_closed _ | Fleet_stream_view _ | Fleet_stream_reader_ended _ | ( Task_dispatch_completed _ | Task_creation_read_done _ | Original_task_read_done _ | Original_task_history_done _ | Original_task_evidence_done _))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))), _) -> ());
       match result with
       | Ok message ->
           state.goal_action_pending <- None;
@@ -23832,6 +23926,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         let _, cols = Masc_tui_render_prim.get_terminal_size () in
         state.log_scroll <- min state.log_scroll (max 0 (List.length (keeper_log_rows state ~cols) - 1))
       end
+  | Keeper_execute_streamed (stream, event) ->
+      ignore (take_keeper_execute_stream state stream event)
   | Live_context_loaded (request, started_ns, result) ->
       let admitted = take_live_context_observation state request result in
       log_live_context_read ~phase:"observed" request ~started_ns
@@ -25041,14 +25137,6 @@ let main
   let msx_spectator_poll_interval_ns =
     Int64.of_float (msx_spectator_poll_seconds *. nanoseconds_per_second)
   in
-  (* The Terminal tab follows output as it is written, so it re-reads on a
-     clock of its own rather than the refresh tick's. Each read is a snapshot
-     of rows the server already holds, and only the open tab asks. *)
-  let keeper_terminal_poll_seconds = 1.0 in
-  let keeper_terminal_poll_interval_ns =
-    Int64.of_float (keeper_terminal_poll_seconds *. nanoseconds_per_second)
-  in
-  let keeper_terminal_last_poll_ns = ref (Mtime_clock.elapsed_ns ()) in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
   let roster_marquee_target = ref None in
   let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
@@ -26896,11 +26984,6 @@ and is loaded on demand through keeper_skill.
           Float.min input_timeout msx_spectator_poll_seconds
         else input_timeout
       in
-      let input_timeout =
-        if keeper_terminal_on_screen state then
-          Float.min input_timeout keeper_terminal_poll_seconds
-        else input_timeout
-      in
       (* The load menu owns the terminal while it is up: skip the frame poll so
          it does not repaint the picker with a game screen. The spectator poll
          resumes the moment a game is chosen and the menu closes. *)
@@ -26933,22 +27016,6 @@ and is loaded on demand through keeper_skill.
                | Observe_machine -> launch_msx_live_read state ~mailbox:async_messages
                | Control_machine -> launch_msx_poll state ~mailbox:async_messages)
           | Masc.Machine_lane.Dos -> launch_dos_live_poll state ~mailbox:async_messages
-        end
-      end;
-      if keeper_terminal_on_screen state then begin
-        let now_ns = Mtime_clock.elapsed_ns () in
-        if
-          Int64.compare (Int64.sub now_ns !keeper_terminal_last_poll_ns)
-            keeper_terminal_poll_interval_ns
-          >= 0
-        then begin
-          keeper_terminal_last_poll_ns := now_ns;
-          Option.iter
-            (fun keeper ->
-              ignore
-                (launch_keeper_execute_read state ~mailbox:async_messages
-                   ~intent:Snapshot_read.Poll keeper))
-            (keeper_execute_target state)
         end
       end;
       let guarding_before_read =

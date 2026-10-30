@@ -407,14 +407,17 @@ Four things this costs, none of them obvious from the CLI's help:
 
 In the MASC TUI, open a Keeper (`Right` from the Keepers list) and press `[`
 once from Info to reach the Terminal tab. It follows the Keeper's redacted
-command lines and stdout/stderr as they arrive, reading once a second, and
+command lines and stdout/stderr as they arrive, over the Server-Sent Events
+stream `GET /api/v1/dashboard/execute-output/<keeper>`, and
 `k`, `PgUp` or `Home` holds the screen still while you read back (`End` follows
 again). The tab works the same for Docker, microVM and `remote_ssh` Keepers,
 because all of them stream through the same server-side ring. It reads that
 ring over HTTP, so it is not a PTY: nothing typed in the TUI reaches the
-command. A pipeline with a file redirect, or another shape the dispatcher
-chains without streaming, shows its output when the command ends rather
-than line by line.
+command. The stream needs a connection that stays open: a proxy between the TUI
+and the server that buffers responses can hold the rows back, and the server
+sends `x-accel-buffering: no` for the proxies that honour it. A pipeline with a
+file redirect, or another shape the dispatcher chains without streaming, shows
+its output when the command ends rather than line by line.
 
 `l` opens the logs view instead. Its Execute section
 shows the most recently observed command summaries and stdout/stderr, newest

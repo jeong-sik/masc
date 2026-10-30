@@ -241,9 +241,20 @@ check_publication_policy() {
   read_current_pr || return $?
   if [ "$review_policy" = release ]; then check_current_ci; fi
 }
+check_cr_ownership() {
+  local mode="$1" replacement_id
+  local args=(--repo "$repo" --pr "$pr" --gh "$GH" --mode "$mode")
+  if [ "$mode" = publish ]; then
+    args+=(--reviewer-id "$me_id")
+    [ -z "${keeper:-}" ] || args+=(--keeper "$keeper")
+    for replacement_id in $replace_cr; do args+=(--replace "$replacement_id"); done
+  fi
+  python3 "$here/review-cr-ownership.py" "${args[@]}"
+}
 check_reviews
 check_verdict
 if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
+  check_cr_ownership consume || exit $?
   [ -n "$approvals" ] || refuse_detail "no trusted non-author approval bound to this head and complete diff"
   read_current_pr
   check_reviews
@@ -257,6 +268,8 @@ if [ "$merge_check" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
   [ -n "$approvals" ] || refuse "approval changed after final diff read"
   check_verdict
   recheck_commit_accounts || exit $?
+  read_current_pr
+  check_cr_ownership consume || exit $?
   read_current_pr
   if [ "$receipt_json" -eq 1 ] || [ "$source_receipt" -eq 1 ]; then
     python3 -c 'import json,sys; print(json.dumps({"pr":int(sys.argv[1]),"head":sys.argv[2],"approval_ids":[int(x) for x in sys.argv[3].split()],"scope":json.loads(sys.argv[4]),"policy":sys.argv[5]}))' "$pr" "$head" "$approvals" "$(compute_scope)" "$review_policy"
@@ -307,6 +320,7 @@ sys.exit(any(line.startswith(("review-scope:", "approve-guard:")) for line in li
   fi
   [ "$keeper" != "$me" ] || refuse "by must name the reviewing Keeper"
 fi
+check_cr_ownership publish || exit $?
 check_publication_policy
 check_reviews
 check_verdict
@@ -325,6 +339,8 @@ fi
 if [ "$check_only" -eq 1 ]; then
   recheck_commit_accounts || exit $?
   read_current_pr
+  check_cr_ownership publish || exit $?
+  read_current_pr
   echo "WOULD APPROVE #$pr head $head policy $review_policy"; exit 0
 fi
 # Bind the reviewed base and native stack position to the approval itself.
@@ -338,6 +354,8 @@ if [ -n "$own_approval" ]; then
   if [ "$previous_scope" = "review-scope: $scope" ] && [ "$own_state" = PASS ]; then
     recheck_commit_accounts || exit $?
     read_current_pr
+    check_cr_ownership publish || exit $?
+    read_current_pr
     echo "SKIP #$pr: $me already APPROVED this head and scope (review $own_approval)"
     exit 0
   fi
@@ -346,6 +364,8 @@ fi
 [ -z "$replaced" ] || footer="$footer · replaces own CHANGES_REQUESTED $replaced"
 footer="$footer$(printf ' · reviewed base `%s` · diff sha256 `%s`' "$review_base" "$review_diff")"
 recheck_commit_accounts || exit $?
+read_current_pr
+check_cr_ownership publish || exit $?
 read_current_pr
 if ! response=$( { printf '%s' "$review_body"; printf '%s' "$footer"; } | "$GH" api -X POST "repos/$repo/pulls/$pr/reviews" -f event=APPROVE -f "commit_id=$head" -F body=@- --jq '[(.id|tostring), .state, .commit_id] | @tsv'); then
   echo "approval submission outcome is unknown; inspect reviews before retry" >&2

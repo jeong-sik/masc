@@ -21,7 +21,8 @@ FAKE_GH = r"""#!/usr/bin/env bash
 set -o pipefail
 shift
 [ "$1" != --paginate ] || shift
-[ "$1" != --slurp ] || shift
+slurp=0
+if [ "$1" = --slurp ]; then slurp=1; shift; fi
 path="$1"; shift
 printf '%s\n' "$path" >> "$FAKE_DIR/calls.log"
 expr="."
@@ -35,15 +36,20 @@ case "$path" in
     count=$((count + 1)); printf '%s' "$count" > "$count_file"
     f="$FAKE_DIR/compare-$count.json"; [ -f "$f" ] || f="$FAKE_DIR/compare.json";;
   repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review.json";;
-  repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json";;
+  repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json"; reviews_collection=1;;
   repos/*/issues/*/comments*) f="$FAKE_DIR/comments.json";;
   repos/*/actions/runs/*/jobs*) f="$FAKE_DIR/jobs.json";;
   repos/*/actions/runs*) f="$FAKE_DIR/runs.json";;
   repos/*/pulls/*) f="$FAKE_DIR/pr.json";;
   *) echo "fake gh: unexpected $path" >&2; exit 9;;
 esac
-jq 'def uid: if .login == "author-keeper" then 10 elif .login == "reviewer-account" then 20 elif .login == "reviewer-keeper" then 30 elif .login == "second-reviewer" then 40 else 50 end;
-    walk(if type == "object" and (.login | type) == "string" and (has("id") | not) then .id = uid else . end)' "$f" | jq -r "$expr"
+if [ "$slurp" = 1 ] && [ "${reviews_collection:-0}" = 1 ]; then
+  jq 'def uid: if .login == "author-keeper" then 10 elif .login == "reviewer-account" then 20 elif .login == "reviewer-keeper" then 30 elif .login == "second-reviewer" then 40 else 50 end;
+      [walk(if type == "object" and (.login | type) == "string" and (has("id") | not) then .id = uid else . end)]' "$f"
+else
+  jq 'def uid: if .login == "author-keeper" then 10 elif .login == "reviewer-account" then 20 elif .login == "reviewer-keeper" then 30 elif .login == "second-reviewer" then 40 else 50 end;
+      walk(if type == "object" and (.login | type) == "string" and (has("id") | not) then .id = uid else . end)' "$f" | jq -r "$expr"
+fi
 """
 
 
@@ -71,7 +77,7 @@ class GuardHarness(unittest.TestCase):
         self.scripts.mkdir()
         for name in ("approve-guard.sh", "ci-checks.sh", "review-verdict.sh", "review-decisions.py",
                      "review-scope.py", "review-refusal.py", "_gh_merge_base.py",
-                     "prepare-approved-batch.py", "review-commit-accounts.py"):
+                     "prepare-approved-batch.py", "review-commit-accounts.py", "review-cr-ownership.py"):
             shutil.copy(HERE / name, self.scripts / name)
         # The real review-diff.py needs Git objects; the diff identity is a fixed fixture here.
         (self.scripts / "review-diff.py").write_text(f"#!/usr/bin/env python3\nprint('{DIFF}')\n")
@@ -610,6 +616,42 @@ class VerdictWithdrawalCase(GuardHarness):
         self.assertEqual(r.returncode, 2)
         self.assertIn("open CHANGES_REQUESTED", r.stderr)
 
+    def test_same_account_different_keeper_cannot_replace_request(self):
+        request = self.negative_review()
+        request["body"] = f"verdict: FAIL head: {HEAD} by: other-keeper\nsource findings"
+        self.reviews(request)
+        result = self.replacement_check()
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("signer is unknown or differs", result.stderr)
+
+    def test_unsigned_request_cannot_be_claimed_by_same_account(self):
+        request = self.negative_review()
+        request["body"] = "Please fix the issue."
+        self.reviews(request)
+        result = self.replacement_check()
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("signer is unknown or differs", result.stderr)
+
+    def test_shared_account_approval_does_not_clear_other_keeper_request(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        approval.update(id=89, submitted_at="2026-10-08T04:00:00Z")
+        approval["user"]["login"] = "reviewer-account"
+        (self.data / "review.json").write_text(json.dumps(approval))
+        request = self.negative_review()
+        request["body"] = f"verdict: FAIL head: {HEAD} by: other-keeper\nsource findings"
+        self.reviews(request, approval)
+        for mode in ("--source-receipt", "--merge-check"):
+            result = self.run_guard(mode)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("unresolved change requests", result.stderr)
+
+    def test_replacement_requires_the_signed_body_in_check_mode(self):
+        self.reviews(self.negative_review())
+        result = self.run_guard("--check", "--replace-own-cr", "88")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("signed review body", result.stderr)
+
     def test_foreign_or_missing_replacement_id_is_refused(self):
         for request in (self.negative_review(login="another-reviewer"),
                         self.negative_review(rid=89)):
@@ -841,6 +883,10 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
                 self.reviews(self.negative_review(), self.negative_review(
                     rid=89, submitted="2026-10-09T03:45:54Z"))
                 published = self.publish(*ids)
+                if len(ids) == 1:
+                    self.assertEqual(published.returncode, 2, published.stderr)
+                    self.assertIn("unresolved change requests", published.stderr)
+                    continue
                 self.assertEqual(published.returncode, 0, published.stderr)
                 for mode in ("--merge-check", "--source-receipt"):
                     result = self.run_guard(mode)
@@ -961,11 +1007,11 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
         self.reviews(self.negative_review())
         gh = self.tmp / "gh"
         gh.write_text(gh.read_text().replace(
-            '  repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json";;',
+            '  repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json"; reviews_collection=1;;',
             '''  repos/*/pulls/*/reviews*)
     [ ! -f "$FAKE_DIR/reviews-already-read" ] || exit 7
     touch "$FAKE_DIR/reviews-already-read"
-    f="$FAKE_DIR/reviews.json";;'''))
+    f="$FAKE_DIR/reviews.json"; reviews_collection=1;;'''))
         r = self.replacement_check()
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn("approve-guard: verdict read failed", r.stderr)

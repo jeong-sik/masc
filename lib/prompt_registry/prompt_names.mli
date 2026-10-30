@@ -96,6 +96,7 @@ val librarian_working_contexts_rule : string
 
 val keeper_memory_selection : string
 val keeper_memory_selection_candidate : string
+val keeper_memory_selection_request_context : string
 val keeper_memory_successor_selection : string
 val keeper_memory_selection_current_decision : string
 val keeper_memory_selection_comparison : string

@@ -96,10 +96,19 @@ let handle ?turn_ref ~clock ~config ~(meta : Keeper_meta_contract.keeper_meta) ~
     | Ok destinations ->
       let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path in
       let before=collect ~config ~meta ~keepers_dir in
-      let purpose=`Assoc ["current_input",`String query;
-        "request_context",`String "Explicit selection from this Keeper's ordinary and source-bound current memory. The request does not establish facts about ambiguous or unknown events.";
-        "keeper_instructions",`String meta.instructions;
-        "turn_ref",(match turn_ref with None -> `Null | Some turn -> Ids.Turn_ref.to_yojson turn)] in
+      let request_context=match before.candidates with
+        | [] -> Ok None
+        | _ :: _ -> Prompt_registry.render_prompt_template Prompt_names.keeper_memory_selection_request_context []
+          |> Result.map (fun text -> Some (String.trim text)) in
+      match request_context with
+      | Error detail -> Keeper_tool_execution.success_data (`Assoc ["status",`String "unavailable";
+          "reason",`String "selection_prompt_unavailable";"detail",`String detail;
+          "selected",`List [];"incomplete",`Bool true])
+      | Ok request_context ->
+      let purpose=`Assoc (["current_input",`String query]
+        @ (match request_context with None -> [] | Some text -> ["request_context",`String text])
+        @ ["keeper_instructions",`String meta.instructions;
+           "turn_ref",(match turn_ref with None -> `Null | Some turn -> Ids.Turn_ref.to_yojson turn)]) in
       let io=Io.create ~config ~keeper_id:meta.name ~destinations in
       let outcomes=Select.select_resolved_many ~evaluate:(Io.evaluate ~clock io) ~purpose
         (List.map (fun row -> row.choice,row.detail) before.candidates) in

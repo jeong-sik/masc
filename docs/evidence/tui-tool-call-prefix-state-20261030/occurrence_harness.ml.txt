@@ -1,0 +1,71 @@
+module Live = struct
+  type tool_occurrence = {stream_scope:int; block_index:int; provider_message_id:string option; tool_call_id:string option}
+end
+type live_tool_call = {local_id:int; value:int; segment:int; occurrence:Live.tool_occurrence; call_id:string option}
+type t = {mutable reversed_tool_calls:live_tool_call list; segment:int}
+type call_update = Call_updated | Call_missing | Call_ambiguous | Call_conflicting
+(* HELPERS *)
+module Old = struct
+(* OLD *)
+(* OLD_OCCURRENCE *)
+end
+module New = struct
+(* NEW *)
+(* NEW_OCCURRENCE *)
+end
+
+let occurrence i = {Live.stream_scope=0;block_index=i;provider_message_id=Some "message";tool_call_id=Some "call"}
+let fixture n duplicate = {segment=0;reversed_tool_calls=List.init n (fun i ->
+  {local_id=(if duplicate && i=n-1 then 0 else i);value=0;segment=0;
+   occurrence=occurrence i;call_id=Some "call"})}
+
+let fuzz () =
+  let random=Random.State.make [|2026;10;30;46886;23|] in
+  for iteration=1 to 100_000 do
+    let length=Random.State.int random 100 in
+    let values=List.init length (fun i ->
+      {local_id=(if iteration mod 2=0 then i else Random.State.int random 10);
+       value=Random.State.int random 1000;segment=Random.State.int random 2;
+       occurrence=occurrence (Random.State.int random 20);
+       call_id=(if Random.State.bool random then Some "call" else None)}) in
+    let target=occurrence (Random.State.int random 22) in
+    let target=if Random.State.int random 5=0 then {target with tool_call_id=Some "other"} else target in
+    let old={segment=0;reversed_tool_calls=values} and newer={segment=0;reversed_tool_calls=values} in
+    let a=ref [] and b=ref [] in
+    let left=Old.update_occurrence old target (fun call -> a:=call.value :: !a; {call with value=call.value+1}) in
+    let right=New.update_occurrence newer target (fun call -> b:=call.value :: !b; {call with value=call.value+1}) in
+    if left<>right || old.reversed_tool_calls<>newer.reversed_tool_calls || !a<> !b then
+      failwith (Printf.sprintf "occurrence divergence at %d" iteration)
+  done;
+  Printf.printf "PASS: 100,000 occurrence updates preserve result, callback order, conflict handling and call records\n%!"
+
+let sample csv size position iterations version =
+  let id=match position with "newest" | "duplicate-newest" -> 0 | "middle" -> size/2 | _ -> size-1 in
+  let target=occurrence id in
+  let t=fixture size (position="duplicate-newest") in
+  let update=if version="old" then Old.update_occurrence else New.update_occurrence in
+  Gc.full_major ();
+  let allocated=Gc.allocated_bytes () and cpu=Sys.time () and wall=Unix.gettimeofday () in
+  for _=1 to iterations do
+    match update t target (fun call -> {call with value=call.value+1}) with
+    | Call_updated -> () | _ -> failwith "fixture call disappeared"
+  done;
+  let wall=Unix.gettimeofday ()-.wall and cpu=Sys.time ()-.cpu in
+  let allocated=Gc.allocated_bytes ()-.allocated in
+  ignore (Sys.opaque_identity t);
+  Printf.fprintf csv "%d,%s,%d,%s,%.9f,%.9f,%.0f\n%!" size position iterations version cpu wall allocated
+
+let benchmark path =
+  let csv=open_out path in
+  output_string csv "size,position,iterations,version,cpu_s,wall_s,allocated_bytes\n";
+  List.iter (fun (size,position,iterations) ->
+    for i=0 to 6 do
+      if i mod 2=0 then (sample csv size position iterations "old"; sample csv size position iterations "new")
+      else (sample csv size position iterations "new"; sample csv size position iterations "old")
+    done) [1,"newest",100_000;16,"newest",50_000;16,"middle",50_000;16,"oldest",50_000;16,"duplicate-newest",50_000;
+            256,"newest",5_000;256,"middle",5_000;256,"oldest",5_000;
+            256,"duplicate-newest",5_000;
+            1024,"newest",1_000;1024,"middle",1_000;1024,"oldest",1_000];
+  close_out csv
+
+let () = fuzz (); if Array.length Sys.argv=2 then benchmark Sys.argv.(1)

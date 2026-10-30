@@ -37,6 +37,17 @@ baseline failure outputs are
 fails on the first of two validation outcomes, so its later branch is not
 claimed as observed.
 
+The displayed failure outputs have only their extra final blank lines removed
+to satisfy the repository whitespace check. Their exact original bytes are
+preserved in the corresponding gzip files; SHA-256 below is of the
+**decompressed original**, not of the displayed file.
+
+| Original output | SHA-256 |
+| --- | --- |
+| [capacity](baseline-capacity-failure.txt.gz) | `28b77ebf61e38f453b67efaf5115a64baaa8e454228bff3f6aaeb13335dd424e` |
+| [validation](baseline-validation-failure.txt.gz) | `faf0712e07d0142fe4cffa5646ec231ab975faae64627e11f06b8d6626f972a7` |
+| [receipt](baseline-receipt-failure.txt.gz) | `8f756f854930519f7dd5023c8ccb957f1cf79c387ced301b9f501c14b1013c15` |
+
 ```sh
 python3 docs/evidence/keeper-memory-projection-conflict-20261030/reproduce.py \
   --baseline cfe7f4e071f1e4e2aee3161760a3216d17bf0c3e \

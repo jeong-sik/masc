@@ -32,6 +32,21 @@ module Make (Capture : Capture) : sig
   val scope : Capture.owner -> string
   val parent_execution_id : Lane_addon_tool_request_owner.retained -> (string, string) result
   (** Strict header read for discovery joining only; follow with full validation. *)
+  val validate_payload :
+    read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+    read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
+    owner:Capture.owner -> capture:Capture.t ->
+    parent:Lane_addon_tool_request_owner.retained -> record:Lane_addon_tool_request_owner.retained ->
+    (unit, string) result
+  val validate_preparation_payload :
+    read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+    read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
+    owner:Capture.owner -> capture:Capture.t ->
+    parent:Lane_addon_tool_request_owner.retained -> (unit, string) result
+  (** Pure current-version payload, captured guidance, source proposal and
+      parent/destination binding checks. The supplied originals must already
+      pass their strict body decoders. Does not observe live ownership, read
+      host proofs, recover a chain or grant dispatch/commit authority. *)
   val prepare_root : store:Lane_addon_store.t -> owner:Capture.owner ->
     capture:Capture.t -> parent:Lane_addon_tool_request_owner.retained ->
     proposal:Yojson.Safe.t -> request_id:string -> authority:Keeper_librarian_absorb_gate.live_authority ->

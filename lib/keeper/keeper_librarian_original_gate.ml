@@ -86,21 +86,23 @@ let current_reading store = {
   records=(fun ~scope -> owned (Owner.load_scope ~store ~scope));
   successor=(fun ~scope successor -> owned (Owner.load_successor_request ~store ~scope successor));
 }
-let load_parent_with ~read ~store ~owner ~capture ~proposal =
-  let* parent = read.load ~scope:(Capture.scope owner) ~request_id:(Capture.request_id capture) in
-  let* parent = Option.to_result ~none:"Original gate execution parent is absent" parent in
+let parent_final ~capture ~proposal (parent:Owner.retained) =
   let* () = equal parent.request (Capture.to_json capture) "Gate parent capture differs" in
   let* judgment = parent_judgment parent in
   let* exact = Capture.request capture in
   let* schema = Option.to_result ~none:"Original Librarian request has no schema" exact.schema in
   let* final = Exact.final_of_json ~schema judgment in
-  let* () = Capture.confirm_final ~store capture final in
   let* () = match final with
     | Exact.Call_final (Answered {output;_}) ->
       equal (Exact.checked_json output) proposal "Gate proposal differs from the original answered judgment"
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Error "Gate requires the original answered proposal" in
-  Ok parent
+  Ok final
+let load_parent_with ~read ~store ~owner ~capture ~proposal =
+  let* parent = read.load ~scope:(Capture.scope owner) ~request_id:(Capture.request_id capture) in
+  let* parent = Option.to_result ~none:"Original gate execution parent is absent" parent in
+  let* final = parent_final ~capture ~proposal parent in
+  let+ () = Capture.confirm_final ~store capture final in parent
 let load_parent ~store ~owner ~capture ~proposal =
   load_parent_with ~read:(current_reading store) ~store ~owner ~capture ~proposal
 
@@ -177,6 +179,60 @@ let completed_json transcript result =
   Ok (`Assoc ["kind",`String "original-gate-complete";"transcript_sha256",`String sha;
     "result",Gate.run_result_to_yojson result])
 
+let request_payload ~owner ~capture ~(parent:Owner.retained) ~request_id request =
+  let* members = request_members request in
+  let* () = Capture.owner_matches_json owner (value "owner" members) in
+  let proposal = value "proposal" members in
+  let* input = inputs capture proposal in
+  let* authority = Gate.replay_authority_of_yojson (value "authority" members) in
+  let* guidance = Gate.guidance_of_yojson (value "guidance" members) in
+  let* predecessor = optional_text (value "predecessor" members) in
+  let+ () = equal request
+    (gate_request ~owner ~capture ~parent ~proposal ~request_id ~authority ~guidance ~predecessor)
+    "Gate original execution identity differs" in
+  proposal,input,authority,guidance,predecessor
+let retained_payload ~owner ~capture ~(parent:Owner.retained) (record:Owner.retained) =
+  let* () = require (record.scope=scope owner && record.installation_id=parent.installation_id
+    && record.package_id=parent.package_id && record.tool=parent.tool) "Gate owner destination differs from its execution" in
+  request_payload ~owner ~capture ~parent ~request_id:record.request_id record.request
+let validate_payload ~read ~read_body ~owner ~capture ~parent ~record =
+  let* proposal,_,_,_,_ = retained_payload ~owner ~capture ~parent record in
+  let* _ = parent_final ~capture ~proposal parent in
+  List.fold_left (fun result event ->
+    let* ()=result in match event with
+    | Progress.Successor_intended successor ->
+      let* request=read_body ~scope:(scope owner) ~request_digest:successor.request_digest in
+      let* next_proposal,_,_,_,predecessor=request_payload ~owner ~capture ~parent
+        ~request_id:successor.request_id request in
+      let* ()=require (successor.request_id<>record.request_id && predecessor=Some record.request_id)
+        "Gate successor differs from its original predecessor" in
+      let* ()=equal proposal next_proposal "Gate successor changed the original proposal" in
+      let* child=read ~scope:(scope owner) ~request_id:successor.request_id in
+      (match child with
+       | Some (child:Owner.retained) -> require (child.request_digest=successor.request_digest)
+           "Gate child differs from original successor intent"
+       | None -> require (match Progress.phase record.progress with Subdivided _ -> false | _ -> true)
+           "Acknowledged original gate successor is absent")
+    | _ -> Ok ()) (Ok ()) (Progress.events record.progress)
+let validate_preparation_payload ~read ~read_body ~owner ~capture ~(parent:Owner.retained) =
+  match Progress.preparation parent.progress with
+  | None -> Ok ()
+  | Some (Preparation_pending intent | Preparation_confirmed intent) ->
+    let* proposal,_,_,_,predecessor=request_payload ~owner ~capture ~parent
+      ~request_id:intent.request_id intent.request in
+    let* ()=require (predecessor=None) "Original gate preparation names a retry" in
+    let* _=parent_final ~capture ~proposal parent in
+    let* child=read ~scope:(scope owner) ~request_id:intent.request_id in
+    match child with
+    | None -> require (match Progress.preparation parent.progress with
+        | Some (Preparation_pending _) -> true | _ -> false) "Acknowledged original gate root is absent"
+    | Some child ->
+      let* ()=validate_payload ~read ~read_body ~owner ~capture ~parent ~record:child in
+      let* ()=equal child.request intent.request "Original gate root differs from its full parent intent" in
+      require (match Progress.preparation parent.progress with
+        | Some (Preparation_pending _) -> Progress.phase child.progress=Progress.Captured | _ -> true)
+        "Unacknowledged original gate root has execution progress"
+
 let validate_successor_request_with ~read ~store ~owner ~capture ~(prior:Owner.retained) (successor:Progress.successor) =
   let* request = read.successor ~scope:(scope owner) successor in
   let* members = request_members request in
@@ -195,18 +251,9 @@ let validate_successor_request_with ~read ~store ~owner ~capture ~(prior:Owner.r
 let rec restore_record_with ~read ~store ~owner ~capture ~visited (record : Owner.retained) =
   let* () = require (not (List.mem record.request_id visited)) "Cyclic gate retry ancestry" in
   let* members = request_members record.request in
-  let* () = Capture.owner_matches_json owner (value "owner" members) in
   let proposal = value "proposal" members in
-  let* input = inputs capture proposal in
   let* parent = load_parent_with ~read ~store ~owner ~capture ~proposal in
-  let* authority = Gate.replay_authority_of_yojson (value "authority" members) in
-  let* guidance = Gate.guidance_of_yojson (value "guidance" members) in
-  let* predecessor = optional_text (value "predecessor" members) in
-  let* () = require (record.scope=scope owner && record.installation_id=parent.installation_id
-    && record.package_id=parent.package_id && record.tool=parent.tool) "Gate owner destination differs from its execution" in
-  let* () = equal record.request
-    (gate_request ~owner ~capture ~parent ~proposal ~request_id:record.request_id ~authority ~guidance ~predecessor)
-    "Gate original execution identity differs" in
+  let* proposal,input,authority,guidance,predecessor = retained_payload ~owner ~capture ~parent record in
   let* () = match predecessor with
     | None ->
       (match Progress.preparation parent.progress with

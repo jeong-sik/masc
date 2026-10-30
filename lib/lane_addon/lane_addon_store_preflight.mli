@@ -39,6 +39,15 @@ type decoder =
   | Exact_record  (** {!Lane_addon_exact.check_retained_record} *)
   | Tool_request_inventory  (** {!Lane_addon_store.tool_request_owner_entry} *)
   | Tool_request_owner  (** {!Lane_addon_tool_request_owner.check_published} *)
+  | Tool_request_payload (** The consumer's current pure payload decoder. *)
+
+type tool_request_reader = scope:string -> request_id:string ->
+  (Lane_addon_tool_request_owner.retained option, string) result
+type request_body_reader = scope:string -> request_digest:string -> (Yojson.Safe.t, string) result
+type payload_validator = read:tool_request_reader -> read_body:request_body_reader ->
+  Lane_addon_tool_request_owner.retained -> (unit, string) result
+(** Explicit read-only parent/body ports. Every returned original passes the
+    same record identity, canonical body and digest checks as the scanned one. *)
 
 val decoder_name : decoder -> string
 
@@ -72,7 +81,7 @@ val fresh_state_step : refusal -> string
 (** The step for one refused record: stop the server, move [aside] away, start
     the new build. *)
 
-val scan : Store.t -> base_path:string -> (report, string) result
+val scan : ?validate_tool_request:payload_validator -> Store.t -> base_path:string -> (report, string) result
 (** Read every record of the store under [base_path] with this build's
     decoders. A missing store directory is an empty store. [Error] means a
     directory exists and cannot be listed. The scan runs beside a live server
@@ -81,7 +90,8 @@ val scan : Store.t -> base_path:string -> (report, string) result
     then the body its check reads. *)
 
 module For_testing : sig
-  val scan : after_read:(string -> unit) -> Store.t -> base_path:string -> (report, string) result
+  val scan : ?validate_tool_request:payload_validator -> after_read:(string -> unit) ->
+    Store.t -> base_path:string -> (report, string) result
   (** The same scan, calling [after_read] with each record's path once its
       bytes are read and before they are decoded, so a test can move a file
       at the point a running server could. *)

@@ -3,6 +3,19 @@
 val scope : Keeper_librarian_durable_request.owner -> string
 val parent_execution_id : Lane_addon_tool_request_owner.retained -> (string, string) result
 (** Strict header read for discovery joining only; follow with full validation. *)
+val validate_payload :
+  read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+  read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
+  owner:Keeper_librarian_durable_request.owner -> capture:Keeper_librarian_durable_request.t ->
+  parent:Lane_addon_tool_request_owner.retained -> record:Lane_addon_tool_request_owner.retained ->
+  (unit, string) result
+val validate_preparation_payload :
+  read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+  read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
+  owner:Keeper_librarian_durable_request.owner -> capture:Keeper_librarian_durable_request.t ->
+  parent:Lane_addon_tool_request_owner.retained -> (unit, string) result
+(** Pure current payload/source/binding checks for deploy preflight. Does not
+    inspect live ownership, read host proofs or grant effect authority. *)
 val prepare_root : store:Lane_addon_store.t -> owner:Keeper_librarian_durable_request.owner ->
   capture:Keeper_librarian_durable_request.t -> parent:Lane_addon_tool_request_owner.retained ->
   proposal:Yojson.Safe.t -> request_id:string -> authority:Keeper_librarian_absorb_gate.live_authority ->

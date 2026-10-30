@@ -3443,17 +3443,22 @@ let private_jsonl_open_stable_lock lock_path =
     private_jsonl_capture Open_stable_lock (fun () ->
       Unix.openfile
         lock_path
-        [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ]
+        [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC; Unix.O_NONBLOCK ]
         0o600)
   with
   | Ok fd -> Ok { fd; creation = Stable_lock_created }
   | Error failure ->
     (match failure.exception_ with
      | Unix.Unix_error (error, _, _) when error = Unix.EEXIST ->
-       private_jsonl_capture Open_stable_lock (fun () ->
-         Unix.openfile lock_path [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0)
-       |> Result.map (fun fd -> { fd; creation = Stable_lock_existing })
-       |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+       (match private_jsonl_capture Inspect_stable_lock (fun () -> Unix.lstat lock_path) with
+        | Error failure -> Error (Private_jsonl_operation_failed failure)
+        | Ok stats when stats.Unix.st_kind <> Unix.S_REG ->
+          Error (Unexpected_transaction_file_kind stats.Unix.st_kind)
+        | Ok _ ->
+          private_jsonl_capture Open_stable_lock (fun () ->
+            Unix.openfile lock_path [ Unix.O_RDWR; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0)
+          |> Result.map (fun fd -> { fd; creation = Stable_lock_existing })
+          |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure))
      (* DET-OK: [exn] is open. Every non-EEXIST open failure remains typed. *)
      | _ -> Error (Private_jsonl_operation_failed failure))
 ;;
@@ -3670,7 +3675,9 @@ let private_jsonl_cursor_of_stats stats =
 ;;
 
 let private_jsonl_open_existing ~close_fd path flags =
-  match Unix.openfile path (Unix.O_CLOEXEC :: flags) 0 with
+  (* The type check below needs an opened descriptor. Without O_NONBLOCK,
+     opening a FIFO for reading can wait forever before we can reject it. *)
+  match Unix.openfile path (Unix.O_CLOEXEC :: Unix.O_NONBLOCK :: flags) 0 with
   | fd ->
     (match
        private_jsonl_validate_open_binding
@@ -3707,7 +3714,7 @@ let purge_private_jsonl_durable_locked_with_io ~io path =
   in
   let* opened =
     private_jsonl_open_existing ~close_fd:io.close_fd path
-      [ Unix.O_RDONLY; Unix.O_NONBLOCK ]
+      [ Unix.O_RDONLY ]
   in
   match opened with
   | None -> sync_removed ()
@@ -3790,7 +3797,7 @@ let purge_private_jsonl_durable_locked_at_snapshot_with_io ~io path
       io.before_sync_parent dir; fsync_parent_directory dir) in
     Ok Private_jsonl_cursor.Missing in
   let* opened = private_jsonl_open_existing ~close_fd:io.close_fd path
-      [Unix.O_RDONLY; Unix.O_NONBLOCK] in
+      [Unix.O_RDONLY] in
   match opened with
   | None -> sync_removed ()
   | Some fd ->
@@ -4236,7 +4243,7 @@ let rewrite_private_jsonl_durable_locked_at_snapshot_with_io
     let success cursor = Cursor_succeeded cursor in
     with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir ~path ->
     let open Result.Syntax in
-    let* opened = private_jsonl_open_existing ~close_fd:io.close_fd path [Unix.O_RDONLY; Unix.O_NONBLOCK] in
+    let* opened = private_jsonl_open_existing ~close_fd:io.close_fd path [Unix.O_RDONLY] in
     match opened with
     | None ->
       let actual = Private_jsonl_cursor.Missing in
@@ -4282,6 +4289,7 @@ module Private_jsonl_slice = struct
         }
     | Offset_not_at_row_boundary of int
     | Incomplete_tail of int
+    | Non_regular_file of Unix.file_kind
     | Io_failed of exn
 
   let error_to_string = function
@@ -4294,6 +4302,8 @@ module Private_jsonl_slice = struct
       Printf.sprintf "JSONL cursor %d is not a row boundary" offset
     | Incomplete_tail end_offset ->
       Printf.sprintf "JSONL store has an incomplete tail at end %d" end_offset
+    | Non_regular_file kind ->
+      "private JSONL store is not a regular file: " ^ file_kind_to_string kind
     | Io_failed exn -> Printexc.to_string exn
   ;;
 end
@@ -4311,7 +4321,7 @@ let read_private_jsonl_slice_locked_with_io ~io path ~from =
         ~path
         (fun () ->
            Stdlib.Mutex.protect path_mu (fun () ->
-             match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+             match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC; Unix.O_NONBLOCK ] 0 with
              | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
                if from = 0
                then Private_file_succeeded { bytes = ""; end_offset = 0 }
@@ -4323,6 +4333,9 @@ let read_private_jsonl_slice_locked_with_io ~io path ~from =
                  fd
                  (fun () ->
                     try
+                      let kind = (Unix.fstat fd).Unix.st_kind in
+                      if kind <> Unix.S_REG then Error (Non_regular_file kind)
+                      else (
                       lock_whole_file_shared fd;
                       let end_offset = Unix.lseek fd 0 Unix.SEEK_END in
                       if from > end_offset
@@ -4372,7 +4385,7 @@ let read_private_jsonl_slice_locked_with_io ~io path ~from =
                           Ok
                             { bytes = Bytes.unsafe_to_string bytes
                             ; end_offset
-                            }))
+                            })))
                     with
                     | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
                     | exn -> Error (Io_failed exn))))
@@ -4992,7 +5005,7 @@ let update_existing_private_file_durable_locked_with_io ~io path decide =
          | Ok (Some _) ->
            match
              private_jsonl_open_existing ~close_fd:io.close_fd path
-               [ Unix.O_RDWR; Unix.O_APPEND; Unix.O_NONBLOCK ]
+               [ Unix.O_RDWR; Unix.O_APPEND ]
            with
            | Error error -> Private_file_failed error
            | Ok None -> Private_file_succeeded None

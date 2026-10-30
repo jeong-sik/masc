@@ -849,6 +849,139 @@ let transaction_snapshot path ~after =
   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
 ;;
 
+(* A child bounds each call even if a regression blocks in [open] before its
+   descriptor can be inspected. Only the child created by this fixture is
+   killed on timeout. *)
+let check_fifo_call_returns label f =
+  let result_read, result_write = Unix.pipe ~cloexec:true () in
+  let read_open = ref true and write_open = ref true in
+  let close_owned fd is_open =
+    if !is_open then (is_open := false; Unix.close fd)
+  in
+  let close_owned_quietly fd is_open =
+    try close_owned fd is_open with Unix.Unix_error _ -> ()
+  in
+  let remaining counter =
+    5. -. (Mtime.Span.to_float_ns (Mtime_clock.count counter) /. 1e9)
+  in
+  let rec reap_until pid counter =
+    if remaining counter <= 0. then None else
+    match Unix.waitpid [ Unix.WNOHANG ] pid with
+    | 0, _ ->
+      let left = remaining counter in
+      if left <= 0. then None
+      else (
+        (try ignore (Unix.select [] [] [] (min left 0.01) : _ * _ * _)
+         with Unix.Unix_error (Unix.EINTR, _, _) -> ());
+        reap_until pid counter)
+    | _, status -> Some status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap_until pid counter
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      close_owned_quietly result_read read_open;
+      close_owned_quietly result_write write_open)
+    (fun () ->
+      match Unix.fork () with
+      | 0 ->
+        let exit_code =
+          try
+            close_owned result_read read_open;
+            let passed = try f () with _ -> false in
+            let byte = if passed then "1" else "0" in
+            let rec write_result () =
+              match Unix.write_substring result_write byte 0 1 with
+              | 1 -> ()
+              | _ -> failwith "FIFO fixture could not write its result"
+              | exception Unix.Unix_error (Unix.EINTR, _, _) -> write_result ()
+            in
+            write_result ();
+            close_owned result_write write_open;
+            if passed then 0 else 1
+          with _ -> 1
+        in
+        Unix._exit exit_code
+      | pid ->
+        let reaped = ref false in
+        Fun.protect
+          ~finally:(fun () ->
+            if not !reaped then (
+              (try Unix.kill pid Sys.sigkill
+               with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+              match reap_until pid (Mtime_clock.counter ()) with
+              | Some _ -> reaped := true
+              | None -> fail (label ^ " fixture child did not exit after SIGKILL")))
+          (fun () ->
+            close_owned result_write write_open;
+            let counter = Mtime_clock.counter () in
+            let rec read_result () =
+              let left = remaining counter in
+              if left <= 0. then fail (label ^ " blocked while opening the FIFO");
+              match Unix.select [ result_read ] [] [] left with
+              | [], _, _ -> fail (label ^ " blocked while opening the FIFO")
+              | _ ->
+                let byte = Bytes.create 1 in
+                (match Unix.read result_read byte 0 1 with
+                 | length -> length = 1 && Bytes.get byte 0 = '1'
+                 | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_result ())
+              | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_result ()
+            in
+            let passed = read_result () in
+            let status =
+              match reap_until pid counter with
+              | Some status -> reaped := true; status
+              | None -> fail (label ^ " fixture child did not exit")
+            in
+            check bool (label ^ " refused the FIFO") true
+              (passed && status = Unix.WEXITED 0)))
+;;
+
+let test_private_jsonl_transactions_reject_fifo_without_writer () =
+  with_transaction_jsonl None @@ fun path ->
+  let snapshot = transaction_snapshot path ~after:None in
+  Unix.mkfifo path 0o600;
+  let is_fifo_error = function
+    | Error (Fs_compat.Unexpected_transaction_file_kind Unix.S_FIFO) -> true
+    | Ok _ | Error _ -> false in
+  let calls =
+    [ "read", (fun () -> is_fifo_error (Fs_compat.read_private_jsonl_durable_locked_result path ~after:None))
+    ; "recover", (fun () -> is_fifo_error (Fs_compat.recover_private_jsonl_durable_locked_result path))
+    ; "append", (fun () -> is_fifo_error
+         (Fs_compat.append_private_jsonl_durable_locked_at_cursor_result path ~expected:snapshot.cursor "{}\n"))
+    ; "rewrite", (fun () -> is_fifo_error
+         (Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result path ~expected:snapshot.cursor "{}\n"))
+    ] in
+  List.iter (fun (label, call) ->
+    check_fifo_call_returns label call;
+    check bool (label ^ " preserved the FIFO") true ((Unix.lstat path).Unix.st_kind = Unix.S_FIFO)) calls
+;;
+
+let test_private_jsonl_stable_lock_rejects_fifo_without_writer () =
+  with_transaction_jsonl None @@ fun path ->
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  Unix.mkfifo lock_path 0o600;
+  check_fifo_call_returns "stable lock" (fun () ->
+    match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+    | Error (Fs_compat.Unexpected_transaction_file_kind Unix.S_FIFO) -> true
+    | Ok _ | Error _ -> false);
+  check bool "stable lock FIFO preserved" true
+    ((Unix.lstat lock_path).Unix.st_kind = Unix.S_FIFO);
+  check bool "data path not created" false (Sys.file_exists path)
+;;
+
+let test_private_jsonl_slice_rejects_fifo_without_writer () =
+  with_transaction_jsonl None @@ fun path ->
+  Unix.mkfifo path 0o600;
+  check_fifo_call_returns "slice read" (fun () ->
+    match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
+    | Fs_compat.Private_file_failed
+        (Fs_compat.Private_jsonl_slice.Non_regular_file Unix.S_FIFO) -> true
+    | Private_file_succeeded _ | Private_file_succeeded_with_cleanup_failure _
+    | Private_file_failed _ | Private_file_failed_with_cleanup_failure _ -> false);
+  check bool "slice data FIFO preserved" true
+    ((Unix.lstat path).Unix.st_kind = Unix.S_FIFO)
+;;
+
 let transaction_snapshot_with_io ~io path ~after =
   match
     Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
@@ -1794,6 +1927,18 @@ let () =
             "private JSONL transaction handles missing stores and deltas"
             `Quick
             test_private_jsonl_transaction_missing_and_delta_contract
+        ; test_case
+            "private JSONL transactions reject a FIFO without a writer"
+            `Quick
+            test_private_jsonl_transactions_reject_fifo_without_writer
+        ; test_case
+            "private JSONL stable lock rejects a FIFO without a writer"
+            `Quick
+            test_private_jsonl_stable_lock_rejects_fifo_without_writer
+        ; test_case
+            "private JSONL slice rejects a FIFO without a writer"
+            `Quick
+            test_private_jsonl_slice_rejects_fifo_without_writer
         ; test_case
             "private JSONL purge removes data and retains its stable lock"
             `Quick

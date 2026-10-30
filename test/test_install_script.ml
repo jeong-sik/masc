@@ -675,7 +675,7 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
   check int "fixture copies the installed release identities"
     (Sys.command (Printf.sprintf "cp -R %s %s"
        (Filename.quote cached_releases)
-       (Filename.quote prefix))) 0;
+       (Filename.quote base_path))) 0;
   (* install.sh reads one symlink level and compares it against
      <canonical prefix>/.masc-releases/<digest>/masc, so the copied
      identity tree needs a case-local pointer: recreate it here. *)

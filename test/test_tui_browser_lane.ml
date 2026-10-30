@@ -282,6 +282,55 @@ let test_screenshot_ownership_and_draft () =
     (failed.selected_tab = Some 2 && failed.load = Failed "selected tab closed" && preview = None);
   expect "non-PNG payload rejected" (Result.is_error (decode_screenshot (screenshot_response ~mime:"image/jpeg" ())))
 
+(* The viewport cadence's redraw skip in [Masc_tui] compares the settled
+   screenshot record field by field (source, client, tab, title, url,
+   viewport) before spending a redraw on it. The comparison input is exactly
+   what [accept_screenshot] hands the redraw path, so a settled viewport shot
+   that decodes identical keeps the cadence armed with the very record the
+   skip will compare against, and any field change decodes different here
+   already. That pins the skip's inputs without driving a terminal. *)
+let test_viewport_cadence_skip_inputs () =
+  let pending = { (loaded ()) with load = Loading (9, Viewport_cadence 2) } in
+  let settle response view =
+    let settled, shot = accept_screenshot ~generation:9 (decode_screenshot response) view in
+    (settled, Option.get shot) in
+  let settled, shot = settle (screenshot_response ()) pending in
+  expect "a settled cadence shot is idle and owned by the selected tab"
+    (settled.load = Idle && shot.source = Live && shot.tab_id = 2
+     && shot.title = "second" && shot.url = "https://example.org/");
+  expect "the identical re-read decodes to the same skip inputs"
+    (let _, again = settle (screenshot_response ()) settled in
+     again.source = shot.source && again.client_id = shot.client_id
+     && again.tab_id = shot.tab_id && again.title = shot.title
+     && again.url = shot.url && again.viewport = shot.viewport);
+  List.iter (fun (field, response) ->
+    expect ("a changed " ^ field ^ " already decodes different, so the skip cannot hold")
+      (let _, changed = settle response settled in
+       not (changed.title = shot.title && changed.url = shot.url
+            && changed.viewport = shot.viewport)))
+    [ ("title", `Assoc [ "ok", `Bool true; "data", `Assoc [
+          "source", `String "live"; "clientId", `String firefox.client_id; "tabId", `Int 2;
+          "title", `String "moved"; "url", `String "https://example.org/";
+          "mimeType", `String "image/png"; "data", `String "UE5H";
+          "viewport", `Assoc [ "documentId", `String "fixture"; "width", `Int 800; "height", `Int 600;
+                               "scrollX", `Int 0; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ]) );
+      ("url", `Assoc [ "ok", `Bool true; "data", `Assoc [
+          "source", `String "live"; "clientId", `String firefox.client_id; "tabId", `Int 2;
+          "title", `String "second"; "url", `String "https://example.org/moved";
+          "mimeType", `String "image/png"; "data", `String "UE5H";
+          "viewport", `Assoc [ "documentId", `String "fixture"; "width", `Int 800; "height", `Int 600;
+                               "scrollX", `Int 0; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ]) );
+      ("viewport", `Assoc [ "ok", `Bool true; "data", `Assoc [
+          "source", `String "live"; "clientId", `String firefox.client_id; "tabId", `Int 2;
+          "title", `String "second"; "url", `String "https://example.org/";
+          "mimeType", `String "image/png"; "data", `String "UE5H";
+          "viewport", `Assoc [ "documentId", `String "fixture"; "width", `Int 800; "height", `Int 600;
+                               "scrollX", `Int 3; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ]) ) ];
+  expect "the armed cadence keeps naming the settled viewport tab"
+    (cadence_operation ~viewport:shot settled = Some (Viewport_cadence 2));
+  expect "a busy view arms no cadence, so no skip input is produced at all"
+    (cadence_operation ~viewport:shot {(loaded ()) with load = Loading (9, Viewport_cadence 2)} = None)
+
 let test_activity_refresh_preserves_pending_read () =
   let original = {(loaded ()) with scroll=9; load=Loading (42, Read_refresh);
     refresh_pending=Some 42;url_draft=Some "https://example.org/draft"} in
@@ -1051,6 +1100,7 @@ let () =
      "every pointer gesture is decided before it is sent", test_pointer_decision;
      "a refused gesture stays until the next input", test_unserved_gesture;
      "screenshot ownership, draft and stale tab", test_screenshot_ownership_and_draft;
+     "viewport cadence skip inputs", test_viewport_cadence_skip_inputs;
      "read and tab selection", test_read_and_selection;
      "closed-tab refresh recovery", test_refresh_rediscovers_tabs;
      "stale response and provenance", test_stale_response;

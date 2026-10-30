@@ -950,6 +950,63 @@ let test_a_memory_pass_carries_the_counterparts_of_its_turn () =
     (durable_reads config ~commit:(fun _original ->
        fail "the durable pass sent the saved turn again"))
 
+let test_missing_counterpart_template_preserves_continuity_source () =
+  let counterpart = "counterpart-pending-continuity-evidence" in
+  with_counterpart_turn ~counterpart @@ fun ~config ~continuity ->
+  let module Current = Masc.Keeper_memory_os_current in
+  let module Cursor = Masc.Keeper_external_read_cursor in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path
+    ~base_path:config.Masc.Workspace.base_path in
+  let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  let prepared = prepare config |> some in
+  let now = match P.turn_window prepared with
+    | Some {through; _} -> through
+    | None -> fail "fixture has no completed counterpart window" in
+  let external_item : Masc.Keeper_external_attention.item =
+    {event_id=Masc.Keeper_external_attention.event_id_of_dedupe_key "continuity-guard-external";
+     dedupe_key="continuity-guard-external";keeper_name;
+     conversation={conversation_id="agent:continuity-guard";surface=Masc.Keeper_external_attention.Agent};
+     external_message=None;source_label="agent";
+     actor={actor_id=Some "agent";display_name=Some "Agent";authority=Masc.Keeper_chat_store.External};
+     urgency=Masc.Keeper_external_attention.Ambient;content_preview="Original external attention";
+     content_ref=None;received_at=now;metadata=[]} in
+  (match Masc.Keeper_external_attention.For_testing.record_with_clock
+     ~now:(fun () -> now) ~base_path:config.Masc.Workspace.base_path external_item with
+   | `Recorded -> () | `Duplicate _ -> fail "duplicate external attention fixture"
+   | `Error detail -> fail detail);
+  let previous = (Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
+  let restore () = match previous with
+    | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
+    | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get in
+  Fun.protect ~finally:restore (fun () ->
+    let range = P.memory_range_id ~config ~keeper_name prepared |> get in
+    let before = Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get in
+    Prompt_registry.set_override Prompt_names.librarian "Summarize this turn" |> get;
+    let prompts = ref [] in
+    let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+      prompts := prompt :: !prompts; Ok memory_answer in
+    continuity runner;
+    check int "an incomplete Memory prompt never reaches the provider" 0 (List.length !prompts);
+    check bool "the source range has no Memory receipt" false
+      (P.memory_committed ~config ~keeper_name prepared |> get);
+    check bool "Memory is unchanged" true
+      (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name |> get = before);
+    check bool "continuity is not published" true (P.read ~config ~keeper_name |> get = None);
+    let cursor = Cursor.observe ~runtime_keepers_dir ~keeper_name |> get in
+    check bool "the external source remains pending without ACK" true
+      (Cursor.observation_matches_preparation cursor ~after:0 ~through:1
+         ~atom:(Some range) ~official:None);
+    restore ();
+    continuity runner;
+    (match !prompts with
+     | [prompt] -> check bool "the corrected prompt includes the original counterpart" true
+         (contains ~sub:counterpart prompt && contains ~sub:"Original external attention" prompt)
+     | _ -> fail "expected exactly one corrected Memory request");
+    check (option int) "the corrected pass publishes the original range" (Some 1)
+      (Option.map (fun (saved : S.t) -> saved.end_atom) (P.read ~config ~keeper_name |> get));
+    let recovered = Cursor.read ~memory_keepers_dir:keepers_dir ~runtime_keepers_dir ~keeper_name |> get in
+    check int "the exact committed receipt authorizes cursor recovery" 1 (Cursor.offset recovered))
+
 (* The CLI slot reports a limit the turn fits without its counterpart and not
    with it, and the turn is one atom, so no smaller unit can leave the
    counterpart out. Both the whole-turn request and the single-message floor
@@ -2424,6 +2481,8 @@ let () = run "production continuity pair"
       test_a_waiting_unit_ends_the_catch_up_after_a_commit;
     test_case "a Memory pass carries the counterparts of its turn" `Quick
       test_a_memory_pass_carries_the_counterparts_of_its_turn;
+    test_case "missing counterpart template preserves the continuity source" `Quick
+      test_missing_counterpart_template_preserves_continuity_source;
     test_case "a turn too large with its counterparts is left to the durable pass" `Quick
       test_a_turn_too_large_with_its_counterparts_is_left_to_the_durable_pass;
     test_case "a committed range asks for the working state alone" `Quick

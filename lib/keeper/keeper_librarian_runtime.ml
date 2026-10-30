@@ -425,12 +425,14 @@ let restore_durable_preparation ~source_input ~parsing_now ~policy ~rule_prompt 
   let+ ()=validate_durable_preparation preparation in preparation
 (* This is an admission check, not a restoration rule: old captures must keep
    their original prompt and remain decodable even if it omitted the input. *)
-let require_counterpart_template (preparation : durable_preparation) =
-  if preparation.source_input.counterpart_observations = []
-    || Prompt_registry.resolution_references_variable preparation.prompt
+let require_counterpart_source ~(source_input : Keeper_librarian.input) ~prompt =
+  if source_input.counterpart_observations = []
+    || Prompt_registry.resolution_references_variable prompt
          ~variable:"counterpart_observations"
   then Ok ()
   else Error "Librarian prompt must include {{counterpart_observations}} while counterpart input is pending"
+let require_counterpart_template (preparation : durable_preparation) =
+  require_counterpart_source ~source_input:preparation.source_input ~prompt:preparation.prompt
 let prepare_durable_with ?continuity ~output_schema ~now source_input =
   let open Result.Syntax in
   let policy : durable_policy = {
@@ -1626,7 +1628,17 @@ let run_pass
         let prompt_variables, prompt_material = match admission with
           | None ->
             (match durable_preparation with
-             | None -> resolve_librarian_prompt pass prompt_input
+             | None ->
+               let variables, material = resolve_librarian_prompt pass prompt_input in
+               let material = match pass with
+                 | Memory_pass (Some _) | Volatile_memory_pass _ ->
+                   Result.bind material (fun (material : librarian_prompt_material) ->
+                     Result.map (fun () -> material)
+                       (require_counterpart_source ~source_input:prompt_input
+                          ~prompt:material.resolution))
+                 | Memory_pass None | Continuity_state_pass _ | Volatile_state_pass _
+                 | Working_context_pass -> material in
+               variables, material
              | Some (Ok prepared) -> prepared.variables,
                Ok {resolution=prepared.prompt;rendered=prepared.rendered_prompt}
              | Some (Error detail) -> [],Error detail)

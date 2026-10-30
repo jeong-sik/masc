@@ -26,10 +26,12 @@ python3 docs/evidence/tui-fetched-current-key-20261030/reproduce.py \
 ```
 
 The benchmark compiles complete old and candidate module sources under
-different names without their interfaces, compares their observations for the
-nine synthetic states, and times one million accessor calls per sample. Seven
-samples alternate order. No request worker, pane rendering, terminal, or
-application frame is measured.
+different names without their interfaces. For nine synthetic states it checks
+each current key against the key in that implementation's current observation,
+then compares those keys across implementations. It does not compare the
+observations' value or error payloads across implementations. It times one
+million accessor calls per sample; seven samples alternate order. No request
+worker, pane rendering, terminal, or application frame is measured.
 
 ## Captured measurements
 

@@ -32,13 +32,18 @@ type request =
   ; evidence : evidence
   }
 
-type outcome =
+type audit_observation =
+  | Audit_call_returned
+  | Audit_unconfirmed
+
+type creation_outcome =
   | Created_and_published of
       { reference : Skill_reference.t
       ; snapshot_revision : string
       ; kind : string
       ; diagnostics : string list
       }
+
   | Created_but_shadowed of
       { reference : Skill_reference.t
       ; snapshot_revision : string
@@ -53,6 +58,11 @@ type outcome =
       ; diagnostics : string list
       }
 
+type outcome =
+  { creation : creation_outcome
+  ; audit : audit_observation
+  }
+
 type refusal_cause =
   | Request_refused
   | Source_unavailable
@@ -64,4 +74,5 @@ type error =
       { code : string
       ; message : string
       ; cause : refusal_cause
+      ; audit : audit_observation option
       }

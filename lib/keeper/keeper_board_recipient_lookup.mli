@@ -35,8 +35,9 @@ val make : base_path:string -> Recipient_lookup.t
       and only if a name needs it.  One unreadable setting, or two Keepers
       claiming one alias, fails the lookup.  The detail names the Keeper or the
       alias, and the write is refused.
-    - A name the Board cannot hold as an identity (longer than 64 bytes) fails
-      the lookup the same way.
+    - A declared name the Board cannot hold as an identity (longer than 64
+      bytes) fails the lookup. An undeclared name remains unresolved after a
+      successful scan; a scan failure is still an error.
     - A Keeper file this build cannot decode as the current schema fails the
       lookup too, whether the name is that Keeper's or a scan reaches it, and so
       do filesystem errors from a read: neither is taken for "no such Keeper".

@@ -34,16 +34,12 @@ let read_file path =
   try Ok (Fs_compat.load_file path)
   with Sys_error msg -> Error msg
 
-(** Format a TOML scalar back to a string suitable for the boot override store.
-    Booleans → "true"/"false"; floats keep their TOML representation;
-    strings pass through as-is. String arrays are not supported — they
-    have no env var equivalent in the keeper config. *)
+(** Format a TOML scalar for both its operator display and boot readers.
+    String arrays are not supported — they have no env var equivalent. *)
 let value_to_string = function
   | Keeper_toml_loader.Toml_string s -> Some s
   | Keeper_toml_loader.Toml_int i -> Some (string_of_int i)
-  | Keeper_toml_loader.Toml_float f ->
-    (* Match TOML representation (no trailing zeros). *)
-    Some (Printf.sprintf "%g" f)
+  | Keeper_toml_loader.Toml_float f -> Some (Keeper_runtime_setting_registry.display_file_float f)
   | Keeper_toml_loader.Toml_bool b -> Some (if b then "true" else "false")
   | ( Keeper_toml_loader.Toml_string_array _
     | Keeper_toml_loader.Toml_array _
@@ -104,12 +100,9 @@ let resolve_overrides
   let applied = List.filter_map (resolve_one ~env_lookup doc) key_to_env in
   (List.length applied, applied)
 
-(* Shadow registry: stores every TOML value keyed by env name, even when
-   the env var is already set.  This lets operator surfaces compare the
-   effective env override against the operator's TOML intent (issue #17192). *)
-let toml_shadow : (string, string) Hashtbl.t = Hashtbl.create 16
-
-let toml_value_opt env_name = Hashtbl.find_opt toml_shadow env_name
+(* Store the parsed boot document independently of any env override. Compare
+   numeric settings by value, not by the spelling chosen for display. *)
+let toml_shadow : (string, Keeper_toml_loader.toml_value) Hashtbl.t = Hashtbl.create 16
 
 let current_schema_version = 1
 let schema_version_key = "keeper_settings.schema_version"
@@ -392,10 +385,26 @@ let validation_report_to_yojson report =
 
 let setting_schema_to_yojson = Keeper_runtime_setting_registry.schema_to_yojson
 
-let configured_value doc (row : Keeper_runtime_setting_registry.setting) =
+let configured_toml_value doc (row : Keeper_runtime_setting_registry.setting) =
   match Keeper_runtime_setting_registry.toml_key_opt row with
-  | Some key -> Option.bind (List.assoc_opt key doc) value_to_string
+  | Some key -> List.assoc_opt key doc
   | None -> None
+;;
+
+let configured_value doc row =
+  Option.bind (configured_toml_value doc row) value_to_string
+;;
+
+let same_setting_value (row : Keeper_runtime_setting_registry.setting) applied configured =
+  match row.value_kind with
+  | Keeper_runtime_setting_registry.Float ->
+    (match numeric_value applied, numeric_value configured with
+     | Some left, Some right -> Float.equal left right
+     | Some _, None | None, Some _ | None, None -> false)
+  | Keeper_runtime_setting_registry.Boolean
+  | Keeper_runtime_setting_registry.Integer
+  | Keeper_runtime_setting_registry.String ->
+    Option.equal String.equal (value_to_string applied) (value_to_string configured)
 ;;
 
 (* A [Toml_only] row ignores the process environment, so the layer in effect is
@@ -420,10 +429,10 @@ let effective_source_label = function
 let application_status doc (row : Keeper_runtime_setting_registry.setting) =
   match configured_value doc row, effective_source row with
   | Some _, Config_boot_overrides.Env -> "preempted_by_env"
-  | Some configured, Config_boot_overrides.Boot_override ->
-    (match toml_value_opt row.env_name with
-     | Some applied when String.equal applied configured -> "applied"
-     | Some _ | None -> "pending_restart")
+  | Some _, Config_boot_overrides.Boot_override ->
+    (match Hashtbl.find_opt toml_shadow row.env_name, configured_toml_value doc row with
+     | Some applied, Some configured when same_setting_value row applied configured -> "applied"
+     | Some _, Some _ | Some _, None | None, Some _ | None, None -> "pending_restart")
   | Some _, Config_boot_overrides.Default ->
     if Keeper_runtime_setting_registry.requires_restart row
     then "pending_restart"
@@ -670,7 +679,7 @@ let load_and_apply_document ~base_path =
                    | Some v ->
                      (match value_to_string v with
                       | None -> ()
-                      | Some s -> Hashtbl.replace toml_shadow env_name s))
+                      | Some _ -> Hashtbl.replace toml_shadow env_name v))
                 key_to_env;
               Atomic.set last_applied_at (Some (Time_compat.now ()));
               Ok count))

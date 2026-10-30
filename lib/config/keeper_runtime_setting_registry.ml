@@ -79,6 +79,19 @@ let display_bool value = if value then "true" else "false"
 let display_int = string_of_int
 let display_float value = Printf.sprintf "%g" value
 
+(* Keep the old display when it preserves the number. File-backed floats are
+   also serialized through this path for the boot readers, so add only as
+   many digits as needed to recover the same binary value. *)
+let display_file_float value =
+  let rec find precision =
+    let text = Printf.sprintf "%.*g" precision value in
+    if precision = 17 || Option.fold ~none:false ~some:(Float.equal value) (float_of_string_opt text)
+    then text
+    else find (precision + 1)
+  in
+  find 6
+;;
+
 let display_string_option = function
   | Some value -> value
   | None -> "(none)"
@@ -226,7 +239,7 @@ let all =
       "Count successful workspace work heartbeat as presence proof"
   ; setting
       ~range:(float_range ~min:0.1 ~max:10.0 ())
-      ~effective:(Reader (fun () -> display_float (Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())))
+      ~effective:(Reader (fun () -> display_file_float (Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())))
       ~env_name:"MASC_KEEPER_SLEEP_CHUNK_SEC"
       ~exposure:(Toml_only "heartbeat.sleep_chunk_sec")
       ~value_kind:Float
@@ -318,7 +331,7 @@ let all =
            ~min:Env_config_keeper.KeeperTurn.temperature_min
            ~max:Env_config_keeper.KeeperTurn.temperature_max
            ())
-      ~effective:(Reader (fun () -> display_float (Env_config_keeper.KeeperTurn.temperature ())))
+      ~effective:(Reader (fun () -> display_file_float (Env_config_keeper.KeeperTurn.temperature ())))
       ~env_name:"MASC_KEEPER_UNIFIED_TEMP"
       ~exposure:(Toml_only "turn.temperature")
       ~value_kind:Float
@@ -350,7 +363,7 @@ let all =
         (Reader
            (fun () ->
               (match Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec () with
-              | Some value -> display_float value
+              | Some value -> display_file_float value
               | None ->
                 display_float
                   Env_config_keeper.KeeperKeepalive.stream_idle_failsafe_floor_sec)))
@@ -374,7 +387,7 @@ let all =
         (Reader
            (fun () ->
               (match Env_config_keeper.KeeperKeepalive.first_event_timeout_sec () with
-              | Some value -> display_float value
+              | Some value -> display_file_float value
               | None ->
                 display_float
                   Env_config_keeper.KeeperKeepalive.first_event_failsafe_floor_sec)))
@@ -398,7 +411,7 @@ let all =
         (Reader
            (fun () ->
               (match Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override () with
-              | Some value -> display_float value
+              | Some value -> display_file_float value
               | None ->
                 display_float
                   Env_config_keeper.KeeperKeepalive.provider_call_deadline_failsafe_floor_sec)))
@@ -459,7 +472,7 @@ let all =
       ~range:(float_range
         ~min:Env_config_keeper.KeeperSupervisor.sweep_interval_min_sec
         ~max:Env_config_keeper.KeeperSupervisor.sweep_interval_max_sec ())
-      ~effective:(Reader (fun () -> display_float (Env_config_keeper.KeeperSupervisor.sweep_interval_sec ())))
+      ~effective:(Reader (fun () -> display_file_float (Env_config_keeper.KeeperSupervisor.sweep_interval_sec ())))
       ~env_name:"MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
       ~exposure:(Toml_only "supervisor.sweep_sec")
       ~value_kind:Float
@@ -891,7 +904,7 @@ let all =
       "Web-search request timeout in seconds"
   ; setting
       ~range:(float_range ~min:0.0 ())
-      ~effective:(Reader (fun () -> display_float (Env_config_runtime.Tools.web_search_cache_ttl_sec ())))
+      ~effective:(Reader (fun () -> display_file_float (Env_config_runtime.Tools.web_search_cache_ttl_sec ())))
       ~env_name:"MASC_WEB_SEARCH_CACHE_TTL_SEC"
       ~exposure:(Toml_only "web_search.cache_ttl_sec")
       ~value_kind:Float

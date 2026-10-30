@@ -59,6 +59,24 @@ should be treated as restart-required.
 | Sandbox DNS | `[sandbox] microvm_dns` | the nameserver a microVM guest is booted with (`runtime.toml` only; one IPv4 or IPv6 address) |
 | Startup-only TOML seeding | every `MASC_KEEPER_*` value sourced from `runtime.toml` | TOML is loaded into the process-local boot override store. A registry row marked `Toml_only` reads only that store and never the process environment. `MASC_KEEPER_AUTONOMOUS_ENABLED`, `MASC_OTEL_ENABLED`, `MASC_SEARXNG_URL` and `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` are `Toml_and_env`: an explicit process env value takes precedence |
 
+To write a `runtime.toml` key from a script, for example before a workspace's
+first start, run `masc config set KEY=VALUE --base-path <path>`. `KEY` is a
+dotted key the settings registry names, such as `autonomous.enabled`. A
+workspace that has no `runtime.toml` is seeded the way server start seeds it,
+then the key is edited in place with comments kept. A key the registry does not
+name, or a value that is not the kind the key holds, is refused and nothing is
+written. What a value means is checked when the server starts.
+
+Floating-point values reach boot readers at their parsed precision. This also
+applies to existing files: a provider-call deadline that is shorter than an
+explicit first-event or stream-idle timeout is refused when Keeper runtime
+settings freeze, even if older six-digit rounding made the pair appear equal.
+Check these timeout relationships before upgrading. `config set` checks each
+setting's type and range; it does not check that relationship. The settings
+view retains the existing short display when it round-trips; otherwise it shows
+enough digits to distinguish the parsed float. Application status compares the
+actual parsed numbers.
+
 Representative code paths:
 
 - [`server_runtime_bootstrap.ml`](../lib/server/server_runtime_bootstrap.ml)

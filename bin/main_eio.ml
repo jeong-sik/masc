@@ -2827,6 +2827,46 @@ let web_search_setup_cmd =
       $ cache_ttl_sec
       $ unset)
 
+(* [masc config set]. The behaviour is in Masc_cli_config_set; this is the
+   argument table. *)
+let config_set_cmd =
+  let assignments =
+    Arg.(non_empty & pos_all string []
+         & info [] ~docv:"KEY=VALUE"
+             ~doc:"A runtime.toml key as the settings registry names it, such as \
+                   autonomous.enabled, and the value to write. Repeat for several: \
+                   they are written in one commit or not at all.")
+  in
+  Cmd.v
+    (Cmd.info
+       "set"
+       ~doc:"Write keys of runtime.toml."
+       ~man:
+         [ `S Manpage.s_description
+         ; `P
+             "Writes each KEY=VALUE into the runtime.toml the server reads for the \
+              workspace, through the same locked writer as web-search-setup, keeping \
+              comments and other tables as they are. A key the settings registry \
+              does not name, or a value that is not the kind the key holds, is \
+              refused and nothing is written."
+         ; `P
+             "A workspace with no runtime.toml is seeded the way server start seeds \
+              it, so a script can set a key before the first start. What a value \
+              means (a blank wake prompt, an address a guest cannot use) is checked \
+              when the server starts, not here."
+         ])
+    Term.(
+      const (fun base_path assignments ->
+        let base_path = Env_config.normalize_masc_base_path_input base_path in
+        Masc_cli_config_set.run ~base_path ~assignments)
+      $ base_path
+      $ assignments)
+
+let config_cmd =
+  Cmd.group
+    (Cmd.info "config" ~doc:"Write the workspace configuration.")
+    [ config_set_cmd ]
+
 let runtime_probe_cmd_exit base_path runtime_id =
   let runtime_config_path = runtime_config_path_for_base_path base_path in
   match Runtime.load_list ~config_path:runtime_config_path with
@@ -4927,6 +4967,7 @@ let cmd =
     ; browser_lane_setup_cmd
     ; voice_local_setup_cmd
     ; web_search_setup_cmd
+    ; config_cmd
     ; runtime_model_list_cmd
     ; runtime_codex_models_cmd
     ; runtime_muse_models_cmd

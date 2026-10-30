@@ -313,6 +313,126 @@ let test_float_value_round_trip () =
     (Some "120.5")
     (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
 
+let test_float_application_status_uses_the_numeric_value () =
+  let open Yojson.Safe.Util in
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  let original = "[heartbeat]\nsleep_chunk_sec = 0.1234567\n[web_search]\ncache_ttl_sec = 2.0\n" in
+  write_toml base_path original;
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok _ -> ()
+   | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+  let row doc env =
+    Keeper_runtime_config.settings_projection_to_yojson (parse_or_fail doc)
+    |> to_list |> List.find (fun item -> item |> member "env" |> to_string = env) in
+  let sleep doc = row doc "MASC_KEEPER_SLEEP_CHUNK_SEC" in
+  check string "unchanged value is applied" "applied"
+    (sleep original |> member "application_status" |> to_string);
+  check string "configured display retains the value" "0.1234567"
+    (sleep original |> member "configured_value" |> to_string);
+  check string "effective display retains the value" "0.1234567"
+    (sleep original |> member "effective_value" |> to_string);
+  let changed = "[heartbeat]\nsleep_chunk_sec = 0.1234568\n[web_search]\ncache_ttl_sec = 2\n" in
+  check string "different values await restart" "pending_restart"
+    (sleep changed |> member "application_status" |> to_string);
+  check string "changed configured display is distinct" "0.1234568"
+    (sleep changed |> member "configured_value" |> to_string);
+  check string "effective display still shows the boot value" "0.1234567"
+    (sleep changed |> member "effective_value" |> to_string);
+  check string "same numeric float and integer remain applied" "applied"
+    (row changed "MASC_WEB_SEARCH_CACHE_TTL_SEC" |> member "application_status" |> to_string);
+  Config_boot_overrides.reset_for_tests ();
+  let simple = "[heartbeat]\nsleep_chunk_sec = 0.65\n" in
+  write_toml base_path simple;
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Ok _ -> ()
+   | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+  check string "simple configured display is unchanged" "0.65"
+    (sleep simple |> member "configured_value" |> to_string);
+  check string "simple effective display is unchanged" "0.65"
+    (sleep simple |> member "effective_value" |> to_string)
+
+(* Before exact boot serialization, both nearby values were rounded to the
+   same six-digit string. A now-visible ordering violation must be refused by
+   the existing runtime freeze rule, even though per-row TOML validation passes. *)
+let test_close_timeout_values_still_obey_the_freeze_rule () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  List.iter (fun budget_key ->
+    with_clean_boot_overrides @@ fun () ->
+    with_base_path @@ fun base_path ->
+    let doc ~deadline ~budget = Printf.sprintf
+        "[turn]\nprovider_call_deadline_sec = %s\n%s = %s\n" deadline budget_key budget in
+    let invalid = doc ~deadline:"100.1234561" ~budget:"100.1234562" in
+    check bool "each value is in its declared range" true
+      (Keeper_runtime_config.validation_report_is_valid
+         (Keeper_runtime_config.validate_doc (parse_or_fail invalid)));
+    write_toml base_path invalid;
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> ()
+     | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+    let message =
+      match Keeper_runtime_resolved.init () with
+      | () -> failf "%s beyond the exact deadline was accepted" budget_key
+      | exception Env_config_core.Config_error message -> message
+    in
+    check string "refusal gives exact values, sources and usable lower bound"
+      (Printf.sprintf
+         "turn.provider_call_deadline_sec (100.1234561, toml) is shorter than \
+          turn.%s (100.1234562, toml): the no-progress threshold would end a silence \
+          that budget still allows; declare turn.provider_call_deadline_sec >= 100.1234562"
+         budget_key)
+      message;
+    let lower_bound_start = String.rindex message ' ' + 1 in
+    let recommended = String.sub message lower_bound_start (String.length message - lower_bound_start) in
+    Config_boot_overrides.reset_for_tests ();
+    Keeper_runtime_resolved.reset_for_tests ();
+    write_toml base_path (doc ~deadline:recommended ~budget:"100.1234562");
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> ()
+     | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+    Keeper_runtime_resolved.init ();
+    check bool "the reported lower bound is accepted" true
+      (Float.equal 100.1234562 (Keeper_runtime_resolved.provider_call_deadline_sec ())))
+    [ "first_event_timeout_sec"; "stream_idle_timeout_sec" ]
+
+let test_timeout_recommendation_covers_both_declared_budgets () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  List.iter (fun (first, idle, lower_bound) ->
+    with_clean_boot_overrides @@ fun () ->
+    with_base_path @@ fun base_path ->
+    let doc deadline = Printf.sprintf
+        "[turn]\nprovider_call_deadline_sec = %s\nfirst_event_timeout_sec = %s\nstream_idle_timeout_sec = %s\n"
+        deadline first idle in
+    write_toml base_path (doc "100.1234561");
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> ()
+     | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+    let message =
+      match Keeper_runtime_resolved.init () with
+      | () -> fail "deadline shorter than both budgets was accepted"
+      | exception Env_config_core.Config_error message -> message
+    in
+    check string "refusal covers the higher declared budget"
+      (Printf.sprintf
+         "turn.provider_call_deadline_sec (100.1234561, toml) is shorter than \
+          turn.first_event_timeout_sec (%s, toml): the no-progress threshold would end a silence \
+          that budget still allows; declare turn.provider_call_deadline_sec >= %s"
+         first lower_bound)
+      message;
+    let lower_bound_start = String.rindex message ' ' + 1 in
+    let recommended = String.sub message lower_bound_start (String.length message - lower_bound_start) in
+    Config_boot_overrides.reset_for_tests ();
+    Keeper_runtime_resolved.reset_for_tests ();
+    write_toml base_path (doc recommended);
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> ()
+     | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+    Keeper_runtime_resolved.init ();
+    check string "the actual recommendation covers both budgets" lower_bound recommended)
+    [ "100.1234562", "110.1234567", "110.1234567"
+    ; "110.1234567", "100.1234562", "110.1234567" ]
+
 let test_resolved_runtime_freezes_toml_values_after_init () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
@@ -1317,6 +1437,12 @@ let () =
             test_the_provider_call_deadline_applied_from_toml_is_read_live
         ; test_case "explicit MASC_CONFIG_DIR wins over base path" `Quick test_explicit_config_dir_wins_over_base_path
         ; test_case "float value round trip" `Quick test_float_value_round_trip
+        ; test_case "float application status uses numeric equality" `Quick
+            test_float_application_status_uses_the_numeric_value
+        ; test_case "close timeout values still obey freeze validation" `Quick
+            test_close_timeout_values_still_obey_the_freeze_rule
+        ; test_case "timeout recommendation covers both declared budgets" `Quick
+            test_timeout_recommendation_covers_both_declared_budgets
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
         ; test_case "resolved stream idle timeout defaults to fail-safe floor" `Quick test_resolved_stream_idle_timeout_defaults_to_failsafe_floor
         ; test_case "resolved first-event timeout defaults to fail-safe floor" `Quick test_resolved_first_event_timeout_defaults_to_failsafe_floor

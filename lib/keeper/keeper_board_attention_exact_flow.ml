@@ -102,9 +102,17 @@ let judge_prompt candidate =
   let* request =
     Keeper_board_attention_candidate.singleton_judgment_request candidate
   in
+  let* relevant = Prompt_registry.render_prompt_template Prompt_names.judge_board_policy_relevant [] in
+  let* not_relevant = Prompt_registry.render_prompt_template Prompt_names.judge_board_policy_not_relevant [] in
+  let* board_policy =
+    Prompt_registry.render_prompt_template Prompt_names.judge_board_policy
+      ["relevant_rule", relevant; "not_relevant_rule", not_relevant]
+  in
   Prompt_registry.render_prompt_template
     Prompt_names.judge_board
-    [ "judgment_request_json", Yojson.Safe.to_string request ]
+    [ "judgment_request_json", Yojson.Safe.to_string request
+    ; "board_policy", board_policy
+    ]
 ;;
 
 let flow_candidates selected_slots =

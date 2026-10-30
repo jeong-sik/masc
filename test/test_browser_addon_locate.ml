@@ -18,8 +18,15 @@ let scene ~document ~text ~x=`Assoc ["schema",`String "masc.browser.scene.v1";"d
   "viewport",`Assoc ["width",`Float 800.;"height",`Float 600.;"scrollX",`Float 0.;"scrollY",`Float 0.];
   "nodes",`List [node ~text ~x];"truncated",`Bool false]
 let scenario manifest =
+  let prompt_key = Prompt_names.browser_locate in
+  let marker = "managed-locate-policy-fixture" in
+  let prompt_root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
+  Prompt_registry.set_markdown_dir (Filename.concat prompt_root "config/prompts");
+  (match Prompt_registry.set_override prompt_key marker with
+   | Ok () -> () | Error detail -> fail detail);
+
   let root=Filename.temp_dir "browser-locate-" "" |> Unix.realpath in
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+  Fun.protect ~finally:(fun () -> Prompt_registry.clear_prompt_override prompt_key; Fs_compat.remove_tree root) (fun () ->
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let clock=Eio.Stdenv.clock env in
     Time_compat.set_clock clock;Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -73,6 +80,7 @@ let scenario manifest =
         let id=match ready.request_ids with [id] -> id | _ -> fail "one original command must own one model request" in
         let listing=Models.listing models |> ok |> Lane_addon_host_request.listing_of_json |> ok in
         (match listing with [Lane_addon_host_request.Exact_output request] ->
+          check (option string) "managed locator system reaches the actual broker request" (Some marker) request.system;
           check string "request uses declared output" "locate" request.output;
           check int "request contains one scoped observation" 1 (List.length request.messages)
          | _ -> fail "missing exact locate request");
@@ -110,6 +118,18 @@ let scenario manifest =
         (fun () -> ignore (Models.wait models ~after:(Some before.revision));true));
       check (list string) "original command cancellation withdraws its model request" []
         (Models.wait models ~after:None |> ok).request_ids;
+      let empty_prompts=Filename.concat root "empty-prompts" in
+      Fs_compat.mkdir_p empty_prompts;
+      Prompt_registry.clear (); Prompt_registry.set_markdown_dir empty_prompts;
+      let revision=(Models.wait models ~after:None |> ok).revision in
+      check bool "missing locator policy returns a failed command" true
+        ((invoke ()).is_error=Some true);
+      let after_missing=Models.wait models ~after:None |> ok in
+      check string "missing policy does not enqueue a model request" revision after_missing.revision;
+      check (list string) "missing policy leaves no model waiter" [] after_missing.request_ids;
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir (Filename.concat prompt_root "config/prompts");
+      (match Prompt_registry.set_override prompt_key marker with Ok () -> () | Error detail -> fail detail);
       let pending,_=start () in
       check bool "private retirement joins the waiting model and driver cleanup" true
         (Owner.dispatch owner {W.incarnation;command=W.Retire}=W.Receipt);

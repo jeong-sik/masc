@@ -497,3 +497,27 @@ val candle_appraiser_weights : string
 val keeper_world_recent_work : string
 
 val keeper_world_recent_work_preview : string
+
+(* Managed judgment instructions and model-facing advice. *)
+val judge_board_policy : string
+val judge_board_system_one : string
+val librarian_preflight : string
+val librarian_context_review : string
+val skill_applicability : string
+val skill_applicability_advice : string
+val skill_applicability_unavailable : string
+val skill_applicability_projection : string
+val browser_locate : string
+
+val librarian_preflight_keep_current : string
+val librarian_preflight_needs_generation : string
+val librarian_preflight_uncertain : string
+val librarian_context_review_faithful : string
+val librarian_context_review_needs_revision : string
+val librarian_context_review_insufficient_evidence : string
+val skill_applicability_applicable : string
+val skill_applicability_not_applicable : string
+val skill_applicability_insufficient_context : string
+val judge_board_policy_relevant : string
+val judge_board_policy_not_relevant : string
+val judge_board_system_one_uncertain : string

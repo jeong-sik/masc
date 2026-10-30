@@ -9,11 +9,16 @@ val render : config:Workspace.config -> keeper_id:string ->
 type prepared
 val prepare : config:Workspace.config -> keeper_id:string -> purpose:Yojson.Safe.t -> prepared
 val render_prepared : prepared -> string
-(** Revalidate selected source records before reusing the prepared projection. *)
+(** Revalidate selected source records before reusing the prepared projection.
+    A change detected before publishing returns an explicit message without
+    selected records. This does not bind the result to later dispatch. *)
 val defer_for_capacity : prepared -> Keeper_memory_delivery_reprojection.t
 (** Called only after a runtime authorizes an effect-safe retry for an explicit
     input capacity refusal. Persist and remove whole selected records only when
-    the rendered projection becomes strictly smaller. Never rerun selection. *)
+    the rendered projection becomes strictly smaller. Never rerun selection.
+    If the observed projection is no longer current at commit, return an error
+    and do not overwrite it; an already retained proposal may remain in the
+    journal. *)
 
 module For_testing : sig
   val prepare_projection : payload:Yojson.Safe.t ->

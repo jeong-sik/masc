@@ -148,9 +148,21 @@ not start an interpreter. Execution and transport failures are also possible,
 so no status alone establishes the cause or proves that no effect ran. Preserve the
 guest, volumes, links and any possibly executed effect as unverified; do not
 automatically retry the effect or restart the service or guest to clear the
-warning. The in-process unverified state applies only while that guest
-generation is retained; a restart, forget or replacement can clear it and
-permit another attempt.
+warning. Guest readiness invalidation, observed absence and replacement retain
+the process-owned cleanup and link effect evidence. A confirmed cleanup is not
+sent again for the same normalized workspace base, backend and guest name in
+that server process; an unconfirmed cleanup also prevents subsequent build-link
+effects. This key is not a durable volume identity and does not cover another
+guest name or process. `microvm_build_cleanup_effect_unverified` names
+the affected guest. Missing execution receipts, exceptions and cancellation do
+not establish that cleanup was unsent. Only an explicit request-not-sent result
+permits another automatic cleanup attempt.
+
+This evidence is process-local: restarting the server loses it, and the current
+cold handoff can attempt cleanup and build links again. Do not restart as a
+recovery action for an unknown effect. Durable no-replay across server restarts
+is not provided. Guest labels do not prove instance or mounted-volume identity,
+and the runtime does not fence an external replacement.
 
 In the affected guest, perform these checks both as root and as the Keeper uid
 and gid: target-directory preparation uses root, while link creation uses the

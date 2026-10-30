@@ -114,7 +114,7 @@ let release_registered_microvm_identity ?expected container_name =
    The volume outlives the guest, so the [mkdir] is paid once per guest per
    process, at boot. A guest whose boot could not make the root and could
    not be taken down either is still running and still registered, so the
-   next start adopts it: it stays out of this set, and the endpoint request
+   next start adopts it: its readiness stays false, and the endpoint request
    makes the root before handing the guest out rather than handing out a
    guest every call fails in. *)
 type microvm_work_root_key = string * Keeper_microvm_backend.t * string
@@ -128,14 +128,43 @@ type microvm_build_links_state =
   | Build_links_effect_unverified
   | Build_links_prepared
 
+type microvm_build_cleanup_state =
+  | Build_cleanup_not_sent
+  | Build_cleanup_effect_unverified
+  | Build_cleanup_confirmed
+
+let microvm_build_cleanup_outcome outcome receipt =
+  match outcome, receipt with
+  | Masc_exec.Sandbox_target.Ran {status=Unix.WEXITED 0; _},
+    Some (Keeper_sandbox_remote.Execution_observed _) -> Build_cleanup_confirmed
+  | Masc_exec.Sandbox_target.Transport_failed _,
+    Some (Keeper_sandbox_remote.Execution_unavailable Keeper_sandbox_remote.Request_not_sent) ->
+    Build_cleanup_not_sent
+  | Masc_exec.Sandbox_target.Transport_failed _,
+    (Some (Keeper_sandbox_remote.Execution_observed _
+       | Keeper_sandbox_remote.Execution_unavailable
+           (Keeper_sandbox_remote.Transport_unavailable _
+           | Keeper_sandbox_remote.Peer_receipt_missing
+           | Keeper_sandbox_remote.Invalid_receipt _
+           | Keeper_sandbox_remote.Shim_refused_without_receipt)) | None)
+  | Masc_exec.Sandbox_target.Ran _,
+    (Some (Keeper_sandbox_remote.Execution_unavailable _) | None)
+  | Masc_exec.Sandbox_target.Ran {status=(Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _); _},
+    Some (Keeper_sandbox_remote.Execution_observed _) -> Build_cleanup_effect_unverified
+;;
+
 type microvm_work_root_ready =
   { key : microvm_work_root_key
   ; generation : unit ref
+  ; root_ready : bool
+  ; build_cleanup_state : microvm_build_cleanup_state
   ; build_links_state : microvm_build_links_state
   }
 
-(* A fresh generation prevents an in-flight link scan from marking a guest
-   ready after its root was forgotten or replaced in this process. *)
+(* Readiness can be invalidated without erasing attempted effects on the
+   persistent work volume. A fresh generation rejects an older completion;
+   neither a guest name nor its absence proves that an effect was not sent.
+   These records belong to this server process, not to a durable journal. *)
 let microvm_work_roots_ready : microvm_work_root_ready list Atomic.t = Atomic.make []
 
 let microvm_work_root_entry ~base_path ~backend ~container_name =
@@ -145,24 +174,59 @@ let microvm_work_root_entry ~base_path ~backend ~container_name =
 ;;
 
 let microvm_work_root_ready ~base_path ~backend ~container_name =
-  Option.is_some (microvm_work_root_entry ~base_path ~backend ~container_name)
+  match microvm_work_root_entry ~base_path ~backend ~container_name with
+  | Some entry -> entry.root_ready
+  | None -> false
 ;;
 
-let rec mark_microvm_work_root_ready ~base_path ~backend ~container_name =
+let rec register_microvm_work_root ~base_path ~backend ~container_name =
   let key = microvm_work_root_key ~base_path ~backend ~container_name in
   let current = Atomic.get microvm_work_roots_ready in
-  if List.exists (fun entry -> entry.key = key) current
-  then ()
-  else if not (Atomic.compare_and_set microvm_work_roots_ready current
-      ({ key; generation = ref (); build_links_state = Build_links_not_prepared } :: current))
-  then mark_microvm_work_root_ready ~base_path ~backend ~container_name
+  match List.find_opt (fun entry -> entry.key = key) current with
+  | Some entry -> entry
+  | None ->
+    let entry = { key; generation = ref (); root_ready = false;
+      build_cleanup_state = Build_cleanup_not_sent;
+      build_links_state = Build_links_not_prepared } in
+    if Atomic.compare_and_set microvm_work_roots_ready current (entry :: current)
+    then entry
+    else register_microvm_work_root ~base_path ~backend ~container_name
+;;
+
+let rec complete_microvm_work_root ~base_path ~backend ~container_name generation =
+  let key = microvm_work_root_key ~base_path ~backend ~container_name in
+  let current = Atomic.get microvm_work_roots_ready in
+  match List.find_opt (fun entry -> entry.key = key) current with
+  | Some entry when entry.generation == generation ->
+    let updated = List.map (fun candidate ->
+      if candidate == entry then { candidate with root_ready = true } else candidate) current in
+    if Atomic.compare_and_set microvm_work_roots_ready current updated then true
+    else complete_microvm_work_root ~base_path ~backend ~container_name generation
+  | Some _ | None -> false
+;;
+
+let mark_microvm_work_root_ready ~base_path ~backend ~container_name =
+  let entry = register_microvm_work_root ~base_path ~backend ~container_name in
+  ignore (complete_microvm_work_root ~base_path ~backend ~container_name entry.generation)
+;;
+
+let rec set_microvm_build_cleanup_state ~base_path ~backend ~container_name generation ~expected state =
+  let key = microvm_work_root_key ~base_path ~backend ~container_name in
+  let current = Atomic.get microvm_work_roots_ready in
+  match List.find_opt (fun entry -> entry.key = key) current with
+  | Some entry when entry.generation == generation && entry.build_cleanup_state = expected ->
+    let updated = List.map (fun candidate ->
+      if candidate == entry then { candidate with build_cleanup_state = state } else candidate) current in
+    if Atomic.compare_and_set microvm_work_roots_ready current updated then true
+    else set_microvm_build_cleanup_state ~base_path ~backend ~container_name generation ~expected state
+  | Some _ | None -> false
 ;;
 
 let rec set_microvm_build_links_state ~base_path ~backend ~container_name generation ~expected state =
   let key = microvm_work_root_key ~base_path ~backend ~container_name in
   let current = Atomic.get microvm_work_roots_ready in
   match List.find_opt (fun entry -> entry.key = key) current with
-  | Some entry when entry.generation == generation && entry.build_links_state = expected ->
+  | Some entry when entry.root_ready && entry.generation == generation && entry.build_links_state = expected ->
     let updated = List.map (fun candidate ->
       if candidate == entry then { candidate with build_links_state = state } else candidate) current in
     if not (Atomic.compare_and_set microvm_work_roots_ready current updated)
@@ -173,9 +237,14 @@ let rec set_microvm_build_links_state ~base_path ~backend ~container_name genera
 
 let rec forget_microvm_work_root ~backend ~container_name =
   let current = Atomic.get microvm_work_roots_ready in
-  let updated = List.filter (fun entry ->
+  let updated = List.map (fun entry ->
     let _, other_backend, other_name = entry.key in
-    not (backend = other_backend && String.equal container_name other_name)) current in
+    if backend = other_backend && String.equal container_name other_name then
+      let build_links_state = match entry.build_links_state with
+        | Build_links_not_prepared -> Build_links_not_prepared
+        | Build_links_effect_unverified | Build_links_prepared -> Build_links_effect_unverified in
+      { entry with root_ready = false; generation = ref (); build_links_state }
+    else entry) current in
   if not (Atomic.compare_and_set microvm_work_roots_ready current updated)
   then forget_microvm_work_root ~backend ~container_name
 ;;
@@ -1286,8 +1355,9 @@ module For_testing_microvm = struct
   type build_link_generation = unit ref
 
   let build_link_generation ~base_path ~backend ~container_name =
-    Option.map (fun entry -> entry.generation)
-      (microvm_work_root_entry ~base_path ~backend ~container_name)
+    match microvm_work_root_entry ~base_path ~backend ~container_name with
+    | Some entry when entry.root_ready -> Some entry.generation
+    | Some _ | None -> None
   ;;
 
   let complete_build_link_scan ~base_path ~backend ~container_name generation =
@@ -1297,7 +1367,7 @@ module For_testing_microvm = struct
 
   let build_link_scan_prepared ~base_path ~backend ~container_name =
     match microvm_work_root_entry ~base_path ~backend ~container_name with
-    | Some { build_links_state = Build_links_prepared; _ } -> true
+    | Some { build_links_state = Build_links_prepared; root_ready; _ } -> root_ready
     | Some { build_links_state = (Build_links_not_prepared | Build_links_effect_unverified); _ }
     | None -> false
   ;;
@@ -1340,9 +1410,9 @@ end
 
 (** Best-effort Apple build-link preparation. A read-only scan failure can be
     retried by a later turn. Once an effect may have been sent, its unknown
-    outcome is retained while this guest generation remains cached. A forget
-    or process restart clears that state; it does not establish workspace
-    ownership or fence an effect already in flight. *)
+    outcome survives guest readiness invalidation for this server process.
+    A process restart loses this evidence; retention does not establish
+    workspace ownership or fence an effect already in flight. *)
 let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation =
     let backend = Keeper_microvm_backend.Apple_container in
     let keeper_work_root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name in
@@ -1365,7 +1435,7 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation 
     let prepared ~expected = ignore (mark ~expected Build_links_prepared) in
     let effect_unverified () =
       Log.Keeper.warn ~keeper_name:t.meta.name
-        "microvm_build_link_effect_unverified: inspect the guest before retrying; this guest generation will not automatically retry while its state is retained; see Keeper User Manual: Build preparation reports a failure" in
+        "microvm_build_link_effect_unverified: inspect the guest before retrying; this process retains the effect across guest readiness invalidation and will not automatically retry; see Keeper User Manual: Build preparation reports a failure" in
     let effect_failed operation status =
       Log.Keeper.warn ~keeper_name:t.meta.name "%s: %s"
         operation (Keeper_sandbox_exec_failure.status_label status);
@@ -2280,7 +2350,19 @@ let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
         (Keeper_microvm_shim_readiness.error_message error)) in
   let* () = ensure_microvm_keeper_work_root ~timeout_sec t ~backend ~container_name
     |> Result.map_error (fun detail -> Adopted_guest_volume_unverified detail) in
-  if not (microvm_work_root_ready ~base_path:t.config.base_path ~backend ~container_name) then (
+  let entry = register_microvm_work_root ~base_path:t.config.base_path ~backend ~container_name in
+  let generation = entry.generation in
+  let mark_cleanup ~expected state =
+    set_microvm_build_cleanup_state ~base_path:t.config.base_path ~backend ~container_name
+      generation ~expected state in
+  let warn_cleanup_unverified () =
+    Log.Keeper.warn ~keeper_name:t.meta.name
+      "microvm_build_cleanup_effect_unverified: guest %s has an unconfirmed cleanup on its persistent work volume; this process will not resend cleanup or build-link effects after readiness invalidation; inspect the original outcome before recovery"
+      container_name in
+  (match entry.build_cleanup_state with
+   | Build_cleanup_confirmed -> ()
+   | Build_cleanup_effect_unverified -> warn_cleanup_unverified ()
+   | Build_cleanup_not_sent ->
     let container_config_dir = Keeper_github_identity.container_config_dir
         ~container_masc_dir:(Keeper_sandbox_runtime_setup.container_masc_dir ~container_root:t.container_root)
         ~keeper_name:t.meta.name in
@@ -2291,28 +2373,31 @@ let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
      | Error detail -> Log.Keeper.warn ~keeper_name:t.meta.name
          "first handoff build cleanup endpoint unavailable: %s" detail
      | Ok endpoint ->
-       let receipt = ref (Keeper_sandbox_remote.Execution_unavailable Keeper_sandbox_remote.Request_not_sent) in
+       (* Reserve before constructing or entering the runner: an exception,
+          cancellation or missing callback leaves an unverified effect. *)
+       if mark_cleanup ~expected:Build_cleanup_not_sent Build_cleanup_effect_unverified then (
+       let receipt = ref None in
        let run = Keeper_sandbox_remote.runner ~timeout_sec
-           ~on_receipt:(fun observation -> receipt := observation) endpoint in
+           ~on_receipt:(fun observation -> receipt := Some observation) endpoint in
        let script = Keeper_sandbox_microvm.first_handoff_build_cleanup_script
            ~keeper_work_root:(Keeper_sandbox_microvm.keeper_work_root ~keeper_name:t.meta.name) in
        let outcome = run ~on_stdout_chunk:None ~on_stderr_chunk:None
            ~stdin_content:None ~env:[||] ~cwd:None ~argv:["/bin/sh"; "-eu"; "-c"; script] in
-       (match outcome, !receipt with
-        | Masc_exec.Sandbox_target.Ran {status=Unix.WEXITED 0; _},
-          Keeper_sandbox_remote.Execution_observed _ -> ()
-        | Masc_exec.Sandbox_target.Transport_failed _, _
-        | Masc_exec.Sandbox_target.Ran _, Keeper_sandbox_remote.Execution_unavailable _
-        | Masc_exec.Sandbox_target.Ran {status=(Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _); _},
-          Keeper_sandbox_remote.Execution_observed _ ->
-          Log.Keeper.warn ~keeper_name:t.meta.name
-            "first handoff build cleanup did not confirm success; link scan will preserve remaining real build directories"));
-    mark_microvm_work_root_ready ~base_path:t.config.base_path ~backend ~container_name);
+       let observed = microvm_build_cleanup_outcome outcome !receipt in
+       ignore (mark_cleanup ~expected:Build_cleanup_effect_unverified observed);
+       (match observed with
+        | Build_cleanup_effect_unverified -> warn_cleanup_unverified ()
+        | Build_cleanup_not_sent | Build_cleanup_confirmed -> ()))));
+  ignore (complete_microvm_work_root ~base_path:t.config.base_path ~backend ~container_name generation);
   (match microvm_work_root_entry ~base_path:t.config.base_path ~backend ~container_name with
-   | Some { generation; build_links_state = Build_links_not_prepared; _ } ->
+   | Some { generation; root_ready = true; build_cleanup_state = Build_cleanup_confirmed;
+            build_links_state = Build_links_not_prepared; _ } ->
      ensure_microvm_build_links ~timeout_sec t ~container_name ~generation
-   | Some { build_links_state = (Build_links_effect_unverified | Build_links_prepared); _ }
-   | None -> ());
+   | Some { build_links_state = Build_links_effect_unverified; _ } ->
+     Log.Keeper.warn ~keeper_name:t.meta.name
+       "microvm_build_link_effect_unverified: guest %s retains an earlier build-link effect or lost its readiness; this process will not resend it or certify the current instance's build links"
+       container_name
+   | Some _ | None -> ());
   Ok ()
 
 let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =

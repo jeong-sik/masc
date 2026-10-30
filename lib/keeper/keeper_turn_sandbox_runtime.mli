@@ -92,7 +92,14 @@ val microvm_remote_endpoint :
     Its final endpoint admission rechecks readiness under that same owner; if
     an observation invalidated it in between, this call fails and can be retried.
     A scope-matched stopped observation also invalidates cached readiness, so a
-    later call can prepare the guest again. If the snapshot is missing or
+    later call can reverify the mount, root and shim. Process-owned cleanup and
+    build-link effect states survive readiness invalidation, including absence
+    or replacement of the named guest. Cleanup is reserved before dispatch;
+    only an observed successful execution confirms it. An uncertain cleanup
+    or link effect is never automatically resent by a later handoff. This is
+    process-local evidence, not a durable receipt across server restarts or an
+    instance/mount fence against an externally replaced guest.
+    If the snapshot is missing or
     unreadable, endpoint admission returns the snapshot error before observing
     the guest; this alone does not clear cached readiness. *)
 
@@ -111,7 +118,8 @@ val microvm_attached_endpoint :
     Never starts a guest. Apple refuses an absent, stopped, unreadable or
     differently scoped guest before returning an endpoint; the observation
     does not fence a subsequent replacement. An observed stopped guest whose
-    scope matches invalidates cached readiness before refusal. Other backends
+    scope matches invalidates cached readiness before refusal, retaining
+    process-owned cleanup and build-link effect evidence. Other backends
     still reach the guest through [container exec]. For Apple, [timeout_sec]
     applies separately to guest inspection and fallback inventory, not to the
     entire endpoint acquisition. A missing or unreadable host snapshot is
@@ -273,7 +281,9 @@ module For_testing_microvm : sig
     base_path:string -> backend:Keeper_microvm_backend.t -> container_name:string -> build_link_generation -> bool
   val build_link_scan_prepared :
     base_path:string -> backend:Keeper_microvm_backend.t -> container_name:string -> bool
-  (** Expose the process-local generation guard for the stale-completion test. *)
+  (** Expose the process-local readiness generation guard for the
+      stale-completion test. Invalidated readiness has no current generation;
+      this does not erase the retained effect evidence. *)
 
   val microvm_identity_snapshot_registered : container_name:string -> bool
   (** Whether a guest name still owns a snapshot; exposes no credential data. *)

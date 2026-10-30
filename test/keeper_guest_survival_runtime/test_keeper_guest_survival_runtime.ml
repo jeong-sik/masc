@@ -279,8 +279,10 @@ let provider root args =
       (match request.argv with
        | "python3" :: "-c" :: _ -> print_string "{\"entries\":[],\"checkouts\":[],\"limit\":null}"; flush stdout
        | _ -> ());
-      let execution_receipt : Exec_ssh_protocol.execution_receipt = {mode=request.mode; boundary=Sandbox_applied} in
-      output_string stderr (Exec_ssh_protocol.render_trailer ~execution_receipt
+      let execution_receipt : Exec_ssh_protocol.execution_receipt option =
+        if Sys.file_exists (file "cleanup-missing-receipt") then None
+        else Some {mode=request.mode; boundary=Sandbox_applied} in
+      output_string stderr (Exec_ssh_protocol.render_trailer ?execution_receipt
         {v=request.v; exit=Some 0; signal=None; timed_out=false; shim_error=None; observed_syscalls=[]});
       flush stderr))
   | _ -> fail ("unsupported provider command " ^ String.concat " " args)
@@ -653,6 +655,48 @@ let process_step root operation =
           Turn.microvm_remote_endpoint ~timeout_sec:10. next) in
       Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
         Result.bind (next_turn ()) (fun _ -> next_turn ()))
+    | ("effect-stopped-return" | "effect-absent-return" | "effect-replacement"
+      | "effect-unknown-return" | "effect-missing-snapshot-return") as change ->
+      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
+        let guest_path = Filename.concat root "guest.json" in
+        let saved = json guest_path in
+        let snapshot = Keeper_microvm_github_identity.host_path ~base_path:root
+            ~keeper_name:keeper ~backend ~network_mode in
+        let held = held_snapshot_path snapshot "effect-held-snapshot" in
+        (match change with
+         | "effect-stopped-return" ->
+           save_json guest_path (replace "status" (`Assoc ["state", `String "stopped"]) saved)
+         | "effect-absent-return" | "effect-replacement" -> Unix.unlink guest_path
+         | "effect-unknown-return" ->
+           write (Filename.concat root "inspect-fails-after-run") "";
+           write (Filename.concat root "list-override") "[{}]"
+         | "effect-missing-snapshot-return" -> Unix.rename snapshot held
+         | _ -> fail "unknown effect retention observation");
+        (match Turn.microvm_attached_endpoint ~timeout_sec:10. ~config ~meta:(meta ()) () with
+         | Error _ -> ()
+         | Ok _ -> fail "unavailable observation accepted the guest");
+        let still_ready = change = "effect-unknown-return" || change = "effect-missing-snapshot-return" in
+        check bool "only authoritative absence or stop invalidates readiness" still_ready
+          (Turn.is_microvm_guest_booted ~config ~meta:(meta ()) ());
+        (match change with
+         | "effect-unknown-return" ->
+           Unix.unlink (Filename.concat root "inspect-fails-after-run");
+           Unix.unlink (Filename.concat root "list-override")
+         | "effect-missing-snapshot-return" -> Unix.rename held snapshot
+         | "effect-stopped-return" | "effect-absent-return" | "effect-replacement" -> ()
+         | _ -> fail "unknown effect retention recovery");
+        let returning = if change = "effect-replacement" then
+            replace "fixture_incarnation" (`String "another-instance-with-the-same-labels") saved
+          else saved in
+        save_json guest_path returning;
+        List.iter (fun marker -> let path = Filename.concat root marker in
+          if Sys.file_exists path then Unix.unlink path)
+          ["cleanup-missing-receipt"; "build-effect-status-2-mkdir"; "build-effect-status-2-link"];
+        Turn.cleanup runtime;
+        let next = Turn.create ~config ~meta:(meta ()) ~image:(Ok "fixture:image")
+            ~network_mode:effective_network () in
+        Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () ->
+          Turn.microvm_remote_endpoint ~timeout_sec:10. next))
     | "replace-failed-after-uncertain-build" ->
       Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
         (* End the first turn without stopping its persistent guest. The build
@@ -1268,6 +1312,33 @@ let test_failed_replacement_keeps_uncertain_build_effect () =
     if expected_links = 1 then assert_build_input root "link" "new\000/masc-build/new\000"))
     ["mkdir", 0; "link", 1]
 
+let test_guest_readiness_changes_do_not_replay_work_volume_effects () =
+  List.iter (fun operation ->
+    List.iter (fun (marker, scans, mkdirs, links) -> with_fixture (fun root ->
+      write (Filename.concat root "scan-output") scan_fixture_output;
+      Option.iter (fun marker -> write (Filename.concat root marker) "") marker;
+      let status, stderr = step_captured root operation in
+      (match status with
+       | Unix.WEXITED 0 -> ()
+       | _ -> failf "%s: retained effect fixture failed: %s" operation stderr);
+      check int "cleanup is sent once despite guest readiness loss" 1
+        (List.length (entries root "requests"));
+      check int "a cleanup without a receipt prevents later link scans" scans
+        (List.length (build_scan_calls root));
+      check int "a possibly applied target mkdir is not replayed" mkdirs
+        (List.length (calls root |> List.filter (List.mem "masc-build-mkdir")));
+      check int "a possibly applied link is not replayed" links
+        (List.length (calls root |> List.filter (List.mem "masc-build-link")));
+      check int "the returning guest is not booted again" 1 (count "run" root);
+      check int "recovery does not stop the returning guest" 0 (count "stop" root);
+      check int "recovery does not delete the returning guest" 0 (count "delete" root)))
+      [Some "cleanup-missing-receipt", 0, 0, 0;
+       Some "build-effect-status-2-mkdir", 1, 1, 0;
+       Some "build-effect-status-2-link", 1, 1, 1;
+       None, 1, 1, 1])
+    ["effect-stopped-return"; "effect-absent-return"; "effect-replacement";
+     "effect-unknown-return"; "effect-missing-snapshot-return"]
+
 (* The provider returns a failure after receiving its input. Neither status
    establishes which interpreter or module, if any, was unavailable. *)
 let test_build_effect_failure_is_not_replayed_in_the_same_process () =
@@ -1689,7 +1760,7 @@ let test_absent_teardown_reacquires_with_fresh_scoped_readiness () = with_fixtur
   check int "the provider booted only once" 1 (count "run" root);
   check int "confirmed absence caused no stop" 0 (count "stop" root);
   check int "confirmed absence caused no delete" 0 (count "delete" root);
-  check int "same process performed first handoff again" 2 (List.length (entries root "requests"))
+  check int "readiness recovery does not repeat persistent-work cleanup" 1 (List.length (entries root "requests"))
 
 let test_checkout_observation_invalidates_before_reacquisition () =
   List.iter (fun operation -> with_fixture (fun root ->
@@ -1703,8 +1774,7 @@ let test_checkout_observation_invalidates_before_reacquisition () =
       (if retries_stopped_guest then 1 else 0) (count "stop" root);
     check int "only reacquisition may delete the still-stopped guest"
       (if retries_stopped_guest then 1 else 0) (count "delete" root);
-    check int "only confirmed absence or stop requires a fresh first handoff"
-      (if operation = "checkout-unknown" || operation = "captured-read-unknown" then 1 else 2)
+    check int "guest observations do not authorize another persistent-work cleanup" 1
       (List.length (entries root "requests"))))
     ["checkout-absent"; "checkout-stopped"; "checkout-unknown"; "read-stopped";
      "captured-read-stopped"; "captured-read-absent"; "captured-read-unknown";
@@ -1714,7 +1784,7 @@ let test_checkout_observation_cannot_late_forget_handoff () = with_fixture @@ fu
   let status, stderr = step_captured root "checkout-race" in
   (match status with Unix.WEXITED 0 -> () | _ -> failf "checkout race failed: %s" stderr);
   check bool "the fake provider held an old inspect" true (Sys.file_exists (Filename.concat root "inspect-held"));
-  check int "the replacement receives its own first handoff" 2 (List.length (entries root "requests"));
+  check int "the newer handoff retains its process-owned cleanup evidence" 1 (List.length (entries root "requests"));
   check int "race does not stop a guest" 0 (count "stop" root);
   check int "race does not delete a guest" 0 (count "delete" root)
 
@@ -1890,6 +1960,7 @@ let () =
         test_case "failed scan retries next turn without repeating handoff" `Quick test_scan_failure_retries_on_the_next_turn_without_repeating_handoff;
         test_case "uncertain link effect is not replayed" `Quick test_uncertain_link_effect_is_not_replayed_in_the_same_process;
         test_case "failed replacement keeps uncertain build effect" `Quick test_failed_replacement_keeps_uncertain_build_effect;
+        test_case "readiness changes never replay work-volume effects" `Quick test_guest_readiness_changes_do_not_replay_work_volume_effects;
         test_case "build effect failure is not replayed" `Quick test_build_effect_failure_is_not_replayed_in_the_same_process;
         test_case "differently targeted build link is preserved without effects" `Quick test_differently_targeted_build_link_is_preserved_without_effects;
         test_case "real build warnings reach the actual scan path" `Quick test_real_build_warning_on_the_actual_scan_path;

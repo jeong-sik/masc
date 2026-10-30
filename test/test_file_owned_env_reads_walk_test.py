@@ -99,6 +99,44 @@ class SourceWalkTest(unittest.TestCase):
             self.assertEqual(list(byte_cut.source_files([str(self.sources)])), [str(self.safe)])
             self.assert_incomplete_walk_fails()
 
+    def test_environment_scan_rejects_file_replaced_by_directory(self):
+        self.hidden.write_text('let x = Sys.getenv_opt "HOME"\n', encoding="utf-8")
+        racing = self.sources / "racing"
+        racing.write_text("ordinary file\n", encoding="utf-8")
+        replacement = Path(self.tmp.name) / "replacement"
+        replacement.mkdir()
+        (replacement / "owned.ml").write_text('let x = Sys.getenv_opt "MASC_KEEPER_DEBUG"\n', encoding="utf-8")
+        old_file = Path(self.tmp.name) / "old-file"
+
+        class ReplacedEntry:
+            def __init__(self, entry):
+                self.entry = entry
+                self.name = entry.name
+                self.path = entry.path
+
+            def is_dir(self):
+                result = self.entry.is_dir()
+                if result:
+                    raise AssertionError("fixture entry was not a file")
+                os.replace(self.path, old_file)
+                os.replace(replacement, self.path)
+                return result
+
+        @contextlib.contextmanager
+        def replace_after_is_dir(path):
+            with self.real_scandir(path) as entries:
+                yield (ReplacedEntry(entry) if Path(entry.path) == racing else entry for entry in entries)
+
+        output = io.StringIO()
+        with mock.patch("os.scandir", side_effect=replace_after_is_dir):
+            with contextlib.redirect_stdout(output):
+                with self.assertRaises(SystemExit) as raised:
+                    env_reads.main(str(self.names), [str(self.sources)])
+        self.assertTrue((racing / "owned.ml").is_file())
+        self.assertIn("source entry changed", str(raised.exception))
+        self.assertIn(str(racing), str(raised.exception))
+        self.assertNotIn("no direct environment read", output.getvalue())
+
     def test_strict_walk_preserves_excluded_directories(self):
         for name in byte_cut.SKIPPED_DIRECTORIES:
             directory = self.sources / name

@@ -306,7 +306,9 @@ def strict_walk(root):
                 else:
                     # DirEntry.is_dir() may return False when an entry has
                     # disappeared. Check the entry itself before ignoring it.
-                    os.lstat(entry.path)
+                    mode = os.lstat(entry.path).st_mode
+                    if stat.S_ISDIR(mode):
+                        raise OSError(f"source entry changed to a directory while scanning: {entry.path}")
                     files.append(entry.name)
         yield directory, names, files
         for name in reversed(names):

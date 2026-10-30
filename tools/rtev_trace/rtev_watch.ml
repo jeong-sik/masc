@@ -3,6 +3,7 @@
    lifecycle events per domain over a window that starts after the ring's
    backlog is drained. Stdlib only. *)
 module RE = Runtime_events
+type collection_end = Stop_requested | Observation_deadline
 
 let ns_of ts = RE.Timestamp.to_int64 ts
 
@@ -105,12 +106,20 @@ let () =
   mark "ready" t_start;
   Printf.printf "ready pid=%d started_at_unix=%.6f\n%!" pid t_start;
   let events = ref 0 in
-  while not (stopping ()) && Unix.gettimeofday () -. t_start < seconds do
-    events := !events + RE.read_poll cursor callbacks None;
-    Unix.sleepf 0.02
-  done;
+  let rec collect () =
+    if stopping () then Stop_requested
+    else if not (Unix.gettimeofday () -. t_start < seconds) then Observation_deadline
+    else (
+      events := !events + RE.read_poll cursor callbacks None;
+      Unix.sleepf 0.02;
+      collect ())
+  in
+  let collection_end = collect () in
   events := !events + RE.read_poll cursor callbacks None;
   let t_end = Unix.gettimeofday () in
+  (match collection_end with
+   | Stop_requested -> mark "stop-ack" t_end
+   | Observation_deadline -> ());
   mark "ended" t_end;
   let window = t_end -. t_start in
   Printf.printf "window started_at_unix=%.6f ended_at_unix=%.6f\n" t_start t_end;
@@ -228,4 +237,6 @@ let () =
   Hashtbl.iter
     (fun (d, e) n -> Printf.printf "%-8d %-24s %6d\n" d (RE.lifecycle_name e) n)
     lifecycles;
-  RE.free_cursor cursor
+  RE.free_cursor cursor;
+  flush stdout;
+  mark "report-complete" (Unix.gettimeofday ())

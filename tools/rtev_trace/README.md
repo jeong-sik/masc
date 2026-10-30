@@ -14,8 +14,16 @@ dune exec tools/rtev_trace/rtev_watch.exe  -- <dir> <pid> <seconds>
 dune exec tools/rtev_trace/rtev_fibers.exe -- <dir> <pid> <seconds>
 ```
 
-Both drain the ring's backlog first, so the window starts when the command
-starts.
+Both drain the ring's backlog first. Their reported observation window starts
+after that draining completes.
+
+For an isolated Keeper workload, use `keeper_scale_session.py --tracers DIR`
+as described in the [owned observation record](../../docs/evidence/extreme-performance-20261030/runtime-events/README.md).
+With `MASC_RTEV_CONTROL_DIR`, the consumers acknowledge `ready`, a requested
+`stop` with `stop-ack`, and successful explicit final stdout flush with
+`report-complete`. A deadline exit does not acknowledge stop. These are
+collection conditions; discarded pre-window state and bounded detailed output
+still prevent treating a summary as a complete per-request causal trace.
 
 `rtev_watch` reports every GC phase (count, per second, total, mean, p50,
 p99, max) aggregated over domains and per domain, the runtime counters per

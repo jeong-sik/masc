@@ -32,6 +32,8 @@ import tomllib
 from urllib.parse import urlsplit
 import uuid
 
+import keeper_scale_trace
+
 EVIDENCE_SCHEMA = "masc.keeper-scale-evidence.v3"
 OPERATION_FIELDS = ("operation_id", "state", "started_at", "completed_at", "outcome_ref", "failure_kind")
 
@@ -465,10 +467,22 @@ class Fixture:
         self.output, self.marker, self.keepers = output, marker, set(keepers)
         self.delay_ms = delay_ms
         self.release = threading.Event()
+        self.stopping = threading.Event()
+        self.handlers_idle = threading.Event()
+        self.handlers_idle.set()
         self.lock = threading.Lock()
         self.requests, self.errors, self.active = [], [], 0
         self.max_active = 0
         self.handler_count = 0
+
+    def coverage_snapshot(self):
+        with self.lock:
+            coverage = defaultdict(list)
+            for row in self.requests:
+                coverage[row["keeper"]].extend(row["sequences"])
+            return {"actual_model_calls": len(self.requests),
+                    "max_provider_requests_in_flight": self.max_active,
+                    "per_keeper_sequences": dict(coverage), "errors": list(self.errors)}
 
     def serve(self):
         fixture = self
@@ -480,6 +494,13 @@ class Fixture:
 
             def log_message(self, *_args):
                 pass
+
+            def log_error(self, format, *args):
+                # BaseHTTPRequestHandler handles malformed HTTP, unsupported
+                # methods and request-read timeouts without raising them.
+                with fixture.lock:
+                    fixture.errors.append({"stage": "provider_http_protocol",
+                                           "error": "http_protocol_error", "detail": format % args})
 
             def send(self, status, data, content_type="application/json"):
                 self.send_response(status)
@@ -504,6 +525,7 @@ class Fixture:
                     require(self.path == "/v1/chat/completions", "unexpected provider route")
                     request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                     row["request"] = request
+                    require(isinstance(request, dict), "provider input must be a JSON object")
                     require(request.get("model") == "deepseek-v4.1-flash", "unexpected provider model")
                     messages = [m for m in request.get("messages", []) if m.get("role") == "user"]
                     require(messages, "provider input has no user message")
@@ -533,8 +555,8 @@ class Fixture:
                         with (fixture.output / "model-requests.jsonl").open("a") as log:
                             log.write(json.dumps(row, ensure_ascii=False) + "\n")
                     fixture.release.wait()
-                    if fixture.delay_ms:
-                        time.sleep(fixture.delay_ms/1000)
+                    require(not fixture.stopping.wait(fixture.delay_ms/1000),
+                            "owned provider fixture is stopping")
                     reply = json.dumps({"schema": "masc.keeper-scale-reply.v1",
                                         "marker": fixture.marker, "keeper": name,
                                         "sequences": sequences}, sort_keys=True)
@@ -572,22 +594,51 @@ class Fixture:
                         log.write(json.dumps(row, ensure_ascii=False) + "\n")
 
         class Server(ThreadingHTTPServer):
-            daemon_threads = False
-            block_on_close = True
+            # Failure cleanup must not wait forever for a handler. Success
+            # still requires the exact active/handler counters to drain below.
+            daemon_threads = True
+            block_on_close = False
             request_queue_size = max(5, len(fixture.keepers))
 
-            def process_request_thread(self, request, client_address):
+            def handle_error(self, request, client_address):
+                # Includes unexpected parser/setup errors and failures writing
+                # the handler's final outcome record. They must survive a
+                # handler that otherwise drains normally.
+                error = sys.exception()
+                with fixture.lock:
+                    fixture.errors.append({"stage": "provider_handler",
+                                           "error": type(error).__name__, "detail": str(error)})
+                super().handle_error(request, client_address)
+
+            def process_request(self, request, client_address):
                 with fixture.lock:
                     fixture.handler_count += 1
+                    fixture.handlers_idle.clear()
+                try:
+                    super().process_request(request, client_address)
+                except BaseException:
+                    with fixture.lock:
+                        fixture.handler_count -= 1
+                        if fixture.handler_count == 0:
+                            fixture.handlers_idle.set()
+                    raise
+
+            def process_request_thread(self, request, client_address):
                 try:
                     super().process_request_thread(request, client_address)
                 finally:
                     with fixture.lock:
                         fixture.handler_count -= 1
+                        if fixture.handler_count == 0:
+                            fixture.handlers_idle.set()
 
         server = Server(("127.0.0.1", 0), Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+        try:
+            thread.start()
+        except BaseException:
+            server.server_close()
+            raise
         return server, thread
 
 
@@ -609,6 +660,7 @@ def run(args, owner):
     out.mkdir(parents=True, exist_ok=False)
     owner["output"] = out
     shutil.copy2(Path(__file__), out / Path(__file__).name)
+    shutil.copy2(Path(keeper_scale_trace.__file__), out / "keeper_scale_trace.py")
     binary = args.binary.resolve(strict=True)
     pinned = out / "masc-installed-copy"
     shutil.copy2(binary, pinned)
@@ -737,6 +789,11 @@ def run(args, owner):
             client = Client(port, token_result["token"], out, args.request_timeout)
             client.rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {},
                 "clientInfo": {"name": "keeper-scale-session", "version": "1"}}, "initialize")
+            if args.tracers is not None:
+                owner["traces"] = keeper_scale_trace.start(
+                    output=out, base=base, tools=args.tracers.resolve(strict=True), server=process,
+                    seconds=args.settle_timeout * 4, ready_timeout=args.request_timeout)
+                owner["trace_workload_start"] = time.time()
             for name in names:
                 client.tool("masc_keeper_up", {"name": name, "create_only": True,
                     "sandbox_profile": "microvm", "microvm_backend": "apple_container",
@@ -860,18 +917,15 @@ def run(args, owner):
             require(after["build"]["runtime_instance_id"] == before["build"]["runtime_instance_id"]
                     and after["keeper_fibers"] == args.keepers, "runtime identity or Keeper population changed")
             write_json(out / "health-after.json", after)
-            coverage = defaultdict(list)
-            with fixture.lock:
-                for row in fixture.requests:
-                    coverage[row["keeper"]].extend(row["sequences"])
-                require(not fixture.errors, "provider error recorded")
-            require(set(coverage) == set(names) and all(sorted(value) == list(range(1, args.messages_per_keeper+1))
-                    for value in coverage.values()), "model request coverage is missing or duplicated")
-            write_json(out / "model-coverage.json", {"actual_model_calls": len(fixture.requests),
-                "max_provider_requests_in_flight": fixture.max_active, "per_keeper_sequences": coverage})
+            write_json(out / "model-coverage-before-shutdown.json", fixture.coverage_snapshot())
             shutil.copytree(config, out / "final-config")
+            owner["trace_workload_end"] = time.time()
             success = True
+    except BaseException as error:
+        owner["workload_error"] = error
+        raise
     finally:
+        fixture.stopping.set()
         fixture.release.set()
         stop_samples.set()
         if sampler is not None:
@@ -879,6 +933,12 @@ def run(args, owner):
         write_json(out / "latency-samples.json", samples)
         write_json(out / "workload-phases.json", phase_events)
         write_json(out / "terminal.json", terminal_receipt(operations, terminal))
+        traces = owner.get("traces")
+        if traces is not None:
+            owner["trace_receipt"] = keeper_scale_trace.finish(
+                traces, started_at_unix=owner.get("trace_workload_start"),
+                ended_at_unix=owner.get("trace_workload_end"))
+            owner.pop("traces")
         forced = False
         if process is not None and process.poll() is None:
             os.killpg(process.pid, signal.SIGTERM)
@@ -891,6 +951,7 @@ def run(args, owner):
         model.shutdown()
         model.server_close()
         model_thread.join(timeout=5)
+        fixture.handlers_idle.wait(timeout=5)
         owner["model_stopped"] = not model_thread.is_alive()
         with fixture.lock:
             model_drained = fixture.active == 0 and fixture.handler_count == 0
@@ -923,6 +984,17 @@ def run(args, owner):
             and cleanup["server_returncode"] == 0 and not cleanup["forced_kill"]
             and cleanup["server_reaped"] and cleanup["model_server_stopped"] and cleanup["sampler_stopped"]
             and cleanup["base_retained"], "workload or owned cleanup incomplete")
+    # No listener or handler can add a late request/error after this snapshot.
+    # A successful earlier projection must not hide a shutdown-time failure.
+    coverage_snapshot = fixture.coverage_snapshot()
+    write_json(out / "model-coverage.json", coverage_snapshot)
+    coverage = coverage_snapshot["per_keeper_sequences"]
+    require(not coverage_snapshot["errors"], "provider error recorded through shutdown")
+    require(set(coverage) == set(names) and all(sorted(value) == list(range(1, args.messages_per_keeper+1))
+            for value in coverage.values()), "final model request coverage is missing or duplicated")
+    if args.tracers is not None:
+        require(owner.get("trace_receipt", {}).get("complete") is True,
+                "runtime-events capture incomplete; inspect runtime-events/receipt.json")
     stored = validate_durable_operations(operations, names, durable, terminal, marker)
     validate_original_payloads(operations, durable, terminal, terminal=True)
     valid = sorted(row["wire_ms"] for row in samples if row.get("valid"))
@@ -953,6 +1025,56 @@ def run(args, owner):
     print(json.dumps(summary, indent=2))
 
 
+def cleanup_failed_run(owner, args):
+    """Attempt every owned cleanup even when another cleanup or disk write fails."""
+    errors = []
+
+    def attempt(name, action):
+        try:
+            action()
+        except BaseException as error:
+            errors.append({"stage": name, "type": type(error).__name__,
+                           "message": str(error), "notes": getattr(error, "__notes__", [])})
+
+    if "fixture" in owner:
+        attempt("provider_stop", owner["fixture"].stopping.set)
+        attempt("provider_release", owner["fixture"].release.set)
+    if "stop_samples" in owner:
+        attempt("sampler_stop", owner["stop_samples"].set)
+    sampler = owner.get("sampler")
+    if sampler is not None and sampler.is_alive():
+        attempt("sampler_join", lambda: sampler.join(timeout=args.request_timeout + 1))
+    traces = owner.get("traces")
+    if traces is not None:
+        attempt("trace_finish", lambda: keeper_scale_trace.finish(
+            traces, started_at_unix=owner.get("trace_workload_start"),
+            ended_at_unix=owner.get("trace_workload_end")))
+    process = owner.get("process")
+    if process is not None:
+        if process.poll() is None:
+            attempt("server_term", lambda: os.killpg(process.pid, signal.SIGTERM))
+            attempt("server_wait", lambda: process.wait(timeout=20))
+        if process.poll() is None:
+            attempt("server_kill", lambda: os.killpg(process.pid, signal.SIGKILL))
+        attempt("server_reap", lambda: process.wait(timeout=5))
+    model, thread = owner.get("model"), owner.get("model_thread")
+    if model is not None:
+        if thread is not None and thread.is_alive():
+            attempt("model_shutdown", model.shutdown)
+        attempt("model_close", model.server_close)
+    if thread is not None and thread.is_alive():
+        attempt("model_join", lambda: thread.join(timeout=5))
+    if "fixture" in owner:
+        fixture = owner["fixture"]
+        attempt("model_handlers_join", lambda: fixture.handlers_idle.wait(timeout=5))
+        if not fixture.handlers_idle.is_set():
+            errors.append({"stage": "model_handlers_join", "type": "IncompleteCleanup",
+                           "message": "owned provider handlers remain active"})
+    if sampler is not None and sampler.is_alive():
+        attempt("sampler_final_join", lambda: sampler.join(timeout=args.request_timeout + 1))
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
@@ -964,6 +1086,8 @@ def main():
     parser.add_argument("--sample-interval", type=float, default=.1)
     parser.add_argument("--request-timeout", type=float, default=15)
     parser.add_argument("--settle-timeout", type=float, default=120)
+    parser.add_argument("--tracers", type=Path,
+                        help="optional directory containing rtev_watch.exe and rtev_fibers.exe")
     args = parser.parse_args()
     require(all(math.isfinite(value) for value in (args.model_delay_ms, args.sample_interval,
                 args.request_timeout, args.settle_timeout))
@@ -977,38 +1101,35 @@ def main():
         # This also owns failures before the server's main try/finally (for
         # example fixture/config validation), and failures copying a damaged
         # store. Never leave a server or model listener behind on those paths.
-        if "fixture" in owner:
-            owner["fixture"].release.set()
-        if "stop_samples" in owner:
-            owner["stop_samples"].set()
-        if "sampler" in owner:
-            owner["sampler"].join(timeout=args.request_timeout + 1)
+        original_error = owner.get("workload_error", error)
+        cleanup_errors = cleanup_failed_run(owner, args)
+        if original_error is not error:
+            cleanup_errors.insert(0, {"stage": "run_finalization", "type": type(error).__name__,
+                                      "message": str(error), "notes": getattr(error, "__notes__", [])})
         process = owner.get("process")
-        if process is not None and process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=20)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait(timeout=5)
-        model = owner.get("model")
         thread = owner.get("model_thread")
-        if model is not None:
-            if thread is not None and thread.is_alive():
-                model.shutdown()
-                thread.join(timeout=5)
-            model.server_close()
         base = owner.get("base")
         owned_output = owner.get("output")
         if owned_output is not None and owned_output.is_dir():
-            if not (owned_output / "cleanup.json").exists():
-                write_json(owned_output / "cleanup.json", {"fallback_cleanup": True,
+            receipts = {
+                "fallback-cleanup.json": {"fallback_cleanup": True,
                     "server_reaped": process is None or process.poll() is not None,
                     "server_returncode": None if process is None else process.poll(),
                     "model_server_stopped": thread is None or not thread.is_alive(),
                     "base_retained": base is not None and base.is_dir(),
-                    "base_path": None if base is None else str(base)})
-            write_json(owned_output / "failure.json", {"type": type(error).__name__, "message": str(error)})
+                    "base_path": None if base is None else str(base), "cleanup_errors": cleanup_errors},
+                "failure.json": {"type": type(original_error).__name__, "message": str(original_error),
+                                 "notes": getattr(original_error, "__notes__", []), "cleanup_errors": cleanup_errors}}
+            for name, receipt in receipts.items():
+                try:
+                    write_json(owned_output / name, receipt)
+                except BaseException as receipt_error:
+                    cleanup_errors.append({"stage": name, "type": type(receipt_error).__name__,
+                                           "message": str(receipt_error)})
+        print(json.dumps({"original_error_type": type(original_error).__name__,
+                          "cleanup_errors": cleanup_errors}), file=sys.stderr)
+        if original_error is not error:
+            raise original_error from None
         raise
 
 

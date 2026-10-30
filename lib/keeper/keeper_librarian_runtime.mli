@@ -81,9 +81,11 @@ type message_descent =
   | No_descent_evidence
   | Smaller_input_may_help
   | Invalid_output_blocks_descent
+  | Unsettled_native_blocks_descent
 (** Whether reading a smaller original message input may answer the failed
     walk. A safe native context refusal needs no invented character limit.
-    Invalid JSON/domain output vetoes descent across the complete walk.
+    Invalid JSON/domain output and unsettled native execution veto descent
+    across the complete walk, including a capacity refusal from another slot.
     This policy never grants permission to skip an unread message. *)
 
 type not_committed =

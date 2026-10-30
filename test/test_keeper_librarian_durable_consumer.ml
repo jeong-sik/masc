@@ -854,7 +854,7 @@ let test_committed_wide_range_recovers_before_retry_narrowing () =
    that follow must reach the end of turn 3 without a model call: turn 2
    through the snapshot, which outlives the receipt the WAL replaced, and
    turn 3 through that receipt. *)
-let test_memory_the_continuity_round_saved_is_not_sent_again () =
+let test_memory_the_continuity_round_saved_is_not_sent_again ~batched () =
   with_workspace @@ fun config ->
   let module Continuity = Masc.Keeper_librarian_continuity in
   let module Current = Masc.Keeper_memory_os_current in
@@ -870,7 +870,8 @@ let test_memory_the_continuity_round_saved_is_not_sent_again () =
   let continuity_saves ~publish =
     let prepared =
       match Continuity.prepare ~config ~keeper_name ~trace_id () with
-      | Ok (Some prepared) -> prepared
+      | Ok (Some prepared) ->
+        if batched then prepared else Continuity.oldest_completed_turn prepared
       | Ok None -> fail "the continuity round found no completed unit"
       | Error detail -> failf "continuity prepare: %s" detail
     in
@@ -914,10 +915,14 @@ let test_memory_the_continuity_round_saved_is_not_sent_again () =
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
    | Consumer.Progress_advanced _ -> fail "the failing durable round advanced");
-  check int "the continuity round saves and publishes turn 2" 2
-    (continuity_saves ~publish:true);
-  check int "the continuity round saves turn 3 and stops before publishing" 3
-    (continuity_saves ~publish:false);
+  if batched then
+    check int "one Memory receipt covers both completed turns before W publication" 3
+      (continuity_saves ~publish:false)
+  else (
+    check int "the continuity round saves and publishes turn 2" 2
+      (continuity_saves ~publish:true);
+    check int "the continuity round saves turn 3 and stops before publishing" 3
+      (continuity_saves ~publish:false));
   let sent = ref [] in
 
     let commit original =
@@ -4653,7 +4658,9 @@ let () =
         ; test_case "committed wide range repairs before retry narrowing" `Quick
             test_committed_wide_range_recovers_before_retry_narrowing
         ; test_case "Memory the continuity round saved is not sent again" `Quick
-            test_memory_the_continuity_round_saved_is_not_sent_again
+            (test_memory_the_continuity_round_saved_is_not_sent_again ~batched:false)
+        ; test_case "batched continuity Memory receipt prevents repeated judgement before W save" `Quick
+            (test_memory_the_continuity_round_saved_is_not_sent_again ~batched:true)
         ; test_case "receipt does not cross a restarted repeated endpoint" `Quick
             test_receipt_does_not_cross_restarted_history_with_repeated_endpoint
         ; test_case "historical range does not borrow current task" `Quick

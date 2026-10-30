@@ -733,11 +733,13 @@ let test_an_undecodable_snapshot_is_rebuilt () = with_source @@ fun _env config 
   check int "the rebuild starts at atom 0" 0 (P.start_atom prepared);
   check bool "no working state is invented" true
     (U.member "previous_working_state" (P.prompt_json prepared) = `Null);
-  let rebuilt = commit config prepared "after the first turn" in
-  check int "the rebuilt snapshot ends at the first turn" 1 rebuilt.end_atom;
-  check (option int) "a request does not start at its early end" (Some 2) rebuilt.catch_up_end_atom;
+  check int "the rebuild contains both completed turns" 2 (List.length (P.messages prepared));
+  let rebuilt = commit config prepared "Both completed turns were folded." in
+  check int "the rebuilt snapshot reaches the captured completed end" 2 rebuilt.end_atom;
+  check (option int) "the fully rebuilt snapshot needs no catch-up target" None rebuilt.catch_up_end_atom;
   check bool "the commit replaced the torn file" true
-    (P.read ~config ~keeper_name |> get = Some rebuilt)
+    (P.read ~config ~keeper_name |> get = Some rebuilt);
+  check bool "a quiet signal has no completed source left" true (Option.is_none (prepare_all config))
 
 (* Two passes read the same undecodable file; the second commits a valid
    snapshot first. The first pass's commit must see that the file changed
@@ -1496,12 +1498,21 @@ let test_context_only_api_holes case () =
     | Context_unreceived_413_only | Context_unreceived_then_typed
     | Context_typed_then_unreceived | Context_late_unreceived -> ());
   pass ();
+  let whole_only = match case with
+    | Context_unreceived_only | Context_unreceived_413_only | Context_cli_tail -> true
+    | Context_unknown_then_typed | Context_typed_then_unknown | Context_all_holes
+    | Context_single_hole | Context_unknown_only | Context_invalid_answer
+    | Context_late_unknown | Context_prior_holes | Context_unreceived_then_typed
+    | Context_typed_then_unreceived | Context_late_unreceived
+    | Context_rewritten_source | Context_appended_suffix -> false in
+  let calls_per_wake = if whole_only then 2 else List.length plan in
   check int "the whole request and each exhausted message visit every declared API candidate"
-    (List.length plan) (List.length !requests);
+    calls_per_wake (List.length !requests);
   let model index=U.member "model" (Yojson.Safe.from_string (List.nth !requests index)) |> U.to_string in
   check bool "exhaustion visits two distinct real API models" true (model 0<>model 1);
-  check (list string) "the exact first message visits those same two models before any skip"
-    [model 0;model 1] [model 2;model 3];
+  if not whole_only then
+    check (list string) "the exact first message visits those same two models before any skip"
+      [model 0;model 1] [model 2;model 3];
   check_memory ();
   let committed = match case with
     | Context_unknown_only | Context_cli_tail | Context_invalid_answer | Context_late_unknown
@@ -1519,14 +1530,15 @@ let test_context_only_api_holes case () =
     if case<>Context_rewritten_source then (
       pass ();
       check int "the next wake retries every original source instead of retaining a volatile hole"
-        (2*List.length plan) (List.length !requests);
+        (2*calls_per_wake) (List.length !requests);
+      let retry_index = if whole_only then 0 else 2 in
       check string "retry starts with the same exact first message and no partial state"
-        (List.nth !requests 2) (List.nth !requests (List.length plan+2));
+        (List.nth !requests retry_index) (List.nth !requests (calls_per_wake+retry_index));
       check bool "a second refusal still publishes neither state nor unread records" true
         (P.read ~config ~keeper_name |> get=snapshot_before);
       check_memory ());
     if case=Context_cli_tail then check int "whole and single-message walks both really reach the CLI tail on each wake"
-      4 (List.length !cli_requests))
+      2 (List.length !cli_requests))
   else (
     let saved=P.read ~config ~keeper_name |> get |> some in
     check int "publication stops at the complete original atom" (P.end_atom prepared) saved.end_atom;
@@ -1980,6 +1992,41 @@ let selected_message_count body =
     total + (context |> U.member "after_message" |> U.to_int)
       - (context |> U.member "first_message" |> U.to_int)) 0 (historical_request body)
 
+let test_unproven_capacity_keeps_completed_range status kind () =
+  let widths = ref [] in
+  narrowing_fixture ~slot_count:1
+    ~answer:(fun _index body ->
+      widths := !widths @ [selected_message_count body];
+      status, refused kind)
+  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  pass ();
+  pass ();
+  check (list int) "a non-capacity failure preserves the whole source across signals"
+    [narrowing_atom_count;narrowing_atom_count] !widths;
+  check bool "no inferred smaller source mode" true
+    (Masc.Keeper_librarian_queue_refresh.For_testing.read_limit ~config ~keeper_name ~trace_id = None);
+  check (option int) "no unread source is consumed" None (coverage ())
+
+let test_mixed_native_failure_vetoes_capacity ~opaque () =
+  let widths = ref [] and native_calls = ref 0 in
+  let cli_runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+    incr native_calls;
+    Error (if opaque then Masc.Fusion_official_client.Setup_failure "fixture unknown native outcome"
+      else queue_native_failure ~claude:false ~tool_effect:true) in
+  narrowing_fixture ~slot_count:1
+    ~cli_slot_ids:[Exact_output_fixture.cli_primary_runtime] ~cli_runner
+    ~answer:(fun _index body ->
+      widths := !widths @ [selected_message_count body];
+      `Request_entity_too_large,refused "invalid_request_error")
+  @@ fun ~bodies:_ ~pass ~coverage ~hide_source:_ ~restart:_ ~config ->
+  pass ();
+  check int "the declared native tail was really visited" 1 !native_calls;
+  check (list int) "unsafe native tail cannot start a smaller original"
+    [narrowing_atom_count] !widths;
+  check bool "a different slot's named 413 cannot leave a descent mode" true
+    (Masc.Keeper_librarian_queue_refresh.For_testing.read_limit ~config ~keeper_name ~trace_id = None);
+  check (option int) "Memory and W stay uncommitted" None (coverage ())
+
 let test_recovery_keeps_the_initial_completed_frontier () =
   let append_new_turn = ref (fun () -> ()) in
   let widths = ref [] in
@@ -2032,7 +2079,7 @@ let test_cached_fit_refusal_reaches_its_original_message_floor () =
         {method_="turn/start";code=Some (-32602);message="fixture capacity";
          data=Some (`Assoc ["input_error_code",`String "input_too_large";
            "actual_chars",`Int actual_chars;"max_chars",`Int max_chars])})))
-    else Error (Masc.Fusion_official_client.Setup_failure "fixture unavailable") in
+    else Error (queue_native_failure ~claude:false ~tool_effect:false) in
   narrowing_fixture ~cli_slot_ids:[F.cli_primary_runtime] ~cli_runner
     ~has_waiting:(fun () -> true) ~slot_count:1
     ~answer:(fun _index body ->
@@ -2347,7 +2394,7 @@ let test_reports_in_one_pass_keep_any_size_verdict () =
     (merge (Some (report "walk" true)) (report "raise" false)).R.smaller_range_meets_same_failure;
   let module I = Masc.Keeper_librarian_input_refusal in
   let named causes = { (report "walk" true) with
-    R.provider_input_refusals = causes } in
+    R.provider_input_refusals = causes;input_capacity_evidence=R.Input_capacity_refused } in
   let first = named [I.Request_body_refused; I.Context_overflow] in
   let second = named [I.Input_capacity; I.Request_body_refused] in
   let causes earlier latest = List.map I.to_string
@@ -2357,7 +2404,16 @@ let test_reports_in_one_pass_keep_any_size_verdict () =
   check (list string) "every named cause survives slot order and deduplicates"
     ["context_overflow";"input_capacity";"request_body_refused"] (causes first second);
   check (list string) "reversing reports preserves the same named causes"
-    (causes first second) (causes second first)
+    (causes first second) (causes second first);
+  check bool "named input evidence survives a later callback without it" true
+    ((merge (Some first) (report "late" false)).R.input_capacity_evidence=R.Input_capacity_refused);
+  let unsettled = {(report "unsafe native" false) with R.message_descent=R.Unsettled_native_blocks_descent} in
+  List.iter (fun (earlier,later) ->
+    let merged = merge (Some earlier) later in
+    check bool "unsettled native veto survives either report order" false
+      (R.may_descend_messages [merged]);
+    check bool "the veto retains the separate named observation" true
+      (merged.R.input_capacity_evidence=R.Input_capacity_refused)) [first,unsettled;unsettled,first]
 
 let test_append_preserves_unread_source_records () = with_source @@ fun _env config save _append boundary ->
   let prefix = [message "Unread request";message "Read answer"] in
@@ -2535,6 +2591,14 @@ let () = run "production continuity pair"
     test_case "Memory-covered and unread intervals are separate batches" `Quick test_batch_partitions_at_memory_coverage;
     test_case "original recovery keeps the initial completed frontier" `Quick test_recovery_keeps_the_initial_completed_frontier;
     test_case "cached fitting refusal reaches the original message floor" `Quick test_cached_fit_refusal_reaches_its_original_message_floor;
+    test_case "generic Invalid_request cannot infer smaller input" `Quick
+      (test_unproven_capacity_keeps_completed_range `Bad_request "invalid_request_error");
+    test_case "timeout cannot infer smaller input" `Quick
+      (test_unproven_capacity_keeps_completed_range `Request_timeout "timeout_error");
+    test_case "typed API capacity then native tool effect blocks descent" `Quick
+      (test_mixed_native_failure_vetoes_capacity ~opaque:false);
+    test_case "typed API capacity then opaque native outcome blocks descent" `Quick
+      (test_mixed_native_failure_vetoes_capacity ~opaque:true);
     test_case "a waiting unit ends the catch-up after a commit" `Quick
       test_a_waiting_unit_ends_the_catch_up_after_a_commit;
     test_case "a Memory pass carries the counterparts of its turn" `Quick

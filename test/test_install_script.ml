@@ -345,6 +345,7 @@ let managed_release_dir prefix id =
 ;;
 
 let install_real_masc_binary prefix =
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote prefix));
   let canonical_prefix = Unix.realpath prefix in
   let dest = Filename.concat canonical_prefix "masc" in
   let slot =

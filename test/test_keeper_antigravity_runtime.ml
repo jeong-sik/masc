@@ -1936,7 +1936,10 @@ module Argument_start_fixture = struct
     let receipt_text = match receipts with
       | [message] ->
         (match member "content_blocks" message with
-         | `List [block] -> member "text" block |> to_string
+         | `List [block] ->
+           check string "retained result carrier uses a text block" "text"
+             (member "type" block |> to_string);
+           member "text" block |> to_string
          | _ -> fail "retained result carrier has unexpected content")
       | _ -> fail "Resume must carry the retained tool result once" in
     let receipt_json = match String.index_opt receipt_text '\n' with

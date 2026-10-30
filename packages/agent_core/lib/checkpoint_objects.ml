@@ -694,7 +694,28 @@ let history_of_json = function
     let* open_messages = open_of_json ~what fields in
     if List.length turns >= turns_per_segment
     then Error (Printf.sprintf "history.turns holds %d turns, a segment's worth or more" (List.length turns))
-    else Ok { segment; turns; open_messages }
+    else (
+      (* Each part was checked as nonnegative above. Check the sum without
+         overflowing before [message_count] is used to answer from the head. *)
+      let add_count total count =
+        if count > max_int - total
+        then Error "history message count exceeds the integer range"
+        else Ok (total + count)
+      in
+      let initial =
+        match segment with
+        | None -> 0
+        | Some segment -> segment.segment_messages
+      in
+      let* closed =
+        List.fold_left
+          (fun sum (turn : turn) ->
+             let* total = sum in
+             add_count total turn.messages)
+          (Ok initial) turns
+      in
+      let* (_ : int) = add_count closed (List.length open_messages) in
+      Ok { segment; turns; open_messages })
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
     Error "history must be an object"
 ;;
@@ -877,7 +898,10 @@ let bundle_entries ~bundle bytes =
         then Ok (List.rev rev)
         else Error (invalid "bytes follow the last listed message")
       | (digest, length) :: rest ->
-        if offset + length >= String.length bytes
+        (* [length] comes from the bundle header. Compare against the
+           remaining bytes before adding it to [offset]: a large valid JSON
+           integer can otherwise overflow and make the index negative. *)
+        if length >= String.length bytes - offset
         then Error (invalid "a listed message runs past the end of the bundle")
         else if not (Char.equal bytes.[offset + length] '\n')
         then Error (invalid (Printf.sprintf "the message at byte %d does not end its line" offset))

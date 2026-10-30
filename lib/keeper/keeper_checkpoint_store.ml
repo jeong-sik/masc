@@ -432,6 +432,19 @@ type 'a checkpoint_summary =
   ; latest : 'a option
   }
 
+(* A summary must isolate the same read/decode failures as the full load.
+   Cancellation still belongs to the caller and must not become a row error. *)
+let protect_summary_read ~on_exception f =
+  try f () with
+  | Eio.Cancel.Cancelled _ as exn ->
+    Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+  | exn -> Error (on_exception exn)
+
+let canonical_read_exception = function
+  | Unix.Unix_error (errno, _, _) as exn ->
+    Read_failed { cause = Os_error errno; detail = Printexc.to_string exn }
+  | exn -> Read_failed { cause = Read_raised; detail = Printexc.to_string exn }
+
 (* The header's session and what a list shows, from the head and the few
    objects it takes, decoded off the scheduler as a load is. *)
 let summarize_head_bytes ~session_dir ~latest bytes =
@@ -454,24 +467,26 @@ let summarize_canonical ~session_dir ~session_id ~latest =
   if not (leaf_is_real_segment session_id) then
     Error (Store_error "session_id is not a real path segment")
   else
-    Result.bind
-      (read_checkpoint_bytes ~session_dir (agent_core_checkpoint_path ~session_dir ~session_id))
-      (fun bytes ->
-         Result.bind (summarize_head_bytes ~session_dir ~latest bytes) (fun (named, summary) ->
-           if String.equal named session_id
-           then Ok summary
-           else
-             Error
-               (Store_error
-                  (Printf.sprintf "the canonical of session %s names session %s" session_id named))))
+    protect_summary_read ~on_exception:canonical_read_exception (fun () ->
+      Result.bind
+        (read_checkpoint_bytes ~session_dir (agent_core_checkpoint_path ~session_dir ~session_id))
+        (fun bytes ->
+           Result.bind (summarize_head_bytes ~session_dir ~latest bytes) (fun (named, summary) ->
+             if String.equal named session_id
+             then Ok summary
+             else
+               Error
+                 (Store_error
+                    (Printf.sprintf "the canonical of session %s names session %s" session_id named)))))
 
 let summarize_agent_core_history_file ~session_dir ~snapshot_id ~latest =
   (* As in [load_agent_core_history_file], a non-segment id is absent. *)
   if not (leaf_is_real_segment snapshot_id) then Error Not_found
   else
-    Result.bind
-      (read_checkpoint_bytes ~session_dir (agent_core_history_path ~session_dir ~snapshot_id))
-      (fun bytes -> Result.map snd (summarize_head_bytes ~session_dir ~latest bytes))
+    protect_summary_read ~on_exception:(fun exn -> Io_error (Printexc.to_string exn)) (fun () ->
+      Result.bind
+        (read_checkpoint_bytes ~session_dir (agent_core_history_path ~session_dir ~snapshot_id))
+        (fun bytes -> Result.map snd (summarize_head_bytes ~session_dir ~latest bytes)))
 
 (* ── Canonical summary (RFC main-domain-scheduler-latency §8 P4b) ────
    The scalars other paths need from the canonical checkpoint — session_id
@@ -878,8 +893,9 @@ let canonical_message_count ~(session_dir : string) ~(session_id : string)
     | Some summary -> Ok (Some summary.summary_message_count)
     | None ->
       (match
-         Result.bind (read_checkpoint_bytes ~session_dir canonical_path) (fun bytes ->
-           head_of_bytes_off_scheduler bytes |> Result.map_error classify_objects_error)
+         protect_summary_read ~on_exception:canonical_read_exception (fun () ->
+           Result.bind (read_checkpoint_bytes ~session_dir canonical_path) (fun bytes ->
+             head_of_bytes_off_scheduler bytes |> Result.map_error classify_objects_error))
        with
        | Ok head -> Ok (Some (Objects.message_count head.history))
        | Error Not_found -> Ok None

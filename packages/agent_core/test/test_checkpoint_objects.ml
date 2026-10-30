@@ -215,6 +215,70 @@ let set_field name replacement (field, value) =
   if String.equal field name then field, replacement else field, value
 ;;
 
+(* Counts in the head must add up in an [int], even when no objects are
+   read. Exactly [max_int] remains representable. *)
+let test_an_overflowing_history_count_is_refused () =
+  let plan = plan_ok (O.create_memo ()) O.Turn_closes (checkpoint (turn 1)) in
+  let digest = `String (String.make 64 'a') in
+  let history ~segment ~turns ~open_count =
+    let segment =
+      match segment with
+      | None -> `Null
+      | Some count -> `Assoc [ "segment", digest; "messages", `Int count; "chain", digest ]
+    in
+    let turn count = `Assoc [ "bundle", digest; "messages", `Int count; "chain", digest ] in
+    `Assoc
+      [ "segment", segment
+      ; "turns", `List (List.map turn turns)
+      ; "open", `List (List.init open_count (fun _ -> digest))
+      ]
+  in
+  let parse history =
+    with_head_edited plan.head_bytes (set_field "history" history) |> O.head_of_string
+  in
+  let refused label history =
+    match parse history with
+    | Error (O.Head_invalid _) -> ()
+    | Ok _ | Error _ -> Alcotest.fail (label ^ ": expected Head_invalid")
+  in
+  refused "turn and open" (history ~segment:None ~turns:[ max_int ] ~open_count:1);
+  refused "segment and turn" (history ~segment:(Some max_int) ~turns:[ 1 ] ~open_count:0);
+  refused "two turns" (history ~segment:None ~turns:[ max_int; 1 ] ~open_count:0);
+  refused "segment and open" (history ~segment:(Some max_int) ~turns:[] ~open_count:1);
+  let accepted label history =
+    match parse history with
+    | Ok head -> Alcotest.(check int) label max_int (O.message_count head.history)
+    | Error error -> Alcotest.fail (label ^ ": " ^ O.load_error_to_string error)
+  in
+  accepted "turn and open at max_int" (history ~segment:None ~turns:[ max_int - 1 ] ~open_count:1);
+  accepted "segment and turn at max_int" (history ~segment:(Some (max_int - 1)) ~turns:[ 1 ] ~open_count:0)
+;;
+
+(* Even a malformed bundle can have a valid content digest. Its declared
+   message length must be checked without overflowing the byte offset. *)
+let test_an_overflowing_bundle_length_is_refused () =
+  let plan = plan_ok (O.create_memo ()) O.Turn_closes (checkpoint (turn 1)) in
+  let bundle =
+    Printf.sprintf {|{"messages":[{"sha256":"%s","bytes":%d}]}|}
+      (String.make 64 'a') max_int ^ "\n"
+  in
+  let digest = O.digest_of_bytes bundle in
+  let objects = store () in
+  write objects plan;
+  Hashtbl.replace objects (digest :> string) bundle;
+  let head_bytes =
+    with_turn_edited plan.head_bytes (fun field ->
+      set_field "messages" (`Int 1) (set_field "bundle" (`String (digest :> string)) field))
+  in
+  (match load_error objects head_bytes with
+   | Some (O.Bundle_invalid _) -> ()
+   | Some _ | None -> Alcotest.fail "an overflowing bundle length must be Bundle_invalid");
+  let head = Result.get_ok (O.head_of_string head_bytes) in
+  match O.find_last ~read_object:(read objects) head (fun _ -> None) with
+  | Error (O.Bundle_invalid _) -> ()
+  | Ok _ | Error _ -> Alcotest.fail "a preview must refuse an overflowing bundle length"
+;;
+
 let test_a_load_refuses_what_it_cannot_prove () =
   let plan = plan_ok (O.create_memo ()) O.Turn_closes (checkpoint (turn 1)) in
   let bundle = (List.hd plan.head.history.turns).bundle in
@@ -765,6 +829,10 @@ let () =
     ; ( "refusals"
       , [ Alcotest.test_case "a load refuses what it cannot prove" `Quick
             test_a_load_refuses_what_it_cannot_prove
+        ; Alcotest.test_case "an overflowing history count is refused" `Quick
+            test_an_overflowing_history_count_is_refused
+        ; Alcotest.test_case "an overflowing bundle length is refused" `Quick
+            test_an_overflowing_bundle_length_is_refused
         ; Alcotest.test_case "a document that is not a head" `Quick
             test_a_document_that_is_not_a_head
         ; Alcotest.test_case "a later head reads as its version" `Quick

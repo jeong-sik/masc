@@ -67,6 +67,16 @@ then the key is edited in place with comments kept. A key the registry does not
 name, or a value that is not the kind the key holds, is refused and nothing is
 written. What a value means is checked when the server starts.
 
+Floating-point values reach boot readers at their parsed precision. This also
+applies to existing files: a provider-call deadline that is shorter than an
+explicit first-event or stream-idle timeout is refused when Keeper runtime
+settings freeze, even if older six-digit rounding made the pair appear equal.
+Check these timeout relationships before upgrading. `config set` checks each
+setting's type and range; it does not check that relationship. The settings
+view retains the existing short display when it round-trips; otherwise it shows
+enough digits to distinguish the parsed float. Application status compares the
+actual parsed numbers.
+
 Representative code paths:
 
 - [`server_runtime_bootstrap.ml`](../lib/server/server_runtime_bootstrap.ml)

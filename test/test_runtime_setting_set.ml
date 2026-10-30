@@ -408,6 +408,44 @@ let test_what_is_written_is_what_the_loader_applies () =
   Config_boot_overrides.reset_for_tests ()
 ;;
 
+let test_float_settings_reach_their_boot_consumers_exactly () =
+  Config_boot_overrides.reset_for_tests ();
+  Fun.protect ~finally:Config_boot_overrides.reset_for_tests (fun () ->
+    with_workspace runtime_base (fun ~base_path ~path ->
+      let values =
+        [ "heartbeat.sleep_chunk_sec", "0.1234567"
+        ; "turn.temperature", "0.1234567"
+        ; "turn.stream_idle_timeout_sec", "40.1234567"
+        ; "turn.first_event_timeout_sec", "100.1234567"
+        ; "turn.provider_call_deadline_sec", "120.1234567"
+        ; "supervisor.sweep_sec", "10.1234567"
+        ; "web_search.cache_ttl_sec", "123456789.0"
+        ]
+      in
+      let registered = R.toml_settings |> List.filter_map (fun row ->
+        if row.R.value_kind = R.Float then R.toml_key_opt row else None) in
+      check (list string) "every file-backed float has a fixture"
+        (List.sort String.compare registered)
+        (List.sort String.compare (List.map fst values));
+      ignore (applied path (List.map (fun (key, value) -> parsed ~key ~value) values));
+      (match Keeper_runtime_config.load_and_apply ~base_path with
+       | Ok count -> check int "all seven floats are applied" 7 count
+       | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+      let exact label expected actual =
+        check bool (label ^ " reaches the runtime reader without rounding") true
+          (Float.equal expected actual) in
+      let exact_opt label expected actual =
+        check bool (label ^ " reaches the runtime reader without rounding") true
+          (Option.equal Float.equal (Some expected) actual) in
+      exact "sleep chunk" 0.1234567 (Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ());
+      exact "temperature" 0.1234567 (Env_config_keeper.KeeperTurn.temperature ());
+      exact_opt "stream idle" 40.1234567 (Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec ());
+      exact_opt "first event" 100.1234567 (Env_config_keeper.KeeperKeepalive.first_event_timeout_sec ());
+      exact_opt "provider deadline" 120.1234567 (Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override ());
+      exact "supervisor sweep" 10.1234567 (Env_config_keeper.KeeperSupervisor.sweep_interval_sec ());
+      exact "search cache TTL" 123456789.0 (Env_config_runtime.Tools.web_search_cache_ttl_sec ())))
+;;
+
 let () =
   run
     "Runtime_setting_set"
@@ -444,6 +482,8 @@ let () =
     ; ( "loader"
       , [ test_case "what is written is what the loader applies" `Quick
             test_what_is_written_is_what_the_loader_applies
+        ; test_case "float settings reach the boot consumers exactly" `Quick
+            test_float_settings_reach_their_boot_consumers_exactly
         ] )
     ]
 ;;

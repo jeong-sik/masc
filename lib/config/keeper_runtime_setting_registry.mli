@@ -100,6 +100,10 @@ val provider_default_display : string
 (** Rendering of a setting left unset so the selected runtime keeps its
     provider default (the thinking request). *)
 
+val display_file_float : float -> string
+(** Render a file-backed float with enough digits to recover the same value.
+    The existing [%g] spelling is preserved when it already round-trips. *)
+
 val effective_value : setting -> string
 (** The value the row's runtime consumer reads, rendered for operators. Never
     echoes raw process input: a malformed or clamped value shows as its owner

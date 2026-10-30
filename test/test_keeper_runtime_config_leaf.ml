@@ -5,6 +5,31 @@ module T = Keeper_toml_loader
 
 let empty_env _ = None
 
+let test_boot_float_strings_round_trip_without_changing_simple_spellings () =
+  let values =
+    [ 0.65; 0.1234567; 123456789.0; 1.0000000000000002
+    ; Float.next_after 0.0 infinity; Float.max_float; -0.0 ]
+  in
+  List.iter (fun value ->
+    let _, overrides = K.resolve_overrides ~env_lookup:empty_env
+        [ "web_search.cache_ttl_sec", T.Toml_float value ] in
+    match List.assoc_opt "MASC_WEB_SEARCH_CACHE_TTL_SEC" overrides with
+    | None -> fail "float boot override missing"
+    | Some rendered ->
+      (match float_of_string_opt rendered with
+       | Some parsed ->
+         check bool (Printf.sprintf "%S retains the exact float" rendered) true
+           (Int64.bits_of_float parsed = Int64.bits_of_float value)
+       | None -> failf "boot override is not a float: %S" rendered)) values;
+  List.iter (fun value ->
+    let _, overrides = K.resolve_overrides ~env_lookup:empty_env
+        [ "turn.temperature", T.Toml_float value ] in
+    check (option string) "an already exact short spelling stays byte-identical"
+      (Some (Printf.sprintf "%g" value))
+      (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides))
+    [ 0.0; -0.0; 0.5; 0.65; 1.23; 120.5; 1e9; 1e-7 ]
+;;
+
 let test_resolve_overrides_maps_known_keys () =
   let doc =
     [ "turn.batch_limit", T.Toml_int 9
@@ -157,6 +182,8 @@ let () =
     [ ( "resolve_overrides"
       , [ test_case "known keys map to env names" `Quick
             test_resolve_overrides_maps_known_keys
+        ; test_case "boot floats retain their exact value" `Quick
+            test_boot_float_strings_round_trip_without_changing_simple_spellings
         ; test_case "the otel switch maps from TOML" `Quick
             test_resolve_overrides_maps_otel_switch
         ; test_case "memory category and item settings map from TOML" `Quick

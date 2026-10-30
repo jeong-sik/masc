@@ -1,6 +1,6 @@
 module Exact = Lane_addon_exact
 open Result.Syntax
-let output_name = "locate"
+let output_name = Browser_addon_models.locate_output_name
 let schema = `Assoc ["type",`String "object";"additionalProperties",`Bool false;
   "properties",`Assoc ["matches",`Assoc ["type",`String "array";"items",`Assoc [
     "type",`String "object";"additionalProperties",`Bool false;
@@ -36,7 +36,7 @@ let decode json =
       else Error "duplicate locate node reference"
   | _ -> Error "invalid locate result"
 let generate owner ~scene:(scene:Browser_scene.t) ~instruction =
-  let* system = Prompt_registry.render_prompt_template Prompt_names.browser_locate [] in
+  let* system = Browser_addon_owner.locate_system owner in
   let request_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
   let context=`Assoc ["instruction",Option.fold ~none:`Null ~some:(fun value -> `String value) instruction;
     "documentId",`String scene.document_id;"url",`String scene.url;"title",`String scene.title;

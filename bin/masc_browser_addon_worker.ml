@@ -62,12 +62,7 @@ let () =
     if !models then (
       let directory=Filename.dirname socket_path in
       let configuration=Eio_unix.run_in_systhread (fun () ->
-        let ( let* )=Result.bind in
-        let* value=Fs_compat.load_owned_regular_file ~ownership_root:directory (Filename.concat directory "models.json")
-          |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
-        let* text=Option.to_result ~none:"missing browser model configuration" value in
-        try Masc.Browser_addon_models.configuration_of_json (Yojson.Safe.from_string text)
-        with Yojson.Json_error detail -> Error detail) in
+        Masc.Browser_addon_models.load_configuration ~directory) in
       let queue=Result.bind configuration (fun configuration -> Masc.Browser_addon_models.create ~incarnation ~configuration) in
       match Result.bind queue (Masc.Browser_addon_owner.attach_models owner) with
       | Ok () -> () | Error detail -> raise (Arg.Bad detail));

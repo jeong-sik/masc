@@ -1167,8 +1167,8 @@ let make_instruction_skill_tool
                         | Some advice ->
                           Prompt_registry.render_prompt_template
                             Prompt_names.skill_applicability_projection
-                            ["advice", advice; "body", wire_content]
-                          |> Result.map Option.some
+                            ["advice", advice]
+                          |> Result.map (fun heading -> Some (String.trim heading ^ "\n" ^ wire_content))
                       in
                       let projected = match advice with
                         | Ok (Some text) -> text

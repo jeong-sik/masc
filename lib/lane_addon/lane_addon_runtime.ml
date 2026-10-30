@@ -1697,6 +1697,12 @@ let backend ~store ~artifact_store () = match !override with
             let env=match package.worker_service with
               | Mcp_tools -> None
               | Browser_service _ -> Some (Browser_addon_environment.project (Unix.environment ())) in
+            let models=match package.worker_service with
+              | Mcp_tools -> None
+              | Browser_service _ when not (uses_host_requests package) -> None
+              | Browser_service _ -> Some (Browser_addon_models.prepare_configuration
+                  ~store_root:(Filename.concat (Lane_addon_store.root store) "worker-model-results")
+                  ~outputs:package.exact_outputs) in
             let* cleanup_context,live_ego=match package.worker_service with
               | Mcp_tools -> Ok (None,None)
               | Browser_service backend -> offload (fun () ->
@@ -1728,9 +1734,7 @@ let backend ~store ~artifact_store () = match !override with
                       Ok (Browser_addon_socket.Ego,Some ego)
                     | Browser_lane.Backend.External_host -> Ok (Browser_addon_socket.External_host,None) in
                   Browser_addon_socket.context ~instance_id ~source
-                    ~models:(if not (uses_host_requests package) then None else Some {
-                      Browser_addon_models.store_root=Filename.concat (Lane_addon_store.root store) "worker-model-results";
-                      outputs=package.exact_outputs})
+                    ~models
                   |> Result.map (fun context -> Some context,live_ego))
                   |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in
             let* admission = prepare_native ~store ~installation_id ~instance_id ~cleanup_context ~is_live_instance in

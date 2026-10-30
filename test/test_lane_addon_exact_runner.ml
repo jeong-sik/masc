@@ -459,7 +459,7 @@ let test_consumer_act_answer_survives_host_proof action_kind () =
     let package={package with exact_outputs=[output]} in
     let original=request ~schema:requested "stagehand-act" in
     let models=Browser_addon_models.create ~incarnation:"0b000000-0000-4000-8000-000000000027"
-      ~configuration:{store_root=Filename.concat base_path "browser-receipts";outputs=[output]}
+      ~configuration:(Browser_addon_models.prepare_configuration ~store_root:(Filename.concat base_path "browser-receipts") ~outputs:[output])
       |> function Ok models -> models | Error detail -> fail detail in
     let waiting=Eio.Fiber.fork_promise ~sw (fun () -> Browser_addon_models.request models original) in
     ignore (Browser_addon_models.wait models ~after:(Some "0"));

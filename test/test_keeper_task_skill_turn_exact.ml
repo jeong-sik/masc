@@ -1400,7 +1400,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let prompt_overrides =
     [Prompt_names.skill_applicability, "managed-applicability-policy-fixture"
     ;Prompt_names.skill_applicability_advice, "managed-applicability-advice {{decision}}"
-    ;Prompt_names.skill_applicability_projection, "{{advice}}\n\nmanaged-skill-body\n{{body}}"] in
+    ;Prompt_names.skill_applicability_projection, "{{advice}}\n\nmanaged-skill-body"] in
   let install_overrides () = List.iter (fun (key, body) ->
     match Prompt_registry.set_override key body with Ok () -> () | Error detail -> fail detail) prompt_overrides in
   install_overrides ();
@@ -1453,12 +1453,14 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
       ~execution_id:(Ids.Execution_id.of_string call_id)
       ~tool_use_id:call_id ()
   in
+  let received_assessment = ref None in
   let tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~assess_applicability:(fun ~reference ~body ->
-        Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
+        let assessment = Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
           ~context:(Some (`Assoc [ "request", `String "inspect the current task" ]))
-          ~reference ~body ())
+          ~reference ~body () in
+        received_assessment := Some assessment; assessment)
       ~on_result:(fun ~input:_ result -> captured := Some result)
       ~instruction_skills:[ instruction_skill reference selected.skill ] () in
   let invoke expected =
@@ -1486,6 +1488,46 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
     (judged |> member "reference" |> Yojson.Safe.to_string);
   check bool "model advice does not invite an invented confidence threshold" false
     (String_util.contains_substring judged_output "confidence");
+  let retained_assessment = Option.get !received_assessment in
+  let activation_config = Workspace.default_config log_root in
+  let activation_trace = Keeper_id.Trace_id.of_string "skill-body-projection" |> Result.get_ok in
+  Fs_compat.mkdir_p (Keeper_fs.keeper_session_dir activation_config (Keeper_id.Trace_id.to_string activation_trace));
+  let recorder = Keeper_skill_activation_recorder.make ~trace_id:activation_trace
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string activation_trace) ~absolute_turn:0)
+      ~runtime_id:(fun () -> Some "fixture-runtime")
+      ~snapshot_revision:(Snapshot.snapshot_revision captured_snapshot) ~task_selection:Selection.empty
+      |> Result.get_ok in
+  let projection_tool = Keeper_tool_composition_surface.make_instruction_skill_tool
+      ~config:activation_config
+      ~assess_applicability:(fun ~reference:_ ~body:_ -> retained_assessment)
+      ~record_activation:(fun ~invocation ~content reference ->
+        (match content with Keeper_skill_activation_recorder.Body body ->
+          check string "activation records the exact original body" frozen_body body
+         | Keeper_skill_activation_recorder.Resource _ -> fail "expected the original Skill body");
+        Keeper_skill_activation_recorder.record_instruction ~config:activation_config recorder ~invocation ~content reference)
+      ~on_result:(fun ~input:_ result -> captured := Some result)
+      ~instruction_skills:[instruction_skill reference selected.skill] () in
+  Fun.protect ~finally:install_overrides (fun () ->
+    Prompt_registry.set_override Prompt_names.skill_applicability_projection "{{advice}}" |> Result.get_ok;
+    let output = run_skill_tool projection_tool (Reference.to_yojson reference) in
+    check bool "an advice-only override still returns the complete frozen body" true
+      (String.ends_with ~suffix:frozen_body output);
+    let actual_body = String.sub output (String.length output - String.length frozen_body) (String.length frozen_body) in
+    check bool "the structural body projection is a successful Skill read" true
+      (Tool_result.is_success (Option.get !captured));
+    let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
+    check int "metadata describes the actual returned body bytes" (String.length actual_body)
+      (metadata |> member "bytes" |> to_int);
+    let actual_sha = Agent_core_sha256.(digest_string actual_body |> to_hex) in
+    check string "metadata describes the actual returned body digest" actual_sha
+      (metadata |> member "sha256" |> to_string);
+    let ledger = Keeper_skill_activation_ledger.load ~config:activation_config ~trace_id:activation_trace |> Result.get_ok in
+    match Keeper_skill_activation_ledger.activations ledger with
+    | [{Keeper_skill_activation_ledger.invocation=Keeper_skill_activation_ledger.Instruction_invocation
+          {served_content=Keeper_skill_activation_ledger.Skill_body {bytes;sha256};_};_}] ->
+      check int "durable activation records the returned body bytes" (String.length actual_body) bytes;
+      check string "durable activation records the returned body digest" actual_sha sha256
+    | _ -> fail "expected one exact body activation");
   ignore (invoke "applicable");
   ignore (invoke "insufficient_context");
   let _, invalid = invoke "advice unavailable" in

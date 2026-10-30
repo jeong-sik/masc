@@ -180,7 +180,7 @@ let test_failed_reads_are_safe_before_the_panel_fits_them () =
   let raw = "오류\027[31m\n\xFF\xE2\x80\x8B literal \\x1B" in
   let expected = "오류\\x1B[31m\\x0A\\xFF\\u200B literal \\x1B" in
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows:24 in
-  state.schedules_error <- Some raw;
+  state.schedules_agenda_error <- Some raw;
   state.keeper_tool_approvals_error <- Some raw;
   state.tasks_error <- Some raw;
   state.operator_stalled <- Agenda.Read_failed raw;

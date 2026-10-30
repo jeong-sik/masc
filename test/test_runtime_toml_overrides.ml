@@ -361,9 +361,9 @@ let test_close_timeout_values_still_obey_the_freeze_rule () =
   List.iter (fun budget_key ->
     with_clean_boot_overrides @@ fun () ->
     with_base_path @@ fun base_path ->
-    let doc value = Printf.sprintf
-        "[turn]\nprovider_call_deadline_sec = 100.1234561\n%s = %s\n" budget_key value in
-    let invalid = doc "100.1234562" in
+    let doc ~deadline ~budget = Printf.sprintf
+        "[turn]\nprovider_call_deadline_sec = %s\n%s = %s\n" deadline budget_key budget in
+    let invalid = doc ~deadline:"100.1234561" ~budget:"100.1234562" in
     check bool "each value is in its declared range" true
       (Keeper_runtime_config.validation_report_is_valid
          (Keeper_runtime_config.validate_doc (parse_or_fail invalid)));
@@ -371,19 +371,67 @@ let test_close_timeout_values_still_obey_the_freeze_rule () =
     (match Keeper_runtime_config.load_and_apply ~base_path with
      | Ok _ -> ()
      | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
-    (match Keeper_runtime_resolved.init () with
-     | () -> failf "%s beyond the exact deadline was accepted" budget_key
-     | exception Env_config_core.Config_error _ -> ());
+    let message =
+      match Keeper_runtime_resolved.init () with
+      | () -> failf "%s beyond the exact deadline was accepted" budget_key
+      | exception Env_config_core.Config_error message -> message
+    in
+    check string "refusal gives exact values, sources and usable lower bound"
+      (Printf.sprintf
+         "turn.provider_call_deadline_sec (100.1234561, toml) is shorter than \
+          turn.%s (100.1234562, toml): the no-progress threshold would end a silence \
+          that budget still allows; declare turn.provider_call_deadline_sec >= 100.1234562"
+         budget_key)
+      message;
+    let lower_bound_start = String.rindex message ' ' + 1 in
+    let recommended = String.sub message lower_bound_start (String.length message - lower_bound_start) in
     Config_boot_overrides.reset_for_tests ();
     Keeper_runtime_resolved.reset_for_tests ();
-    write_toml base_path (doc "100.1234561");
+    write_toml base_path (doc ~deadline:recommended ~budget:"100.1234562");
     (match Keeper_runtime_config.load_and_apply ~base_path with
      | Ok _ -> ()
      | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
     Keeper_runtime_resolved.init ();
-    check bool "an exactly equal deadline is accepted" true
-      (Float.equal 100.1234561 (Keeper_runtime_resolved.provider_call_deadline_sec ())))
+    check bool "the reported lower bound is accepted" true
+      (Float.equal 100.1234562 (Keeper_runtime_resolved.provider_call_deadline_sec ())))
     [ "first_event_timeout_sec"; "stream_idle_timeout_sec" ]
+
+let test_timeout_recommendation_covers_both_declared_budgets () =
+  with_env "MASC_CONFIG_DIR" None @@ fun () ->
+  List.iter (fun (first, idle, lower_bound) ->
+    with_clean_boot_overrides @@ fun () ->
+    with_base_path @@ fun base_path ->
+    let doc deadline = Printf.sprintf
+        "[turn]\nprovider_call_deadline_sec = %s\nfirst_event_timeout_sec = %s\nstream_idle_timeout_sec = %s\n"
+        deadline first idle in
+    write_toml base_path (doc "100.1234561");
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> ()
+     | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+    let message =
+      match Keeper_runtime_resolved.init () with
+      | () -> fail "deadline shorter than both budgets was accepted"
+      | exception Env_config_core.Config_error message -> message
+    in
+    check string "refusal covers the higher declared budget"
+      (Printf.sprintf
+         "turn.provider_call_deadline_sec (100.1234561, toml) is shorter than \
+          turn.first_event_timeout_sec (%s, toml): the no-progress threshold would end a silence \
+          that budget still allows; declare turn.provider_call_deadline_sec >= %s"
+         first lower_bound)
+      message;
+    let lower_bound_start = String.rindex message ' ' + 1 in
+    let recommended = String.sub message lower_bound_start (String.length message - lower_bound_start) in
+    Config_boot_overrides.reset_for_tests ();
+    Keeper_runtime_resolved.reset_for_tests ();
+    write_toml base_path (doc recommended);
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> ()
+     | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+    Keeper_runtime_resolved.init ();
+    check string "the actual recommendation covers both budgets" lower_bound recommended)
+    [ "100.1234562", "110.1234567", "110.1234567"
+    ; "110.1234567", "100.1234562", "110.1234567" ]
 
 let test_resolved_runtime_freezes_toml_values_after_init () =
   with_clean_boot_overrides @@ fun () ->
@@ -1393,6 +1441,8 @@ let () =
             test_float_application_status_uses_the_numeric_value
         ; test_case "close timeout values still obey freeze validation" `Quick
             test_close_timeout_values_still_obey_the_freeze_rule
+        ; test_case "timeout recommendation covers both declared budgets" `Quick
+            test_timeout_recommendation_covers_both_declared_budgets
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
         ; test_case "resolved stream idle timeout defaults to fail-safe floor" `Quick test_resolved_stream_idle_timeout_defaults_to_failsafe_floor
         ; test_case "resolved first-event timeout defaults to fail-safe floor" `Quick test_resolved_first_event_timeout_defaults_to_failsafe_floor

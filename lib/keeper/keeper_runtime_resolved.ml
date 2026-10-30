@@ -152,12 +152,25 @@ let freeze_from_current () =
      than a floored budget stands: the operator asked for the earlier cut
      and nothing they declared is negated by it. *)
   let describe (name : string) (field : float field) =
-    Printf.sprintf "turn.%s (%g, %s)" name field.value (source_to_string field.source)
+    Printf.sprintf
+      "turn.%s (%s, %s)"
+      name
+      (Keeper_runtime_setting_registry.display_file_float field.value)
+      (source_to_string field.source)
   in
   let declared (field : float field) =
     match field.source with
     | Env | Toml -> true
     | Default | Failsafe_floor -> false
+  in
+  (* A single correction should cover both declared budgets. A fallback
+     floor is not an operator-declared budget and must not raise the bound. *)
+  let minimum_deadline =
+    List.fold_left
+      (fun maximum field ->
+         if declared field && field.value > maximum then field.value else maximum)
+      provider_call_deadline_sec.value
+      [ first_event_timeout_sec; stream_idle_timeout_sec ]
   in
   let refuse_shorter_than ~budget_name (budget : float field) =
     if declared budget && provider_call_deadline_sec.value < budget.value
@@ -166,10 +179,10 @@ let freeze_from_current () =
         (Env_config_core.Config_error
            (Printf.sprintf
               "%s is shorter than %s: the no-progress threshold would end a silence \
-               that budget still allows; declare turn.provider_call_deadline_sec >= %g"
+               that budget still allows; declare turn.provider_call_deadline_sec >= %s"
               (describe "provider_call_deadline_sec" provider_call_deadline_sec)
               (describe budget_name budget)
-              budget.value))
+              (Keeper_runtime_setting_registry.display_file_float minimum_deadline)))
   in
   refuse_shorter_than ~budget_name:"first_event_timeout_sec" first_event_timeout_sec;
   refuse_shorter_than ~budget_name:"stream_idle_timeout_sec" stream_idle_timeout_sec;

@@ -75,7 +75,6 @@ type error =
       ; before : float
       ; first_boundary_line : int
       ; end_boundary_line : int
-      ; end_turn_ref : Ids.Turn_ref.t
       ; atom_bound : (int * float) option
       ; official_bound : (int * float) option
       }

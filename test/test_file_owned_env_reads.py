@@ -1,0 +1,277 @@
+"""No OCaml source reads a file-owned setting from the process environment.
+
+The settings registry marks a setting `Toml_only` when `runtime.toml` is its
+only input. `Env_config_core.raw_value_opt` answers such a name from the boot
+override store and never from the process environment, so the shell that
+started the server cannot change what the file says. A read that goes around
+it, such as `Sys.getenv_opt "MASC_KEEPER_DEBUG"`, makes that shell an owner of
+the setting again.
+
+The rule reports a call to `Sys.getenv`, `Sys.getenv_opt`, `Unix.getenv`, or any
+function whose name contains `getenv`, applied to a file-owned name (comments
+removed). The name is written as
+
+  - the string literal, `Sys.getenv_opt "MASC_KEEPER_DEBUG"`, or
+  - a name bound to it, `let debug_env = "MASC_KEEPER_DEBUG"` and then
+    `Sys.getenv_opt debug_env` in the file that binds it (a local
+    `let ... in` included), or through a module path from any file,
+    `Sys.getenv_opt Env_config_keeper.KeeperRuntime.debug_env`.
+
+A name read through `Env_config_core` (`get_bool`, `get_int`, `raw_value_opt`)
+is the supported path and is not reported. A name in a list, such as the ones a
+keeper's environment is scrubbed of, and a name inside another string, such as an
+embedded script, are not reads.
+
+The names come from the settings registry, one per line, in the file given
+first, so a setting that becomes file-owned is covered without a line here.
+Reads built from pieces (`"MASC_" ^ suffix`) and a bound name used unqualified
+in another file, after an `open`, are not seen.
+
+usage: test_file_owned_env_reads.py <names file> <source root>...
+"""
+
+import re
+import sys
+
+# The OCaml lexer helpers of the byte-cut scan: comments removed with literals
+# kept, string and quoted-string skipping. The scan files sit side by side.
+from test_byte_cut_previews import (
+    CHAR_LITERAL,
+    IDENT_CHAR,
+    IDENT_START,
+    QUOTED_OPEN,
+    blank_comments,
+    skip_quoted,
+    skip_string,
+    source_files,
+)
+
+# Any function that reads one variable: `Sys.getenv_opt`, `Unix.getenv`, a local
+# `let getenv = Sys.getenv_opt`, a wrapper such as `Process_env.getenv_opt`.
+READ = r"(?:[A-Z][A-Za-z0-9_']*\.)*[A-Za-z0-9_']*getenv[A-Za-z0-9_']*"
+# The argument: an optional parenthesis, then a literal placeholder or a name.
+OPEN = r"\s*\(?\s*"
+# `let debug_env = "MASC_X"` and `let debug_env : string = "MASC_X"`; the last
+# group is set for `let debug_env = "MASC_X" in`, which no module path reaches.
+CONSTANT = re.compile(
+    r"\blet\s+(?:rec\s+)?([a-z_][A-Za-z0-9_']*)\s*(?::\s*string\s*)?=\s*\"#(\d+)\"(\s+in\b)?"
+)
+LITERAL_READ = re.compile(READ + OPEN + r"\"#(\d+)\"")
+
+
+def literalize(code):
+    """The code with every string literal replaced by "#n", and the literals.
+
+    Reads are looked for in code, never inside a string: an embedded shell or
+    Python script that says `getenv "MASC_X"` is data. Character literals and
+    identifiers with primes are skipped the way OCaml's lexer skips them, so a
+    `'"'` does not open a string.
+    """
+    out = []
+    literals = []
+    i = 0
+    n = len(code)
+
+    def put(body):
+        literals.append(body)
+        out.append('"#%d"' % (len(literals) - 1))
+
+    while i < n:
+        char = code[i]
+        if IDENT_START.match(char):
+            j = i + 1
+            while j < n and IDENT_CHAR.match(code[j]):
+                j += 1
+            out.append(code[i:j])
+            i = j
+            continue
+        if char == '"':
+            j = skip_string(code, i)
+            put(code[i + 1 : j - 1])
+            i = j
+            continue
+        if char == "{":
+            opener = QUOTED_OPEN.match(code, i)
+            if opener:
+                j = skip_quoted(code, opener.end(), opener.group(1))
+                put(code[opener.end() : j - len(opener.group(1)) - 2])
+                i = j
+                continue
+        if char == "'":
+            literal = CHAR_LITERAL.match(code, i)
+            if literal:
+                out.append(" ")
+                i = literal.end()
+                continue
+        out.append(char)
+        i += 1
+    return "".join(out), literals
+
+
+def bindings_of(text, names):
+    """The identifiers bound to a file-owned name: (everywhere, reachable).
+
+    `everywhere` holds every binding, for reads in the file itself. `reachable`
+    leaves out `let x = "..." in`, which belongs to its expression and which no
+    module path names, for reads written `Module.x` in any file.
+    """
+    code, literals = literalize(blank_comments(text, keep_width=False))
+    everywhere = {}
+    reachable = {}
+    for match in CONSTANT.finditer(code):
+        name = literals[int(match.group(2))]
+        if name not in names:
+            continue
+        everywhere[match.group(1)] = name
+        if not match.group(3):
+            reachable[match.group(1)] = name
+    return everywhere, reachable
+
+
+def alternation(identifiers):
+    return "|".join(re.escape(identifier) for identifier in sorted(identifiers))
+
+
+def findings(text, names, own, reachable):
+    """(line, snippet) of each read of a file-owned name in [text].
+
+    [own] are the identifiers bound to one in this file, [reachable] the ones a
+    module path names in any file.
+    """
+    code, literals = literalize(blank_comments(text, keep_width=False))
+    found = [
+        match
+        for match in LITERAL_READ.finditer(code)
+        if literals[int(match.group(1))] in names
+    ]
+    if own:
+        found.extend(re.finditer(READ + OPEN + r"(?:" + alternation(own) + r")\b", code))
+    if reachable:
+        found.extend(
+            re.finditer(READ + OPEN + r"(?:[A-Z][A-Za-z0-9_']*\.)+(?:" + alternation(reachable) + r")\b", code)
+        )
+
+    def shown(match):
+        text = re.sub(r'"#(\d+)"', lambda hole: '"' + literals[int(hole.group(1))] + '"', match.group(0))
+        return " ".join(text.split())
+
+    return [
+        (code.count("\n", 0, match.start()) + 1, shown(match))
+        for match in sorted(found, key=lambda m: m.start())
+    ]
+
+
+def read_names(path):
+    with open(path, encoding="utf-8") as handle:
+        names = {line.strip() for line in handle if line.strip()}
+    if not names:
+        sys.exit(f"{path} names no file-owned setting: the registry or the dump is wrong")
+    return names
+
+
+SELF_NAMES = {"MASC_KEEPER_DEBUG", "MASC_H2_MAX_CONCURRENT_STREAMS"}
+
+# One file each; what the file itself binds is read from the file.
+SHOULD_MATCH = [
+    'let f () = Sys.getenv_opt "MASC_KEEPER_DEBUG"',
+    'let f () = Sys.getenv "MASC_KEEPER_DEBUG"',
+    'let f () = Unix.getenv "MASC_KEEPER_DEBUG"',
+    'let f () = Stdlib.Sys.getenv_opt "MASC_KEEPER_DEBUG"',
+    'let f () = Sys.getenv_opt\n    "MASC_KEEPER_DEBUG"',
+    'let f () = Sys.getenv_opt ("MASC_KEEPER_DEBUG")',
+    'let f () = Sys.getenv_opt (* why *) "MASC_KEEPER_DEBUG"',
+    'let f () = Sys.getenv_opt {|MASC_KEEPER_DEBUG|}',
+    'let getenv = Sys.getenv_opt\nlet f () = getenv "MASC_KEEPER_DEBUG"',
+    'let f () = Process_env.getenv_opt "MASC_KEEPER_DEBUG"',
+    'let f () = match Sys.getenv_opt "MASC_H2_MAX_CONCURRENT_STREAMS" with Some v -> v | None -> ""',
+    'let debug_env = "MASC_KEEPER_DEBUG"\nlet f () = Sys.getenv_opt debug_env',
+    'let debug_env : string = "MASC_KEEPER_DEBUG"\nlet f () = Sys.getenv_opt debug_env',
+    'let rec k = "MASC_KEEPER_DEBUG"\nlet f () = Sys.getenv_opt (k)',
+    'let f () =\n  let env_name = "MASC_KEEPER_DEBUG" in\n  Sys.getenv_opt env_name',
+    'module K = struct let debug_env = "MASC_KEEPER_DEBUG" end\nlet f () = Sys.getenv_opt K.debug_env',
+    'let c = \'"\'\nlet f () = Sys.getenv_opt "MASC_KEEPER_DEBUG"',
+]
+
+SHOULD_NOT_MATCH = [
+    'let f () = Env_config_core.get_bool ~default:false "MASC_KEEPER_DEBUG"',
+    'let f () = raw_value_opt "MASC_KEEPER_DEBUG"',
+    'let f () = Env_config_core.raw_value_opt "MASC_H2_MAX_CONCURRENT_STREAMS"',
+    'let f () = Sys.getenv_opt "HOME"',
+    'let f () = Sys.getenv_opt "MASC_KEEPER_DEBUG_LEVEL"',
+    'let f () = Sys.getenv_opt "XMASC_KEEPER_DEBUG"',
+    '(* Sys.getenv_opt "MASC_KEEPER_DEBUG" *)\nlet f () = ()',
+    'let scrubbed = [ "MASC_KEEPER_DEBUG"; "HOME" ]',
+    'let debug_env = "MASC_KEEPER_DEBUG"\nlet f () = Env_config_core.raw_value_opt debug_env',
+    'let debug_env = "MASC_KEEPER_DEBUG"\nlet f () = Sys.getenv_opt other_env',
+    'let debug_env = "MASC_KEEPER_DEBUG"\nlet f () = Sys.getenv_opt debug_envelope',
+    'let f ?(getenv = Sys.getenv_opt) name = getenv name',
+    'let doc = "Sys.getenv_opt \\"MASC_KEEPER_DEBUG\\""',
+    'let script = {|getenv "MASC_KEEPER_DEBUG"|}',
+    'let script = {sh|Sys.getenv_opt "MASC_KEEPER_DEBUG"|sh}',
+    'let c = \'"\'\nlet f () = Sys.getenv_opt "HOME"',
+    'let other = "MASC_KEEPER_TIMEOUT"\nlet f () = Sys.getenv_opt other',
+    'let f () =\n  let env_name = "MASC_KEEPER_DEBUG" in\n  Env_config_core.raw_value_opt env_name',
+]
+
+# Two files: (the file that binds, the file that reads, whether the read is flagged).
+# A local binding is not reachable from another file, and an unqualified name is
+# the other file's own variable.
+PAIRS = [
+    ('module K = struct let debug_env = "MASC_KEEPER_DEBUG" end', 'let f () = Sys.getenv_opt K.debug_env', True),
+    ('module K = struct let debug_env = "MASC_KEEPER_DEBUG" end', 'let f () = Sys.getenv_opt Env_config_keeper.K.debug_env', True),
+    ('let f () = let env_name = "MASC_KEEPER_DEBUG" in Env_config_core.raw_value_opt env_name', 'let g env_name = Sys.getenv_opt env_name', False),
+    ('let f () = let env_name = "MASC_KEEPER_DEBUG" in Env_config_core.raw_value_opt env_name', 'let g () = Sys.getenv_opt Other.env_name', False),
+    ('module K = struct let debug_env = "MASC_KEEPER_DEBUG" end', 'let g () = Sys.getenv_opt Other.timeout_env', False),
+]
+
+
+def findings_of(texts, names):
+    """{index: [(line, snippet)]} for several files read together."""
+    bound = [bindings_of(text, names) for text in texts]
+    reachable = {}
+    for _, reach in bound:
+        reachable.update(reach)
+    return [findings(text, names, own, reachable) for text, (own, _) in zip(texts, bound)]
+
+
+def self_test():
+    for sample in SHOULD_MATCH:
+        if not findings_of([sample], SELF_NAMES)[0]:
+            sys.exit(f"the scanner misses a known shape: {sample!r}")
+    for sample in SHOULD_NOT_MATCH:
+        if findings_of([sample], SELF_NAMES)[0]:
+            sys.exit(f"the scanner flags an allowed form: {sample!r}")
+    for binder, reader, flagged in PAIRS:
+        if bool(findings_of([binder, reader], SELF_NAMES)[1]) != flagged:
+            verdict = "misses" if flagged else "flags"
+            sys.exit(f"the scanner {verdict} a read across files: {binder!r} / {reader!r}")
+
+
+def main(names_path, roots):
+    self_test()
+    names = read_names(names_path)
+    paths = sorted(source_files(roots))
+    if not paths:
+        sys.exit(f"no .ml file found under {roots}: the roots are wrong")
+    texts = []
+    for path in paths:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            texts.append(handle.read())
+    flagged = []
+    for path, found in zip(paths, findings_of(texts, names)):
+        flagged.extend(f"{path}:{line}: {snippet}" for line, snippet in found)
+    if flagged:
+        sys.exit(
+            "These reads take a setting that runtime.toml alone owns from the process "
+            "environment.\n"
+            "Read it through Env_config_core (get_bool, get_int, raw_value_opt), which answers "
+            "it from the boot override store:\n  "
+            + "\n  ".join(flagged)
+        )
+    print(f"{len(paths)} .ml files scanned, {len(names)} file-owned names, no direct environment read")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        sys.exit(__doc__)
+    main(sys.argv[1], sys.argv[2:])

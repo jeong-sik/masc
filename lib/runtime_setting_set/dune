@@ -1,0 +1,13 @@
+(include_subdirs no)
+
+(library
+ (name runtime_setting_set)
+ (public_name masc.runtime_setting_set)
+ (wrapped false)
+ (modules runtime_setting_set)
+ (libraries
+  masc.config
+  masc.keeper_runtime
+  masc.keeper_toml
+  masc.runtime
+  masc.toml_line_editor))

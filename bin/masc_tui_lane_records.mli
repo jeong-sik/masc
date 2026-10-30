@@ -20,17 +20,22 @@ type record = {
 
 val parse : string -> (record list, string) result
 (** The entries of [text] in file order. No [binding.records] key is no
-    entry. A malformed entry is an error naming what it needs. *)
+    entry. Inline bindings and records arrays, and malformed entries, are
+    refused with an instruction to edit the raw TOML. *)
 
 val add : string -> Yojson.Safe.t -> (string, string) result
-(** Append the entry [json] describes and return the new text. The entry is
-    checked the way the host checks it (closed kind, exact keys per kind,
-    non-blank [source_id], known visibilities, repository-relative paths),
-    and a [source_id] the text already carries is refused. *)
+(** Append the entry [json] describes and return the new text. Its fields are
+    checked with the host grant validator under an operator-owned assumption
+    (closed kind, exact keys per kind, non-blank [source_id], known
+    visibilities, repository-relative paths). This does not establish the
+    declaration's actual ownership or worker application. Existing duplicate
+    IDs and a [source_id] the text already carries are refused. Other TOML
+    values and existing entries must compare equal after the insertion. *)
 
 val remove : string -> source_id:string -> (string, string) result
-(** Drop the entry named [source_id] and return the new text. Refused when
-    no entry carries that name. *)
+(** Drop exactly one entry named [source_id] and return the new text. Refused
+    when any IDs are duplicated, or the name is absent or not addressable.
+    The remaining parsed entries and unrelated TOML must compare equal. *)
 
 val item_schema : Yojson.Safe.t
 (** The JSON schema the add form renders: [source_id], a closed [kind],
@@ -67,6 +72,12 @@ val text_entry_open : t -> bool
 
 val text : t -> string
 (** The overlay's working copy of the TOML. *)
+
+val title : t -> string
+(** The declaration draft this overlay belongs to. *)
+
+val message : t -> string option
+(** The last edit result, if any. *)
 
 val lines : t -> string list
 (** The overlay as printable rows: the entries, the open form if any, and

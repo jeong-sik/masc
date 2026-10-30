@@ -2022,7 +2022,35 @@ let role_refresh_keeps_original_action_and_installation () =
   check (option string) "explicit navigation may select the replacement installation" (Some "replacement")
     (Option.bind (UI.selected_declaration selected) (fun declaration -> declaration.installation_id))
 
+let records_overlay_keeps_draft_identity_and_scroll () =
+  let text = "[binding]\n[[binding.records]]\nsource_id = \"one\"\nkind = \"wiki\"\n" in
+  let first = { (Draft.create "a.toml" |> ok) with text } in
+  let second = { first with file_name="b.toml" } in
+  let view = UI.put_document UI.initial first |> UI.open_records |> ok in
+  let form = UI.edit_records ~key:"a" view |> ok in
+  let form = UI.edit_records ~key:"x" {form with scroll=7} |> ok in
+  check int "typing keeps the scrolled form" 7 form.scroll;
+  let form = UI.paste_records ~text:"more" form in
+  check int "pasting keeps the scrolled form" 7 form.scroll;
+  let listing = UI.edit_records ~key:"esc" form |> ok in
+  check int "return to selected record" 0 listing.scroll;
+  let changed = UI.edit_records ~key:"d" listing |> ok in
+  let selected = match UI.selected_document changed with
+    | Some session -> session | None -> fail "selected draft disappeared" in
+  check string "the selected draft receives the deletion" "[binding]\n" selected.text;
+  check bool "the overlay remains open" true (Option.is_some changed.records);
+  let switched = UI.put_document view second in
+  check bool "a different filename closes an overlay even with identical text" true
+    (Option.is_none switched.records);
+  let mismatched = {view with document_key=Some "b.toml"; documents=[first;second]} in
+  check bool "a mismatched selected draft is not overwritten" true
+    (Result.is_error (UI.edit_records ~key:"d" mismatched));
+  let changed_under_overlay = {view with documents=[{first with text="[binding]\n"}]} in
+  check bool "changed draft text is not overwritten" true
+    (Result.is_error (UI.edit_records ~key:"d" changed_under_overlay))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "records overlay keeps draft identity and scroll" `Quick records_overlay_keeps_draft_identity_and_scroll;
   test_case "current category requires exact id and path" `Quick
     current_category_requires_exact_id_and_path;
   test_case "Inspect categories use strict shared decoding" `Quick inspect_category_decode_is_strict;

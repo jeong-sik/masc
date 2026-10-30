@@ -2659,6 +2659,7 @@
   masc.workspace_connection
   masc_tui_lane_application
   masc_tui_lane_addons
+  masc_tui_lane_records
   masc_tui_lane_broadcast_pending
   masc_tui_fusion_launch
   masc_tui_fusion_seat_routes

@@ -86,8 +86,12 @@ let add_rejects_host_invalid_values () =
   (match Records.add quiz_toml bad_visibility with
    | Ok _ -> fail "expected an unknown visibility to be refused"
    | Error _ -> ());
-  match Records.add quiz_toml bad_path with
-  | Ok _ -> fail "expected an escaping path to be refused"
+  (match Records.add quiz_toml bad_path with
+   | Ok _ -> fail "expected an escaping path to be refused"
+   | Error _ -> ());
+  let wrong_kind_field = json {|{"source_id":"wiki","kind":"wiki","repository_id":"repo"}|} in
+  match Records.add quiz_toml wrong_kind_field with
+  | Ok _ -> fail "a reviewed field for another kind must not be silently discarded"
   | Error _ -> ()
 
 let add_without_binding_refused () =
@@ -120,11 +124,96 @@ let overlay_cancel_and_drop () =
       check bool "lines render" true (Records.lines overlay <> []);
       (match Records.handle ~key:"esc" overlay with
        | Ok Records.Cancel -> ()
-       | _ -> fail "expected Esc to cancel");
+       | Ok (Updated _ | Apply _) | Error _ -> fail "expected Esc to cancel");
       (match Records.handle ~key:"d" overlay with
        | Ok (Records.Apply (_, text)) ->
            check bool "wkbl dropped" false (Option.is_some (index_of text "source_id = \"wkbl\""))
-       | _ -> fail "expected d to apply a removal")
+       | Ok (Updated _ | Cancel) | Error _ -> fail "expected d to apply a removal")
+
+let expect_error label = function
+  | Error _ -> ()
+  | Ok _ -> fail label
+
+let unsupported_shapes_are_not_empty () =
+  let inline =
+    "binding = { sources = [], records = [{ source_id = \"wiki\", kind = \"wiki\" }] }\n" in
+  let array = "[binding]\nsources = []\nrecords = [{ source_id = \"wiki\", kind = \"wiki\" }]\n" in
+  let empty_array = "[binding]\nsources = []\nrecords = []\n" in
+  List.iter (fun text -> expect_error "unsupported shape must not look empty" (Records.open_ ~title:"x" ~text))
+    [inline; array; empty_array]
+
+let multiline_and_ambiguous_ids_fail_closed () =
+  let entry = json {|{"source_id":"wkbl","kind":"wiki"}|} in
+  let text = "[binding]\n[[binding.records]]\nsource_id = \"\"\"wk\\\n  bl\"\"\"\nkind = \"wiki\"" in
+  List.iter (fun text ->
+    (match Records.parse text with
+     | Ok [record] -> check string "parsed multiline id" "wkbl" record.source_id
+     | Ok _ | Error _ -> fail "multiline source id did not parse");
+    expect_error "duplicate multiline id must be refused" (Records.add text entry);
+    expect_error "unaddressable multiline id must not report deletion" (Records.remove text ~source_id:"wkbl");
+    let overlay = match Records.open_ ~title:"x" ~text with Ok value -> value | Error e -> fail e in
+    (match Records.handle ~key:"d" overlay with
+     | Ok (Records.Updated overlay) -> check string "original draft preserved" text (Records.text overlay)
+     | Ok (Apply _ | Cancel) | Error _ -> fail "unaddressable deletion applied"))
+    [text; text ^ "\n"];
+  let duplicate = "[binding]\n[[binding.records]]\nsource_id = \"wkbl\"\nkind = \"wiki\"\n[[binding.records]]\nsource_id = \"wkbl\"\nkind = \"wiki\"\n" in
+  expect_error "ambiguous deletion must be refused" (Records.remove duplicate ~source_id:"wkbl");
+  expect_error "duplicate must be refused" (Records.add duplicate entry);
+  expect_error "an unrelated addition must not preserve an ambiguous set"
+    (Records.add duplicate (json {|{"source_id":"new","kind":"wiki"}|}));
+  let duplicate_with_other = duplicate ^ "[[binding.records]]\nsource_id = \"other\"\nkind = \"wiki\"\n" in
+  expect_error "an unrelated deletion must not preserve an ambiguous set"
+    (Records.remove duplicate_with_other ~source_id:"other");
+  expect_error "missing id without trailing newline must not count a newline as deletion"
+    (Records.remove "[binding]" ~source_id:"missing")
+
+let preserves_subtables_and_header_comments () =
+  let text = "[binding]\nsources = []\n[[binding.records]]\nsource_id = \"old\"\nkind = \"wiki\"\n[binding.records.extra]\nfoo = 42\n\n# schedule description\n[schedule]\nperiod = 5\n" in
+  match Records.add text (json {|{"source_id":"new","kind":"wiki"}|}) with
+  | Error detail -> fail detail
+  | Ok result ->
+      check_contains result "[binding.records.extra]\nfoo = 42\n";
+      check_contains result "# schedule description\n[schedule]\n";
+      (match index_of result "[binding.records.extra]", index_of result "source_id = \"new\"" with
+       | Some extra, Some new_entry -> check bool "old subtable stays before new entry" true (extra < new_entry)
+       | Some _, None | None, Some _ | None, None -> fail "expected both entries")
+
+let overlay_form_and_large_list () =
+  let text = "[binding]\n" ^ String.concat "" (List.init 30 (fun i ->
+    Printf.sprintf "[[binding.records]]\nsource_id = \"id%d\"\nkind = \"wiki\"\n" i)) in
+  let overlay = match Records.open_ ~title:"x" ~text with Ok value -> value | Error e -> fail e in
+  let move overlay = match Records.handle ~key:"j" overlay with
+    | Ok (Records.Updated next) -> next
+    | Ok (Apply _ | Cancel) | Error _ -> fail "selection failed" in
+  let overlay = List.fold_left (fun overlay _ -> move overlay) overlay (List.init 29 Fun.id) in
+  check_contains (String.concat "\n" (Records.lines overlay)) "30/30 · id29";
+  let overlay = match Records.handle ~key:"a" overlay with
+    | Ok (Records.Updated next) -> next
+    | Ok (Apply _ | Cancel) | Error _ -> fail "form did not open" in
+  check bool "schema form open" true (Records.text_entry_open overlay);
+  let rows = String.concat "\n" (Records.lines overlay) in
+  check_contains rows "host requires an operator-owned declaration";
+  check_contains rows "Before granting internal or direct";
+  check_contains rows "source_id";
+  check bool "list does not bury the form" false (Option.is_some (index_of rows "id29"));
+  check_contains rows "Esc:back · then s saves"
+
+let overlay_add_form_applies_to_draft () =
+  let step key overlay = match Records.handle ~key overlay with
+    | Ok (Records.Updated next) -> next
+    | Ok (Apply _ | Cancel) | Error _ -> fail ("unexpected event on " ^ key) in
+  let overlay = match Records.open_ ~title:"x" ~text:"[binding]\nsources = []\n" with
+    | Ok value -> value | Error e -> fail e in
+  let overlay = step "a" overlay |> Records.insert_text ~text:"fresh" |> step "tab"
+    |> step "right" |> step "right" |> step "right" |> step "\019" in
+  match Records.handle ~key:"enter" overlay with
+  | Ok (Records.Apply (_, text)) ->
+      (match Records.parse text with
+       | Ok [record] ->
+           check string "added source" "fresh" record.source_id;
+           check string "added kind" "wiki" record.kind
+       | Ok _ | Error _ -> fail "submitted grant did not parse")
+  | Ok (Updated _ | Cancel) | Error _ -> fail "expected a staged edit"
 
 let () =
   run "tui lane records"
@@ -143,5 +232,10 @@ let () =
           test_case "remove drops one" `Quick remove_drops_one_entry;
           test_case "remove missing refused" `Quick remove_missing_refused;
           test_case "overlay cancel and drop" `Quick overlay_cancel_and_drop;
+          test_case "unsupported TOML shapes" `Quick unsupported_shapes_are_not_empty;
+          test_case "multiline and ambiguous ids" `Quick multiline_and_ambiguous_ids_fail_closed;
+          test_case "subtables and header comments" `Quick preserves_subtables_and_header_comments;
+          test_case "form and large list" `Quick overlay_form_and_large_list;
+          test_case "add through form" `Quick overlay_add_form_applies_to_draft;
         ] );
     ]

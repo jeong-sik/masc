@@ -90,6 +90,7 @@ type t = {
   presentation : presentation; screen : screen; overview_mode : overview_mode; help_open : bool;
   current_selection : overview_selection; history_selection : overview_selection;
   action_menu : action_menu option;
+  records : Masc_tui_lane_records.t option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
   application_reading : configuration Application.reading;
   snapshot_read_error : string option;
@@ -519,7 +520,8 @@ let put_document view (document : Document.session) =
      external edit — leaves the overlay showing another text, so only an
      unchanged text keeps it open. *)
   let records = match view.records with
-    | Some overlay when String.equal (Masc_tui_lane_records.text overlay) document.text -> view.records
+    | Some overlay when String.equal (Masc_tui_lane_records.title overlay) document.file_name
+                        && String.equal (Masc_tui_lane_records.text overlay) document.text -> view.records
     | Some _ | None -> None in
   {view with documents=document :: List.filter (fun (s : Document.session) -> s.file_name <> document.file_name) view.documents;
     document_key=Some document.file_name; records}
@@ -1303,14 +1305,24 @@ let edit_records ~key view =
   let* event = Masc_tui_lane_records.handle ~key overlay in
   match event with
   | Masc_tui_lane_records.Cancel -> Ok ({view with records=None;error=None;scroll=0})
-  | Updated overlay -> Ok ({view with records=Some overlay;error=None;scroll=0})
-  | Apply (overlay, text) ->
+  | Updated next ->
+      let scroll =
+        if Masc_tui_lane_records.text_entry_open overlay
+           && Masc_tui_lane_records.text_entry_open next
+           && Masc_tui_lane_records.message overlay = Masc_tui_lane_records.message next
+        then view.scroll else 0 in
+      Ok ({view with records=Some next;error=None;scroll})
+  | Apply (next, text) ->
       let* session = match selected_document view with
         | Some session -> Ok session | None -> Error "The open document changed; Esc closes the records overlay." in
-      Ok (put_document {view with records=Some overlay;error=None;scroll=0} {session with text})
+      let* () =
+        if Masc_tui_lane_records.title overlay = session.file_name
+           && Masc_tui_lane_records.text overlay = session.text then Ok ()
+        else Error "The open document changed; Esc closes the records overlay without applying this edit." in
+      Ok (put_document {view with records=Some next;error=None;scroll=0} {session with text})
 
 let paste_records ~text view =
-  {view with records=Option.map (Masc_tui_lane_records.insert_text ~text) view.records;scroll=0}
+  {view with records=Option.map (Masc_tui_lane_records.insert_text ~text) view.records}
 
 (* A result value laid out as an outline instead of one line of JSON: an
    object field is a key, a list item is a bullet, a string is its text with

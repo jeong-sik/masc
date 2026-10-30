@@ -19594,7 +19594,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             let selected = view.document_key=Some key in
             let view = match session with None -> view | Some session ->
               let updated = Addons.put_document view session in
-              {updated with document_key=view.document_key} in
+              {updated with document_key=view.document_key;
+                records=(if selected then updated.records else view.records)} in
             match response with
             (* Same reason as the pending note: a rejection is the answer to
                the save, and it is drawn above the draft the reader is in. *)
@@ -29493,9 +29494,11 @@ and is loaded on demand through keeper_skill.
                            | Error detail -> update {view with evidence_prompt=None;error=lane_addons_input_failure detail})
                       | _ -> ())
                  | None when Option.is_some view.records ->
-                     (match Addons.edit_records ~key view with
+                     if key="pageup" || key="pagedown" then
+                       scroll_lane_addons ~page:true ~down:(key="pagedown")
+                     else (match Addons.edit_records ~key view with
                       | Ok next -> update next
-                      | Error detail -> update {view with error=lane_addons_input_failure detail})
+                      | Error detail -> update {view with error=lane_addons_input_failure detail;scroll=0})
                  | None -> match view.subscription_panel,view.action_menu,view.draft with
                  | Some panel,_,_ ->
                      let module Subs = Masc_tui_lane_subscriptions in

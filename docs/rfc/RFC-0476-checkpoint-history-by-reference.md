@@ -178,10 +178,11 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 
 - 메시지 개수(heartbeat, `keeper_status`)는 head 로 답한다. 묶음마다 메시지 수를 head 에 같이 둔다. 요약 캐시에 없을 때도 head 만 해석한다.
 - 대시보드 checkpoint 목록은 head 와 몇 개의 객체만 읽는다. `system_prompt` 유무는 머리 객체 하나를 읽는다. 미리보기(글이 있는 가장 최근 메시지)는 열린 메시지, 마지막 턴의 묶음, segment 순으로 뒤에서부터 읽다가 찾으면 멈춘다. 읽은 객체마다 digest 와 묶음의 메시지 수는 확인하지만, 처음부터 이어지는 chain 은 확인하지 않는다. 그래서 이 읽기는 보여 주기용이고 load 를 대신하지 않는다.
-- Librarian 과 continuation 의 앞부분 비교는 해시 체인으로 한다. 지금의 `prefix_digest` 는 덮은 메시지의 JSON 을 이어 붙인 한 덩어리의 SHA-256 이라서(lib/librarian_continuity_snapshot.ml:227), 묶음 digest 로는 만들 수 없다. 턴 중간까지 덮은 경우도 비교할 수 없다.
-  - 정의: `chain(0) = SHA-256("masc.rfc-0476.chain.v1")` 이고, `chain(i+1) = SHA-256(hex(chain(i)) ‖ hex(digest(message i)))` 다. 저장도 hex 로 한다.
-  - 앞부분 k 개의 값은 `chain(k)` 다. head 에 있는 "k 바로 앞 묶음의 끝 체인 값"에서 시작해, 그 묶음 머리의 메시지 digest 를 k 까지 이어 계산한다. 메시지를 다시 인코딩하지 않는다.
-  - Librarian continuity snapshot 은 `prefix_sha256` 대신 `chain(k)` 를 저장한다. 옛 snapshot 은 하드컷 때 버려진다(§3.7). 임의의 k 에서 두 방법(전체 history 를 처음부터 잇기, head 와 묶음에서 이어 계산하기)이 같은 값을 내는지 시험으로 고정한다.
+- 메시지마다의 chain 값은 `chain(0) = SHA-256("masc.rfc-0476.chain.v1")`, `chain(i+1) = SHA-256(hex(chain(i)) ‖ hex(digest(message i)))` 다. 저장도 hex 로 한다.
+- Librarian continuity 의 앞부분 비교는 덮은 메시지의 JSON 을 이어 붙인 한 덩어리의 SHA-256(`prefix_digest`, lib/librarian_continuity_snapshot.ml:224)을 그대로 쓴다.
+  - 같은 바이트를 다시 읽은 라운드는 decode 도, 앞부분 digest 도 다시 하지 않는다. 바이트가 바뀐 라운드는 history 를 전부 다시 읽고 앞부분을 처음부터 해시한다.
+  - 그 라운드에서 해시는 작은 몫이다. 2026-10-30 에 가장 큰 v18 history(메시지 4,683개, 인코딩 4.7MB, 객체 3,418개)의 사본에서, 해시는 0.036초, history 를 읽는 데는 0.8~1.7초가 걸렸다.
+  - 그래서 라운드 비용은 해시가 아니라 history 읽기가 정한다. 이 history 는 10시간에 메시지 4,683개만큼 자랐고, 압축하지 않으니 계속 자란다. 줄일 것은 바뀐 바이트를 읽을 때 history 전체를 다시 읽는 비용이다(#46907).
 - 턴 하나를 쓰는 history 읽기는 지금처럼 전체를 메모리에 올린다. 다만 media 를 빼면 msx-retro-mania 가 179MB 에서 약 58MB 가 된다. 같은 프로세스 안에서는 메모리 사본을 그대로 쓴다.
 - 기동 tail 복구는 마지막 묶음과 진행 중 턴만 읽어도 되는지 `close_open_tail` 의 규칙을 확인해서 정한다. 이 RFC 에서 약속하지 않는다.
 
@@ -256,8 +257,7 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 4. **L1-4: head 로 읽기(§3.5).**
    1. L1-4a(#46795): `plan_save` 와 load 가 메시지마다의 chain 값을 memo 에 남기고, 다음 저장은 물리적으로 같은 앞부분의 값을 이어 쓴다. 16000 메시지에서 라운드 저장이 메시지 수에 비례하지 않게 된다.
    2. L1-4b(#46802), v18: 머리 객체와 turn segment(D8). head 크기가 머리 필드의 크기와 턴 수에 따라 늘지 않는다.
-   3. L1-4c: 개수·미리보기를 head 로 읽는다.
-   4. Librarian `chain(k)`. Librarian 은 이미 같은 메시지 값이면 앞부분 digest 를 이어 계산한다(`prefix_digest`). 그래서 지금 비용이 있는지 재 보고 나서 정한다.
+   3. L1-4c(#46872): 개수·미리보기를 head 로 읽는다.
 5. **L1-5: 객체 정리와 기준점(§3.6).**
    1. L1-5a(#46827, #46838): 기동 때 객체 정리. Keeper 가 시작하기 전에 돌아서, 잠금 밖에서 객체를 읽는 `decode_changed_bytes` 와 겹치지 않는다.
    2. L1-5b: purge 가 옛 묶음을 가리키는 보관 head 도 지운다. 보관 head 는 저장마다 새 head 를 복사한 것이고, 읽는 곳은 대시보드의 checkpoint 목록뿐이다. 그래서 purge 로 checkpoint 가 바뀌면 그 세션의 보관 head 를 모두 지운다. 다음 저장이 다시 보관한다. 백업은 canonical 과 그 객체만 들어서, 되돌려도 보관 head 는 돌아오지 않는다.
@@ -268,7 +268,7 @@ Keeper 의 agent-core checkpoint 는 저장할 때마다 history 전체를 다�
 - 요청 범위·demotion·degrade 규칙 변경
 - 컴팩션, 요약, 이미지 설명 생성
 - `masc_dos_screen` 이 텍스트 모드 화면에서 이미지를 빼는 것(도구 쪽 결정이다)
-- Librarian 의 읽기 범위 설계 변경. digest 비교로 바꾸는 것만 한다.
+- Librarian 의 읽기 범위 설계 변경
 
 ## 7. 위험
 

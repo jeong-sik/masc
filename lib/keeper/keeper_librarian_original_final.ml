@@ -70,3 +70,20 @@ let confirm_final ~store {exact;schema;declaration_id} final =
      | Completed_latest {execution={outcome=Exact.Call_refused _;_};_} ->
        Error "Original history refused host execution cannot confirm a call result")
   | Exact.Outcome_unknown | Exact.Not_allowed _ | Exact.Request_id_reused -> Ok ()
+
+let decode_final ~store ({exact;schema;declaration_id} as target) json =
+  match Exact.final_of_json ~schema json with
+  | Ok final -> Ok final
+  | Error strict_error ->
+    let* observed=Exact.observe_retained ~store ~declaration_id ~schema exact in
+    match observed with
+    | Exact.Retained_terminal (Exact.Retained_call (Exact.Answered _) as retained) ->
+      let final=Exact.delivered retained in
+      let* ()=equal json (Exact.final_to_json final)
+        "Final JSON differs from the original host answer" in
+      let* ()=confirm_final ~store target final in
+      Ok final
+    | Retained_absent | Retained_open
+    | Retained_terminal (Retained_call (Invalid_output _ | Input_refused _ | Output_limit_reached _)
+                        | Retained_unknown _ | Retained_not_allowed _ | Retained_request_id_reused) ->
+      Error strict_error

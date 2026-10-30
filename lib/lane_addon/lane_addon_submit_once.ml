@@ -31,7 +31,7 @@ type 'final result =
   | Settled of Owner.retained
 
 type worker_state = Absent | Pending | Capacity_wait | Finished of Exact.final
-let reply ~label ~request_id ~schema (response : Mcp_protocol.Mcp_types.tool_result) =
+let reply ~label ~request_id ~decode_final (response : Mcp_protocol.Mcp_types.tool_result) =
   let context = label ^ " Add-on reply" in
   let* () = match response.is_error with
     | Some true -> Error (Unavailable (Agent_core.Mcp.text_of_tool_result response))
@@ -50,7 +50,7 @@ let reply ~label ~request_id ~schema (response : Mcp_protocol.Mcp_types.tool_res
       | "pending" -> Ok (Pending, fields)
       | "capacity_wait" -> Ok (Capacity_wait, fields)
       | "finished" ->
-        let* final, fields = Candle_json.field ~context "result" (Exact.final_of_json ~schema) fields in
+        let* final, fields = Candle_json.field ~context "result" decode_final fields in
         Ok (Finished final, fields)
       | _ -> Error ("Unknown " ^ label ^ " worker state") in
     let* () = Candle_json.finish ~context fields in
@@ -81,7 +81,7 @@ let same_observation left right = match left, right with
    [Unsent]. *)
 type attempt_error = Unsent of error | Unknown of error
 
-let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
+let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~decode_final ~prepare
     ~(call : call) ~terminal =
   let final original final =
     let* value = terminal original final in
@@ -148,7 +148,7 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
     | Error (Not_sent error) -> Error (Unsent error)
     | Error (Sent_unknown detail) -> Error (Unknown (Uncertain detail))
     | Ok response ->
-      reply ~label ~request_id:original.request_id ~schema response
+      reply ~label ~request_id:original.request_id ~decode_final response
       |> Result.map_error (fun error -> Unknown error) in
   let read = `Assoc ["kind", `String "read"; "request_id", `String original.request_id] in
   let wait_before_send original = function
@@ -177,7 +177,7 @@ let resume ~store ~label ~(original : Owner.retained) ~request ~schema ~prepare
          unknown original error) in
   match Progress.phase original.progress with
   | Progress.Judged judgment ->
-    let* result = rejected (Exact.final_of_json ~schema judgment) in
+    let* result = rejected (decode_final judgment) in
     (match result with
      | Exact.Call_final (Exact.Answered _) -> final original result
      | Exact.Call_final (Exact.Invalid_output _ | Exact.Input_refused _ | Exact.Output_limit_reached _)

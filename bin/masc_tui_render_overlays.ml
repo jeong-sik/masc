@@ -268,14 +268,16 @@ let detail_peer_status state reading =
   let retained = function
     | Some page -> Printf.sprintf " · page %d retained" page
     | None -> "" in
+  let retry = function
+    | Some page -> Printf.sprintf " · r retries page %d" page
+    | None -> "" in
   match keeper_peer_status_for_reading state reading with
-  | Some (Keeper_peer_loading {page; retained = previous}) ->
-      Some (Theme.info (), Printf.sprintf "  Loading page %d%s" page (retained previous))
-  | Some (Keeper_peer_arrived {page; retained = previous; error = None}) ->
-      Some (Theme.info (), Printf.sprintf "  Page %d ready%s · awaiting frame" page (retained previous))
-  | Some (Keeper_peer_arrived {page; retained = previous; error = Some reason}) ->
-      Some (Theme.warn (), Printf.sprintf "  Page %d failed%s · %s"
-        page (retained previous) (Terminal_text.single_line reason))
+  | Some (Keeper_peer_loading {page; retained = previous; retry = failed}) ->
+      Some (Theme.info (), Printf.sprintf "  Loading page %d%s%s"
+        page (retained previous) (retry failed))
+  | Some (Keeper_peer_arrived {page; retained = previous; retry = failed}) ->
+      Some (Theme.info (), Printf.sprintf "  Page %d response received%s%s · awaiting frame"
+        page (retained previous) (retry failed))
   | Some (Keeper_peer_failed {page; retained = previous; reason}) ->
       Some (Theme.warn (), Printf.sprintf "  Page %d failed%s · r retry · %s"
         page (retained previous) (Terminal_text.single_line reason))

@@ -24672,6 +24672,7 @@ let main
   let presented = ref (Presented.initial ~approval:None
       ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
       ~reader:None ~panel_owner:None) in
+  let presented_peer_owner = ref None in
   let presented_chat_row_actions :
       (workspace_authority * unit ref) Masc_tui_chat_row_actions.t ref =
     ref Masc_tui_chat_row_actions.empty
@@ -25010,11 +25011,20 @@ let main
     Presented.panel_owner_matches !presented ~current_owner
       ~context_search_owner:(context_search_owner ())
   in
+  let peer_frame_owner_on_screen ~terminal_rows =
+    match Masc_tui_render.frame_choice state ~terminal_rows with
+    | `Detail_reading reading -> keeper_peer_frame_owner state reading
+    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+    | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
+    | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
+  in
   let present_frame frame approval presses panes acting_pane chat_row_actions change_authority
       ~input_pending ~write ~flush reader =
     (* Read once: each call copies the whole screen into a fresh list. *)
     let presented_rows = Frame_presenter.presented_rows frame_presenter in
     let panel_owner = Masc_tui_render.panel_input_owner state
+        ~terminal_rows:frame.Frame_presenter.terminal_rows in
+    let candidate_peer_owner = peer_frame_owner_on_screen
         ~terminal_rows:frame.Frame_presenter.terminal_rows in
     let damaged = Terminal_write_repair.consume_damage () in
     let candidate_rejection = presented_input_rejection
@@ -25042,9 +25052,12 @@ let main
            || Option.is_some (queue_owner_of_reader reader)) && (!presented).panes <> panes)
       || play_owner_authority_changed ~presented:(play_card_of_reader (!presented).reader)
            ~candidate:(play_card_of_reader reader)
+      || keeper_peer_frame_owner_changed ~presented:!presented_peer_owner
+           ~candidate:candidate_peer_owner
       || Presented.panel_presentation_changed !presented ~current_owner:panel_owner
       || ((damaged || Option.is_none presented_rows)
           && (Option.is_some (!presented).panel_owner
+              || Option.is_some !presented_peer_owner || Option.is_some candidate_peer_owner
               || owned_reader (!presented).reader || owned_reader reader))
     in
     let frame =
@@ -25088,11 +25101,11 @@ let main
     let change_authority_changed =
       not (Option.equal Masc_tui_render_repositories.same_repository_change_authority
         !presented_change_authority change_authority) in
-    (* Approval identity, Help ownership, Queue ownership or selection, and the Play card can
-       change while clipped terminal text stays byte-identical. Those changes
-       force presentation. Activity, chat row action and repository change authority changes force a full
-       presentation only if a differential draw would otherwise do nothing;
-       ordinary async updates stay differential. *)
+    (* Approval, Help, Queue, Play and relationship page ownership can change
+       while clipped terminal text stays byte-identical. Those changes force
+       presentation. Activity, chat row action and repository change authority
+       changes force a full presentation only if a differential draw would
+       otherwise do nothing; ordinary async updates stay differential. *)
     match
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
@@ -25154,6 +25167,7 @@ let main
         let input_pending = input_pending () in
         presented := Presented.presented !presented ~approval ~presses ~panes ~reader
             ~panel_owner ~owner_changed ~input_pending;
+        presented_peer_owner := candidate_peer_owner;
         state.acting_pane_presented <- acting_pane;
         presented_chat_row_actions := chat_row_actions;
         presented_change_authority := change_authority;
@@ -27206,6 +27220,32 @@ and is loaded on demand through keeper_skill.
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
             None in
+      (* A reader can be opened or replaced before the next frame. Keys from
+         the previously presented owner cannot navigate that unseen reader. *)
+      let peer_owner_decision =
+        let terminal_rows, _ = get_terminal_size () in
+        let candidate = peer_frame_owner_on_screen ~terminal_rows in
+        match input with
+        | None -> Presented.Accept_input
+        | Some event ->
+            let kind = match event with
+              | Pasted _ -> Presented.Paste
+              | Graphics_reply _ -> Presented.Protocol
+              | Key _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+              | Mouse_wheel _ -> Presented.Action in
+            Presented.decide_unpresented_input
+              ~frame_presented:(not (keeper_peer_frame_owner_changed
+                ~presented:!presented_peer_owner ~candidate))
+              ~external_surface:(state.image_open || state.msx_open) kind in
+      (match peer_owner_decision with
+       | Presented.Reject_paste when Option.is_some interrupted_paste ->
+           presented := Presented.reject_recovery !presented
+       | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
+      let input = match peer_owner_decision with
+        | Presented.Accept_input -> input
+        | Presented.Reject_action | Presented.Reject_paste ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            None in
       (* A Queue refresh can change its placement or page boundary before
          the replacement frame. Refuse that input before it can acknowledge
          an earlier rejection or begin a gesture against changing content. *)
@@ -27253,7 +27293,8 @@ and is loaded on demand through keeper_skill.
         | Presented.Accept_input -> false
         | Presented.Reject_action | Presented.Reject_paste -> true in
       let rejected_operator_input = rejected || decision_rejected unpresented_decision
-        || decision_rejected panel_decision || decision_rejected queue_viewport_decision
+        || decision_rejected panel_decision || decision_rejected peer_owner_decision
+        || decision_rejected queue_viewport_decision
         || orphan_pointer_tail in
       let panel_owns_input = Option.is_some current_panel
         && panel_owner_matches current_panel
@@ -27464,6 +27505,16 @@ and is loaded on demand through keeper_skill.
        | Presented.Reject_paste ->
            report_input_rejection state Masc_tui_action_notice.Paste_rejected
              "Paste was not applied on this screen; retry in a text field";
+           Render_schedule.request render_schedule Render_schedule.Background);
+      (match peer_owner_decision with
+       | Presented.Accept_input -> ()
+       | Presented.Reject_action ->
+           report_input_rejection state Masc_tui_action_notice.Input_rejected
+             "Relationship reader changed: input was not applied; review and retry";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Presented.Reject_paste ->
+           report_input_rejection state Masc_tui_action_notice.Paste_rejected
+             "Relationship reader changed: paste was not applied; retry";
            Render_schedule.request render_schedule Render_schedule.Background);
       (match queue_viewport_decision with
        | Presented.Accept_input -> ()
@@ -37158,7 +37209,8 @@ and is loaded on demand through keeper_skill.
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
-             (present_frame frame approval presses panes acting_pane chat_row_actions change_authority ~input_pending:input_unsettled clamped)
+             (present_frame frame approval presses panes acting_pane chat_row_actions change_authority
+                ~input_pending:asynchronous_input_pending clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

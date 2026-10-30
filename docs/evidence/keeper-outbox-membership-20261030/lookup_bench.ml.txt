@@ -28,13 +28,14 @@ let () =
   List.iter (fun (n,repeats) ->
     let ids=names n in let paths=List.map path ids in
     let old=Old_lookup.make paths and new_=New_lookup.make paths in
-    let first=if n=0 then "absent" else List.hd ids in
-    let last=if n=0 then "absent" else List.hd (List.rev ids) in
+    let missing=String.make 64 'f' in
+    let first=if n=0 then missing else List.hd ids in
+    let last=if n=0 then missing else List.hd (List.rev ids) in
     List.iter (fun (place,id) ->
       let label=Printf.sprintf "n%d_%s" n place in
       for i=0 to 6 do
         if i mod 2=0 then (sample label "old" (module Old_lookup) old id repeats; sample label "new" (module New_lookup) new_ id repeats)
         else (sample label "new" (module New_lookup) new_ id repeats; sample label "old" (module Old_lookup) old id repeats)
-      done) ["first",first;"last",last;"missing","absent"])
+      done) ["first",first;"last",last;"missing",missing])
     [0,10000;1,10000;16,2000;256,200;1024,40];
   ignore (Sys.opaque_identity !sink)

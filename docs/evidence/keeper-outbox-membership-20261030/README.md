@@ -37,7 +37,14 @@ context or establish a fix for context overflow.
 ## Timing and allocation
 
 [Membership samples](lookup-samples.csv) and [full-list samples](ids-samples.csv)
-contain seven same-process samples per role in alternating order. Each sample
+contain seven same-process samples per role in alternating order. Membership
+misses use a 64-character lowercase hexadecimal ID, the shape accepted by the
+actual `Tool_result_ready` intake. The first [short-miss run](lookup-short-miss-samples.csv)
+and its [source](lookup_bench-short-miss.ml.txt) are also retained: its
+six-byte `absent` target did not represent that intake, so the table below
+uses the separate 64-character run instead. That run compiled successfully
+with an OCaml warning about the temporary source file's hyphenated name.
+Each sample
 began with `Gc.full_major`; allocation is the `Gc.allocated_bytes` difference,
 CPU is `Sys.time`, and wall is `Unix.gettimeofday`. Timings include lookup and
 harness overhead, with no explicit warmup. The table gives separate medians;
@@ -47,15 +54,15 @@ included.
 
 | Snapshot and result | Repeated lookups | CPU ms, old → new | Wall ms, old → new | Allocated bytes, old → new |
 | --- | ---: | ---: | ---: | ---: |
-| 0 receipts, missing | 10,000 | 0.030 → 0.022 | 0.030 → 0.022 | 400,096 → 320,096 |
-| 1 receipt, first | 10,000 | 1.926 → 1.945 | 1.924 → 1.946 | 3,760,096 → 3,440,096 |
-| 16 receipts, first | 2,000 | 6.045 → 0.391 | 6.046 → 0.390 | 10,832,096 → 688,096 |
-| 16 receipts, missing | 2,000 | 6.143 → 6.019 | 6.164 → 6.018 | 10,832,096 → 10,048,096 |
-| 256 receipts, first | 200 | 9.693 → 0.039 | 9.710 → 0.039 | 17,211,296 → 68,896 |
-| 256 receipts, last | 200 | 9.997 → 9.895 | 10.031 → 10.033 | 17,211,296 → 15,980,896 |
-| 1,024 receipts, missing | 40 | 8.218 → 8.010 | 8.327 → 8.165 | 13,764,256 → 12,780,896 |
+| 0 receipts, missing | 10,000 | 0.032 → 0.022 | 0.031 → 0.021 | 400,096 → 320,096 |
+| 1 receipt, first | 10,000 | 1.979 → 1.983 | 1.986 → 2.004 | 3,760,096 → 3,440,096 |
+| 16 receipts, first | 2,000 | 6.090 → 0.415 | 6.117 → 0.414 | 10,832,096 → 688,096 |
+| 16 receipts, missing | 2,000 | 6.280 → 6.239 | 6.299 → 6.268 | 10,832,096 → 10,048,096 |
+| 256 receipts, first | 200 | 9.714 → 0.040 | 9.740 → 0.039 | 17,211,296 → 68,896 |
+| 256 receipts, last | 200 | 9.918 → 9.897 | 9.935 → 9.917 | 17,211,296 → 15,980,896 |
+| 1,024 receipts, missing | 40 | 8.285 → 7.757 | 8.294 → 7.781 | 13,764,256 → 12,780,896 |
 
-The one-receipt first-match case had a 0.99% CPU and 1.14% wall median
+The one-receipt first-match case had a 0.20% CPU and 0.91% wall median
 increase. The separate full-list workload for 1,024 receipts (40 iterations)
 had CPU 7.841 → 7.953 ms and wall 7.839 → 7.986 ms, while allocation stayed
 13,762,656 bytes. Those short samples do not establish a stable regression.

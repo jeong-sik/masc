@@ -456,7 +456,7 @@ let process_step root operation =
               ~prepare_authority:(fun () -> Ok old) ~provider_rest:(fun _ -> AR.No_stated_rest) () in
           Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
             (fun () -> Error "fixture admission unavailable");
-          (match run () with Ok {AR.verdict=None; _} -> ()
+          (match run () with Ok (_, {AR.verdict=None; _}) -> ()
            | Ok _ | Error _ -> fail "legacy captured original could not enter admission wait");
           let retained = match O.load_retained ~store ~verification_id ~attempt:0 ~installation_id ~package_id with
             | Ok retained -> retained | Error _ -> fail "legacy original could not be loaded" in
@@ -464,7 +464,7 @@ let process_step root operation =
            | Admission_wait _ -> () | _ -> fail "legacy original did not retain admission wait");
           Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
             (fun () -> Ok ["fixture-reviewer", Types_core.Catalog_slot]);
-          (match run () with Ok {AR.verdict=Some (Approve "legacy original admitted"); _} -> ()
+          (match run () with Ok (_, {AR.verdict=Some (Approve "legacy original admitted"); _}) -> ()
            | Ok _ | Error _ -> fail "legacy original could not re-enter after admission wait");
           check int "legacy original reached its reviewer exactly once" 1 !reviewer_calls);
         let directory = value (Keeper_github_identity.ensure_config_dir ~config ~keeper_name:keeper) in
@@ -605,7 +605,7 @@ let process_step root operation =
           match W.run_attempt ~store ~verification_id ~attempt:0 ~installation_id ~package_id
               ~prepare_notes:(fun _ -> "fixture review notes") ~base_path:base
               ~prepare_authority:(fun () -> Ok prepared) ~provider_rest:(fun _ -> AR.No_stated_rest) () with
-          | Ok {AR.verdict=Some (Approve "submitted evidence inspected"); _} -> ()
+          | Ok (_, {AR.verdict=Some (Approve "submitted evidence inspected"); _}) -> ()
           | Ok _ | Error _ -> fail "reviewer did not complete with submitted evidence");
         check int "reviewer ran once" 1 !calls;
         let captured = match Keeper_sandbox_remote_lane.capture_read_authority ~config ~meta:(meta ()) () with

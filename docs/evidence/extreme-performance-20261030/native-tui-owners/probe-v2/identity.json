@@ -1,0 +1,9 @@
+{
+  "base_git": "fd230b33f1c25b1fb49b6f56f1d03c5876baa423",
+  "scope": "v2 keeps v1 captures unchanged and corrects direct loopback health, info-query env/cwd, sibling/PATH autostart denial, paired transport controls, complete input writes and separate capture qualification. Native elapsed clock is not mapped to Python perf_counter. Report checks compare raw phase ordinals/counts and stage counts to actual diagnostic summaries, retain malformed JSON and both plain/JSON omission evidence. Reads PTY to EOF after reap and parses stage notes/calls while excluding unattributed residuals.",
+  "files": {
+    "tui_observer.py": "5bfecf289c388f17a53809e6db060248cda37804e60ad888167d85195ad6f36f",
+    "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+    "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "command": [
+    "python3",
+    "artifacts/extreme-perf-20261030/tui-owner-probe-v2/keeper_scale_session.py",
+    "--binary",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc",
+    "--tui-binary",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc-tui",
+    "--repo",
+    ".",
+    "--output",
+    "artifacts/extreme-perf-20261030/native-tui-owner300-v2",
+    "--keepers",
+    "300",
+    "--messages-per-keeper",
+    "2"
+  ],
+  "started_at_unix": 1793343929.371438,
+  "ended_at_unix": 1793344103.164899,
+  "returncode": 0,
+  "scope": "300 real isolated Keeper owners after 2/30 qualification, same immutable observer and native source5297349. Scripted loopback provider; no real peer-tool/broadcast/audio/physical paint proof. Native elapsed clock is not joined to Python input timestamps. Autostart log is a read-time lower bound; sibling/PATH shim prevents launching a real replacement server. Request/observation failures and rate limits remain part of results."
+}

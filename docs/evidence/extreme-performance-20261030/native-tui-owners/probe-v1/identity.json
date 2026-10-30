@@ -1,0 +1,10 @@
+{
+  "base_git": "fd230b33f1c25b1fb49b6f56f1d03c5876baa423",
+  "scope": "Owned-copy adaptation: adds a TUI observer between held-provider identity snapshot and the original queued-operation validation/release. No product code changed, provider still scripted loopback. Phase metrics do not certify key application or physical UI.",
+  "source_original_sha256": "3ce44e1d0e6f2288a60a0bf054d2bbb00d1de3ccb0bff900d469f6b8e37d61ee",
+  "files": {
+    "tui_observer.py": "1a17b7f7ddcaca749d898ecf1fdda27afcc59c33f7e8e391018c9592aa1c2882",
+    "keeper_scale_session.py": "2ac411fd87554f7e3e84c8c8082427239fd5a6ffd5568ee14bde4edef2154e98",
+    "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+  }
+}

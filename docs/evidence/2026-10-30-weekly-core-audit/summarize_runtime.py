@@ -7,6 +7,7 @@ import datetime as dt
 import hashlib
 import json
 import math
+import os
 import statistics
 from pathlib import Path
 
@@ -48,6 +49,31 @@ def rows(path, invalid):
         invalid["unreadable_files"] += 1
 
 
+def keeper_directories(path, invalid):
+    try:
+        with os.scandir(path) as entries:
+            keepers = []
+            for entry in entries:
+                try:
+                    if entry.is_dir():
+                        keepers.append((entry.name, Path(entry.path)))
+                except OSError:
+                    invalid["unreadable_keeper_entries"] += 1
+            return keepers
+    except OSError:
+        raise SystemExit("Keeper runtime directory is missing or unreadable") from None
+
+
+def selected_paths(directory, names, invalid, error_key):
+    """Read one source directory; a missing selected name is normal."""
+    try:
+        with os.scandir(directory) as entries:
+            return {entry.name: Path(entry.path) for entry in entries if entry.name in names}
+    except OSError:
+        invalid[error_key] += 1
+        return {}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-path", type=Path, required=True)
@@ -57,20 +83,46 @@ def main():
     start, end = stamp(args.from_time), stamp(args.until_time)
     if end < start:
         parser.error("until-time precedes from-time")
-    keepers = args.base_path / ".masc" / "keepers"
-    if not keepers.is_dir():
-        raise SystemExit("Keeper runtime directory is missing or unreadable")
     invalid = collections.Counter()
+    keepers = keeper_directories(args.base_path / ".masc" / "keepers", invalid)
 
     snapshots = []
     snapshot_keepers = set()
     day = dt.datetime.fromtimestamp(start, dt.timezone.utc).date()
     last_day = dt.datetime.fromtimestamp(end, dt.timezone.utc).date()
-    snapshot_paths = []
+    days_by_month = collections.defaultdict(set)
     while day <= last_day:
-        snapshot_paths.extend(keepers.glob(f"*/provider-inputs/{day:%Y-%m}/{day:%d}.jsonl"))
+        days_by_month[f"{day:%Y-%m}"].add(f"{day:%d}.jsonl")
         day += dt.timedelta(days=1)
-    for path in snapshot_paths:
+    snapshot_paths = []
+    prompt_paths = []
+    recall_files = []
+    for keeper, directory in keepers:
+        sources = selected_paths(
+            directory,
+            {"provider-inputs", "last-prompt.json", "memory-recall-evaluations.jsonl",
+             "memory-recall-evaluations.jsonl.1"},
+            invalid,
+            "unreadable_keeper_directories",
+        )
+        prompt = sources.get("last-prompt.json")
+        if prompt is not None:
+            prompt_paths.append(prompt)
+        for name in ("memory-recall-evaluations.jsonl", "memory-recall-evaluations.jsonl.1"):
+            if name in sources:
+                recall_files.append(sources[name])
+        provider_dir = sources.get("provider-inputs")
+        if provider_dir is None:
+            continue
+        months = selected_paths(
+            provider_dir, days_by_month, invalid, "unreadable_provider_input_directories"
+        )
+        for month, directory in months.items():
+            files = selected_paths(
+                directory, days_by_month[month], invalid, "unreadable_provider_month_directories"
+            )
+            snapshot_paths.extend((keeper, path) for path in files.values())
+    for keeper, path in snapshot_paths:
         for item, _ in rows(path, invalid):
             captured = item.get("captured_at")
             wire = item.get("wire")
@@ -90,7 +142,7 @@ def main():
                 continue
             if start <= captured <= end:
                 snapshots.append(item)
-                snapshot_keepers.add(path.parts[-4])
+                snapshot_keepers.add(keeper)
     bodies = sorted(item["wire"]["body_bytes"] for item in snapshots)
     message_counts = [len(item.get("messages") or []) for item in snapshots]
     schema_counts = [len(item.get("tool_schemas") or []) for item in snapshots]
@@ -98,7 +150,7 @@ def main():
                         for schema in item.get("tool_schemas") or [])
                     for item in snapshots]
     prompt_blocks = collections.defaultdict(list)
-    for path in keepers.glob("*/last-prompt.json"):
+    for path in prompt_paths:
         try:
             with path.open("r", encoding="utf-8") as source:
                 item = json.load(source)
@@ -117,8 +169,6 @@ def main():
         except (OSError, ValueError, UnicodeDecodeError):
             invalid["unreadable_prompt_files"] += 1
 
-    recall_files = list(keepers.glob("*/memory-recall-evaluations.jsonl"))
-    recall_files += list(keepers.glob("*/memory-recall-evaluations.jsonl.1"))
     counts = collections.Counter()
     usage = collections.Counter()
     started_bytes = []

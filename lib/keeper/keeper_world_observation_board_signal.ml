@@ -502,23 +502,11 @@ let wake_reason
       ~(signal : Board_dispatch.board_signal)
   : wake_assessment board_read
   =
-  (* A post is read for an address once, when its audience is classified: a
-     post that names anyone is [Targets] and never reaches this function. The
-     text of a post that reaches it carries no address, so reading it again
-     would only turn evidence text in a system post into a wake. *)
-  let matched =
-    match signal.kind with
-    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
-      { explicit_mention = false; matched_targets = [] }
-    | Board_dispatch.Board_comment_added _
-    | Board_dispatch.Board_reaction_changed _
-    | Board_dispatch.Board_vote_cast _ -> match_signal ~meta ~signal
-  in
-  if matched.explicit_mention
-  then Available (Wake Explicit_mention)
-  else (
-    let self_ids = Message_scope.self_ids meta in
-    match signal.kind with
+  (* This is the [Thread_participants] route. Explicit recipients were fixed
+     in the audience at write time and are handled by [Targets]; re-reading
+     text here could turn a formerly unresolved name into a new recipient. *)
+  let self_ids = Message_scope.self_ids meta in
+  match signal.kind with
     | Board_dispatch.Board_reaction_changed _ ->
       (match reaction_touches_self_activity ~self_ids ~signal with
        | Unavailable _ as unavailable -> unavailable
@@ -555,5 +543,5 @@ let wake_reason
                   then Wake Reply_to_self_comment
                   else Unaddressed_comment post.visibility))
     | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
-      Available Not_addressed)
+      Available Not_addressed
 ;;

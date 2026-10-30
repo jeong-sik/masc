@@ -298,9 +298,15 @@ val summary_for_keeper :
 val fleet_summary_json :
   base_path:string ->
   keeper_names:string list ->
+  owner_lifecycle:(keeper_name:string -> Keeper_event_queue_persistence.owner_lifecycle) ->
   limit_per_keeper:int ->
   Yojson.Safe.t
-(** Summarize recent reaction-ledger state for a bounded keeper fleet. *)
+(** Summarize recent reaction-ledger state for a bounded keeper fleet. Pending
+    identities are retained even when the exact durable queue and canonical
+    owner lifecycle establish ordinary runnable or operator-retained work.
+    Recoverable, fenced, unknown, unread, quarantined, or unmatched pending
+    work still requires attention. The displayed identity cap is never used
+    to decide the health verdict. This observation changes no queue state. *)
 
 val fleet_summary_status_strings : string list
 (** Every value the fleet summary's ["status"] field can carry. A reader that

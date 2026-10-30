@@ -482,6 +482,10 @@ let test_summary_marks_unreacted_and_reacted_stimuli () =
    just been rendered into, with a string comparison behind it that nothing
    could reach (#27560). This is the path that carries a degraded keeper up
    with no durable-queue signal involved. *)
+let owner_not_observed ~keeper_name:_ =
+  Keeper_event_queue_persistence.Lifecycle_unknown "owner not observed in this fixture"
+;;
+
 let test_fleet_summary_follows_a_degraded_keeper () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "fleet-degraded-keeper" in
@@ -495,6 +499,7 @@ let test_fleet_summary_follows_a_degraded_keeper () =
   check_member_string "the keeper itself is degraded" "degraded" "status" summary;
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
@@ -510,7 +515,153 @@ let test_fleet_summary_follows_a_degraded_keeper () =
     fleet
 ;;
 
- let test_fleet_summary_surfaces_durable_event_queue_backlog () =
+let test_fleet_pending_uses_owner_and_exact_durable_queue () =
+  let module Queue = Keeper_event_queue_persistence in
+  List.iter
+    (fun (lifecycle, needs_attention) ->
+      with_temp_base @@ fun base_path ->
+      let keeper_name = "classified-pending" in
+      let stimulus = schedule_due_stimulus () in
+      let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+      Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+      Keeper_registry_event_queue.enqueue ~base_path keeper_name stimulus;
+      let path = event_queue_snapshot_path ~base_path ~keeper_name in
+      let before = In_channel.with_open_bin path In_channel.input_all in
+      let fleet = Keeper_reaction_ledger.fleet_summary_json
+        ~base_path ~keeper_names:[keeper_name]
+        ~owner_lifecycle:(fun ~keeper_name:_ -> lifecycle) ~limit_per_keeper:10 in
+      check bool "owner and exact pending queue decide operator attention" needs_attention
+        (fleet |> member "operator_action_required" |> to_bool);
+      check int "an expected pending stimulus is not marked reacted" 1
+        (fleet |> member "pending_stimulus_count" |> to_int);
+      check int "attention count is separate from pending count"
+        (if needs_attention then 1 else 0)
+        (fleet |> member "attention_required_stimulus_count" |> to_int);
+      let summary = fleet |> member "keepers" |> to_list |> List.hd in
+      check (list string) "the exact pending identity remains visible" [stimulus_id]
+        (summary |> member "pending_stimulus_ids" |> to_list |> List.map to_string);
+      check_member_string "keeper and fleet verdicts agree"
+        (if needs_attention then "degraded" else "ok") "status" summary;
+      check int "no synthetic turn receipt is added" 0
+        (summary |> member "reaction_count" |> to_int);
+      check string "health never changes the durable queue" before
+        (In_channel.with_open_bin path In_channel.input_all);
+      let raw = Keeper_reaction_ledger.summary_for_keeper
+        ~base_path ~keeper_name ~limit:10 in
+      check_member_string "ledger-only observation remains conservative"
+        "degraded" "status" raw)
+    [ Queue.Runnable, false
+    ; Queue.Retained_disabled, false
+    ; Queue.Paused_dead, false
+    ; Queue.Recoverable, true
+    ; Queue.Shutdown_fenced, true
+    ; Queue.Lifecycle_unknown "owner not found", true
+    ]
+;;
+
+let test_fleet_paused_missing_queue_still_requires_attention () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "paused-without-queue-witness" in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name
+    (schedule_due_stimulus ());
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Paused_dead)
+    ~limit_per_keeper:10 in
+  check bool "pause does not explain an absent durable queue witness" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "unwitnessed pending remains visible" 1
+    (fleet |> member "pending_stimulus_count" |> to_int);
+  check int "unwitnessed pending needs attention" 1
+    (fleet |> member "attention_required_stimulus_count" |> to_int)
+;;
+
+let test_fleet_other_queued_payload_does_not_explain_pending () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "different-payload-identity" in
+  let pending = board_stimulus ~post_id:"shared-post-id" () in
+  let other = { (fusion_completed_stimulus ()) with post_id = pending.post_id } in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name pending;
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name other;
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Paused_dead)
+    ~limit_per_keeper:10 in
+  check int "the other queued payload remains counted" 1
+    (fleet |> member "durable_event_queue_pending_count" |> to_int);
+  check int "a shared post id does not certify the stimulus identity" 1
+    (fleet |> member "attention_required_stimulus_count" |> to_int);
+  check bool "a different queued payload cannot suppress operator attention" true
+    (fleet |> member "operator_action_required" |> to_bool)
+;;
+
+let test_fleet_pending_mismatch_beyond_display_cap () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "pending-outside-display-cap" in
+  let stimuli = List.init 9 (fun index ->
+    board_stimulus ~post_id:(Printf.sprintf "pending-%d" index) ()) in
+  List.iter (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
+    stimuli;
+  List.iter (Keeper_registry_event_queue.enqueue ~base_path keeper_name)
+    (List.take 8 stimuli);
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Paused_dead)
+    ~limit_per_keeper:20 in
+  check int "all nine pending identities contribute to the verdict" 9
+    (fleet |> member "pending_stimulus_count" |> to_int);
+  check int "the ninth identity is the unmatched one" 1
+    (fleet |> member "attention_required_stimulus_count" |> to_int);
+  check bool "the mismatch beyond the displayed list requires attention" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  let summary = fleet |> member "keepers" |> to_list |> List.hd in
+  check int "the presentation cap remains eight" 8
+    (summary |> member "pending_stimulus_ids" |> to_list |> List.length)
+;;
+
+let test_fleet_paused_pending_damaged_queue_requires_attention () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "paused-unread-queue" in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name
+    (schedule_due_stimulus ());
+  let path = event_queue_snapshot_path ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname path);
+  write_file path "{not-json";
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Paused_dead)
+    ~limit_per_keeper:10 in
+  check_member_string "unread queue leaves health unknown" "unknown" "status" fleet;
+  check bool "pause cannot suppress storage uncertainty" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "unread queue does not clear the pending observation" 1
+    (fleet |> member "pending_stimulus_count" |> to_int);
+  check int "the unverified pending observation needs attention" 1
+    (fleet |> member "attention_required_stimulus_count" |> to_int)
+;;
+
+let test_fleet_expected_pending_does_not_suppress_quarantine () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "paused-pending-with-quarantine" in
+  let stimulus = schedule_due_stimulus () in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name stimulus;
+  Dated_jsonl.append (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc ["schema", `String "invalid-ledger-schema"]);
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Paused_dead)
+    ~limit_per_keeper:10 in
+  check int "expected pending itself does not need operator attention" 0
+    (fleet |> member "attention_required_stimulus_count" |> to_int);
+  check int "quarantine is preserved" 1
+    (fleet |> member "quarantined_row_count" |> to_int);
+  check_member_string "quarantine still degrades health" "degraded" "status" fleet;
+  check bool "quarantine still requires operator attention" true
+    (fleet |> member "operator_action_required" |> to_bool)
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_backlog () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "durable-backlog-keeper" in
   Keeper_registry_event_queue.enqueue
@@ -527,6 +678,7 @@ let test_fleet_summary_follows_a_degraded_keeper () =
     (fusion_completed_stimulus ());
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
@@ -588,6 +740,7 @@ let test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name (
     (board_stimulus ~post_id:"post-durable-only" ());
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[]
       ~limit_per_keeper:10
@@ -641,6 +794,7 @@ let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
     (Yojson.Safe.to_string (Keeper_event_queue.queue_to_yojson Keeper_event_queue.empty));
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[]
       ~limit_per_keeper:10
@@ -676,6 +830,7 @@ let test_fleet_summary_source_age_never_supplies_residence () =
     let snapshot_path = event_queue_snapshot_path ~base_path ~keeper_name in
     let before = Yojson.Safe.from_file snapshot_path in
     let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path ~keeper_names:[keeper_name] ~limit_per_keeper:10 in
     check bool "reaction health leaves durable state semantics unchanged" true
       (Yojson.Safe.from_file snapshot_path = before);
@@ -707,6 +862,7 @@ let test_fleet_summary_surfaces_durable_event_queue_read_error () =
   write_file path "{not-json";
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
@@ -753,6 +909,7 @@ let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
   write_file path {|{"schema":"unexpected.event.queue.schema","items":{}}|};
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
@@ -1109,6 +1266,7 @@ let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
     (unexpected_reason |> member "count" |> to_int);
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
@@ -1180,6 +1338,7 @@ let test_quarantine_is_keeper_local () =
             error));
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ quarantined_keeper; healthy_keeper ]
       ~limit_per_keeper:10
@@ -2091,6 +2250,24 @@ let () =
             "fleet summary surfaces durable event queue backlog"
             `Quick
             test_fleet_summary_surfaces_durable_event_queue_backlog
+        ; test_case
+            "fleet pending uses owner and exact durable queue"
+            `Quick test_fleet_pending_uses_owner_and_exact_durable_queue
+        ; test_case
+            "paused pending without a queue witness requires attention"
+            `Quick test_fleet_paused_missing_queue_still_requires_attention
+        ; test_case
+            "other queued payload does not explain pending"
+            `Quick test_fleet_other_queued_payload_does_not_explain_pending
+        ; test_case
+            "pending mismatch beyond display cap requires attention"
+            `Quick test_fleet_pending_mismatch_beyond_display_cap
+        ; test_case
+            "paused pending with damaged queue requires attention"
+            `Quick test_fleet_paused_pending_damaged_queue_requires_attention
+        ; test_case
+            "expected pending does not suppress quarantine"
+            `Quick test_fleet_expected_pending_does_not_suppress_quarantine
         ; test_case
             "fleet summary discovers durable event queue backlog without meta name"
             `Quick

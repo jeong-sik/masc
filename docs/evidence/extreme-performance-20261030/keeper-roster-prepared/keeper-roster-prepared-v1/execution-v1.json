@@ -1,0 +1,49 @@
+{
+  "scope": "Prepared-source research only; reduced records and no native product/TUI claim.",
+  "started_unix": 1793353080.221301,
+  "ended_unix": 1793353081.824008,
+  "returncode": 0,
+  "stderr": "",
+  "loadavg_before": [
+    27.77685546875,
+    30.26953125,
+    33.35009765625
+  ],
+  "loadavg_after": [
+    27.77685546875,
+    30.26953125,
+    33.35009765625
+  ],
+  "cpu_count": 16,
+  "inputs": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/prepared_roster.mli",
+      "sha256": "357d5688308045ab051c03a413684b4f223154cffef0589b1ac59d8ba3f87671"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/prepared_roster.ml",
+      "sha256": "fdd4ab34dff749a9cba5a329e27fe73640c93a47244300e89bd9ef8bb148f1dd"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-prepared-v1/benchmark.ml",
+      "sha256": "7b3f0ba67a81bda1b022dfedd6bca885f2fec494adc97c29b64334e2a8ae6211"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-projection-component-v1/fixture_types.ml",
+      "sha256": "8ec90e805205e9802f4c0e50a589df266fdd3b6dd7b300dd727dbd240cd30eee"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-projection-component-v1/control_baseline.ml",
+      "sha256": "fc05671cc22995812e9c59f256b296782e495c209fe0408166c8a78120f22332"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-projection-component-v1/fixture_types.cmx",
+      "sha256": "3b3405f60d0e3270da6084e4a93bfb1c8b6a1051b2cfd1115a4dcc8ffafcc227"
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-projection-component-v1/control_baseline.cmx",
+      "sha256": "5ebc75050ffb8ecf420e0dcd22dc38a0290e7c799f6f27aeb54c95cbb45c21d2"
+    }
+  ],
+  "binary_sha256": "8bbb84c274dfb957637ea8be828f0d0ae531fdc52acf15beaf6d63b82e1f7d96"
+}

@@ -671,7 +671,7 @@ let render_keeper_list (state : state) =
        box_line buf cols
          ((Theme.warn ()) ^ "  " ^ Terminal_text.single_line err ^ Ansi.reset)
    | None -> ());
-  (match state.keeper_roster with
+  (match Keeper_control.roster_view state.keeper_roster with
    | Keeper_control.Roster_invalid { errors; _ } ->
        box_line buf cols
          (Printf.sprintf "%s  configuration errors: %d; select a keeper for details%s"

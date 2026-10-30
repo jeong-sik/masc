@@ -1,0 +1,15 @@
+{
+  "started_unix": 1793355574.8824031,
+  "ended_unix": 1793355575.307304,
+  "returncode": 0,
+  "stdout": "{\"reading_comparisons\":1262,\"lifecycle_choice_pairs\":2524,\"scope\":\"Exact product factory/getter/decision fragments with reduced typed runtime records; no complete product-module or TUI native execution, UI ordering or latency proof.\"}\n",
+  "stderr": "",
+  "binary_sha256": "f09d692eeddc3e4d967c0f240f742a01a65b680f2da90c782b069e08ef24548d",
+  "source_inputs_sha256": {
+    "fixture_types.ml": "26e0864ea25215eb919094ed5524e45ce71fdc012c5f32aa5c1abc0ae8770a22",
+    "actual_control_baseline.ml": "8e3722c20e943ebd931a991f7780e7dbb76e006a0d57331167aaaaf6ae829461",
+    "actual_control_candidate.mli": "38794ba028e61b8cccb39a600095cad4dd8cfb5a73664fec47f1a3e90bde80b1",
+    "actual_control_candidate.ml": "8a53d7bc954029bc7ab4e27e7eb618073f1b4390e3cb6b7a254a618f5d509c37",
+    "verify.ml": "f28514f64d018d1157426cdbbc282fd908b5236e447bd95b07c5579c4d645297"
+  }
+}

@@ -1,0 +1,81 @@
+[
+  {
+    "command": [
+      "ocamlfind",
+      "ocamlopt",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "fixture_types.ml"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlfind",
+      "ocamlopt",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "actual_control_baseline.ml"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlfind",
+      "ocamlopt",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "actual_control_candidate.mli"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlfind",
+      "ocamlopt",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "-c",
+      "actual_control_candidate.ml"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlfind",
+      "ocamlopt",
+      "-w",
+      "+4+32+69",
+      "-warn-error",
+      "+a",
+      "fixture_types.cmx",
+      "actual_control_baseline.cmx",
+      "actual_control_candidate.cmx",
+      "verify.ml",
+      "-o",
+      "verify"
+    ],
+    "returncode": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "command": [
+    "ocamlfind",
+    "ocamlopt",
+    "-I",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-projection-component-v1",
+    "-w",
+    "+4+32+69",
+    "-warn-error",
+    "+a",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-projection-component-v1/fixture_types.cmx",
+    "prepared_roster.cmx",
+    "live_memory.ml",
+    "-o",
+    "live-memory"
+  ],
+  "returncode": 0,
+  "stdout": "",
+  "stderr": "findlib: [WARNING] Interface benchmark.cmi occurs in several directories: ., /Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-projection-component-v1\n"
+}

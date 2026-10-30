@@ -1,0 +1,15 @@
+{
+  "started_unix": 1793354804.874662,
+  "ended_unix": 1793354805.2872262,
+  "returncode": 0,
+  "stdout": "{\"reading_comparisons\":1262,\"lifecycle_choice_pairs\":2524,\"scope\":\"Exact product factory/getter/decision fragments with reduced typed runtime records; no complete module, UI ordering, native execution or latency proof.\"}\n",
+  "stderr": "",
+  "binary_sha256": "6431f5fd67660e882340340e92a64117e9a1719e5534de9c96b303be575df8aa",
+  "source_inputs_sha256": {
+    "fixture_types.ml": "26e0864ea25215eb919094ed5524e45ce71fdc012c5f32aa5c1abc0ae8770a22",
+    "actual_control_baseline.ml": "8e3722c20e943ebd931a991f7780e7dbb76e006a0d57331167aaaaf6ae829461",
+    "actual_control_candidate.mli": "a59af769b8dee6a08fd3175af98e82dbef6bbbb0c7169a39e2e997b82517efe1",
+    "actual_control_candidate.ml": "8a53d7bc954029bc7ab4e27e7eb618073f1b4390e3cb6b7a254a618f5d509c37",
+    "verify.ml": "7bfdb1e4a00f871487a5e4d2b4256f47b692957022f6c8eab813f8700bc6e846"
+  }
+}

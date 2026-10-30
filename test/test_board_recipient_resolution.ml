@@ -638,9 +638,8 @@ let test_an_edit_keeps_the_concurrent_write_if_the_replan_fails =
     check bool "the failed edit did not reach disk" false (persisted_text_contains "zzmarker-rejected"))
 ;;
 
-(* An edit that leaves the text alone does not address anybody anew.  The
-   recorded audience stays what it was written as and the lookup is not asked,
-   so a declaration that changed since then does not rewrite it. *)
+(* When an audience was recorded, an edit that leaves the text alone keeps it
+   and does not ask the lookup, even if a declaration has changed. *)
 let test_an_edit_that_leaves_the_text_alone_keeps_the_recorded_audience =
   let current = ref table in
   let asked = ref 0 in
@@ -665,6 +664,70 @@ let test_an_edit_that_leaves_the_text_alone_keeps_the_recorded_audience =
     check (list string) "the recorded audience stays" [ "alice" ] (target_names edited.audience);
     check (list string) "nothing is reported again" [] unresolved;
     check int "the lookup was not asked" 0 !asked)
+;;
+
+(* A legacy row has no recorded audience. An edit of the same text must still
+   resolve its address, but an audience-only change does not emit an edit signal. *)
+let test_an_unchanged_legacy_edit_resolves_its_missing_audience =
+  let asked = ref 0 in
+  let broken = ref false in
+  let lookup =
+    Recipient_lookup.make (fun candidate ->
+      incr asked;
+      if !broken then Error "legacy lookup failed" else declared_from table candidate)
+  in
+  started ~lookup (fun () ->
+    let post, _ = get (write ~visibility:Board.Public "@alice same legacy text") in
+    let legacy =
+      match Board.post_to_yojson post with
+      | `Assoc fields -> `Assoc (List.remove_assoc "audience" fields)
+      | _ -> fail "post wire must be an object"
+    in
+    Fs_compat.save_file (Board.persist_path ()) (Yojson.Safe.to_string legacy ^ "\n");
+    Board.reset_global_for_test ();
+    Board_dispatch.reset_for_test ();
+    Board_dispatch.init_jsonl ~recipient_lookup:lookup ();
+    let legacy_post = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    check bool "the old row has no audience" true (Option.is_none legacy_post.audience);
+    let signals = ref 0 in
+    Board_dispatch.set_board_signal_hook (fun _ -> incr signals);
+    asked := 0;
+    broken := true;
+    (match
+       Board_dispatch.update_post_with_unresolved
+         ~post_id:(post_id post) ~editor:"writer" ~content:legacy_post.body ()
+     with
+     | Error (Board.Recipient_lookup_failed _) -> ()
+     | Ok _ -> fail "the unchanged legacy edit must fail when lookup fails"
+     | Error error -> fail (Board.show_board_error error));
+    check int "the unchanged legacy edit asked the lookup" 1 !asked;
+    let after_failure = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    check bool "failure left the legacy audience absent" true (Option.is_none after_failure.audience);
+    let after_failure_on_disk =
+      Fs_compat.load_file (Board.persist_path ()) |> Yojson.Safe.from_string
+    in
+    (match after_failure_on_disk with
+     | `Assoc fields -> check bool "failure did not add a disk audience" false (List.mem_assoc "audience" fields)
+     | _ -> fail "the legacy disk row must be an object");
+    check int "failure emitted no signal" 0 !signals;
+    broken := false;
+    let edited, unresolved =
+      get
+        (Board_dispatch.update_post_with_unresolved
+           ~post_id:(post_id post) ~editor:"writer" ~content:legacy_post.body ())
+    in
+    check int "the retry asked the lookup" 2 !asked;
+    check (list string) "the edit records the newly resolved audience" [ "alice" ]
+      (target_names edited.audience);
+    check (list string) "the name resolved" [] unresolved;
+    check bool "the content timestamp stayed unchanged" true
+      (Float.equal legacy_post.content_updated_at edited.content_updated_at);
+    check int "the audience-only change emitted no edit signal" 0 !signals;
+    Board.reset_global_for_test ();
+    Board_dispatch.reset_for_test ();
+    Board_dispatch.init_jsonl ~recipient_lookup:lookup ();
+    let reloaded = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    check (list string) "the new audience survives reload" [ "alice" ] (target_names reloaded.audience))
 ;;
 
 (* A comment replaces the post record and leaves what the edit's early work read
@@ -866,6 +929,10 @@ let () =
             "an edit that leaves the text alone keeps the recorded audience"
             `Quick
             test_an_edit_that_leaves_the_text_alone_keeps_the_recorded_audience
+        ; test_case
+            "an unchanged legacy edit resolves its missing audience"
+            `Quick
+            test_an_unchanged_legacy_edit_resolves_its_missing_audience
         ; test_case
             "a comment during the lookup does not make the edit ask again"
             `Quick

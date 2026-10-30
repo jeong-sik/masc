@@ -911,7 +911,9 @@ let create_post_once_by_fusion_run_id
    it is worked out again, so no write is based on a post it did not see.
    Repeated concurrent changes can delay the edit; yielding between attempts
    lets other fibers run and permits cancellation without holding either lock.
-   An edit that leaves the text alone keeps the recorded audience. *)
+   An edit that leaves the text alone keeps a recorded audience. If no
+   audience was recorded, even unchanged text needs an audience calculated;
+   resolving its address candidates may ask the lookup and fail. *)
 let update_post_with_outcome
       store
       ~lookup

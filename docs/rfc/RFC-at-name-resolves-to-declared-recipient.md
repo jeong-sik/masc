@@ -168,7 +168,7 @@ val resolve :
 - 받는 사람이 없는 공개·내부 글은 `Discoverable` 이어서, `board_interests` 가 있는 Keeper 마다 주의 판단 후보가 된다. 글쓴이 자신은 뺀다 (`lib/keeper/keeper_board_audience.ml` 의 `route_for_keeper`). 지금은 대상 지정 글이라 모든 Keeper 가 건너뛴다. 109개는 모두 internal 글이고, 설정 41개 중 38개가 `board_interests` 를 가진다. 재생은 이 후보를 견주지 않는다.
 - 브로드캐스트 응답은 `ok:false` 에서 `unresolved` 표시로 바뀐다.
 
-별칭을 나중에 선언해도 이미 쓴 글은 다시 해석하지 않는다. 글의 `audience` 와 메시지의 받는 사람은 쓸 때 정한 값 그대로다. 선언에 없는 이름이 든 글 169개도 같다. 글을 고칠 때는 제목이나 본문이 바뀐 경우에만 그때의 선언으로 다시 정한다.
+별칭을 나중에 선언해도 이미 쓴 글을 읽을 때 다시 해석하지 않는다. 글에 기록된 `audience` 와 메시지의 받는 사람은 쓸 때 정한 값 그대로다. 선언에 없는 이름이 든 글 169개도 같다. 글에 `audience` 가 기록돼 있으면 제목이나 본문이 바뀐 고치기에서만 그때의 선언으로 다시 정한다. `audience` 가 없는 이전 글은 같은 내용으로 고쳐도 그때의 선언으로 계산한다 (L2c).
 
 ### 3.4 소비자는 해석된 결과만 받는다
 
@@ -212,7 +212,7 @@ val resolve :
 | L1 | `Candidate` 와 `resolve`, 순수 시험. 선언은 인자로 받는다. 이름이 경로가 되기 전의 막음은 `Candidate.of_string` 에 둔다 (§3.1). 재생 도구 `tools/recipient_replay` 가 board 글을 센다 (§7) |
 | L2a | Keeper 의 게시판 스캔과 `Board_dispatch` 의 글 신호(`create_post_once_by_fusion_run_id`, `update_post`)가 글에 기록된 `audience` 를 쓴다. 제목과 본문에서 다시 계산하지 않는다. `audience` 가 기록되지 않은 글은 스캔이 건너뛴다. 댓글은 아직 글자에서 읽는다. 스캔이 닿는 글에서 동작은 바뀌지 않는다 (D4) |
 | L2b | 댓글에도 `audience` 를 기록한다. `add_comment_with_audience` 가 정한 값을 댓글과 함께 저장하고(`lib/board/board_core.ml`), 스캔이 그 값을 쓴다. 스캔이 댓글의 `audience` 를 글자에서 계산하는 길은 없어진다. `Thread_participants` 로 기록된 댓글에서 Keeper 를 깨우는 판단(`wake_reason`)은 아직 글자를 읽고, 그 읽기는 L2d 에서 바꾼다 (§3.4). 이미 쓴 댓글에는 값이 없고, 읽을 때 짐작하지 않는다 (D4) |
-| L2c | board 쓰기 경로(글 만들기·고치기·댓글)가 `resolution` 으로 `audience` 를 정하고 응답에 `unresolved` 를 싣는다. 조회 함수는 `Board_dispatch.init_jsonl` 의 필수 인자(`~recipient_lookup`)로 서버 시작점에서 넘기고, 후보로 파일 경로를 만들기 전에 `Keeper_name.of_string` 을 거친다 (§3.1). 선언 여부는 라우터와 같은 `effective_target_ids` 로 가리고(§3.2), 전체 Keeper 설정 목록은 주소 계산마다 필요한 때 한 번만 읽는다(`Recipient_lookup.make_per_write`). 글 고치기는 락을 잡기 전에 조회하고, 락 안에서 계산에 쓴 값이 그대로일 때만 그 결과를 쓴다. 경합으로 값이 바뀌면 락을 놓고 다시 계산하므로 설정도 다시 읽을 수 있다. 제목과 본문이 그대로인 고치기는 audience 를 다시 정하지 않고 조회도 하지 않는다. 읽기가 먼저 시작한 백엔드에는 조회가 없어서 주소가 든 글은 거절되고, 이후 `init_jsonl` 이 조회를 넣으면 풀린다. `unresolved` 는 MCP 도구 `masc_board_post`·`masc_board_post_update`·`masc_board_comment` 의 응답에 실린다 |
+| L2c | board 쓰기 경로(글 만들기·고치기·댓글)가 `resolution` 으로 `audience` 를 정하고 응답에 `unresolved` 를 싣는다. 조회 함수는 `Board_dispatch.init_jsonl` 의 필수 인자(`~recipient_lookup`)로 서버 시작점에서 넘기고, 후보로 파일 경로를 만들기 전에 `Keeper_name.of_string` 을 거친다 (§3.1). 선언 여부는 라우터와 같은 `effective_target_ids` 로 가리고(§3.2), 전체 Keeper 설정 목록은 주소 계산마다 필요한 때 한 번만 읽는다(`Recipient_lookup.make_per_write`). 글 고치기는 락을 잡기 전에 조회하고, 락 안에서 계산에 쓴 값이 그대로일 때만 그 결과를 쓴다. 경합으로 값이 바뀌면 락을 놓고 다시 계산하므로 설정도 다시 읽을 수 있다. 기록된 audience 가 있고 정규화한 제목과 본문이 그대로면 그 audience 를 유지하고 조회하지 않는다. audience 가 없는 이전 글은 같은 내용으로 고쳐도 audience 를 계산한다. 이때 선언 조회가 필요한 주소가 있으면 조회하며, 조회가 실패하면 편집은 저장하지 않는다. 제목·본문·저자가 그대로여서 audience 만 새로 기록된 경우 `content_updated_at` 은 유지되고 `Board_post_updated` 신호는 나가지 않는다. 읽기가 먼저 시작한 백엔드에는 조회가 없어서 주소가 든 글은 거절되고, 이후 `init_jsonl` 이 조회를 넣으면 풀린다. `unresolved` 는 MCP 도구 `masc_board_post`·`masc_board_post_update`·`masc_board_comment` 의 응답에 실린다 |
 | L2d | Keeper 가 글자에서 `@이름` 을 다시 읽는 두 곳(`match_observation`, `wake_reason` 의 `match_signal`)이 기록된 `audience` 를 쓴다. 읽는 쪽을 지우는 일이고 새 상태는 없다. 다만 `match_observation` 은 큐에 쌓인 자극에 `audience` 가 없어서, 글은 그 자리에서 읽는 글의 값을, 댓글은 댓글 목록을 읽어서 가져와야 한다 (§3.4) |
 | L3 | 브로드캐스트 쓰기와 알림이 `resolution` 을 쓰고, 전달은 정해 둔 받는 사람으로 Keeper 를 찾는다. `Board_addressing.routing_target` 을 지운다. 지우기 전에 후보 추출이 선택자 옆의 `@이름` 을 놓치지 않는지 시험한다 (§3.4). 재생 도구에 저장된 메시지를 더한다 (§7) |
 | L4 | gRPC `mentions` 를 후보로 바로 넘기고, 선언에 없는 이름은 오류로 돌려준다 (D3) |

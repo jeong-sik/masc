@@ -225,7 +225,13 @@ val create_post_once_by_fusion_run_id :
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
     missing id, and [Validation_error] for empty/oversized content or invalid
     [new_author].  When provided by the current owner, [new_author] transfers
-    persisted ownership. *)
+    persisted ownership.
+
+    Unchanged normalized title and body keep an existing recorded audience.
+    If the post has no recorded audience, the edit calculates one even for
+    unchanged text; resolving address candidates may fail the edit. When only
+    the audience changes, the content timestamp is unchanged and the dispatcher
+    does not emit a [Board_post_updated] signal. *)
 val update_post :
   post_id:string ->
   editor:string ->

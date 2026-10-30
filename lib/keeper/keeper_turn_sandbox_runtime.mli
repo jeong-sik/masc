@@ -62,9 +62,10 @@ val prepare_github_identity_secret_files :
 
     Docker: the bind is [ensure_started] itself and the redaction target is the
     stable [hosts.yml] the running container has mounted; a central login
-    reaches it through the mount. Microvm: the guest's identity is its
-    boot-time snapshot, and a drift from the central revision drops the handle
-    so the next boot rebuilds it. *)
+    reaches it through the mount. Microvm prepares an intended boot-time host
+    snapshot; a drift from the central revision drops the handle so the next
+    boot rebuilds it. Apple observation does not prove the guest's mounted
+    inode. *)
 
 val cleanup : t -> unit
 (** Best-effort teardown. Safe to call multiple times. *)
@@ -72,21 +73,27 @@ val cleanup : t -> unit
 val microvm_remote_endpoint_of_running :
   t -> container_name:string -> (Keeper_sandbox_remote.t, string) result
 (** The running guest as a remote endpoint (RFC-0400): [container exec] into
-    [container_name] delivering the framed request to the mounted shim, the
-    work volume as the remote root, the mounted identity snapshot as
+    [container_name] delivering the framed request to the intended shim, the
+    work volume as the remote root, the intended guest identity path as
     [GH_CONFIG_DIR] (and its derived credential config as
     [GIT_CONFIG_GLOBAL] when the keeper has a configured GitHub identity), and
     the config env naming the mounted config. Refused for a non-microvm keeper.
-    Validates the mounted credential snapshot and the process's shared shim
-    readiness. Does not start a guest or prepare build output. *)
+    Verifies the process's shared shim readiness. For Apple, it validates the
+    host-side credential snapshot, observes the named running guest and checks
+    its workspace, keeper and network labels before returning the endpoint.
+    This proves neither the guest's mounted inode nor a fence against later
+    guest replacement. Does not start a guest or prepare build output. *)
 
 val microvm_remote_endpoint :
   ?timeout_sec:float -> t -> (Keeper_sandbox_remote.t, string) result
 (** {!microvm_remote_endpoint_of_running} after ensuring the guest is up.
     Apple completes its first process handoff under Keeper lifecycle ownership,
-    including durable identity validation, shim verification and build cleanup. *)
+    including durable identity validation, shim verification and build cleanup.
+    Its final endpoint admission rechecks readiness under that same owner; if
+    an observation invalidated it in between, this call fails and can be retried. *)
 
 val microvm_attached_endpoint :
+  ?timeout_sec:float ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   unit ->
@@ -94,13 +101,37 @@ val microvm_attached_endpoint :
 (** The keeper's guest as an endpoint, without a turn. The guest name is a
     function of the keeper and the base path and the guest is keeper-lifetime,
     so a caller without a turn can reach one that is up. Apple briefly borrows
-    Keeper lifecycle ownership to validate the mounted durable identity.
+    Keeper lifecycle ownership to validate the host-side durable identity and
+    observe the guest's labels.
 
-    Never starts a guest and never probes for one: a stopped guest fails the
-    [container exec] instead, and {!microvm_guest_absence_reason} names that
-    failure afterwards. Booting for a reader would spend a VM start and write
-    the identity snapshot and work root, which belong to the keeper's turn.
+    Never starts a guest. Apple refuses an absent, stopped, unreadable or
+    differently scoped guest before returning an endpoint; the observation
+    does not fence a subsequent replacement. Other backends still reach the
+    guest through [container exec]. For Apple, [timeout_sec] applies to guest
+    inspection, not to the entire endpoint acquisition. Booting for a reader
+    would spend a VM start and write the identity snapshot and work root, which
+    belong to the keeper's turn.
     Refused for a non-microvm keeper. *)
+
+val with_apple_snapshot_endpoint :
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  (revision:string -> Keeper_sandbox_remote.t -> ('a, string) result) ->
+  ('a, string) result
+(** Capture the host-side snapshot and endpoint route under the process-local
+    Keeper lifecycle owner without observing the guest. The callback must only
+    capture or inspect the route; it must never execute a guest command or
+    reacquire the owner. A later guest effect needs its own guest observation. *)
+
+val with_apple_attached_endpoint :
+  ?timeout_sec:float -> config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  (revision:string -> Keeper_sandbox_remote.t -> ('a, string) result) ->
+  ('a, string) result
+(** Validate the Apple guest's scope labels and host-side credential snapshot
+    under the process-local Keeper lifecycle owner. The callback must only inspect the endpoint, not
+    execute a guest command or reacquire the owner. The optional timeout bounds
+    the guest inspection, not the full acquisition and validation. The revision
+    identifies the validated snapshot; it does not prove which inode the guest
+    actually mounted. Changes after inspection are not fenced. *)
 
 val microvm_guest_absence_reason :
   ?timeout_sec:float ->
@@ -112,23 +143,30 @@ val microvm_guest_absence_reason :
     already holds a failure and wants the fact behind it. [None] when the
     guest is up, when the probe could not answer, or when the keeper is not a
     microvm -- in each of those the caller keeps its own error rather than
-    replacing it with a guess. *)
+    replacing it with a guess. A confirmed observation invalidates work-root
+    and shim readiness for the backend and name. In Eio, observation and
+    invalidation hold the process-local Keeper lifecycle lock. Apple returns
+    [None] outside Eio. This does not fence another server's guest changes. *)
 
 val is_microvm_guest_booted :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   unit ->
   bool
-(** Pure in-memory check: returns true if this server process has booted the
-    microVM guest and prepared its work volume root. Returns false if the keeper
-    is not Micro_vm or has not been booted yet in this process lifetime. *)
+(** Pure in-memory check for the current base, backend and guest name. Returns
+    false when the backend is unspecified or this process has not prepared that
+    guest's work volume root. *)
 
 val forget_microvm_guest_booted :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   unit ->
   unit
-(** Evicts the guest from the booted set (e.g. after it was observed stopped or dead). *)
+(** Evicts every base's work-root and shim readiness for the same backend and
+    guest name (e.g. after it was observed stopped or dead). Other backends,
+    process boot records and identity snapshots are not evicted. A caller
+    pairing this with an observation must hold the Keeper lifecycle owner;
+    {!microvm_guest_absence_reason} performs the pair under that owner. *)
 
 (** What a microvm guest this process booted was booted with. Adopt matches a
     guest by name, which carries none of these, so each is recorded at boot
@@ -221,9 +259,12 @@ end
 module For_testing_microvm : sig
   type build_link_generation
 
-  val build_link_generation : container_name:string -> build_link_generation option
-  val complete_build_link_scan : container_name:string -> build_link_generation -> bool
-  val build_link_scan_prepared : container_name:string -> bool
+  val build_link_generation :
+    base_path:string -> backend:Keeper_microvm_backend.t -> container_name:string -> build_link_generation option
+  val complete_build_link_scan :
+    base_path:string -> backend:Keeper_microvm_backend.t -> container_name:string -> build_link_generation -> bool
+  val build_link_scan_prepared :
+    base_path:string -> backend:Keeper_microvm_backend.t -> container_name:string -> bool
   (** Expose the process-local generation guard for the stale-completion test. *)
 
   val microvm_identity_snapshot_registered : container_name:string -> bool
@@ -245,6 +286,19 @@ module For_testing_microvm : sig
     -> meta:Keeper_meta_contract.keeper_meta
     -> unit
     -> unit
+
+  val mark_microvm_work_root_ready :
+    base_path:string -> backend:Keeper_microvm_backend.t -> container_name:string -> unit
+  val microvm_work_root_ready :
+    base_path:string -> backend:Keeper_microvm_backend.t -> container_name:string -> bool
+  (** Exercise colliding guest names across independently scoped bases. *)
+
+  val record_process_boot : container_name:string -> microvm_boot -> unit
+  val process_boot : container_name:string -> microvm_boot option
+  val register_process_identity : container_name:string -> cleanup:(unit -> unit) -> bool
+  (** Exercise whether another backend's process-owned boot record survives
+      an Apple observation or teardown of the same name. The identity helper
+      registers a synthetic process-owned snapshot with the supplied cleanup. *)
 
   val ensure_work_volume_mounted
     :  ?timeout_sec:float
@@ -370,8 +424,12 @@ val teardown_keeper_sandbox_by_name :
     entry is gone. A remote-SSH Keeper owns no local container;
     Docker and microVM teardown target only their declared runtime.
     Apple teardown observes the stable trim and repair helper names but never
-    removes them without workspace ownership. Presence or unreadable inventory
-    is reported after all guest names are attempted. An explicit [timeout_sec]
+    removes them without workspace ownership. Before removing an Apple guest,
+    its observed stable ownership and network labels must match the request;
+    missing or different labels are refused before any guest removal. This
+    observation does not fence replacement between inspection and removal.
+    After the ownership preflight, presence or unreadable helper inventory is
+    reported after all guest names are attempted. An explicit [timeout_sec]
     also bounds the helper inventory; otherwise it uses the I/O budget. The
     first guest error wins, otherwise the helper observation result is returned.
 
@@ -424,8 +482,10 @@ val sweep_abandoned_microvm_guests :
   (Keeper_microvm_backend.t * Keeper_sandbox_microvm.sweep_outcome) list
 (** Collect abandoned guests with exclusive lifecycle inventory ownership
     from listing through deletion. Apple preserves current declared guest
-    names regardless of owner PID and revalidates the declaration before each
-    deletion; uncertain inventory or declarations preserve guests. Other
+    names regardless of owner PID and revalidates the declaration and the
+    named guest's ownership labels before each deletion; uncertain inventory,
+    declarations or labels preserve guests. The observation does not fence a
+    replacement before deletion. Other
     backends retain their process ownership rules. Ordinary
     lifecycle operations serialize per Keeper; different Keepers may prepare
     concurrently whenever inventory maintenance is not active. *)

@@ -29,8 +29,8 @@ let container_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(m
     let* remote_workspace_root =
       (match read_authority with
        | None -> Keeper_sandbox_remote_lane.workspace_root ~config ~meta
-       | Some authority -> Result.map Keeper_sandbox_remote.workspace_root
-           (Keeper_sandbox_remote_lane.read_authority_endpoint authority ~config ~meta))
+       | Some authority -> Keeper_sandbox_remote_lane.with_read_authority_endpoint authority ~config ~meta
+           (fun endpoint -> Ok (Keeper_sandbox_remote.workspace_root endpoint)))
     in
     (match
        Keeper_remote_path.host_to_remote ~base_path:config.base_path
@@ -291,9 +291,10 @@ let run_command_with_capture ?read_authority ?turn_sandbox_factory
     Error "run_command_with_status: command_argv is empty"
   else match read_authority with
   | Some authority ->
-    run_endpoint_command_with_status
-      ~acquire_endpoint:(fun ~cwd:_ -> Keeper_sandbox_remote_lane.read_authority_endpoint authority ~config ~meta)
-      ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+    Keeper_sandbox_remote_lane.with_read_authority_endpoint ~timeout_sec authority ~config ~meta (fun endpoint ->
+      run_endpoint_command_with_status
+        ~acquire_endpoint:(fun ~cwd:_ -> Ok endpoint)
+        ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ())
   | None ->
     let cwd = host_playground_root ~config ~meta in
     match resolve_read_dispatch ~turn_sandbox_factory ~meta ~cwd with
@@ -304,14 +305,13 @@ let run_command_with_capture ?read_authority ?turn_sandbox_factory
           Keeper_sandbox_remote_lane.endpoint ?turn_sandbox_factory ~config ~meta ~cwd ())
         ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
     | Ok Attached_guest ->
-      (* The guest is not probed before the call: a stopped one fails the exec
-         on its own, and probing first would spend a second subprocess on
-         every read. The probe runs here instead, only to replace an exec
-         failure with the fact behind it. *)
+      (* Apple endpoint admission observes guest ownership and state before
+         returning; other backends rely on exec. After an error, a separate
+         absence observation can replace it with a confirmed fact. *)
       (match
          run_endpoint_command_with_status
            ~acquire_endpoint:(fun ~cwd:_ ->
-             Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta ())
+             Keeper_sandbox_remote_lane.attached_guest_endpoint ~timeout_sec ~config ~meta ())
            ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
        with
        | Ok _ as ok -> ok

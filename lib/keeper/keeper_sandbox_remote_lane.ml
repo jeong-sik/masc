@@ -78,11 +78,11 @@ let guest_endpoint ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
    the guest directly and cannot start anything. A caller with no turn --
    verification lookup, an operator surface -- reads through this and gets a
    refusal only when the guest is genuinely down. *)
-let attached_guest_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) () =
+let attached_guest_endpoint ?timeout_sec ~(config : Workspace.config) ~(meta : keeper_meta) () =
   match meta.sandbox_profile with
   | Docker -> Error (docker_has_no_remote_lane meta)
   | Remote_ssh -> openssh_endpoint ~config ~meta
-  | Micro_vm -> Keeper_turn_sandbox_runtime.microvm_attached_endpoint ~config ~meta ()
+  | Micro_vm -> Keeper_turn_sandbox_runtime.microvm_attached_endpoint ?timeout_sec ~config ~meta ()
 ;;
 
 let endpoint ?turn_sandbox_factory ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd () =
@@ -159,28 +159,60 @@ type read_authority = {
   profile : Keeper_types_profile.sandbox_profile;
   endpoint : Keeper_sandbox_remote.t;
   declaration : Exec_ssh_endpoint.t option;
+  microvm_scope : (Keeper_microvm_backend.t option * Keeper_types_profile_sandbox.network_mode) option;
+  apple_revision : string option;
 }
 
+(* This value can contain environment values. It is compared only in memory. *)
+let apple_endpoint_route endpoint =
+  let strings values = `List (List.map (fun value -> `String value) values) in
+  `Assoc ["name", `String (Keeper_sandbox_remote.name endpoint);
+    "workspace_root", `String (Keeper_sandbox_remote.workspace_root endpoint);
+    "gh_config_dir", `String (Keeper_sandbox_remote.gh_config_dir endpoint);
+    "transport_argv", strings (Keeper_sandbox_remote.transport_argv endpoint);
+    "probe_argv", strings (Keeper_sandbox_remote.probe_argv endpoint);
+    "injected_env", `List (List.map (fun (key, value) ->
+      `List [`String key; `String value]) (Keeper_sandbox_remote.injected_env endpoint))]
+
 let capture_read_authority ~(config : Workspace.config) ~(meta : keeper_meta) () =
-  let capture endpoint declaration =
+  let capture endpoint declaration apple_revision =
+    let microvm_scope = match meta.sandbox_profile with
+      | Micro_vm -> Some (meta.microvm_backend, meta.network_mode)
+      | Docker | Remote_ssh -> None in
     Some {base_path=config.base_path;keeper=meta.name;profile=meta.sandbox_profile;
-      endpoint;declaration} in
+      endpoint;declaration;microvm_scope;apple_revision} in
   match meta.sandbox_profile with
   | Docker -> Ok None
   | Remote_ssh ->
     let* declaration = Keeper_sandbox_ssh.resolve_endpoint ~base_path:config.base_path ~keeper_name:meta.name in
     let* endpoint = Keeper_sandbox_ssh.create ~base_path:config.base_path ~keeper_name:meta.name ~endpoint:declaration () in
     let* endpoint = ready endpoint in
-    Ok (capture endpoint (Some declaration))
+    Ok (capture endpoint (Some declaration) None)
   | Micro_vm ->
-    let* endpoint = attached_guest_endpoint ~config ~meta () in
-    Ok (capture endpoint None)
+    (match meta.microvm_backend with
+     | Some Keeper_microvm_backend.Apple_container ->
+       Keeper_turn_sandbox_runtime.with_apple_snapshot_endpoint ~config ~meta
+         (fun ~revision endpoint -> Ok (capture endpoint None (Some revision)))
+     | None | Some (Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox) ->
+       let* endpoint = attached_guest_endpoint ~config ~meta () in
+       Ok (capture endpoint None None))
 
-let read_authority_endpoint authority ~(config : Workspace.config) ~(meta : keeper_meta) =
-  if String.equal authority.base_path config.base_path && String.equal authority.keeper meta.name
-     && authority.profile = meta.sandbox_profile
-  then Ok authority.endpoint
-  else Error "captured read authority belongs to another workspace, Keeper or sandbox profile"
+let with_read_authority_endpoint ?timeout_sec authority ~(config : Workspace.config) ~(meta : keeper_meta) use =
+  if not (String.equal authority.base_path config.base_path && String.equal authority.keeper meta.name
+          && authority.profile = meta.sandbox_profile)
+  then Error "captured read authority belongs to another workspace, Keeper or sandbox profile"
+  else if Option.exists (fun scope -> scope <> (meta.microvm_backend, meta.network_mode)) authority.microvm_scope
+  then Error "captured read authority microVM backend or network changed"
+  else match authority.apple_revision with
+    | None -> use authority.endpoint
+    | Some expected_revision ->
+      let* () = Keeper_turn_sandbox_runtime.with_apple_attached_endpoint ?timeout_sec ~config ~meta (fun ~revision current ->
+        let same_route = Yojson.Safe.equal (apple_endpoint_route current)
+            (apple_endpoint_route authority.endpoint) in
+        if not (String.equal expected_revision revision && same_route)
+        then Error "captured Apple read authority credential snapshot or route changed"
+        else Ok ()) in
+      use authority.endpoint
 
 let read_authority_workspace_root authority = Keeper_sandbox_remote.workspace_root authority.endpoint
 
@@ -193,15 +225,21 @@ let read_authority_identity authority =
     "declaration",(match authority.declaration with
       | None -> `Null | Some declaration -> `String (Exec_ssh_endpoint.to_toml declaration))]
 
+let microvm_endpoint_route endpoint =
+  `Assoc ["kind", `String "microvm";
+    "argv", `List (List.map (fun value -> `String value)
+      (Keeper_sandbox_remote.transport_argv endpoint));
+    "root", `String (Keeper_sandbox_remote.workspace_root endpoint)]
+
+let apple_snapshot_route ~(config : Workspace.config) ~(meta : keeper_meta) =
+  Keeper_turn_sandbox_runtime.with_apple_snapshot_endpoint ~config ~meta
+    (fun ~revision:_ endpoint -> Ok (microvm_endpoint_route endpoint))
+
 let read_authority_route authority =
   match authority.declaration with
   | Some declaration ->
     `Assoc ["kind", `String "ssh"; "endpoint", `String (Exec_ssh_endpoint.to_toml declaration)]
-  | None ->
-    `Assoc ["kind", `String "microvm";
-      "argv", `List (List.map (fun value -> `String value)
-        (Keeper_sandbox_remote.transport_argv authority.endpoint));
-      "root", `String (read_authority_workspace_root authority)]
+  | None -> microvm_endpoint_route authority.endpoint
 
 let read_authority_declared_path authority path = match authority.declaration with
   | None -> None

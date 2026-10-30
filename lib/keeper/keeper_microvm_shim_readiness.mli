@@ -46,7 +46,8 @@ val verify :
     Cancellation/fatal exceptions propagate, with no cached guessed success. *)
 
 val forget : backend:Keeper_microvm_backend.t -> guest_name:string -> unit
-(** Call only after actual guest deletion or before admitting its replacement.
+(** Call only after the guest is confirmed stopped, absent or deleted, or
+    before admitting its replacement.
     Invalidate every matching base conservatively, including an in-flight
     check: its old result cannot authorize the replacement. No TTL or retry
     scheduler is involved. *)

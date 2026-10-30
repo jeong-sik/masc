@@ -1,0 +1,11 @@
+{
+  "scope": "actual readiness and invalidation functions with stub base normalization, Eio and guest size; no runtime or VM",
+  "runtime_source_sha256": "b327c4d7251d8bcd00b4a098280889390588f4cca46f283a3217f64add663291",
+  "shim_source_sha256": "095f55a039008b81b3fc0374ed6105c4ba1341e56548cd9b2203ebefdcece54a",
+  "program_sha256": "2e8b167a1e9736c17554b0e9b81882626af8ea3a7f63e5ae49bab3b9f32e1c00",
+  "compile_exit": 0,
+  "compile_stderr": "",
+  "run_exit": 0,
+  "stdout": "PASS: Apple invalidation clears same-name bases and preserves other-name and Kata state\n",
+  "stderr": ""
+}

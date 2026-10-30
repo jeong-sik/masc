@@ -115,9 +115,8 @@ let try_handle_with_authority
          (match read_authority with
           | None -> Keeper_sandbox_remote_lane.declared_endpoint_path_of_args ~config ~meta ~path:(arg "path") ~cwd
           | Some authority ->
-            let open Result.Syntax in
-            let* _ = Keeper_sandbox_remote_lane.read_authority_endpoint authority ~config ~meta in
-            Ok (Keeper_sandbox_remote_lane.read_authority_declared_path_of_args authority ~path:(arg "path") ~cwd))
+            Keeper_sandbox_remote_lane.with_read_authority_endpoint authority ~config ~meta
+              (fun _ -> Ok (Keeper_sandbox_remote_lane.read_authority_declared_path_of_args authority ~path:(arg "path") ~cwd)))
        with
        | Ok (Some endpoint_path) -> Ok endpoint_path
        | Ok None -> Error refusal

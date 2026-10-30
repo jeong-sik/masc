@@ -18,6 +18,13 @@ Use the configured runtime's exact ID and an image promoted in Docker's own
 catalog. This first runner supports Docker; it does not provision Apple guests.
 The server may be an isolated campaign server, using the ports in
 [the benchmark runbook](../BENCHMARK-RUNBOOK.md#isolated-server-ports).
+Prepare the optional [Keeper Librarian Add-on](keeper-memory-execution.md) in
+that workspace before a retirement scenario. A fresh server does not inherit
+the installed workspace's declaration or state. For an `await_summary` scenario,
+the runner records health's configuration observation and refuses a known
+`addon_unattached` before creating a Keeper. It does not require `serving` as a
+global turn gate or treat an earlier provider failure as a reason to suppress
+a new ordinary attempt. Readiness never proves a successful provider call.
 
 ```bash
 python3 scripts/harness/workload/keeper_temporal_continuity.py run \
@@ -101,6 +108,27 @@ Recall and any actual tool re-read may still contribute information; this
 experiment observes omission from organic request history, not W-only causal
 attribution or remote provider receipt. The scenario adds propositions for the
 latest correction in W and the late answer, assessed separately.
+
+```mermaid
+flowchart TD
+  A[Target turn completed: owner atom boundary] --> B[Read saved W readiness]
+  B --> C{Same generation, covers target, no unread holes?}
+  C -->|Not yet| B
+  B -->|Observer wait expires| X[Incomplete capture; no probe submitted]
+  C -->|Yes| D[Restart only the dedicated Keeper lane]
+  D --> E[Submit late probe without restating corrections]
+  E --> F[Record every serialization: turn, projection, body identity]
+  E --> G[Observe terminal operation and original reply]
+  F --> H[Join all SDK request bodies and last canonical input]
+  G --> H
+  H --> I[Omission observed, not observed, or unavailable]
+  G --> J[Separate scoped semantic assessment]
+  I --> K[Immutable TUI view and authoritative report digest]
+  J --> K
+```
+
+The wait observes an ordinary Librarian outcome. It does not create a runtime
+hook, choose a summary, or run Librarian on every turn.
 
 ## Measure meaning separately
 
@@ -203,6 +231,31 @@ ruff check scripts/harness/workload/keeper_temporal_continuity.py scripts/tests/
 These are HTTP/MCP fixture tests of the collector and judge protocol. They do not
 execute real models. Retain real-run output separately under `artifacts/` and
 select private-data-free evidence intentionally before publication.
+
+The [2026-10-30 candidate observation](../evidence/keeper-temporal-retirement-20261030/README.md)
+retains a 12-turn bootstrap/catch-up campaign, actual organic-prefix omission,
+the final W/reply and native TUI frames. It also records quota-blocked attempts
+and the separate offline configuration parse failure
+([issue #46981](https://github.com/jeong-sik/masc/issues/46981)). Its limits belong
+with its results; it is not a steady-state or installed-main continuity verdict.
+
+## Prior-art boundaries
+
+[Letta's context architecture](https://www.letta.com/constitution/#context-architecture)
+separates the active window from persisted, retrievable message history and
+describes recursive summaries replacing evicted messages. This experiment
+similarly retains durable originals while observing what leaves prepared input.
+That design correspondence is an inference, not a cross-product benchmark.
+
+[LangGraph checkpointers](https://docs.langchain.com/oss/python/langgraph/checkpointers)
+identify historical graph states by thread/checkpoint and distinguish inspecting
+state from replay, which re-executes later model/API steps. Here `assess` reads
+retained observations; it does not replay the Keeper. Keeper/turn/generation and
+body identities are checked separately from semantic probabilities.
+
+[근거] Both official documents checked 2026-10-30T19:09:09+09:00; confidence
+High for the documented mechanisms. Neither source establishes MASC's measured
+continuity or equivalence between these products.
 
 [Evidence] Owner provider-input, delegate reply and turn-record contracts at the
 implementation source; official Noul request/response documentation checked

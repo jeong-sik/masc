@@ -17515,6 +17515,12 @@ let keeper_peer_frame_owner state reading =
   | Some peer, Some current when current == reading -> Some peer.kpr_frame_owner
   | (Some _ | None), (Some _ | None) -> None
 
+(* A compact or non-peer frame cannot publish peer input authority. The
+   reading is the exact typed choice captured for the frame being drawn. *)
+let keeper_peer_drawn_owner state ~compact ~drawn_reading =
+  if compact then None
+  else Option.bind drawn_reading (keeper_peer_frame_owner state)
+
 let same_keeper_peer_frame_owner left right =
   left.kpfo_reader == right.kpfo_reader && left.kpfo_page == right.kpfo_page
 

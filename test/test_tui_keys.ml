@@ -1360,6 +1360,18 @@ let test_keeper_peer_presented_owner_barrier () =
   let first = begin_keeper_peer_reading state ~keeper_name:"beta" in
   ignore (finish_keeper_peer_reading state ~keeper_name:"beta" ~token:first (Ok (page (Some "10"))));
   let old_owner = owner () in
+  let drawn_owner ~compact drawn_reading =
+    keeper_peer_drawn_owner state ~compact ~drawn_reading in
+  Alcotest.(check bool) "the drawn peer reader supplies its input owner" true
+    (Option.equal same_keeper_peer_frame_owner old_owner
+       (drawn_owner ~compact:false (Some (reading ()))));
+  Alcotest.(check bool) "a compact frame cannot publish the peer owner" true
+    (Option.is_none (drawn_owner ~compact:true (Some (reading ()))));
+  let unrelated = Masc_tui_detail_reading.create_observation ~title:"other" [] in
+  Alcotest.(check bool) "another reader cannot publish the peer owner" true
+    (Option.is_none (drawn_owner ~compact:false (Some unrelated)));
+  Alcotest.(check bool) "a non-reader frame cannot publish the peer owner" true
+    (Option.is_none (drawn_owner ~compact:false None));
   let next = match request_keeper_peer_page state Peer_next with
     | Some ("beta", token, _) -> token
     | Some _ | None -> Alcotest.fail "page request did not start" in

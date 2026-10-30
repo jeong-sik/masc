@@ -25019,13 +25019,13 @@ let main
     | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
   in
   let present_frame frame approval presses panes acting_pane chat_row_actions change_authority
-      ~input_pending ~write ~flush reader =
+      ~drawn_detail_reading ~input_pending ~write ~flush reader =
     (* Read once: each call copies the whole screen into a fresh list. *)
     let presented_rows = Frame_presenter.presented_rows frame_presenter in
     let panel_owner = Masc_tui_render.panel_input_owner state
         ~terminal_rows:frame.Frame_presenter.terminal_rows in
-    let candidate_peer_owner = peer_frame_owner_on_screen
-        ~terminal_rows:frame.Frame_presenter.terminal_rows in
+    let candidate_peer_owner = keeper_peer_drawn_owner state
+        ~compact:frame.Frame_presenter.compact_frame ~drawn_reading:drawn_detail_reading in
     let damaged = Terminal_write_repair.consume_damage () in
     let candidate_rejection = presented_input_rejection
         ~rows:(max 1 frame.Frame_presenter.terminal_rows)
@@ -37139,6 +37139,7 @@ and is loaded on demand through keeper_skill.
            (* Keys and async updates can change the pane reservation after
               the interaction snapshot. Store the focus the next frame shows. *)
            reconcile_chat_focus ();
+           let drawn_detail_reading = ref None in
            let frame, clamped, approval, presses, panes, acting_pane, chat_row_actions =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
@@ -37191,6 +37192,14 @@ and is loaded on demand through keeper_skill.
                    if input_holds_incomplete_sequence input_reader then
                      Some "Terminal sequence incomplete; Ctrl-C cancels it"
                    else None in
+                 (* This is the renderer's typed choice at its content height;
+                    the emitted frame later decides whether it is compact. *)
+                 let content_rows, _ = Masc_tui_render_prim.get_terminal_size () in
+                 drawn_detail_reading := (match Masc_tui_render.frame_choice state ~terminal_rows:content_rows with
+                   | `Detail_reading reading -> Some reading
+                   | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+                   | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
+                   | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None);
                  render ~home ~compact_recovery_notice state)
            in
            let terminal_rows, cols = get_terminal_size () in
@@ -37210,6 +37219,7 @@ and is loaded on demand through keeper_skill.
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
              (present_frame frame approval presses panes acting_pane chat_row_actions change_authority
+                ~drawn_detail_reading:!drawn_detail_reading
                 ~input_pending:asynchronous_input_pending clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done

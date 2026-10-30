@@ -881,14 +881,25 @@ let test_admission_capture_keeps_original_policy ()=with_fixture (fun ~sw:_ fixt
     let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
     let inventory=io (fun () -> Parts.discover ~store:fixture.store ~owner
       ~restore_gate:(Gate.restore_size_evidence ~store:fixture.store ~owner) |> get) in
-    let refuse request=check bool "an absent policy is never reconstructed from current defaults" true
-      (io (fun () -> Capture.restore ~owner ~load_parent:(Parts.load_parent inventory)
-        {record with Owner.request} |> Result.is_error)) in
+    let refuse name expected request=
+      let restored=io (fun () ->
+        let store=Store.create ~root:(Filename.concat fixture.base_path name) in
+        Owner.retain ~store ~scope:record.scope ~request_id:record.request_id
+          ~installation_id:record.installation_id ~package_id:record.package_id
+          ~tool:record.tool ~summary:record.summary ~request |> owned;
+        let retained=match Owner.load ~store ~scope:record.scope ~request_id:record.request_id |> owned with
+          | Some retained -> retained | None -> fail "the malformed capture was not retained" in
+        Capture.restore ~owner ~load_parent:(Parts.load_parent inventory) retained) in
+      match restored with
+      | Error detail -> check string "an absent policy is never reconstructed from current defaults" expected detail
+      | Ok _ -> fail "an invalid original policy capture was restored" in
     let fields=Yojson.Safe.Util.to_assoc record.request in
     let prepared_fields=Yojson.Safe.Util.to_assoc prepared in
-    refuse (`Assoc (("preparation",`Assoc (List.remove_assoc "admission_prompt" prepared_fields))::
+    refuse "capture-without-admission-policy" "Original Librarian capture has unknown, missing or repeated fields"
+      (`Assoc (("preparation",`Assoc (List.remove_assoc "admission_prompt" prepared_fields))::
       List.remove_assoc "preparation" fields));
-    refuse (`Assoc (("schema",`Int 1)::List.remove_assoc "schema" fields))))
+    refuse "capture-with-old-schema" "Unknown original Librarian execution schema/kind"
+      (`Assoc (("schema",`Int 1)::List.remove_assoc "schema" fields))))
 
 let test_missing_admission_policy_refuses_before_capture ()=with_fixture (fun ~sw:_ fixture ->
   with_missing_librarian_fragment "admission_policy" (fun () ->

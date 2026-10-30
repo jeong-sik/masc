@@ -46,7 +46,6 @@ type error =
       ; before : float
       ; first_boundary_line : int
       ; end_boundary_line : int
-      ; end_turn_ref : Ids.Turn_ref.t
       ; atom_bound : (int * float) option
       ; official_bound : (int * float) option
       }
@@ -141,7 +140,7 @@ let error_to_string = function
   | Memory_snapshot_unreadable detail ->
     "current Memory OS snapshot is unreadable: " ^ detail
   | Counterpart_interval_non_monotone
-      { after; before; first_boundary_line; end_boundary_line; end_turn_ref
+      { after; before; first_boundary_line; end_boundary_line
       ; atom_bound; official_bound } ->
     let show_bound = function
       | None -> "none"
@@ -149,9 +148,9 @@ let error_to_string = function
         Printf.sprintf "(line=%d,recorded_at=%.17g)" line recorded_at
     in
     Printf.sprintf
-      "counterpart interval is not monotone: after=%.17g before=%.17g first_boundary_line=%d end_boundary_line=%d end_turn=%s atom_bound=%s official_bound=%s"
+      "counterpart interval is not monotone: after=%.17g before=%.17g first_boundary_line=%d end_boundary_line=%d atom_bound=%s official_bound=%s"
       after before first_boundary_line end_boundary_line
-      (Ids.Turn_ref.to_string end_turn_ref) (show_bound atom_bound) (show_bound official_bound)
+      (show_bound atom_bound) (show_bound official_bound)
   | Counterpart_observations_unreadable error ->
     Keeper_librarian_input_sources.read_error_to_string error
   | Progress_write_failed error -> P.write_error_to_string error
@@ -1519,7 +1518,7 @@ let consume_one_with_extent
           && external_through = Keeper_external_read_cursor.offset external_cursor ->
         Error (Counterpart_interval_non_monotone
           { after; before = ended_at; first_boundary_line = step_line first_step
-          ; end_boundary_line = step_line last_step; end_turn_ref = turn_ref
+          ; end_boundary_line = step_line last_step
           ; atom_bound; official_bound })
       | None | Some _ -> Ok ()
     in

@@ -1961,14 +1961,12 @@ let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
          Consumer.Memory_committed)
    with
    | Error (Consumer.Counterpart_interval_non_monotone
-       { after; before; first_boundary_line; end_boundary_line; end_turn_ref
+       { after; before; first_boundary_line; end_boundary_line
        ; atom_bound; official_bound }) ->
      check (float 0.001) "prior boundary time" 20.0 after;
      check (float 0.001) "range end time" 10.0 before;
      check int "selected range begins at the second boundary" 2 first_boundary_line;
      check int "selected range ends at the second boundary" 2 end_boundary_line;
-     check string "selected trace" trace_id (Ids.Turn_ref.trace_id end_turn_ref);
-     check int "selected turn" 2 (Ids.Turn_ref.absolute_turn end_turn_ref);
      check (option (pair int (float 0.001))) "atom witness" (Some (1, 20.0)) atom_bound;
      check (option (pair int (float 0.001))) "no official witness" None official_bound
    | Error error -> fail (Consumer.error_to_string error)
@@ -4511,6 +4509,22 @@ let test_official_cursor_above_the_range_end_refuses_the_hand_off () =
    with
    | Ok () -> ()
    | Error error -> fail (Official.write_error_to_string error));
+  let external_item : Keeper_external_attention.item =
+    { event_id = Keeper_external_attention.event_id_of_dedupe_key "clock-fixture"
+    ; dedupe_key = "clock-fixture"; keeper_name
+    ; conversation = { conversation_id = "agent:clock-fixture"; surface = Keeper_external_attention.Agent }
+    ; external_message = None; source_label = "agent"
+    ; actor = { actor_id = Some "external"; display_name = Some "External"
+              ; authority = Keeper_chat_store.External }
+    ; urgency = Keeper_external_attention.Ambient
+    ; content_preview = "Previously acknowledged evidence"
+    ; content_ref = None; received_at = now; metadata = [] }
+  in
+  (match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> now)
+      ~base_path:config.Workspace.base_path external_item with
+   | `Recorded -> ()
+   | `Duplicate _ -> fail "duplicate external fixture"
+   | `Error detail -> fail detail);
   (match
      Consumer.consume_one ~config ~keeper_name
        ~commit:(fun _original -> Consumer.Memory_committed)
@@ -4537,38 +4551,84 @@ let test_official_cursor_above_the_range_end_refuses_the_hand_off () =
   append_boundary
     config ~trace_id:trace_c ~turn:1 ~recorded_at:(now +. 300.0) [ message "c" ];
   write_meta config trace_c;
-  for _attempt = 1 to 2 do
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let atom_before = read_progress config in
+  let official_before = read_official config in
+  (match atom_before with
+   | Some progress -> check string "fixture atom cursor" trace_a progress.position.trace_id
+   | None -> fail "fixture lacks atom cursor");
+  (match official_before with
+   | Some progress -> check int "fixture official cursor" 2 progress.Official.boundary_line
+   | None -> fail "fixture lacks official cursor");
+  let external_cursor () =
+    match Masc.Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name with
+    | Ok value -> Masc.Keeper_external_read_cursor.observation_to_json value
+    | Error error -> fail error
+  in
+  let external_before = external_cursor () in
+  check bool "fixture has a nonzero settled external cursor" true
+    (Yojson.Safe.equal external_before (`Assoc [ "after", `Int 1; "pending", `Null ]));
+  let source_paths =
+    [ Boundaries.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    ; Keeper_chat_store.chat_path ~base_dir:config.Workspace.base_path ~keeper_name
+    ; Store.agent_core_checkpoint_path
+        ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_b) ~session_id:trace_b
+    ; Store.agent_core_checkpoint_path
+        ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_c) ~session_id:trace_c
+    ]
+  in
+  let source_bytes () = List.map Fs_compat.load_file_opt source_paths in
+  let source_before = source_bytes () in
+  check bool "the selected-source fixture has all four files" true
+    (List.for_all Option.is_some source_before);
+  let selected_checkpoint () =
+    let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_b in
+    match Store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_b with
+    | Error error -> fail (Store.checkpoint_ref_load_error_to_string error)
+    | Ok snapshot ->
+      Store.exact_snapshot_reference snapshot,
+      `List (List.map Agent_core.Checkpoint.message_to_json (Store.exact_snapshot_messages snapshot))
+  in
+  let checkpoint_before = selected_checkpoint () in
+  let external_source_path =
+    Keeper_external_attention.attention_path ~base_path:config.Workspace.base_path ~keeper_name
+  in
+  let external_source_before = Fs_compat.load_file_opt external_source_path in
+  check bool "fixture has an external source file" true (Option.is_some external_source_before);
+  for attempt = 1 to 2 do
+    (* Reset only the consumer's process-local narrowing marker; this is a
+       restart simulation, not a new process or a reset of other caches. *)
+    if attempt = 2 then Consumer.For_testing.reset_process_state ();
     (match
        Consumer.consume_one ~config ~keeper_name
          ~commit:(fun _original ->
            fail "the hand-off committed a range that strands the row")
      with
      | Error (Consumer.Counterpart_interval_non_monotone
-         { after; before; first_boundary_line; end_boundary_line; end_turn_ref
+         { after; before; first_boundary_line; end_boundary_line
          ; atom_bound; official_bound } as error) ->
        check (float 0.001) "the refusal names the carried bound" a_ended after;
        check (float 0.001) "and this range's end" (now -. 100.0) before;
        check int "first selected boundary" 3 first_boundary_line;
        check int "last selected boundary" 3 end_boundary_line;
-       check string "selected trace" trace_b (Ids.Turn_ref.trace_id end_turn_ref);
-       check int "selected turn" 1 (Ids.Turn_ref.absolute_turn end_turn_ref);
        check (option (pair int (float 0.001))) "atom witness" (Some (1, a_ended)) atom_bound;
        check (option (pair int (float 0.001))) "official witness" (Some (2, a_ended)) official_bound;
        check string "the queued error contains the cursor and selected-range coordinates"
          (Printf.sprintf
-            "counterpart interval is not monotone: after=%.17g before=%.17g first_boundary_line=3 end_boundary_line=3 end_turn=%s atom_bound=(line=1,recorded_at=%.17g) official_bound=(line=2,recorded_at=%.17g)"
-            a_ended (now -. 100.0) (Ids.Turn_ref.to_string end_turn_ref) a_ended a_ended)
+            "counterpart interval is not monotone: after=%.17g before=%.17g first_boundary_line=3 end_boundary_line=3 atom_bound=(line=1,recorded_at=%.17g) official_bound=(line=2,recorded_at=%.17g)"
+            a_ended (now -. 100.0) a_ended a_ended)
          (Consumer.error_to_string error)
      | Error error -> fail (Consumer.error_to_string error)
      | Ok _ -> fail "the hand-off advanced past a row no later range would read");
-    (match read_progress config with
-     | Some progress ->
-       check string "the position stays on the retired trace" trace_a progress.position.trace_id
-     | None -> fail "the refused pass removed progress");
-    (match Official.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name with
-     | Ok (Some { Official.boundary_line }) -> check int "official cursor remains" 2 boundary_line
-     | Ok None -> fail "the refused pass removed the official cursor"
-     | Error error -> fail (Official.read_error_to_string error))
+    check bool "the entire atom cursor is unchanged" true (read_progress config = atom_before);
+    check bool "the entire official cursor is unchanged" true (read_official config = official_before);
+    check bool "the entire external cursor observation is unchanged" true
+      (Yojson.Safe.equal (external_cursor ()) external_before);
+    check bool "the selected fixture source files are unchanged" true (source_bytes () = source_before);
+    check bool "the selected checkpoint identity and decoded messages are unchanged" true
+      (selected_checkpoint () = checkpoint_before);
+    check bool "the external source file is unchanged" true
+      (Fs_compat.load_file_opt external_source_path = external_source_before)
   done
 ;;
 

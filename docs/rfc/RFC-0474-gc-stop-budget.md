@@ -468,6 +468,25 @@ L4d 직후 41건(A)과 L4e·L4f 13건(C)은 TUI 수와 원장 크기가 달라 �
 
 원장이 E·E2 의 두 배 가까이 커져도 timeout 이 없었다. 그래서 읽기마다 오늘 파일을 다시 해시하는 비용을 줄이는 층은 지금 만들지 않는다. 날짜 파일이 이보다 커지거나 timeout 이 다시 보이면 그때 다룬다.
 
+#### L5 — 매시간 도는 chat journal 감사를 main domain 밖에서 한다 (#46816)
+
+L4h 뒤에도 서버 전체가 몇 초씩 멈췄다. 10-29~30 밤, TUI 두 개가 같은 10초 안에 함께 2초 넘게 느려진 때가 7시간 20분에 6번 있었다(최대 5.3초). TUI timeout 기준(10초) 안이라 위 측정에는 걸리지 않았다.
+
+- 10-30 01:29Z 에 `sample`(10초, 50 ms 간격)로 멈춤 하나를 잡았다. 그 10초 동안 `/health` 가 3.3초 걸렸다. main thread(`caml_main`)가 193개 표본 가운데 58개를 `stat` 시스템 콜 안에서 보냈다. 호출 경로는 `Keeper_chat_journal_audit.within_lookback` → `Unix.stat` 였다.
+- 유지보수 루프(`server_bootstrap_maintenance.ml`)는 한 시간마다 `Keeper_chat_journal_audit.sweep` 을 main domain 에서 바로 돌렸다. sweep 은 Keeper 마다 `Sys.readdir`, journal 마다 `Unix.stat`(10-30 기준 50개 Keeper, 8,133개 파일, 5.1 GB)을 부르고, 고른 journal 과 그 Keeper 의 chat store 를 읽어 파싱한다. 모두 Eio 밖의 막는 호출이라 그동안 main domain 의 다른 fiber, HTTP 연결 받기까지 돌지 못했다.
+- 타이머는 서버가 뜬 시각부터 한 시간마다 돈다. 잡은 멈춤(01:29Z)은 01:28Z sweep 과, 밤의 03:31 KST 멈춤은 03:28 KST sweep 과 맞는다. 밤의 다른 다섯 번은 이것으로 설명되지 않아 #46816 에 남긴다.
+
+설계:
+
+1. sweep 을 세 단계로 나눈다. 파일 고르기(디렉터리 읽기와 stat)와 고른 journal 의 읽기·비교는 공유 풀의 CPU job 으로 돌린다(`Domain_pool_ref.submit_cpu_or_inline`). 풀이 없거나 Eio 밖이거나 이미 풀 job 안이면 제자리에서 돈다.
+2. `liveness`(chat operation registry 에 턴이 아직 도는지 묻기)는 두 job 사이에서 호출자의 domain 에서 부른다. registry 가 풀 worker 에서 불려도 안전하다는 근거를 찾지 못했기 때문이다. 답은 어느 쪽이든 그 순간의 읽기다. 끝난 operation 은 계속 끝난 상태이고, 도는 operation 은 다음 차례로 넘긴다.
+3. `sweep` 의 interface 와 결과(순서, Keeper 마다 store 를 한 번만 읽기, 한 번 감사한 operation 다시 읽지 않기)는 그대로다.
+
+검증:
+
+- 단위(`test_keeper_chat_journal_audit`): 기존 sweep 시험은 풀 없이 그대로 통과한다. 새 시험은 1-worker 풀을 넣고 sweep 을 부른다. `liveness` 가 호출자의 domain 에서 한 번 불렸는지, 이 이름의 풀 job 이 정확히 두 개였는지 본다.
+- 운영: 배포 뒤 같은 `sample` 감시로 매시간 sweep 시각에 main thread 가 `stat` 에 머무는지 보고, TUI 로그에서 두 TUI 가 함께 느려진 때를 다시 센다.
+
 ## 5. 순서
 
 1. L1 — 코드가 작고, A/B 로 효과를 이미 봤다.
@@ -482,6 +501,7 @@ L4d 직후 41건(A)과 L4e·L4f 13건(C)은 TUI 수와 원장 크기가 달라 �
 10. L4f — trust snapshot 시간의 98%였던 승인 기록 읽기를 한 번 읽는 index 로 바꾼다.
 11. L4g — Keeper meta 를 읽을 때마다 프로세스 전체를 줄 세우던 디렉터리 확인 lock 을 없앤다.
 12. L4h — 새 프로세스가 이미 증명된 tool-call 원장 날짜 파일 전부(4.7 GB)를 다시 해시하지 않게 한다. 읽기마다 오늘 파일을 다시 해시하는 비용은 다음 층에서 정한다.
+13. L5 — 매시간 도는 chat journal 감사의 파일 훑기와 읽기를 main domain 밖 풀에서 한다(#46816).
 
 ## 6. 하지 않는 것
 

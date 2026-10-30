@@ -27,7 +27,9 @@ let all decode items =
 
 let request_kind = "keeper-librarian-floor-step"
 let hash text = Agent_core_sha256.(to_hex (digest_string text))
-let scope_for_hash hash = "keeper-librarian-floor-step-" ^ hash
+let scope_prefix = "keeper-librarian-floor-step-"
+let is_scope value = String.starts_with ~prefix:scope_prefix value
+let scope_for_hash hash = scope_prefix ^ hash
 let owner_hash owner = hash (Durable.scope owner)
 let scope owner = scope_for_hash (owner_hash owner)
 let fresh_request_id owner = Yojson.Safe.to_string

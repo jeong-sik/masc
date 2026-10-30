@@ -90,6 +90,57 @@ pretend the old input was consumed. This guide intentionally provides no
 blanket move command: the correct session and progress scope depends on the
 persisted bindings, not just the first failed file.
 
+## Librarian original executions and absorption gates
+
+Store label: `lane-addon tool request owners`, decoder `consumer original
+request payload`. A readable generic owner envelope and matching body digest
+do not establish that this build can read the Librarian payload. Admission
+executions require schema 2 with captured admission and retirement policy;
+all admission, completed-history and message-floor absorption gate requests
+require version 3 with captured guidance. Execution schema 1 and gate version
+2 have no reader or automatic conversion in this build.
+
+The refusal names the owner record's full path, scope, request ID, request
+digest and decoder error. Owner records live under
+`.masc/lane-addons/tool-request-owners/`; the named complete bodies are separate
+files in that store. The check includes historical gate records, full gate
+preparations retained by execution parents, and digest-only retry bodies that
+have not yet acquired a child owner record. It checks current payload, source
+and host bindings through read-only ports, including reciprocal root/retry
+IDs and digests, ancestry cycles and unacknowledged child progress. It does
+not observe or initialize
+today's Memory epoch, run parts discovery or publication recovery, replay a
+provider, save Memory, or acknowledge input.
+
+Reconcile the work under a compatible build before cutting state. Review the
+complete captured physical workspace/keepers/runtime roots, Keeper identity,
+Memory epoch and queue generation, rather than moving only the first refused
+file. Preserve the connected scope together:
+
+- Execution originals and their complete bodies, immutable candidate parts,
+  two-child partition transactions/children, and replacement/frontier records.
+- Admission, history and floor-step gate originals, captured guidance,
+  parent judgments and preparation intents, retry predecessors/successors and
+  unpublished bodies, plus the host execution/size evidence they name.
+- Original pending candidates and their generation/sequence/payload identity,
+  Memory commit/publication and admission/range receipts, original source and
+  history snapshots/boundaries, source progress, and dependent queue or
+  external-cursor ACK evidence.
+
+Parts discovery restores originals before receipt-backed queue ACK. An old
+execution or gate can therefore block the complete inventory even when it is
+historical. Removing its gate alone can leave a parent preparation, retry or
+partition pointing at missing evidence. A refused record, finished worker
+reply or delivery receipt does not prove domain completion or consumption.
+Record unresolved work explicitly; keep its original source evidence and
+pending input instead of manufacturing an ACK or replaying an effect.
+
+Apply the stopped-writer inventory, verified backup and scope review above.
+Do not fill missing policy from today's prompts, reset an epoch to hide an
+old scope, or clear a complete Librarian worker volume. A clean current-payload
+scan is only decoding evidence; actual continuity, execution proofs and
+consumption still require their normal authorities.
+
 ## Verify and roll back
 
 Re-run the candidate's full `validate-stores` against the stopped workspace.

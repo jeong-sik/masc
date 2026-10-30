@@ -3,6 +3,7 @@ module type Capture = sig
   type owner
   type t
   val gate_scope : owner -> string
+  val gate_scope_prefix : string
   val gate_kind : string
   (** Host constants/addressing for this purpose; never worker-supplied aliases.
       Stable addressing must not hide old records after a missing/replaced epoch. *)
@@ -40,6 +41,7 @@ let equal left right detail = let* matches = same left right in require matches 
 let digest json = let* json = canonical json in
   Ok Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex)
 let scope = Capture.gate_scope
+let is_scope value = String.starts_with ~prefix:Capture.gate_scope_prefix value
 let fields expected = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare expected -> Ok fields
   | _ -> Error "Original gate record has unknown, duplicate or missing fields"
@@ -195,9 +197,49 @@ let retained_payload ~owner ~capture ~(parent:Owner.retained) (record:Owner.reta
   let* () = require (record.scope=scope owner && record.installation_id=parent.installation_id
     && record.package_id=parent.package_id && record.tool=parent.tool) "Gate owner destination differs from its execution" in
   request_payload ~owner ~capture ~parent ~request_id:record.request_id record.request
+let root_binding ~(parent:Owner.retained) (record:Owner.retained) =
+  match Progress.preparation parent.progress with
+  | None -> Error "Original gate root has no full parent preparation intent"
+  | Some (Preparation_pending original | Preparation_confirmed original) ->
+    let* ()=require (original.request_id=record.request_id) "Original parent names another gate root" in
+    let* ()=equal original.request record.request "Original gate root differs from its full parent intent" in
+    match Progress.preparation parent.progress with
+    | Some (Preparation_pending _) -> require (Progress.phase record.progress=Progress.Captured)
+        "Unacknowledged original gate root has execution progress"
+    | Some (Preparation_confirmed _) -> Ok ()
+    | None -> Error "Original gate root preparation disappeared"
+let predecessor_binding ~(prior:Owner.retained) (record:Owner.retained) =
+  match Progress.phase prior.progress with
+  | Progress.Subdividing (_,successor) | Subdivided (_,successor) ->
+    let* ()=require (successor.request_id=record.request_id) "Gate predecessor names another original child" in
+    require (successor.request_digest=record.request_digest) "Gate child differs from original successor intent"
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Rejected _ -> Error "Gate child has no original forward publication intent"
+let pending_child ~(prior:Owner.retained) (child:Owner.retained) =
+  match Progress.phase prior.progress with
+  | Progress.Subdividing _ -> require (Progress.phase child.progress=Progress.Captured)
+      "Unacknowledged original gate child has execution progress"
+  | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+  | Finished _ | Conflicted _ | Rejected _ | Subdivided _ -> Ok ()
+(* Captured links only. Live owner and host-proof restoration stay in the
+   runtime path below. *)
+let validate_binding_chain ~read ~owner ~capture ~parent record =
+  let rec visit visited (record:Owner.retained) =
+    let* ()=require (not (List.mem record.request_id visited)) "Cyclic gate retry ancestry" in
+    let* proposal,_,_,_,predecessor=retained_payload ~owner ~capture ~parent record in
+    let* _=parent_final ~capture ~proposal parent in
+    let* ()=match predecessor with
+      | None -> root_binding ~parent record
+      | Some request_id ->
+        let* prior=read ~scope:(scope owner) ~request_id in
+        let* prior=Option.to_result ~none:"Original predecessor gate is absent" prior in
+        let* prior_proposal=visit (record.request_id::visited) prior in
+        let* ()=equal prior_proposal proposal "Gate retry changed the original proposal" in
+        let* ()=predecessor_binding ~prior record in pending_child ~prior record in
+    Ok proposal in
+  visit [] record
 let validate_payload ~read ~read_body ~owner ~capture ~parent ~record =
-  let* proposal,_,_,_,_ = retained_payload ~owner ~capture ~parent record in
-  let* _ = parent_final ~capture ~proposal parent in
+  let* proposal=validate_binding_chain ~read ~owner ~capture ~parent record in
   List.fold_left (fun result event ->
     let* ()=result in match event with
     | Progress.Successor_intended successor ->
@@ -209,11 +251,19 @@ let validate_payload ~read ~read_body ~owner ~capture ~parent ~record =
       let* ()=equal proposal next_proposal "Gate successor changed the original proposal" in
       let* child=read ~scope:(scope owner) ~request_id:successor.request_id in
       (match child with
-       | Some (child:Owner.retained) -> require (child.request_digest=successor.request_digest)
-           "Gate child differs from original successor intent"
-       | None -> require (match Progress.phase record.progress with Subdivided _ -> false | _ -> true)
-           "Acknowledged original gate successor is absent")
-    | _ -> Ok ()) (Ok ()) (Progress.events record.progress)
+       | Some child ->
+         let* _,_,_,_,predecessor=retained_payload ~owner ~capture ~parent child in
+         let* ()=require (predecessor=Some record.request_id) "Gate successor has another predecessor" in
+         let* ()=predecessor_binding ~prior:record child in pending_child ~prior:record child
+       | None -> (match Progress.phase record.progress with
+         | Progress.Subdividing _ -> Ok ()
+         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+         | Finished _ | Conflicted _ | Rejected _ | Subdivided _ ->
+           Error "Acknowledged original gate successor is absent"))
+    | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+    | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
+    | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
+    | Commit_conflicted _ | Refused _ | Successor_observed _ | Observer _ -> Ok ()) (Ok ()) (Progress.events record.progress)
 let validate_preparation_payload ~read ~read_body ~owner ~capture ~(parent:Owner.retained) =
   match Progress.preparation parent.progress with
   | None -> Ok ()
@@ -225,12 +275,14 @@ let validate_preparation_payload ~read ~read_body ~owner ~capture ~(parent:Owner
     let* child=read ~scope:(scope owner) ~request_id:intent.request_id in
     match child with
     | None -> require (match Progress.preparation parent.progress with
-        | Some (Preparation_pending _) -> true | _ -> false) "Acknowledged original gate root is absent"
+        | Some (Preparation_pending _) -> true | None | Some (Preparation_confirmed _) -> false)
+        "Acknowledged original gate root is absent"
     | Some child ->
       let* ()=validate_payload ~read ~read_body ~owner ~capture ~parent ~record:child in
       let* ()=equal child.request intent.request "Original gate root differs from its full parent intent" in
       require (match Progress.preparation parent.progress with
-        | Some (Preparation_pending _) -> Progress.phase child.progress=Progress.Captured | _ -> true)
+        | Some (Preparation_pending _) -> Progress.phase child.progress=Progress.Captured
+        | None | Some (Preparation_confirmed _) -> true)
         "Unacknowledged original gate root has execution progress"
 
 let validate_successor_request_with ~read ~store ~owner ~capture ~(prior:Owner.retained) (successor:Progress.successor) =
@@ -255,18 +307,7 @@ let rec restore_record_with ~read ~store ~owner ~capture ~visited (record : Owne
   let* parent = load_parent_with ~read ~store ~owner ~capture ~proposal in
   let* proposal,input,authority,guidance,predecessor = retained_payload ~owner ~capture ~parent record in
   let* () = match predecessor with
-    | None ->
-      (match Progress.preparation parent.progress with
-       | None -> Error "Original gate root has no full parent preparation intent"
-       | Some (Preparation_pending original | Preparation_confirmed original) ->
-         let* () = require (original.request_id=record.request_id) "Original parent names another gate root" in
-         let* () = equal original.request record.request "Original gate root differs from its full parent intent" in
-         match Progress.preparation parent.progress with
-         | Some (Preparation_pending _) ->
-           require (Progress.phase record.progress=Progress.Captured)
-             "Unacknowledged original gate root has execution progress"
-         | Some (Preparation_confirmed _) -> Ok ()
-         | None -> Error "Original gate root preparation disappeared")
+    | None -> root_binding ~parent record
     | Some request_id ->
       let* prior = read.load ~scope:(scope owner) ~request_id in
       let* prior = Option.to_result ~none:"Original predecessor gate is absent" prior in
@@ -277,12 +318,7 @@ let rec restore_record_with ~read ~store ~owner ~capture ~visited (record : Owne
        | Some _ | None -> Error "Only a completed unsuccessful gate can have a new attempt" in
       let* prior_record = read.load ~scope:(scope owner) ~request_id in
       let* prior_record = Option.to_result ~none:"Original predecessor gate disappeared" prior_record in
-      (match Progress.phase prior_record.progress with
-       | Progress.Subdividing (_,successor) | Subdivided (_,successor) ->
-         let* () = require (successor.request_id=record.request_id) "Gate predecessor names another original child" in
-         require (successor.request_digest=record.request_digest) "Gate child differs from original successor intent"
-       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-       | Finished _ | Conflicted _ | Rejected _ -> Error "Gate child has no original forward publication intent") in
+      predecessor_binding ~prior:prior_record record in
   let* transcript, terminal = List.fold_left (fun accumulated event ->
     let* transcript, terminal = accumulated in
     match event with
@@ -354,15 +390,7 @@ let read_chain_with ~read ~store ~owner ~capture =
        | Some (child,predecessor) ->
          let* () = require (predecessor=Some record.request_id) "Gate successor has another predecessor" in
          let* () = require (successor.request_digest=child.request_digest) "Original gate successor input changed" in
-         match Progress.phase record.progress with
-         | Progress.Subdividing _ ->
-           (match Progress.phase child.progress with
-            | Progress.Captured -> Ok ()
-            | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-            | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ ->
-              Error "Unacknowledged original gate child has execution progress")
-         | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-         | Finished _ | Conflicted _ | Rejected _ | Subdivided _ -> Ok ())
+         pending_child ~prior:record child)
     | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
     | Finished _ | Conflicted _ | Rejected _ -> Ok ()) (Ok ()) matching in
   match matching with

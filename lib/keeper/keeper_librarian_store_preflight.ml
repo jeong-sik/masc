@@ -8,19 +8,16 @@ open Result.Syntax
 type purpose = Admission_execution | Admission_part | Admission_partition
   | History_execution | Floor_execution | Admission_gate | History_gate | Floor_gate
 
-(* These are host-owned Store protocol namespaces, not model text or live
-   ownership. The complete decoder below verifies the exact captured scope. *)
+(* Producers own their Store protocol namespaces. Recognition grants no live
+   ownership; the complete decoder still checks the exact captured scope. *)
 let purpose scope =
-  List.find_map (fun (prefix,purpose) ->
-    if String.starts_with ~prefix scope then Some purpose else None)
-    ["keeper-librarian-admission-gate/",Admission_gate;
-     "keeper-librarian-durable-gate/",History_gate;
-     "keeper-librarian-floor-step-gate/",Floor_gate;
-     "keeper-librarian-execution-",Admission_execution;
-     "keeper-librarian-history-execution-",History_execution;
-     "keeper-librarian-floor-step-",Floor_execution;
-     "keeper-librarian-parts/",Admission_part;
-     "keeper-librarian-partitions/",Admission_partition]
+  List.find_map (fun (owns,purpose) -> if owns scope then Some purpose else None)
+    [Keeper_librarian_admission_gate.is_scope,Admission_gate;
+     Keeper_librarian_durable_gate.is_scope,History_gate;
+     Keeper_librarian_floor_step_gate.is_scope,Floor_gate;
+     Admission.is_scope,Admission_execution;History.is_scope,History_execution;
+     Floor.is_scope,Floor_execution;Parts.is_scope,Admission_part;
+     Parts.is_partition_scope,Admission_partition]
 
 let owner_json (record:Owner.retained) = match record.request with
   | `Assoc fields -> Option.to_result ~none:"Original Librarian payload has no captured owner"

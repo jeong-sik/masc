@@ -7,6 +7,7 @@ module type Capture = sig
   type owner
   type t
   val gate_scope : owner -> string
+  val gate_scope_prefix : string
   val gate_kind : string
   (** Host constants/addressing for this purpose; never worker-supplied aliases.
       Stable addressing must not hide old records after a missing/replaced epoch. *)
@@ -30,6 +31,7 @@ module Make (Capture : Capture) : sig
   (** Original absorption evaluations for one restored purpose-bound answer.
       Caller holds the existing Memory-lane/purge fence and serializes this owner. *)
   val scope : Capture.owner -> string
+  val is_scope : string -> bool
   val parent_execution_id : Lane_addon_tool_request_owner.retained -> (string, string) result
   (** Strict header read for discovery joining only; follow with full validation. *)
   val validate_payload :
@@ -44,7 +46,8 @@ module Make (Capture : Capture) : sig
     owner:Capture.owner -> capture:Capture.t ->
     parent:Lane_addon_tool_request_owner.retained -> (unit, string) result
   (** Pure current-version payload, captured guidance, source proposal and
-      parent/destination binding checks. The supplied originals must already
+      parent/destination, root/predecessor and pending-publication binding
+      checks. The supplied originals must already
       pass their strict body decoders. Does not observe live ownership, read
       host proofs, recover a chain or grant dispatch/commit authority. *)
   val prepare_root : store:Lane_addon_store.t -> owner:Capture.owner ->

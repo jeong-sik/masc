@@ -1,6 +1,7 @@
 (** Original absorption evaluations for one restored completed-history answer.
     Caller holds the existing Memory-lane/purge fence and serializes this owner. *)
 val scope : Keeper_librarian_durable_request.owner -> string
+val is_scope : string -> bool
 val parent_execution_id : Lane_addon_tool_request_owner.retained -> (string, string) result
 (** Strict header read for discovery joining only; follow with full validation. *)
 val validate_payload :

@@ -12,6 +12,7 @@ val discovery_scope : base_path:string -> keepers_dir:string -> keeper_id:string
 (** Physical roots and canonical Keeper only, so a missing/replaced epoch cannot
     hide old originals in a different scope. Addressing grants no authority. *)
 val scope : owner -> string
+val is_scope : string -> bool
 val keeper_id : owner -> string
 val base_path : owner -> string
 val keepers_dir : owner -> string

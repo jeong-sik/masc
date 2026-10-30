@@ -108,7 +108,9 @@ let observe_owner ~base_path ~keepers_dir ~keeper_id =
 
 type destination = {installation_id:string;package_id:string;tool:string;source_revision:string;configuration_revision:string}
 let owner_hash owner = scope_hash (scope_identity owner)
-let scope_for_hash hash="keeper-librarian-execution-" ^ hash
+let scope_prefix="keeper-librarian-execution-"
+let is_scope value=String.starts_with ~prefix:scope_prefix value
+let scope_for_hash hash=scope_prefix ^ hash
 let scope owner=scope_for_hash (owner_hash owner)
 let fresh_request_id owner=Yojson.Safe.to_string (`List [
   `String "keeper-librarian";`String (owner_hash owner);`String (Random_id.uuid_v7 ())])

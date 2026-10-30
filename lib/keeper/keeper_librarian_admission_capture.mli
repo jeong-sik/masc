@@ -42,6 +42,9 @@ type destination = {
 }
 type t
 val scope : owner -> string
+val is_scope : string -> bool
+(** Recognize this producer's wire namespace only; full decoding still checks
+    the exact captured owner and request identity. *)
 val fresh_request_id : owner -> string
 val scope_of_request_id : string -> (string, string) result
 (** Host-minted canonical tagged JSON binds the original physical Keeper and

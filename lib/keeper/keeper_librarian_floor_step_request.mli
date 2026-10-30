@@ -19,6 +19,7 @@ type link = {request_id:string;request_digest:string}
 (** An original named by the ID and digest of its record. *)
 
 val scope : Keeper_librarian_durable_request.owner -> string
+val is_scope : string -> bool
 (** The store scope of this owner's steps. It differs from the owner's history
     scope. *)
 val fresh_request_id : Keeper_librarian_durable_request.owner -> string

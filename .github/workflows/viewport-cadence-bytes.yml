@@ -81,9 +81,12 @@ jobs:
 
       - name: Measure PTY bytes
         run: |
-          # The measuring harness itself comes from the after tree.
+          # The measuring harness itself comes from the after tree: copy it out
+          # first, because building the before tree checks out an older commit
+          # in which this script does not exist.
+          cp scripts/measure-viewport-cadence-bytes.py /tmp/measure-viewport-cadence-bytes.py
           git checkout --quiet "$AFTER_SHA"
-          python3 scripts/measure-viewport-cadence-bytes.py \
+          python3 /tmp/measure-viewport-cadence-bytes.py \
             --before /tmp/masc_tui_before.exe \
             --after /tmp/masc_tui_after.exe \
             --out /tmp/viewport-cadence-bytes.json

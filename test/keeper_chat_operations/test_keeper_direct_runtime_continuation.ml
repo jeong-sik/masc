@@ -138,7 +138,7 @@ let test_resume_uncertain_commit_is_read_back () = with_path (fun path -> with_o
   Store.resume_direct_runtime_retry store ~now:13. ~operation_id ~observed:retry |> ok;
   check bool "resumed phase independently confirmed" true (match (execution store).phase with
       | Semantic.Resuming_runtime_retry observed -> Semantic.equal_runtime_retry retry observed
-      | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_gate _ | Semantic.Suspended _
+      | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Preparing_checkpoint _ | Semantic.Resuming_gate _ | Semantic.Preparation_wait _ | Semantic.Suspended _
       | Semantic.Recovering _ | Semantic.Settled _ -> false);
   check bool "input retained while execution is active" true ((current store).input = Some input)))
 
@@ -577,6 +577,8 @@ let test_official_checkpoint_retains_session_input_and_cancel_boundary () = with
       ~observed:(Semantic.Official_client {saved with session_id="unrelated-thread"}));
     check_original store;
     Store.resume_direct_checkpoint store ~now:18. ~operation_id ~observed:authority |> ok;
+    Store.enter_direct_preparation store ~now:18. ~operation_id
+      ~execution_digest:(current store).execution_digest |> ok;
     let advanced = Semantic.Official_client {saved with turn_id="next-yield"} in
     ignore (Store.defer_direct_checkpoint store ~now:19. ~operation_id
       ~execution_digest:(current store).execution_digest ~checkpoint:advanced |> ok);

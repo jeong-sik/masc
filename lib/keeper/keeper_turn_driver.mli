@@ -343,6 +343,7 @@ val run_named :
      transmitted:Keeper_official_client_host.transmitted_model_input ->
      unit) ->
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
+  ?on_official_checkpoint_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
   ?official_task_reference:Keeper_official_task_reference.t ->
   ?official_client_composed_context:
     (unit -> Keeper_official_client_host.composed_context option) ->
@@ -471,6 +472,8 @@ type attempt_inference_policy =
   }
 
 module For_testing : sig
+  val official_client_dispatch : provider_config_transform:'a option ->
+    ('b,Agent_core.Error.t) result -> Keeper_attempt_dispatch.t
   val official_client_turn_start :
     session_id:string option ->
     read_boundary:(unit -> Keeper_carried_front.turn_start) ->

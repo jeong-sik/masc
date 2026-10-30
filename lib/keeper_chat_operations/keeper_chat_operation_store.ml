@@ -5,7 +5,7 @@ module Semantic = Keeper_semantic_execution
 module Scope_set = Set.Make (Keeper_execution_scope_id)
 
 let semantic_is_running = function
-  | Semantic.Running | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ -> true
+  | Semantic.Running | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ -> true
   | Semantic.Preparing | Semantic.Ready | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Recovering _ | Semantic.Settled _ -> false
 
 let scope_key id = Yojson.Safe.to_string (Keeper_execution_scope_id.to_json id)
@@ -1656,7 +1656,7 @@ let persist_and_readback store expected persist =
 let input_wait_state = function
   | Some {Semantic.phase=Semantic.Recovering {origin=Semantic.Input_wait waiting;_};_} -> Some waiting
   | Some {Semantic.phase=(Semantic.Preparing | Semantic.Ready | Semantic.Running
-      | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Settled _
+      | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Settled _
       | Semantic.Recovering {origin=(Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
           | Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Interrupted_execution
           | Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _);_});_}
@@ -1665,7 +1665,7 @@ let input_wait_state = function
 let gate_state = function
   | Some {Semantic.phase=Semantic.Recovering {origin=Semantic.Gate_wait state; _}; _} -> Some state
   | Some {Semantic.phase=(Semantic.Preparing | Semantic.Ready | Semantic.Running
-      | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Settled _
+      | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Settled _
       | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Gate_binding _ | Semantic.Input_wait _); _}); _}
   | None -> None
@@ -1685,7 +1685,7 @@ let blocked_queued_scopes db ~now =
            live dependency witness commits a replacement wait. *)
         | Semantic.Recovering {origin=Semantic.Runtime_retry {Semantic.not_before=Some not_before; _}; _}
           when not_before > now -> Some execution.id
-        | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _
+        | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _
         | Semantic.Resuming_gate _ | Semantic.Suspended _ | Semantic.Settled _
         | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
             | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _} -> None)) executions in
@@ -1778,7 +1778,7 @@ let next_runtime_retry_wake store ~now =
            | Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Interrupted_execution
            | Semantic.Gate_wait _ | Semantic.Gate_binding _ | Semantic.Input_wait _ -> earliest)
         | Semantic.Preparing | Semantic.Ready | Semantic.Running
-        | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+        | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
         | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Settled _ -> earliest)
       None
       executions)
@@ -2291,7 +2291,7 @@ let direct_execution_with_db db (operation : Operation.t) =
 
 let pending_retry = function
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Runtime_retry continuation; _ }; _ } -> Some continuation
-  | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+  | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
       | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Settled _
       | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Unconfirmed_sources
           | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Gate_wait _ | Semantic.Gate_binding _ | Semantic.Input_wait _); _}); _ }
@@ -2299,12 +2299,12 @@ let pending_retry = function
 ;;
 
 let pending_checkpoint = function
-  | Some { Semantic.phase = Semantic.Preparation_wait {checkpoint;_}; _ } -> Some checkpoint
+  | Some { Semantic.phase = Semantic.Preparation_wait {checkpoint;_}; _ } -> Some (Semantic.Official_client checkpoint)
   | Some { Semantic.phase = Semantic.Suspended checkpoint; _ }
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Checkpointed checkpoint; _ }; _ } -> Some (Semantic.Agent_core checkpoint)
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Official_checkpointed checkpoint; _ }; _ } -> Some (Semantic.Official_client checkpoint)
   | Some { Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Running
-      | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Settled _
+      | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _ | Semantic.Settled _
       | Semantic.Recovering {origin = (Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
           | Semantic.Interrupted_execution | Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _ | Semantic.Input_wait _); _}); _ }
   | None -> None
@@ -2676,7 +2676,7 @@ let wait_direct_preparation store ~now ~operation_id ~execution_digest ~observed
     match operation.state, waiting with
     | Operation.Queued, Some waiting
         when String.equal execution_digest waiting.execution_digest
-          && Semantic.equal_gate_checkpoint observed waiting.waiting.checkpoint
+          && Semantic.equal_gate_checkpoint observed (Semantic.Official_client waiting.waiting.checkpoint)
           && String.equal detail waiting.waiting.detail -> Ok operation
     | _ -> Error (Integrity_error "preparation wait commit is not confirmed") in
   let result = with_transaction store (fun () ->
@@ -2689,6 +2689,9 @@ let wait_direct_preparation store ~now ~operation_id ~execution_digest ~observed
     | Operation.Running _ ->
       let* execution = direct_execution_with_db store.db operation in
       let* expected = Option.to_result ~none:(Integrity_error "preparation wait has no admitted checkpoint") execution in
+      let* observed = match observed with
+        | Semantic.Official_client checkpoint -> Ok checkpoint
+        | Agent_core _ -> Error (Invalid_input "preparation wait requires an official checkpoint") in
       let* next = semantic_transition ~now (Semantic.Wait_preparation {observed;detail}) expected in
       let* () = update_semantic store ~expected next in
       requeue_continuation_with_db store.db operation) in
@@ -2697,6 +2700,64 @@ let wait_direct_preparation store ~now ~operation_id ~execution_digest ~observed
   | Error (Store_unavailable _ as error) ->
     (match read_confirmed () with Ok operation -> Ok operation | Error _ -> Error error)
   | Error _ as error -> error
+;;
+
+(* [Preparing_checkpoint] is a positive durable exclusion of client entry:
+   the adapter must commit [Enter_official_checkpoint] before it proceeds. *)
+let block_preparing_with_db store ~now ~detail operation execution =
+  match operation.Operation.state, execution with
+  | Operation.Running _, Some ({Semantic.phase=Semantic.Preparing_checkpoint observed;_} as expected) ->
+    let* next = semantic_transition ~now (Semantic.Wait_preparation {observed;detail}) expected in
+    let* () = update_semantic store ~expected next in
+    requeue_continuation_with_db store.db operation |> Result.map Option.some
+  | _, _ -> Ok None
+;;
+
+let block_preparing_checkpoint store ~now ~operation_id ~detail =
+  let* () = ensure_open store in
+  let* operation = operation_or_unknown store.db operation_id in
+  let* execution = direct_execution_with_db store.db operation in
+  match execution with
+  | Some {Semantic.phase=Semantic.Preparing_checkpoint _;_} ->
+    with_transaction store (fun () ->
+      let* operation = operation_or_unknown store.db operation_id in
+      let* execution = direct_execution_with_db store.db operation in
+      block_preparing_with_db store ~now ~detail operation execution)
+  | Some _ | None -> Ok None
+;;
+
+let block_preparing_operations store ~now =
+  let* () = ensure_open store in
+  with_transaction store (fun () ->
+    let* executions = semantic_rows store.db ~active_only:true in
+    List.fold_left (fun result (execution : Semantic.t) ->
+      let* () = result in
+      match execution.phase, Keeper_execution_scope_id.direct_operation_id execution.id with
+      | Semantic.Preparing_checkpoint _, Some operation_id ->
+        let* operation = operation_or_unknown store.db operation_id in
+        let* _ = direct_execution_with_db store.db operation in
+        block_preparing_with_db store ~now ~detail:"official checkpoint preparation interrupted before dispatch admission"
+          operation (Some execution) |> Result.map (fun _ -> ())
+      | _, _ -> Ok ()) (Ok ()) executions)
+;;
+
+let enter_direct_preparation store ~now ~operation_id ~execution_digest =
+  let* () = ensure_open store in
+  (* An uncertain admission write is never reconciled into client entry. *)
+  with_transaction store (fun () ->
+    let* operation = operation_or_unknown store.db operation_id in
+    if not (String.equal operation.execution_digest execution_digest)
+    then Error (Invalid_input "preparation dispatch execution digest changed")
+    else match operation.state with
+    | Operation.Running _ ->
+      let* execution = direct_execution_with_db store.db operation in
+      (match execution with
+       | Some ({Semantic.phase=Semantic.Preparing_checkpoint _;_} as expected) ->
+         let* next = semantic_transition ~now Semantic.Enter_official_checkpoint expected in
+         update_semantic store ~expected next
+       | Some {Semantic.phase=(Semantic.Running | Semantic.Resuming_gate _);_} | None -> Ok ()
+       | Some _ -> Error (Invalid_input "official preparation no longer owns dispatch admission"))
+    | _ -> Error (Not_running operation_id))
 ;;
 
 let retry_direct_preparation store ~now ~operation_id ~expected_revision ~execution_digest =
@@ -2751,7 +2812,7 @@ let direct_gate_bindings store =
         Ok ((operation_id, binding) :: rows)
       | Semantic.Recovering {origin=(Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched
           | Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Interrupted_execution | Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Input_wait _); _}
-      | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _
+      | Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _
       | Semantic.Resuming_gate _ | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Settled _ -> Ok rows) (Ok []) executions |> Result.map List.rev
 
 let direct_gate_obligations store ~operation_id =
@@ -2766,7 +2827,7 @@ let direct_gate_binding store ~operation_id =
   let* execution = direct_execution_with_db store.db operation in
   match execution with
   | Some {Semantic.phase=Semantic.Recovering {origin=Semantic.Gate_binding binding; _}; _} -> Ok (Some binding)
-  | Some {Semantic.phase=(Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _
+  | Some {Semantic.phase=(Semantic.Preparing | Semantic.Ready | Semantic.Running | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _
       | Semantic.Resuming_gate _ | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Settled _
       | Semantic.Recovering {origin=(Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Checkpointed _ | Semantic.Official_checkpointed _
           | Semantic.Unconfirmed_sources | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution | Semantic.Input_wait _); _}); _}
@@ -3034,7 +3095,7 @@ let settle_direct_semantic store current command =
   | Some {Semantic.phase = (Semantic.Preparing | Semantic.Ready | Semantic.Settled _
       | Semantic.Recovering {origin = (Semantic.Unconfirmed_sources
           | Semantic.Confirmed_undispatched | Semantic.Interrupted_execution); _}); _} -> Ok ()
-  | Some ({Semantic.phase = (Semantic.Running | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
+  | Some ({Semantic.phase = (Semantic.Running | Semantic.Preparation_wait _ | Semantic.Suspended _ | Semantic.Preparing_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _
       | Semantic.Recovering {origin = (Semantic.Checkpointed _ | Semantic.Official_checkpointed _ | Semantic.Runtime_retry _ | Semantic.Gate_wait _ | Semantic.Gate_binding _ | Semantic.Input_wait _); _}); _} as expected) ->
     let* now, terminal = match command with
       | Reducer.Cancel_queued {completed_at} -> Ok (completed_at, Semantic.Cancelled)
@@ -3145,14 +3206,14 @@ let reconcile_semantic_running store ~now =
     match execution.native_call, execution.phase with
     | Keeper_native_call.Active _, _ -> Ok count
     | (Keeper_native_call.No_native_call | Keeper_native_call.Terminal_unacknowledged _),
-      (Semantic.Running | Semantic.Resuming_checkpoint _ | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _) ->
+      (Semantic.Running | Semantic.Resuming_runtime_retry _ | Semantic.Resuming_gate _) ->
         let* next = Semantic.apply ~now
           (Semantic.Require_reconciliation "process restarted during semantic execution") execution
           |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error)) in
         let* () = update_semantic store ~expected:execution next in
         Ok (count + 1)
     | (Keeper_native_call.No_native_call | Keeper_native_call.Terminal_unacknowledged _),
-      (Semantic.Preparing | Semantic.Ready | Semantic.Preparation_wait _ | Semantic.Suspended _
+      (Semantic.Preparing | Semantic.Ready | Semantic.Preparing_checkpoint _ | Semantic.Preparation_wait _ | Semantic.Suspended _
       | Semantic.Recovering _ | Semantic.Settled _) -> Ok count) (Ok 0) executions
 ;;
 
@@ -3193,7 +3254,11 @@ let settle_running_after_restart store ~now =
             update_semantic store ~expected next in
         Ok (operation :: interrupted)
       | None | Some Keeper_native_call.No_native_call ->
-        (match pending_checkpoint execution, pending_retry execution, gate_state execution with
+        let* blocked = block_preparing_with_db store ~now
+            ~detail:"official checkpoint preparation interrupted before dispatch admission" operation execution in
+        (match blocked with
+         | Some _ -> Ok interrupted
+         | None -> match pending_checkpoint execution, pending_retry execution, gate_state execution with
          | None, None, None -> Ok (operation :: interrupted)
          | Some _, _, _ | None, Some _, _ | None, None, Some _ ->
            requeue_continuation_with_db store.db operation |> Result.map (fun _ -> interrupted))) (Ok []) running in

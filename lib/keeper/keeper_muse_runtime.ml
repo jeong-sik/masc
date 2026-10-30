@@ -748,7 +748,7 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
-let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
@@ -819,6 +819,7 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
       |> Result.map_error (Keeper_internal_error.guidance_preparation_unavailable
           ~field:Prompt_names.keeper_muse_native_read)
     in
+    let* () = on_guidance_prepared () in
     let* account_home = match config.account_home with
       | None -> Error (config_error ~field:"account_home"
           "Keeper Muse requires an explicitly selected account home")
@@ -1751,7 +1752,7 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
                  recovery_detail)))
 ;;
 
-let run ~input_source ~media_store ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
     ?official_client_continuation ~runtime_id ~configured_reasoning_effort
     ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
@@ -1785,7 +1786,7 @@ let run ~input_source ~media_store ?argument_source ?official_task_reference ?co
   let result =
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~result_scope ~media_store ~input_source
+      run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~input_source
         ~argument_source
         ~official_task_reference
         ~composed_context

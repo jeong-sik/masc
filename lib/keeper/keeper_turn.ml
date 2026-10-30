@@ -990,7 +990,8 @@ let run_keeper_invocation_turn_admitted_inner
                 | None, _ -> Ok () in
               let e_str = Agent_core.Error.to_string err in
               let cause = match preparation_retained with
-                | Ok () -> (Keeper_request_failure.of_core_error err).cause
+                | Ok () -> (Keeper_request_failure.of_core_error
+                    (Keeper_internal_error.without_guidance_preparation_authority err)).cause
                 | Error detail -> Keeper_request_failure.Turn_continuation_unpersisted
                     {stage=Keeper_request_failure.Checkpoint_retain;detail} in
               Keeper_turn_helpers.finalize_trajectory_acc

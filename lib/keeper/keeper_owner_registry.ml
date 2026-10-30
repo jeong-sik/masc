@@ -1005,3 +1005,7 @@ let wait_direct_preparation ~base_path ~keeper_name ~operation_id ~execution_dig
 let retry_direct_preparation ~base_path ~keeper_name ~operation_id ~expected_revision ~execution_digest =
   with_owner_command ~base_path ~keeper_name (fun owner ->
     Keeper_owner.retry_direct_preparation owner ~operation_id ~expected_revision ~execution_digest)
+
+let enter_direct_preparation ~base_path ~keeper_name ~operation_id ~execution_digest =
+  with_owner_command ~base_path ~keeper_name (fun owner ->
+    Keeper_owner.enter_direct_preparation owner ~operation_id ~execution_digest)

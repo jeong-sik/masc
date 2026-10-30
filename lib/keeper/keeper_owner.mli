@@ -678,3 +678,6 @@ val wait_direct_preparation : t -> operation_id:Chat_operation.Operation_id.t ->
     preparation failure. No generic Config/transport failure grants this action. *)
 val retry_direct_preparation : t -> operation_id:Chat_operation.Operation_id.t ->
   expected_revision:int64 -> execution_digest:string -> (Chat_operation.t,error) result
+
+val enter_direct_preparation : t -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  execution_digest:string -> (unit,error) result

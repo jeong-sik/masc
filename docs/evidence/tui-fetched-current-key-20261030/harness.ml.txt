@@ -1,0 +1,64 @@
+module Make (F : module type of Old_fetched) = struct
+  let started = function F.Started (state, request) -> state, request | F.Already_loading -> failwith "expected start"
+  let states () =
+    let initial : (string,string,string) F.source = F.initial in
+    let loading, request=started (F.start ~equal:String.equal initial ~key:"a") in
+    let ready=F.complete ~equal:String.equal loading request (Ok "value") in
+    let failed=F.complete ~equal:String.equal loading request (Error "failure") in
+    let retrying,_=started (F.refresh ~equal:String.equal failed ~key:"a") in
+    let refreshing,refresh=started (F.start ~equal:String.equal ready ~key:"a") in
+    let stale=F.complete ~equal:String.equal refreshing refresh (Error "stale") in
+    let refreshing_stale,_=started (F.start ~equal:String.equal stale ~key:"a") in
+    ["absent",initial;"loading",loading;"ready",ready;"failed",failed;"retrying",retrying;
+     "refreshing",refreshing;"stale",stale;"refreshing-stale",refreshing_stale;"cleared",F.clear ready]
+  let sample csv label iterations version state =
+    Gc.full_major ();
+    let alloc=Gc.allocated_bytes () and cpu=Sys.time () and wall=Unix.gettimeofday () in
+    for _=1 to iterations do ignore (Sys.opaque_identity (F.current_key state)) done;
+    let wall=Unix.gettimeofday ()-.wall and cpu=Sys.time ()-.cpu and alloc=Gc.allocated_bytes ()-.alloc in
+    Printf.fprintf csv "%s,%d,%s,%.9f,%.9f,%.0f\n%!" label iterations version cpu wall alloc
+  let sample_request csv label iterations version state =
+    Gc.full_major ();
+    let alloc=Gc.allocated_bytes () and cpu=Sys.time () and wall=Unix.gettimeofday () in
+    for _=1 to iterations do ignore (Sys.opaque_identity (F.current_request state)) done;
+    let wall=Unix.gettimeofday ()-.wall and cpu=Sys.time ()-.cpu and alloc=Gc.allocated_bytes ()-.alloc in
+    Printf.fprintf csv "%s,%d,%s,%.9f,%.9f,%.0f\n%!" label iterations version cpu wall alloc
+  let views () = List.map (fun (label,state) ->
+    let key=F.current_key state and reading=Option.map fst (F.current state) in
+    if key<>reading then failwith ("key disagrees with reading: "^label);
+    label,key) (states ())
+end
+module Old=Make(Old_fetched)
+module Via=Make(Via_request_fetched)
+module Direct=Make(Direct_fetched)
+module Project=Make(Project_fetched)
+
+let () =
+  if Old.views ()<>Via.views () || Old.views ()<>Direct.views () || Old.views ()<>Project.views ()
+  then failwith "states diverged";
+  Printf.printf "PASS: nine absent/loading/settled/refresh/clear states agree\n%!";
+  let csv=open_out Sys.argv.(1) in
+  output_string csv "state,iterations,version,cpu_s,wall_s,allocated_bytes\n";
+  let old=Old.states () and via=Via.states () and direct=Direct.states () and project=Project.states () in
+  List.iteri (fun i (label,state) ->
+    let _,via_state=List.nth via i and _,direct_state=List.nth direct i and _,project_state=List.nth project i in
+    for round=0 to 6 do
+      let a ()=Old.sample csv label 1_000_000 "old" state
+      and b ()=Via.sample csv label 1_000_000 "via" via_state
+      and c ()=Direct.sample csv label 1_000_000 "direct" direct_state
+      and d ()=Project.sample csv label 1_000_000 "project" project_state in
+      if round mod 2=0 then (a ();b ();c ();d ()) else (d ();c ();b ();a ())
+    done) old;
+  close_out csv;
+  let requests=open_out Sys.argv.(2) in
+  output_string requests "state,iterations,version,cpu_s,wall_s,allocated_bytes\n";
+  List.iteri (fun i (label,state) ->
+    let _,via_state=List.nth via i and _,direct_state=List.nth direct i and _,project_state=List.nth project i in
+    for round=0 to 6 do
+      let a ()=Old.sample_request requests label 1_000_000 "old" state
+      and b ()=Via.sample_request requests label 1_000_000 "via" via_state
+      and c ()=Direct.sample_request requests label 1_000_000 "direct" direct_state
+      and d ()=Project.sample_request requests label 1_000_000 "project" project_state in
+      if round mod 2=0 then (a ();b ();c ();d ()) else (d ();c ();b ();a ())
+    done) old;
+  close_out requests

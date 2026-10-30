@@ -190,6 +190,7 @@ export interface DashboardKeeperReactionLedgerHealth {
   quarantined_row_count: number | null
   cursor_swept_stimulus_count: number | null
   pending_stimulus_count: number | null
+  attention_required_stimulus_count: number | null
   read_error_count: number | null
   pending_by_keeper: DashboardKeeperReactionLedgerPendingKeeper[]
 }

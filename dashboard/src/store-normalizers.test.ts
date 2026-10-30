@@ -568,6 +568,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         status: 'degraded',
         operator_action_required: true,
         pending_stimulus_count: 2,
+        attention_required_stimulus_count: 1,
         cursor_swept_stimulus_count: 5,
         quarantined_row_count: 1,
         pending_by_keeper: [{
@@ -584,6 +585,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         status: 'degraded',
         operator_action_required: true,
         pending_stimulus_count: 2,
+        attention_required_stimulus_count: 1,
         cursor_swept_stimulus_count: 5,
         quarantined_row_count: 1,
         pending_by_keeper: [{
@@ -594,4 +596,60 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
       },
     })
   })
+
+  it('preserves ordinary reaction-ledger pending independently of attention', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_reaction_ledger: {
+        status: 'ok',
+        operator_action_required: false,
+        pending_stimulus_count: 3,
+        attention_required_stimulus_count: 0,
+        pending_by_keeper: [{
+          keeper_name: 'paused-keeper',
+          pending_stimulus_count: 3,
+          pending_stimulus_ids: ['occurrence-a', 'occurrence-b', 'occurrence-c'],
+        }],
+      },
+    }))
+
+    expect(result?.fleet_safety?.keeper_reaction_ledger).toMatchObject({
+      operator_action_required: false,
+      pending_stimulus_count: 3,
+      attention_required_stimulus_count: 0,
+      pending_by_keeper: [{
+        pending_stimulus_count: 3,
+        pending_stimulus_ids: ['occurrence-a', 'occurrence-b', 'occurrence-c'],
+      }],
+    })
+  })
+
+  it('retains reaction-ledger attention when it is the only observed ledger field', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_reaction_ledger: { attention_required_stimulus_count: 2 },
+    }))
+
+    expect(result?.fleet_safety?.keeper_reaction_ledger).toMatchObject({
+      attention_required_stimulus_count: 2,
+      pending_stimulus_count: null,
+      status: null,
+    })
+  })
+
+  it.each([undefined, null, 'unread', Number.NaN])(
+    'keeps unknown reaction-ledger attention as null rather than zero (%s)',
+    value => {
+      const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+        keeper_reaction_ledger: {
+          status: 'unknown',
+          pending_stimulus_count: 3,
+          attention_required_stimulus_count: value,
+        },
+      }))
+
+      expect(result?.fleet_safety?.keeper_reaction_ledger).toMatchObject({
+        pending_stimulus_count: 3,
+        attention_required_stimulus_count: null,
+      })
+    },
+  )
 })

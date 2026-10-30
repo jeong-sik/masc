@@ -757,6 +757,76 @@ let test_actual_official_or_mixed_path kind () = with_fixture ~history_kind:kind
   check (list string) "actual official source judgment publishes Memory" ["Knowledge from original completed history"]
     (io (fun () -> claims fixture.keepers_dir));
   check int "official or mixed source uses one original host HTTP request" 1 (F.post_count fixture.server))
+
+(* An official turn can have no turn-tagged fragments while its independent
+   counterpart sources still have unread evidence. Exercise the configured
+   Addon path, including the actual receipt and both source acknowledgements. *)
+let test_untagged_official_counterparts_reach_memory_once () =
+  with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+    let speaker : Keeper_chat_store.speaker =
+      {speaker_id=Some "external";speaker_name=Some "External";
+       speaker_authority=Keeper_chat_store.External} in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~content:"Independent speaker evidence" ~speaker ();
+    let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+    io (fun () ->
+      (* The second boundary ends after the appended chat. The pre-existing
+         external fixture is also before it, and neither turn has a fragment
+         that names its turn. *)
+      official_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
+      let path file=Keeper_turn_fragments.path ~session_dir file in
+      write (path Keeper_turn_fragments.Main)
+        ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+      write (path Keeper_turn_fragments.Internal) "");
+    let official ()=io (fun () -> Keeper_librarian_official_progress.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
+      |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get) in
+    let before=official () in
+    let provider_calls=ref 0 in
+    fixture.set_response (fun capture ->
+      incr provider_calls;
+      let input=Capture.source capture |> Source.input in
+      check int "the provider original has no tagged messages" 0 (List.length input.messages);
+      check int "the provider original has no tagged tool observations" 0 (List.length input.tool_observations);
+      check (list string) "the provider original holds both independent observations"
+        ["Independent speaker evidence";"Original admitted external evidence"]
+        (List.map (fun (o:Keeper_counterpart_observation.t) -> o.content)
+           input.counterpart_observations |> List.sort String.compare);
+      `OK,F.openai_response (answer capture));
+    drive_advanced fixture;
+    let record,capture=only_original fixture in
+    let source=Capture.source capture in
+    let expected=Source.official_range_id source |> Option.get in
+    check bool "the official receipt covers the original untagged turns" true
+      (io (fun () -> Current.committed_official_coverage ~keepers_dir:fixture.keepers_dir
+        ~keeper_id:keeper_name ~receipt_scope:expected.receipt_scope |> get)=Some expected);
+    check bool "the original has no atom receipt" true (Option.is_none (Source.range_id source));
+    check bool "official position advances after the receipt" true (official ()<>before);
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+    let through=Keeper_librarian_input_sources.external_through (Source.counterparts source) in
+    check int "one external admission was read" 1 through;
+    check bool "the external admission was acknowledged" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:through ~through ~atom:None ~official:None);
+    check bool "the actual original is finished" true
+      (match Progress.phase record.Owner.progress with Finished _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    check (list string) "the provider result was published to Memory"
+      ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+    check int "one actual provider request held the counterparts" 1 !provider_calls;
+    let official_after=official () in
+    (match run_worker fixture with
+     | Ok Consumer.Nothing_to_read -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "a settled counterpart-only turn was read again");
+    check bool "the next call leaves the official position" true (official ()=official_after);
+    check bool "the next call leaves the external acknowledgement" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:through ~through ~atom:None ~official:None);
+    check int "the next call makes no duplicate provider request" 1 (F.post_count fixture.server))
+
 let test_production_queue_pending_retains_all_sources () = with_fixture (fun ~sw:_ fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
   fixture.set_response (fun capture ->
@@ -2055,6 +2125,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_gate_request_names_its_parent_by_digest;
   test_case "actual official-only original reaches Memory and official ACK" `Quick (test_actual_official_or_mixed_path Official);
   test_case "actual mixed original reaches Memory and both receipt/position kinds" `Quick (test_actual_official_or_mixed_path Mixed);
+  test_case "untagged official counterparts reach Memory once" `Quick
+    test_untagged_official_counterparts_reach_memory_once;
   test_case "production durable queue stops following phases on actual Pending" `Quick test_production_queue_pending_retains_all_sources;
   test_case "actual host result bridge resumes production queue" `Quick test_actual_result_bridge_uses_production_queue;
   test_case "host answer without original gate waits while Off" `Quick test_host_answer_without_gate_waits_while_off;

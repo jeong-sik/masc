@@ -3,7 +3,7 @@ rfc: "runtime-settings-have-one-owner"
 title: "파일에 키가 있는 설정은 서버를 띄운 셸의 환경변수를 읽지 않는다"
 status: Draft
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 author: claude
 related: ["0335", "settings-typed-delivery", "keeper-guests-stay-inside-a-host-memory-budget"]
 ---
@@ -13,7 +13,8 @@ related: ["0335", "settings-typed-delivery", "keeper-guests-stay-inside-a-host-m
 - 상태: 초안. 이 RFC 를 쓰는 동안 코드는 바꾸지 않았다. 코드에는 임시 처방 #46805 만 있다(§1.3).
 - 근거: 코드 사실은 `origin/main` `59faef0be37` 에서 읽었고, 수치는 2026-10-29 에 센 값이다. 시각은 모두 KST 다. 세는 방법은 부록 A.
 - 운영자 답(2026-10-29): 근본 개선이 필요하다고 했다. 결정 D1~D3 은 이 문서의 기본안대로 가기로 했다(§8).
-- 사람 결정 필요: D4(§8).
+- 사람 결정 필요: D4, D6, D7(§8).
+- 보정(2026-10-30): 3층과 4층의 범위를 이름 기준으로 다시 셌다(§2, §3.6, §3.7). 4층은 원안대로 만들면 재시작한 서버가 조용히 달라진다. 3층은 검사 하나로 좁혔고 #46858 에 구현했다.
 
 ## 0. 요약
 
@@ -25,8 +26,8 @@ related: ["0335", "settings-typed-delivery", "keeper-guests-stay-inside-a-host-m
 
 - 설정마다 주인을 하나로 한다. `runtime.toml` 에 키가 있는 설정 38개는 환경변수를 읽지 않는다. 환경변수는 환경 전용 설정 26개(비밀, 경로)만 남는다.
 - 강제하는 곳은 읽는 함수 한 군데(`Env_config_core.raw_value_opt`)다. 설정마다 고치지 않는다.
-- 레지스트리 밖에서 환경변수를 직접 읽는 곳을 찾아 등록하거나 없애고, 새로 늘지 않게 검사한다.
-- 마지막으로 `masc restart` 가 넘기는 환경을 레지스트리에서 만든다.
+- 파일 소유 이름을 `raw_value_opt` 밖에서 직접 읽으면 CI 가 실패하게 한다(3층).
+- `masc restart` 가 넘기는 환경은 결정 D7 로 따로 정한다(4층).
 
 RFC-0335 가 같은 방향을 7월에 정했지만 코드에 들어간 단계가 없다. 이 RFC 는 0335 의 W2·W3 를 지금 있는 레지스트리 위에서 다시 자른다(§1.4).
 
@@ -79,6 +80,10 @@ RFC settings-typed-delivery(2026-09-02, Draft)는 비목표에 "env 를 입력�
 | 아직 `Toml_and_env` 인 36개 이름을 쓰는 시험 | 파일 37개, 256곳 |
 | 위 이름을 환경변수로 쓰는 스크립트·compose | 이름 4개, 파일 33개. `MASC_KEEPER_AUTONOMOUS_ENABLED` 27개 파일, `MASC_OTEL_ENABLED` 8개, `MASC_SEARXNG_URL` 2개, `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` 2개(한 파일이 여러 이름을 쓰면 겹친다). harness, 스모크, 릴리스 증거 스크립트와 `docker-compose.yml` |
 | 환경을 직접 읽는 줄(`Sys.getenv`, `Unix.getenv`, `Unix.environment`) | `lib` 140, `bin` 41. `bin` 에는 클라이언트(CLI, TUI)가 섞여 있다 |
+| 서버가 읽는 `MASC_*` 이름 중 레지스트리가 문자열로 적지 않은 것 | 135. 읽기 함수의 인자이거나 `*_env_key` 상수로 정의된 이름을 센 값이다. 84개가 `lib/config` 에 있다. 이름만 나오는 91개(제거 목록, 스냅샷 명세, 문서 문자열)는 뺐다. 표본 22개의 이름과 위치를 훑어 보니 모두 환경으로 조정하는 값이었다 |
+| `MASC_` 로 시작하지 않는 이름을 문자열로 읽는 곳 | 25(`HOME`, `PATH`, `XDG_*`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `OTEL_*`, 봇 토큰 등) |
+| 이름을 `runtime.toml` 이 정하는 읽기 | provider 자격 증명(`[providers.<id>.credentials]` 의 `key`) |
+| 환경 읽기 함수를 직접 쓰는 파일 | `lib` 96, `bin` 20 |
 | `lib`, `bin` 에서 파일 키 이름을 문자열 그대로 getenv 하는 곳 | 0 |
 
 ## 3. 설계
@@ -123,26 +128,55 @@ RFC settings-typed-delivery(2026-09-02, Draft)는 비목표에 "env 를 입력�
 
 스크립트가 서버를 띄울 때는 임시 base path 에 `runtime.toml` 을 쓴다. compose 는 설정 디렉터리를 마운트한다.
 
+다시 세어 보니 파일은 34개다(주석만 있는 fixture 1개 포함). 셸 harness 12개는 `scripts/harness/lib/server_bootstrap.sh` 를 같이 쓰고, 파이썬 12개는 서버 환경 묶음(`MASC_GRPC_ENABLED` 등)을 각자 만든다. `start-masc.sh` 는 `.env` 파일을 읽은 뒤에도 부른 쪽의 값을 지키려고 이름 6개를 따로 보존한다.
+
 33개 파일 대부분은 서버를 임시 base path 에 띄우면서 `MASC_KEEPER_AUTONOMOUS_ENABLED=false` 로 Keeper 자동 시작을 끄는 harness 다. 릴리스 스모크(`release-binary-smoke.sh`, `install-smoke.sh`, `release-evidence.sh`)도 들어 있다. 로컬에서 돌려 보지 않고 한 번에 바꾸기에는 범위가 커서, 이 네 이름은 2b층으로 따로 뺀다(§6). 파일 위치를 정하는 `MASC_BASE_PATH`, `MASC_CONFIG_DIR` 는 파일을 읽기 전에 필요해서 파일 안에 둘 수 없다. 환경 전용으로 남는다. `MASC_BASE_PATH` 는 0335 의 결정 6항과 같다.
 
 ### 3.6 레지스트리 밖의 환경 읽기(3층)
 
-`lib` 140줄, `bin` 41줄을 분류한다.
+원안은 `lib` 140줄, `bin` 41줄을 분류하는 것이었다.
 
 - 클라이언트(CLI, TUI)가 쓰는 값은 서버 설정이 아니므로 범위 밖이다.
 - 서버 설정은 `Env_only` 로 등록하거나 `runtime.toml` 로 옮긴다.
 - 어디서도 쓰지 않는 읽기는 지운다.
 
-그다음 `lib/` 에서 `Sys.getenv`, `Unix.getenv` 를 `Env_config_core` 와 허용 파일 목록 밖에서 부르면 실패하는 검사를 넣는다. 0335 W3 가 정한 규칙 그대로다.
+보정(2026-10-30). 줄이 아니라 이름을 세면 범위가 다르다(§2).
+
+- 서버가 레지스트리 밖에서 읽는 `MASC_*` 이름이 135개 있다. 포트, 호스트, 캐시와 타임아웃, 토큰이다. 파일 키가 없는 설정이라 주인이 이미 환경 하나다.
+- `MASC_` 로 시작하지 않는 이름이 25개 있다.
+- 이름을 `runtime.toml` 이 정하는 읽기가 있다(provider 자격 증명).
+
+이 RFC 가 지키려는 것은 "파일 키가 있는 설정은 환경변수를 읽지 않는다"는 보장이다. 파일 키가 없는 135개는 이 보장과 상관이 없다. 보장이 깨지는 길은 파일 소유 이름을 `raw_value_opt` 밖에서 읽는 것이다. 그래서 3층은 이 길을 막는 검사로 줄인다(#46858).
+
+- `lib`, `bin` 의 `.ml` 에서 파일 소유 이름을 `Sys.getenv`, `Sys.getenv_opt`, `Unix.getenv`(이름에 `getenv` 가 든 함수 포함)에 넘기면 실패한다. 이름을 상수에 묶어 읽는 경우도 잡는다.
+- 파일 소유 이름은 레지스트리에서 오므로 2b 로 이름이 늘어도 검사가 따라온다.
+- 지금 위반은 0이다.
+
+0335 W3 가 정한 "`Sys.getenv`, `Unix.getenv` 를 `Env_config_core` 와 허용 파일 목록 밖에서 부르면 실패한다"는 규칙은 하지 않는다. 직접 읽는 파일이 `lib` 에 96개라서 허용 목록은 지금 상태를 굳힐 뿐이고, 파일 키가 있는 설정을 지키는 데는 위 검사로 충분하다. 4층 결정(D7) 뒤에 다시 본다.
 
 ### 3.7 `masc restart` 가 넘기는 환경(4층)
 
-새 서버에 넘기는 환경을 이렇게 만든다.
+원안. 새 서버에 넘기는 환경을 이렇게 만든다.
 
 - 프로세스 기본: `HOME`, `USER`, `LOGNAME`, `PATH`, `SHELL`, `TMPDIR`, `LANG`, `LC_*`, `SSH_AUTH_SOCK`, `XPC_*`, `__CF_USER_TEXT_ENCODING`. 상수 목록 하나로 둔다.
 - 레지스트리의 환경 전용 이름.
 
 3층이 끝나기 전에는 하지 않는다. 레지스트리 밖에서 읽는 값이 빠지면 서버가 조용히 달라진다.
+
+보정(2026-10-30). 이름을 다시 세어 보니 원안은 위험하다.
+
+- 서버가 읽는 이름이 레지스트리 밖에 `MASC_*` 135개, 그 밖에 25개 있다(§2). 허용 목록에서 빠지면 재시작한 서버가 다른 포트와 다른 토큰으로 뜬다.
+- 이름을 `runtime.toml` 이 정하는 provider 자격 증명은 목록에 미리 적을 수 없다.
+- 서버가 띄우는 도구(`git`, `docker`, `container`)와 라이브러리도 환경을 읽는다. 목록에 없으면 그 도구가 조용히 다르게 동작한다.
+- 목록을 완성해도, 새 환경 읽기가 생길 때마다 목록을 고치지 않으면 같은 일이 다시 생긴다.
+
+#46367 의 설명에는 호출한 셸의 환경을 통째로 넘긴 이유가 없다. 새 빌드로 바꾸는 명령이라, 떠 있던 서버와 같은 설정으로 다시 뜨는 것이 뜻에 맞다.
+
+| 안 | 얻는 것 | 잃는 것 |
+|---|---|---|
+| a. 4층을 이 RFC 에서 빼고 별도 RFC 로 정한다 | 2a, 2b, 3층만으로 이 RFC 가 풀려는 사고(파일 값을 환경이 덮는 것)는 닫힌다 | 환경 전용 설정과 레지스트리 밖 이름에 옛 탭의 낡은 값이 새는 길은 남는다 |
+| b. 재시작이 떠 있는 서버의 환경을 그대로 넘긴다. 바꿀 값은 `--env KEY=VAL`, 뺄 값은 `--unset KEY` 로 적는다 | 목록 없이 모든 이름에서 호출한 셸의 영향이 없어진다 | 떠 있는 서버의 환경을 읽을 방법이 필요하다(macOS 는 `ps eww` 나 `KERN_PROCARGS2`, Linux 는 `/proc/<pid>/environ`). 셸에서 `export` 하고 `masc restart` 하던 사람은 값이 안 들어가서 놀란다 |
+| c. 원안(허용 목록) | 호출한 셸의 영향이 모두 없어진다 | 위의 위험 네 가지. 이름 200여 개를 등록하는 일이 먼저 필요하다 |
 
 ## 4. 하지 않는 것
 
@@ -183,8 +217,8 @@ RFC settings-typed-delivery(2026-09-02, Draft)는 비목표에 "env 를 입력�
 | 1 | 이 RFC | 문서 검사 |
 | 2a | 읽는 함수 한 군데에서 강제한다. `Config_boot_overrides` 에 파일 소유 이름을 선언하고 `raw_value_opt` 가 따른다. 스크립트가 쓰지 않는 32행을 `Toml_only` 로 바꾸고 로더를 거치는 시험을 옮긴다. #46805 의 특수 처리를 일반 규칙으로 대체하고 `docs/ENV-CONTRACT.md` 와 헤더 주석을 고친다 | §7 의 엉뚱한 환경값 시험, `Test` 워크플로 |
 | 2b | 스크립트가 쓰는 네 이름(4행)을 `Toml_only` 로 바꾸고, 스크립트 33개와 compose 를 `runtime.toml` 쓰기로 옮긴 뒤 `Toml_and_env` 를 지운다 | 옮긴 스크립트 중 돌려 볼 수 있는 것은 돌린다. 릴리스 스모크는 따로 표시한다 |
-| 3 | 레지스트리 밖의 서버 쪽 환경 읽기를 등록하거나 지우고, 새로 늘면 실패하는 검사를 넣는다 | 검사의 시험, 분류 목록 |
-| 4 | `masc restart` 가 넘기는 환경을 레지스트리에서 만든다 | 환경 만들기 순수 함수 시험, 재시작 뒤 서버 환경 이름 확인 |
+| 3 | 파일 소유 이름을 `raw_value_opt` 밖에서 직접 읽으면 실패하는 검사를 넣는다(#46858). 레지스트리 밖 환경 읽기를 분류하는 일은 하지 않는다(§3.6) | 검사의 자체 점검, 실제 소스에 읽기를 붙인 변이 확인, `Test` 워크플로 |
+| 4 | 결정 D7 로 정한다. 원안은 `masc restart` 가 넘기는 환경을 레지스트리에서 만드는 것이다(§3.7) | D7 뒤에 정한다 |
 
 ## 7. 검증
 
@@ -203,7 +237,8 @@ RFC settings-typed-delivery(2026-09-02, Draft)는 비목표에 "env 를 입력�
 | D3 | #46805 는 임시 처방이다. 병합됐으니(2026-10-29 22:56) 본문에 `WORKAROUND` 표시와 이 RFC 를 적고, 2층이 병합될 때 특수 처리를 일반 규칙으로 바꾼다 | 정함. 병합이 라벨보다 먼저였다 |
 | D4 | 파일 소유 이름을 아래층에 알리는 방법. (a) 부팅 때 선언(기본안), (b) 표를 아래층에 둔다(§3.3) | 열림 |
 | D5 | 0335 의 W1(자격 증명 파일)을 이 RFC 뒤에 이어서 할지 | 열림. 이 RFC 에는 영향이 없다 |
-| D6 | 2b층에서 스크립트 33개를 옮기는 방식. 스크립트마다 `runtime.toml` 을 쓰는 공용 함수(셸 하나, 파이썬 하나)를 두거나, 서버를 띄우는 harness 공용 코드(`scripts/harness/lib/server_bootstrap.sh`)에 한 번만 넣는다 | 열림. 2b층을 시작할 때 정한다 |
+| D6 | 2b층에서 스크립트 33개를 옮기는 방식. 스크립트마다 `runtime.toml` 을 쓰는 공용 함수(셸 하나, 파이썬 하나)를 두거나, 서버를 띄우는 harness 공용 코드(`scripts/harness/lib/server_bootstrap.sh`)에 한 번만 넣는다. 다시 세어 보니 셸 12개가 그 공용 코드를 같이 쓰고, 파이썬 12개는 서버 환경 묶음을 각자 만든다. 추천: 셸은 공용 코드에 한 번, 파이썬은 도우미 하나로 모은다. 키 오타는 `validate_doc` 로 확인하는 시험을 둔다 | 열림. 2b층을 시작할 때 정한다 |
+| D7 | 4층(재시작 환경)을 어떻게 할지(§3.7). a. 이 RFC 에서 빼고 별도 RFC 로 정한다. b. 재시작이 떠 있는 서버의 환경을 넘긴다. c. 원안(허용 목록) | 열림. 추천 a. 원안은 이름 200여 개를 먼저 등록해야 하고, b 는 재시작의 동작을 바꿔서 따로 설계할 값어치가 있다 |
 
 ## 9. 되돌리기
 
@@ -216,3 +251,6 @@ RFC settings-typed-delivery(2026-09-02, Draft)는 비목표에 "env 를 입력�
 - 시험: 아직 `Toml_and_env` 인 36개 이름을 `test/` 에서 `rg -c -F` 로 센다.
 - 스크립트·compose: `.github scripts Makefile Dockerfile docker-compose.yml sandbox-images deploy ops` 에서 같은 이름을 센다.
 - 환경 직접 읽기: `rg -n 'Sys\.getenv(_opt)?\b|Unix\.getenv\b|Unix\.environment' lib bin --glob '*.ml'`.
+- 이름 기준(2026-10-30, 2a 브랜치 `cce6db8aa3a`): `lib`, `bin` 의 `.ml` 에서 `"MASC_[A-Z0-9_]+"` 문자열을 모으면 265개다. 그중 같은 줄이나 다음 줄에서 읽기 함수(`get_string`, `get_int`, `get_float`, `get_bool`, `get_bool_strict`, `get_int_clamped`, `get_float_clamped`, `get_int_nonneg`, `get_float_nonneg`, `get_ratio`, `get_port`, `get_retention_days`, `raw_value_opt`, `Sys.getenv_opt`, `Sys.getenv`)의 인자로 쓰이거나 `let ..._env_key = "MASC_..."` 꼴의 상수로 정의된 이름이 174개이고, 레지스트리가 `~env_name:"..."` 로 적은 49개를 빼면 135개다. 정규식으로 센 근사값이다. 표본 22개의 이름과 위치를 훑어 보니 모두 환경으로 조정하는 값이었다.
+- `MASC_` 로 시작하지 않는 이름: 같은 읽기 함수의 인자로 쓰인 대문자 문자열 25개.
+- 환경 읽기 함수를 직접 쓰는 파일: `rg -l 'Sys\.getenv|Unix\.getenv|Unix\.environment' lib --glob '*.ml'` 96개, `bin` 20개.

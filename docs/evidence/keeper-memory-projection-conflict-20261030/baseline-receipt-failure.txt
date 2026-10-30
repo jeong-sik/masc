@@ -1,0 +1,12 @@
+ASSERT stale receipt returns an explicit unavailable projection
+File "case.ml", line 123, character 2:
+FAIL stale receipt returns an explicit unavailable projection
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Case.test_revalidation_receipt_cannot_overwrite_newer_reduction in file "case.ml", lines 123-124, characters 2-82
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+

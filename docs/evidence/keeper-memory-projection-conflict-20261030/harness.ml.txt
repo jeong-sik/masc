@@ -1,0 +1,96 @@
+let refusal = Agent_core.Error.Api (ContextOverflow {message="fixture";limit=None})
+let row id = `Assoc ["id",`String id;"text",`String (id ^ String.make 256 'x')]
+let make_payload n = `Assoc ["status",`String "selected";"selection_id",`String "s";
+  "selected",`List (List.init n (fun i -> row (string_of_int i)))]
+
+let differential () =
+  let random = Random.State.make [|2026;10;30;2|] in
+  for _batch = 1 to 500 do
+    let valid = ref true and durable = ref true in
+    let left_events = ref [] and right_events = ref [] in
+    let validate events payload =
+      events := ("validate",payload) :: !events;
+      if !valid then Ok () else Error "source changed" in
+    let retain events ~reason ~payload =
+      events := (reason,payload) :: !events;
+      if !durable then Ok () else Error "receipt failed" in
+    let payload = make_payload (1 + Random.State.int random 8) in
+    let old = Old_host.make_prepared ~payload ~validate:(validate left_events) ~retain:(retain left_events) in
+    let fresh = New_host.make_prepared ~payload ~validate:(validate right_events) ~retain:(retain right_events) in
+    for _step = 1 to 30 do
+      valid := Random.State.int random 5 <> 0;
+      durable := Random.State.int random 5 <> 0;
+      (match Random.State.int random 2 with
+       | 0 ->
+           let left = Old_host.render_prepared old in
+           let right = New_host.render_prepared fresh in
+           if left <> right then failwith "different render"
+       | _ ->
+           let left = Old_host.defer_for_capacity old ~refusal in
+           let right = New_host.defer_for_capacity fresh ~refusal in
+           if left <> right then failwith "different reduction");
+      if !left_events <> !right_events then failwith "different validation or receipt"
+    done
+  done;
+  print_endline "differential: 15000 normal observations passed"
+
+(* Pause a capacity receipt in a separate domain while this domain records a
+   source failure. This controls the interleaving; it is not a live Keeper. *)
+let domain_case () =
+  let run make render defer =
+    let gate = Mutex.create () and signal = Condition.create () in
+    let started = ref false and release = ref false in
+    let source_changed = Atomic.make false in
+    let validate payload =
+      if Atomic.get source_changed && Yojson.Safe.Util.member "status" payload = `String "selected"
+      then Error "source changed" else Ok () in
+    let retain ~reason:_ ~payload:_ =
+      Mutex.lock gate;
+      if not !started then begin
+        started := true;
+        Condition.broadcast signal;
+        while not !release do Condition.wait signal gate done
+      end;
+      Mutex.unlock gate;
+      Ok () in
+    let prepared = make ~payload:(make_payload 4) ~validate ~retain in
+    let worker = Domain.spawn (fun () -> defer prepared ~refusal) in
+    Mutex.lock gate;
+    while not !started do Condition.wait signal gate done;
+    Mutex.unlock gate;
+    Atomic.set source_changed true;
+    let unavailable = render prepared in
+    Mutex.lock gate; release := true; Condition.broadcast signal; Mutex.unlock gate;
+    let result = Domain.join worker in
+    result,unavailable,render prepared in
+  let old_result,_,_ = run Old_host.make_prepared Old_host.render_prepared Old_host.defer_for_capacity in
+  let new_result,before,after = run New_host.make_prepared New_host.render_prepared New_host.defer_for_capacity in
+  if old_result <> Ok Keeper_memory_delivery_reprojection.Reprojected then
+    failwith "baseline did not admit the stale cross-domain reduction";
+  (match new_result with Error _ -> () | Ok _ -> failwith "candidate admitted the stale cross-domain reduction");
+  if before <> after || not (String_util.contains_substring after "source changed") then
+    failwith "candidate did not preserve the newer unavailable projection";
+  print_endline "controlled cross-domain overlap: baseline accepts stale reduction; candidate refuses and retains unavailable projection"
+
+let sink = ref 0
+let bench path =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc "case,variant,n,cpu_seconds,wall_seconds,allocated_bytes\n";
+    let payload = make_payload 4 in
+    let old = Old_host.make_prepared ~payload ~validate:(fun _ -> Ok ()) ~retain:(fun ~reason:_ ~payload:_ -> Ok ()) in
+    let fresh = New_host.make_prepared ~payload ~validate:(fun _ -> Ok ()) ~retain:(fun ~reason:_ ~payload:_ -> Ok ()) in
+    let sample variant f =
+      Gc.full_major ();
+      let allocated = Gc.allocated_bytes () and cpu = Sys.time () and wall = Unix.gettimeofday () in
+      for _ = 1 to 500_000 do sink := !sink + String.length (f ()) done;
+      Printf.fprintf oc "valid_render,%s,500000,%.9f,%.9f,%.0f\n%!" variant
+        (Sys.time () -. cpu) (Unix.gettimeofday () -. wall) (Gc.allocated_bytes () -. allocated) in
+    for round = 0 to 6 do
+      let old () = sample "old" (fun () -> Old_host.render_prepared old) in
+      let fresh () = sample "new" (fun () -> New_host.render_prepared fresh) in
+      if round mod 2 = 0 then (old (); fresh ()) else (fresh (); old ())
+    done);
+  Printf.printf "benchmark sink %d\n%!" !sink
+
+let () = differential (); domain_case (); bench Sys.argv.(1)

@@ -47,19 +47,7 @@ jobs:
           sha256sum "$RUNNER_TEMP/measure-viewport-cadence-bytes.py" > "$RUNNER_TEMP/harness-sha256.txt"
 
       - name: Resolve pinned heads
-        run: |
-          # Before: the parent of the #46832 merge commit (skip absent).
-          # After: default pin is the #46832 merge commit itself (eb39c50f3379)
-          # per mad-scientist c-5b12c920 condition 1; AFTER_REF overrides for
-          # reproductions on a later main.
-          if [ -z "$BEFORE_SHA" ]; then
-            BEFORE_SHA="$(git rev-parse eb39c50f3379^)"
-          fi
-          git checkout --quiet "${AFTER_REF:-eb39c50f3379}"
-          AFTER_SHA="$(git rev-parse HEAD)"
-          echo "BEFORE_SHA=$BEFORE_SHA" >> "$GITHUB_ENV"
-          echo "AFTER_SHA=$AFTER_SHA" >> "$GITHUB_ENV"
-          echo "before=$BEFORE_SHA after=$AFTER_SHA"
+        run: scripts/resolve-viewport-cadence-pins.sh
 
       - name: Set up OCaml
         uses: ./.github/actions/setup-ocaml-toolchain
@@ -102,4 +90,5 @@ jobs:
             /tmp/masc_tui_before.exe
             /tmp/masc_tui_after.exe
             ${{ runner.temp }}/harness-sha256.txt
+            ${{ runner.temp }}/source-heads.txt
           retention-days: 30

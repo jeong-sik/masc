@@ -15,6 +15,7 @@
 (rule
  (alias runtest-test_measure_viewport_cadence_bytes)
  (deps ../scripts/measure-viewport-cadence-bytes.py
+       ../scripts/resolve-viewport-cadence-pins.sh
        ../scripts/tests/test_measure_viewport_cadence_bytes.py)
  (action (run python3 %{dep:../scripts/tests/test_measure_viewport_cadence_bytes.py})))
 

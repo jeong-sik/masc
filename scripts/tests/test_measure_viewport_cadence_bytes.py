@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import time
@@ -16,6 +17,7 @@ import unittest
 from unittest import mock
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "measure-viewport-cadence-bytes.py"
+PINS_PATH = MODULE_PATH.parent / "resolve-viewport-cadence-pins.sh"
 spec = importlib.util.spec_from_file_location("viewport_cadence_bytes", MODULE_PATH)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -215,6 +217,65 @@ class HarnessTest(unittest.TestCase):
         self.assertEqual(len(report['before']), module.SESSIONS)
         self.assertEqual(len(report['after']), module.SESSIONS)
         self.assertEqual(len(report['session_comparisons']), module.SESSIONS)
+
+
+class PinsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='masc-viewport-pins-')
+        self.root = Path(self.tmp.name).resolve()
+        self.repo = self.root / 'repo'
+        self.repo.mkdir()
+        self.runner = self.root / 'runner'
+        self.runner.mkdir()
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Viewport test')
+        self.git('config', 'user.email', 'viewport-test@example.invalid')
+        # The disposable fixture is not the user's repository; do not invoke
+        # machine-wide hooks or signing settings while manufacturing commits.
+        (self.root / 'empty-hooks').mkdir()
+        self.git('config', 'core.hooksPath', str(self.root / 'empty-hooks'))
+        self.git('config', 'commit.gpgsign', 'false')
+        self.git('config', 'tag.gpgsign', 'false')
+        self.git('commit', '--quiet', '--allow-empty', '-m', 'before')
+        self.before = self.git('rev-parse', 'HEAD').stdout.strip()
+        self.git('tag', '-a', 'before-tag', '-m', 'annotated tag')
+        self.git('commit', '--quiet', '--allow-empty', '-m', 'after')
+        self.after = self.git('rev-parse', 'HEAD').stdout.strip()
+        self.git('update-ref', 'refs/remotes/origin/feature', self.after)
+        (self.repo / 'blob.txt').write_text('not a commit')
+        self.blob = self.git('hash-object', '-w', 'blob.txt').stdout.strip()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.repo, text=True, capture_output=True, check=True)
+
+    def resolve(self, before, after):
+        env = dict(os.environ, BEFORE_SHA=before, AFTER_REF=after,
+                   RUNNER_TEMP=str(self.runner), GITHUB_ENV=str(self.root / 'github-env'))
+        return subprocess.run(['bash', str(PINS_PATH)], cwd=self.repo, env=env,
+                              text=True, capture_output=True)
+
+    def test_inputs_are_resolved_to_commit_heads_and_recorded(self):
+        self.git('checkout', '--quiet', '--detach', self.before)
+        result = self.resolve('before-tag', 'feature')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.git('rev-parse', 'HEAD').stdout.strip(), self.after)
+        self.assertEqual((self.runner / 'source-heads.txt').read_text(),
+                         f'before_sha={self.before}\nafter_sha={self.after}\n')
+        self.assertEqual((self.root / 'github-env').read_text(),
+                         f'BEFORE_SHA={self.before}\nAFTER_SHA={self.after}\n')
+
+    def test_invalid_or_option_like_input_does_not_record_or_checkout(self):
+        self.git('checkout', '--quiet', '--detach', self.before)
+        for before, after in [('before-tag', '--help'), ('--help', 'feature'),
+                              ('before-tag', self.blob), (self.blob, 'feature')]:
+            result = self.resolve(before, after)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.git('rev-parse', 'HEAD').stdout.strip(), self.before)
+            self.assertFalse((self.runner / 'source-heads.txt').exists())
+            self.assertFalse((self.root / 'github-env').exists())
 
 
 if __name__ == '__main__':

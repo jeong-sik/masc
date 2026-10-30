@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["librarian-lifecycle", "0463-librarian-absorb-rewrite-round"]
-implementation_prs: ["#39036"]
+implementation_prs: ["#39036", "#46926"]
 ---
 
 # RFC-0467 — durable 회차는 연속성 따라잡기 뒤에 줄 서지 않는다

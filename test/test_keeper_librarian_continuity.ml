@@ -571,7 +571,9 @@ let test_queue_reuses_capacity_without_gating_alternatives () =
     if String.equal runtime_id F.cli_secondary_runtime then
       match P.read ~config ~keeper_name |> get with
       | Some saved when saved.end_atom = 3 -> alternative_bytes := Some actual_chars; Ok answer
-      | _ -> Error (Masc.Fusion_official_client.Setup_failure "fixture unavailable")
+      | _ -> Error (Masc.Fusion_official_client.Codex_failure
+          (Codex.Context_window_exceeded
+            {message="fixture unmeasured capacity";tool_effect_attempted=false}))
     else (
       incr final_calls;
       if actual_chars > max_chars then (
@@ -1499,9 +1501,9 @@ let test_context_only_api_holes case () =
     | Context_typed_then_unreceived | Context_late_unreceived -> ());
   pass ();
   let whole_only = match case with
-    | Context_unreceived_only | Context_unreceived_413_only | Context_cli_tail -> true
+    | Context_unreceived_only | Context_unreceived_413_only -> true
     | Context_unknown_then_typed | Context_typed_then_unknown | Context_all_holes
-    | Context_single_hole | Context_unknown_only | Context_invalid_answer
+    | Context_single_hole | Context_unknown_only | Context_cli_tail | Context_invalid_answer
     | Context_late_unknown | Context_prior_holes | Context_unreceived_then_typed
     | Context_typed_then_unreceived | Context_late_unreceived
     | Context_rewritten_source | Context_appended_suffix -> false in
@@ -1538,7 +1540,7 @@ let test_context_only_api_holes case () =
         (P.read ~config ~keeper_name |> get=snapshot_before);
       check_memory ());
     if case=Context_cli_tail then check int "whole and single-message walks both really reach the CLI tail on each wake"
-      2 (List.length !cli_requests))
+      4 (List.length !cli_requests))
   else (
     let saved=P.read ~config ~keeper_name |> get |> some in
     check int "publication stops at the complete original atom" (P.end_atom prepared) saved.end_atom;

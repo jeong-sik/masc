@@ -3581,7 +3581,7 @@ let test_runtime_checkpoint_memory_floor ?native case () =
   let expected_calls = match native with
     | Some scenario -> if native_descent_succeeds scenario then 4 else List.length native_answers
     | None -> match case with
-    | Unknown_checkpoint_refusal -> 1 | Cli_tail_checkpoint_refusal -> 2
+    | Unknown_checkpoint_refusal | Cli_tail_checkpoint_refusal -> 1
     | Checkpoint_holes_without_observations -> 3 | All_checkpoint_holes -> 5
     | Partial_checkpoint_hole | Retired_checkpoint_hole | Late_checkpoint_failure
     | Rewritten_checkpoint_source | Appended_checkpoint_suffix | Restarted_checkpoint_history
@@ -3590,7 +3590,7 @@ let test_runtime_checkpoint_memory_floor ?native case () =
   check int "only declared API slots receive HTTP generation requests"
     (if Option.is_some native then 0 else expected_calls) (F.post_count server);
   check int "only the declared CLI tail is dispatched and never treated as proven API exhaustion"
-    (if Option.is_some native then expected_calls else if case=Cli_tail_checkpoint_refusal then 2 else 0) !cli_calls;
+    (if Option.is_some native then expected_calls else if case=Cli_tail_checkpoint_refusal then 1 else 0) !cli_calls;
   let contains ~sub text =
     let rec at index = index+String.length sub<=String.length text
       && (String.sub text index (String.length sub)=sub || at (index+1)) in
@@ -3614,7 +3614,9 @@ let test_runtime_checkpoint_memory_floor ?native case () =
     (match result with
      | Ok (Consumer.Memory_not_committed (_::_ as reports)) ->
        (match native with
-        | None -> ()
+        | None -> if case=Cli_tail_checkpoint_refusal then
+          check bool "an opaque native tail vetoes the earlier API capacity witness" false
+            (Keeper_librarian_runtime.may_descend_messages reports)
         | Some scenario ->
           check bool "aggregate native evidence blocks message descent" false
             (Keeper_librarian_runtime.may_descend_messages reports);

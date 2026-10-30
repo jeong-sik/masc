@@ -87,7 +87,11 @@ def completed_reply(operation: Json, operation_id: str) -> tuple[str, list[Any]]
     if operation.get("schema") != "masc.keeper_chat_operation.v1":
         raise AcceptanceError("unsupported chat operation schema")
     if chat_state(operation) is not ChatState.SUCCEEDED:
-        raise AcceptanceError("operation has no successful completed reply")
+        detail = operation.get("failure_detail")
+        raise AcceptanceError(
+            "operation has no successful completed reply"
+            + (": " + detail if isinstance(detail, str) else "")
+        )
     turn_ref = text(operation.get("outcome_ref"), "operation outcome_ref")
     reply = object_value(operation.get("completed_reply"), "completed_reply")
     if reply.get("status") != "available" or reply.get("turn_ref") != turn_ref:
@@ -558,6 +562,9 @@ class Capture:
                 "running executable differs from the verified candidate digest"
             )
         self.report["effective_paths"] = paths
+        self.report["memory_execution_readiness"] = health.get(
+            "keeper_memory_execution"
+        )
         self.save()
         if self.client is None:
             raise AcceptanceError("semantic assessment does not start a Keeper session")
@@ -1258,6 +1265,26 @@ def run(capture: Capture, scenario: Json) -> None:
     capture.report["scenario"] = scenario
     capture.report["scenario_sha256"] = digest(encoded(scenario))
     capture.save()
+    if any(step["kind"] == "await_summary" for step in scenario["steps"]):
+        readiness = object_value(
+            capture.report.get("memory_execution_readiness"),
+            "Memory execution readiness",
+        )
+        if readiness.get("schema") != "keeper.memory_execution_availability.v1":
+            raise AcceptanceError("Memory execution readiness schema is unavailable")
+        operations = {
+            row["tool"]: row
+            for row in list_value(readiness.get("operations"), "Memory operations")
+        }
+        for tool in ("admit_memory", "derive_memory"):
+            operation = object_value(operations.get(tool), tool + " readiness")
+            if operation.get("state") == "addon_unattached":
+                raise AcceptanceError(
+                    tool + ": addon_unattached; configure the keeper-librarian Add-on "
+                    "before starting the retirement scenario; no Keeper was created"
+                )
+        # Cached configuration observations are not provider success or a runtime
+        # gate. Earlier provider failures do not prevent a new ordinary attempt.
     capture.call(
         "masc_keeper_up",
         {

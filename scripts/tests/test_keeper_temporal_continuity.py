@@ -79,6 +79,7 @@ def fixture(
         operation["state"] = "Accepted"
     if variation == "failed-operation":
         operation["state"] = "Failed"
+        operation["failure_detail"] = "fixture provider usage limit"
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:
@@ -125,7 +126,17 @@ def fixture(
                 self.reply(
                     {
                         "paths": {"effective_base_path": base},
-                        "build": {"binary_commit": "fixture_only"},
+                        "build": {
+                            "binary_commit": "fixture_only",
+                            "executable_sha256": "fixture_executable",
+                        },
+                        "keeper_memory_execution": {
+                            "schema": "keeper.memory_execution_availability.v1",
+                            "operations": [
+                                {"tool": tool, "state": "addon_unattached"}
+                                for tool in ("admit_memory", "derive_memory")
+                            ],
+                        },
                     }
                 )
             elif parsed.path.endswith("/provider-input/part"):
@@ -328,6 +339,11 @@ class CaptureProtocol(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stdout)
                 self.assertEqual(report["measurement_status"], "incomplete")
                 self.assertNotEqual(report["timeline"][0]["status"], "captured")
+                if variation == "failed-operation":
+                    self.assertEqual(
+                        report["error"],
+                        "operation has no successful completed reply: fixture provider usage limit",
+                    )
                 self.assertTrue(
                     all(
                         c["params"]["name"] == "masc_keeper_delegate_status"
@@ -341,6 +357,58 @@ class CaptureProtocol(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(report["timeline"], [])
         self.assertFalse(any("method" in call for call in calls))
+
+    def test_retirement_without_configured_librarian_creates_no_keeper(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = pathlib.Path(directory)
+            with fixture(workspace, "valid") as (endpoint, calls):
+                output = workspace / "capture"
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SCRIPT),
+                        "run",
+                        "--mcp-url",
+                        endpoint,
+                        "--expected-base-path",
+                        str(workspace),
+                        "--expected-binary-commit",
+                        "fixture_only",
+                        "--expected-executable-sha256",
+                        "fixture_executable",
+                        "--keeper",
+                        "fixture-keeper",
+                        "--runtime-id",
+                        "fixture-runtime",
+                        "--sandbox-image",
+                        "fixture-image",
+                        "--request-timeout",
+                        "2",
+                        "--wait-timeout",
+                        "2",
+                        "--poll-interval",
+                        "0.01",
+                        "--scenario",
+                        str(
+                            SCRIPT.parents[2]
+                            / "fixtures/keeper-temporal-continuity/retired-history.json"
+                        ),
+                        "--output",
+                        str(output),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertTrue((output / "report.json").exists(), result.stderr)
+            report = json.loads((output / "report.json").read_bytes())
+            self.assertEqual(report["measurement_status"], "incomplete")
+            self.assertEqual(
+                report["memory_execution_readiness"]["operations"][0]["state"],
+                "addon_unattached",
+            )
+            self.assertFalse(any(call.get("method") == "tools/call" for call in calls))
 
     def test_wrong_candidate_stops_before_mcp(self) -> None:
         result, report, calls = self.capture("wrong-binary")

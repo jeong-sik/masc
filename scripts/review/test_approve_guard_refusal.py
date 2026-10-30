@@ -172,6 +172,7 @@ class CommitIndependence(GuardHarness):
                     result = self.run_guard(mode)
                     self.assertEqual(result.returncode, 2, result.stderr)
                     self.assertIn("identity is incomplete", result.stderr)
+                    self.assertIn(f"{HEAD} {'author' if author_role is None else 'committer'} account unavailable", result.stderr)
                     self.assertEqual(result.stdout, "")
 
     def test_matching_account_is_not_admitted_or_allowed_to_publish(self):

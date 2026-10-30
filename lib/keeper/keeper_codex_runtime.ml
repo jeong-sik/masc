@@ -204,7 +204,7 @@ let carried_model_input_projection ~input_source
          Some
            (Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
               ~capacity:capacity_bytes));
-    Host.project_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent
+    Host.project_source ~input_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent
   in
   let* sent =
     Host.start_range_projection

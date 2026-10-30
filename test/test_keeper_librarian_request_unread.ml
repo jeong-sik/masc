@@ -208,9 +208,30 @@ let test_custom_projection_cannot_replace_evidence () =
   let stale=Frozen.of_results ~snapshot:(Ok []) ~memory:(Ok [later_hole]) in
   let project history=Ok (Frozen.attach ~role:T.System stale
     (List.filter (fun message -> not (Window.is_unread_context message)) history)) in
-  let sent=Host.project_source ~unread:frozen (Some project)
+  let sent=Host.project_source ~input_source:(Masc.Keeper_request_source.Keeper_history {trace_id})
+    ~unread:frozen (Some project)
     (Frozen.attach ~role:T.System frozen messages) |> Result.map_error Agent_core.Error.to_string |> require in
   check_carrier frozen sent
+
+let test_completion_review_keeps_the_projected_original () =
+  let historical=Frozen.of_results ~snapshot:(Ok []) ~memory:(Ok [hole]) in
+  let original=messages @ Frozen.attach ~role:T.System historical [] in
+  let unavailable=Frozen.of_results ~snapshot:(Error "none") ~memory:(Error "none") in
+  let appended=message "caller-projected context" in
+  let calls=ref 0 in
+  let project history=incr calls;Ok (history @ [appended]) in
+  let sent=Host.project_source ~input_source:Masc.Keeper_request_source.Completion_review
+    ~unread:unavailable (Some project) original
+    |> Result.map_error Agent_core.Error.to_string |> require in
+  check bool "original unread-tagged evidence and projected output stay exact" true
+    (List.map Agent_core.Checkpoint.message_to_json sent
+     = List.map Agent_core.Checkpoint.message_to_json (original @ [appended]));
+  check int "caller projection runs once" 1 !calls;
+  match Host.project_source ~input_source:Masc.Keeper_request_source.Completion_review
+      ~unread:unavailable (Some (fun _ -> Error (Agent_core.Error.Internal "projection refused"))) original with
+  | Error (Agent_core.Error.Internal detail) -> check string "projection error is preserved" "projection refused" detail
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok _ -> fail "a refused projection must stay refused"
 
 let test_native_empty_replaces_held_evidence () =
   let first=official_front (choose (Ok [hole])) in
@@ -249,4 +270,5 @@ let ()=run "frozen librarian unread requests" ["request",[
   test_case "capacity zero-history floor preserves evidence" `Quick test_capacity_floor_keeps_evidence;
   test_case "summary omission and native resume preserve evidence" `Quick test_summary_fallback_and_resume;
   test_case "custom official projection cannot replace evidence" `Quick test_custom_projection_cannot_replace_evidence;
+  test_case "completion review keeps its own unread-tagged evidence" `Quick test_completion_review_keeps_the_projected_original;
   test_case "native known-empty and unavailable replace held evidence" `Quick test_native_empty_replaces_held_evidence]]

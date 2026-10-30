@@ -327,9 +327,12 @@ type carried_start =
 
 type librarian_position = Keeper_turn_driver_try_provider.librarian_position
 
-let project_source ~unread source_projection messages =
+let project_source ~input_source ~unread source_projection messages =
   let result=match source_projection with None -> Ok messages | Some project -> project messages in
-  Result.map (Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System unread) result
+  match input_source with
+  | Keeper_request_source.Completion_review -> result
+  | Keeper_request_source.Keeper_history _ ->
+    Result.map (Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System unread) result
 
 type librarian_front_reader =
   Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
@@ -1044,7 +1047,7 @@ let carried_history_projection ~input_source
       (fun _ observed ~transmitted_bytes -> front := Some (observed,transmitted_bytes))
       on_carried_front)
     ~turn_start ~keeper_name ~runtime_id history_messages in
-  let* sent = project_source
+  let* sent = project_source ~input_source
     ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent in
   (* A refused custom projection returned no range. Publish the buffered
      raw-source observations only after the final transmitted copy exists. *)

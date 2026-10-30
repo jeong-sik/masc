@@ -199,12 +199,16 @@ let test_outcomes_project_typed () =
   let calls =
     install_stub (fun _ ->
       Ok
-        (Publish.Created_and_published
-           { reference; snapshot_revision = "rev-1"; kind = "instruction"; diagnostics = [] }))
+        { Publish.creation =
+            Publish.Created_and_published
+              { reference; snapshot_revision = "rev-1"; kind = "instruction"; diagnostics = [] }
+        ; audit = Publish.Audit_call_returned
+        })
   in
   let result, data = call config (args source_text) in
   check bool "completed" true (result.disposition = Tool_result.Completed ());
   check string "status" "created_and_published" (string_field "status" data);
+  check string "audit call returned" "audit_call_returned" (string_field "audit_status" data);
   check string "snapshot revision" "rev-1" (string_field "snapshot_revision" data);
   check string "kind" "instruction" (string_field "kind" data);
   check (list string) "diagnostics" []
@@ -220,12 +224,15 @@ let test_outcomes_project_typed () =
   ignore
     (install_stub (fun _ ->
        Ok
-         (Publish.Created_but_unpublished
-            { reference
-            ; reason = "refresh failed"
-            ; kind = "instruction"
-            ; diagnostics = [ "fence info \"TOML Composition\" reads like \"toml composition\"" ]
-            })));
+         { Publish.creation =
+             Publish.Created_but_unpublished
+               { reference
+               ; reason = "refresh failed"
+               ; kind = "instruction"
+               ; diagnostics = [ "fence info \"TOML Composition\" reads like \"toml composition\"" ]
+               }
+         ; audit = Publish.Audit_unconfirmed
+         }));
   let unpublished = call config (args source_text) in
   failed_with
     ~code:"created_but_unpublished"
@@ -233,6 +240,9 @@ let test_outcomes_project_typed () =
     ~effect_disposition:Tool_result.Proven_post_effect
     unpublished;
   check string "reason" "refresh failed" (string_field "reason" (snd unpublished));
+  check string "unpublished audit" "unconfirmed" (string_field "audit_status" (snd unpublished));
+  check bool "unpublished reference kept" true
+    (Yojson.Safe.Util.member "reference" (snd unpublished) = Skill_reference.to_yojson reference);
   check string "kind" "instruction" (string_field "kind" (snd unpublished));
   check (list string) "diagnostics"
     [ "fence info \"TOML Composition\" reads like \"toml composition\"" ]
@@ -248,8 +258,11 @@ let test_outcomes_project_typed () =
   ignore
     (install_stub (fun _ ->
        Ok
-         (Publish.Created_but_shadowed
-            { reference; snapshot_revision = "rev-2"; winner; kind = "instruction"; diagnostics = [] })));
+         { Publish.creation =
+             Publish.Created_but_shadowed
+               { reference; snapshot_revision = "rev-2"; winner; kind = "instruction"; diagnostics = [] }
+         ; audit = Publish.Audit_unconfirmed
+         }));
   let shadowed = call config (args source_text) in
   (* The write and the republish committed, so the call completes and the
      status says the rest. Every failure class carries a next move the model
@@ -257,6 +270,7 @@ let test_outcomes_project_typed () =
   check bool "shadowed publish completes" true
     ((fst shadowed).disposition = Tool_result.Completed ());
   check string "shadowed status" "created_but_shadowed" (string_field "status" (snd shadowed));
+  check string "shadowed audit" "unconfirmed" (string_field "audit_status" (snd shadowed));
   check bool "names the winner" true
     (Yojson.Safe.Util.member "winner" (snd shadowed) = Skill_reference.identity_to_yojson winner);
   check bool "keeps the exact reference" true
@@ -290,12 +304,12 @@ let test_outcomes_project_typed () =
     (install_stub (fun _ ->
        Error
          (Server_keeper_skill_publish.refusal_of_editor_error
+            ~audit:Publish.Audit_unconfirmed
             (Server_skill_editor.Write_failed "disk full"))));
-  call config (args source_text)
-  |> failed_with
-       ~code:"write_failed"
-       ~class_:Tool_result.Runtime_failure
-       ~effect_disposition:Tool_result.Effect_outcome_unknown
+  let unknown = call config (args source_text) in
+  failed_with ~code:"write_failed" ~class_:Tool_result.Runtime_failure
+    ~effect_disposition:Tool_result.Effect_outcome_unknown unknown;
+  check string "write-unknown audit" "unconfirmed" (string_field "audit_status" (snd unknown))
 ;;
 
 (* The whole chain the server installs, with the editor, the project-agents
@@ -377,6 +391,110 @@ let test_editor_publishes_and_never_overwrites () =
        ~class_:Tool_result.Policy_rejection
        ~effect_disposition:Tool_result.Proven_pre_effect;
   check string "existing SKILL.md untouched" original (read_file path)
+;;
+
+let with_append_guard guard f =
+  Dated_jsonl.set_append_guard guard;
+  Fun.protect ~finally:(fun () -> Dated_jsonl.set_append_guard (fun append -> append ())) f
+;;
+
+let skill_audit_entries config =
+  Audit_log.read_entries config
+  |> List.filter (fun (entry : Audit_log.audit_entry) ->
+    entry.action = Audit_log.Custom "skill_write")
+;;
+
+(* Exercise the real editor and audit boundary. A guard can fail either
+   before or after running the append, so both observations must be reported
+   as unconfirmed without changing the completed publication. *)
+let test_audit_observation_preserves_publication () =
+  with_workspace @@ fun ~base_path ~workspace ~config ~refresh ->
+  Atomic.set Workspace_hooks.keeper_skill_publish_fn
+    (Server_keeper_skill_publish.publish ~refresh);
+  let publish name guard =
+    let source_text = instruction name in
+    let result, data =
+      with_append_guard guard (fun () -> call config (args ~package_id:name source_text))
+    in
+    check bool "publication completed" true (result.disposition = Tool_result.Completed ());
+    check string "publication status" "created_and_published" (string_field "status" data);
+    let reference = reference_of name source_text in
+    check bool "exact written reference" true
+      (Yojson.Safe.Util.member "reference" data = Skill_reference.to_yojson reference);
+    check string "source digest kept in result"
+      Agent_core_sha256.(digest_string source_text |> to_hex)
+      (string_field "source_sha256" data);
+    check bool "evidence kept in result" true
+      (Yojson.Safe.Util.member "evidence" data = `List [ `String "memory:fact-1" ]);
+    check string "source bytes preserved" source_text
+      (read_file (Filename.concat base_path (".agents/skills/" ^ name ^ "/SKILL.md")));
+    (match Service.current ~workspace with
+     | Some snapshot ->
+       check bool "reference resolves" true
+         (Result.is_ok (Skill_catalog_snapshot.resolve_reference snapshot reference))
+     | None -> fail "no snapshot after publication");
+    data, reference
+  in
+  let before, _ = publish "before" (fun _append -> failwith "before append") in
+  check string "before append is unconfirmed" "unconfirmed" (string_field "audit_status" before);
+  check int "no row was appended before the exception" 0 (List.length (skill_audit_entries config));
+  let after, after_reference =
+    publish "after" (fun append -> append (); failwith "after append")
+  in
+  check string "after append is also unconfirmed" "unconfirmed" (string_field "audit_status" after);
+  (match skill_audit_entries config with
+   | [ entry ] ->
+     check bool "appended row has the same reference" true
+       (Yojson.Safe.Util.member "reference" entry.details = Skill_reference.to_yojson after_reference);
+     check bool "appended row has the evidence" true
+       (Yojson.Safe.Util.member "evidence" entry.details = `List [ `String "memory:fact-1" ])
+   | entries -> fail (Printf.sprintf "expected one appended audit row, got %d" (List.length entries)));
+  (* A returning guard is allowed to skip its callback. The positive status
+     describes the call's return, not proof that an audit row exists. *)
+  let skipped, _ = publish "skipped" (fun _append -> ()) in
+  check string "returning call" "audit_call_returned" (string_field "audit_status" skipped);
+  check int "returning call did not prove another row exists" 1
+    (List.length (skill_audit_entries config));
+  call config (args ~package_id:"before" (instruction "before"))
+  |> failed_with ~code:"package_already_exists" ~class_:Tool_result.Policy_rejection
+       ~effect_disposition:Tool_result.Proven_pre_effect
+;;
+
+let test_audit_cancellation_propagates_after_write () =
+  with_workspace @@ fun ~base_path ~workspace:_ ~config ~refresh ->
+  Atomic.set Workspace_hooks.keeper_skill_publish_fn
+    (Server_keeper_skill_publish.publish ~refresh);
+  let source_text = instruction "cancelled" in
+  let cancelled =
+    with_append_guard (fun _append -> raise (Eio.Cancel.Cancelled Exit)) (fun () ->
+      match call config (args ~package_id:"cancelled" source_text) with
+      | _ -> false
+      | exception Eio.Cancel.Cancelled _ -> true)
+  in
+  check bool "audit cancellation propagates" true cancelled;
+  check string "cancellation does not undo the Skill write" source_text
+    (read_file (Filename.concat base_path ".agents/skills/cancelled/SKILL.md"))
+;;
+
+let test_audit_exception_does_not_change_unpublished_effect () =
+  with_workspace @@ fun ~base_path ~workspace:_ ~config ~refresh:_ ->
+  let refresh () = Error "snapshot unavailable" in
+  Atomic.set Workspace_hooks.keeper_skill_publish_fn
+    (Server_keeper_skill_publish.publish ~refresh);
+  let source_text = instruction "unpublished" in
+  let outcome =
+    with_append_guard (fun _append -> failwith "before append") (fun () ->
+      call config (args ~package_id:"unpublished" source_text))
+  in
+  failed_with ~code:"created_but_unpublished" ~class_:Tool_result.Runtime_failure
+    ~effect_disposition:Tool_result.Proven_post_effect outcome;
+  let data = snd outcome in
+  check string "audit unconfirmed" "unconfirmed" (string_field "audit_status" data);
+  check bool "written reference preserved" true
+    (Yojson.Safe.Util.member "reference" data
+     = Skill_reference.to_yojson (reference_of "unpublished" source_text));
+  check string "written source preserved" source_text
+    (read_file (Filename.concat base_path ".agents/skills/unpublished/SKILL.md"))
 ;;
 
 (* A workspace that has never had a Skill has no .agents/skills folder, and
@@ -603,6 +721,12 @@ let () =
         ; test_case "editor outcomes project typed" `Quick test_outcomes_project_typed
         ; test_case "editor path publishes and never overwrites" `Quick
             test_editor_publishes_and_never_overwrites
+        ; test_case "audit observation preserves publication" `Quick
+            test_audit_observation_preserves_publication
+        ; test_case "audit cancellation propagates after write" `Quick
+            test_audit_cancellation_propagates_after_write
+        ; test_case "audit exception keeps unpublished effect" `Quick
+            test_audit_exception_does_not_change_unpublished_effect
         ; test_case "first publish creates the source folder" `Quick
             test_first_publish_creates_the_source_folder
         ; test_case "publish behind an earlier source names the winner" `Quick

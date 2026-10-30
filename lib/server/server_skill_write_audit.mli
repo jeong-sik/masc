@@ -16,9 +16,11 @@ type subject =
       ; package_id : string
       }
 
-(** Append a [skill_write] row. [evidence] is the Keeper's own list and is
-    recorded as given; the operator route passes none. A failing audit append
-    is logged, never raised, except cancellation. *)
+(** Attempt a [skill_write] row. [evidence] is the Keeper's own list and is
+    recorded as given; the operator route passes none. A non-cancellation
+    exception is logged and returned as [Audit_unconfirmed]: it can happen
+    before or after append. A completed call is not a durable transaction
+    with the Skill write. Cancellation is propagated. *)
 val record :
   Workspace.config ->
   agent_id:string ->
@@ -28,4 +30,4 @@ val record :
   ?evidence:string list ->
   outcome:Audit_log.outcome ->
   unit ->
-  unit
+  Workspace_skill_publish.audit_observation

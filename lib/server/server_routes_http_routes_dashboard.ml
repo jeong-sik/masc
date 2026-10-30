@@ -831,14 +831,14 @@ let audit_runtime_config_write
       (Printexc.to_string exn)
 
 let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome =
-  Server_skill_write_audit.record
+  ignore (Server_skill_write_audit.record
     (Mcp_server.workspace_config state)
     ~agent_id:agent_name
     ~subject:(Server_skill_write_audit.Published reference)
     ~source_text
     ~status
     ~outcome
-    ()
+    ())
 ;;
 
 (* [package_directory] is kept in the audit row because a later create for

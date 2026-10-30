@@ -37,12 +37,22 @@ export function fitLine(line, columns) {
   return result
 }
 
+// The ruler and piano-roll cells carry arrays of string SGR parameters.
+function sameStyles(left, right) {
+  if (left === right) return true
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index++) {
+    if (left[index] !== right[index]) return false
+  }
+  return true
+}
+
 // Adjacent [char, styles] cells with the same styles become one segment.
 export function cellSegments(cells) {
   const segments = []
   for (const [char, styles] of cells) {
     const last = segments.at(-1)
-    if (last && last[1].join(';') === styles.join(';')) last[0] += char
+    if (last && sameStyles(last[1], styles)) last[0] += char
     else segments.push([char, styles])
   }
   return segments

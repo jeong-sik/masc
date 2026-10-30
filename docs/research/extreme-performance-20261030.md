@@ -99,7 +99,14 @@ materialization/fold remains a separate bottleneck candidate.
 DAW source is in `tools/alphatex/music-workbench.mjs`, `sequencer-tui.mjs` and
 `arrangement-tui.mjs`. These views erase the entire viewport before rewriting it;
 the piano roll also scans the complete note list separately for every visible
-pitch. These are source candidates, not measured DAW causes yet.
+pitch. The [DAW component study](../evidence/extreme-performance-20261030/daw-piano-roll/README.md)
+now measures extracted piano-roll calculations with explicit synthetic inputs.
+Style-array comparison and frame-local note grouping reduce observed CPU/wall
+for multiple pitch rows. An adversarial one-row regression caused a structural
+single-scan correction; all five runs and remaining negative observations are
+retained. The final 48-row/30k/onscreen-uniform component improves 5.408→1.069 ms
+but its per-call p95 is 2.301 ms. This is not whole DAW latency, allocation,
+audio timing or an observed physical flicker cause.
 [Ghostty's synchronized-output documentation](https://ghostty.org/docs/help/synchronized-output)
 explains why intermediate large redraws can flicker. A DEC 2026/differential
 presentation experiment must preserve terminal policy, recovery and child-view
@@ -116,6 +123,7 @@ stale/partial/failed results and controlled 30/300 owner populations.
 | Boundary | Current evidence | Remaining proof |
 | --- | --- | --- |
 | TUI input decision, decode, state application, build, present | Last retained TUI self-report f06ab8f; no native TUI timing in this investigation | Real native requests/state decisions and phase timings, physical display scope separate |
+| DAW edit/navigation, piano roll, playback and presentation | Paired extracted-loop wall/CPU; 4 existing style and 63 controller/editor checks | Real input/state timing, allocation, audio/MIDI deadlines and physical flicker |
 | HTTP and MCP | Limited live wire baseline; isolated health/status | Route-specific semantic/freshness predicates, aligned server stages, tails under controlled load |
 | Markdown/HTML/file I/O | Original-record allocation clues | Read/hash/parse/commit attribution, growth and replacement, durable before/after |
 | SQLite queue operations | 60/600 exact durable outcomes | Admission, lookup, commit/checkpoint distributions and duplicate/loss checks |

@@ -1,0 +1,761 @@
+{
+  "scope": "Controlled component conditions; per-call samples and batch CPU separate. No whole DAW/UI target verdict.",
+  "rows": [
+    {
+      "rows": 24,
+      "notes": 0,
+      "distribution": "empty",
+      "before": {
+        "wall_median_batch_us": 201.3125,
+        "cpu_median_batch_us": 189.4296875,
+        "per_call_p50_us": 173.958,
+        "per_call_p95_us": 331.541,
+        "per_call_p99_us": 574.417,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 98.38801562500001,
+        "cpu_median_batch_us": 93.078125,
+        "per_call_p50_us": 79.709,
+        "per_call_p95_us": 175,
+        "per_call_p99_us": 317.917,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 88.69758593750001,
+        "cpu_median_batch_us": 90.234375,
+        "per_call_p50_us": 79.125,
+        "per_call_p95_us": 155.5,
+        "per_call_p99_us": 237.708,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 30,
+      "distribution": "offscreen",
+      "before": {
+        "wall_median_batch_us": 184.039390625,
+        "cpu_median_batch_us": 185.46875,
+        "per_call_p50_us": 179,
+        "per_call_p95_us": 312.833,
+        "per_call_p99_us": 752.875,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 81.5126953125,
+        "cpu_median_batch_us": 82.578125,
+        "per_call_p50_us": 79.541,
+        "per_call_p95_us": 83.833,
+        "per_call_p99_us": 313.791,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 85.93099218750001,
+        "cpu_median_batch_us": 87.1015625,
+        "per_call_p50_us": 82.917,
+        "per_call_p95_us": 112.708,
+        "per_call_p99_us": 180.166,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 30,
+      "distribution": "one-pitch",
+      "before": {
+        "wall_median_batch_us": 190.55078125,
+        "cpu_median_batch_us": 196.53125,
+        "per_call_p50_us": 177.542,
+        "per_call_p95_us": 302.792,
+        "per_call_p99_us": 424.375,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 83.810546875,
+        "cpu_median_batch_us": 89.375,
+        "per_call_p50_us": 80.875,
+        "per_call_p95_us": 110,
+        "per_call_p99_us": 286.958,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 82.7236328125,
+        "cpu_median_batch_us": 86.1171875,
+        "per_call_p50_us": 79.833,
+        "per_call_p95_us": 173.75,
+        "per_call_p99_us": 240.042,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 30,
+      "distribution": "uniform",
+      "before": {
+        "wall_median_batch_us": 212.2880859375,
+        "cpu_median_batch_us": 197.3203125,
+        "per_call_p50_us": 178.083,
+        "per_call_p95_us": 349.708,
+        "per_call_p99_us": 540.625,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 91.63508593750001,
+        "cpu_median_batch_us": 88.09375,
+        "per_call_p50_us": 80.167,
+        "per_call_p95_us": 169.667,
+        "per_call_p99_us": 257.375,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 82.291015625,
+        "cpu_median_batch_us": 89.0078125,
+        "per_call_p50_us": 79.792,
+        "per_call_p95_us": 152.25,
+        "per_call_p99_us": 325.458,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 300,
+      "distribution": "offscreen",
+      "before": {
+        "wall_median_batch_us": 197.4970703125,
+        "cpu_median_batch_us": 197.2578125,
+        "per_call_p50_us": 185.292,
+        "per_call_p95_us": 273.791,
+        "per_call_p99_us": 462.958,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 91.12403125,
+        "cpu_median_batch_us": 97.359375,
+        "per_call_p50_us": 88.792,
+        "per_call_p95_us": 118.334,
+        "per_call_p99_us": 214.291,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 87.43228906249999,
+        "cpu_median_batch_us": 87.984375,
+        "per_call_p50_us": 81.75,
+        "per_call_p95_us": 142.125,
+        "per_call_p99_us": 238.875,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 300,
+      "distribution": "one-pitch",
+      "before": {
+        "wall_median_batch_us": 216.3776015625,
+        "cpu_median_batch_us": 212.453125,
+        "per_call_p50_us": 194.25,
+        "per_call_p95_us": 326.875,
+        "per_call_p99_us": 603.708,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 112.26008593750001,
+        "cpu_median_batch_us": 113.890625,
+        "per_call_p50_us": 95.416,
+        "per_call_p95_us": 223.792,
+        "per_call_p99_us": 455.209,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 97.48177343750001,
+        "cpu_median_batch_us": 100.3515625,
+        "per_call_p50_us": 84.125,
+        "per_call_p95_us": 169,
+        "per_call_p99_us": 340.916,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 300,
+      "distribution": "uniform",
+      "before": {
+        "wall_median_batch_us": 208.078453125,
+        "cpu_median_batch_us": 197.7734375,
+        "per_call_p50_us": 185.917,
+        "per_call_p95_us": 351.375,
+        "per_call_p99_us": 541.416,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 101.2265703125,
+        "cpu_median_batch_us": 107.796875,
+        "per_call_p50_us": 91.875,
+        "per_call_p95_us": 181.334,
+        "per_call_p99_us": 455.166,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 100.40494531249999,
+        "cpu_median_batch_us": 105.0625,
+        "per_call_p50_us": 90.334,
+        "per_call_p95_us": 185.709,
+        "per_call_p99_us": 298.25,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 3000,
+      "distribution": "offscreen",
+      "before": {
+        "wall_median_batch_us": 231.38053125,
+        "cpu_median_batch_us": 231.7578125,
+        "per_call_p50_us": 222.541,
+        "per_call_p95_us": 289.25,
+        "per_call_p99_us": 418.667,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 92.3046875,
+        "cpu_median_batch_us": 92.59375,
+        "per_call_p50_us": 87.208,
+        "per_call_p95_us": 101.541,
+        "per_call_p99_us": 238.459,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 90.7499921875,
+        "cpu_median_batch_us": 91.8515625,
+        "per_call_p50_us": 87.167,
+        "per_call_p95_us": 92.5,
+        "per_call_p99_us": 250.542,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 3000,
+      "distribution": "one-pitch",
+      "before": {
+        "wall_median_batch_us": 258.2470703125,
+        "cpu_median_batch_us": 264.375,
+        "per_call_p50_us": 253.459,
+        "per_call_p95_us": 372.542,
+        "per_call_p99_us": 560.625,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 167.923828125,
+        "cpu_median_batch_us": 167.609375,
+        "per_call_p50_us": 159.083,
+        "per_call_p95_us": 248.5,
+        "per_call_p99_us": 418.208,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 128.57128125,
+        "cpu_median_batch_us": 163.5234375,
+        "per_call_p50_us": 111.375,
+        "per_call_p95_us": 237.792,
+        "per_call_p99_us": 331.417,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 3000,
+      "distribution": "uniform",
+      "before": {
+        "wall_median_batch_us": 285.8333359375,
+        "cpu_median_batch_us": 277.984375,
+        "per_call_p50_us": 251.958,
+        "per_call_p95_us": 585.334,
+        "per_call_p99_us": 907.375,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 114.7431640625,
+        "cpu_median_batch_us": 117.078125,
+        "per_call_p50_us": 99.458,
+        "per_call_p95_us": 207.708,
+        "per_call_p99_us": 356.625,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 101.40234375,
+        "cpu_median_batch_us": 101.5703125,
+        "per_call_p50_us": 96.917,
+        "per_call_p95_us": 133.959,
+        "per_call_p99_us": 279.458,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 30000,
+      "distribution": "offscreen",
+      "before": {
+        "wall_median_batch_us": 772.4700625,
+        "cpu_median_batch_us": 772.46875,
+        "per_call_p50_us": 779.041,
+        "per_call_p95_us": 1456.917,
+        "per_call_p99_us": 1698.417,
+        "calls": 96
+      },
+      "combined": {
+        "wall_median_batch_us": 130.4270625,
+        "cpu_median_batch_us": 129.6875,
+        "per_call_p50_us": 127.75,
+        "per_call_p95_us": 216.416,
+        "per_call_p99_us": 465.458,
+        "calls": 96
+      },
+      "time-window": {
+        "wall_median_batch_us": 161.72787499999998,
+        "cpu_median_batch_us": 140.9375,
+        "per_call_p50_us": 132.417,
+        "per_call_p95_us": 380.917,
+        "per_call_p99_us": 492.917,
+        "calls": 96
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 30000,
+      "distribution": "one-pitch",
+      "before": {
+        "wall_median_batch_us": 922.25390625,
+        "cpu_median_batch_us": 913.84375,
+        "per_call_p50_us": 878.791,
+        "per_call_p95_us": 1090.375,
+        "per_call_p99_us": 1753.75,
+        "calls": 96
+      },
+      "combined": {
+        "wall_median_batch_us": 779.85028125,
+        "cpu_median_batch_us": 809.0,
+        "per_call_p50_us": 765.375,
+        "per_call_p95_us": 1110.208,
+        "per_call_p99_us": 1323.75,
+        "calls": 96
+      },
+      "time-window": {
+        "wall_median_batch_us": 230.91537499999998,
+        "cpu_median_batch_us": 233.53125,
+        "per_call_p50_us": 215.917,
+        "per_call_p95_us": 334.292,
+        "per_call_p99_us": 444.625,
+        "calls": 96
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 30000,
+      "distribution": "uniform",
+      "before": {
+        "wall_median_batch_us": 1023.6536249999999,
+        "cpu_median_batch_us": 1007.9375,
+        "per_call_p50_us": 916.834,
+        "per_call_p95_us": 1723.75,
+        "per_call_p99_us": 1931.792,
+        "calls": 96
+      },
+      "combined": {
+        "wall_median_batch_us": 341.0364375,
+        "cpu_median_batch_us": 342.25,
+        "per_call_p50_us": 291.292,
+        "per_call_p95_us": 648.709,
+        "per_call_p99_us": 2131.542,
+        "calls": 96
+      },
+      "time-window": {
+        "wall_median_batch_us": 206.90234375,
+        "cpu_median_batch_us": 221.4375,
+        "per_call_p50_us": 187.584,
+        "per_call_p95_us": 449.833,
+        "per_call_p99_us": 491.708,
+        "calls": 96
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 0,
+      "distribution": "empty",
+      "before": {
+        "wall_median_batch_us": 561.2672578125,
+        "cpu_median_batch_us": 576.671875,
+        "per_call_p50_us": 486.084,
+        "per_call_p95_us": 928.417,
+        "per_call_p99_us": 1422.666,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 271.9808046875,
+        "cpu_median_batch_us": 270.9453125,
+        "per_call_p50_us": 221.333,
+        "per_call_p95_us": 438,
+        "per_call_p99_us": 620.333,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 268.4781875,
+        "cpu_median_batch_us": 255.578125,
+        "per_call_p50_us": 225.584,
+        "per_call_p95_us": 449.25,
+        "per_call_p99_us": 737.833,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 30,
+      "distribution": "offscreen",
+      "before": {
+        "wall_median_batch_us": 566.730140625,
+        "cpu_median_batch_us": 561.234375,
+        "per_call_p50_us": 539.166,
+        "per_call_p95_us": 773.916,
+        "per_call_p99_us": 1053.833,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 301.5517578125,
+        "cpu_median_batch_us": 289.7265625,
+        "per_call_p50_us": 271.042,
+        "per_call_p95_us": 420.084,
+        "per_call_p99_us": 651.334,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 291.0537109375,
+        "cpu_median_batch_us": 285.75,
+        "per_call_p50_us": 271.125,
+        "per_call_p95_us": 449,
+        "per_call_p99_us": 678.959,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 30,
+      "distribution": "one-pitch",
+      "before": {
+        "wall_median_batch_us": 546.3261640625,
+        "cpu_median_batch_us": 545.125,
+        "per_call_p50_us": 537.334,
+        "per_call_p95_us": 690.75,
+        "per_call_p99_us": 909.417,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 282.6188203125,
+        "cpu_median_batch_us": 278.21875,
+        "per_call_p50_us": 266.25,
+        "per_call_p95_us": 433.334,
+        "per_call_p99_us": 616.792,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 282.89615625,
+        "cpu_median_batch_us": 282.6171875,
+        "per_call_p50_us": 267.667,
+        "per_call_p95_us": 440.709,
+        "per_call_p99_us": 626.708,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 30,
+      "distribution": "uniform",
+      "before": {
+        "wall_median_batch_us": 558.5953828125,
+        "cpu_median_batch_us": 549.0234375,
+        "per_call_p50_us": 540.583,
+        "per_call_p95_us": 904.333,
+        "per_call_p99_us": 1429.041,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 287.0765,
+        "cpu_median_batch_us": 270.8359375,
+        "per_call_p50_us": 252.958,
+        "per_call_p95_us": 584.166,
+        "per_call_p99_us": 931.834,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 282.3616484375,
+        "cpu_median_batch_us": 280.796875,
+        "per_call_p50_us": 267.709,
+        "per_call_p95_us": 530.875,
+        "per_call_p99_us": 915.292,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 300,
+      "distribution": "offscreen",
+      "before": {
+        "wall_median_batch_us": 597.397453125,
+        "cpu_median_batch_us": 584.15625,
+        "per_call_p50_us": 556.666,
+        "per_call_p95_us": 746,
+        "per_call_p99_us": 1050.709,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 281.1731796875,
+        "cpu_median_batch_us": 284.734375,
+        "per_call_p50_us": 269.916,
+        "per_call_p95_us": 364.417,
+        "per_call_p99_us": 494.584,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 282.8828125,
+        "cpu_median_batch_us": 280.8671875,
+        "per_call_p50_us": 270.417,
+        "per_call_p95_us": 391.917,
+        "per_call_p99_us": 501.916,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 300,
+      "distribution": "one-pitch",
+      "before": {
+        "wall_median_batch_us": 643.7626953125,
+        "cpu_median_batch_us": 610.3046875,
+        "per_call_p50_us": 618.292,
+        "per_call_p95_us": 924.625,
+        "per_call_p99_us": 1414.208,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 306.97265625,
+        "cpu_median_batch_us": 310.3359375,
+        "per_call_p50_us": 286.5,
+        "per_call_p95_us": 529.875,
+        "per_call_p99_us": 787.208,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 307.5696640625,
+        "cpu_median_batch_us": 307.6875,
+        "per_call_p50_us": 281.916,
+        "per_call_p95_us": 556.583,
+        "per_call_p99_us": 2145.667,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 300,
+      "distribution": "uniform",
+      "before": {
+        "wall_median_batch_us": 557.4755859375,
+        "cpu_median_batch_us": 556.7421875,
+        "per_call_p50_us": 554.833,
+        "per_call_p95_us": 722.833,
+        "per_call_p99_us": 1070.459,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 271.939453125,
+        "cpu_median_batch_us": 273.9765625,
+        "per_call_p50_us": 271.709,
+        "per_call_p95_us": 316.333,
+        "per_call_p99_us": 523.542,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 272.822265625,
+        "cpu_median_batch_us": 275.6640625,
+        "per_call_p50_us": 268.458,
+        "per_call_p95_us": 393.292,
+        "per_call_p99_us": 546.583,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 3000,
+      "distribution": "offscreen",
+      "before": {
+        "wall_median_batch_us": 763.168296875,
+        "cpu_median_batch_us": 745.953125,
+        "per_call_p50_us": 720.125,
+        "per_call_p95_us": 1076.125,
+        "per_call_p99_us": 1465.625,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 296.9384765625,
+        "cpu_median_batch_us": 288.890625,
+        "per_call_p50_us": 274.75,
+        "per_call_p95_us": 469.584,
+        "per_call_p99_us": 613.917,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 325.0380859375,
+        "cpu_median_batch_us": 302.8984375,
+        "per_call_p50_us": 277.584,
+        "per_call_p95_us": 527.5,
+        "per_call_p99_us": 722,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 3000,
+      "distribution": "one-pitch",
+      "before": {
+        "wall_median_batch_us": 850.5035859375,
+        "cpu_median_batch_us": 779.5,
+        "per_call_p50_us": 739.208,
+        "per_call_p95_us": 1633.291,
+        "per_call_p99_us": 10638.5,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 440.02538281249997,
+        "cpu_median_batch_us": 384.3125,
+        "per_call_p50_us": 349.375,
+        "per_call_p95_us": 912.25,
+        "per_call_p99_us": 1379.25,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 326.30859375,
+        "cpu_median_batch_us": 304.4375,
+        "per_call_p50_us": 286.125,
+        "per_call_p95_us": 520.083,
+        "per_call_p99_us": 1380.5,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 3000,
+      "distribution": "uniform",
+      "before": {
+        "wall_median_batch_us": 794.0332109375,
+        "cpu_median_batch_us": 776.8515625,
+        "per_call_p50_us": 752.166,
+        "per_call_p95_us": 1028.709,
+        "per_call_p99_us": 1610.625,
+        "calls": 384
+      },
+      "combined": {
+        "wall_median_batch_us": 320.4905546875,
+        "cpu_median_batch_us": 317.7734375,
+        "per_call_p50_us": 304.542,
+        "per_call_p95_us": 451.708,
+        "per_call_p99_us": 650.833,
+        "calls": 384
+      },
+      "time-window": {
+        "wall_median_batch_us": 292.6985625,
+        "cpu_median_batch_us": 292.4140625,
+        "per_call_p50_us": 281.583,
+        "per_call_p95_us": 374.791,
+        "per_call_p99_us": 519.584,
+        "calls": 384
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 30000,
+      "distribution": "offscreen",
+      "before": {
+        "wall_median_batch_us": 2761.46878125,
+        "cpu_median_batch_us": 2574.5,
+        "per_call_p50_us": 2555.792,
+        "per_call_p95_us": 3902.875,
+        "per_call_p99_us": 4974,
+        "calls": 96
+      },
+      "combined": {
+        "wall_median_batch_us": 346.54037500000004,
+        "cpu_median_batch_us": 340.46875,
+        "per_call_p50_us": 321.791,
+        "per_call_p95_us": 606.958,
+        "per_call_p99_us": 664.667,
+        "calls": 96
+      },
+      "time-window": {
+        "wall_median_batch_us": 390.03384374999996,
+        "cpu_median_batch_us": 375.40625,
+        "per_call_p50_us": 352.416,
+        "per_call_p95_us": 695.583,
+        "per_call_p99_us": 748.666,
+        "calls": 96
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 30000,
+      "distribution": "one-pitch",
+      "before": {
+        "wall_median_batch_us": 2763.38671875,
+        "cpu_median_batch_us": 2577.0,
+        "per_call_p50_us": 2536.625,
+        "per_call_p95_us": 3711.625,
+        "per_call_p99_us": 10539.709,
+        "calls": 96
+      },
+      "combined": {
+        "wall_median_batch_us": 1103.40103125,
+        "cpu_median_batch_us": 1014.40625,
+        "per_call_p50_us": 962.292,
+        "per_call_p95_us": 1911.166,
+        "per_call_p99_us": 4759.667,
+        "calls": 96
+      },
+      "time-window": {
+        "wall_median_batch_us": 492.33459374999995,
+        "cpu_median_batch_us": 462.5,
+        "per_call_p50_us": 415.542,
+        "per_call_p95_us": 1596.25,
+        "per_call_p99_us": 1974.666,
+        "calls": 96
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 30000,
+      "distribution": "uniform",
+      "before": {
+        "wall_median_batch_us": 2510.4921875,
+        "cpu_median_batch_us": 2498.5,
+        "per_call_p50_us": 2534.958,
+        "per_call_p95_us": 3298.958,
+        "per_call_p99_us": 4347.208,
+        "calls": 96
+      },
+      "combined": {
+        "wall_median_batch_us": 576.5129999999999,
+        "cpu_median_batch_us": 570.5,
+        "per_call_p50_us": 549.584,
+        "per_call_p95_us": 877.166,
+        "per_call_p99_us": 1101.667,
+        "calls": 96
+      },
+      "time-window": {
+        "wall_median_batch_us": 368.21353124999996,
+        "cpu_median_batch_us": 369.0,
+        "per_call_p50_us": 366.208,
+        "per_call_p95_us": 656.375,
+        "per_call_p99_us": 1407.333,
+        "calls": 96
+      }
+    }
+  ],
+  "gc_entries": 1049,
+  "gc_duration_ms": 215.95405703783035
+}

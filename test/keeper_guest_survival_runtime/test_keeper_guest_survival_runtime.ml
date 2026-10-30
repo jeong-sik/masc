@@ -1365,9 +1365,22 @@ let process_step root operation =
               (Turn.is_microvm_guest_booted ~config ~meta:(meta ()) ());
             Ok endpoint
           | Error detail ->
-            check bool "racing turn fails closed" true
-              (Astring.String.is_infix ~affix:"microvm guest readiness changed" detail);
-            Turn.microvm_remote_endpoint ~timeout_sec:10. runtime))
+            (* The turn can see the old prepared state before waiting for
+               the lifecycle owner, then fail the final admission after the
+               stopped observation invalidates it. *)
+            let unprepared = Astring.String.is_infix
+                ~affix:"microvm_build_preparation_unverified:" detail in
+            let changed_during_preparation = Astring.String.is_infix
+                ~affix:"microvm guest readiness changed" detail in
+            check bool ("racing turn fails closed: " ^ detail) true
+              (unprepared || changed_during_preparation);
+            if unprepared then
+              check bool "invalidated guest is not ready at the refused handoff" false
+                (Turn.is_microvm_guest_booted ~config ~meta:(meta ()) ());
+            Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun endpoint ->
+              check bool "successful retry has fresh readiness" true
+                (Turn.is_microvm_guest_booted ~config ~meta:(meta ()) ());
+              Ok endpoint)))
     | "checkout-absent" | "checkout-stopped" | "checkout-unknown" | "read-stopped"
     | "captured-read-stopped" | "captured-read-absent" | "captured-read-unknown"
     | "endpoint-stopped" | "endpoint-absent" ->

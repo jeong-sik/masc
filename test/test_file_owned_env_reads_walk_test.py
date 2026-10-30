@@ -29,25 +29,106 @@ class SourceWalkTest(unittest.TestCase):
         self.names = root / "names.txt"
         self.names.write_text("MASC_KEEPER_DEBUG\n", encoding="utf-8")
         self.real_scandir = os.scandir
+        self.real_lstat = os.lstat
 
     def deny_directory(self, path):
         if Path(path) == self.denied:
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
         return self.real_scandir(path)
 
+    @contextlib.contextmanager
+    def deny_entry_type(self, path, vanished=False):
+        denied = self.denied
+
+        class UnreadableEntry:
+            def __init__(self, entry):
+                self.name = entry.name
+                self.path = entry.path
+
+            def is_dir(self):
+                if vanished:
+                    return False
+                raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), self.path)
+
+        with self.real_scandir(path) as entries:
+            yield (UnreadableEntry(entry) if Path(entry.path) == denied else entry for entry in entries)
+
+    def deny_lstat(self, path, *args, **kwargs):
+        if Path(path) == self.denied:
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+        return self.real_lstat(path, *args, **kwargs)
+
+    def assert_incomplete_walk_fails(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            with self.assertRaises(SystemExit) as raised:
+                env_reads.main(str(self.names), [str(self.sources)])
+        self.assertIn("cannot enumerate OCaml source files", str(raised.exception))
+        self.assertIn(str(self.denied), str(raised.exception))
+        self.assertNotIn("no direct environment read", output.getvalue())
+
     def test_existing_caller_keeps_default_walk_behavior(self):
         with mock.patch("os.scandir", side_effect=self.deny_directory):
             self.assertEqual(list(byte_cut.source_files([str(self.sources)])), [str(self.safe)])
 
     def test_environment_scan_rejects_an_incomplete_walk(self):
-        output = io.StringIO()
         with mock.patch("os.scandir", side_effect=self.deny_directory):
-            with contextlib.redirect_stdout(output):
-                with self.assertRaises(SystemExit) as raised:
-                    env_reads.main(str(self.names), [str(self.sources)])
-        self.assertIn("cannot enumerate OCaml source files", str(raised.exception))
-        self.assertIn(str(self.denied), str(raised.exception))
-        self.assertNotIn("no direct environment read", output.getvalue())
+            self.assert_incomplete_walk_fails()
+
+    def test_environment_scan_rejects_an_unknown_entry_type(self):
+        with mock.patch("os.scandir", side_effect=self.deny_entry_type):
+            # os.walk treats is_dir errors as non-directories; the existing
+            # byte-cut caller retains that behavior, while this scan fails.
+            self.assertEqual(list(byte_cut.source_files([str(self.sources)])), [str(self.safe)])
+            self.assert_incomplete_walk_fails()
+
+    def test_environment_scan_rejects_lstat_error(self):
+        with mock.patch("os.lstat", side_effect=self.deny_lstat):
+            self.assert_incomplete_walk_fails()
+
+    def test_environment_scan_rejects_unavailable_entry_treated_as_a_file(self):
+        def vanish(path):
+            return self.deny_entry_type(path, vanished=True)
+
+        def missing_lstat(path, *args, **kwargs):
+            if Path(path) == self.denied:
+                raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(path))
+            return self.real_lstat(path, *args, **kwargs)
+
+        with mock.patch("os.scandir", side_effect=vanish), mock.patch("os.lstat", side_effect=missing_lstat):
+            self.assertEqual(list(byte_cut.source_files([str(self.sources)])), [str(self.safe)])
+            self.assert_incomplete_walk_fails()
+
+    def test_strict_walk_preserves_excluded_directories(self):
+        for name in byte_cut.SKIPPED_DIRECTORIES:
+            directory = self.sources / name
+            directory.mkdir()
+            (directory / "skipped.ml").write_text('let x = Sys.getenv_opt "MASC_KEEPER_DEBUG"\n', encoding="utf-8")
+        roots = [str(self.sources)]
+        expected = {str(self.safe), str(self.hidden)}
+        self.assertEqual(set(byte_cut.source_files(roots)), expected)
+        self.assertEqual(set(byte_cut.source_files(roots, strict=True)), expected)
+
+    def test_strict_walk_preserves_symlink_policy(self):
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        (outside / "outside.ml").write_text('let x = Sys.getenv_opt "MASC_KEEPER_DEBUG"\n', encoding="utf-8")
+        self.hidden.write_text('let x = Sys.getenv_opt "HOME"\n', encoding="utf-8")
+        try:
+            (self.sources / "dir_link").symlink_to(outside, target_is_directory=True)
+            (self.sources / "dir_link.ml").symlink_to(outside, target_is_directory=True)
+            (self.sources / "file_link.ml").symlink_to(outside / "outside.ml")
+        except OSError as error:
+            self.skipTest(f"symlinks unavailable: {error}")
+
+        roots = [str(self.sources)]
+        expected = {str(self.safe), str(self.hidden), str(self.sources / "file_link.ml")}
+        self.assertEqual(set(byte_cut.source_files(roots)), expected)
+        self.assertEqual(set(byte_cut.source_files(roots, strict=True)), expected)
+        with self.assertRaises(SystemExit) as raised:
+            env_reads.main(str(self.names), roots)
+        self.assertIn(str(self.sources / "file_link.ml"), str(raised.exception))
+        self.assertNotIn(str(self.sources / "dir_link"), str(raised.exception))
 
     def test_complete_walk_reports_the_hidden_violation(self):
         with self.assertRaises(SystemExit) as raised:

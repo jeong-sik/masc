@@ -334,15 +334,11 @@ def self_test():
             sys.exit(f"the scanner {verdict} a read across files: {binder!r} / {reader!r}")
 
 
-def raise_walk_error(error):
-    raise error
-
-
 def main(names_path, roots):
     self_test()
     names = read_names(names_path)
     try:
-        paths = sorted(source_files(roots, onerror=raise_walk_error))
+        paths = sorted(source_files(roots, strict=True))
     except OSError as error:
         sys.exit(f"cannot enumerate OCaml source files: {error}")
     if not paths:

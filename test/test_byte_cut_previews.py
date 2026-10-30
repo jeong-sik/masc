@@ -28,6 +28,7 @@ usage: test_byte_cut_previews.py <source root>...
 
 import os
 import re
+import stat
 import sys
 
 SKIPPED_DIRECTORIES = {"_build", "test", ".git", "node_modules"}
@@ -282,11 +283,41 @@ def findings(text):
     return found
 
 
-def source_files(roots, *, onerror=None):
+def strict_walk(root):
+    """Walk without suppressing directory enumeration or metadata errors."""
+    stack = [root]
+    while stack:
+        directory = stack.pop()
+        names = []
+        files = []
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                # These names cannot be source files; skip them before asking
+                # for metadata, even when their directories are unreadable.
+                if entry.name in SKIPPED_DIRECTORIES and not entry.name.endswith(".ml"):
+                    continue
+                if entry.is_dir():
+                    names.append(entry.name)
+                else:
+                    # DirEntry.is_dir() may return False when an entry has
+                    # disappeared. Check the entry itself before ignoring it.
+                    os.lstat(entry.path)
+                    files.append(entry.name)
+        yield directory, names, files
+        for name in reversed(names):
+            path = os.path.join(directory, name)
+            # Like os.walk(followlinks=False), do not descend into directory
+            # symlinks. Unlike os.path.islink, lstat does not hide errors.
+            if not stat.S_ISLNK(os.lstat(path).st_mode):
+                stack.append(path)
+
+
+def source_files(roots, *, strict=False):
     for root in roots:
         if not os.path.isdir(root):
             sys.exit(f"source root {root} is not a directory")
-        for directory, names, files in os.walk(root, onerror=onerror):
+        walk = strict_walk(root) if strict else os.walk(root)
+        for directory, names, files in walk:
             names[:] = [name for name in names if name not in SKIPPED_DIRECTORIES]
             for name in files:
                 if name.endswith(".ml"):

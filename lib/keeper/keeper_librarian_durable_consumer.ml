@@ -49,6 +49,14 @@ type error =
       ; atom_bound : (int * float) option
       ; official_bound : (int * float) option
       }
+  | Counterpart_input_capacity_refused of
+      { turn_ref : Ids.Turn_ref.t
+      ; atom_range : Keeper_memory_os_current.durable_range_id option
+      ; official_range : Keeper_memory_os_current.official_range_id option
+      ; observation_count : int
+      ; observation_bytes : int
+      ; reports : Keeper_librarian_runtime.not_committed list
+      }
   | Counterpart_observations_unreadable of Keeper_librarian_input_sources.read_error
   | Progress_write_failed of P.write_error
   | Official_progress_unreadable of O.read_error
@@ -77,10 +85,35 @@ let publication_unfinished = function
   | Boundary_log_unreadable _ | Progress_unreadable _ | Checkpoint_unreadable _
   | Position_in_other_trace _ | Position_not_in_history _ | Range_stopped _
   | Range_end_boundary_missing _ | Progress_boundary_missing _ | Memory_snapshot_unreadable _
-  | Counterpart_interval_non_monotone _ | Counterpart_observations_unreadable _
+  | Counterpart_interval_non_monotone _ | Counterpart_input_capacity_refused _
+  | Counterpart_observations_unreadable _
   | Progress_write_failed _ | Official_progress_unreadable _ | Official_progress_write_failed _
   | Official_progress_boundary_missing _ | Committed_official_range_mismatch
   | Official_range_stopped _ | Fragment_store_unreadable _ | Fragment_line_unreadable _ -> false
+;;
+
+let refused_original original reports =
+  let input = Capture.input original in
+  let capacity_only (report : Keeper_librarian_runtime.not_committed) =
+    report.input_capacity_only
+    && report.input_capacity_evidence = Keeper_librarian_runtime.Input_capacity_refused
+    && not report.smaller_range_meets_same_failure
+    && match report.message_descent with
+       | Keeper_librarian_runtime.Invalid_output_blocks_descent -> false
+       | No_descent_evidence | Smaller_input_may_help -> true
+  in
+  if input.messages = [] && input.tool_observations = []
+     && input.counterpart_observations <> []
+     && reports <> [] && List.for_all capacity_only reports
+  then Error (Counterpart_input_capacity_refused
+    { turn_ref = input.turn_ref
+    ; atom_range = Capture.range_id original
+    ; official_range = Capture.official_range_id original
+    ; observation_count = List.length input.counterpart_observations
+    ; observation_bytes = String.length
+        (Keeper_counterpart_observation.render_for_prompt input.counterpart_observations)
+    ; reports })
+  else Ok (Memory_not_committed reports)
 ;;
 
 let fragment_file_to_string = function
@@ -151,6 +184,27 @@ let error_to_string = function
       "counterpart interval is not monotone: after=%.17g before=%.17g first_boundary_line=%d end_boundary_line=%d atom_bound=%s official_bound=%s"
       after before first_boundary_line end_boundary_line
       (show_bound atom_bound) (show_bound official_bound)
+  | Counterpart_input_capacity_refused
+      { turn_ref; atom_range; official_range; observation_count; observation_bytes; reports } ->
+    let atom = match atom_range with
+      | None -> "none"
+      | Some (range : Keeper_memory_os_current.durable_range_id) ->
+        Printf.sprintf "trace=%s,start_atom=%d,end_atom=%d,end_boundary_line=%d"
+          range.trace_id range.start_atom range.end_atom range.end_boundary_line in
+    let official = match official_range with
+      | None -> "none"
+      | Some (range : Keeper_memory_os_current.official_range_id) ->
+        Printf.sprintf "after_boundary_line=%d,turns=%s" range.after_boundary_line
+          (Yojson.Safe.to_string (`List (List.map (fun (line, turn_ref) ->
+             `List [`Int line; Ids.Turn_ref.to_yojson turn_ref]) range.turns))) in
+    Printf.sprintf
+      "counterpart-only input refused by input-capacity boundary: turn_ref=%s atom_range=(%s) official_range=(%s) observations=%d observation_bytes=%d; full source retained without truncation, cursors and external ACK unchanged; requires capacity for the complete original input: %s"
+      (Yojson.Safe.to_string (Ids.Turn_ref.to_yojson turn_ref)) atom official
+      observation_count observation_bytes
+      (String.concat "; " (List.map (fun (report : Keeper_librarian_runtime.not_committed) ->
+         Printf.sprintf "%s; provider_input_refusals=[%s]" report.detail
+           (String.concat "," (List.map Keeper_librarian_input_refusal.to_string
+             report.provider_input_refusals))) reports))
   | Counterpart_observations_unreadable error ->
     Keeper_librarian_input_sources.read_error_to_string error
   | Progress_write_failed error -> P.write_error_to_string error
@@ -632,7 +686,7 @@ type message_floor =
   | Runtime_message_floor of Keeper_lane_cli_oneshot.runner option
 
 let floor_refusal detail : Keeper_librarian_runtime.not_committed =
-  {input_capacity_evidence=No_input_capacity_refusal;provider_input_refusals=[];
+  {input_capacity_evidence=No_input_capacity_refusal;input_capacity_only=false;provider_input_refusals=[];
    message_descent=No_descent_evidence;
    detail;walk_shows_size=false;smaller_range_meets_same_failure=false}
 
@@ -1125,6 +1179,7 @@ let consume_one_with_extent
               | Position_not_in_history _ | Range_stopped _
               | Range_end_boundary_missing _ | Progress_boundary_missing _
               | Memory_snapshot_unreadable _ | Counterpart_interval_non_monotone _
+              | Counterpart_input_capacity_refused _
               | Counterpart_observations_unreadable _ | Progress_write_failed _
               | Official_progress_unreadable _ | Official_progress_write_failed _
               | Official_progress_boundary_missing _
@@ -1586,7 +1641,7 @@ let consume_one_with_extent
           (No_message_floor | Runtime_message_floor _) -> result in
       match result with
       | Memory_pending -> Ok Pending
-      | Memory_refused reports -> Ok (Memory_not_committed reports)
+      | Memory_refused reports -> refused_original original reports
       | Memory_committed ->
         let* _ = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Keeper_memory_os_current.committed_unread_messages
@@ -1646,6 +1701,7 @@ let consume_one_with_progress_writer_and_floor
    | (Error (Range_stopped _), _) | (Error (Range_end_boundary_missing _), _)
    | (Error (Progress_boundary_missing _), _) | (Error (Memory_snapshot_unreadable _), _)
    | (Error (Counterpart_interval_non_monotone _), _)
+   | (Error (Counterpart_input_capacity_refused _), _)
    | (Error (Counterpart_observations_unreadable _), _) | (Error (Progress_write_failed _), _)
    | (Error (Official_progress_unreadable _), _) | (Error (Official_progress_write_failed _), _)
    | (Error (Official_progress_boundary_missing _), _)

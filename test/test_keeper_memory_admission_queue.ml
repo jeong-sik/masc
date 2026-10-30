@@ -803,6 +803,7 @@ let test_size_with_a_same_failure_is_deferred_whole () =
       input_capacity_evidence =
         (if capacity then Masc.Keeper_librarian_runtime.Input_capacity_refused
          else Masc.Keeper_librarian_runtime.No_input_capacity_refusal);
+      input_capacity_only = capacity && not same;
       provider_input_refusals = []; smaller_range_meets_same_failure = same } in
   let name = function
     | Worker.Input_size_refused _ -> "split" | Worker.Deferred _ -> "defer"

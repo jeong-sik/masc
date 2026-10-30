@@ -88,6 +88,13 @@ type message_descent =
 
 type not_committed =
   { input_capacity_evidence : input_capacity_evidence
+  ; input_capacity_only : bool
+      (** Derived from {!Keeper_exact_walk_failure.input_capacity_only} for
+          the complete failed walk. Unlike [input_capacity_evidence], this
+          also excludes output limits, timeouts and incomplete/missing output
+          alongside an input refusal. Reports without typed failure evidence
+          answer false.
+          This observation grants no authority to consume or split input. *)
   ; message_descent : message_descent
       (** Whole-walk policy, independent of measured historical fitting and
           actual exhausted API evidence used to authorize unread records. *)

@@ -3022,12 +3022,14 @@ let test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports ()
   let module Runtime = Masc.Keeper_librarian_runtime in
   let reports = if not with_reports then [] else
     [ { Runtime.input_capacity_evidence = Runtime.Input_capacity_refused
+      ; input_capacity_only = true
       ; provider_input_refusals = [Masc.Keeper_librarian_input_refusal.Request_body_refused]
       ; detail = "provider refused the input"
       ; walk_shows_size = true
       ; message_descent = Runtime.Smaller_input_may_help
       ; smaller_range_meets_same_failure = false }
     ; { Runtime.input_capacity_evidence = Runtime.No_input_capacity_refusal
+      ; input_capacity_only = false
       ; provider_input_refusals = []
       ; detail = "later slot did not report input size"
       ; walk_shows_size = false
@@ -4165,6 +4167,129 @@ let test_untagged_turn_preserves_counterparts ~fail_position_after_commit () =
    | Consumer.Nothing_to_read -> () | _ -> fail "settled input remains unread")
 ;;
 
+let test_untagged_non_monotone_interval_exposes_source_positions () =
+  with_workspace @@ fun config ->
+  let previous_trace = "trace-old-official-clock" in
+  let trace_id = "trace-new-official-clock" in
+  write_meta config previous_trace;
+  append_official_boundary config ~trace_id:previous_trace ~turn:1 ~recorded_at:20.;
+  (match Official.write ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name {Official.boundary_line=1} with
+   | Ok () -> () | Error error -> fail (Official.write_error_to_string error));
+  write_meta config trace_id;
+  let path = Masc.Keeper_turn_fragments.path
+      ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_id)
+      Masc.Keeper_turn_fragments.Main in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path
+    ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"untagged"}]}|} ^ "\n");
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:10.;
+  List.iter (fun () ->
+    match Consumer.consume_one ~config ~keeper_name
+        ~commit:(fun _ -> fail "empty fragments cannot bypass the inverted interval") with
+    | Error (Consumer.Counterpart_interval_non_monotone
+        {after;before;first_boundary_line;end_boundary_line;atom_bound;official_bound}) ->
+      check int "the stopped first boundary is visible" 2 first_boundary_line;
+      check int "the stopped last boundary is visible" 2 end_boundary_line;
+      check (float 0.001) "the exact lower clock is visible" 20. after;
+      check (float 0.001) "the exact upper clock is visible" 10. before;
+      check (option (pair int (float 0.001))) "there is no preceding atom witness" None atom_bound;
+      check (option (pair int (float 0.001))) "the preceding official boundary and clock are visible"
+        (Some (1,20.)) official_bound
+    | Error error -> fail (Consumer.error_to_string error)
+    | Ok _ -> fail "an empty backwards-clock turn advanced") [();()];
+  (match read_official config with
+   | Some progress -> check int "repeated stopped passes preserve the original cursor" 1 progress.boundary_line
+   | None -> fail "the official cursor was removed");
+  check bool "repeated stopped passes create no atom cursor" true (Option.is_none (read_progress config))
+;;
+
+let test_counterpart_capacity_refusal_preserves_complete_source () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-counterpart-capacity" in
+  let module Runtime = Masc.Keeper_librarian_runtime in
+  write_meta config trace_id;
+  let content = "first byte\n" ^ String.make 65536 'x' ^ "\nlast byte" in
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External } in
+  Keeper_chat_store.append_user_message ~base_dir:config.Workspace.base_path ~keeper_name
+    ~speaker ~content ();
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:(Time_compat.now () +. 10.);
+  let module Failure = Masc.Keeper_exact_walk_failure in
+  let module Exact = Agent_core.Exact_output in
+  let capacity = Failure.of_cause (Exact.Provider_response_refused
+      {http_status=413;refusal=Request_body_refused;retry_after_s=None}) in
+  let report = Runtime.not_committed_of_failure
+      ~detail:"the provider refused this complete request body" capacity in
+  let original = ref None in
+  let check_input value =
+    let input = Original.input value in
+    check (list string) "no part of the counterpart text is truncated" [content] (counterpart_contents input);
+    original := Some value in
+  (match Consumer.consume_one ~config ~keeper_name ~commit:(fun value ->
+       check_input value; Consumer.Memory_refused [report]) with
+   | Error (Consumer.Counterpart_input_capacity_refused
+       { turn_ref; atom_range; official_range; observation_count; observation_bytes; reports }) ->
+     check string "refusal names the exact source trace" trace_id (Ids.Turn_ref.trace_id turn_ref);
+     check int "whole observation remains one source item" 1 observation_count;
+     check bool "byte measurement includes the complete content and JSON envelope" true
+       (observation_bytes > String.length content);
+     check bool "capacity evidence is retained without rewriting it" true (reports = [report]);
+     check bool "official-only input does not invent an atom receipt" true (Option.is_none atom_range);
+     (match official_range with
+      | Some range -> check (list int) "the unconsumed source line is addressable" [1] (List.map fst range.turns)
+      | None -> fail "source boundary coordinates are absent")
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "capacity refusal was not explicit");
+  check bool "capacity refusal keeps the official cursor unread" true (Option.is_none (read_official config));
+  (match !original with
+   | None -> fail "the complete original was not captured"
+   | Some value ->
+     let restored = Original.of_json (Original.to_json value) |> Result.map_error Original.error_to_string in
+     (match restored with Ok restored -> check_input restored | Error detail -> fail detail));
+  let ordinary = {report with Runtime.input_capacity_evidence = Runtime.No_input_capacity_refusal;
+    input_capacity_only = false;
+    provider_input_refusals = []; message_descent = Runtime.No_descent_evidence;
+    smaller_range_meets_same_failure = true; detail = "transport failed without a size judgment"} in
+  List.iter (fun reports ->
+    match consume config (fun value -> check_input value; Consumer.Memory_refused reports) with
+    | Consumer.Memory_not_committed actual -> check bool "non-capacity failure retains its actual report" true (actual=reports)
+    | _ -> fail "ordinary or mixed failure was mislabeled capacity refusal")
+    [[ordinary]; [report; ordinary]; [{report with Runtime.message_descent=Runtime.Invalid_output_blocks_descent}]];
+  List.iter (fun cause ->
+    let other = Failure.of_cause cause in
+    List.iter (fun evidence ->
+      let mixed = Runtime.not_committed_of_failure ~detail:"one mixed failed walk" evidence in
+      check bool "an earlier non-capacity visit survives the last capacity refusal" false
+        mixed.input_capacity_only;
+      (match consume config (fun value -> check_input value; Consumer.Memory_refused [mixed]) with
+       | Consumer.Memory_not_committed [actual] ->
+         check bool "the one aggregate report remains an ordinary refusal" true (actual=mixed)
+       | _ -> fail "a mixed walk was mislabeled as a capacity-only refusal"))
+      [Failure.combine other capacity;Failure.combine capacity other])
+    [Exact.Output_limit_reached;Incomplete_output;Missing_output;Ambiguous_output 2;
+     Unexpected_output_content;Response_body_deadline_exceeded;Invalid_json_output;
+     Provider_response_refused {http_status=408;refusal=Timeout;retry_after_s=None};
+     Provider_response_refused {http_status=503;refusal=Network_error;retry_after_s=None};
+     Provider_response_refused {http_status=400;refusal=Refusal_body_not_received;retry_after_s=None}];
+  let unknown = Runtime.not_committed_of_failure ~detail:"runtime was not run"
+      (Failure.of_cli_failure (Masc.Keeper_lane_cli_oneshot.Unknown_runtime {runtime_id="missing-slot"})) in
+  (match consume config (fun value -> check_input value; Consumer.Memory_refused [unknown]) with
+   | Consumer.Memory_not_committed [actual] -> check bool "unexecuted unknown remains ordinary" true (actual=unknown)
+   | _ -> fail "unknown runtime was mislabeled as a capacity-only refusal");
+  (match consume config (fun value -> check_input value; Consumer.Memory_pending) with
+   | Consumer.Pending -> () | _ -> fail "pending work was mislabeled a capacity refusal");
+  check bool "all refusals and Pending leave the official position intact" true (Option.is_none (read_official config));
+  (match consume config (fun value ->
+       check_input value;
+       commit_pending_memory config ~expected_revision:(Original.expected_revision value)
+         ~range_id:(Original.range_id value) ~official_range_id:(Original.official_range_id value)
+         (Original.input value)) with
+   | Consumer.Official_advanced {atom=None;official} -> check int "a later complete-input commit advances once" 1 official.boundary_line
+   | _ -> fail "the intact source could not be reprocessed")
+;;
+
 let test_untagged_turn_with_unreadable_counterparts_keeps_cursor () =
   with_workspace @@ fun config ->
   let trace_id = "trace-untagged-unreadable-counterpart" in
@@ -5034,6 +5159,10 @@ let () =
             (test_untagged_turn_preserves_counterparts ~fail_position_after_commit:false)
         ; test_case "untagged counterparts recover a failed cursor write" `Quick
             (test_untagged_turn_preserves_counterparts ~fail_position_after_commit:true)
+        ; test_case "untagged non-monotone interval exposes source positions" `Quick
+            test_untagged_non_monotone_interval_exposes_source_positions
+        ; test_case "counterpart capacity refusal preserves complete source" `Quick
+            test_counterpart_capacity_refusal_preserves_complete_source
         ; test_case "untagged turn cannot skip unreadable counterpart input" `Quick
             test_untagged_turn_with_unreadable_counterparts_keeps_cursor
         ; test_case "a refused fragment line stops the pass" `Quick

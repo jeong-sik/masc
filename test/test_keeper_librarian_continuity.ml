@@ -2215,7 +2215,8 @@ let test_reports_in_one_pass_keep_any_size_verdict () =
   let report ?(same = false) detail walk_shows_size =
     { R.detail; walk_shows_size; smaller_range_meets_same_failure = same;
       message_descent=(if walk_shows_size then R.Smaller_input_may_help else R.No_descent_evidence);
-      input_capacity_evidence = R.No_input_capacity_refusal; provider_input_refusals = [] } in
+      input_capacity_evidence = R.No_input_capacity_refusal; input_capacity_only = false;
+      provider_input_refusals = [] } in
   List.iter
     (fun (name, earlier, (latest : R.not_committed), expected) ->
        let merged = merge earlier latest in

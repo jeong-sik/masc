@@ -8,6 +8,7 @@ type t =
   ; named_input_capacity : bool
   ; invalid_output : bool
   ; size_independent_execution_failure : bool
+  ; non_capacity_execution_failure : bool
   ; measured_cli_capacity : Keeper_lane_cli_oneshot.input_capacity option
   ; provider_input_refusals : Input_refusal.t list
   }
@@ -17,19 +18,23 @@ let empty =
   ; named_input_capacity = false
   ; invalid_output = false
   ; size_independent_execution_failure = false
+  ; non_capacity_execution_failure = false
   ; measured_cli_capacity = None
   ; provider_input_refusals = []
   }
 ;;
 
-let invalid_output = { empty with invalid_output = true }
+let invalid_output = { empty with invalid_output = true; non_capacity_execution_failure = true }
 let input_capacity_refusal =
   { empty with historical_range_size = true; named_input_capacity = true }
 ;;
-let with_invalid_output evidence = { evidence with invalid_output = true }
+let with_invalid_output evidence =
+  { evidence with invalid_output = true; non_capacity_execution_failure = true }
 let without_measured_cli_capacity evidence = { evidence with measured_cli_capacity = None }
 let shows_range_size evidence = not evidence.invalid_output && evidence.historical_range_size
 let refuses_input_capacity evidence = not evidence.invalid_output && evidence.named_input_capacity
+let input_capacity_only evidence =
+  refuses_input_capacity evidence && not evidence.non_capacity_execution_failure
 
 let larger_capacity previous observed =
   match previous, observed with
@@ -45,6 +50,8 @@ let combine left right =
   ; invalid_output = left.invalid_output || right.invalid_output
   ; size_independent_execution_failure =
       left.size_independent_execution_failure || right.size_independent_execution_failure
+  ; non_capacity_execution_failure =
+      left.non_capacity_execution_failure || right.non_capacity_execution_failure
   ; measured_cli_capacity = larger_capacity left.measured_cli_capacity right.measured_cli_capacity
   ; provider_input_refusals =
       Input_refusal.union left.provider_input_refusals right.provider_input_refusals
@@ -53,7 +60,8 @@ let combine left right =
 
 let execution ~historical_range_size ~named_input_capacity =
   { empty with historical_range_size; named_input_capacity
-  ; size_independent_execution_failure = not historical_range_size }
+  ; size_independent_execution_failure = not historical_range_size
+  ; non_capacity_execution_failure = not named_input_capacity }
 ;;
 
 let size_independent = execution ~historical_range_size:false ~named_input_capacity:false
@@ -316,7 +324,7 @@ let of_cli_observation observation = match observation.cause with
   | Claude_context_refused {tool_effect_attempted=true;response_emitted=_;message=_}
   | Claude_context_refused {tool_effect_attempted=false;response_emitted=true;message=_}
   | Native_failed (Codex | Claude | Claude_admission | Antigravity | Muse | Host) ->
-    {empty with size_independent_execution_failure=true}
+    {empty with size_independent_execution_failure=true;non_capacity_execution_failure=true}
 
 let of_cli_failure failure = of_cli_observation (cli_observation failure)
 let cli_observation_of_yojson json =

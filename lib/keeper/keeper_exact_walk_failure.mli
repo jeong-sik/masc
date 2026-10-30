@@ -6,6 +6,12 @@ type t = private
   ; named_input_capacity : bool
   ; invalid_output : bool
   ; size_independent_execution_failure : bool
+  ; non_capacity_execution_failure : bool
+      (** An API or CLI walk failure that did not establish input capacity,
+          including completion errors before generation dispatch and historical
+          range-fitting causes such as timeouts and output limits. Local
+          candidate rejections remain neutral. This observation does not prove
+          generation dispatch and is independent of both sizing policies. *)
   ; measured_cli_capacity : Keeper_lane_cli_oneshot.input_capacity option
   ; provider_input_refusals : Keeper_librarian_input_refusal.t list
       (** Distinct, canonically ordered named causes across the walk. These are
@@ -33,6 +39,13 @@ val refuses_input_capacity : t -> bool
     partitioning must additionally reject [size_independent_execution_failure],
     as the original Parts proof checker does. Neither derived observation
     erases the independent failures or measured CLI limits retained in [t]. *)
+
+val input_capacity_only : t -> bool
+(** Named input-capacity evidence with no invalid output or observed
+    non-capacity execution failure anywhere in the failed walk. A later
+    capacity refusal cannot hide an earlier timeout, incomplete output,
+    output limit or other failure. This is a diagnostic classification;
+    it grants no partition, consumption or unread-message authority. *)
 
 val of_cause : Agent_core.Exact_output.execution_error_cause -> t
 val of_disposition : Agent_core.Exact_output.candidate_rejection_disposition -> t

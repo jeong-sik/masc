@@ -10,6 +10,8 @@ related: ["0032"]
 
 # RFC: 설정은 env 이름이 아니라 typed 값으로 읽는 곳에 닿는다
 
+> 갱신(2026-10-29): 비목표의 "env 입력 유지"와 "우선순위 유지"는 `runtime.toml` 에 키가 있는 설정에 한해 RFC `runtime-settings-have-one-owner` 가 바꾼다.
+
 ## 0. Summary
 
 Keeper 런타임 설정은 지금 env 이름을 전달 경로로 쓴다. `runtime.toml` 의 값은 부팅 때 그

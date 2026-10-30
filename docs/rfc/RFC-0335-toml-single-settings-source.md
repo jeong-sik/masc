@@ -8,7 +8,7 @@ status: Draft
 - **Status:** Draft
 - **Authors:** Vincent (yousleepwhen)
 - **Created:** 2026-07-09
-- **Related:** RFC-0274 (workspace base-path SSOT), RFC-0032 (env-knob unification), RFC-0317 (in-process Slack gateway)
+- **Related:** RFC-0274 (workspace base-path SSOT), RFC-0032 (env-knob unification), RFC-0317 (in-process Slack gateway), RFC-runtime-settings-have-one-owner (W2·W3 redesign on the settings registry)
 - **Supersedes:** dotenv sourcing in `start-masc.sh`; env-as-config reads across `env_config_*` and call sites
 
 ## TL;DR

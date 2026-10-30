@@ -51,9 +51,16 @@ admission still checks that pin.
 To replace your own open change request after rereview, pass
 `--replace-own-cr REVIEW_ID` alongside the reviewed base, diff and PASS body.
 The ID may name any of your open CRs on that PR; repeat the option to name
-several. Every ID is checked against the authenticated account and actual CR
-state. A new approval supersedes that account's previous formal decision without
-dismissing another review. Replacement flags cannot authorize merge or receipts.
+several. Every ID is checked against the authenticated account, actual CR state,
+and matching claimed Keeper; a different or missing claim remains unresolved.
+Each Keeper can replace their own requests separately; other unresolved requests
+continue to block receipt and merge. Replacement flags cannot authorize merge or
+receipts by themselves. Claimed names do not authenticate Keeper sessions.
+Review IDs do not establish publication order: the guard compares submission
+times when choosing the latest formal review and when validating a replacement.
+Missing times or ties for an account's latest formal review refuse ordering.
+An older tie is allowed, but an approval must be strictly later than the request
+it replaces; a same-time approval cannot clear it.
 
 `review-decisions.py` reduces structured review/comment decisions independently
 for each authenticated GitHub login. A later trusted PASS can supersede only

@@ -145,8 +145,8 @@ admit_review() {
     --base-sha "$pr_base_sha" --current-diff "$current_diff" --release-run "${release_run:-}"
 }
 review_rows() {
-  ci_gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | [.user.login, (.id|tostring), .state] | @tsv' |
-    sort -t "$(printf '\t')" -k1,1 -k2,2nr
+  ci_gh_json "repos/$repo/pulls/$pr/reviews?per_page=100" '.[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "DISMISSED") | @json' |
+    python3 "$here/review-formal-order.py"
 }
 check_reviews() {
   local all_rows rows who rid state bound scope_status review_json admit_status replacement_id owned_state actor_id

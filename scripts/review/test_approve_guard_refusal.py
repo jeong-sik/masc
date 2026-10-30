@@ -77,7 +77,8 @@ class GuardHarness(unittest.TestCase):
         self.scripts.mkdir()
         for name in ("approve-guard.sh", "ci-checks.sh", "review-verdict.sh", "review-decisions.py",
                      "review-scope.py", "review-refusal.py", "_gh_merge_base.py",
-                     "prepare-approved-batch.py", "review-commit-accounts.py", "review-cr-ownership.py"):
+                     "prepare-approved-batch.py", "review-commit-accounts.py", "review-cr-ownership.py",
+                     "review-formal-order.py"):
             shutil.copy(HERE / name, self.scripts / name)
         # The real review-diff.py needs Git objects; the diff identity is a fixed fixture here.
         (self.scripts / "review-diff.py").write_text(f"#!/usr/bin/env python3\nprint('{DIFF}')\n")
@@ -646,6 +647,76 @@ class VerdictWithdrawalCase(GuardHarness):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn("unresolved change requests", result.stderr)
 
+    def test_source_receipt_uses_submission_order_when_review_ids_are_reversed(self):
+        footer = footer_line().replace(" · reviewed base", " · replaces own CHANGES_REQUESTED 90 · reviewed base")
+        self.review(footer)
+        approval = json.loads((self.data / "review.json").read_text())
+        approval.update(id=77, submitted_at="2026-10-10T03:45:54Z")
+        approval["user"]["login"] = "reviewer-account"
+        (self.data / "review.json").write_text(json.dumps(approval))
+        request = self.negative_review(rid=90, submitted="2026-10-08T03:45:54Z")
+        request["body"] = f"verdict: FAIL head: {'a' * 40} by: reviewer-keeper\nold-head finding"
+        self.reviews(request, approval)
+        result = self.run_guard("--source-receipt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        request["submitted_at"] = "2026-10-11T03:45:54Z"
+        self.reviews(request, approval)
+        result = self.run_guard("--source-receipt")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("open CHANGES_REQUESTED", result.stderr)
+
+    def test_old_tied_approvals_do_not_block_a_unique_latest_approval(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        old1 = dict(approval, id=77, submitted_at="2026-10-07T03:45:54Z")
+        old2 = dict(approval, id=78, submitted_at="2026-10-07T03:45:54Z")
+        latest = dict(approval, id=79, submitted_at="2026-10-08T03:45:54Z")
+        self.reviews(old1, old2, latest)
+        (self.data / "review.json").write_text(json.dumps(latest))
+        for mode in ("--check", "--source-receipt", "--merge-check"):
+            with self.subTest(mode=mode):
+                result = self.run_guard(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tied_latest_request_and_approval_still_refuse(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        older = dict(approval, id=77, submitted_at="2026-10-07T03:45:54Z")
+        latest = dict(approval, id=79, submitted_at="2026-10-08T03:45:54Z")
+        request = self.negative_review(rid=78, login="reviewer-keeper")
+        self.reviews(older, request, latest)
+        (self.data / "review.json").write_text(json.dumps(latest))
+        for mode in ("--check", "--source-receipt"):
+            with self.subTest(mode=mode):
+                result = self.run_guard(mode)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("ambiguous submission times", result.stderr)
+
+    def test_old_tied_request_stays_open_until_later_explicit_replacement(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        request = self.negative_review(rid=88, login="reviewer-keeper",
+                                       submitted="2026-10-07T03:45:54Z")
+        tied = dict(approval, id=77, submitted_at="2026-10-07T03:45:54Z")
+        tied["body"] = tied["body"].replace(
+            " · reviewed base", " · replaces own CHANGES_REQUESTED 88 · reviewed base")
+        latest = dict(approval, id=79, submitted_at="2026-10-08T03:45:54Z")
+        self.reviews(request, tied, latest)
+        (self.data / "review.json").write_text(json.dumps(latest))
+        publication = self.run_guard("--check")
+        self.assertEqual(publication.returncode, 0, publication.stderr)
+        for mode in ("--source-receipt", "--merge-check"):
+            with self.subTest(mode=mode):
+                result = self.run_guard(mode)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("unresolved change requests (review IDs 88)", result.stderr)
+        latest["body"] = latest["body"].replace(
+            " · reviewed base", " · replaces own CHANGES_REQUESTED 88 · reviewed base")
+        self.reviews(request, tied, latest)
+        (self.data / "review.json").write_text(json.dumps(latest))
+        result = self.run_guard("--source-receipt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_replacement_requires_the_signed_body_in_check_mode(self):
         self.reviews(self.negative_review())
         result = self.run_guard("--check", "--replace-own-cr", "88")
@@ -1117,7 +1188,8 @@ class QueueAdmissionDiagnosticCase(GuardHarness):
         shutil.copy(HERE / "queue-ledger.sh", self.scripts / "queue-ledger.sh")
         request = {"id": 88, "state": "CHANGES_REQUESTED",
                    "body": "Please fix the unresolved finding.",
-                   "user": {"login": "blocked-reviewer"}}
+                   "user": {"login": "blocked-reviewer"},
+                   "submitted_at": "2026-10-08T03:45:54Z"}
         (self.data / "reviews.json").write_text(json.dumps([request]))
         gh = self.tmp / "gh"
         gh.write_text(gh.read_text().replace('shift\n',

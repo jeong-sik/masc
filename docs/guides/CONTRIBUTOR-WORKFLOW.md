@@ -276,7 +276,10 @@ requests separately, and those requests continue to block consumption. An
 unsigned request or a request signed by another Keeper cannot be claimed just
 because the GitHub account is shared; its actual owner must resolve it. The
 guard compares claims in review bodies, not authenticated Keeper sessions, so
-verify actual ownership separately.
+verify actual ownership separately. Replacement order is determined from
+submission times, not review IDs. Missing times or a tie for an account's latest
+formal review leave ordering unavailable; a replacement must be strictly later
+than its request.
 Existing CRs and comment verdicts do not prevent recording a new independent
 approval from a different account. At merge/receipt consumption, each account's
 unresolved FAIL/HOLD still blocks: a PASS from another account, including the PR

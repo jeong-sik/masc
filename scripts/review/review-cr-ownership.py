@@ -33,6 +33,14 @@ def actor_id(review):
     return value if type(value) is int and value > 0 else None
 
 
+def submitted_at(review):
+    """An unknown publication time cannot establish replacement order."""
+    try:
+        return decisions.timestamp(review.get("submitted_at"), "submitted_at")
+    except ValueError:
+        return None
+
+
 def header(review, wanted):
     body = review.get("body")
     if not isinstance(body, str):
@@ -75,19 +83,24 @@ def outstanding(pages):
     if (len(ids) != len(records) or any(type(i) is not int or i < 1 for i in ids)
             or len(set(ids)) != len(ids)):
         raise ValueError("invalid or duplicate review id")
+    # IDs identify reviews, but can predate their submission (for example a
+    # draft review). Collect CRs first and compare actual publication times.
     pending = {}
-    for review in sorted(records, key=lambda r: r["id"]):
-        state = review.get("state")
-        if state == "CHANGES_REQUESTED":
+    for review in records:
+        if review.get("state") == "CHANGES_REQUESTED":
             match = header(review, "FAIL")
-            pending[review["id"]] = (actor_id(review), match[4] if match else None)
-        elif state == "APPROVED":
+            pending[review["id"]] = (actor_id(review), match[4] if match else None,
+                                     submitted_at(review))
+    for review in records:
+        if review.get("state") == "APPROVED":
             match = header(review, "PASS")
             body = review.get("body")
             lines = body.split("\n") if isinstance(body, str) else []
             footer = FOOTER.fullmatch(next((line for line in reversed(lines) if line), ""))
             actor = actor_id(review)
+            approved_at = submitted_at(review)
             if (match is None or footer is None or footer[1] != match[2] or actor is None
+                    or approved_at is None
                     or (footer[2] == "source" and (match[3] is not None or footer[3] is not None))
                     or (footer[2] == "release" and (match[3] is None or footer[3] != match[3]))
                     or not has_scope(lines)
@@ -95,9 +108,11 @@ def outstanding(pages):
                 continue
             for value in footer[4].split():
                 request_id = int(value)
-                if pending.get(request_id) == (actor, match[4]):
+                candidate = pending.get(request_id)
+                if (candidate is not None and candidate[:2] == (actor, match[4])
+                        and candidate[2] is not None and candidate[2] < approved_at):
                     del pending[request_id]
-    return tuple((rid, *pending[rid]) for rid in sorted(pending))
+    return tuple((rid, *pending[rid][:2]) for rid in sorted(pending))
 
 
 def main():

@@ -68,7 +68,13 @@ val load_and_apply : base_path:string -> (int, load_failure) result
 
     Validates the registry's effective readers before applying overrides, even
     with no TOML file. Strict malformed environment input is a [Validate]
-    failure at startup rather than a later Keeper-cycle exception. *)
+    failure at startup rather than a later Keeper-cycle exception.
+
+    Validates them again once the file's values are applied, because a reader
+    checks what a value means and the type and range check of each key does
+    not: a blank [autonomous.wake_prompt] is a [Validate] failure that names
+    the key, not an exception on every autonomous turn. A load that fails this
+    way restores the boot override store to what it held before the load. *)
 
 (** Read the raw TOML value for [env_name] from the shadow registry.
     Returns [None] when the key was absent from [runtime.toml]

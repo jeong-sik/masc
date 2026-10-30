@@ -6,7 +6,10 @@
    returns, while the name is not declared, proves the reader consults the
    environment. Once the loader has declared the names, the same environment
    value must change nothing, and the boot store must answer exactly as the
-   environment did. *)
+   environment did.
+
+   The loader also runs each reader on what the file supplied: a value the
+   reader rejects fails the load and leaves the store as it was. *)
 open Alcotest
 
 module R = Keeper_runtime_setting_registry
@@ -111,9 +114,8 @@ let test_the_loader_declares_the_file_owned_names () =
   Config_boot_overrides.reset_for_tests ()
 ;;
 
-(* A runtime.toml whose [turn] value is outside the declared range, so the
-   load fails in validation. *)
-let with_unloadable_runtime_toml f =
+(* A base path whose runtime.toml holds [content]. *)
+let with_runtime_toml content f =
   let base_path = Filename.temp_dir "masc-file-owned" "" in
   let masc_dir = Filename.concat base_path ".masc" in
   let config_dir = Filename.concat masc_dir "config" in
@@ -121,7 +123,7 @@ let with_unloadable_runtime_toml f =
   Unix.mkdir masc_dir 0o755;
   Unix.mkdir config_dir 0o755;
   let channel = open_out_bin path in
-  output_string channel "[turn]\nstream_idle_timeout_sec = 0\n";
+  output_string channel content;
   close_out channel;
   with_env "MASC_CONFIG_DIR" None (fun () ->
     Fun.protect
@@ -136,9 +138,12 @@ let with_unloadable_runtime_toml f =
       (fun () -> f base_path))
 ;;
 
+(* A [turn] value outside the declared range, so the load fails in validation. *)
+let out_of_range_runtime_toml = "[turn]\nstream_idle_timeout_sec = 0\n"
+
 let test_a_load_that_fails_declares_nothing () =
   Config_boot_overrides.reset_for_tests ();
-  with_unloadable_runtime_toml (fun base_path ->
+  with_runtime_toml out_of_range_runtime_toml (fun base_path ->
     (match Keeper_runtime_config.load_and_apply ~base_path with
      | Ok _ -> fail "a runtime.toml with an out-of-range value was applied"
      | Error failure ->
@@ -149,6 +154,75 @@ let test_a_load_that_fails_declares_nothing () =
          check bool (row.env_name ^ " is not declared after a failed load") false
            (Config_boot_overrides.is_file_owned row.env_name))
       file_owned_rows);
+  Config_boot_overrides.reset_for_tests ()
+;;
+
+let wake_prompt_name = "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT"
+let max_bytes_name = "MASC_KEEPER_METRICS_MAX_BYTES"
+
+let mentions ~affix text =
+  let affix_length = String.length affix in
+  let rec from index =
+    index + affix_length <= String.length text
+    && (String.equal (String.sub text index affix_length) affix || from (index + 1))
+  in
+  from 0
+;;
+
+(* Both keys pass the type and range check of the file. The wake prompt's reader
+   rejects a blank one. [metrics.max_bytes] is already in the store when the
+   reader check finds that. *)
+let blank_wake_prompt_runtime_toml =
+  "[metrics]\nmax_bytes = 4096\n\n[autonomous]\nwake_prompt = \"\"\n"
+;;
+
+let test_a_value_its_reader_rejects_fails_the_load () =
+  Config_boot_overrides.reset_for_tests ();
+  with_runtime_toml blank_wake_prompt_runtime_toml (fun base_path ->
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> fail "a blank wake prompt was applied"
+     | Error failure ->
+       check bool "the load fails in validation" true
+         (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
+       check bool "the message names the runtime.toml key" true
+         (mentions ~affix:"autonomous.wake_prompt" failure.Keeper_runtime_config.message));
+    check (option string) "the rejected value is not left in the store" None
+      (Config_boot_overrides.get_opt wake_prompt_name);
+    check (option string) "a value stored before the rejection is not left either" None
+      (Config_boot_overrides.get_opt max_bytes_name);
+    check bool "the failed load declares nothing" false
+      (Config_boot_overrides.is_file_owned wake_prompt_name));
+  Config_boot_overrides.reset_for_tests ()
+;;
+
+let test_a_rejected_load_restores_what_the_store_held () =
+  Config_boot_overrides.reset_for_tests ();
+  Config_boot_overrides.set max_bytes_name "2048";
+  with_runtime_toml blank_wake_prompt_runtime_toml (fun base_path ->
+    (match Keeper_runtime_config.load_and_apply ~base_path with
+     | Ok _ -> fail "a blank wake prompt was applied"
+     | Error _ -> ());
+    check (option string) "the earlier value is back" (Some "2048")
+      (Config_boot_overrides.get_opt max_bytes_name);
+    check (option string) "the rejected value is not left" None
+      (Config_boot_overrides.get_opt wake_prompt_name));
+  Config_boot_overrides.reset_for_tests ()
+;;
+
+let test_a_value_its_reader_accepts_stays_applied () =
+  Config_boot_overrides.reset_for_tests ();
+  with_runtime_toml
+    "[metrics]\nmax_bytes = 4096\n\n[autonomous]\nwake_prompt = \"what changed?\"\n"
+    (fun base_path ->
+       (match Keeper_runtime_config.load_and_apply ~base_path with
+        | Ok count -> check int "both keys are applied" 2 count
+        | Error failure -> fail (Keeper_runtime_config.load_failure_to_string failure));
+       check (option string) "the metrics value is in the store" (Some "4096")
+         (Config_boot_overrides.get_opt max_bytes_name);
+       check (option string) "the wake prompt is in the store" (Some "what changed?")
+         (Config_boot_overrides.get_opt wake_prompt_name);
+       check bool "the names stay declared" true
+         (Config_boot_overrides.is_file_owned wake_prompt_name));
   Config_boot_overrides.reset_for_tests ()
 ;;
 
@@ -191,6 +265,12 @@ let () =
             test_the_loader_declares_the_file_owned_names
         ; test_case "a load that fails declares nothing" `Quick
             test_a_load_that_fails_declares_nothing
+        ; test_case "a value its reader rejects fails the load" `Quick
+            test_a_value_its_reader_rejects_fails_the_load
+        ; test_case "a rejected load restores what the store held" `Quick
+            test_a_rejected_load_restores_what_the_store_held
+        ; test_case "a value its reader accepts stays applied" `Quick
+            test_a_value_its_reader_accepts_stays_applied
         ; test_case "a declared name answers from the file only" `Quick
             test_a_declared_name_answers_from_the_file_only
         ; test_case "a name that is not declared still reads the environment" `Quick

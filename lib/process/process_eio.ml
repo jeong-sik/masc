@@ -60,6 +60,8 @@ let observe_process_timeout argv ~timeout_sec ~origin =
 
 type spawn_guard = { run : 'a. (unit -> 'a) -> 'a }
 
+type fallback_policy = Allow_unix_fallback | Eio_only
+
 let default_spawn_guard = { run = (fun f -> f ()) }
 let spawn_guard : spawn_guard Atomic.t = Atomic.make default_spawn_guard
 let set_spawn_guard guard = Atomic.set spawn_guard guard
@@ -848,6 +850,7 @@ let run_argv_with_stdin_and_status_split
     ?timeout_sec
     ?env
     ?cwd
+    ?(fallback_policy = Allow_unix_fallback)
     ?output_capture
     ?on_stdout_chunk
     ?on_stderr_chunk
@@ -859,19 +862,23 @@ let run_argv_with_stdin_and_status_split
     Option.iter
       (fun capture ->
         Process_output_capture.unavailable capture
-          ~message:"Unix fallback provides retained output without authoritative pipe EOF")
+          ~message:(match fallback_policy with
+            | Eio_only -> "Eio process runtime required"
+            | Allow_unix_fallback -> "Unix fallback provides retained output without authoritative pipe EOF"))
       output_capture;
-    let status, stdout, stderr =
-      run_unix_argv_with_stdin_and_status_split_fallback ?timeout_sec ?env
-        ?cwd ~stdin_content argv
-    in
-    Option.iter
-      (fun f -> if stdout <> "" then Eio_process_capture.invoke_output_chunk_callback f stdout)
-      on_stdout_chunk;
-    Option.iter
-      (fun f -> if stderr <> "" then Eio_process_capture.invoke_output_chunk_callback f stderr)
-      on_stderr_chunk;
-    status, stdout, stderr
+    match fallback_policy with
+    | Eio_only -> Unix.WEXITED 127, "", "Eio process runtime required"
+    | Allow_unix_fallback ->
+      let status, stdout, stderr =
+        run_unix_argv_with_stdin_and_status_split_fallback ?timeout_sec ?env
+          ?cwd ~stdin_content argv in
+      Option.iter
+        (fun f -> if stdout <> "" then Eio_process_capture.invoke_output_chunk_callback f stdout)
+        on_stdout_chunk;
+      Option.iter
+        (fun f -> if stderr <> "" then Eio_process_capture.invoke_output_chunk_callback f stderr)
+        on_stderr_chunk;
+      status, stdout, stderr
   in
   with_spawn_guard (fun () ->
       if not (is_initialized ()) then
@@ -918,7 +925,7 @@ let run_argv_with_stdin_and_status_split
                 (timeout_status, stdout, stderr)
             | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
-                if should_retry_unix_fallback exn then (
+                if fallback_policy = Allow_unix_fallback && should_retry_unix_fallback exn then (
                   Log.Misc.warn
                     "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
@@ -1288,6 +1295,7 @@ let run_argv_with_status_split_streaming
     ?timeout_sec
     ?env
     ?cwd
+    ?(fallback_policy = Allow_unix_fallback)
     ?output_capture
     ~on_stdout_chunk
     ~on_stderr_chunk
@@ -1300,16 +1308,20 @@ let run_argv_with_status_split_streaming
     Option.iter
       (fun capture ->
         Process_output_capture.unavailable capture
-          ~message:"Unix fallback provides retained output without authoritative pipe EOF")
+          ~message:(match fallback_policy with
+            | Eio_only -> "Eio process runtime required"
+            | Allow_unix_fallback -> "Unix fallback provides retained output without authoritative pipe EOF"))
       output_capture;
-    let status, stdout, stderr =
-      run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv
-    in
-    if not (String.equal stdout "")
-    then Eio_process_capture.invoke_output_chunk_callback on_stdout_chunk stdout;
-    if not (String.equal stderr "")
-    then Eio_process_capture.invoke_output_chunk_callback on_stderr_chunk stderr;
-    status, stdout, stderr
+    match fallback_policy with
+    | Eio_only -> Unix.WEXITED 127, "", "Eio process runtime required"
+    | Allow_unix_fallback ->
+      let status, stdout, stderr =
+        run_unix_argv_with_status_split_fallback ?timeout_sec ?env ?cwd argv in
+      if not (String.equal stdout "")
+      then Eio_process_capture.invoke_output_chunk_callback on_stdout_chunk stdout;
+      if not (String.equal stderr "")
+      then Eio_process_capture.invoke_output_chunk_callback on_stderr_chunk stderr;
+      status, stdout, stderr
   in
   with_spawn_guard (fun () ->
       if not (is_initialized ())
@@ -1362,7 +1374,7 @@ let run_argv_with_status_split_streaming
             timeout_status, stdout, stderr
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn ->
-            if should_retry_unix_fallback exn
+            if fallback_policy = Allow_unix_fallback && should_retry_unix_fallback exn
             then (
               Log.Misc.warn
                 "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"

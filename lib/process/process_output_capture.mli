@@ -5,17 +5,20 @@
 type source =
   | Complete_file of { path : string; byte_length : int }
   | Incomplete_file of { path : string; byte_length : int }
-  | Capture_failed of { path : string option; message : string }
+  | Capture_failed of { path : string option; message : string; limit_exceeded : bool }
 
 type files = { stdout : source; stderr : source }
 type stream = Stdout | Stderr
 type t
 
-val with_capture : capture_dir:string -> (t -> 'a) -> 'a * files
+val with_capture :
+  ?stdout_limit:int -> ?stderr_limit:int -> capture_dir:string -> (t -> 'a) -> 'a * files
 (** Create fresh 0600 stream files below [capture_dir], creating that
     directory lazily. Close descriptors on every exit, including cancellation;
     preserve the original cancellation and leave partial files for evidence.
-    File I/O errors become [Capture_failed] and never prevent [f] from running.
+    File I/O errors and an optional per-stream byte limit become
+    [Capture_failed] and never prevent [f] from running or the pipe draining.
+    Limits must be nonnegative; the default leaves a stream unbounded.
     The caller must eventually publish or remove the returned files. *)
 
 val append : t -> stream:stream -> string -> unit

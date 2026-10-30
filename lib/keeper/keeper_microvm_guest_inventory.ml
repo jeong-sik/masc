@@ -19,6 +19,7 @@ type unavailable_output = Keeper_microvm_cli_output.unavailable_output =
   | Capture_directory_unavailable
   | Capture_incomplete
   | Capture_failed
+  | Capture_limit_exceeded
   | Capture_unreadable
   | Capture_permissions_invalid
   | Capture_length_mismatch
@@ -66,7 +67,7 @@ let read_apple ~timeout_sec =
   | Error {reason; status} ->
     match reason with
     | Capture_cleanup_failed -> Error (Output_unavailable Capture_cleanup_failed)
-    | (Capture_directory_unavailable | Capture_incomplete | Capture_failed
+    | (Capture_directory_unavailable | Capture_incomplete | Capture_failed | Capture_limit_exceeded
       | Capture_unreadable | Capture_permissions_invalid | Capture_length_mismatch) as reason ->
       match status with
       | None | Some (Unix.WEXITED 0) -> Error (Output_unavailable reason)

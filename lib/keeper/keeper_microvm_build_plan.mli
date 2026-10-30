@@ -5,7 +5,7 @@ type build_link_state =
 
 type build_link_plan =
   | Link_create of string
-  | Link_retarget of string
+  | Link_preserve_symlink of { existing : string; expected : string }
   | Link_already_correct
   | Link_refused_real_directory
   | Link_refused_invalid_path of { detail : string; state : build_link_state }
@@ -27,7 +27,7 @@ type build_link_row =
 val build_volume_guest_root : string
 val build_link_target : playground_relative:string -> (string, string) result
 val plan_build_link : target:string -> build_link_state -> build_link_plan
-val build_scan_rows_of_output : string -> build_scan_row list
+val build_scan_rows_of_output : string -> (build_scan_row list, string) result
 val build_link_rows_of_scan : build_scan_row list -> build_link_row list
 val build_link_actions : build_link_row list -> (string * string) list
 val build_link_targets : build_link_row list -> string list

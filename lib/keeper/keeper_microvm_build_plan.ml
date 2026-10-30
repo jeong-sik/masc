@@ -5,9 +5,12 @@ let build_link_separator = ':'
 let build_link_target ~playground_relative =
   let segments = String.split_on_char '/' playground_relative in
   let empty = List.exists (fun s -> String.equal s "") segments in
+  let traversal = List.exists (fun s -> String.equal s "." || String.equal s "..") segments in
   let collides = String.contains playground_relative build_link_separator in
   if List.is_empty segments || empty
   then Error ("empty path segment in playground path: " ^ playground_relative)
+  else if traversal
+  then Error ("dot path segment in playground path: " ^ playground_relative)
   else if collides
   then
     Error
@@ -30,7 +33,7 @@ type build_link_state =
 
 type build_link_plan =
   | Link_create of string
-  | Link_retarget of string
+  | Link_preserve_symlink of { existing : string; expected : string }
   | Link_already_correct
   | Link_refused_real_directory
   | Link_refused_invalid_path of { detail : string; state : build_link_state }
@@ -42,12 +45,12 @@ type build_link_plan =
     the checkout keeps building on the unified work volume until the next
     owned first handoff removes it
     ([Keeper_sandbox_microvm.first_handoff_build_cleanup_script]), unless the
-    checkout holds [Keeper_sandbox_microvm.build_keep_marker]. Retargeting a stale link is
-    different -- removing a symlink removes no data. *)
+    checkout holds [Keeper_sandbox_microvm.build_keep_marker]. A differently
+    targeted symlink is preserved because this plan cannot prove it is ours. *)
 let plan_build_link ~target = function
   | Build_absent -> Link_create target
   | Build_symlink existing when String.equal existing target -> Link_already_correct
-  | Build_symlink _ -> Link_retarget target
+  | Build_symlink existing -> Link_preserve_symlink { existing; expected = target }
   | Build_real_directory -> Link_refused_real_directory
 ;;
 
@@ -56,27 +59,28 @@ type build_scan_row =
   ; state : build_link_state
   }
 
-let build_scan_row_of_line line =
-  match String.split_on_char '\t' line with
-  | [ checkout; "absent" ] -> Some { checkout; state = Build_absent }
-  | [ checkout; "real" ] -> Some { checkout; state = Build_real_directory }
-  | [ checkout; "symlink"; target ] -> Some { checkout; state = Build_symlink target }
-  | _ -> None
-;;
-
-(** Parses [Keeper_sandbox_microvm.build_scan_argv_for]'s stdout. A line this module does not
-    recognize is dropped rather than raised on: the scan is read-only, so a
-    malformed line costs one missed checkout, not a crashed turn. *)
+(** Each scan record is three NUL-terminated fields: checkout, kind, target.
+    Newlines and tabs can occur in paths or link targets and are data. Refuse
+    the entire stream when framing is incomplete or a kind is unknown. *)
 let build_scan_rows_of_output raw =
-  raw
-  |> String.split_on_char '\n'
-  |> List.filter_map (fun line ->
-    if String.equal (String.trim line) "" then None else build_scan_row_of_line line)
+  if String.equal raw "" then Ok []
+  else
+    let rec parse rows = function
+      | [ "" ] -> Ok (List.rev rows)
+      | checkout :: "absent" :: "" :: rest when not (String.equal checkout "") ->
+        parse ({ checkout; state = Build_absent } :: rows) rest
+      | checkout :: "real" :: "" :: rest when not (String.equal checkout "") ->
+        parse ({ checkout; state = Build_real_directory } :: rows) rest
+      | checkout :: "symlink" :: target :: rest when not (String.equal checkout "") ->
+        parse ({ checkout; state = Build_symlink target } :: rows) rest
+      | _ -> Error "invalid or truncated build scan output"
+    in
+    parse [] (String.split_on_char '\000' raw)
 ;;
 
 (** Every scanned checkout's target and plan, decided purely so the refusal
     stays testable (see {!plan_build_link}) -- deciding never touches the
-    guest; only [Keeper_sandbox_microvm.build_link_apply_argv_for] does. *)
+    guest; only [Keeper_sandbox_microvm.build_link_apply_request_for] does. *)
 type build_link_row =
   { checkout : string
   ; target : string option
@@ -99,24 +103,24 @@ let build_link_actions rows =
   List.filter_map
     (fun { checkout; target; plan } ->
       match plan, target with
-      | (Link_create _ | Link_retarget _), Some target -> Some (checkout, target)
-      | ((Link_create _ | Link_retarget _), None)
-      | ((Link_already_correct | (Link_refused_real_directory | Link_refused_invalid_path _)), _) -> None)
+      | Link_create _, Some target -> Some (checkout, target)
+      | (Link_create _, None)
+      | ((Link_already_correct | Link_preserve_symlink _ | Link_refused_real_directory | Link_refused_invalid_path _), _) -> None)
     rows
 ;;
 
-(** Every target a link points at, or is about to: the create and retarget
-    actions plus the rows already linked. The build volume is recreated empty
+(** Every target a link points at, or is about to: create actions plus rows
+    already linked. The build volume is recreated empty
     on every fresh guest boot while the work volume keeps the old links, so a
     link that is already correct points at a directory that no longer exists
     until it is created again -- and dune does not create it
-    ([Keeper_sandbox_microvm.build_target_mkdir_argv]). *)
+    ([Keeper_sandbox_microvm.build_target_mkdir_request]). *)
 let build_link_targets rows =
   List.filter_map
     (fun { checkout = _; target; plan } ->
       match plan, target with
-      | (Link_create _ | Link_retarget _ | Link_already_correct), Some target -> Some target
-      | (Link_create _ | Link_retarget _ | Link_already_correct | Link_refused_real_directory | Link_refused_invalid_path _), _ ->
+      | (Link_create _ | Link_already_correct), Some target -> Some target
+      | (Link_create _ | Link_already_correct | Link_preserve_symlink _ | Link_refused_real_directory | Link_refused_invalid_path _), _ ->
         None)
     rows
 ;;

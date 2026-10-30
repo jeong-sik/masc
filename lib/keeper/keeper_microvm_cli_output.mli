@@ -5,6 +5,7 @@ type unavailable_output =
   | Capture_directory_unavailable
   | Capture_incomplete
   | Capture_failed
+  | Capture_limit_exceeded
   | Capture_unreadable
   | Capture_permissions_invalid
   | Capture_length_mismatch
@@ -24,6 +25,15 @@ val read : timeout_sec:float -> argv:string list -> (Unix.process_status * strin
     A nonzero child can still have complete stdout. Unix fallback cannot.
     Private 0700 capture directories are removed on every exit, with cleanup
     protected from cancellation. Cancellation and fatal exceptions propagate. *)
+
+val read_with_environment :
+  ?timeout_sec:float -> stdout_limit:int -> stderr_limit:int ->
+  env:string array -> cwd:string -> argv:string list -> unit ->
+  (Unix.process_status * string * string, error) result
+(** The same complete stdout capture with explicit per-stream byte limits,
+    process environment and cwd. It requires Eio and does not use the Unix
+    fallback, whose capture is not subject to these limits. Exceeding the stdout limit is unavailable,
+    not a complete result. The third field is a bounded stderr preview. *)
 
 val unavailable_message : unavailable_output -> string
 val error_message : error -> string

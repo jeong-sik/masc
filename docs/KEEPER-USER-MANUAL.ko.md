@@ -100,6 +100,159 @@ Apple 부팅은 이미지의 entrypoint를 요청한 실행 파일로 덮어씁�
 않습니다. 서버 프로세스의 첫 소유 턴 접속은 보존 표시가 없는 실제 `_build`를 별도
 디렉토리로 옮긴 뒤 삭제합니다. `.masc-keep-build`가 있으면 해당 출력을 보존합니다.
 
+#### 빌드 준비가 상태 127을 보고할 때
+
+`microvm_build_link_mkdir_failed` 또는 `microvm_build_link_apply_failed`의 상태가
+127이면 빌드 준비에 필요한 Python이 guest에 없을 수 있습니다. 실행 경로 또는 전송
+오류일 수도 있으므로 127만으로 아무 효과도 실행되지 않았다고 판단하지 마세요. guest,
+볼륨, 링크와 이미 실행됐을 수 있는 효과의 결과를 미확인 상태로 보존하세요. 경고를
+없애려고 자동으로 재시도하거나 서비스·guest를 재시작하지 마세요. 프로세스 안의 미확인
+상태는 해당 guest 세대가 유지되는 동안에만 적용됩니다. 재시작, 망각 또는 교체는 이
+상태를 지워 다시 시도할 수 있습니다.
+
+영향받은 guest 안에서 실패한 단계를 실행한 사용자로 **두 경로를 모두** 확인하세요.
+대상 디렉터리 준비는 root, 링크 생성은 Keeper의 uid와 gid로 실행됩니다. 아래 확인은
+권한만 읽습니다.
+
+```sh
+for guest_python_candidate in /usr/bin/python3 /usr/local/bin/python3; do
+  if [ -x "$guest_python_candidate" ]; then
+    printf '%s: executable permission present\n' "$guest_python_candidate"
+  else
+    printf '%s: absent or not executable for this user\n' "$guest_python_candidate"
+  fi
+done
+```
+
+두 경로 모두 실행할 수 없다면 운영자에게 신뢰할 수 있는 호환 이미지 또는 인터프리터
+준비를 요청하세요. 실행 권한이 있어도 Python, 로더, guest 전송 경로 또는 이전 효과가
+정상이라는 증거는 아닙니다. 남은 효과의 결과와 다른 작업 공간의 소유자를 확인한 뒤
+변경을 계획하세요. 이 확인만으로 소프트웨어를 설치하거나 guest를 교체하고, 서비스를
+재시작하거나 재시도하지 마세요. 아래 Python 진단도 두 경로 중 신뢰할 수 있는 실행 파일이
+없으면 사용할 수 없습니다.
+
+#### 체크아웃을 옮긴 뒤 보존된 `_build` 링크
+
+MASC는 `_build` 심볼릭 링크가 현재 체크아웃에 기대되는 빌드 대상과 다르면 소유자를
+확인할 수 없어 그대로 둡니다. 예를 들어 체크아웃을 `old`에서 `new`로 옮겨도 링크는
+`/masc-build/old`를 가리킬 수 있습니다. 새 부팅 때 build volume이 비워져 링크가
+끊기면 Dune 빌드가 실패할 수 있습니다. MASC는 이전 대상을 만들거나 링크를 자동으로
+바꾸지 않습니다. Keeper 작업 루트 바로 아래 `new`의 기대 대상은 `/masc-build/new`,
+`repos/new`의 기대 대상은 `/masc-build/repos:new`입니다. 이름에 `:`이 들어가면 이
+방식으로 매핑할 수 없으므로 대상을 추측하지 말고 운영자에게 확인하세요.
+
+경고에는 체크아웃 경로가 나오지 않습니다. 먼저 guest 안에서 해당 Keeper의 실제 작업
+루트로 이동하세요. 아래 `reviewer`는 그 Keeper의 정규화된 이름으로 바꿉니다. 이 읽기
+전용 탐색은 루트 아래 세 단계까지 `_build` 링크를 나열하고, `.git`과 `_build` 트리는
+건너뛰며 디렉터리 심볼릭 링크를 따라가지 않습니다. 경로와 대상은 특수 문자를 이스케이프해
+표시합니다. `dune-project: True`인 항목이 MASC의 체크아웃 탐색 대상이며, 루트 자체와
+더 깊은 디렉터리는 그 범위 밖입니다. 읽기 오류는 stderr에 표시되며, 오류가 있으면 목록이
+완전하지 않을 수 있습니다. 출력에는 공유 볼륨의 경로와 링크 대상이 드러날 수 있으므로
+영향받는 모든 작업 공간 소유자가 허용한 공유 범위 안에서만 보고, 보관하고, 전달하세요.
+고정 경로의 인터프리터도 신뢰할 수 있는 guest 이미지에 있어야 합니다. 격리 옵션이 신뢰할
+수 없는 실행 파일을 안전하게 만들지는 않습니다.
+
+```sh
+keeper_work_root=/masc-work/reviewer  # replace with the actual guest path
+cd -- "$keeper_work_root" || exit 1
+if [ -x /usr/bin/python3 ]; then
+  guest_python=/usr/bin/python3
+elif [ -x /usr/local/bin/python3 ]; then
+  guest_python=/usr/local/bin/python3
+else
+  printf '%s\n' 'No supported Python; ask the operator.' >&2
+  exit 1
+fi
+"$guest_python" -I -S - <<'PY'
+import os, stat, sys
+
+def report(error):
+    print("cannot inspect:", repr(error.filename), repr(error), file=sys.stderr)
+
+for base, dirs, _ in os.walk(".", topdown=True, followlinks=False, onerror=report):
+    rel = os.path.relpath(base, ".")
+    depth = 0 if rel == "." else len(rel.split(os.sep))
+    dirs[:] = [] if depth >= 3 else [d for d in dirs if d not in (".git", "_build")]
+    if rel == ".":
+        continue
+    link = os.path.join(base, "_build")
+    try:
+        if stat.S_ISLNK(os.lstat(link).st_mode):
+            try:
+                os.stat(os.path.join(base, "dune-project"))
+                candidate = True
+            except FileNotFoundError:
+                candidate = False
+            except OSError as error:
+                report(error)
+                candidate = "unverified"
+            print("checkout:", repr(rel), "target:", repr(os.readlink(link)),
+                  "dune-project:", candidate)
+    except FileNotFoundError:
+        continue
+    except OSError as error:
+        report(error)
+PY
+```
+
+해당 Keeper의 실행 경로 또는 허가된 guest 셸로 **해당 guest 안의 체크아웃**에서
+탐색에 나온 정확한 경로를 선택하고 다음을 실행해 확인하세요. 경로는 하나의 인자로
+인용하고, 이스케이프된 표시를 셸 명령으로 그대로 취급하지 마세요. 명령은 현재 경로와
+링크만 읽습니다. `False`는 대상이 없거나,
+접근할 수 없거나, 디렉터리가 아니라는 뜻일 수 있습니다.
+
+```sh
+if [ -x /usr/bin/python3 ]; then
+  guest_python=/usr/bin/python3
+elif [ -x /usr/local/bin/python3 ]; then
+  guest_python=/usr/local/bin/python3
+else
+  printf '%s\n' 'No supported Python; ask the operator.' >&2
+  exit 1
+fi
+"$guest_python" -I -S - <<'PY'
+import os
+print("checkout:", repr(os.getcwd()))
+print("_build link:", repr(os.readlink("_build")) if os.path.islink("_build") else "<not a symlink>")
+print("target is a directory:", os.path.isdir("_build"))
+PY
+```
+
+`_build`가 심볼릭 링크가 아니거나 체크아웃·마운트가 예상한 곳이 아니라면 복구를
+멈추고 실제 항목부터 살펴보세요. 기존 디렉터리에는 빌드 데이터가 있을 수 있습니다.
+
+변경하기 전에 Keeper, 작업 공간, 체크아웃과 링크의 소유자를 확인하세요. 서로 다른
+작업 공간의 동명 Keeper가 볼륨을 공유할 수 있습니다. 관련 소유자와 조율해 어느 빌드나
+다른 쓰기 작업도 체크아웃과 대상을 사용하지 않는지 확인하세요. 한 guest의 프로세스
+목록만으로 독점 소유를 증명할 수는 없습니다. 소유권이나 작업 상태가 불확실하면 링크와
+대상을 보존하고 운영자에게 확인을 요청하세요.
+
+체크아웃 소유자가 빌드해도 안전하다고 확인하고 운영자가 guest의 `/tmp`가 해당 guest만의
+임시 저장 공간인지 확인했다면, 그 안에 새 디렉터리를 만들어 기존 링크와 이전 대상을
+건드리지 않고 Dune 명령을 복구할 수 있습니다. `/tmp`에 쓸 수 있는 허가된 guest 실행
+경로에서만 실행하세요.
+
+```sh
+umask 077
+recovery_dir=$(mktemp -d /tmp/masc-dune-recovery.XXXXXXXX) || exit 1
+printf 'Recovery build directory: %s\n' "$recovery_dir"
+DUNE_BUILD_DIR="$recovery_dir" dune build
+```
+
+이후 Dune 명령에도 같은 `DUNE_BUILD_DIR`을 사용하세요. guest의 `/tmp`는 용량이 제한돼
+있고 guest 메모리를 사용할 수 있으며, guest가 중지되거나 교체되면 내용이 사라질 수
+있습니다. 디렉터리 권한이 0700이어도 같은 uid의 다른 프로세스와는 격리되지 않습니다.
+자동으로 정리하지 않으므로 소유자와 사용 중인 빌드가 없음을 확인한 뒤 승인된 운영
+절차로 그 정확한 디렉터리만 정리하세요. `/tmp`가 guest 전용인지 확인하지 못했거나 해당
+실행 경로에서 쓸 수 없다면 운영자에게 요청하세요. 소유권이 불확실한 공유 볼륨으로 이
+우회 경로를 옮기지 마세요. `_build`를 강제로 사용하는 스크립트는 여전히 실패할 수
+있습니다.
+
+링크를 영구 복구하려면 소유자·운영자와 조율해 이전 링크와 대상을 보존하고, 현재
+체크아웃의 정확한 대상이 이 작업 공간 소유이며 사용 중이지 않은지 확인한 뒤 강제
+덮어쓰기나 일괄 삭제 없이 교체하고 결과를 확인하세요. 이전 링크를 살린다는 이유로
+`/masc-build/old`를 만들지 마세요. 다른 체크아웃이 쓸 수 있습니다.
+
 작업 볼륨 확인은 guest가 마운트 부재를 직접 보고한 경우
 (`microvm_work_volume_not_mounted`)와 확인 명령이 실패하거나 시간 초과된 경우
 (`microvm_work_volume_probe_unverified`)를 구분합니다. 후자는 마운트 상태를

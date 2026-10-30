@@ -25,7 +25,7 @@ type publication =
 let complete_path stream = function
   | Process_output_capture.Complete_file { path; byte_length } -> Ok (path, byte_length)
   | Process_output_capture.Incomplete_file _ -> Error (Incomplete_stream stream)
-  | Process_output_capture.Capture_failed { message; path = _ } ->
+  | Process_output_capture.Capture_failed { message; _ } ->
     Error (Capture_failed message)
 
 open Result.Syntax

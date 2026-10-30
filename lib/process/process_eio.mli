@@ -109,6 +109,10 @@ type spawn_guard = { run : 'a. (unit -> 'a) -> 'a }
     install resource observation without making this lower
     [masc_process] library depend on those policy modules. *)
 
+type fallback_policy = Allow_unix_fallback | Eio_only
+(** [Eio_only] fails closed if the Eio runtime is unavailable and does not
+    retry via Unix after an Eio error. The default preserves Unix fallback. *)
+
 val set_spawn_guard : spawn_guard -> unit
 (** Install the process-wide foreground spawn guard. *)
 
@@ -152,6 +156,7 @@ val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?fallback_policy:fallback_policy ->
   ?output_capture:Process_output_capture.t ->
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
@@ -162,7 +167,8 @@ val run_argv_with_stdin_and_status_split :
     [(status, stdout, stderr)] without combining stderr into stdout. When
     callback arguments are supplied on the Eio path, they are invoked for
     stdout/stderr chunks while the process is still running. Fallback Unix
-    execution remains completion-captured. *)
+    execution remains completion-captured. [Eio_only] also prevents Unix
+    execution when no Eio runtime is initialized. *)
 
 val run_argv_with_stdin_held_open_and_status_split :
   ?timeout_sec:float ->
@@ -323,6 +329,7 @@ val run_argv_with_status_split_streaming :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?fallback_policy:fallback_policy ->
   ?output_capture:Process_output_capture.t ->
   on_stdout_chunk:(string -> unit) ->
   on_stderr_chunk:(string -> unit) ->
@@ -333,7 +340,8 @@ val run_argv_with_status_split_streaming :
     process is still running. The returned strings are bounded previews.
     [output_capture], when supplied, preserves raw chunks independently of
     callbacks and marks completeness only at pipe EOF. Unix fallback has no
-    authoritative chunk/EOF contract and marks capture unavailable. *)
+    authoritative chunk/EOF contract and marks capture unavailable.
+    [Eio_only] prevents that fallback entirely. *)
 
 type pipeline_stage = {
   argv : string list;

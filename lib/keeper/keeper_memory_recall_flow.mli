@@ -65,7 +65,10 @@ val run :
   (judged option, Keeper_memory_recall_jev_codec.build_error) result
 (** [Ok None] for no candidates: nothing is sent. [Error] when a request cannot
     be built, before anything is sent: two candidates share an id (in one piece
-    or in two), or an option set is invalid.
+    or in two), an option set is invalid, or managed guidance cannot be loaded.
+    Every candidate/time question for every original ID is rendered before
+    dispatch. Capacity splits and carries use only that immutable snapshot;
+    current prompt edits cannot change an ongoing flow.
 
     Otherwise:
     - the candidates are cut into pieces of at most [piece_bytes] of line

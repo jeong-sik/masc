@@ -35,12 +35,25 @@ let piece_of candidates =
   | piece :: _ -> piece
   | [] -> Alcotest.fail "no piece"
 
+let guidance_for piece =
+  Codec.load_guidance ~question_ids:(List.map C.id (C.piece_candidates piece))
+let build_candidate_request ~purpose piece =
+  let ( let* ) = Result.bind in
+  let* guidance = guidance_for piece in Codec.candidate_request ~guidance ~purpose piece
+let build_turn_request ~purpose =
+  let ( let* ) = Result.bind in
+  let* guidance = guidance_for (piece_of two_candidates) in Codec.turn_request ~guidance ~purpose
+let build_time_request piece =
+  let ( let* ) = Result.bind in
+  let* guidance = guidance_for piece in Codec.time_request ~guidance piece
+
 let built = function
   | Ok request -> request
   | Error (Codec.Duplicate_candidate_id id) -> Alcotest.failf "duplicate id %s" id
   | Error (Codec.Choice_set_invalid detail) -> Alcotest.failf "choice set invalid: %s" detail
+  | Error (Codec.Guidance_unavailable detail) -> Alcotest.failf "guidance unavailable: %s" detail
 
-let candidate_request () = built (Codec.candidate_request ~purpose (piece_of two_candidates))
+let candidate_request () = built (build_candidate_request ~purpose (piece_of two_candidates))
 
 let choice label probabilities =
   Types.Choice_answer { choice = label; probabilities; confidence = 0.9 }
@@ -139,9 +152,9 @@ let test_each_row_names_its_question () =
   with_journal (fun journal ->
     let piece = piece_of two_candidates in
     let requests =
-      [ built (Codec.candidate_request ~purpose piece)
-      ; built (Codec.turn_request ~purpose)
-      ; built (Codec.time_request piece)
+      [ built (build_candidate_request ~purpose piece)
+      ; built (build_turn_request ~purpose)
+      ; built (build_time_request piece)
       ]
     in
     List.iter
@@ -296,10 +309,10 @@ let test_each_question_kind_is_counted_on_its_own () =
     let piece = piece_of two_candidates in
     List.iter
       (fun request -> ignore (Eval.evaluate_with ~call:accepted_call journal request))
-      [ built (Codec.candidate_request ~purpose piece)
-      ; built (Codec.turn_request ~purpose)
-      ; built (Codec.time_request piece)
-      ; built (Codec.time_request piece)
+      [ built (build_candidate_request ~purpose piece)
+      ; built (build_turn_request ~purpose)
+      ; built (build_time_request piece)
+      ; built (build_time_request piece)
       ];
     List.iter
       (fun (kind, expected) ->

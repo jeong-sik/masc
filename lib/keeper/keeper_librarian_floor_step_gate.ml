@@ -16,7 +16,7 @@ module Journal = Keeper_librarian_original_gate.Make (struct
   let owner_matches_json = Owner.owner_matches_json
   let request_id = Capture.request_id
   let to_json = Capture.to_json
-  let request = Capture.request
+  let decode_final = Capture.decode_final
   let confirm_final = Capture.confirm_final
   let gate_inputs step proposal =
     Capture.validate_proposal step proposal

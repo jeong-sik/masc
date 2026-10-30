@@ -285,6 +285,9 @@ let host_proof_target capture =
   let* ()=confirm_owner capture in
   let* exact=request capture in
   Final.target ~installation_id:capture.destination.installation_id exact
+let decode_final ~store capture json =
+  let* target=host_proof_target capture in
+  Final.decode_final ~store target json
 let refusal_evidence ~store capture final =
   Final.refusal_evidence ~store ~target:(fun () -> host_proof_target capture) final
 let confirm_final ~store capture final =

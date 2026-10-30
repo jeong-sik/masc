@@ -71,6 +71,10 @@ val destination : t -> destination
 val source : t -> Keeper_librarian_durable_capture.t
 val preparation : t -> Keeper_librarian_runtime.durable_preparation
 val request : t -> (Lane_addon_exact.request, string) result
+val decode_final : store:Lane_addon_store.t -> t -> Yojson.Safe.t ->
+  (Lane_addon_exact.final, string) result
+(** Reobserve the original owner and decode with its original host evidence.
+    This neither validates the proposal nor grants a Memory write. *)
 val confirm_owner : t -> (unit, string) result
 val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
   (unit, string) result

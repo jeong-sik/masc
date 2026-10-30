@@ -594,6 +594,93 @@ let test_actual_completed_history_path () = with_fixture (fun ~sw:_ fixture ->
   check bool "its gate records settle under the same day" true (List.for_all (settled_on fixture ~date) gates);
   check int "no gate record stays for validation" 0 (List.length (gate_records fixture capture));
   check int "already consumed source never creates another provider request" posts (F.post_count fixture.server))
+
+let test_retained_answer_with_invalid_working_context_recovers () = with_fixture (fun ~sw:_ fixture ->
+  let output capture = match answer capture with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+      if key="working_contexts" then key,`List [`Assoc [
+        "merge_contexts",`List [];"sources",`List [`String "fixture-source"];
+        "context",`String "original context";"next_steps",`List [];
+        "completeness",`String "current"]]
+      else key,value) fields)
+    | _ -> fail "fixture answer is not an object" in
+  fixture.set_response (fun capture -> `OK,F.openai_response (output capture));
+  let before=progress fixture and delivered= !(fixture.deliveries) in
+  assert_pending (run_worker fixture);
+  await_delivery fixture ~after:delivered;
+  let record,capture=only_original fixture in
+  let exact=Capture.request capture |> get in
+  let schema=Option.get exact.Exact.schema in
+  let final=match latest fixture capture with
+    | Exact.Completed_latest {execution={outcome=Call_ended (Answered _ as answer);_};_} -> Exact.Call_final answer
+    | _ -> fail "actual original answer and proof were not retained" in
+  let wire=Exact.final_to_json final in
+  check bool "strict consumer schema rejects the additional nested field" true
+    (Result.is_error (Exact.final_of_json ~schema wire));
+  let decoded=io (fun () -> Capture.decode_final ~store:fixture.store capture wire) |> get in
+  check json "recovery preserves the exact host answer" wire (Exact.final_to_json decoded);
+  let proposal=Capture.validate_proposal capture (output capture) |> get in
+  (match proposal.Keeper_librarian_runtime.accepted.selection.working_contexts with
+   | Keeper_librarian.Working_contexts_invalid _ -> ()
+   | Working_contexts_organized _ | Working_contexts_missing -> fail "invalid context must remain refused");
+  let changed=match wire with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key="slot" then key,`String "different-slot" else key,value) fields)
+    | _ -> fail "final is not an object" in
+  check bool "a different worker result cannot borrow the host answer" true
+    (io (fun () -> Result.is_error (Capture.decode_final ~store:fixture.store capture changed)));
+  check bool "a different schema cannot observe this original" true
+    (io (fun () -> Result.is_error (Exact.observe_retained ~store:fixture.store
+      ~declaration_id:"librarian" ~schema:(`Assoc []) exact)));
+  let strict_forgery=match wire with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key="output" then key,answer capture else key,value) fields)
+    | _ -> fail "final is not an object" in
+  let strict_final=io (fun () -> Capture.decode_final ~store:fixture.store capture strict_forgery) |> get in
+  check bool "a strict forged answer still fails the host confirmation boundary" true
+    (io (fun () -> Result.is_error (Capture.confirm_final ~store:fixture.store capture strict_final)));
+  let empty_store=Store.create ~root:(Filename.concat fixture.base_path "missing-original-proof") in
+  let host=io (fun () -> Store.load_exact_request fixture.store ~declaration_id:"librarian"
+    ~request_id:exact.request_id |> get |> Option.get) in
+  io (fun () -> Store.save_exact_request empty_store ~declaration_id:"librarian"
+    ~request_id:exact.request_id host |> get);
+  check bool "a terminal without its execution proof cannot recover" true
+    (io (fun () -> Result.is_error (Capture.decode_final ~store:empty_store capture wire)));
+  let invalid_memory=match output capture with
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        if key="new_claims" then key,`List [new_claim ""] else key,value) fields)
+    | _ -> fail "fixture answer is not an object" in
+  check bool "invalid Memory is still rejected by its domain" true
+    (Result.is_error (Capture.validate_proposal capture invalid_memory));
+  let hold=memory_action fixture (fun () ->
+    Durable_owner.resume ~store:fixture.store ~config:fixture.config ~reserved:[]
+      ~original:record ~request:capture
+      ~call:(fun ~expected:_ ~original:_ ~arguments:_ -> fail "proved host answer must not call the worker")
+      ~publish:(fun ~original:_ ~request:_ ~proposal:_ ->
+        Ok (Durable_owner.Publication_pending "fixture holds publication after judgment"))
+      ~wake:(fun () -> ())) in
+  (match hold with
+   | Ok (Durable_owner.Publication_waiting _) -> ()
+   | Ok (Pending _ | Refused _ | Finished _ | Basis_superseded _) -> fail "original did not retain its judgment"
+   | Error error -> fail (Durable_owner.error_to_string error));
+  let judged,_=only_original fixture in
+  (match Progress.phase judged.Owner.progress with
+   | Progress.Judged actual -> check json "the real submit machine retained the original answer" wire actual
+   | _ -> fail "original is not waiting with its proven judgment");
+  let posts=F.post_count fixture.server in
+  check bool "the retained original completes publication" true (advanced (run_worker fixture));
+  check (list string) "valid original Memory was committed"
+    ["Knowledge from original completed history"] (io (fun () -> claims fixture.keepers_dir));
+  check bool "source progress follows the committed original" true (progress fixture<>before);
+  let range=Option.get (Source.range_id (Capture.source capture)) in
+  let coverage=io (fun () -> Current.committed_durable_coverage ~keepers_dir:fixture.keepers_dir
+    ~keeper_id:keeper_name ~receipt_scope:range.Current.receipt_scope |> get) in
+  check bool "the original Memory receipt covers the source range" true (coverage=Some range);
+  let finished,_=only_original fixture in
+  (match Progress.phase finished.Owner.progress with
+   | Progress.Finished commit -> check json "finished judgment remains unchanged" wire commit.judgment
+   | _ -> fail "original judgment did not finish");
+  check int "the original provider request is not resubmitted" posts (F.post_count fixture.server))
 (* A settle that stopped between a history record and its gate records leaves
    gates of an archived execution. A pass with no original reads no gate
    scope, so the pass of the next original settles them. *)
@@ -2036,6 +2123,8 @@ let test_settling_a_position_no_step_holds_is_an_error () = with_fixture (fun ~s
   check (list int) "and no step moved" [0;1] (sorted_positions fixture request))
 
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
+  test_case "proved original survives invalid working context on resume" `Quick
+    test_retained_answer_with_invalid_working_context_recovers;
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
   test_case "a worker frame refusal ends the original instead of blocking publication" `Quick

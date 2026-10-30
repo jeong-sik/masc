@@ -89,15 +89,13 @@ let for_part inventory part=List.find_opt (fun original ->
 let last_gate ~store ~owner original =
   io (fun () -> Gate_journal.latest ~store ~owner ~capture:original.capture)
 
-let original_answer original =
+let original_answer ~store original =
   let* judgment=match Progress.phase original.record.progress with
     | Progress.Judged value -> Ok value
     | Committing commit | Commit_unknown (commit,_) | Finished commit -> Ok commit.judgment
     | Captured | Admission_wait _ | Dispatch_pending _ | Conflicted _ | Rejected _
     | Subdividing _ | Subdivided _ -> Error "Original execution has no answered proposal" in
-  let* exact=Capture.request original.capture in
-  let* schema=Option.to_result ~none:"Original admission output schema is absent" exact.schema in
-  let* final=Exact.final_of_json ~schema judgment in
+  let* final=io (fun () -> Capture.decode_final ~store original.capture judgment) in
   match final with
   | Exact.Call_final (Answered {output;_}) -> Ok (Exact.checked_json output)
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
@@ -236,7 +234,7 @@ let gate_result ~store ~config ~reserved ~owner ~inventory part original proposa
          | Some Evaluation_failed | None ->
            match live with None -> apply gate record | Some authority -> retry authority)
 let answered ~store ~config ~reserved ~owner ~inventory part original =
-  let* proposal=original_answer original in
+  let* proposal=original_answer ~store original in
   let* parsed=Capture.validate_proposal original.capture proposal in
   match parsed with
   | Keeper_librarian_runtime.Deferred -> Ok (Terminal (source original part,false))
@@ -289,7 +287,7 @@ let frontier ~store ~owner inventory =
         (match Progress.phase original.record.progress with
          | Progress.Finished _ -> continue (source original part)
          | Judged _ | Committing _ ->
-           let* proposal=original_answer original in
+           let* proposal=original_answer ~store original in
            let* parsed=Capture.validate_proposal original.capture proposal in
            (match parsed with
             | Keeper_librarian_runtime.Deferred -> continue (source original part)

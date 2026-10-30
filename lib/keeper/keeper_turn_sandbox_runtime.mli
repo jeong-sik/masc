@@ -82,7 +82,11 @@ val microvm_remote_endpoint_of_running :
     host-side credential snapshot, observes the named running guest and checks
     its workspace, keeper and network labels before returning the endpoint.
     This proves neither the guest's mounted inode nor a fence against later
-    guest replacement. Does not start a guest or prepare build output. *)
+    guest replacement. Refuses unresolved cleanup or link applications on
+    the shared work volume; diagnostic reads use {!microvm_attached_endpoint}.
+    Consumes any still-available cleanup opportunity before granting execution
+    so a later prepared handoff preserves output created through this endpoint.
+    Does not start a guest or prepare build output. *)
 
 val microvm_remote_endpoint :
   ?timeout_sec:float -> t -> (Keeper_sandbox_remote.t, string) result
@@ -90,7 +94,30 @@ val microvm_remote_endpoint :
     Apple completes its first process handoff under Keeper lifecycle ownership,
     including durable identity validation, shim verification and build cleanup.
     Its final endpoint admission rechecks readiness under that same owner; if
-    an observation invalidated it in between, this call fails and can be retried. *)
+    an observation invalidated it in between, this call fails and can be retried.
+    A scope-matched stopped observation also invalidates cached readiness, so a
+    later call can reverify the mount, root and shim. Process-owned cleanup and
+    build-link effects belong to the backend's Keeper work volume, shared
+    across workspace and network aliases. Cleanup is reserved before endpoint
+    construction and consumed even when the request was not sent. A trusted
+    terminal failure permits best-effort handoff; unresolved destructive
+    cleanup refuses handoff because it may still act on later build output.
+    Guest invalidation retains these effects while allowing a fresh read-only
+    scan and idempotent target creation on the disposable build volume.
+    Unresolved link applications are not resent and refuse execution handoff:
+    a current read-only scan does not prove the original application stopped.
+    Targets for both correct and planned links are still prepared so an earlier
+    application arriving after the scan cannot create a dangling link. Unknown
+    attached maintenance also refuses execution handoff. Handoff requires a
+    completed link scan and target preparation in the current guest generation.
+    Read-only scan and idempotent target failures may be retried by a later
+    handoff in that generation without replaying uncertain link applications.
+    This is
+    process-local evidence, not a durable receipt across server restarts or an
+    instance/mount fence against an externally replaced guest.
+    If the snapshot is missing or
+    unreadable, endpoint admission returns the snapshot error before observing
+    the guest; this alone does not clear cached readiness. *)
 
 val microvm_attached_endpoint :
   ?timeout_sec:float ->
@@ -106,10 +133,14 @@ val microvm_attached_endpoint :
 
     Never starts a guest. Apple refuses an absent, stopped, unreadable or
     differently scoped guest before returning an endpoint; the observation
-    does not fence a subsequent replacement. Other backends still reach the
-    guest through [container exec]. For Apple, [timeout_sec] applies to guest
-    inspection, not to the entire endpoint acquisition. Booting for a reader
-    would spend a VM start and write the identity snapshot and work root, which
+    does not fence a subsequent replacement. An observed stopped guest whose
+    scope matches invalidates cached readiness before refusal, retaining
+    process-owned cleanup and build-link effect evidence. Other backends
+    still reach the guest through [container exec]. For Apple, [timeout_sec]
+    applies separately to guest inspection and fallback inventory, not to the
+    entire endpoint acquisition. A missing or unreadable host snapshot is
+    reported before guest observation. Booting for a reader would spend a VM
+    start and write the identity snapshot and work root, which
     belong to the keeper's turn.
     Refused for a non-microvm keeper. *)
 
@@ -127,10 +158,11 @@ val with_apple_attached_endpoint :
   (revision:string -> Keeper_sandbox_remote.t -> ('a, string) result) ->
   ('a, string) result
 (** Validate the Apple guest's scope labels and host-side credential snapshot
-    under the process-local Keeper lifecycle owner. The callback must only inspect the endpoint, not
-    execute a guest command or reacquire the owner. The optional timeout bounds
-    the guest inspection, not the full acquisition and validation. The revision
-    identifies the validated snapshot; it does not prove which inode the guest
+    under the process-local Keeper lifecycle owner. The callback must only inspect
+    the endpoint, not execute a guest command or reacquire the owner. The optional
+    timeout bounds guest inspection and fallback inventory separately, not the full
+    acquisition and validation. The revision identifies the validated snapshot;
+    it does not prove which inode the guest
     actually mounted. Changes after inspection are not fenced. *)
 
 val microvm_guest_absence_reason :
@@ -265,7 +297,9 @@ module For_testing_microvm : sig
     base_path:string -> backend:Keeper_microvm_backend.t -> container_name:string -> build_link_generation -> bool
   val build_link_scan_prepared :
     base_path:string -> backend:Keeper_microvm_backend.t -> container_name:string -> bool
-  (** Expose the process-local generation guard for the stale-completion test. *)
+  (** Expose the process-local readiness generation guard for the
+      stale-completion test. Invalidated readiness has no current generation;
+      this does not erase the retained effect evidence. *)
 
   val microvm_identity_snapshot_registered : container_name:string -> bool
   (** Whether a guest name still owns a snapshot; exposes no credential data. *)
@@ -509,3 +543,13 @@ val build_cleanup_report_of_string : string -> (build_cleanup_report, string) re
 val cleanup_attached_builds : config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta -> retention_sec:float -> unit ->
   (build_cleanup_report option, string) result
+(** The caller holds the Keeper's exclusive maintenance slot. Apple additionally
+    holds its process-local lifecycle owner across cleanup admission, guest
+    observation and the maintenance command. An unresolved first-handoff
+    cleanup or maintenance refuses this mutation; attached diagnostic reads
+    remain separate. Each maintenance attempt reserves its shared work resource
+    before dispatch. Unknown results retain that reservation across scope exit;
+    only trustworthy terminal or request-not-sent evidence releases it. Intent
+    and receipt observations are retained in the existing audit log, without
+    command output or credentials. Audit evidence is not a restart admission
+    journal; the reservation remains process-local. *)

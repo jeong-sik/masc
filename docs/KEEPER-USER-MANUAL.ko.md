@@ -131,12 +131,48 @@ guest 교체도 막지 못합니다. 서버 프로세스의 첫 소유 턴 접�
 
 `microvm_build_link_mkdir_failed` 또는 `microvm_build_link_apply_failed`는 0이 아닌
 종료 상태나 signal을 보고할 수 있습니다. 127은 인터프리터를 시작하지 못한 경우일 수
-있습니다. 실행 경로 또는 전송
-오류일 수도 있으므로 어느 상태만으로도 원인이나 효과의 미실행을 판단하지 마세요. guest,
-볼륨, 링크와 이미 실행됐을 수 있는 효과의 결과를 미확인 상태로 보존하세요. 경고를
-없애려고 자동으로 재시도하거나 서비스·guest를 재시작하지 마세요. 프로세스 안의 미확인
-상태는 해당 guest 세대가 유지되는 동안에만 적용됩니다. 재시작, 망각 또는 교체는 이
-상태를 지워 다시 시도할 수 있습니다.
+있습니다. 로컬 종료 상태만으로 원인이나 guest 효과의 미실행을 판단하지 마세요.
+guest·볼륨·링크를 보존하고 확인하세요. 서비스나 guest를 재시작해도 미확인 효과는
+해결되지 않습니다.
+
+같은 서버 프로세스에서는 backend와 Keeper 작업 볼륨마다 cleanup 기회를 한 번만
+소비합니다. workspace나 network mode가 달라도 같은 이력을 사용합니다. 명시적인
+request-not-sent도 이후 턴이 새 빌드 출력을 만들 수 있으므로 다시 보내지 않습니다.
+영수증으로 확인된 성공은 반복하지 않습니다. 종료 상태와 일치하는 영수증이 있는
+실패·signal·shim timeout·실행 전 거부도 cleanup을 소비하고 실제 `_build` 항목을 보존한 채 준비를
+이어 갑니다. 영수증 누락·예외·취소 때도 runner의 명확한 request-not-sent 근거가
+없으면 cleanup 결과를 미확인으로 남깁니다.
+`microvm_build_cleanup_effect_unverified`는 새 실행 handoff를 제공할 수 없는 Keeper를
+표시합니다. 원래 cleanup이 나중에 생긴 출력을 옮길 수 있기 때문입니다. guest와
+identity를 검증할 수 있으면 진단용 attached 읽기는 가능하지만 cleanup의 종료를
+증명하지는 않습니다.
+
+준비 캐시를 무효화하면 링크를 읽기 전용으로 다시 조사합니다. build 볼륨은 일회성이므로
+대상 디렉터리 생성은 멱등적으로 다시 수행할 수 있습니다. 결과가 미확인인 symlink 생성은
+다른 workspace·network 이름에서도 재전송하지 않습니다. 현재 올바른 링크와 안전한 생성
+계획 모두에 대상 디렉터리를 준비합니다. 조사 때 링크가 없었더라도 이전 미확인 생성이
+뒤늦게 적용될 수 있기 때문입니다. 실제 디렉터리와 다른 대상을 가리키는 링크는 보존합니다.
+
+attached 정기 정리도 같은 작업 볼륨에 자기 실행 시도를 예약합니다.
+`microvm_build_maintenance_effect_unverified`는 결과가 미확인인 정리의 operation ID를
+표시하며, 그 정리를 다시 보내지 않고 새 실행과 정리를 거절합니다. 명확한 종료 또는
+request-not-sent 근거가 있으면 예약을 해제합니다. 진단용 읽기는 유지합니다. 기존 workspace
+감사 로그의 `custom:keeper_microvm_build_maintenance`에 실행 전 intent와 결과, operation ID,
+민감 정보를 가린 boundary·exit·signal·timeout·shim 오류를 기록합니다. 명령 출력과 인증
+정보는 저장하지 않습니다. intent를 기록할 수 없으면 정리를 보내지 않습니다. 이 로그는
+flush된 조사 근거이며 fsync 기반 실행 권위나 서버 재시작 후 자동 복구 원장이 아닙니다.
+
+현재 읽기 전용 조사만으로 원래 symlink 생성이 종료됐다고 증명할 수 없으므로, 그 결과가
+미확인이면 실행 handoff를 거부합니다. 실행 endpoint는 현재 guest 준비 세대에서 링크 조사와
+필요한 대상 준비가 완료됐을 때만 제공합니다. 읽기 전용 조사 실패는 후속 handoff에서 다시
+확인할 수 있습니다. 영속 symlink 결과가 미확인이 아니라면 대상 mkdir만 실패한 경우도
+guest 중지나 준비 캐시 초기화 없이 같은 세대에서 재시도합니다. 경고만 남기고 실행
+endpoint를 제공하지는 않습니다.
+
+이 이력은 현재 프로세스의 이름 기반 기록입니다. 서버를 재시작하면 사라지고 첫 handoff가
+cleanup을 다시 시도할 수 있습니다. 미확인 효과를 복구하려고 재시작하지 마세요. 서버
+재시작을 넘는 durable no-replay, 물리 볼륨 identity와 다른 프로세스의 변경을 막는 fencing은
+제공하지 않습니다. guest 라벨도 외부 인스턴스나 mount 교체를 막지 못합니다.
 
 영향받은 guest 안에서 root와 Keeper uid·gid **양쪽으로** 고정 경로를 확인하세요. 대상
 디렉터리 준비는 root, 링크 생성은 Keeper 권한으로 실행되므로 한 사용자의 확인으로 다른

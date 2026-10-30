@@ -1,0 +1,3 @@
+### Added
+
+- `viewport-cadence-bytes` workflow + `measure-viewport-cadence-bytes.py`: raw PTY-master byte counts for the browser viewport cadence with (a) identical across-the-board response fields, (b) a changed-title positive control, on both the Before (`11749bf34f`, parent of the #46832 merge `eb39c50f33`) and After (default `eb39c50f33`) pins in one identical CI image. How to run: Actions → viewport-cadence-bytes → Run workflow (optionally override `after_ref`). It only adds a workflow and a script; no TUI or server code changes. Artifact `viewport-cadence-bytes` carries `result.json`, both `masc_tui_*` binaries with SHA256, and `capture-*.txt`. Experimental measurement harness. (#PR)

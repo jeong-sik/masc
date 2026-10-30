@@ -2755,7 +2755,8 @@ let enter_direct_preparation store ~now ~operation_id ~execution_digest =
        | Some ({Semantic.phase=Semantic.Preparing_checkpoint _;_} as expected) ->
          let* next = semantic_transition ~now Semantic.Enter_official_checkpoint expected in
          update_semantic store ~expected next
-       | Some {Semantic.phase=(Semantic.Running | Semantic.Resuming_gate _);_} | None -> Ok ()
+       | Some {Semantic.phase=Semantic.Running;_} -> Ok ()
+       | None -> Error (Invalid_input "official preparation has no semantic checkpoint")
        | Some _ -> Error (Invalid_input "official preparation no longer owns dispatch admission"))
     | _ -> Error (Not_running operation_id))
 ;;

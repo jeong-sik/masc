@@ -670,6 +670,24 @@ let test_corrupt_input_cannot_become_fresh_or_repaired () =
     check string "corrupt payload evidence is retained" before (raw_file path)))
     [`Null; `Assoc ["payload", `String "different input with stale digest"]]
 
+let test_dispatch_admission_requires_semantic_checkpoint () =
+  with_store (fun _path store ->
+    submit store ~now:1. "no-preparation" fixture_input;
+    let operation = claim store ~now:2. in
+    let scope = direct_scope operation in
+    let before = Chat.to_json operation in
+    check bool "fresh claimed operation has no semantic preparation" true
+      (Store.semantic_get store scope |> execution_ok = None);
+    (match Store.enter_direct_preparation store ~now:3. ~operation_id:operation.operation_id
+        ~execution_digest:operation.execution_digest with
+     | Error (Store.Invalid_input _) -> ()
+     | Error error -> fail (Store.error_to_string error)
+     | Ok () -> fail "an operation without semantic preparation gained dispatch admission");
+    let after = Store.get store operation.operation_id |> store_ok |> Option.get in
+    check bool "refused admission preserves exact operation and input" true (Chat.to_json after = before);
+    check bool "refused admission creates no semantic row" true
+      (Store.semantic_get store scope |> execution_ok = None))
+
 let test_preparation_wait_preserves_official_checkpoint client_kind fault () =
   with_path (fun path ->
     let operation_id = operation_id "preparation-original" in
@@ -740,6 +758,10 @@ let test_preparation_wait_preserves_official_checkpoint client_kind fault () =
          && resumed.execution_digest=operation.execution_digest);
       Store.resume_direct_checkpoint store ~now:16. ~operation_id ~observed:checkpoint |> store_ok;
       Store.enter_direct_preparation store ~now:16. ~operation_id ~execution_digest:operation.execution_digest |> store_ok;
+      let entered = Execution.to_json (get store scope) in
+      Store.enter_direct_preparation store ~now:16. ~operation_id ~execution_digest:operation.execution_digest |> store_ok;
+      check bool "repeated callback preserves confirmed dispatch admission" true
+        (Execution.to_json (get store scope) = entered);
       Store.succeed_running store ~now:17. ~operation_id ~outcome_ref:"original-completed" |> store_ok |> ignore;
       check bool "terminal acknowledgement releases original input" true
         (Option.is_none (get store scope).input);
@@ -749,6 +771,8 @@ let test_preparation_wait_preserves_official_checkpoint client_kind fault () =
 let () =
   run "keeper semantic execution store"
     [ "preparation wait", [
+        test_case "fresh claim without semantic checkpoint refuses dispatch admission" `Quick
+          test_dispatch_admission_requires_semantic_checkpoint;
         test_case "Muse after consume retains original authority" `Quick
           (test_preparation_wait_preserves_official_checkpoint Execution.Muse None);
         test_case "Codex after consume retains original authority" `Quick

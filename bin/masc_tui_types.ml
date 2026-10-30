@@ -5923,6 +5923,20 @@ module Browser_lane_view = struct
     source : source; client_id : string option; tab_id : int; title : string; url : string;
     data : string; elapsed_ms : float; viewport : Browser_lane.Pointer.viewport;
   }
+
+  (* Bytes decide the picture, metadata decides the chrome, and viewport
+     geometry decides where clicks land. Capture duration is not rendered
+     again when those inputs are unchanged. *)
+  let viewport_redraw_is_redundant
+      ~(previous : screenshot) ~previous_bytes ~(shot : screenshot) ~bytes =
+    String.equal previous_bytes bytes
+    && previous.source = shot.source
+    && Option.equal String.equal previous.client_id shot.client_id
+    && previous.tab_id = shot.tab_id
+    && String.equal previous.title shot.title
+    && String.equal previous.url shot.url
+    && previous.viewport = shot.viewport
+
   type scene = { source : source; client_id : string option; tab_id : int;
     content : Masc.Browser_scene.t; elapsed_ms : float }
   type scene_scope_context = {

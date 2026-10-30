@@ -12064,22 +12064,6 @@ let close_image state =
       Masc_tui_msx.invalidate ();
       write_to_terminal Masc_tui_graphics.delete_all
 
-(* Whether an arriving screenshot would draw exactly what the viewport
-   already shows. The bytes decide the picture; the title, address, tab,
-   source and client decide the chrome around it; the geometry decides where
-   clicks land -- all three must match. [elapsed_ms] is deliberately excluded:
-   it names how long this capture took, and a static page keeps showing the
-   first capture's number rather than re-transmitting identical pixels to
-   refresh it. *)
-let same_browser_viewport_shot
-    (previous : Browser_lane_view.screenshot) (shot : Browser_lane_view.screenshot) =
-  previous.source = shot.source
-  && Option.equal String.equal previous.client_id shot.client_id
-  && previous.tab_id = shot.tab_id
-  && String.equal previous.title shot.title
-  && String.equal previous.url shot.url
-  && previous.viewport = shot.viewport
-
 let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   let failed = ref false in
   let refuse detail =
@@ -23280,8 +23264,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                  let unchanged =
                    match state.browser_viewport with
                    | Some (previous, previous_bytes) ->
-                       String.equal previous_bytes bytes
-                       && same_browser_viewport_shot previous shot
+                       Browser_lane_view.viewport_redraw_is_redundant
+                         ~previous ~previous_bytes ~shot ~bytes
                    | None -> false in
                  if unchanged then ()
                  else begin

@@ -1021,7 +1021,7 @@ let check_repeated_host_stop run =
    | Error error -> fail (Agent_core.Error.to_string error));
   match run.outcome.result with
   | Error error ->
-    (match Keeper_internal_error.classify_masc_internal_error error with
+    (match Keeper_internal_error.carried_masc_internal_error error with
      | Some (Keeper_internal_error.Host_stopped_turn
          { runtime_id = stopped_runtime; stop = Repeated_tool_call }) ->
        check string "stopped runtime" runtime_id stopped_runtime

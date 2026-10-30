@@ -2107,7 +2107,8 @@
   ; digest of the directory's own (st_dev, st_ino) identity.
   masc.agent_core.digest
   masc.tool_metrics_store)
- (deps ../bin/main_eio.exe fixtures/skill-ledger-async-actions.json))
+ (deps ../bin/main_eio.exe fixtures/skill-ledger-async-actions.json
+  ../config/prompts/keeper.fleet.diagnose.md))
 
 (test
  (name test_dashboard_namespace_truth)
@@ -3530,7 +3531,7 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries browser_addon_fixture masc_test_deps masc.runtime masc.browser_lane masc.lane_addon_call_context)
- (deps ../bin/masc_native_addon_launcher.exe))
+ (deps ../config/prompts/keeper.vision.output.md ../config/prompts/keeper.vision.request_header.md ../bin/masc_native_addon_launcher.exe))
 
 (rule
  (alias runtest-browser-native-screenshot)

@@ -11,7 +11,7 @@ val fleet_fsm_message_payload :
   reason:string ->
   snapshot:Yojson.Safe.t ->
   execution:Yojson.Safe.t ->
-  [> `Assoc of (string * Yojson.Safe.t) list ]
+  ([> `Assoc of (string * Yojson.Safe.t) list ], string) result
 
 val composite_recommended_actions_json :
   keeper_name:string ->

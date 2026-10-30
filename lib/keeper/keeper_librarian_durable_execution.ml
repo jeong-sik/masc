@@ -4,11 +4,11 @@ module Retained = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Runtime = Lane_addon_runtime
 module Consumer = Keeper_librarian_durable_consumer
+module Refusal = Keeper_librarian_durable_refusal
 module Source = Keeper_librarian_durable_capture
 module Current = Keeper_memory_os_current
 module Commit = Keeper_librarian_durable_commit
 module Submit = Lane_addon_submit_once
-module Exact = Lane_addon_exact
 module Descent = Keeper_librarian_floor_descent
 module Floor_chain = Keeper_librarian_floor_chain
 module Floor_cleanup = Keeper_librarian_floor_cleanup
@@ -28,23 +28,6 @@ let fresh_authority ~config ~reserved request () =
   Edge.fresh_authority ~config ~reserved ~owner:(Request.physical_owner request)
     ~expected:(Request.destination request) ()
 let call = Edge.call
-let refusal_report ~store request final : Keeper_librarian_runtime.not_committed =
-  let detail=match final with
-    | Exact.Call_final (Answered _) -> "Unexpected answered result in original history refusal"
-    | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
-    | Outcome_unknown | Not_allowed _ | Request_id_reused ->
-      "Original history request refused: " ^ Yojson.Safe.to_string (Exact.final_to_json final) in
-  (* A terminal refusal ends this original ID, not its unread source. It
-     reports what the host actually observed about reading less, and grants no
-     consumption, capacity or skip authority. An unreadable observation reports
-     none and says so, the same as a refusal that shows nothing. This report
-     alone does not free a Keeper from a range it cannot read (#46398): the
-     same range is chosen again until a floor reads it smaller. *)
-  match io (fun () -> Request.refusal_evidence ~store request final) with
-  | Ok evidence -> Keeper_librarian_runtime.not_committed_of_failure ~detail evidence
-  | Error why ->
-    Keeper_librarian_runtime.not_committed_of_failure
-      ~detail:(detail ^ "; reading less could not be judged: " ^ why) Keeper_exact_walk_failure.empty
 let resume ~store ~config ~reserved ~wake (original,request) =
   Owner.resume ~store ~config ~reserved ~original ~request ~wake ~call:(call ~config ~reserved)
     ~publish:(fun ~original ~request ~proposal ->
@@ -94,7 +77,8 @@ let recover_replacement ~store ((parent:Retained.retained),parent_request) =
       "Unacknowledged history replacement has execution progress" in
     let* _=advance_original ~store parent (Progress.Replacement_observed child.request_id) in Ok () in
   Ok (child,request)
-let capture ?replacement_parent ~store ~config ~reserved ~keeper_name source =
+let capture ?replacement_parent ?(before_retain=fun _ -> Ok ())
+    ~store ~config ~reserved ~keeper_name source =
   let base_path=config.Workspace.base_path in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let* owner=io (fun () ->
@@ -112,6 +96,7 @@ let capture ?replacement_parent ~store ~config ~reserved ~keeper_name source =
      serializers. capture_tool_request_owner's factory is pure, so use the
      destination publication port rather than placing I/O in that factory. *)
   with_destination ~config ~reserved (fun destination ->
+    let* ()=before_retain destination in
     let predecessor=Option.map (fun ((parent:Retained.retained),_) ->
       {Request.request_id=parent.request_id;request_digest=parent.request_digest}) replacement_parent in
     let* request=io (fun () -> Request.create ?predecessor ~request_id ~owner ~destination ~source ~preparation ()) in
@@ -322,11 +307,14 @@ let rec consume_one ~config ~keeper_name ~wake =
     | Ok (Owner.Finished _) -> Ok (completed_outcome request)
     | Ok (Pending _ | Publication_waiting _ | Basis_superseded _) -> Ok Consumer.Pending
     | Ok (Refused (final,_)) ->
-      (* The host's refusal reached this pass, not the Consumer's commit, so
-         the Consumer did not narrow the next read as it does after a failed
-         commit. Without the mark the same wide range is read again. *)
-      Consumer.mark_range_failed ~config ~keeper_name;
-      Consumer.refused_original (Request.source request) [refusal_report ~store request final] in
+      (* Only a non-counterpart refusal marks a smaller next read. A capacity-
+         only counterpart original has no message-floor coordinate; narrowing
+         would change its chat window instead of splitting its model input. *)
+      let refused=Consumer.refused_original (Request.source request) [Refusal.report ~store request final] in
+      (match refused with
+       | Error _ -> ()
+       | Ok _ -> Consumer.mark_range_failed ~config ~keeper_name);
+      refused in
   (* Discovery does not initialize an epoch or create a replacement request.
      Any malformed old original fails the full inventory before fresh selection. *)
   let inventory_started=Mtime_clock.now () in
@@ -375,8 +363,21 @@ let rec consume_one ~config ~keeper_name ~wake =
     match candidates with
     | Error detail -> error ("Original history floor candidates did not resolve: " ^ detail)
     | Ok candidates ->
+    let stops=match observed with
+      | None -> Ok []
+      | Some (_,_,_,settled) ->
+        List.fold_left (fun stops (record,request) ->
+          let* stops=stops in
+          let* stop=Refusal.retained_stop ~store ~record ~request in
+          Ok (Option.fold ~none:stops ~some:(fun stop -> stop::stops) stop))
+          (Ok []) settled in
+    match stops with
+    | Error detail -> error ("Original history capacity stop did not resolve: " ^ detail)
+    | Ok stops ->
     let is_candidate ((record:Retained.retained),_) =
       List.exists (fun candidate -> (Descent.record candidate).request_id=record.request_id) candidates in
+    let is_stopped ((record:Retained.retained),_) =
+      List.exists (fun stop -> Refusal.request_id stop=record.request_id) stops in
     let moved=match observed with
       | None -> Ok (0,0,0)
       | Some (scope,owner,inventory,settled) ->
@@ -384,7 +385,7 @@ let rec consume_one ~config ~keeper_name ~wake =
            the two never leaves a step without its original. *)
         let* steps=Floor_cleanup.cleanup ~store ~owner ~candidates in
         let* orphans=settle_orphan_gates ~store ~inventory ~scope originals in
-        let settled=List.filter (fun original -> not (is_candidate original)) settled in
+        let settled=List.filter (fun original -> not (is_candidate original || is_stopped original)) settled in
         let* chains=settle_chains ~store ~inventory (finished_chains ~settled ~superseded originals) in
         Ok (chains,orphans,steps) in
     match moved with
@@ -431,21 +432,28 @@ let rec consume_one ~config ~keeper_name ~wake =
            | Error detail -> error detail
            | Ok original -> resume_original original)
     | [],[] ->
+      match Refusal.blocked ~config ~reserved stops with
+      | Some refusal -> Error refusal
+      | None ->
       match resolve ~config ~reserved with
       | Error detail -> error detail
       | Ok None -> error "Original history Addon is not attached; source remains unconsumed"
       | Ok (Some _) ->
         let failure=ref None in
+        let capacity_stop=ref None in
         let stop detail=failure:=Some detail;Consumer.Memory_pending in
+        let before_retain destination=match Refusal.blocks_destination stops destination with
+          | None -> Ok ()
+          | Some refusal -> capacity_stop:=Some refusal;Error (Consumer.error_to_string refusal) in
         let new_original source =
-          match capture ~store ~config ~reserved ~keeper_name source with
+          match capture ~before_retain ~store ~config ~reserved ~keeper_name source with
           | Error detail -> stop detail
           | Ok original ->
             match resume ~store ~config ~reserved ~wake original with
             | Error detail -> stop detail
             | Ok (Owner.Finished _) -> Consumer.Memory_committed
             | Ok (Pending _ | Publication_waiting _ | Basis_superseded _) -> Consumer.Memory_pending
-            | Ok (Refused (final,_)) -> Consumer.Memory_refused [refusal_report ~store (snd original) final] in
+            | Ok (Refused (final,_)) -> Consumer.Memory_refused [Refusal.report ~store (snd original) final] in
         (* A refused one-turn original covers the range this pass selected. The
            pass reads that range message by message under the original, not as
            an original of its own: the host already refused it as one request. *)
@@ -486,4 +494,7 @@ let rec consume_one ~config ~keeper_name ~wake =
          | [] -> ()
          | _::_ -> Consumer.mark_range_failed ~config ~keeper_name);
         let result=Consumer.consume_one ~config ~keeper_name ~commit in
-        match !failure with Some detail -> error detail | None -> result)
+        match !capacity_stop,!failure with
+        | Some refusal,_ -> Error refusal
+        | None,Some detail -> error detail
+        | None,None -> result)

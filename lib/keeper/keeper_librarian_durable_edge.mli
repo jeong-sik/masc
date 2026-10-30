@@ -13,6 +13,11 @@ val with_destination : config:Workspace.config -> reserved:string list ->
 (** Run [publish] with the destination the configuration names now, under the
     configuration and action serializers. The destination must be this
     feature's package and tool. *)
+val same_destination : Keeper_librarian_durable_request.destination ->
+  Keeper_librarian_durable_request.destination -> bool
+(** Compare installation/package/tool and semantic configuration revision.
+    Source bytes, comments and activity do not identify worker inputs.
+    Pure comparison only; grants no live authority or retry by itself. *)
 val fresh_authority : config:Workspace.config -> reserved:string list ->
   owner:Keeper_librarian_durable_request.owner ->
   expected:Keeper_librarian_durable_request.destination -> unit -> (unit, string) result

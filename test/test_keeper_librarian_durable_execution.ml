@@ -758,10 +758,10 @@ let test_actual_official_or_mixed_path kind () = with_fixture ~history_kind:kind
     (io (fun () -> claims fixture.keepers_dir));
   check int "official or mixed source uses one original host HTTP request" 1 (F.post_count fixture.server))
 
-(* An official turn can have no turn-tagged fragments while its independent
-   counterpart sources still have unread evidence. Exercise the configured
-   Addon path, including the actual receipt and both source acknowledgements. *)
-let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
+(* Preserve the upstream narrowed-range regression for ordinary invalid-request
+   refusals. The capacity-only path now retains a durable stop; an independent
+   failure still narrows without losing counterpart identities or ACK ordering. *)
+let test_counterpart_non_capacity_refusal_preserves_narrowed_sources () =
   with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
     let content = "begin counterpart\n" ^ String.make 65536 'x' ^ "\nend counterpart" in
     let speaker : Keeper_chat_store.speaker =
@@ -797,21 +797,22 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     let initial_requests = ref [] in
     fixture.set_response (fun capture ->
       initial_requests := !initial_requests @ [observations capture];
-      `Request_entity_too_large,
-        {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+      `Bad_request,
+        {|{"error":{"message":"fixture invalid request","type":"invalid_request_error"}}|});
     let deliveries= !(fixture.deliveries) in
     assert_pending (run_worker fixture);
     await_delivery fixture ~after:deliveries;
     check bool "the refused request retains both complete counterpart identities and bytes" true
       (!initial_requests = [0,0,[external_observation;chat_observation]]);
     (match run_worker fixture with
-     | Error (Consumer.Counterpart_input_capacity_refused {official_range;reports=[report];_}) ->
-       check bool "the host receipt names its actual provider input refusal" true
-         (report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused]);
+     | Ok (Consumer.Memory_not_committed [report]) ->
+       let official_range=Source.official_range_id (Capture.source (snd (only_original fixture))) in
+       check bool "ordinary invalid-request refusal invents no capacity evidence" true
+         (report.provider_input_refusals=[] && not report.input_capacity_only);
        check bool "the operator can locate both original official rows" true
          (Option.map (fun (range:Current.official_range_id) -> List.map fst range.turns) official_range=Some [1;2])
      | Error error -> fail (Consumer.error_to_string error)
-     | Ok _ -> fail "a retained counterpart-only capacity refusal was not explicit");
+     | Ok _ -> fail "ordinary counterpart refusal did not return its actual report");
     check bool "the refusal does not advance official history" true (official ()=before);
     let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
       ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
@@ -829,19 +830,20 @@ let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
     let narrowed_refusal = ref [] in
     fixture.set_response (fun capture ->
       narrowed_refusal := !narrowed_refusal @ [observations capture];
-      `Request_entity_too_large,
-        {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+      `Bad_request,
+        {|{"error":{"message":"fixture invalid request","type":"invalid_request_error"}}|});
     let deliveries= !(fixture.deliveries) in
     assert_pending (run_worker fixture);
     await_delivery fixture ~after:deliveries;
     (match run_worker fixture with
-     | Error (Consumer.Counterpart_input_capacity_refused {official_range;reports=[report];_}) ->
-       check bool "the narrowed refusal retains the real provider cause" true
-         (report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused]);
+     | Ok (Consumer.Memory_not_committed [report]) ->
+       let official_range=Source.official_range_id (Capture.source (snd (only_original fixture))) in
+       check bool "the narrowed invalid-request refusal invents no capacity evidence" true
+         (report.provider_input_refusals=[] && not report.input_capacity_only);
        check bool "the narrowed refusal names only the first boundary" true
          (Option.map (fun (range:Current.official_range_id) -> List.map fst range.turns) official_range=Some [1])
      | Error error -> fail (Consumer.error_to_string error)
-     | Ok _ -> fail "the narrowed counterpart refusal was not explicit");
+     | Ok _ -> fail "ordinary narrowed refusal did not return its actual report");
     let narrowed,narrowed_capture=only_original fixture in
     check bool "the narrowed refusal uses a distinct original" true
       (narrowed.Owner.request_id<>rejected.request_id);
@@ -1214,7 +1216,7 @@ let test_source_replacement_cannot_publish_retained_answer change () = with_fixt
   check string "source failure retains the original request ID" record.request_id restored_record.Owner.request_id;
   check json "source failure retains full original evidence" original (Capture.to_json restored);
   check int "source replacement starts no substitute provider" posts (F.post_count fixture.server))
-let restart_actual_worker fixture ~sw =
+let restart_actual_worker ?(while_off=fun () -> ()) fixture ~sw =
   let old=(runtime_export fixture).Runtime.instance_id in
   let changed=Eio.Condition.create () in
   let stop=Runtime.subscribe_owner_events ~config:fixture.config ~package_id:Capture.package_id
@@ -1224,7 +1226,7 @@ let restart_actual_worker fixture ~sw =
     (* The actual maintenance owner's cleanup nudge schedules a new attach
        after the retiring entry is removed. No guessed poll/yield loop. *)
     Runtime.start_configuration_service ~config:fixture.config ~sw ~clock:fixture.clock;
-    set_enabled fixture false;set_enabled fixture true;
+    set_enabled fixture false;while_off ();set_enabled fixture true;
     let attached=Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
       Eio.Condition.loop_no_mutex changed (fun () ->
         let snapshot=Runtime.tool_export_snapshot ~config:fixture.config ~reserved:[]
@@ -1238,6 +1240,166 @@ let restart_actual_worker fixture ~sw =
       (List.exists (fun instance -> member "runtime_presence" instance=`String "live"
         && member "instance_id" instance=`String old) instances);
     check bool "actual replacement worker exports a different usable incarnation" true (attached.instance_id<>old))
+let replace_actual_worker_configuration fixture ~sw source =
+  let old=(runtime_export fixture).Runtime.instance_id in
+  let changed=Eio.Condition.create () in
+  let stop=Runtime.subscribe_owner_events ~config:fixture.config ~package_id:Capture.package_id
+    (fun (Configuration_observed | Export_inventory_changed | Exact_result_delivered _) ->
+      Eio.Condition.broadcast changed) in
+  Fun.protect ~finally:stop (fun () ->
+    Runtime.start_configuration_service ~config:fixture.config ~sw ~clock:fixture.clock;
+    io (fun () -> write fixture.source source);reconcile fixture;
+    Eio.Time.with_timeout_exn fixture.clock F.fixture_wait_seconds (fun () ->
+      Eio.Condition.loop_no_mutex changed (fun () ->
+        let snapshot=Runtime.tool_export_snapshot ~config:fixture.config ~reserved:[]
+          ~access:Lane_addon_sources.Operator_configuration in
+        List.find_opt (fun (export:Runtime.tool_export) -> export.tool.name=Capture.tool && export.instance_id<>old)
+          snapshot.exports)) |> ignore;
+    reconcile fixture)
+(* An official turn can have no turn-tagged fragments while its independent
+   counterpart sources still have unread evidence. Exercise the configured
+   Addon path, including the actual receipt and both source acknowledgements. *)
+let test_counterpart_only_provider_capacity_refusal_is_source_preserving () =
+  with_fixture ~history_kind:Official (fun ~sw fixture ->
+    let content = "begin counterpart\n" ^ String.make 65536 'x' ^ "\nend counterpart" in
+    let speaker : Keeper_chat_store.speaker =
+      {speaker_id=Some "external";speaker_name=Some "External";
+       speaker_authority=Keeper_chat_store.External} in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~content ~speaker ();
+    io (fun () ->
+      official_turn fixture.config ~turn:2 ~time:(Time_compat.now () +. 10.);
+      let session_dir=Keeper_fs.keeper_session_dir fixture.config trace_id in
+      let path file=Keeper_turn_fragments.path ~session_dir file in
+      write (path Keeper_turn_fragments.Main)
+        ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+      write (path Keeper_turn_fragments.Internal) "");
+    let official ()=io (fun () -> Keeper_librarian_official_progress.read
+      ~keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_id:keeper_name
+      |> Result.map_error Keeper_librarian_official_progress.read_error_to_string |> get) in
+    let before=official () in
+    let external_observation : Keeper_counterpart_observation.t =
+      {origin=Connector_attention;channel="agent";workspace_id=None;
+       user_id=Some "original-agent";user_name=Some "Original agent";
+       authority=External;content="Original admitted external evidence"} in
+    let chat_observation : Keeper_counterpart_observation.t =
+      {origin=Durable_chat;channel="direct";workspace_id=None;
+       user_id=Some "external";user_name=Some "External";
+       authority=External;content} in
+    let expected=[external_observation;chat_observation] in
+    let observations capture =
+      let input=Capture.source capture |> Source.input in
+      List.length input.messages,List.length input.tool_observations,
+        List.sort Stdlib.compare input.counterpart_observations in
+    let check_complete ?(expected=expected) capture =
+      check bool "the provider retains complete counterpart identities and bytes" true
+        (observations capture=(0,0,List.sort Stdlib.compare expected)) in
+    let provider_inputs=ref [] in
+    fixture.set_response (fun capture ->
+      provider_inputs:= !provider_inputs @ [observations capture];
+      `Request_entity_too_large,
+        {|{"error":{"message":"fixture body too large","type":"invalid_request_error"}}|});
+    let deliveries= !(fixture.deliveries) in
+    assert_pending (run_worker fixture);
+    await_delivery fixture ~after:deliveries;
+    check bool "the refused HTTP input retains both original counterparts" true
+      (!provider_inputs=[0,0,List.sort Stdlib.compare expected]);
+    (match run_worker fixture with
+     | Error (Consumer.Counterpart_input_capacity_refused {official_range;reports=[report];_}) ->
+       check bool "the host receipt names its actual provider input refusal" true
+         (report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused]);
+       check bool "the operator can locate both original official rows" true
+         (Option.map (fun (range:Current.official_range_id) -> List.map fst range.turns) official_range=Some [1;2])
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "a retained counterpart-only capacity refusal was not explicit");
+    check bool "the refusal does not advance official history" true (official ()=before);
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get) in
+    check bool "the refusal does not acknowledge the external row" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:0 ~through:1 ~atom:None
+        ~official:(Source.official_range_id (Capture.source (snd (only_original fixture)))));
+    no_memory fixture;
+    let rejected,original=only_original fixture in
+    check_complete original;
+    let source_json=Source.to_json (Capture.source original) in
+    let request_json=Capture.to_json original and rejected_progress=Progress.to_json rejected.progress in
+    let restored=Source.of_json source_json |> Result.map_error Source.error_to_string |> get in
+    check json "the whole refused original survives strict restoration" source_json (Source.to_json restored);
+    check int "only one actual provider request was refused" 1 (F.post_count fixture.server);
+    let check_held () =
+      (match run_worker fixture with
+       | Error (Consumer.Counterpart_input_capacity_refused {official_range;reports=[report];_}) ->
+         check bool "every wake reports the same located refusal" true
+           (official_range=Source.official_range_id (Capture.source original)
+            && report.provider_input_refusals=[Keeper_librarian_input_refusal.Request_body_refused])
+       | Error error -> fail (Consumer.error_to_string error)
+       | Ok _ -> fail "a settled capacity refusal reminted fresh work");
+      let held_record,held=only_original fixture in
+      check string "the held original keeps its durable ID" rejected.request_id held_record.Owner.request_id;
+      check json "no new observer/dispatch events appear" rejected_progress (Progress.to_json held_record.progress);
+      check json "restart reloads the exact complete original" request_json (Capture.to_json held);
+      check bool "every held wake preserves official progress" true (official ()=before);
+      check json "every held wake preserves the external preparation without ACK"
+        (Keeper_external_read_cursor.observation_to_json (Source.external_prepared (Capture.source original)))
+        (Keeper_external_read_cursor.observation_to_json (cursor ()));
+      check int "held wake sends no substitute model request" 1 (F.post_count fixture.server);
+      no_memory fixture in
+    check_held ();check_held ();
+    Consumer.For_testing.reset_process_state ();
+    restart_actual_worker ~while_off:check_held fixture ~sw;
+    check_held ();
+    let appended="Counterpart appended after the refusal" in
+    Keeper_chat_store.append_user_message ~base_dir:fixture.base_path ~keeper_name
+      ~content:appended ~speaker ();
+    io (fun () -> official_turn fixture.config ~turn:3 ~time:(Time_compat.now () +. 20.));
+    check_held ();
+    let expected={chat_observation with content=appended}::expected in
+    fixture.set_response (fun capture ->
+      provider_inputs:= !provider_inputs @ [observations capture];
+      `OK,F.openai_response (answer capture));
+    (* Changed provider declarations alone carry no comparable original plan
+       identity. An improved response and another admitted slot do not retry. *)
+    publish_routes fixture.base_path [fixture.server.base_url;fixture.server.base_url];
+    check_held ();
+    let configured_b=fixture.declaration true |> String.split_on_char '\n'
+      |> List.map (function "run_id=\"librarian-original-owner\"" -> "run_id=\"librarian-capacity-retry\"" | line -> line)
+      |> String.concat "\n" in
+    replace_actual_worker_configuration fixture ~sw configured_b;
+    (* Observe B, then return to A before selection. A's original must still
+       survive: archiving it on the first configuration observation is unsafe. *)
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    check_held ();
+    replace_actual_worker_configuration fixture ~sw configured_b;
+    drive_advanced fixture;
+    let fresh,fresh_capture=observed_originals fixture
+      |> List.filter (fun ((record:Owner.retained),_) -> record.request_id<>rejected.request_id)
+      |> function [original] -> original | _ -> fail "one new configured original must own the successful request" in
+    check_complete ~expected fresh_capture;
+    check bool "the configured recovery HTTP input retains all old and appended counterparts" true
+      (List.nth_opt !provider_inputs 1=Some (0,0,List.sort Stdlib.compare expected));
+    check bool "fresh reprocessing uses a new original, not replaying the refused request" true
+      (fresh.Owner.request_id<>rejected.request_id);
+    check bool "official history advances only after a real complete-input commit" true (official ()<>before);
+    check bool "external evidence is acknowledged only after that commit" true
+      (Keeper_external_read_cursor.observation_matches_preparation (cursor ())
+        ~after:1 ~through:1 ~atom:None ~official:None);
+    check int "one refused and one successful complete-input request" 2 (F.post_count fixture.server);
+    replace_actual_worker_configuration fixture ~sw (fixture.declaration true);
+    (match run_worker fixture with
+     | Ok Consumer.Nothing_to_read -> ()
+     | Ok _ -> fail "the consumed larger range should leave no fresh source"
+     | Error error -> fail (Consumer.error_to_string error));
+    let settled,retained=archived fixture ~date:(day_of rejected.request_id) rejected in
+    check json "old refusal and complete source remain in the ordinary archive" (canonical request_json) retained;
+    check json "settlement never rewrites the original rejection" rejected_progress (Progress.to_json settled);
+    io (fun () -> official_turn fixture.config ~turn:4 ~time:(Time_compat.now () +. 30.));
+    (match run_worker fixture with
+     | Ok (Consumer.Official_advanced _) -> ()
+     | Ok _ -> fail "a future empty official range should advance under the restored configuration"
+     | Error error -> fail (Consumer.error_to_string error));
+    check int "past refused configuration does not block or redispatch a future range" 2 (F.post_count fixture.server))
+
 let test_purge_joins_unknown_then_worker_restart_does_not_resubmit history_kind () =
   with_fixture ~history_kind (fun ~sw fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in
@@ -2336,6 +2498,8 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
   test_case "actual mixed original reaches Memory and both receipt/position kinds" `Quick (test_actual_official_or_mixed_path Mixed);
   test_case "counterpart-only capacity refusal preserves source and ACK" `Quick
     test_counterpart_only_provider_capacity_refusal_is_source_preserving;
+  test_case "ordinary counterpart refusals preserve narrowed source identities" `Quick
+    test_counterpart_non_capacity_refusal_preserves_narrowed_sources;
   test_case "missing counterpart substitution preserves fresh source until corrected" `Quick
     test_counterpart_prompt_omission_preserves_fresh_source;
   test_case "untagged official counterparts reach Memory once" `Quick

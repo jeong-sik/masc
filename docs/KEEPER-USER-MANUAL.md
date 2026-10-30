@@ -823,6 +823,26 @@ interrupted execution; MASC does not silently replay potentially completed
 effects. A changed conversation or tool surface also requires recovery instead
 of replaying the original input into a new session.
 
+## Resume a refused counterpart-only history read
+
+If the Librarian reports `Counterpart_input_capacity_refused`, its actual
+provider or transport refused the complete counterpart input. The original
+request, source, range coordinates and refusal remain durable. Later ticks,
+worker/server restarts, appended chat and turning the Addon Off/On report the
+same refusal without another model request. Retained-input restoration and
+validation still require I/O; this does not impose a chat capture size limit.
+
+Arrange a provider or transport that accepts the full input, then explicitly
+change the completed-history Addon's semantic configuration, such as its
+declaration's `run_id`, and apply that configuration. This permits a fresh
+request under the current authority checks; it does not prove improved capacity.
+Changing only the provider registry, a comment or `enabled` does not authorize
+retry. Returning to an already-refused configuration remains stopped while
+that original range is relevant. A later actual Memory-backed reader frontier
+and external ACK can settle the old refusal so it does not block future ranges;
+accounted unread messages retain their ledger entries. Source, progress and
+external ACKs are preserved until ordinary successful publication.
+
 ## Retrieve memory for a purpose
 
 When available in the Keeper's tool surface, `keeper_memory_select` accepts a

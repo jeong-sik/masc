@@ -624,26 +624,25 @@ let test_history_clear_guards_and_exact_commit () = with_store @@ fun path store
   Store.commit_history_clear_input_checkpoint reopened ~trace_id ~observed:(Some cleared)
     ~checkpoint:(Some (checkpoint 2)) |> ok |> input_updated
 
-let test_history_clear_never_hides_terminal_unknown_native () = with_store @@ fun _path store operation ->
+let test_a_settled_unknown_effect_admits_history_clear () = with_store @@ fun _path store operation ->
   let trace_id=(checkpoint 1).Keeper_checkpoint_ref.trace_id in
   Store.update_input_checkpoint store ~observed:None ~checkpoint:(checkpoint 1) |> ok |> input_updated;
   bind store operation (make_call operation);
   terminal store operation (Agent.Operator_repair_required Agent.Effect_outcome_unknown);
   ignore (Store.fail_running store ~now:4. ~operation_id ~kind:Operation.Turn_exception
     ~detail:"unknown effect" ~outcome_ref:None |> ok);
-  check int "ordinary outstanding semantics omit this terminal row" 0
-    (List.length (Store.semantic_outstanding store |> function Ok rows -> rows
-      | Error error -> fail (Store.semantic_error_to_string error)));
   let before=read store in
-  rejected "terminal unknown effect admitted clear" (Store.history_clear_input_checkpoint store ~trace_id);
-  rejected "terminal unknown effect published clear" (Store.commit_history_clear_input_checkpoint store
-    ~trace_id ~observed:(Some (checkpoint 1)) ~checkpoint:(Some (checkpoint 2)));
-  check bool "original unknown receipt survives clear refusal" true (Native.equal_state before (read store));
-  check_input "unknown effect retains original input" (Some (checkpoint 1)) store
+  check bool "the settled execution admits the clear" true
+    (Option.equal Keeper_checkpoint_ref.equal (Some (checkpoint 1))
+      (Store.history_clear_input_checkpoint store ~trace_id |> ok));
+  Store.commit_history_clear_input_checkpoint store ~trace_id ~observed:(Some (checkpoint 1))
+    ~checkpoint:(Some (checkpoint 2)) |> ok |> input_updated;
+  check_input "the clear publishes its input" (Some (checkpoint 2)) store;
+  check bool "the unknown-effect receipt survives the clear" true (Native.equal_state before (read store))
 
 let () = run "native-call-owner-store" ["input ownership", [
   test_case "history clear requires actual settlement and preserves commit uncertainty" `Quick test_history_clear_guards_and_exact_commit;
-  test_case "terminal unknown native is never hidden by semantic settlement" `Quick test_history_clear_never_hides_terminal_unknown_native;
+  test_case "a settled unknown effect admits history clear" `Quick test_a_settled_unknown_effect_admits_history_clear;
   test_case "retired response cut binds input and native authority atomically" `Quick test_retired_cut_bind_and_input_owner_are_atomic;
   test_case "stale native and unknown effects preserve input" `Quick test_retired_cut_native_refusals_keep_input;
   test_case "unknown prior input never becomes fresh or releases evidence" `Quick

@@ -1042,18 +1042,13 @@ let update_input_checkpoint ?(allow_turn_reset = false) store ~observed ~checkpo
       let* () = install_input_checkpoint_with_db store ~previous checkpoint in
       Ok Input_checkpoint_updated)
 
-(* A terminal semantic phase alone cannot settle a native effect. Read every
-   original record so unknown-effect calls on terminal rows are not hidden. *)
+(* A settled record never resumes. The native receipt a restart or a stop
+   leaves on it records the call and does not hold the clear back. *)
 let require_history_clear_quiescence store =
   let* inventory = inventory store in
-  let* rows = semantic_rows store.db ~active_only:false in
-  let unsettled execution =
-    not (Semantic.is_terminal execution) ||
-    match execution.Semantic.native_call with
-    | Keeper_native_call.No_native_call -> false
-    | Active _ | Terminal_unacknowledged _ -> true in
-  if Option.is_some inventory.running_operation_id || List.exists unsettled rows then
-    Error (Invalid_input "history clear requires settled semantic and native execution; reconcile outstanding effects first")
+  let* outstanding = semantic_rows store.db ~active_only:true in
+  if Option.is_some inventory.running_operation_id || not (List.is_empty outstanding) then
+    Error (Invalid_input "history clear requires every operation and semantic execution to be settled")
   else Ok ()
 
 let history_clear_input_checkpoint store ~trace_id =

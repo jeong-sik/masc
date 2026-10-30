@@ -16,7 +16,8 @@ val assess :
     cancellation propagates to the caller. *)
 
 val to_yojson : t -> Yojson.Safe.t
-val model_advice : t -> string option
+val model_advice : t -> (string option, string) result
 (** [None] when policy disables review or required input/question material is
     unavailable before a request. Returned judgments and HTTP/response failures
-    produce short advice without turning the assessment into a gate. *)
+    produce short advice without turning the assessment into a gate. Render
+    errors remain explicit; the caller retains the frozen body without advice. *)

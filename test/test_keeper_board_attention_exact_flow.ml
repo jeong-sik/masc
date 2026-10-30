@@ -1112,9 +1112,13 @@ let test_mixed_cli_cancellation_propagates_once () =
         Alcotest.fail "cancelled CLI tail did not close the exact run as cancelled")))
 ;;
 
+let board_policy_marker = "managed-board-policy-fixture"
+
 let test_cli_only_executes_without_http_provenance () =
   Fixture.with_official_client_runtimes (fun () ->
   with_prompt_registry (fun () ->
+    (match Prompt_registry.set_override Prompt_names.judge_board_policy board_policy_marker with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
     run_eio (fun ~sw:_ ~net ~clock ->
       let candidate = candidate "board-attention-cli-only" in
       publish_lane ~cli_slot_ids:[ Fixture.cli_primary_runtime ] [];
@@ -1122,7 +1126,9 @@ let test_cli_only_executes_without_http_provenance () =
         | Ok prepared -> prepared
         | Error _ -> Alcotest.fail "CLI-only Board lane must prepare" in
       let calls = ref 0 in
-      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+        Alcotest.(check bool) "full-lane request consumes the shared policy override" true
+          (contains_substring ~needle:board_policy_marker prompt);
         incr calls;
         Ok (Yojson.Safe.to_string (judgment_output ~candidate_id:candidate.Candidate.candidate_id)) in
       match Exact_flow.execute ~cli_runner:runner
@@ -2465,6 +2471,9 @@ let test_jev_event_fanout_failure_releases_claim () =
 ;;
 
 let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
+  with_prompt_registry (fun () ->
+  (match Prompt_registry.set_override Prompt_names.judge_board_policy board_policy_marker with
+   | Ok () -> () | Error detail -> Alcotest.fail detail);
   run_eio_with_http_pool (fun ~sw ~net ~clock ->
     let candidate = candidate "board-attention-jev-adapter" in
     let jev =
@@ -2538,6 +2547,8 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
              (json_string_field "type" (`Assoc question));
            (match json_string_field "instructions" (`Assoc question) with
             | Some instructions ->
+              Alcotest.(check bool) "Jev request consumes the shared policy override" true
+                (contains_substring ~needle:board_policy_marker instructions);
               Alcotest.(check bool)
                 "the question names the keeper"
                 true
@@ -2557,24 +2568,37 @@ let test_jev_adapter_sends_the_decisions_and_reads_not_relevant () =
                 "the request offers every decision under its label"
                 (Judgment.decision_tokens @ ["uncertain"])
                 (List.map fst criteria);
-              Alcotest.(check (option string))
-                "relevant requires the current signal, not capability overlap"
-                (Some
-                   "The current signal itself requires this keeper's concrete attention, review, or action for one of its board interests; general topic or capability overlap alone is insufficient.")
-                (match List.assoc_opt "relevant" criteria with
-                 | Some (`String description) -> Some description
-                 | Some _ | None -> None);
-              Alcotest.(check (option string))
-                "not relevant includes broad interest overlap"
-                (Some
-                   "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with a board interest, or does not require this keeper to act.")
-                (match List.assoc_opt "not_relevant" criteria with
-                 | Some (`String description) -> Some description
-                 | Some _ | None -> None)
+              List.iter (fun (label, key) ->
+                let expected = Prompt_registry.render_prompt_template key [] |> Result.get_ok in
+                Alcotest.(check (option string)) "managed policy clause reaches the exact criterion"
+                  (Some expected) (json_string_field label (`Assoc criteria)))
+                ["relevant", Prompt_names.judge_board_policy_relevant;
+                 "not_relevant", Prompt_names.judge_board_policy_not_relevant;
+                 "uncertain", Prompt_names.judge_board_system_one_uncertain]
             | Some _ | None -> Alcotest.fail "the relevance question has no criteria map")
          | Some _ | None -> Alcotest.fail "the request carries no relevance question")
       | bodies ->
-        Alcotest.failf "expected one request to Jev, saw %d" (List.length bodies)))
+        Alcotest.failf "expected one request to Jev, saw %d" (List.length bodies))))
+;;
+
+let test_missing_board_policy_never_dispatches () =
+  with_prompt_registry (fun () ->
+  with_temp_base "missing-board-policy-" (fun dir ->
+  run_eio_with_http_pool (fun ~sw ~net ~clock ->
+    let candidate = candidate "missing-board-policy" in
+    let jev = Fixture.start_server ~sw ~net ~clock (Fixture.Reply "{}") in
+    Prompt_registry.clear ();
+    Prompt_registry.set_markdown_dir dir;
+    let destinations =
+      ({ Typesafeai_client.endpoint = jev.base_url; model = "fixture"; api_key = "fixture" }, []) in
+    Alcotest.(check bool) "missing shared policy rejects one Jev question" true
+      (Result.is_error (Typesafeai_board_attention.judge_candidate ~clock ~destinations ~candidate ()));
+    Alcotest.(check bool) "missing shared policy rejects a Jev batch" true
+      (Result.is_error (Typesafeai_board_attention.judge_candidates ~clock ~destinations ~candidates:[candidate] ()));
+    Alcotest.(check int) "no Jev dispatch without policy" 0 (Fixture.post_count jev);
+    match prepare_exact ~net:(Some net) candidate with
+    | Error (Exact_flow.Prompt_contract_unavailable _) -> ()
+    | Error _ | Ok _ -> Alcotest.fail "full lane did not expose its unavailable prompt contract")))
 ;;
 
 (* A rejected batch answer must say which keys it carried. The 53 quarantines
@@ -2966,7 +2990,9 @@ let () =
             test_flow_bookkeeping_failures_are_not_provider_exhaustion
         ] )
     ; ( "jev first"
-      , [ Alcotest.test_case "normal producer batches owner cursor catchup" `Quick
+      , [ Alcotest.test_case "missing policy stops both model transports" `Quick
+            test_missing_board_policy_never_dispatches
+        ; Alcotest.test_case "normal producer batches owner cursor catchup" `Quick
             test_normal_discoverable_producer_batches_owner_cursor_catchup
         ; Alcotest.test_case "detached normal admission revalidates current owner" `Quick
             test_detached_normal_admission_revalidates_owner

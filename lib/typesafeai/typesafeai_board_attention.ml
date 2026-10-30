@@ -22,18 +22,21 @@ open Result.Syntax
 (* The explicit uncertainty choice delegates to the full lane. A decided
    answer's confidence goes back to the caller, which sends a decision below
    its settle floor to the full lane as well. *)
-let relevance_choices =
-  Typesafeai_types.choice_set
+let relevance_choices () =
+  let* relevant = Prompt_registry.render_prompt_template Prompt_names.judge_board_policy_relevant [] in
+  let* not_relevant = Prompt_registry.render_prompt_template Prompt_names.judge_board_policy_not_relevant [] in
+  let* uncertain = Prompt_registry.render_prompt_template Prompt_names.judge_board_system_one_uncertain [] in
+  let* board_policy = Prompt_registry.render_prompt_template Prompt_names.judge_board_policy
+      ["relevant_rule", relevant; "not_relevant_rule", not_relevant] in
+  let* choices = Typesafeai_types.choice_set
     ~options:(List.map (fun decision -> Settled decision) Judgment.all_of_decision @ [Uncertain])
     ~label:decision_label
     ~describe:(function
-      | Settled Judgment.Relevant ->
-        Some
-          "The current signal itself requires this keeper's concrete attention, review, or action for one of its board interests; general topic or capability overlap alone is insufficient."
-      | Settled Judgment.Not_relevant ->
-        Some
-          "The current signal is aimed elsewhere, is general discussion or noise, only overlaps with a board interest, or does not require this keeper to act."
-      | Uncertain -> Some "The current signal does not provide enough evidence to decide; request a full judgment by the review lane.")
+      | Settled Judgment.Relevant -> Some relevant
+      | Settled Judgment.Not_relevant -> Some not_relevant
+      | Uncertain -> Some uncertain)
+  in
+  Ok (choices, board_policy)
 ;;
 
 let relevance_question_id = "relevance"
@@ -44,14 +47,15 @@ let relevance_question_id = "relevance"
    disagreed, a blind judge reading the production rule sided with this
    shape 23 times. The same shape lets one request carry a question per
    keeper for the same signal. *)
-let relevance_question ~choices ~interests candidate =
-  Typesafeai_types.choice_of_set
-    ~instructions:
-      (Printf.sprintf
-         "Does the Board signal in state.signal itself require concrete attention, review, or action from keeper %S for one of its board interests %s? General topic or capability overlap is not sufficient. Choose uncertain when you cannot establish either decision from the supplied signal."
-         candidate.Keeper_board_attention_candidate.keeper_name
-         (Yojson.Safe.to_string (`List (List.map (fun interest -> `String interest) interests))))
-    choices
+let relevance_question ~board_policy ~choices ~interests candidate =
+  let* instructions =
+    Prompt_registry.render_prompt_template Prompt_names.judge_board_system_one
+      [ "board_policy", board_policy
+      ; "keeper_name_json", Yojson.Safe.to_string (`String candidate.Keeper_board_attention_candidate.keeper_name)
+      ; "board_interests_json", Yojson.Safe.to_string (`List (List.map (fun interest -> `String interest) interests))
+      ]
+  in
+  Ok (Typesafeai_types.choice_of_set ~instructions choices)
 ;;
 
 let rationale
@@ -74,8 +78,9 @@ let rationale
 ;;
 
 let judge_candidate ?clock ~destinations ~candidate () =
-  let* choices = relevance_choices in
+  let* choices, board_policy = relevance_choices () in
   let* interests = Keeper_board_attention_candidate.board_interests candidate in
+  let* question = relevance_question ~board_policy ~choices ~interests candidate in
   let state =
     `Assoc
       [ ( "signal"
@@ -88,7 +93,7 @@ let judge_candidate ?clock ~destinations ~candidate () =
       ?clock
       ~destinations
       ~state
-      ~questions:[ relevance_question_id, relevance_question ~choices ~interests candidate ]
+      ~questions:[ relevance_question_id, question ]
       ()
     |> Result.map_error Typesafeai_client.failure_to_string
   in
@@ -132,7 +137,7 @@ let judge_candidates ?clock ~destinations ~(candidates : Keeper_board_attention_
   match candidates with
   | [] -> Ok []
   | first :: _ ->
-    let* choices = relevance_choices in
+    let* choices, board_policy = relevance_choices () in
     let signal = Keeper_board_attention_candidate.signal_to_yojson first.signal in
     let rec questions seen = function
       | [] -> Ok []
@@ -143,8 +148,9 @@ let judge_candidates ?clock ~destinations ~(candidates : Keeper_board_attention_
         then Error "typesafeai: event batch contains different signals"
         else
           let* interests = Keeper_board_attention_candidate.board_interests candidate in
+          let* question = relevance_question ~board_policy ~choices ~interests candidate in
           let* tail = questions (id :: seen) rest in
-          Ok ((id, relevance_question ~choices ~interests candidate) :: tail)
+          Ok ((id, question) :: tail)
     in
     let* questions = questions [] candidates in
     let* evaluated =

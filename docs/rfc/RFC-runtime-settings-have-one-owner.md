@@ -126,7 +126,16 @@ RFC settings-typed-delivery(2026-09-02, Draft)는 비목표에 "env 를 입력�
 
 ### 3.5 스크립트와 compose
 
-스크립트가 서버를 띄울 때는 임시 base path 에 `runtime.toml` 을 쓴다. compose 는 설정 디렉터리를 마운트한다.
+원안은 스크립트가 서버를 띄울 때 임시 base path 에 `runtime.toml` 을 쓰고, compose 는 설정 디렉터리를 마운트하는 것이었다.
+
+보정(2026-10-30). 이 방법은 그대로는 안 된다.
+
+- 서버는 `[runtime]` 기본 모델, 레인, provider 가 다 든 `runtime.toml` 이 있어야 뜨고, 아무것도 합성하지 않는다(`scripts/fixtures/release-evidence/runtime.toml` 머리말).
+- 설정 루트가 이미 있으면 부팅은 없는 파일만 채운다(`Refill_existing_root`, `write_missing_embedded`). 있는 `runtime.toml` 은 건드리지 않는다. 그래서 스크립트가 `[autonomous] enabled = false` 한 줄짜리 파일을 미리 써 두면 시드가 일어나지 않아 서버가 뜨지 못한다.
+- 파일이 이미 있는 harness(fixture 를 복사하는 `release-evidence.sh` 등)는 fixture 에 키를 더하면 된다. `test_runtime_config_validity` 가 fixture 를 검사한다.
+- 시드된 기본 설정으로 뜨는 harness 는 시드한 뒤에 키를 고쳐야 한다. 스크립트에는 그럴 수단이 없고, `masc start` 에는 이 설정을 바꾸는 플래그도 없다.
+
+그래서 2b 는 스크립트만 고쳐서는 끝나지 않는다. 방식은 결정 D6 이다.
 
 다시 세어 보니 파일은 34개다(주석만 있는 fixture 1개 포함). 셸 harness 12개는 `scripts/harness/lib/server_bootstrap.sh` 를 같이 쓰고, 파이썬 12개는 서버 환경 묶음(`MASC_GRPC_ENABLED` 등)을 각자 만든다. `start-masc.sh` 는 `.env` 파일을 읽은 뒤에도 부른 쪽의 값을 지키려고 이름 6개를 따로 보존한다.
 
@@ -237,7 +246,7 @@ RFC settings-typed-delivery(2026-09-02, Draft)는 비목표에 "env 를 입력�
 | D3 | #46805 는 임시 처방이다. 병합됐으니(2026-10-29 22:56) 본문에 `WORKAROUND` 표시와 이 RFC 를 적고, 2층이 병합될 때 특수 처리를 일반 규칙으로 바꾼다 | 정함. 병합이 라벨보다 먼저였다 |
 | D4 | 파일 소유 이름을 아래층에 알리는 방법. (a) 부팅 때 선언(기본안), (b) 표를 아래층에 둔다(§3.3) | 열림 |
 | D5 | 0335 의 W1(자격 증명 파일)을 이 RFC 뒤에 이어서 할지 | 열림. 이 RFC 에는 영향이 없다 |
-| D6 | 2b층에서 스크립트 33개를 옮기는 방식. 스크립트마다 `runtime.toml` 을 쓰는 공용 함수(셸 하나, 파이썬 하나)를 두거나, 서버를 띄우는 harness 공용 코드(`scripts/harness/lib/server_bootstrap.sh`)에 한 번만 넣는다. 다시 세어 보니 셸 12개가 그 공용 코드를 같이 쓰고, 파이썬 12개는 서버 환경 묶음을 각자 만든다. 추천: 셸은 공용 코드에 한 번, 파이썬은 도우미 하나로 모은다. 키 오타는 `validate_doc` 로 확인하는 시험을 둔다 | 열림. 2b층을 시작할 때 정한다 |
+| D6 | 2b층에서 스크립트 34개가 쓰는 네 이름을 어떻게 옮길지(§3.5). 스크립트가 최소 `runtime.toml` 을 써서는 서버가 뜨지 않으므로 서버 쪽 수단이 필요하다. a. `masc config set KEY=VALUE --base-path P` 를 더한다. 부팅과 같은 방법으로 설정 루트를 시드한 뒤 `Toml_line_editor` 로 키를 고치고 `validate_doc` 로 확인한다. 파일이 계속 유일한 주인이다. b. `masc start --set KEY=VALUE` 를 더한다. 그 프로세스에만 켜지는 명시적 덮어쓰기라서 주인이 파일과 실행 인자 둘이 된다. c. 파일이 이미 있는 harness 는 fixture 에 키를 더하고, 시드를 쓰는 harness 는 완전한 fixture 로 바꾼다. 서버 쪽 변경은 없지만, 기본 설정으로 새로 뜨는 경로를 시험하던 harness(`run_local_fresh_boot_contract.sh` 등)가 그 시험을 잃는다 | 열림. 추천 a(D1 을 지키고 harness 시험의 뜻도 지킨다). 정해지면 2b 를 시작한다 |
 | D7 | 4층(재시작 환경)을 어떻게 할지(§3.7). a. 이 RFC 에서 빼고 별도 RFC 로 정한다. b. 재시작이 떠 있는 서버의 환경을 넘긴다. c. 원안(허용 목록) | 열림. 추천 a. 원안은 이름 200여 개를 먼저 등록해야 하고, b 는 재시작의 동작을 바꿔서 따로 설계할 값어치가 있다 |
 
 ## 9. 되돌리기

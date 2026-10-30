@@ -92,12 +92,24 @@ let remainder t ~final_text =
 ;;
 
 let finish_response t ~final_text =
-  if String.equal final_text ""
-     || String.equal final_text (Buffer.contents t.raw)
-     || String.equal final_text (Buffer.contents t.current)
-     || List.exists (String.equal final_text) t.previous_messages
-  then None
-  else match remainder t ~final_text with
-    | Some _ as missing -> missing
-    | None -> Some ((if t.after_tool_row then "" else break_after t.shown) ^ final_text)
+  if String.equal final_text "" then None
+  else
+    let raw = Buffer.contents t.raw in
+    if String.equal final_text raw then None
+    else
+      let current = Buffer.contents t.current in
+      if String.equal final_text current
+         || List.exists (String.equal final_text) t.previous_messages
+      then None
+      else
+        let missing =
+          if String.starts_with ~prefix:raw final_text then
+            (* Equality was handled above, so the raw prefix is strict. *)
+            let offset = String.length raw in
+            Some (String.sub final_text offset (String.length final_text - offset))
+          else suffix_after ~prefix:current final_text
+        in
+        match missing with
+        | Some _ as missing -> missing
+        | None -> Some ((if t.after_tool_row then "" else break_after t.shown) ^ final_text)
 ;;

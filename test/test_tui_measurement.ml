@@ -75,6 +75,8 @@ let test_artifact_integrity () =
   let content = Yojson.Safe.to_string (R.to_yojson report) in
   let sha256 = Agent_core_sha256.(to_hex (digest_string content)) in
   let actual = decoded_report () in
+  let actual = match actual with UI.Measurement.Snapshot actual -> actual
+    | UI.Measurement.Temporal _ -> Alcotest.fail "expected synthetic report" in
   Alcotest.(check string) "exact report" content
     (Yojson.Safe.to_string (R.to_yojson actual.report));
   let rejects label expected json =
@@ -103,6 +105,8 @@ let test_artifact_integrity () =
 
 let test_loaded_context_hashes () =
   let loaded = decoded_report () in
+  let loaded = match loaded with UI.Measurement.Snapshot loaded -> loaded
+    | UI.Measurement.Temporal _ -> Alcotest.fail "expected synthetic report" in
   let expected = List.map (fun (sample : R.sample) ->
     sample.case.id, "23b660be57ad4c147a8b4b9ad1f5e1eae2cd266393670083de249f8f1b128f74") report.samples in
   Alcotest.(check (list (pair string string)))
@@ -134,9 +138,58 @@ let test_stale_results () =
   Alcotest.(check (option string)) "current read failure remains visible"
     (Some "missing artifact") state.lane_run_detail_error
 
+let test_temporal_observations () =
+  let module T = Masc.Tui_decode_temporal_continuity in
+  let sha = String.make 64 'a' in
+  let range first_atom = `Assoc ["capture_id", `String "fixture-request";
+    "body_sha256", `String sha; "first_atom", `Int first_atom; "summary_end_atom", `Int 5] in
+  let omission first_atom = `Assoc ["status", `String "observed";
+    "target_boundary", `Assoc ["end_atom", `Int 5]; "requests", `List [range first_atom]] in
+  let step ~w ~omitted ~probability ~model = `Assoc [
+    "step_id", `String "probe"; "kind", `String "message"; "status", `String "captured";
+    "operation_state", `String "Succeeded"; "turn_ref", `String "trace#12";
+    "working_state_messages", w; "reply", `List [`String "The corrected observation continues."];
+    "working_state", (match w with `Null -> `Null | `Int 0 -> `List [] | _ -> `List [`Assoc []]);
+    "prefix_omission", omitted; "target_boundary", `Null;
+    "judgments", `List [`Assoc ["criterion_id", `String "latest correction";
+      "scope", `String "reply"; "status", `String "measured";
+      "probability", probability; "response_model", model]]] in
+  let view ?(passed = `Null) row = `Assoc [
+    "schema", `String T.schema; "keeper", `String "fixture";
+    "provenance", `String "assessment_of_captured_keeper_evidence";
+    "measurement_status", `String "incomplete"; "error", `String "later observation unavailable";
+    "started_at", `String "2026-10-30T00:00:00Z"; "finished_at", `Null;
+    "report_path", `String "/private/report.json"; "report_sha256", `String sha;
+    "harness_source_sha256", `String sha; "source_capture_sha256", `String sha;
+    "binary_commit", `Null; "executable_sha256", `Null;
+    "body_response_binding", `String "not_established";
+    "librarian_causal_attribution", `String "not_established";
+    "continuity_pass", passed; "timeline", `List [row]] in
+  let row = step ~w:`Null ~omitted:(omission 5) ~probability:(`Float 0.) ~model:(`String "actual-judge") in
+  let content = Yojson.Safe.to_string (view row) in
+  let sha256 = Agent_core_sha256.(to_hex (digest_string content)) in
+  (match UI.Measurement.decode_artifact ~sha256 (envelope content) with
+   | Ok (UI.Measurement.Temporal loaded) ->
+     Alcotest.(check bool) "incomplete capture remains incomplete" true (loaded.status = T.Incomplete);
+     (match loaded.timeline with
+      | [{working_state_messages = None; omission = T.Observed detail;
+          judgments = [{result = T.Measured {probability = 0.; model = "actual-judge"}; _}]; _}] ->
+        Alcotest.(check int) "exclusive target end retained" 5 detail.target_end_atom
+      | _ -> Alcotest.fail "lost unknown W, exact cut or raw boundary probability")
+   | Ok _ -> Alcotest.fail "expected temporal view" | Error detail -> Alcotest.fail detail);
+  let rejects label json = Alcotest.(check bool) label true (Result.is_error (T.of_yojson json)) in
+  rejects "report does not certify pass" (view ~passed:(`Bool true) row);
+  rejects "earlier request cannot certify omission"
+    (view (step ~w:(`Int 1) ~omitted:(omission 4) ~probability:(`Float 1.) ~model:(`String "actual")));
+  rejects "measured probability requires actual model"
+    (view (step ~w:(`Int 0) ~omitted:`Null ~probability:(`Float 0.5) ~model:`Null));
+  rejects "probability is a bounded raw observation"
+    (view (step ~w:`Null ~omitted:`Null ~probability:(`Float 1.1) ~model:(`String "actual")))
+
 let () =
   Alcotest.run "TUI measurement artifacts"
     [ "reader", [ Alcotest.test_case "incomplete is not failed or scored" `Quick test_stage_counts
                 ; Alcotest.test_case "SHA bytes and typed report" `Quick test_artifact_integrity
                 ; Alcotest.test_case "context hashes are derived at load" `Quick test_loaded_context_hashes
-                ; Alcotest.test_case "late results cannot retarget detail" `Quick test_stale_results ] ]
+                ; Alcotest.test_case "late results cannot retarget detail" `Quick test_stale_results
+                ; Alcotest.test_case "temporal evidence retains uncertainty" `Quick test_temporal_observations ] ]

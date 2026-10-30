@@ -494,6 +494,48 @@ let test_message_payload_matches_the_serialised_message () =
     payload.Snapshot.payload_sha256
 ;;
 
+let test_continuity_export_keeps_every_attributed_request_and_exact_boundary () =
+  with_workspace (fun config ->
+    let module C = Keeper_continuity_request in
+    let module E = Keeper_continuity_evidence in
+    let module B = Keeper_turn_boundaries in
+    let reference = turn_ref 7 in
+    let range : C.range = { origin = Keeper_carried_front.Turn_start { end_atom = 0 };
+      first_atom = 0; total_atoms = 1; custom_projection_changed = false } in
+    let record_request ~range wire =
+      C.record_best_effort ~config ~keeper_name:keeper ~turn_ref:(Some reference)
+        ~unread:Keeper_librarian_request_unread.empty ~runtime_id:"local"
+        ~selection:C.Without_snapshot ~range ~wire in
+    record_request ~range:(Some range) { wire with capture_id = Some "first-wire" };
+    record_request ~range:None wire;
+    write config 7;
+    let position = match B.position_of_messages [message] with
+      | Ok value -> value | Error detail -> fail detail in
+    let boundary : B.record = { recorded_at = 1.; event = B.Turn_ended {
+      turn_ref = reference; task_context = Keeper_turn_task_context.No_task;
+      history_at_start = B.Fresh_history; position } } in
+    let append record = match B.append ~keepers_dir:(Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper record with
+      | Ok () -> () | Error error -> fail (B.append_error_to_string error) in
+    append boundary;
+    let evidence = match E.read ~config ~keeper ~turn_ref:reference with
+      | Ok value -> value | Error error -> fail (Snapshot.read_error_to_string error) in
+    let open Yojson.Safe.Util in
+    check string "exact owner" keeper (evidence |> member "keeper" |> to_string);
+    check bool "last wire is the retained canonical manifest" true
+      (member "wire" evidence = Wire.observation_to_yojson wire);
+    let requests = evidence |> member "requests" |> member "value" |> to_list in
+    check int "both serializations retained" 2 (List.length requests);
+    check bool "unassociated serialization never inherits an older range" true
+      (List.nth requests 1 |> member "bounded_range" = `Null);
+    check bool "typed completed boundary exported exactly" true
+      (evidence |> member "completed_boundary" |> member "value" |> member "record"
+       = B.record_to_json boundary);
+    append { recorded_at = 2.; event = B.History_restarted { trace_id = Ids.Turn_ref.trace_id reference } };
+    check string "another history generation cannot reuse the old boundary" "unavailable"
+      (E.completed_boundary ~config ~keeper ~turn_ref:reference |> member "kind" |> to_string))
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -531,6 +573,8 @@ let () =
             "a message payload is the serialised message and its digest"
             `Quick
             test_message_payload_matches_the_serialised_message
+        ; test_case "continuity export preserves every request and history generation" `Quick
+            test_continuity_export_keeps_every_attributed_request_and_exact_boundary
         ] )
     ; ( "turn boundary"
       , [ test_case

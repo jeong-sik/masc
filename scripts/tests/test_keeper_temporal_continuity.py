@@ -141,6 +141,30 @@ def fixture(
                         "text": content,
                     }
                 )
+            elif parsed.path.endswith("/provider-input/continuity"):
+                self.reply(
+                    {
+                        "schema": "masc.keeper-continuity-evidence.v1",
+                        "keeper": "fixture-keeper",
+                        "turn_ref": "trace#1",
+                        "wire": {
+                            "capture_id": "capture-1",
+                            "body_sha256": "prepared_only",
+                        },
+                        "requests": {
+                            "kind": "unavailable",
+                            "reason": "explicit fixture",
+                        },
+                        "completed_boundary": {
+                            "kind": "unavailable",
+                            "reason": "explicit fixture",
+                        },
+                        "saved_readiness_only": {
+                            "kind": "unavailable",
+                            "reason": "explicit fixture",
+                        },
+                    }
+                )
             elif parsed.path.endswith("/provider-input"):
                 self.reply(
                     {
@@ -240,7 +264,12 @@ class CaptureProtocol(unittest.TestCase):
                         "2",
                         "--poll-interval",
                         "0.01",
-                    ],
+                    ]
+                    + (
+                        ["--expected-binary-commit", "different-fixture"]
+                        if variation == "wrong-binary"
+                        else []
+                    ),
                     capture_output=True,
                     text=True,
                     check=False,
@@ -313,6 +342,13 @@ class CaptureProtocol(unittest.TestCase):
         self.assertEqual(report["timeline"], [])
         self.assertFalse(any("method" in call for call in calls))
 
+    def test_wrong_candidate_stops_before_mcp(self) -> None:
+        result, report, calls = self.capture("wrong-binary")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(report["timeline"], [])
+        self.assertIn("expected candidate commit", report["error"])
+        self.assertFalse(any("method" in call for call in calls))
+
     def test_assessment_does_not_replay_keeper_operations_or_modify_its_source(
         self,
     ) -> None:
@@ -344,6 +380,8 @@ class CaptureProtocol(unittest.TestCase):
             "altered-prompt",
             "reused-operation",
             "unobserved-restart",
+            "summary-before-restart",
+            "summary-after-restart",
         ):
             with (
                 self.subTest(variation=variation),
@@ -419,6 +457,148 @@ class CaptureProtocol(unittest.TestCase):
                     source["timeline"].append(
                         {"step_id": "restart", "status": "restart_observed"}
                     )
+                elif variation in ("summary-before-restart", "summary-after-restart"):
+                    target = source["timeline"][0]
+                    target["prepared_input"]["trace_id"] = "fixture-trace"
+                    target["continuity_evidence"]["completed_boundary"] = {
+                        "kind": "available",
+                        "value": {
+                            "history_start_boundary_line": 1,
+                            "boundary_line": 2,
+                            "record": {
+                                "kind": "turn_ended",
+                                "turn_ref": target["turn_ref"],
+                                "position": {"kind": "atom_history", "end_atom": 5},
+                            },
+                        },
+                    }
+                    for event in source["events"]:
+                        event_path = original.parent / event["path"]
+                        payload = json.loads(event_path.read_bytes())
+                        if event["kind"] == "http_read":
+                            if payload["route"].endswith("/provider-input"):
+                                payload["response"] = target["prepared_input"]
+                            elif payload["route"].endswith(
+                                "/provider-input/continuity"
+                            ):
+                                payload["response"] = target["continuity_evidence"]
+                            event_path.write_text(json.dumps(payload))
+                            event["sha256"] = hashlib.sha256(
+                                event_path.read_bytes()
+                            ).hexdigest()
+                    ready = copy.deepcopy(target["continuity_evidence"])
+                    ready["saved_readiness_only"] = {
+                        "kind": "available",
+                        "value": {
+                            "kind": "summarized",
+                            "trace_id": "fixture-trace",
+                            "history_start_boundary_line": 1,
+                            "end_atom": 5,
+                            "unread_messages": [],
+                        },
+                    }
+                    boundary = {
+                        "trace_id": "fixture-trace",
+                        "history_start_boundary_line": 1,
+                        "boundary_line": 2,
+                        "end_atom": 5,
+                    }
+                    source["scenario"]["steps"].extend(
+                        [
+                            {
+                                "id": "wait",
+                                "kind": "await_summary",
+                                "through_step": "op-1",
+                            },
+                            {"id": "restart", "kind": "restart"},
+                        ]
+                    )
+                    source["timeline"].extend(
+                        [
+                            {
+                                "step_id": "wait",
+                                "kind": "await_summary",
+                                "status": "summary_ready_observed",
+                                "continuity_evidence": ready,
+                                "target_boundary": boundary,
+                                "target_turn_ref": target["turn_ref"],
+                            },
+                            {
+                                "step_id": "restart",
+                                "kind": "restart",
+                                "status": "restart_observed",
+                            },
+                        ]
+                    )
+                    readiness = [
+                        (
+                            "http_read",
+                            {
+                                "route": "/api/v1/keepers/fixture-keeper/provider-input/continuity",
+                                "query": {"turn_ref": target["turn_ref"]},
+                                "response": ready,
+                            },
+                        )
+                    ]
+                    restart = []
+                    for name, arguments, response in (
+                        (
+                            "masc_keeper_down",
+                            {
+                                "name": "fixture-keeper",
+                                "remove_meta": False,
+                                "remove_session": False,
+                            },
+                            {},
+                        ),
+                        (
+                            "masc_keeper_status",
+                            {"name": "fixture-keeper"},
+                            {
+                                "keepalive_running": False,
+                                "runtime": {"shutdown_admission_fence": False},
+                            },
+                        ),
+                        ("masc_keeper_up", {"name": "fixture-keeper"}, {}),
+                        (
+                            "masc_keeper_status",
+                            {"name": "fixture-keeper"},
+                            {"keepalive_running": True},
+                        ),
+                    ):
+                        restart.extend(
+                            [
+                                (
+                                    "tool_started",
+                                    {"name": name, "arguments": arguments},
+                                ),
+                                (
+                                    "tool_response",
+                                    {
+                                        "name": name,
+                                        "response": {
+                                            "result": {"structuredContent": response}
+                                        },
+                                    },
+                                ),
+                            ]
+                        )
+                    extra = (
+                        readiness + restart
+                        if variation == "summary-before-restart"
+                        else restart + readiness
+                    )
+                    for index, (kind, payload) in enumerate(extra):
+                        raw = json.dumps(payload).encode()
+                        relative = f"raw/ordered-{index}.json"
+                        (original.parent / relative).write_bytes(raw)
+                        source["events"].append(
+                            {
+                                "kind": kind,
+                                "path": relative,
+                                "sha256": hashlib.sha256(raw).hexdigest(),
+                            }
+                        )
                 source["scenario_sha256"] = hashlib.sha256(
                     json.dumps(
                         source["scenario"],
@@ -463,7 +643,7 @@ class CaptureProtocol(unittest.TestCase):
                 self.assertFalse(
                     any("method" in call or "get" in call for call in calls)
                 )
-                if variation != "valid":
+                if variation not in ("valid", "summary-before-restart"):
                     self.assertEqual(result.returncode, 1, result.stdout)
                     self.assertEqual(report["measurement_status"], "incomplete")
                     self.assertEqual(calls, [])
@@ -478,6 +658,144 @@ class CaptureProtocol(unittest.TestCase):
                 )
                 self.assertIsNone(report["continuity_pass"])
                 self.assertEqual(len(calls), 1)
+
+
+class RetiredPrefixProtocol(unittest.TestCase):
+    def test_every_request_must_omit_a_completed_prefix_in_the_same_generation(
+        self,
+    ) -> None:
+        namespace = runpy.run_path(str(SCRIPT), run_name="retirement_fixture")
+        unread = {
+            source: {"status": "available", "messages": []}
+            for source in ("snapshot", "memory")
+        }
+        wires = [
+            {"capture_id": identifier, "body_sha256": identifier, "body_bytes": 12}
+            for identifier in ("request-a", "request-b")
+        ]
+        rows = [
+            {
+                "schema": "masc.continuity-request.v3",
+                "keeper": "fixture",
+                "turn_ref": "trace#2",
+                "association": "projection_associated",
+                "wire": wire,
+                "unread": unread,
+                "selection": {
+                    "kind": "summarized",
+                    "trace_id": "trace",
+                    "history_start_boundary_line": 1,
+                    "end_atom": 5,
+                    "unread_messages": [],
+                },
+                "bounded_range": {"first_atom": 5, "custom_projection_changed": False},
+            }
+            for wire in wires
+        ]
+        target = {
+            "turn_ref": "trace#1",
+            "prepared_input": {"trace_id": "trace"},
+            "continuity_evidence": {
+                "completed_boundary": {
+                    "kind": "available",
+                    "value": {
+                        "history_start_boundary_line": 1,
+                        "boundary_line": 2,
+                        "record": {
+                            "kind": "turn_ended",
+                            "turn_ref": "trace#1",
+                            "position": {"kind": "atom_history", "end_atom": 5},
+                        },
+                    },
+                }
+            },
+        }
+        original = {
+            "turn_ref": "trace#2",
+            "prepared_input": {"wire": wires[-1]},
+            "working_state_messages": [{"fixture": True}],
+            "continuity_evidence": {
+                "keeper": "fixture",
+                "requests": {"kind": "available", "value": rows},
+            },
+            "turn_records": {
+                "entries": [
+                    {
+                        "record": {
+                            "request_observations": [
+                                {
+                                    "evidence": {
+                                        "status": "recorded",
+                                        "requests": [
+                                            {
+                                                "provenance": {
+                                                    "state": "serialized",
+                                                    "request": wire,
+                                                }
+                                            }
+                                            for wire in wires
+                                        ],
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+        }
+        for variation in (
+            "valid",
+            "earlier-request-retains-prefix",
+            "missing-request",
+            "unpaired-projection",
+            "wrong-generation",
+            "partial-summary",
+            "unread-holes",
+            "custom-projection",
+            "missing-w",
+            "local-rejection",
+            "unknown-dispatch",
+        ):
+            with self.subTest(variation=variation):
+                probe = copy.deepcopy(original)
+                request_rows = probe["continuity_evidence"]["requests"]["value"]
+                if variation == "earlier-request-retains-prefix":
+                    request_rows[0]["bounded_range"]["first_atom"] = 0
+                elif variation == "missing-request":
+                    request_rows.pop(0)
+                elif variation == "unpaired-projection":
+                    request_rows[0]["association"] = "projection_unavailable"
+                elif variation == "wrong-generation":
+                    request_rows[0]["selection"]["history_start_boundary_line"] = 3
+                elif variation == "partial-summary":
+                    request_rows[0]["selection"]["end_atom"] = 4
+                elif variation == "unread-holes":
+                    request_rows[0]["unread"]["memory"]["messages"] = [
+                        {"source": "fixture"}
+                    ]
+                elif variation == "custom-projection":
+                    request_rows[0]["bounded_range"]["custom_projection_changed"] = True
+                elif variation == "missing-w":
+                    probe["working_state_messages"] = []
+                elif variation in ("local-rejection", "unknown-dispatch"):
+                    probe["turn_records"]["entries"][0]["record"][
+                        "request_observations"
+                    ].insert(
+                        0,
+                        {
+                            "evidence": {
+                                "status": "not_dispatched"
+                                if variation == "local-rejection"
+                                else "no_durable_scope"
+                            }
+                        },
+                    )
+                observed = namespace["prefix_omission"](target, probe)
+                if variation in ("valid", "local-rejection"):
+                    self.assertEqual(observed["status"], "observed")
+                    self.assertEqual(len(observed["requests"]), 2)
+                else:
+                    self.assertNotEqual(observed["status"], "observed")
 
 
 class SemanticProtocol(unittest.TestCase):

@@ -20,6 +20,9 @@ let strings values = `List (List.map (fun value -> `String value) values)
 let field key = function `Assoc fields -> List.assoc key fields | _ -> fail "expected object"
 let text = function `String value -> value | _ -> fail "expected string"
 let value = function Ok value -> value | Error detail -> fail detail
+(* Snapshots are 0500. Moving one to another parent on Linux would require
+   write permission to update its [..] entry; a sibling keeps it immutable. *)
+let held_snapshot_path snapshot name = Filename.concat (Filename.dirname snapshot) name
 let replace key value = function
   | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
   | _ -> fail "fixture replacement requires an object"
@@ -618,7 +621,7 @@ let process_step root operation =
         check int "unavailable guest lookups send no framed request" before_requests (request_count ());
         let snapshot = Keeper_microvm_github_identity.host_path
             ~base_path:base ~keeper_name:keeper ~backend ~network_mode in
-        let held_snapshot = Filename.concat root "review-held-snapshot" in
+        let held_snapshot = held_snapshot_path snapshot "review-held-snapshot" in
         Unix.rename snapshot held_snapshot;
         Fun.protect ~finally:(fun () -> Unix.rename held_snapshot snapshot) (fun () ->
           let before_missing = call_count () in
@@ -834,7 +837,7 @@ let process_step root operation =
         let guest_path = Filename.concat root "guest.json" in
         let saved_guest = read guest_path in
         let snapshot = Keeper_microvm_github_identity.host_path ~base_path:root ~keeper_name:keeper ~backend ~network_mode in
-        let held_snapshot = Filename.concat root "race-held-snapshot" in
+        let held_snapshot = held_snapshot_path snapshot "race-held-snapshot" in
         save_json guest_path (replace "status" (`Assoc ["state", `String "stopped"]) (json guest_path));
         Unix.rename snapshot held_snapshot;
         write (Filename.concat root "hold-inspect") "";
@@ -882,7 +885,7 @@ let process_step root operation =
         let guest_path = Filename.concat root "guest.json" in
         let saved_guest = read guest_path in
         let snapshot = Keeper_microvm_github_identity.host_path ~base_path:root ~keeper_name:keeper ~backend ~network_mode in
-        let held_snapshot = Filename.concat root "checkout-held-snapshot" in
+        let held_snapshot = held_snapshot_path snapshot "checkout-held-snapshot" in
         let other_base = Filename.concat root "checkout-other-workspace" in
         let other_shim = Config_dir_resolver.microvm_shim_dir ~base_path:other_base in
         Fs_compat.mkdir_p other_shim;
@@ -997,7 +1000,7 @@ let process_step root operation =
         let guest_path = Filename.concat root "guest.json" in
         let saved_guest = read guest_path in
         let snapshot = Keeper_microvm_github_identity.host_path ~base_path:root ~keeper_name:keeper ~backend ~network_mode in
-        let held_snapshot = Filename.concat root "held-snapshot" in
+        let held_snapshot = held_snapshot_path snapshot "held-snapshot" in
         Unix.rename snapshot held_snapshot;
         Unix.unlink guest_path;
         let result = Turn.teardown_keeper_sandbox_by_name ~timeout_sec:10. ~config ~keeper_name:keeper

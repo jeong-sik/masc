@@ -2476,6 +2476,142 @@ let test_settling_a_position_no_step_holds_is_an_error () = with_fixture (fun ~s
    | Ok moved -> failf "%d records settled for a position no step holds" moved);
   check (list int) "and no step moved" [0;1] (sorted_positions fixture request))
 
+(* Reconstruct a pre-policy question from its captured parts. This deliberately
+   uses structural restoration, not the fresh preparation API that now refuses
+   it. The source, original store, worker and host receipts remain real. *)
+let with_legacy_omitted_original fixture f =
+  let previous=(Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
+  Fun.protect ~finally:(fun () -> match previous with
+    | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
+    | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> get) (fun () ->
+    let captured=ref None in
+    assert_pending (memory_action fixture (fun () -> Consumer.consume_one ~config:fixture.config ~keeper_name
+      ~commit:(fun source -> captured:=Some source;Consumer.Memory_pending)));
+    let source=Option.get !captured in
+    let input=Source.input source in
+    check bool "legacy original has observations the old question could omit" true
+      (input.counterpart_observations<>[]);
+    Prompt_registry.set_override Prompt_names.librarian "Legacy history question without observation substitution" |> get;
+    let module R=Keeper_librarian_runtime in
+    let seed=R.prepare_durable ~now:(Time_compat.now ()) {input with counterpart_observations=[]} |> get in
+    let preparation=R.restore_durable_preparation ~source_input:input ~parsing_now:seed.parsing_now
+      ~policy:seed.policy ~rule_prompt:seed.rule_prompt ~prompt:seed.prompt ~output_schema:seed.output_schema |> get in
+    R.validate_durable_preparation preparation |> get;
+    let original,request=memory_action fixture (fun () ->
+      let owner=io (fun () -> Capture.observe_owner ~base_path:fixture.base_path
+        ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name) |> get in
+      Keeper_librarian_durable_edge.with_destination ~config:fixture.config ~reserved:[] (fun destination ->
+        let request=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+          ~owner ~destination ~source ~preparation ()) |> get in
+        let original=Durable_owner.retain ~store:fixture.store request
+          |> Result.map_error Durable_owner.error_to_string |> get in
+        Ok (original,request)) |> get) in
+    f original request)
+let assert_omitted_original_blocked = function
+  | Error error ->
+    check bool "the original remains a blocked publication" true (Consumer.publication_unfinished error);
+    check bool "blocked reason names the frozen omitted input" true
+      (Astring.String.is_infix ~affix:"counterpart_observations" (Consumer.error_to_string error))
+  | Ok _ -> fail "an unsafe retained question reached a fresh effect"
+let advance_legacy fixture original event =
+  io (fun () -> match Owner.advance ~store:fixture.store ~expected:original ~event with
+    | Ok (Owner.Stored record | Already_stored record) -> record
+    | Ok (Unconfirmed detail) -> fail detail
+    | Error error -> fail (Owner.update_error_to_string error))
+let test_legacy_omitted_original_refuses_admission_but_observes_pending () =
+  with_fixture (fun ~sw:_ fixture -> with_legacy_omitted_original fixture (fun original request ->
+    let source_json=Capture.to_json request and events=Progress.to_json original.Owner.progress in
+    let cursor ()=io (fun () -> Keeper_external_read_cursor.observe
+      ~runtime_keepers_dir:(Workspace.keepers_runtime_dir fixture.config) ~keeper_name |> get)
+      |> Keeper_external_read_cursor.observation_to_json in
+    let cursor_before=cursor () and position_before=progress fixture in
+    assert_omitted_original_blocked (run_worker fixture);
+    let held,restored=only_original fixture in
+    check json "rejected admission leaves the original progress unchanged" events (Progress.to_json held.progress);
+    check json "rejected admission retains the exact old question" source_json (Capture.to_json restored);
+    let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
+      |> Result.map_error Lane_addon_manifest.error_to_string |> get in
+    let authorization=Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path
+      ~store:fixture.store ~declaration_id:"librarian" ~package (Capture.request request |> get)
+      |> Result.map_error (function Exact.Unowned {reason} -> reason | Undecided {detail} -> detail) |> get in
+    (match authorization.before_dispatch () with
+     | Error detail -> check bool "actual host dispatch names the omitted input" true
+         (Astring.String.is_infix ~affix:"counterpart_observations" detail)
+     | Ok () -> fail "actual host dispatch admitted an omitted retained question");
+    Prompt_registry.clear_prompt_override Prompt_names.librarian;
+    assert_omitted_original_blocked (run_worker fixture);
+    let dispatched=advance_legacy fixture held Progress.Dispatch_intended in
+    assert_pending (run_worker fixture);
+    let pending,restored=only_original fixture in
+    check string "unknown delivery keeps the old ID" dispatched.request_id pending.Owner.request_id;
+    check json "pending observation never rerenders the question" source_json (Capture.to_json restored);
+    check json "no external preparation is ACKed" cursor_before (cursor ());
+    check bool "no read position advances" true (progress fixture=position_before);
+    check int "admission, provider guard and pending wakes dispatch no model" 0 (F.post_count fixture.server);
+    no_memory fixture))
+(* Seed one actual host answer using the pre-policy authority boundary. This
+   test-only dispatcher removes the new guard only while modeling that earlier
+   HTTP call; original binding/schema/domain validation and receipts stay real. *)
+let seed_legacy_original_answer fixture original request =
+  let current_authorize=Server_lane_addon_exact.authorize_request ~base_path:fixture.base_path in
+  let runner=Server_lane_addon_exact.runner ~base_path:fixture.base_path in
+  let old_authorize ~store ~declaration_id ~package request =
+    Result.map (fun (authority:Exact.request_authorization) ->
+      {authority with before_dispatch=(fun () -> Ok ())})
+      (current_authorize ~store ~declaration_id ~package request) in
+  Fun.protect ~finally:(fun () -> Runtime.register_exact_runner ~authorize_request:current_authorize runner) (fun () ->
+    Runtime.register_exact_runner ~authorize_request:old_authorize runner;
+    let original=advance_legacy fixture original Progress.Dispatch_intended in
+    let destination=Capture.destination request in
+    let before= !(fixture.deliveries) in
+    Runtime.call_captured_tool_request ~config:fixture.config ~reserved:[] ~export:(runtime_export fixture)
+      ~access:Lane_addon_sources.Operator_configuration ~installation_id:destination.installation_id
+      ~package_id:destination.package_id ~tool:destination.tool ~configuration_revision:destination.configuration_revision
+      ~original ~arguments:(`Assoc ["kind",`String "submit";"request",Exact.request_to_json (Capture.request request |> get)])
+      |> Result.map_error (fun _ -> "legacy fixture submit was refused before its modeled old effect") |> get |> ignore;
+    await_delivery fixture ~after:before)
+let test_legacy_omitted_answer_blocks_judged_and_commit_publication () =
+  with_fixture (fun ~sw:_ fixture -> with_legacy_omitted_original fixture (fun original request ->
+    let source_json=Capture.to_json request in
+    seed_legacy_original_answer fixture original request;
+    check int "the fixture retained one real pre-policy host request" 1 (F.post_count fixture.server);
+    assert_omitted_original_blocked (run_worker fixture);
+    let judged,restored=only_original fixture in
+    check bool "actual host answer remains a judged original" true
+      (match Progress.phase judged.Owner.progress with Judged _ -> true
+       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _ | Finished _
+       | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
+    check json "new publication refuses without rewriting the actual old question" source_json (Capture.to_json restored);
+    let proposal=Capture.validate_proposal request (answer request)
+      |> get in
+    let direct=memory_action fixture (fun () -> Keeper_librarian_durable_commit.publish ~store:fixture.store
+      ~config:fixture.config ~request ~original:judged ~proposal
+      ~fresh_authority:(fun () -> fail "omitted original must stop before a new Gate effect")) in
+    (match direct with
+     | Error detail -> check bool "direct publication names its omitted input" true
+         (Astring.String.is_infix ~affix:"counterpart_observations" detail)
+     | Ok _ -> fail "direct publication admitted an omitted retained question");
+    check int "no new Gate original is created" 0 (List.length (gate_records fixture request));
+    let check_owner_phase original =
+      let result=memory_action fixture (fun () -> Durable_owner.resume ~store:fixture.store ~config:fixture.config
+        ~reserved:[] ~original ~request ~wake:(fun () -> fail "unsafe publication cannot wake completion")
+        ~call:(Keeper_librarian_durable_edge.call ~config:fixture.config ~reserved:[])
+        ~publish:(fun ~original:_ ~request:_ ~proposal:_ -> fail "unsafe original cannot enter a publication callback")) in
+      (match result with
+       | Error error -> check bool "commit phase remains explicitly blocked" true
+           (Astring.String.is_infix ~affix:"counterpart_observations" (Durable_owner.error_to_string error))
+       | Ok _ -> fail "an unsafe retained commit phase reached an effect") in
+    (* These legal journal transitions test the owner's effect boundary. They
+       do not fabricate a Gate/Memory receipt or claim a completed commit. *)
+    let committing=advance_legacy fixture judged (Progress.Commit_intended {before=`String "before";after=`String "after"}) in
+    check_owner_phase committing;
+    let unknown=advance_legacy fixture committing (Progress.Commit_uncertain (`Assoc ["detail",`String "legacy interrupted effect"])) in
+    check_owner_phase unknown;
+    check json "every blocked phase preserves the original source/question" source_json
+      (Capture.to_json (snd (only_original fixture)));
+    check int "publication never replays the original provider request" 1 (F.post_count fixture.server);
+    no_memory fixture))
+
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
@@ -2500,6 +2636,10 @@ let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured c
     test_counterpart_only_provider_capacity_refusal_is_source_preserving;
   test_case "ordinary counterpart refusals preserve narrowed source identities" `Quick
     test_counterpart_non_capacity_refusal_preserves_narrowed_sources;
+  test_case "legacy omitted original blocks admission but observes pending" `Quick
+    test_legacy_omitted_original_refuses_admission_but_observes_pending;
+  test_case "legacy omitted answer blocks Judged and commit publication" `Quick
+    test_legacy_omitted_answer_blocks_judged_and_commit_publication;
   test_case "missing counterpart substitution preserves fresh source until corrected" `Quick
     test_counterpart_prompt_omission_preserves_fresh_source;
   test_case "untagged official counterparts reach Memory once" `Quick

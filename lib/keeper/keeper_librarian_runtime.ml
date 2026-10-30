@@ -946,6 +946,8 @@ let validate_durable_step_proposal (step : durable_step_preparation) output =
    Memory plan and program take it unchanged. A failed judgment is no decision. *)
 let durable_memory_step ~run_id (step : durable_step_preparation) (proposal : durable_step_proposal)
     ~absorb_gate =
+  let open Result.Syntax in
+  let* ()=require_counterpart_template step.preparation in
   let selection=proposal.proposal.accepted.selection in
   if String.trim run_id="" then Error "Original history floor step needs a run identity"
   else match Keeper_librarian_absorb_gate.failure_detail ~absorbed:selection.absorbed absorb_gate with

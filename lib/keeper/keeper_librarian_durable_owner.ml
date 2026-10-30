@@ -116,6 +116,9 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
   let prepare () =
     let* ()=confirm_live_owner () in
     Keeper_librarian_durable_edge.confirm_destination ~config ~reserved destination in
+  let admit () =
+    let* ()=Memory_runtime.require_counterpart_template (Request.preparation request) |> rejected in
+    prepare () in
   let call ~arguments =
     match prepare () with
     | Error error -> Error (Submit.Not_sent error)
@@ -130,6 +133,7 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok (Refusal (final,record)) in
   let publish_answer record proposal =
+    let* ()=Memory_runtime.require_counterpart_template (Request.preparation request) |> rejected in
     let* published=publish ~original:record ~request ~proposal in
     match published with
     | Publication_pending detail -> Ok (Publication_waiting detail)
@@ -146,7 +150,7 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~request ~(call:c
        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
        | Finished _ | Rejected _ | Subdividing _ | Subdivided _ -> wake ());
       Ok (Basis_superseded completed) in
-  let* result=Submit.resume ~store ~label:"History Memory" ~original ~request:exact ~schema ~prepare ~call ~terminal in
+  let* result=Submit.resume ~store ~label:"History Memory" ~original ~request:exact ~schema ~prepare:admit ~call ~terminal in
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
   | Final (Answer (proposal,record)) -> publish_answer record proposal

@@ -124,6 +124,7 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~unread_me
             | Worker_unreachable -> "unreachable" | Missing_after_dispatch -> "missing after dispatch"
             | Journal_recheck -> "journal recheck")))
        | Step_owner.Refused (final, record) ->
+         let* ()=Memory_runtime.require_counterpart_template (Step.step step).preparation in
          let detail = Printf.sprintf "Floor step %d was refused: %s" question.position
            (Yojson.Safe.to_string (Exact.final_to_json final)) in
          let report = match io (fun () -> Step.refusal_evidence ~store step final) with

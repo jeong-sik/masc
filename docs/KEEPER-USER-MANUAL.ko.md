@@ -709,6 +709,15 @@ Librarian이 `Counterpart_input_capacity_refused`를 보고하면 실제 provide
 
 ## 목적에 맞는 기억 회수
 
+counterpart 입력이 있는 미완료 history 질문이나 message-floor 단계의 원래
+Librarian 프롬프트에는 `{{counterpart_observations}}`가 있어야 합니다. 빠졌으면
+새 dispatch와 Memory·ACK 게시를 막습니다. 이미 Memory 영수증이 있어도 ACK가
+아직 끝나지 않은 과거 commit은 같은 검사를 통과해야 합니다. 원래 질문과 영수증은
+조회할 수 있게 보존합니다. 현재 override를 고치면 새 질문에 적용되며 잘못된 옛
+질문을 다시 쓰거나 재전송하지 않습니다. 이런 미완료 작업은 복구가 필요한 차단
+상태로 남습니다. 완료된 과거 캡처는 계속 읽을 수 있으며 과거 누락을 자동으로
+맞추거나 관측을 읽었다고 판정하지 않습니다.
+
 Keeper의 도구 목록에 `keeper_memory_select`가 있으면 `purpose`에
 “현재 E17 production에 적용되는 승인 절차는?”처럼 질문이나 판단 목적을
 전달합니다. 현재 일반 기억과 파일에 근거한 기억을 계보와 함께 평가합니다.

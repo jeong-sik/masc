@@ -372,6 +372,16 @@ val prepare_durable : now:float -> Keeper_librarian.input ->
 val validate_durable_preparation : durable_preparation -> (unit, string) result
 (** Pure restoration check of the complete captured input, policy, resolutions,
     substitutions, rendered prompt and schema. No environment/prompt lookup. *)
+val require_counterpart_template : durable_preparation -> (unit, string) result
+(** Pure live-effect policy: a nonempty counterpart input requires its variable
+    in this frozen prompt, using the renderer's own placeholder parser. No
+    current prompt lookup or rewriting occurs. New questions, fresh dispatch,
+    and unfinished publication must pass it, including a receipt-proved Memory
+    commit whose external ACK is still pending. It grants no execution effect.
+    It is deliberately separate from structural validation/restoration, so
+    completed historical captures remain decodable and inspectable. A legacy
+    unfinished question that fails stays blocked with its original bytes and
+    receipts; fixing today's override cannot rewrite or replay that question. *)
 val restore_durable_preparation : source_input:Keeper_librarian.input -> parsing_now:float ->
   policy:durable_policy -> rule_prompt:Prompt_registry.prompt_resolution ->
   prompt:Prompt_registry.prompt_resolution -> output_schema:Yojson.Safe.t ->

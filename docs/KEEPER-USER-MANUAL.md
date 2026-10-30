@@ -845,6 +845,16 @@ external ACKs are preserved until ordinary successful publication.
 
 ## Retrieve memory for a purpose
 
+An unfinished history question or message-floor step with counterpart input
+must include `{{counterpart_observations}}` in its frozen Librarian prompt.
+Omission blocks fresh dispatch and new Memory/ACK publication, including an
+old commit that already has a Memory receipt but has not settled its ACK.
+The original question and receipts remain inspectable. Repairing today's
+override enables new questions; it does not rewrite or replay an unsafe old
+question. Such unfinished work stays explicitly blocked for recovery.
+Completed historical captures remain readable; this guard does not reconcile
+earlier omissions or declare their observations read.
+
 When available in the Keeper's tool surface, `keeper_memory_select` accepts a
 `purpose`, such as “Which approval applies to E17 production now?” It evaluates
 current ordinary and source-bound memories with their provenance. `keeper_memory_search`

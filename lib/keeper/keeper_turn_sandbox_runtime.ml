@@ -173,10 +173,21 @@ let microvm_build_cleanup_outcome outcome receipt =
 (* Work/build volume names are Keeper-scoped, not workspace/guest-scoped.
    Group effects by that same nominal backend resource. This is not proof of
    a physical mount identity or authority over another server's guest. *)
+type microvm_maintenance_attempt =
+  { operation_id : string
+  ; container_name : string
+  ; observation : Keeper_sandbox_remote.execution_observation option
+  }
+
+type microvm_maintenance_state =
+  | Maintenance_idle
+  | Maintenance_unverified of microvm_maintenance_attempt
+
 type microvm_work_effects =
   { resource : Keeper_microvm_backend.t * string
   ; cleanup_state : microvm_build_cleanup_state
   ; links_unverified : bool
+  ; maintenance : microvm_maintenance_state
   }
 
 let microvm_work_effects : microvm_work_effects list Atomic.t = Atomic.make []
@@ -187,7 +198,8 @@ let rec register_microvm_work_effects ~backend ~keeper_name =
   match List.find_opt (fun entry -> entry.resource = resource) current with
   | Some entry -> entry
   | None ->
-    let entry = {resource; cleanup_state=Build_cleanup_available; links_unverified=false} in
+    let entry = {resource; cleanup_state=Build_cleanup_available; links_unverified=false;
+      maintenance=Maintenance_idle} in
     if Atomic.compare_and_set microvm_work_effects current (entry :: current) then entry
     else register_microvm_work_effects ~backend ~keeper_name
 ;;
@@ -219,7 +231,14 @@ let microvm_build_cleanup_unresolved_message ~keeper_name =
 ;;
 
 let microvm_build_cleanup_admission ~backend ~keeper_name =
-  match (register_microvm_work_effects ~backend ~keeper_name).cleanup_state with
+  let effects = register_microvm_work_effects ~backend ~keeper_name in
+  match effects.maintenance with
+  | Maintenance_unverified attempt ->
+    Error (Printf.sprintf
+      "microvm_build_maintenance_effect_unverified: keeper %s has unresolved maintenance %s on guest %s; inspect its audit receipts before a new mutation handoff"
+      keeper_name attempt.operation_id attempt.container_name)
+  | Maintenance_idle ->
+  match effects.cleanup_state with
   | Build_cleanup_effect_unverified ->
     Error (microvm_build_cleanup_unresolved_message ~keeper_name)
   | Build_cleanup_available | Build_cleanup_skipped_not_sent
@@ -232,6 +251,23 @@ let microvm_build_link_effect_admission ~backend ~keeper_name =
       "microvm_build_link_effect_unverified: keeper %s has an unresolved symlink application; a read-only scan does not prove it stopped, so a new execution handoff is unavailable"
       keeper_name)
   else Ok ()
+;;
+
+let reserve_microvm_maintenance ~backend ~keeper_name attempt =
+  update_microvm_work_effects ~backend ~keeper_name (fun effects ->
+    match effects.maintenance with
+    | Maintenance_idle -> Some {effects with maintenance=Maintenance_unverified attempt}
+    | Maintenance_unverified _ -> None)
+;;
+
+let settle_microvm_maintenance ~backend ~keeper_name ~operation_id ~observation ~resolved =
+  update_microvm_work_effects ~backend ~keeper_name (fun effects ->
+    match effects.maintenance with
+    | Maintenance_unverified attempt when String.equal attempt.operation_id operation_id ->
+      let maintenance = if resolved then Maintenance_idle
+        else Maintenance_unverified {attempt with observation} in
+      Some {effects with maintenance}
+    | Maintenance_idle | Maintenance_unverified _ -> None)
 ;;
 
 type microvm_work_root_ready =
@@ -1538,19 +1574,14 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation 
            | None -> ())
          rows;
        let effects = register_microvm_work_effects ~backend ~keeper_name:t.meta.name in
-       let rows = if effects.links_unverified then (
+       let actions = if effects.links_unverified then (
            effect_unverified ();
-           (* Inspecting an existing correct link and creating its disposable
-              target does not resend the earlier symlink application. *)
-           List.filter (fun (row : Keeper_sandbox_microvm.build_link_row) ->
-             match row.plan with
-             | Link_already_correct -> true
-             | Link_create _ | Link_preserve_symlink _ | Link_refused_real_directory
-             | Link_refused_invalid_path _ -> false) rows)
-         else rows in
-       let actions = Keeper_sandbox_microvm.build_link_actions rows in
+           [])
+         else Keeper_sandbox_microvm.build_link_actions rows in
        (* Already-correct links need their target too: a fresh boot recreates
-          the build volume empty while the work volume keeps the links. *)
+          the build volume empty while the work volume keeps the links.
+          Keep planned targets even when apply is unresolved: an earlier
+          symlink can arrive after this scan, and mkdir does not replay it. *)
        (match Keeper_sandbox_microvm.build_link_targets rows with
         | [] -> prepared ~expected:Build_links_not_prepared
         | _ :: _ as targets ->
@@ -2515,7 +2546,16 @@ let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
    | None -> ()
    | Some entry ->
      match entry.build_links_state with
-     | Build_links_prepared | Build_links_effect_unverified -> ()
+     | Build_links_prepared -> ()
+     | Build_links_effect_unverified ->
+       (* Target mkdir is idempotent. An earlier target-only failure must not
+          strand this live generation; persistent symlink uncertainty stays
+          in the shared resource and never gains replay permission here. *)
+       if not (effects ()).links_unverified
+          && set_microvm_build_links_state ~base_path:t.config.base_path ~backend
+               ~container_name entry.generation ~expected:Build_links_effect_unverified
+               Build_links_not_prepared
+       then ensure_microvm_build_links ~timeout_sec t ~container_name ~generation:entry.generation
      | Build_links_not_prepared ->
        ensure_microvm_build_links ~timeout_sec t ~container_name ~generation:entry.generation);
   (match microvm_work_root_entry ~base_path:t.config.base_path ~backend ~container_name with
@@ -4104,6 +4144,108 @@ let build_cleanup_report_of_string stdout =
   with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ ->
     Error "invalid Keeper cleanup report"
 
+type microvm_maintenance_audit_phase = Maintenance_reserved | Maintenance_result
+
+let audit_microvm_maintenance ~(config : Workspace.config) ~(meta : keeper_meta)
+    ~phase ~attempt ~outcome ~resolved =
+  let phase_name = match phase with
+    | Maintenance_reserved -> "reserved"
+    | Maintenance_result -> "result" in
+  let observation = match attempt.observation with
+    | None -> `Null
+    | Some (Keeper_sandbox_remote.Execution_unavailable _ as observation) ->
+      Keeper_sandbox_remote.execution_observation_to_yojson observation
+    | Some (Keeper_sandbox_remote.Execution_observed (receipt, trailer)) ->
+      let integer = Option.fold ~none:`Null ~some:(fun n -> `Int n) in
+      `Assoc ["status", `String "observed";
+        "receipt", Exec_ssh_protocol.execution_receipt_to_yojson receipt;
+        "outcome", `Assoc ["exit", integer trailer.exit; "signal", integer trailer.signal;
+          "timed_out", `Bool trailer.timed_out;
+          "shim_error", Option.fold ~none:`Null ~some:(fun detail -> `String detail) trailer.shim_error]] in
+  let result = match outcome with
+    | None -> `Null
+    | Some (Masc_exec.Sandbox_target.Ran {status; _}) ->
+      `Assoc ["kind", `String "payload_result";
+        "status", `String (Keeper_sandbox_exec_failure.status_label status)]
+    | Some (Masc_exec.Sandbox_target.Transport_failed {failure; _}) ->
+      let failure = match failure with
+        | Payload_timed_out -> "payload_timed_out"
+        | Lane_unavailable -> "lane_unavailable" in
+      `Assoc ["kind", `String "transport_failure"; "failure", `String failure] in
+  let details = Observability_redact.redact_json_strings (`Assoc
+      ["keeper_name", `String meta.name; "operation_id", `String attempt.operation_id;
+       "guest_name", `String attempt.container_name; "phase", `String phase_name;
+       "execution_observation", observation; "result", result;
+       "effect_resolved", `Bool resolved]) in
+  try
+    Audit_log.log_action config ~agent_id:meta.name
+      ~action:(Audit_log.Custom "keeper_microvm_build_maintenance")
+      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~details ~outcome:(match phase, outcome, resolved with
+        | Maintenance_reserved, _, _ -> Audit_log.Success
+        | Maintenance_result, Some (Masc_exec.Sandbox_target.Ran {status=Unix.WEXITED 0; _}), true ->
+          Audit_log.Success
+        | Maintenance_result,
+          (None | Some (Masc_exec.Sandbox_target.Ran
+            {status=(Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _); _}
+            | Transport_failed _)), (true | false) ->
+          Audit_log.Failure "maintenance did not report success") ();
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Observability_redact.redact_text (Printexc.to_string exn))
+;;
+
+(* The caller retains the Keeper lifecycle owner through this attempt.
+   Its remote effect outlives that scope unless the runner proves termination. *)
+let run_microvm_build_maintenance ~config ~(meta : keeper_meta) ~container_name
+    ~endpoint ~timeout_sec ~stdin_content ~argv =
+  let backend = Keeper_microvm_backend.Apple_container in
+  let attempt = {operation_id=Random_id.uuid_v7 (); container_name; observation=None} in
+  let settle ~observation ~resolved =
+    ignore (settle_microvm_maintenance ~backend ~keeper_name:meta.name
+      ~operation_id:attempt.operation_id ~observation ~resolved) in
+  if not (reserve_microvm_maintenance ~backend ~keeper_name:meta.name attempt) then
+    Result.bind (microvm_build_cleanup_admission ~backend ~keeper_name:meta.name)
+      (fun () -> Error "microvm maintenance reservation changed; retry admission")
+  else
+    (* No request has been sent at reservation. The runner guarantees its
+       finally callback on return or exception, replacing this initial fact
+       with its own observation before this attempt is settled. *)
+    let observation = ref (Some (Keeper_sandbox_remote.Execution_unavailable
+        Keeper_sandbox_remote.Request_not_sent)) and outcome = ref None in
+    let finish () =
+      let state = match !outcome, !observation with
+        | Some result, receipt -> microvm_build_cleanup_outcome result receipt
+        | None, Some (Keeper_sandbox_remote.Execution_unavailable Request_not_sent) ->
+          Build_cleanup_skipped_not_sent
+        | None, (Some (Keeper_sandbox_remote.Execution_observed _
+            | Execution_unavailable (Transport_unavailable _ | Peer_receipt_missing
+              | Invalid_receipt _ | Shim_refused_without_receipt)) | None) ->
+          Build_cleanup_effect_unverified in
+      let resolved = match state with
+        | Build_cleanup_confirmed | Build_cleanup_finished_incomplete
+        | Build_cleanup_skipped_not_sent -> true
+        | Build_cleanup_available | Build_cleanup_effect_unverified -> false in
+      settle ~observation:!observation ~resolved;
+      match audit_microvm_maintenance ~config ~meta ~phase:Maintenance_result
+          ~attempt:{attempt with observation= !observation} ~outcome:!outcome ~resolved with
+      | Ok () -> ()
+      | Error detail -> Log.Keeper.warn ~keeper_name:meta.name
+          "microvm maintenance %s result audit failed: %s" attempt.operation_id detail in
+    Fun.protect ~finally:(fun () -> Eio.Cancel.protect finish) (fun () ->
+      match audit_microvm_maintenance ~config ~meta ~phase:Maintenance_reserved
+          ~attempt ~outcome:None ~resolved:false with
+      | Error detail -> Error ("microvm maintenance intent audit failed before dispatch: " ^ detail)
+      | Ok () ->
+        let run = Keeper_sandbox_remote.runner ~timeout_sec
+            ~on_receipt:(fun receipt -> observation := Some receipt) endpoint in
+        let result = run ~on_stdout_chunk:None ~on_stderr_chunk:None
+            ~stdin_content:(Some stdin_content) ~env:[||] ~cwd:None ~argv in
+        outcome := Some result;
+        Ok (result, !observation))
+;;
+
 (* Called only while the Owner holds its exclusive maintenance slot. Attach to
    the recorded guest; never boot, stop, pause, or refresh its credentials. *)
 let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
@@ -4131,29 +4273,25 @@ let cleanup_attached_builds ~(config : Workspace.config) ~(meta : keeper_meta)
                   ~observation:(Apple_running_guest {timeout_sec; admission=Diagnostic_read}) with
                | Error _ as error -> error
                | Ok (endpoint, _) ->
-                 let observation = ref (Keeper_sandbox_remote.Execution_unavailable
-                                          Keeper_sandbox_remote.Request_not_sent) in
-                 let run = Keeper_sandbox_remote.runner ~timeout_sec
-                     ~on_receipt:(fun receipt -> observation := receipt) endpoint in
-                 let outcome = run ~on_stdout_chunk:None ~on_stderr_chunk:None
-                     ~stdin_content:(Some stdin_content) ~env:[||] ~cwd:None
+                 let* outcome, observation = run_microvm_build_maintenance ~config ~meta
+                     ~container_name ~endpoint ~timeout_sec ~stdin_content
                      ~argv:["python3"; "-"; "--guest-root"; root;
                             "--build-root"; Keeper_sandbox_microvm.build_volume_guest_root; "--idle-hours";
                             string_of_float (retention_sec /. Masc_time_constants.hour); "--apply"] in
-                 match outcome, !observation with
+                 match outcome, observation with
                  | Masc_exec.Sandbox_target.Ran { status = Unix.WEXITED 0; stdout; _ },
-                   Keeper_sandbox_remote.Execution_observed _ ->
+                   Some (Keeper_sandbox_remote.Execution_observed _) ->
                    Result.map Option.some (build_cleanup_report_of_string stdout)
                  | Masc_exec.Sandbox_target.Transport_failed { reason; _ }, _ ->
                    Error ("Keeper guest cleanup transport failed: " ^ reason)
-                 | _, Keeper_sandbox_remote.Execution_unavailable _ ->
+                 | _, (Some (Keeper_sandbox_remote.Execution_unavailable _) | None) ->
                    Error "Keeper guest cleanup exit receipt missing"
                  | Masc_exec.Sandbox_target.Ran
                      { status =
                          (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _)
                      ; _
                      },
-                   Keeper_sandbox_remote.Execution_observed _ ->
+                   Some (Keeper_sandbox_remote.Execution_observed _) ->
                    Error "Keeper guest cleanup command failed"))
          | Ok (Keeper_sandbox_runtime.Docker_container_stopped
               | Keeper_sandbox_runtime.Docker_container_absent) -> Ok None

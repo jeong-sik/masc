@@ -106,10 +106,13 @@ val microvm_remote_endpoint :
     scan and idempotent target creation on the disposable build volume.
     Unresolved link applications are not resent and refuse execution handoff:
     a current read-only scan does not prove the original application stopped.
-    Handoff also requires a completed link scan and target preparation in the
-    current guest readiness generation. Scan or target failures do not supply
-    an execution endpoint. A later call re-enters incomplete preparation even
-    when the work root is already ready. This is
+    Targets for both correct and planned links are still prepared so an earlier
+    application arriving after the scan cannot create a dangling link. Unknown
+    attached maintenance also refuses execution handoff. Handoff requires a
+    completed link scan and target preparation in the current guest generation.
+    Read-only scan and idempotent target failures may be retried by a later
+    handoff in that generation without replaying uncertain link applications.
+    This is
     process-local evidence, not a durable receipt across server restarts or an
     instance/mount fence against an externally replaced guest.
     If the snapshot is missing or
@@ -543,4 +546,10 @@ val cleanup_attached_builds : config:Workspace.config ->
 (** The caller holds the Keeper's exclusive maintenance slot. Apple additionally
     holds its process-local lifecycle owner across cleanup admission, guest
     observation and the maintenance command. An unresolved first-handoff
-    cleanup refuses this mutation; attached diagnostic reads remain separate. *)
+    cleanup or maintenance refuses this mutation; attached diagnostic reads
+    remain separate. Each maintenance attempt reserves its shared work resource
+    before dispatch. Unknown results retain that reservation across scope exit;
+    only trustworthy terminal or request-not-sent evidence releases it. Intent
+    and receipt observations are retained in the existing audit log, without
+    command output or credentials. Audit evidence is not a restart admission
+    journal; the reservation remains process-local. *)

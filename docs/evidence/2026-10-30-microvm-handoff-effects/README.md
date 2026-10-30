@@ -84,3 +84,51 @@ callback and extracted-state checks cover that edge at source/core scope only.
 The effect records remain process-local and nominal-resource-scoped. They do
 not provide durable reconciliation, physical mount identity, external instance
 fencing or automatic recovery of an unknown destructive effect.
+
+## Follow-up to maintenance and late-link review
+
+Review CR 5711111653 and comment 6519716416 identified two boundaries missed
+by the original source PASS for `899a6dbafcef29f9e84a4c38f97003f3397f3955`.
+That PASS was withdrawn. Attached maintenance now reserves a shared work-resource
+attempt before sending `--apply`. Unknown outcomes retain the operation ID and
+actual observation after lifecycle release. Terminal or request-not-sent evidence
+releases only the matching attempt. The existing workspace audit store records
+intent before send and the full redacted receipt/result afterward. An intent
+write failure sends no maintenance; result-write failure cannot erase unknown
+state or create an avoidable latch after trusted termination. This audit uses
+flush-only append, not fsync-backed crash durability or restart admission.
+
+Target planning now retains safe `Link_create` targets while suppressing unknown
+symlink redispatch. The provider fixture delays an original unresolved symlink
+until after a later scan emitted `Build_absent`, during target mkdir on the new
+empty build volume. The expected target is still prepared for that late link.
+Execution remains withheld while the persistent application is unresolved.
+Refused and differently targeted rows retain their existing treatment.
+
+Additional provider scenarios cover maintenance missing receipt, transport loss,
+terminal success/nonzero/timeout/refusal, failed endpoint construction and failed
+intent-audit writes. They read the real audit store to verify operation-ID pairs,
+full redacted receipt fields and exclusion of command output/credentials. The
+maintenance payload's selected filesystem effect is modeled; its actual embedded
+bytes are validated, but the fixture does not execute the embedded Python script
+or an Apple VM. Known-not-sent integration remains unproven as above.
+
+Local follow-up checks passed: parser checks for all three source/interface/test
+files, whitespace/changelog checks, 28 checks on the actual extracted state/core,
+and type checking of the actual audit/maintenance helper blocks with interface
+stubs and warnings 4/32/69 fatal. These extraction checks are not a project build
+or provider-suite execution. New follow-up output stays under the working checkout's
+`artifacts/microvm-handoff-followup-20261030/`. The original 20-check capture
+and its digests remain in their original run directory. The follow-up core
+harness SHA-256 is `b6ff4698c0ef0b1e2c24f4ac95ee0f686d7336a127d7d7e9ce7021185d709a17`.
+
+
+The candidate was integrated onto concurrent public head
+`fcdfa13e9ba9fe808ae3f60c7ca5d0d3af4c1e52` (base
+`a97919872890eb9b4e730f65b745ab094ed8ce12`), preserving its stricter execution
+admission. A further temporary-target-failure gap was found: local target
+uncertainty could refuse every later handoff even after the fault disappeared.
+A shared-resource check now permits a current-generation scan/idempotent mkdir
+retry when no persistent symlink application is unresolved. It never clears
+shared link uncertainty. Provider cases distinguish same-runtime and next-turn
+recovery without stop, replacement, readiness invalidation or cleanup replay.

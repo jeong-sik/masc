@@ -1,0 +1,18 @@
+{
+  "scope": "Post-exit daily-ledger scan of the isolated instrumented 300-owner packet; byte quantiles select two repeated observed JSON trees, not operation-latency quantiles. These captured rows remain private.",
+  "rows": 25393,
+  "total_bytes": 24880003,
+  "p50_row_bytes": 570,
+  "p99_row_bytes": 9812,
+  "max_row_bytes": 9812,
+  "selected_inputs": {
+    "p50": {
+      "observed_row_bytes": 570,
+      "sha256": "a3ebd0e3569d4cd0a476b63f1575aba7476923b1c9a3c2539ffc29dc39deb897"
+    },
+    "p99": {
+      "observed_row_bytes": 9812,
+      "sha256": "d17bfeff6226867914ce36637ecaa1c3fabd4e71e39de7c4302c245a7836e200"
+    }
+  }
+}

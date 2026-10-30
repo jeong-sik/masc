@@ -229,6 +229,18 @@ val keeper_world_transcript_intro : string
     section 4.4): the status line a judged turn always carries, and the body of
     the memories the judgment carried. *)
 
+(** Managed recall instructions and external criterion policy. *)
+val keeper_recall_candidate : string
+val keeper_recall_candidate_possibly_needed : string
+val keeper_recall_candidate_not_needed : string
+val keeper_recall_time : string
+val keeper_recall_time_standing : string
+val keeper_recall_time_bound : string
+val keeper_recall_turn : string
+val keeper_recall_turn_yes : string
+val keeper_recall_turn_no : string
+val keeper_recall_turn_unsure : string
+
 val keeper_recall_status_selected : string
 val keeper_recall_status_selected_ids : string
 val keeper_recall_status_none_found_needed : string

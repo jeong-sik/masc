@@ -126,6 +126,7 @@ let judged_of = function
   | Ok None -> Alcotest.fail "expected a judgment"
   | Error (Codec.Duplicate_candidate_id id) -> Alcotest.failf "duplicate id %s" id
   | Error (Codec.Choice_set_invalid detail) -> Alcotest.failf "choice set invalid: %s" detail
+  | Error (Codec.Guidance_unavailable detail) -> Alcotest.failf "guidance unavailable: %s" detail
 
 let calls_of_kind kind calls = List.filter (fun call -> call.kind = kind) calls
 
@@ -391,7 +392,7 @@ let test_a_duplicate_stops_before_anything_is_sent () =
       let result, calls = run_flow ~piece_bytes accepting [ same; sized 1 small; same ] in
       (match result with
        | Error (Codec.Duplicate_candidate_id id) -> Alcotest.(check string) label (C.id same) id
-       | Error (Codec.Choice_set_invalid detail) -> Alcotest.fail detail
+       | Error (Codec.Choice_set_invalid detail | Codec.Guidance_unavailable detail) -> Alcotest.fail detail
        | Ok _ -> Alcotest.failf "%s: judged a list with a duplicate" label);
       Alcotest.(check int) (label ^ ": nothing sent") 0 (List.length calls))
     [ "one piece", 10 * small; "two pieces apart", small ]
@@ -756,10 +757,139 @@ let test_a_request_of_a_raises_while_question_b_is_waiting () =
   Alcotest.check_raises "comes out of run" (Failure "a broke") (fun () ->
     ignore (within_five_seconds env (fun () -> Flow.run ~evaluate ~purpose [ sized 0 small ])))
 
+(* Exercise the managed policy at the evaluator boundary, including requests
+   rebuilt after capacity refusals. Fixture strings are operator overrides,
+   not snapshots of the shipped wording. *)
+let recall_fragments = [
+  "candidate", Prompt_names.keeper_recall_candidate;
+  "candidate.possibly_needed", Prompt_names.keeper_recall_candidate_possibly_needed;
+  "candidate.not_needed", Prompt_names.keeper_recall_candidate_not_needed;
+  "time", Prompt_names.keeper_recall_time;
+  "time.standing", Prompt_names.keeper_recall_time_standing;
+  "time.time_bound", Prompt_names.keeper_recall_time_bound;
+  "turn", Prompt_names.keeper_recall_turn;
+  "turn.yes", Prompt_names.keeper_recall_turn_yes;
+  "turn.no", Prompt_names.keeper_recall_turn_no;
+  "turn.unsure", Prompt_names.keeper_recall_turn_unsure]
+
+let with_recall_asset transform f =
+  let original=Prompt_registry.get_markdown_dir () |> Option.value
+    ~default:(Masc_test_deps.source_path "config/prompts") in
+  let directory=Filename.temp_dir "recall-policy-" "" in
+  let source=Fs_compat.load_file (Filename.concat original "keeper.memory.recall.md") in
+  Out_channel.with_open_bin (Filename.concat directory "keeper.memory.recall.md")
+    (fun channel -> output_string channel (transform source));
+  Fun.protect ~finally:(fun () -> Prompt_registry.set_markdown_dir original;
+    Fs_compat.remove_tree directory) (fun () -> Prompt_registry.set_markdown_dir directory;f ())
+
+let without_fragment marker text =
+  let _,lines=List.fold_left (fun (skipping,lines) line ->
+    if line="### " ^ marker || line="### " ^ marker ^ " (vars: question_id)"
+    then true,lines
+    else if skipping && not (String.starts_with ~prefix:"### " line) then true,lines
+    else false,line::lines) (false,[]) (String.split_on_char '\n' text) in
+  String.concat "\n" (List.rev lines)
+
+let refuse_without_call transform =
+  with_recall_asset transform (fun () -> Eio_main.run (fun _ ->
+    let calls=ref 0 in
+    let evaluate request=incr calls;evaluator (ref []) accepting request in
+    let candidates=List.init 3 (fun index -> sized index small) in
+    (match Flow.run ~evaluate ~purpose ~piece_bytes:small candidates with
+     | Error (Codec.Guidance_unavailable _) -> ()
+     | Error (Codec.Duplicate_candidate_id _ | Codec.Choice_set_invalid _) | Ok _ ->
+       Alcotest.fail "missing or unrenderable policy must be an explicit build error");
+    Alcotest.(check int) "no turn, candidate or time evaluation starts" 0 !calls))
+
+let test_every_required_policy_is_resolved_before_any_call () =
+  List.iter (fun (marker,_) -> refuse_without_call (without_fragment marker)) recall_fragments
+
+let test_unrenderable_time_policy_refuses_before_any_call () =
+  refuse_without_call (fun text ->
+    let _,lines=List.fold_left (fun (inside,lines) line ->
+      let inside=if line="### time (vars: question_id)" then true
+        else if String.starts_with ~prefix:"### " line then false else inside in
+      inside,(if inside && not (String.starts_with ~prefix:"### " line)
+        then line ^ " {{missing_time_context}}" else line)::lines)
+      (false,[]) (String.split_on_char '\n' text) in
+    String.concat "\n" (List.rev lines))
+
+let fixture_instructions version kind id = match kind with
+  | Candidate_question -> version ^ " candidate " ^ id
+  | Time_question -> version ^ " time " ^ id
+  | Turn_question -> version ^ " turn"
+let fixture_meaning version label = version ^ " criterion " ^ label
+let fixture_policy version = [
+  Prompt_names.keeper_recall_candidate, fixture_instructions version Candidate_question "{{question_id}}";
+  Prompt_names.keeper_recall_time, fixture_instructions version Time_question "{{question_id}}";
+  Prompt_names.keeper_recall_turn, fixture_instructions version Turn_question "turn";
+  Prompt_names.keeper_recall_candidate_possibly_needed, fixture_meaning version "possibly_needed";
+  Prompt_names.keeper_recall_candidate_not_needed, fixture_meaning version "not_needed";
+  Prompt_names.keeper_recall_time_standing, fixture_meaning version "standing";
+  Prompt_names.keeper_recall_time_bound, fixture_meaning version "time_bound";
+  Prompt_names.keeper_recall_turn_yes, fixture_meaning version "yes";
+  Prompt_names.keeper_recall_turn_no, fixture_meaning version "no";
+  Prompt_names.keeper_recall_turn_unsure, fixture_meaning version "unsure"]
+let publish_policy policy = List.iter (fun (key,value) -> match Prompt_registry.set_override key value with
+  | Ok () -> () | Error detail -> Alcotest.fail detail) policy
+
+let test_capacity_splits_and_time_questions_keep_one_policy_snapshot () =
+  let originals=List.map (fun (_,key) -> key,(Prompt_registry.resolve_prompt key).override_value) recall_fragments in
+  Fun.protect ~finally:(fun () -> List.iter (fun (key,value) -> match value with
+    | None -> Prompt_registry.clear_prompt_override key
+    | Some value -> publish_policy [key,value]) originals) (fun () ->
+    publish_policy (fixture_policy "original");
+    Eio_main.run (fun _ ->
+      let changed=ref false and calls=ref [] in
+      let expected_version=ref "original" in
+      let evaluate (request : Codec.request) =
+        if not !changed then (changed:=true;publish_policy (fixture_policy "changed"));
+        calls:=request::!calls;
+        List.iter (fun (id,question) -> match question with
+          | Types.Choice {instructions;criteria} ->
+            Alcotest.(check string) "the evaluator consumes the captured managed instructions"
+              (fixture_instructions !expected_version request.kind id) instructions;
+            Alcotest.(check (list (pair string (option string))))
+              "the evaluator consumes the captured external criterion definitions"
+              (List.map (fun (label,_) -> label,Some (fixture_meaning !expected_version label)) criteria) criteria
+          | Types.Score _ | Types.Noul _ -> Alcotest.fail "recall uses typed Choice questions") request.questions;
+        let ids=ids_of request in
+        match request.kind with
+        | Candidate_question when List.length ids>1 -> Error Flow.Capacity_refused
+        | Candidate_question -> answer_all (if !expected_version="original" then possibly else unrelated) ids
+        | Turn_question -> Ok (response ["turn",if !expected_version="original" then yes else no])
+        | Time_question -> answer_all time_bound ids in
+      let candidates=List.init 4 (fun index -> sized index small) in
+      let run ()=Flow.run ~evaluate ~purpose ~piece_bytes:(List.length candidates * small) candidates |> judged_of in
+      let judged=run () in
+      Alcotest.(check (list string)) "every capacity partition kept its original candidate IDs"
+        (List.map C.id candidates) (List.filter_map (function J.Decided {id;decision=J.Possibly_needed} -> Some id
+          | J.Decided {decision=J.Not_needed;_} | J.Undecided _ -> None) judged.results);
+      Alcotest.(check int) "the complete capacity descent used the same policy"
+        (2 * List.length candidates-1)
+        (List.length (List.filter (fun (r:Codec.request) -> r.kind=Candidate_question) !calls));
+      Alcotest.(check (list (pair string string))) "all carried original IDs receive the captured time question"
+        (List.map (fun candidate -> C.id candidate,"time_bound") candidates)
+        (List.map (fun (id,mark) -> id,(match mark with
+          | J.Marked nature -> J.time_nature_label nature | J.Time_unjudged -> "unjudged")) judged.marks);
+      expected_version:="changed";
+      let next=run () in
+      Alcotest.(check int) "a later flow consumes the changed policy and carries nothing" 0
+        (List.length (List.filter_map (function J.Decided {id;decision=J.Possibly_needed} -> Some id
+          | J.Decided {decision=J.Not_needed;_} | J.Undecided _ -> None) next.results));
+      Alcotest.(check int) "the later no-knowledge answer fabricates no time marks" 0 (List.length next.marks)))
+
 let () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   Alcotest.run "keeper_memory_recall_flow"
     [ ( "flow"
-      , [ Alcotest.test_case "sized candidates have the line bytes they are named for" `Quick
+      , [ Alcotest.test_case "every required policy resolves before evaluation" `Quick
+            test_every_required_policy_is_resolved_before_any_call
+        ; Alcotest.test_case "unrenderable time policy refuses before evaluation" `Quick
+            test_unrenderable_time_policy_refuses_before_any_call
+        ; Alcotest.test_case "capacity splits and time questions retain one policy snapshot" `Quick
+            test_capacity_splits_and_time_questions_keep_one_policy_snapshot
+        ; Alcotest.test_case "sized candidates have the line bytes they are named for" `Quick
             test_sized_candidates_have_the_line_bytes_they_are_named_for
         ; Alcotest.test_case "no candidates send nothing" `Quick test_no_candidates_send_nothing
         ; Alcotest.test_case "everything taken" `Quick test_everything_taken

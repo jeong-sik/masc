@@ -5,11 +5,11 @@ The loopback fixture gates each screenshot response. A sample starts when a
 response is released and ends just before the next screenshot response is
 released. The manually requested first screenshot is warmup; the 15-second
 session starts at the next cadence request. It includes one settling window,
-five constant samples and a changed-title control window. PTY bytes can include unrelated
-TUI output, including asynchronous frames from other events. Title and image
-co-occurrence in a window does not establish which event caused either. The
-two pins must run in the same environment. This is a bounded experiment, not a
-measurement of CPU, latency, real-browser traffic, or exclusive causation.
+five constant samples and a control window with a uniquely marked PNG whose
+pixels are unchanged. PTY bytes can include unrelated TUI output, including
+asynchronous frames from other events. The two pins must run in the same
+environment. This is a bounded experiment, not a measurement of CPU, latency,
+real-browser traffic, or exclusive attribution of every byte to the viewport.
 """
 from __future__ import annotations
 
@@ -66,17 +66,50 @@ def make_png() -> bytes:
             + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
 
 
-PNG_B64 = base64.b64encode(make_png()).decode("ascii")
+PNG = make_png()
+PNG_B64 = base64.b64encode(PNG).decode("ascii")
+
+
+def make_control_png() -> str:
+    """Add a unique ancillary chunk without changing the image pixels."""
+    tag = b"tEXt"
+    payload = b"masc-cadence\x00" + secrets.token_hex(16).encode("ascii")
+    chunk = (struct.pack(">I", len(payload)) + tag + payload
+             + struct.pack(">I", zlib.crc32(tag + payload) & 0xFFFFFFFF))
+    return base64.b64encode(PNG[:-12] + chunk + PNG[-12:]).decode("ascii")
+
+
+def has_iterm_image(data: bytes, image: str) -> bool:
+    """Match the complete image payload within a single terminated iTerm OSC."""
+    prefix = b"\x1b]1337;File="
+    expected = image.encode("ascii")
+    offset = 0
+    while True:
+        start = data.find(prefix, offset)
+        if start < 0:
+            return False
+        end = data.find(b"\x07", start + len(prefix))
+        if end < 0:
+            return False
+        header, separator, payload = data[start + len(prefix):end].partition(b":")
+        printable_header = all(0x20 <= byte < 0x7f for byte in header)
+        inline_fields = [field for field in header.split(b";")
+                         if field.partition(b"=")[0] == b"inline"]
+        if (separator and printable_header and inline_fields == [b"inline=1"]
+                and payload == expected):
+            return True
+        offset = end + 1
 
 
 class Fixture:
-    def __init__(self, base: Path, control_title: str) -> None:
+    def __init__(self, base: Path, control_image: str) -> None:
         self.base = base
-        self.control_title = control_title
+        self.control_image = control_image
         self.lock = threading.Lock()
         self.poll_count = 0
         self.requests: queue.Queue[dict[str, Any]] = queue.Queue()
-        self.read_complete = threading.Event()
+        self.read_completions = 0
+        self.selected_tab_read = threading.Event()
         self.responses_complete = 0
         self.errors: list[str] = []
         self.exchanges: list[dict[str, Any]] = []
@@ -104,10 +137,10 @@ class Fixture:
             with self.lock:
                 self.errors.append(f"poll {n} was not released")
             return 504, {"ok": False, "error": {"message": "fixture gate timeout"}}, event
-        title = self.control_title if n == CONSTANT_SAMPLES + 3 else TITLE
+        image = self.control_image if n == CONSTANT_SAMPLES + 3 else PNG_B64
         return 200, {"ok": True, "data": {
             "source": "live", "clientId": CLIENT, "tabId": 7,
-            "title": title, "url": URL, "mimeType": "image/png", "data": PNG_B64,
+            "title": TITLE, "url": URL, "mimeType": "image/png", "data": image,
             "viewport": {"documentId": "fixture-doc-1", "width": 80, "height": 24,
                          "scrollX": 0, "scrollY": 0}, "elapsed_ms": 250,
         }}, event
@@ -167,8 +200,18 @@ def fixture_server(fixture: Fixture) -> Iterator[int]:
                     "page": {"tabId": 7, "title": TITLE, "url": URL, "text": "fixture",
                              "chars": 7, "truncated": False}, "source": "live",
                     "clientId": CLIENT, "elapsed_ms": 250}}
-                fixture.record_setup("POST", path, request, payload, self.reply(payload))
-                fixture.read_complete.set()
+                written = self.reply(payload)
+                fixture.record_setup("POST", path, request, payload, written)
+                if written:
+                    with fixture.lock:
+                        fixture.read_completions += 1
+                        # A cadence read for the selected tab can only start
+                        # after the initial read was applied by the TUI.
+                        if (fixture.read_completions >= 2 and isinstance(request, dict)
+                                and request.get("lane") == "live"
+                                and request.get("clientId") == CLIENT
+                                and request.get("tabId") == 7):
+                            fixture.selected_tab_read.set()
             elif path == "/api/v1/dashboard/browser-lane/screenshot":
                 status, payload, event = fixture.screenshot(request)
                 delivered = self.reply(payload, status)
@@ -234,9 +277,9 @@ def response_boundary_ordered(current: dict[str, Any], following: dict[str, Any]
     return complete is not None and current["released_at"] <= complete <= following["received_at"]
 
 
-def measure(executable: Path, base: Path, capture: Path, control_title: str,
+def measure(executable: Path, base: Path, capture: Path, control_image: str,
             *, startup_marker: bytes | None = None) -> dict[str, Any]:
-    fixture = Fixture(base, control_title)
+    fixture = Fixture(base, control_image)
     output = bytearray()
     windows: list[dict[str, Any]] = []
     errors: list[str] = []
@@ -270,10 +313,6 @@ def measure(executable: Path, base: Path, capture: Path, control_title: str,
             read(master, 0.05)
         return True
 
-    def has_title_and_image(data: bytes, title: str) -> bool:
-        return (title.encode() in data and b"\x1b]1337;File=" in data
-                and PNG_B64.encode() in data)
-
     try:
         with fixture_server(fixture) as port, tui_pty(executable, base, port) as (master, proc):
             # The terminal capability probe completes before the lane key is sent.
@@ -290,9 +329,12 @@ def measure(executable: Path, base: Path, capture: Path, control_title: str,
             if started:
                 os.write(master, b"\x1e")  # Ctrl-^: open the browser lane
                 ready = wait_for(master, proc,
-                                 lambda: fixture.read_complete.is_set() and b"Read 250.0 ms" in output,
-                                 READY_TIMEOUT_SEC, "browser lane read")
+                                 fixture.selected_tab_read.is_set,
+                                 READY_TIMEOUT_SEC, "selected-tab cadence read")
+            result["selected_tab_cadence_observed"] = ready
             if ready:
+                # Send this toggle once. The first screenshot request confirms
+                # acceptance; retrying could instead dismiss an open viewport.
                 os.write(master, b"\x0f")  # Ctrl-O: open the selected screenshot
                 for expected in range(1, EXPECTED_POLLS + 1):
                     available = wait_for(master, proc, lambda: not fixture.requests.empty(),
@@ -319,8 +361,8 @@ def measure(executable: Path, base: Path, capture: Path, control_title: str,
                                         "completion_after_release_sec": (None if completed_at is None else
                                             completed_at - current["released_at"]),
                                         "response_completed_before_next_request": ordered,
-                                        "title_and_image_observed": has_title_and_image(data, control_title if
-                                            number == CONSTANT_SAMPLES + 3 else TITLE)})
+                                        "image_observed": has_iterm_image(data, control_image if
+                                            number == CONSTANT_SAMPLES + 3 else PNG_B64)})
                     if event["number"] != expected:
                         errors.append(f"expected poll {expected}, received {event['number']}")
                     cursor = len(output)
@@ -356,18 +398,19 @@ def measure(executable: Path, base: Path, capture: Path, control_title: str,
         exchanges = list(fixture.exchanges)
         setup_exchanges = list(fixture.setup_exchanges)
     fixture_capture = capture.with_suffix(".fixture.json")
-    fixture_capture.write_text(json.dumps({"schema": "masc.viewport_fixture.v1",
-                                           "control_title": control_title,
+    fixture_capture.write_text(json.dumps({"schema": "masc.viewport_fixture.v2",
+                                           "control_png_sha256": hashlib.sha256(
+                                               base64.b64decode(control_image)).hexdigest(),
                                            "setup_exchanges": setup_exchanges,
                                            "screenshot_exchanges": exchanges}, indent=2) + "\n")
     by_poll = {w["poll"]: w for w in windows}
     constants = [by_poll[n] for n in range(3, CONSTANT_SAMPLES + 3) if n in by_poll]
-    initial = by_poll.get(1, {}).get("title_and_image_observed", False)
-    control = by_poll.get(CONSTANT_SAMPLES + 3, {}).get("title_and_image_observed", False)
+    initial = by_poll.get(1, {}).get("image_observed", False)
+    control = by_poll.get(CONSTANT_SAMPLES + 3, {}).get("image_observed", False)
     if not initial:
-        errors.append("initial title and image were not observed in the window")
+        errors.append("initial iTerm image was not observed in the window")
     if not control:
-        errors.append("control title and image were not observed in the window")
+        errors.append("control iTerm image was not observed in the window")
     if poll_count != EXPECTED_POLLS or len(constants) != CONSTANT_SAMPLES:
         errors.append("unexpected number of screenshot polls or constant samples")
     result.update({"poll_count": poll_count, "constant_samples": len(constants),
@@ -376,8 +419,7 @@ def measure(executable: Path, base: Path, capture: Path, control_title: str,
                    "session_total_bytes": max(0, len(output) - session_cursor) if session_started else 0,
                    "fixture_capture": fixture_capture.name,
                    "constant_ticks_bytes": sum(w["bytes"] for w in constants),
-                   "constant_windows_with_title_and_image": sum(
-                       w["title_and_image_observed"] for w in constants),
+                   "constant_windows_with_image": sum(w["image_observed"] for w in constants),
                    "control_tick_bytes": by_poll.get(CONSTANT_SAMPLES + 3, {}).get("bytes", 0),
                    "initial_window_observed": initial, "control_window_observed": control,
                    "valid": not errors})
@@ -389,9 +431,8 @@ def judge(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
                          and before["constant_samples"] == after["constant_samples"] == CONSTANT_SAMPLES)
     control = before["control_window_observed"] and after["control_window_observed"]
     delta = before["constant_ticks_bytes"] - after["constant_ticks_bytes"]
-    baseline_images = before["constant_windows_with_title_and_image"] == CONSTANT_SAMPLES
-    images_reduced = (after["constant_windows_with_title_and_image"]
-                      < before["constant_windows_with_title_and_image"])
+    baseline_images = before["constant_windows_with_image"] == CONSTANT_SAMPLES
+    images_reduced = after["constant_windows_with_image"] < before["constant_windows_with_image"]
     valid = before["valid"] and after["valid"] and poll_counts_match and control and baseline_images
     return {"valid": valid,
             "poll_counts_match": poll_counts_match, "control_windows_observed": control,
@@ -408,8 +449,8 @@ def judge_sessions(before: list[dict[str, Any]], after: list[dict[str, Any]]) ->
     valid = all(pair["valid"] for pair in pairs)
     before_bytes = sum(s["constant_ticks_bytes"] for s in before)
     after_bytes = sum(s["constant_ticks_bytes"] for s in after)
-    before_windows = sum(s["constant_windows_with_title_and_image"] for s in before)
-    after_windows = sum(s["constant_windows_with_title_and_image"] for s in after)
+    before_windows = sum(s["constant_windows_with_image"] for s in before)
+    after_windows = sum(s["constant_windows_with_image"] for s in after)
     samples = SESSIONS * CONSTANT_SAMPLES
     return {"valid": valid, "session_comparisons": pairs,
             "constant_samples_per_side": samples,
@@ -428,12 +469,13 @@ def main() -> int:
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    control_title = "Control-" + secrets.token_hex(12)
-    report: dict[str, Any] = {"schema": "masc.viewport_cadence_bytes.v2",
+    control_image = make_control_png()
+    report: dict[str, Any] = {"schema": "masc.viewport_cadence_bytes.v3",
                               "definition": "raw PTY bytes per screenshot response window",
                               "limitation": "A window can contain unrelated or delayed asynchronous frames; "
-                                            "co-occurring title and image bytes do not establish causation.",
-                              "control_title": control_title,
+                                            "not every byte is attributable to the screenshot response.",
+                              "control_png_sha256": hashlib.sha256(
+                                  base64.b64decode(control_image)).hexdigest(),
                               "conditions": {"constant_samples": CONSTANT_SAMPLES,
                                              "sessions_per_binary": SESSIONS,
                                              "session_seconds": SESSION_SEC,
@@ -441,7 +483,8 @@ def main() -> int:
                                              "warmup_polls": 1,
                                              "expected_session_polls": EXPECTED_POLLS - 1,
                                              "cadence_sec": CADENCE_SEC,
-                                             "same_image": True,
+                                             "same_image_across_binaries": True,
+                                             "control_change": "ancillary PNG chunk; pixels unchanged",
                                              "terminal": "emulated iTerm graphics"}}
     measured: dict[str, list[dict[str, Any]]] = {"before": [], "after": []}
     for index in range(1, SESSIONS + 1):
@@ -450,7 +493,7 @@ def main() -> int:
                 base = Path(tmp).resolve()
                 (base / ".masc").mkdir()
                 measured[label].append(measure(executable.resolve(), base,
-                    args.out.parent / f"capture-{label}-{index}.bin", control_title))
+                    args.out.parent / f"capture-{label}-{index}.bin", control_image))
     report.update(measured)
     report.update(judge_sessions(measured["before"], measured["after"]))
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

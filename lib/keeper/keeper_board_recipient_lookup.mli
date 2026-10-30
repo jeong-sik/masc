@@ -22,10 +22,12 @@ val make : base_path:string -> Recipient_lookup.t
       name is looked up among the aliases like any other. A matching own name
       retains priority over alias collisions. The router compares the recorded
       target with each Keeper's effective target list, subject to its separate
-      suppression of signals authored by that Keeper. When the canonical
-      filename does not answer and alternate spellings are checked, every
-      matching file must be readable, and a file's payload name must exactly
-      match its filename before that file can claim own-name priority.
+      suppression of signals authored by that Keeper. Every own-name claim
+      requires the actual persisted filename spelling to match the payload name
+      exactly. The lookup lists persisted names even for the canonical shortcut
+      (a listing error fails the lookup), but it does not read unrelated
+      settings on that shortcut. When alternate spellings are checked, every
+      matching file must be readable before the name can be accepted.
     - An alias is found by reading every Keeper's settings, once for the write
       and only if a name needs it.  One unreadable setting, or two Keepers
       claiming one alias, fails the lookup.  The detail names the Keeper or the

@@ -83,20 +83,25 @@ let declared ~config ~all_names ~all_metas candidate =
        let failed detail =
          Error (Printf.sprintf "cannot resolve @%s: %s" written detail)
        in
-       (* A file this build cannot read is not "no such Keeper": taking it for
-          one would turn the address into prose without a word to the author. *)
-       (match
-          reading (fun () -> Keeper_meta_store.read_effective_meta_presence config name)
-        with
-        | Error detail -> failed detail
-        | Ok (Keeper_meta_store.Meta_not_current detail) ->
-          failed
-            (Printf.sprintf "Keeper %s has settings this build cannot read: %s" name detail)
-        | Ok (Keeper_meta_store.Meta_present meta) when answers meta id -> recipient id
-        | Ok (Keeper_meta_store.Meta_present _ | Keeper_meta_store.Meta_absent) ->
-          (match Lazy.force all_names with
-           | Error detail -> failed detail
-           | Ok names ->
+       (* A case-insensitive filesystem may open [Alice.json] for [alice].
+          Check the actual directory spelling as well as the payload before
+          granting the own-name shortcut. The names listing does not read any
+          unrelated Keeper's settings. *)
+       let find ~direct =
+         match Lazy.force all_names with
+         | Error detail -> failed detail
+         | Ok names ->
+           let canonical_owner_answers =
+             match direct with
+             | Some meta ->
+               String.equal name meta.Keeper_meta_contract.name
+               && List.exists (String.equal name) names
+               && answers meta id
+             | None -> false
+           in
+           if canonical_owner_answers
+           then recipient id
+           else
              (match alternate_own_name_answers ~config ~id ~folded_name:name names with
               | Error detail -> failed detail
               | Ok true -> recipient id
@@ -111,7 +116,19 @@ let declared ~config ~all_names ~all_metas candidate =
                     with
                     | Error detail -> failed detail
                     | Ok None -> Ok None
-                    | Ok (Some _) -> recipient id))))))
+                    | Ok (Some _) -> recipient id)))
+       in
+       (* A file this build cannot read is not "no such Keeper": taking it for
+          one would turn the address into prose without a word to the author. *)
+       (match
+          reading (fun () -> Keeper_meta_store.read_effective_meta_presence config name)
+        with
+        | Error detail -> failed detail
+        | Ok (Keeper_meta_store.Meta_not_current detail) ->
+          failed
+            (Printf.sprintf "Keeper %s has settings this build cannot read: %s" name detail)
+        | Ok (Keeper_meta_store.Meta_present meta) -> find ~direct:(Some meta)
+        | Ok Keeper_meta_store.Meta_absent -> find ~direct:None))
 ;;
 
 let make ~base_path =

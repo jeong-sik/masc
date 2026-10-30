@@ -210,6 +210,83 @@ let test_an_alternate_filename_does_not_promote_a_foreign_alias config =
     (ask config "alice")
 ;;
 
+(* The canonical spelling needs the same ownership check as an alternate:
+   a foreign payload can claim an alias but cannot hide another claim. *)
+let test_a_canonical_filename_does_not_promote_a_foreign_alias config =
+  register_keeper config ~mention_targets:[ "alice" ] "bob";
+  let path name = Keeper_types_profile.keeper_meta_path config name in
+  Unix.rename (path "bob") (path "alice");
+  expect_ok "one foreign alias" ([ "alice" ], []) (ask config "alice");
+  register_keeper config ~mention_targets:[ "alice" ] "charlie";
+  expect_error "conflicting foreign aliases" ~mentioning:[ "@alice"; "alice"; "charlie" ]
+    (ask config "alice")
+;;
+
+(* A foreign canonical payload must not hide a real owner in a differently
+   cased filename. This arrangement needs a case-sensitive filesystem. *)
+let test_a_foreign_canonical_file_does_not_hide_an_alternate_owner config =
+  register_keeper config "Alice";
+  let path name = Keeper_types_profile.keeper_meta_path config name in
+  if Sys.file_exists (path "alice") then Alcotest.skip ();
+  register_keeper config ~mention_targets:[ "alice" ] "bob";
+  Unix.rename (path "bob") (path "alice");
+  register_keeper config ~mention_targets:[ "alice" ] "charlie";
+  expect_ok "the actual alternate owner still has priority" ([ "alice" ], [])
+    (ask config "alice")
+;;
+
+(* Matching folded identities are insufficient: the filename and metadata
+   must agree exactly before a payload can take the own-name shortcut. *)
+let test_a_canonical_filename_requires_exact_payload_name config =
+  register_keeper config "Alice";
+  let path name = Keeper_types_profile.keeper_meta_path config name in
+  Unix.rename (path "Alice") (path "alice");
+  let names = match Keeper_meta_store.persisted_keeper_names_result config with
+    | Ok names -> names
+    | Error detail -> fail detail in
+  if not (List.exists (String.equal "alice") names) then Alcotest.skip ();
+  expect_ok "case-fold equal payload is not the canonical owner" ([], [ "alice" ])
+    (ask config "alice")
+;;
+
+(* On a case-insensitive filesystem opening [alice.json] can return
+   [Alice.json]. Its payload spelling is not the actual stored filename. *)
+let test_a_case_insensitive_path_cannot_promote_a_foreign_owner config =
+  register_keeper config ~mention_targets:[ "alice" ] "alice";
+  let path name = Keeper_types_profile.keeper_meta_path config name in
+  Unix.rename (path "alice") (path "Alice");
+  let names = match Keeper_meta_store.persisted_keeper_names_result config with
+    | Ok names -> names
+    | Error detail -> fail detail in
+  if not (Sys.file_exists (path "alice") && List.exists (String.equal "Alice") names)
+  then Alcotest.skip ();
+  register_keeper config ~mention_targets:[ "alice" ] "charlie";
+  expect_error "a different stored spelling cannot own alice"
+    ~mentioning:[ "@alice"; "Alice"; "charlie" ] (ask config "alice")
+;;
+
+(* A readable canonical file is not enough if its actual filename cannot be
+   listed. On privileged accounts that can still list it, this case is skipped. *)
+let test_an_unlistable_store_fails_even_for_a_canonical_owner config =
+  register_keeper config "alice";
+  let directory = Keeper_types_profile.keeper_dir config in
+  let permissions = (Unix.stat directory).Unix.st_perm in
+  Unix.chmod directory 0o111;
+  Fun.protect ~finally:(fun () -> Unix.chmod directory permissions) (fun () ->
+    let cannot_list =
+      match Sys.readdir directory with
+      | _ -> false
+      | exception Sys_error _ -> true
+    in
+    if not cannot_list then Alcotest.skip ();
+    (match Keeper_meta_store.read_effective_meta_presence config "alice" with
+     | Ok (Keeper_meta_store.Meta_present _) -> ()
+     | Ok (Keeper_meta_store.Meta_absent | Keeper_meta_store.Meta_not_current _) | Error _ ->
+       fail "canonical settings must still be readable without directory listing");
+    expect_error "unlistable canonical owner" ~mentioning:[ "@alice"; "list keeper directory" ]
+      (ask config "alice"))
+;;
+
 (* Registry ownership requires the filename and payload spelling to match,
    even when their Board identities fold to the same name. *)
 let test_an_alternate_filename_requires_exact_payload_name config =
@@ -474,6 +551,16 @@ let () =
             (with_workspace test_a_mixed_case_owner_that_does_not_answer_uses_the_alias)
         ; test_case "an alternate filename does not promote a foreign alias" `Quick
             (with_workspace test_an_alternate_filename_does_not_promote_a_foreign_alias)
+        ; test_case "a canonical filename does not promote a foreign alias" `Quick
+            (with_workspace test_a_canonical_filename_does_not_promote_a_foreign_alias)
+        ; test_case "a foreign canonical file does not hide an alternate owner" `Quick
+            (with_workspace test_a_foreign_canonical_file_does_not_hide_an_alternate_owner)
+        ; test_case "a canonical filename requires an exact payload name" `Quick
+            (with_workspace test_a_canonical_filename_requires_exact_payload_name)
+        ; test_case "a case-insensitive path cannot promote a foreign owner" `Quick
+            (with_workspace test_a_case_insensitive_path_cannot_promote_a_foreign_owner)
+        ; test_case "an unlistable store fails for a canonical owner" `Quick
+            (with_workspace test_an_unlistable_store_fails_even_for_a_canonical_owner)
         ; test_case "an alternate filename requires an exact payload name" `Quick
             (with_workspace test_an_alternate_filename_requires_exact_payload_name)
         ; test_case "all alternate spellings are read before accepting" `Quick

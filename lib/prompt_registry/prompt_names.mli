@@ -81,6 +81,20 @@ val keeper_observation_rejected_digest_row : string
 
 val librarian : string
 
+(** Managed admission and absorption policy fragments. *)
+val librarian_admission_policy : string
+val librarian_retirement_policy : string
+val librarian_absorb_forward : string
+val librarian_absorb_pair : string
+val librarian_absorb_observations : string
+val librarian_absorb_reverse : string
+val librarian_absorb_reverse_yes : string
+val librarian_absorb_reverse_no : string
+val librarian_absorb_mergeable : string
+val librarian_absorb_different_context : string
+val librarian_absorb_loses_knowledge : string
+val librarian_absorb_uncertain : string
+
 (** A continuity pass over a range whose Memory is already committed: the
     answer is the working state alone. *)
 val librarian_continuity : string

@@ -37,7 +37,9 @@ module Make (Capture : Capture) : sig
     proposal:Yojson.Safe.t -> request_id:string -> authority:Keeper_librarian_absorb_gate.live_authority ->
     (Lane_addon_request_progress.preparation_intent, string) result
   (** Build and validate the full immutable first gate request before retaining
-      its parent preparation intent. Does not publish or evaluate anything. *)
+      its parent preparation intent. The live handle's complete guidance bundle is
+      required and persisted here; missing policy refuses before publication.
+      Does not publish or evaluate anything. *)
   val recover_root : store:Lane_addon_store.t -> owner:Capture.owner ->
     capture:Capture.t ->
     (Lane_addon_tool_request_owner.retained, string) result
@@ -69,7 +71,9 @@ module Make (Capture : Capture) : sig
   (** Strictly rejoin parent judgment and original physical capture. Replay every
       completed request through the common gate derivation. Only the first next
       question without an intent can execute, using a live handle whose captured
-      authority is exactly the original one. Pending/aborted requests remain
+      Keeper/destination authority is exactly the original one. All questions,
+      size checks and replay use the retained guidance, independent of current
+      prompt edits. Pending/aborted requests remain
       unknown. Complete replay and terminal publication require no live config.
       No Memory save, candidate ACK, partition or automatic new attempt occurs. *)
   val validate : store:Lane_addon_store.t -> owner:Capture.owner ->

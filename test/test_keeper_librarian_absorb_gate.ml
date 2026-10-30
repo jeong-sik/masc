@@ -6,6 +6,19 @@ module Gate = Masc.Keeper_librarian_absorb_gate
 module T = Masc.Typesafeai_types
 module Types = Masc.Keeper_memory_os_types
 
+let guidance () = match Gate.resolve_guidance () with
+  | Ok guidance -> guidance | Error detail -> Alcotest.fail detail
+
+let with_guidance_override key text f =
+  let original=(Prompt_registry.resolve_prompt key).override_value in
+  Fun.protect ~finally:(fun () -> match original with
+    | None -> Prompt_registry.clear_prompt_override key
+    | Some original -> (match Prompt_registry.set_override key original with
+        | Ok () -> () | Error detail -> Alcotest.fail detail)) (fun () ->
+    (match Prompt_registry.set_override key text with
+     | Ok () -> () | Error detail -> Alcotest.fail detail);
+    f ())
+
 (* The one element a single-destination case expects. A mismatch fails with
    every element it got, not only how many, so the failure log shows what the
    run actually reported. *)
@@ -131,7 +144,7 @@ let test_every_source_mergeable_absorbs_as_answered () =
   let facts = List.map fact sources in
   let absorbed = absorbed_into merged facts in
   let evaluate, requests, _ = table ~noul_of:(fun _ -> 0.9) in
-  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check int) "both absorptions go through" 2 (List.length j.absorbed);
   Alcotest.(check int) "none kept current" 0 (List.length j.left);
   Alcotest.(check int) "both counted as conveyed" 2 (List.length j.conveyed);
@@ -152,7 +165,7 @@ let test_observations_reach_judgment_without_becoming_the_candidate () =
       (Yojson.Safe.Util.member "proposed_memory" state |> Yojson.Safe.Util.to_string);
     Ok { T.model = "fixture"; usage = None;
          answers = List.map (fun (qid, _) -> qid, choice_answer "mergeable") questions } in
-  let result = judged (Gate.judge ~new_observations:observations ~evaluate
+  let result = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:observations ~evaluate
     ~facts:[source] ~new_claims:[candidate] ~absorbed:(absorbed_into candidate [source])) in
   Alcotest.(check int) "supported transition can absorb its original" 1 (List.length result.absorbed)
 ;;
@@ -171,7 +184,7 @@ let test_forward_request_selection_and_capacity () =
       Ok { T.model = "fixture"; usage = None;
            answers = List.map (fun (qid, _) -> qid, choice_answer "mergeable") questions }
     in
-    let judge source = Gate.judge ~new_observations:observations ~evaluate
+    let judge source = Gate.judge ~guidance:(guidance ()) ~new_observations:observations ~evaluate
         ~facts:[source] ~new_claims:[candidate] ~absorbed:(absorbed_into candidate [source]) in
     ignore (judged (judge (fact source_text)));
     let state, questions = match !captured with
@@ -227,7 +240,7 @@ let test_oversized_observations_leave_the_pass_pending () =
   let candidate = fact "Incident A17 was resolved." in
   let evaluate ~state:_ ~questions:_ = Alcotest.fail "oversized evidence must not dispatch" in
   let absorbed = absorbed_into candidate [source] in
-  match Gate.judge ~new_observations:[`String (String.make Gate.request_bytes_limit 'x')]
+  match Gate.judge ~guidance:(guidance ()) ~new_observations:[`String (String.make Gate.request_bytes_limit 'x')]
           ~evaluate ~facts:[source] ~new_claims:[candidate] ~absorbed with
   | Gate.Judged _ -> Alcotest.fail "oversized evidence is not completed consolidation"
   | Gate.Failed { kind; absorbed; unjudgeable; _ } ->
@@ -253,7 +266,7 @@ let test_knowledge_loss_keeps_its_memory_current () =
       (* The claim says nothing about paging the operator. *)
       if contains statement "pages the operator" then 0.2 else 0.95)
   in
-  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check (list string))
     "only the alpha memory is absorbed"
     [ id (List.nth facts 0) ]
@@ -282,7 +295,7 @@ let test_only_mergeable_permits_absorption () =
        | _ -> Alcotest.fail "forward consolidation must ask a typed choice");
       Ok { T.model = "context-fixture"; usage = None
          ; answers = List.map (fun (qid, _) -> qid, choice_answer decision) questions } in
-    let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts:[source] ~new_claims:[merged]
+    let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts:[source] ~new_claims:[merged]
       ~absorbed:(absorbed_into merged [source])) in
     Alcotest.(check int) (decision ^ " absorption")
       (if decision = "mergeable" then 1 else 0) (List.length j.absorbed);
@@ -300,13 +313,13 @@ let test_the_model_not_answering_keeps_the_sources () =
   let facts = List.map fact sources in
   let absorbed = absorbed_into merged facts in
   let evaluate ~state:_ ~questions:_ = Error "HTTP 529" in
-  (match Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
+  (match Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
    | Gate.Failed { reason; absorbed = applied; _ } ->
      Alcotest.(check string) "the reason is carried" "HTTP 529" reason;
      Alcotest.(check int) "unconfirmed sources stay current" 0 (List.length applied)
    | Gate.Judged _ -> Alcotest.fail "expected failed judgment");
   let missing ~state:_ ~questions:_ = Ok { T.model = "jev-test"; answers = []; usage = None } in
-  match Gate.judge ~new_observations:[] ~evaluate:missing ~facts ~new_claims:[ merged ] ~absorbed with
+  match Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate:missing ~facts ~new_claims:[ merged ] ~absorbed with
   | Gate.Failed _ -> ()
   | Gate.Judged _ -> Alcotest.fail "an answer without the questions is not a judgment"
 ;;
@@ -318,7 +331,7 @@ let test_an_absorption_the_pass_cannot_place_stays_current () =
   let stranger = fact "a memory the pass did not carry" in
   let absorbed = absorbed_into merged (facts @ [ stranger ]) in
   let evaluate, _, asked = table ~noul_of:(fun _ -> 0.9) in
-  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check (list string))
     "the conveyed memory is absorbed, the unjudged stranger stays current"
     [ id (List.hd facts) ]
@@ -334,7 +347,7 @@ let test_an_absorption_into_a_restated_memory_is_judged () =
   let facts = List.map fact (sources @ [ merged.claim ]) in
   let absorbed = absorbed_into merged (List.map fact sources) in
   let evaluate, requests, _ = table ~noul_of:(fun _ -> 0.9) in
-  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[] ~absorbed) in
+  let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[] ~absorbed) in
   Alcotest.(check int) "both absorptions judged and conveyed" 2 (List.length j.conveyed);
   Alcotest.(check int) "none passed through unjudged" 0 (List.length j.unjudged);
   Alcotest.(check int) "each source is judged against the restated memory" 2 !requests
@@ -350,7 +363,7 @@ let test_complete_sources_are_asked_separately () =
   let facts = List.init 5 (fun i -> fact (Printf.sprintf "%s copy %d" many.Types.claim i)) in
   let absorbed = absorbed_into merged facts in
   let evaluate, requests, asked = table ~noul_of:(fun _ -> 1.0) in
-  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check (list string)) "complete source memories are judged once"
     (List.map (fun (source : Types.fact) -> source.claim) facts) (List.rev !asked);
   Alcotest.(check bool) "one request per complete source" true (!requests = List.length facts);
@@ -371,7 +384,7 @@ let test_a_missing_seventeenth_statement_keeps_the_whole_memory () =
   in
   let j =
     judged
-      (Gate.judge ~new_observations:[] ~evaluate ~facts:[ source ] ~new_claims:[ claim ]
+      (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts:[ source ] ~new_claims:[ claim ]
          ~absorbed:(absorbed_into claim [ source ]))
   in
   Alcotest.(check (list string)) "the exception is judged within its complete source"
@@ -832,7 +845,7 @@ let test_reported_choice_reaches_contextual_consolidation () =
       (* Run the actual response codec before the gate's Forward decoder. *)
       T.eval_response_of_yojson (`Assoc ["model",`String "reported-choice-fixture";
         "answers",`Assoc (List.map (fun (id, answer) -> id,T.answer_to_yojson answer) answers)]) in
-    let judgment = judged (Gate.judge ~new_observations:[] ~evaluate ~facts:[source]
+    let judgment = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts:[source]
       ~new_claims:[merged] ~absorbed:(absorbed_into merged [source])) in
     Alcotest.(check int) "only reported mergeable authorizes absorption" absorbed_count
       (List.length judgment.absorbed);
@@ -851,7 +864,7 @@ let test_an_invalid_choice_confidence_keeps_the_source () =
         T.Choice_answer { T.choice = "mergeable"; confidence = 2.
           ; probabilities = [ "mergeable", 1.; "different_context", 0.
                             ; "loses_knowledge", 0.; "uncertain", 0. ] }) questions } in
-  match Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
+  match Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
   | Gate.Failed _ -> ()
   | Gate.Judged _ -> Alcotest.fail "2.0 is not a probability"
 ;;
@@ -877,7 +890,7 @@ let test_a_rejection_completed_before_a_later_failure_is_kept () =
     else Error "HTTP 529"
   in
   match
-    Gate.judge ~new_observations:[] ~evaluate ~facts:[ first; second ] ~new_claims:[ merged; other ] ~absorbed
+    Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts:[ first; second ] ~new_claims:[ merged; other ] ~absorbed
   with
   | Gate.Failed { absorbed = applied; left; _ } ->
     Alcotest.(check (list string)) "the rejected source stays current"
@@ -902,7 +915,7 @@ let test_a_conveyed_verdict_survives_a_later_failure () =
          ; answers = List.map (fun (qid, _) -> qid, choice_answer "mergeable") questions }
     else Error "HTTP 529"
   in
-  let outcome = Gate.judge ~new_observations:[] ~evaluate ~facts:[ first; second ]
+  let outcome = Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts:[ first; second ]
       ~new_claims:[ merged; other ] ~absorbed in
   let run = Gate.Evaluated { outcome; copy_checks = []; evaluations = [] } in
   Alcotest.(check (list string)) "only completed positive absorptions apply"
@@ -924,7 +937,7 @@ let test_failure_preserves_unjudged_from_unvisited_groups () =
   let missing_source : Types.absorbed_statement = { absorbed = "absent-source"; into = id merged } in
   let missing_claim : Types.absorbed_statement = { absorbed = id source; into = "absent-claim" } in
   let absorbed = absorbed_into merged [ source ] @ [ missing_source; missing_claim ] in
-  let outcome = Gate.judge ~new_observations:[] ~evaluate:(fun ~state:_ ~questions:_ -> Error "HTTP 503")
+  let outcome = Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate:(fun ~state:_ ~questions:_ -> Error "HTTP 503")
       ~facts:[ source ] ~new_claims:[ merged ] ~absorbed in
   let run = Gate.Evaluated { outcome; copy_checks = []; evaluations = [] } in
   Alcotest.(check int) "all unconfirmed sources remain current" 0
@@ -1073,7 +1086,7 @@ let test_run_records_the_destination_passed_over () =
   let authority = match !captured_destinations with
     | first::rest -> Gate.Gate_available (first,rest)
     | [] -> Alcotest.fail "the actual walk captured its original destinations" in
-  (match Gate.restore ~authority ~new_observations:[] ~facts:[first] ~new_claims:[merged]
+  (match Gate.restore ~guidance:(guidance ()) ~authority ~new_observations:[] ~facts:[first] ~new_claims:[merged]
       ~superseding:[] ~absorbed ~evaluations:(List.rev !retained) with
    | Error error -> Alcotest.fail (Gate.replay_error_to_string error)
    | Ok restored -> Alcotest.(check string) "the original failed-prefix/reserve walk rederives its decision"
@@ -1185,7 +1198,7 @@ let test_run_uses_one_destination_and_model_snapshot () =
       | _ -> Alcotest.fail "retained evaluation file is a list" in
     let destination : Masc.Typesafeai_client.destination_id =
       { destination_uri = initial.base_url; model = "initial-request-model" } in
-    match Gate.restore ~authority:(Gate.Gate_available (destination, []))
+    match Gate.restore ~guidance:(guidance ()) ~authority:(Gate.Gate_available (destination, []))
       ~new_observations:[] ~facts:[first; second] ~new_claims:[merged; other]
       ~superseding:[] ~absorbed ~evaluations:restored_records with
     | Error error -> Alcotest.fail (Gate.replay_error_to_string error)
@@ -1629,7 +1642,7 @@ let test_complete_source_before_failure ~first_rejected () =
         })
     else Error "HTTP 529"
   in
-  match Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
+  match Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed with
   | Gate.Failed { absorbed = applied; left; _ } ->
     Alcotest.(check int) "two requests were attempted" 2 !calls;
     Alcotest.(check (list string)) "only completed negative evidence is reported"
@@ -1647,7 +1660,7 @@ let test_a_claim_over_the_state_bound_keeps_all_its_absorptions_current () =
   let facts = List.map fact sources in
   let absorbed = absorbed_into wide facts in
   let evaluate, requests, _asked = table ~noul_of:(fun _ -> 1.0) in
-  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ wide ] ~absorbed) in
+  let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[ wide ] ~absorbed) in
   Alcotest.(check int) "nothing is absorbed" 0 (List.length j.absorbed);
   Alcotest.(check int) "every memory is reported as too large to judge"
     (List.length sources) (List.length j.unjudgeable);
@@ -1661,7 +1674,7 @@ let test_an_oversized_memory_stays_current_when_another_request_fails () =
   let small = fact (List.hd sources) in
   let absorbed = absorbed_into merged [ huge; small ] in
   let evaluate ~state:_ ~questions:_ = Error "HTTP 529" in
-  match Gate.judge ~new_observations:[] ~evaluate ~facts:[ huge; small ] ~new_claims:[ merged ] ~absorbed with
+  match Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts:[ huge; small ] ~new_claims:[ merged ] ~absorbed with
   | Gate.Failed { absorbed = applied; _ } ->
     Alcotest.(check (list string)) "neither oversized nor unconfirmed memory is absorbed"
       []
@@ -1677,7 +1690,7 @@ let test_a_statement_too_large_to_judge_keeps_its_memory_current () =
   let facts = [ huge; small ] in
   let absorbed = absorbed_into merged facts in
   let evaluate, requests, asked = table ~noul_of:(fun _ -> 1.0) in
-  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
+  let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[ merged ] ~absorbed) in
   Alcotest.(check (list string)) "only the small memory is absorbed"
     [ id small ]
     (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) j.absorbed);
@@ -1712,10 +1725,10 @@ let recording evaluate =
 
 let copy_checks ~evaluate ~claim ~superseding =
   let absorbed = absorbed_into claim copy_sources in
-  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts:copy_sources ~new_claims:[ claim ] ~absorbed) in
+  let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts:copy_sources ~new_claims:[ claim ] ~absorbed) in
   Alcotest.(check int) "the forward question absorbed nothing" 0 (List.length j.absorbed);
   let checks =
-    Gate.judge_copies ~evaluate ~facts:copy_sources ~new_claims:[ claim ] ~superseding
+    Gate.judge_copies ~guidance:(guidance ()) ~evaluate ~facts:copy_sources ~new_claims:[ claim ] ~superseding
       ~absorbed ~applied:j.absorbed
   in
   Gate.Evaluated { outcome = Gate.Judged j; copy_checks = checks; evaluations = [] }, checks
@@ -1845,12 +1858,12 @@ let test_a_claim_with_an_absorption_applied_is_not_asked_back () =
       if String.equal statement first.claim then 0.9 else 0.1)
   in
   let absorbed = absorbed_into copy_claim copy_sources in
-  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts:copy_sources ~new_claims:[ copy_claim ] ~absorbed) in
+  let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts:copy_sources ~new_claims:[ copy_claim ] ~absorbed) in
   Alcotest.(check (list string)) "one source absorbed" [ id first ]
     (List.map (fun (s : Types.absorbed_statement) -> s.absorbed) j.absorbed);
   let before = !requests in
   let checks =
-    Gate.judge_copies ~evaluate ~facts:copy_sources ~new_claims:[ copy_claim ] ~superseding:[]
+    Gate.judge_copies ~guidance:(guidance ()) ~evaluate ~facts:copy_sources ~new_claims:[ copy_claim ] ~superseding:[]
       ~absorbed ~applied:j.absorbed
   in
   Alcotest.(check int) "no reverse check" 0 (List.length checks);
@@ -1884,10 +1897,10 @@ let test_a_restated_memory_is_not_asked_back () =
   let facts = restated :: copy_sources in
   let absorbed = absorbed_into restated copy_sources in
   let evaluate, requests, _ = table ~noul_of:(fun _ -> 0.1) in
-  let j = judged (Gate.judge ~new_observations:[] ~evaluate ~facts ~new_claims:[] ~absorbed) in
+  let j = judged (Gate.judge ~guidance:(guidance ()) ~new_observations:[] ~evaluate ~facts ~new_claims:[] ~absorbed) in
   let before = !requests in
   let checks =
-    Gate.judge_copies ~evaluate ~facts ~new_claims:[] ~superseding:[] ~absorbed
+    Gate.judge_copies ~guidance:(guidance ()) ~evaluate ~facts ~new_claims:[] ~superseding:[] ~absorbed
       ~applied:j.absorbed
   in
   Alcotest.(check int) "no reverse check" 0 (List.length checks);
@@ -2032,7 +2045,7 @@ let reading_the_state () =
 
 let reverse_check ~evaluate ~sources ~claim =
   only_check
-    (Gate.judge_copies ~evaluate ~facts:sources ~new_claims:[ claim ] ~superseding:[]
+    (Gate.judge_copies ~guidance:(guidance ()) ~evaluate ~facts:sources ~new_claims:[ claim ] ~superseding:[]
        ~absorbed:(absorbed_into claim sources) ~applied:[])
 ;;
 
@@ -2529,7 +2542,7 @@ let reload_gate_evaluations records =
     | _ -> Alcotest.fail "original transcript is a list")
 ;;
 
-let record_gate_evaluations ~respond ~facts ~absorbed =
+let record_gate_evaluations ~captured_guidance ~respond ~facts ~absorbed =
   let module C = Masc.Typesafeai_client in
   let records = ref [] in
   let evaluate direction ~state ~questions =
@@ -2546,11 +2559,11 @@ let record_gate_evaluations ~respond ~facts ~absorbed =
       ~destinations:[replay_destination] ~state ~questions;
       returned = Some (Gate.evaluation_evidence_to_yojson evaluation) } :: !records;
     Result.map (fun result -> result.C.response) result |> Result.map_error C.failure_to_string in
-  let outcome = Gate.judge ~evaluate:(evaluate Gate.Forward) ~new_observations:[]
+  let outcome = Gate.judge ~guidance:captured_guidance ~evaluate:(evaluate Gate.Forward) ~new_observations:[]
     ~facts ~new_claims:[merged] ~absorbed in
   let copy_checks = match outcome with
     | Gate.Failed _ -> []
-    | Gate.Judged judged -> Gate.judge_copies ~evaluate:(evaluate Gate.Reverse)
+    | Gate.Judged judged -> Gate.judge_copies ~guidance:captured_guidance ~evaluate:(evaluate Gate.Reverse)
         ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ~applied:judged.absorbed in
   outcome, copy_checks, reload_gate_evaluations (List.rev !records)
 ;;
@@ -2562,8 +2575,8 @@ let replay_response ~forward ~reverse direction questions =
       | Gate.Reverse -> T.Noul_answer { T.noul = reverse }) questions }
 ;;
 
-let restore_gate ~facts ~absorbed evaluations =
-  Gate.restore ~authority:(Gate.Gate_available (replay_destination, []))
+let restore_gate ?(captured_guidance=guidance ()) ~facts ~absorbed evaluations =
+  Gate.restore ~guidance:captured_guidance ~authority:(Gate.Gate_available (replay_destination, []))
     ~new_observations:[] ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ~evaluations
 ;;
 
@@ -2618,7 +2631,7 @@ let test_replay_after_owner_numeric_normalization forward () =
     incr calls;
     replay_response ~forward ~reverse:1. direction questions in
   let expected_outcome, expected_copies, records =
-    record_gate_evaluations ~facts ~absorbed ~respond in
+    record_gate_evaluations ~captured_guidance:(guidance ()) ~facts ~absorbed ~respond in
   let calls_before_restore = !calls in
   let restored = reload_gate_progress records in
   let first = List.hd restored in
@@ -2650,7 +2663,7 @@ let test_replay_after_owner_numeric_normalization forward () =
 let test_replay_preserves_forward_reverse_policy () =
   let facts, absorbed = replay_inputs () in
   List.iter (fun reverse ->
-    let _, expected, records = record_gate_evaluations ~facts ~absorbed
+    let _, expected, records = record_gate_evaluations ~captured_guidance:(guidance ()) ~facts ~absorbed
       ~respond:(replay_response ~forward:"loses_knowledge" ~reverse) in
     match restore_gate ~facts ~absorbed records |> require_replay with
     | Gate.Skipped _ -> Alcotest.fail "original gate was available"
@@ -2668,7 +2681,7 @@ let test_replay_preserves_forward_reverse_policy () =
 
 let test_replay_refuses_incomplete_or_rebound_originals () =
   let facts, absorbed = replay_inputs () in
-  let _, _, records = record_gate_evaluations ~facts ~absorbed
+  let _, _, records = record_gate_evaluations ~captured_guidance:(guidance ()) ~facts ~absorbed
     ~respond:(replay_response ~forward:"mergeable" ~reverse:0.9) in
   let first, second = match records with
     | [first;second] -> first,second | _ -> Alcotest.fail "two source requests" in
@@ -2684,7 +2697,7 @@ let test_replay_refuses_incomplete_or_rebound_originals () =
     (map_member "request_body_sha256" (fun _ -> `String (String.make 64 '0')))) records);
   check "different destination" (map_first_returned (map_member "result"
     (map_member "destination" (map_member "model" (fun _ -> `String "new-model")))) records);
-  Gate.restore ~authority:(Gate.Gate_available (replay_destination, []))
+  Gate.restore ~guidance:(guidance ()) ~authority:(Gate.Gate_available (replay_destination, []))
     ~new_observations:[`String "new input after the original request"] ~facts ~new_claims:[merged]
     ~superseding:[] ~absorbed ~evaluations:records |> refuse_replay "different original observations";
   restore_gate ~facts:(List.rev facts) ~absorbed:(List.rev absorbed) records
@@ -2697,7 +2710,7 @@ let test_replay_refuses_incomplete_or_rebound_originals () =
 
 let test_replay_strict_raw_response_codec () =
   let facts, absorbed = replay_inputs () in
-  let _, _, records = record_gate_evaluations ~facts ~absorbed
+  let _, _, records = record_gate_evaluations ~captured_guidance:(guidance ()) ~facts ~absorbed
     ~respond:(replay_response ~forward:"mergeable" ~reverse:0.9) in
   let alter_response f = map_first_returned (map_member "result" (map_member "response" f)) records in
   List.iter (fun (label, changed) -> restore_gate ~facts ~absorbed changed |> refuse_replay label)
@@ -2732,7 +2745,7 @@ let test_replay_preserves_original_failed_and_partial_results () =
       model=replay_destination.model; refusal=C.Http_response_failure {status=402;
         destination_uri=replay_destination.destination_uri;body=String.make 1 (Char.chr 255);detail="payment required"}};
       later_attempts=[] } in
-  let _, _, records = record_gate_evaluations ~respond ~facts ~absorbed in
+  let _, _, records = record_gate_evaluations ~captured_guidance:(guidance ()) ~respond ~facts ~absorbed in
   let restored = restore_gate ~facts ~absorbed records |> require_replay in
   (match restored with
    | Gate.Evaluated {outcome=Gate.Failed {absorbed=confirmed;kind=Gate.Evaluation_failed;_};_} ->
@@ -2743,13 +2756,13 @@ let test_replay_preserves_original_failed_and_partial_results () =
   Alcotest.(check bool) "the original failure still defers the whole range" true
     (Option.is_some (Gate.failure_detail ~absorbed restored));
   List.iter (fun answer ->
-    let _, _, records = record_gate_evaluations ~facts ~absorbed
+    let _, _, records = record_gate_evaluations ~captured_guidance:(guidance ()) ~facts ~absorbed
       ~respond:(fun _ _ -> Ok { T.model="invalid-original"; usage=None; answers=answer }) in
     let result=restore_gate ~facts ~absorbed records |> require_replay in
     Alcotest.(check bool) "original missing/wrong-kind typed answers remain failed" true
       (Gate.failure_kind result = Some Gate.Evaluation_failed))
     [ []; ["s0_0", T.Noul_answer {T.noul=0.9}] ];
-  let _, _, records = record_gate_evaluations ~facts ~absorbed
+  let _, _, records = record_gate_evaluations ~captured_guidance:(guidance ()) ~facts ~absorbed
     ~respond:(fun direction questions -> match direction with
       | Gate.Forward -> replay_response ~forward:"loses_knowledge" ~reverse:0.9 direction questions
       | Gate.Reverse -> Error { C.first_attempt = {destination_uri=replay_destination.destination_uri;
@@ -2765,14 +2778,14 @@ let test_replay_preserves_original_failed_and_partial_results () =
 let test_replay_preserves_unavailable_and_local_capacity () =
   let facts, absorbed = replay_inputs () in
   List.iter (fun (reason, expected) ->
-    let result = Gate.restore ~authority:(Gate.Gate_unavailable reason) ~new_observations:[]
+    let result = Gate.restore ~guidance:(guidance ()) ~authority:(Gate.Gate_unavailable reason) ~new_observations:[]
       ~facts ~new_claims:[merged] ~superseding:[] ~absorbed ~evaluations:[] |> require_replay in
     Alcotest.(check int) "captured availability preserves original absorption policy" expected
       (Gate.absorbed_of_run result |> List.length))
     [Masc.Typesafeai_config.Absorb_gate_disabled,2; Masc.Typesafeai_config.Keeper_excluded,2;
      Masc.Typesafeai_config.Lane_disabled,0; Masc.Typesafeai_config.No_armed_destination,0];
   let oversized = [`String (String.make (Gate.request_bytes_limit + 1) 'x')] in
-  let result = Gate.restore ~authority:(Gate.Gate_available (replay_destination,[]))
+  let result = Gate.restore ~guidance:(guidance ()) ~authority:(Gate.Gate_available (replay_destination,[]))
     ~new_observations:oversized ~facts ~new_claims:[merged] ~superseding:[] ~absorbed
     ~evaluations:[] |> require_replay in
   Alcotest.(check bool) "original pre-dispatch capacity failure needs no fabricated evaluation" true
@@ -2805,11 +2818,139 @@ let test_replay_authority_round_trips_every_unavailable_reason () =
     ; Config.Keeper_excluded ]
 ;;
 
+let test_replay_uses_captured_policy_after_override () =
+  let captured_guidance=guidance () in
+  let facts,absorbed=replay_inputs () in
+  let _,_,evaluations=record_gate_evaluations ~captured_guidance
+    ~respond:(replay_response ~forward:"loses_knowledge" ~reverse:0.9) ~facts ~absorbed in
+  let serialized=Gate.guidance_to_yojson captured_guidance in
+  with_guidance_override Masc.Prompt_names.librarian_absorb_forward "Changed consolidation policy" (fun () ->
+  with_guidance_override Masc.Prompt_names.librarian_absorb_reverse "Changed reverse policy" (fun () ->
+    let restored_guidance=match Gate.guidance_of_yojson serialized with
+      | Ok value -> value | Error detail -> Alcotest.fail detail in
+    let before=restore_gate ~captured_guidance ~facts ~absorbed evaluations |> require_replay in
+    let after=restore_gate ~captured_guidance:restored_guidance ~facts ~absorbed evaluations |> require_replay in
+    Alcotest.(check string) "captured policy keeps the original complete request and decision"
+      (Gate.run_result_to_yojson before |> Yojson.Safe.to_string)
+      (Gate.run_result_to_yojson after |> Yojson.Safe.to_string);
+    restore_gate ~facts ~absorbed evaluations |> refuse_replay "new policy cannot borrow the old answers";
+    let live=Gate.resolve ~keeper_id:"original-policy-owner" in
+    (* A complete prefix needs no live destination. Requiring it to match new
+       wording here would invalidate otherwise complete original evidence. *)
+    Gate.continue_captured ~guidance:restored_guidance ~keeper_id:"original-policy-owner"
+      ~authority:(Gate.Gate_available (replay_destination,[])) ~live_authority:(Some live)
+      ~evaluations ~new_observations:[] ~facts ~new_claims:[merged] ~superseding:[] ~absorbed
+      ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ ->
+        Alcotest.fail "a completed original must not dispatch again")
+      ~after_evaluate:(fun ~evaluation_id:_ _ -> Alcotest.fail "no new response")
+      ~on_evaluation_aborted:(fun ~evaluation_id:_ _ -> Alcotest.fail "no new request") ()
+      |> require_replay |> ignore))
+;;
+
+let test_continuation_uses_original_policy_with_current_live_destinations () =
+  with_gate_http_fixture @@ fun ~sw ~net ~clock ->
+  let module F = Exact_output_fixture in
+  let server=F.start_server ~sw ~net ~clock (F.Reply (choice_response "mergeable")) in
+  Masc_test_deps.with_typesafeai_policy
+    { (Runtime_typesafeai_policy.current ()) with
+      destinations=({Runtime_schema.endpoint=server.base_url;model="policy-continuation";
+        api_key_env="TYPESAFEAI_API_KEY"},[]) } @@ fun () ->
+  let keeper_id="original-policy-owner" in
+  let original=Gate.resolve ~keeper_id in
+  let captured=Gate.guidance_of_authority original |> (function
+    | Ok value -> value | Error detail -> Alcotest.fail detail) in
+  let serialized=Gate.guidance_to_yojson captured in
+  let facts=List.map fact (List.take 2 sources) in
+  let other=fact "The independent second context remains useful." in
+  let absorbed=absorbed_into merged [List.hd facts] @ absorbed_into other [List.nth facts 1] in
+  let evaluations=ref [] and started=ref 0 in
+  let before ~direction ~destinations ~state ~questions =
+    Gate.evaluation_request_to_yojson ~direction ~destinations ~state ~questions in
+  let after ~evaluation_id evaluation =
+    evaluations:= !evaluations @ [{Gate.request=evaluation_id;
+      returned=Some (Gate.evaluation_evidence_to_yojson evaluation)}] in
+  let exception Prefix_complete in
+  (try
+     ignore (Gate.run_captured original ~clock ~new_observations:[] ~facts
+       ~new_claims:[merged;other] ~superseding:[] ~absorbed
+       ~before_evaluate:(fun ~direction ~destinations ~state ~questions ->
+         incr started;
+         if !started=2 then raise Prefix_complete;
+         before ~direction ~destinations ~state ~questions)
+       ~after_evaluate:after ());
+     Alcotest.fail "fixture must stop before the second request is retained"
+   with Prefix_complete -> ());
+  Alcotest.(check int) "only the completed prefix was sent" 1 (F.post_count server);
+  with_guidance_override Masc.Prompt_names.librarian_absorb_forward
+    (String.make Gate.request_bytes_limit 'x') (fun () ->
+    let live=Gate.resolve ~keeper_id in
+    let guidance=Gate.guidance_of_yojson serialized |> (function
+      | Ok value -> value | Error detail -> Alcotest.fail detail) in
+    let result=Gate.continue_captured ~guidance ~keeper_id
+      ~authority:(Gate.replay_authority original) ~live_authority:(Some live)
+      ~evaluations:!evaluations ~new_observations:[] ~facts ~new_claims:[merged;other]
+      ~superseding:[] ~absorbed ~before_evaluate:before ~after_evaluate:after
+      ~on_evaluation_aborted:(fun ~evaluation_id:_ _ -> Alcotest.fail "no fixture request should abort") ()
+      |> require_replay in
+    Alcotest.(check int) "continuation sends only the first unstarted original question" 2 (F.post_count server);
+    Alcotest.(check int) "both sources are judged using the captured short policy" 2
+      (List.length (Gate.absorbed_of_run result));
+    let replayed=Gate.restore ~guidance ~authority:(Gate.replay_authority original)
+      ~new_observations:[] ~facts ~new_claims:[merged;other] ~superseding:[] ~absorbed
+      ~evaluations:!evaluations |> require_replay in
+    Alcotest.(check string) "the continued exact journal replays without current prompt lookup"
+      (Gate.run_result_to_yojson result |> Yojson.Safe.to_string)
+      (Gate.run_result_to_yojson replayed |> Yojson.Safe.to_string))
+;;
+
+let test_captured_policy_sizes_the_dispatched_question () =
+  let source=fact "Original source is still useful." in
+  let candidate=fact "The source and supported follow-up are useful." in
+  let absorbed=absorbed_into candidate [source] in
+  let captured_guidance=guidance () in
+  with_guidance_override Masc.Prompt_names.librarian_absorb_pair
+    (String.make Gate.request_bytes_limit 'x') (fun () ->
+    let captured_questions=ref [] in
+    let evaluate ~state ~questions =
+      captured_questions:=questions;
+      let bytes=String.length (Yojson.Safe.to_string state)+
+        List.fold_left (fun n (_,q) -> n+String.length (Yojson.Safe.to_string (T.question_to_yojson q))) 0 questions in
+      Alcotest.(check bool) "serialized captured request fits" true (bytes<=Gate.request_bytes_limit);
+      Ok {T.model="fixture";usage=None;answers=List.map (fun (id,_) -> id,choice_answer "mergeable") questions} in
+    let original=Gate.judge ~guidance:captured_guidance ~evaluate ~new_observations:[]
+      ~facts:[source] ~new_claims:[candidate] ~absorbed |> judged in
+    Alcotest.(check int) "captured short policy dispatches" 1 original.requests;
+    Alcotest.(check bool) "the captured question was actually created" true (!captured_questions<>[]);
+    let current=Gate.judge ~guidance:(guidance ())
+      ~evaluate:(fun ~state:_ ~questions:_ -> Alcotest.fail "oversize current policy must not dispatch")
+      ~new_observations:[] ~facts:[source] ~new_claims:[candidate] ~absorbed |> judged in
+    Alcotest.(check int) "current oversize text keeps the original source" 1 (List.length current.unjudgeable))
+;;
+
+let test_guidance_codec_refuses_absent_or_unknown_policy () =
+  let original=Gate.guidance_to_yojson (guidance ()) in
+  let refuse json=match Gate.guidance_of_yojson json with
+    | Error _ -> () | Ok _ -> Alcotest.fail "invalid captured policy accepted" in
+  (match original with
+   | `Assoc fields ->
+     refuse (`Assoc (List.remove_assoc "prompts" fields));
+     refuse (`Assoc (("version",`Int 0)::List.remove_assoc "version" fields));
+     let prompts=Yojson.Safe.Util.member "prompts" original |> Yojson.Safe.Util.to_assoc in
+     refuse (`Assoc (("prompts",`Assoc (List.remove_assoc "forward" prompts))::List.remove_assoc "prompts" fields));
+     refuse (`Assoc (("prompts",`Assoc (("forward",`Null)::prompts))::List.remove_assoc "prompts" fields))
+   | _ -> Alcotest.fail "guidance must serialize as an object")
+;;
+
 let () =
   Alcotest.run
     "keeper_librarian_absorb_gate"
     [ ( "original replay"
-      , [ Alcotest.test_case "forward and reverse policy is rederived" `Quick test_replay_preserves_forward_reverse_policy
+      , [ Alcotest.test_case "captured policy survives current override changes" `Quick test_replay_uses_captured_policy_after_override
+        ; Alcotest.test_case "continuation keeps original policy with current live destinations" `Quick
+            test_continuation_uses_original_policy_with_current_live_destinations
+        ; Alcotest.test_case "sizing uses the captured question policy" `Quick test_captured_policy_sizes_the_dispatched_question
+        ; Alcotest.test_case "missing or unknown captured policy refuses" `Quick test_guidance_codec_refuses_absent_or_unknown_policy
+        ; Alcotest.test_case "forward and reverse policy is rederived" `Quick test_replay_preserves_forward_reverse_policy
         ; Alcotest.test_case "owner reload preserves integral forward evidence" `Quick
             (test_replay_after_owner_numeric_normalization "mergeable")
         ; Alcotest.test_case "owner reload preserves integral reverse evidence" `Quick

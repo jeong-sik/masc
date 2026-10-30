@@ -717,7 +717,7 @@ let test_gate_request_names_its_parent_by_digest () = with_fixture (fun ~sw:_ fi
     ~request:earlier) |> owned;
   match io (fun () -> Gate.Inventory.read ~store:fixture.store ~owner:(Capture.physical_owner capture)) with
   | Error detail -> check string "a gate request in the earlier shape is refused by its version"
-      "Original gate request is not version 2" detail
+      "Original gate request is not version 3" detail
   | Ok _ -> fail "a gate request that copies its parent was read")
 let test_actual_official_or_mixed_path kind () = with_fixture ~history_kind:kind (fun ~sw:_ fixture ->
   let atom_before=progress fixture in

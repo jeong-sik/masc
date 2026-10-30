@@ -7841,6 +7841,12 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
     ~description:"Record an effect before configuration refresh" ~parameters:[]
     (fun _ -> incr effect_count;
       Ok { Agent_core.Types.content = "effect retained"; content_blocks = None; _meta = None }) in
+  (* Confirm the exact call and response before the vendor turn completes.
+     Without this the result remains in the durable outbox and is correctly
+     injected on Resume, which is a different case from the one tested here. *)
+  let confirmed_tool_result =
+    {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"dynamicToolCall","id":"call-1","tool":"masc_probe","arguments":{"marker":"from-codex"},"status":"completed","success":true,"contentItems":[{"type":"inputText","text":"effect retained"}]}}}|}
+  in
   let native_history =
     [ Agent_core.Types.user_msg "Native correction: use the saved result."
     ; Agent_core.Types.make_message ~role:Assistant
@@ -7904,6 +7910,7 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          ; thread_result
          ; turn_result
          ; tool_call_request
+         ; confirmed_tool_result
          ; item_completed
          ; turn_completed
          ]
@@ -7921,6 +7928,13 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
             with
             | Error error -> fail (Agent_core.Error.to_string error)
             | Ok result -> check int "initial context turn" 1 result.turns);
+       check int "the first turn ran the effect once" 1 !effect_count;
+       let pending =
+         match Keeper_client_tool_outbox.load ~base_path ~keeper_name:"codex-fixture" with
+         | Ok snapshot -> Keeper_client_tool_outbox.receipt_ids snapshot
+         | Error detail -> fail detail
+       in
+       check (list string) "the confirmed tool result was settled before Resume" [] pending;
        with_fixture
          ~capture_path:resume_capture
          [ init_result

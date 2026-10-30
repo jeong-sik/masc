@@ -24,14 +24,14 @@ let response choice : Jev.eval_response =
     {choice;confidence=1.;probabilities=List.map (fun label -> label,if label=choice then 1. else 0.)
       ["applies_to_query";"different_scope";"uncertain"]}]}
 let test_corrected_truth_uses_current_target () =
-  let key = Masc.Prompt_names.keeper_memory_successor_selection in
-  let previous = (Masc.Prompt_registry.resolve_prompt key).override_value in
-  let set value = match Masc.Prompt_registry.set_override key value with
+  let key = Prompt_names.keeper_memory_successor_selection in
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  let set value = match Prompt_registry.set_override key value with
     | Ok () -> () | Error detail -> fail detail in
   set "MANAGED_SUCCESSOR_POLICY";
   Fun.protect ~finally:(fun () -> match previous with
     | Some value -> set value
-    | None -> Masc.Prompt_registry.clear_prompt_override key) @@ fun () ->
+    | None -> Prompt_registry.clear_prompt_override key) @@ fun () ->
   let evaluate ~state ~questions =
     (match questions with
      | [_, Jev.Choice {instructions;_}] ->

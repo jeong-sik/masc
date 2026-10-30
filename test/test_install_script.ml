@@ -652,10 +652,14 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
   let cache = release_identity_cache () in
-  ignore (Sys.command (Printf.sprintf "rm -rf %s && mkdir -p %s"
-     (Filename.quote (Filename.concat base_path ".release"))
-     (Filename.quote (Filename.concat base_path ".release"))));
-  let release_base_url = stage_release_mirror base_path in
+  (* The cache already holds a packaged mirror (tarballs, checksums, receipt).
+     Copying it wholesale removes the per-case python packaging cost that
+     pushed the suite past its 601s deadline. *)
+  check int "fixture copies the cached release mirror"
+    (Sys.command (Printf.sprintf "cp -R %s %s"
+       (Filename.quote (Filename.concat cache ".release"))
+       (Filename.quote base_path))) 0;
+  let release_base_url = "file://" ^ Filename.concat base_path ".release" in
   check int "fixture copies the installed release identities"
     (Sys.command (Printf.sprintf "cp -R %s %s"
        (Filename.quote

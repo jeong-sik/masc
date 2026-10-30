@@ -352,6 +352,24 @@ let assert_not_contains label text needle =
   check bool label false (string_contains text needle)
 ;;
 
+(* Alcotest renders the label on failure, so keep it short and attach only the
+   last lines of the installer output — enough to name the failing stage without
+   blowing up the summary block the 600s timeout can truncate. *)
+let expect_install_exit0 ~label:(label : string) (output : string)
+    (status : Unix.process_status) : unit =
+  let exit0 = status = Unix.WEXITED 0 in
+  if exit0 then check bool label true exit0
+  else begin
+    let tail =
+      output |> String.split_on_char '\n'
+      |> List.filter (fun l -> l <> "")
+      |> List.rev |> List.filteri (fun i _ -> i < 5) |> List.rev
+      |> String.concat " ⏎ "
+    in
+    check bool (label ^ " — installer tail: " ^ tail) false exit0
+  end
+;;
+
 (* Mirror install.sh's detect_asset so the staged release names the asset the
    script will request for this platform. *)
 let platform_release_asset () =
@@ -729,8 +747,8 @@ let test_config_seed_skips_each_existing_file_without_force () =
     write_file runtime edited;
     let omitted = Filename.concat config "prompts/keeper.md" in
     Sys.remove omitted;
-    let output, status = run_install_status ~seed_config:true ["--no-wizard"; "--no-guest-shim"] base_path in
-    check bool output true (status = Unix.WEXITED 0);
+    let output, status = run_install_status ~seed_config:true [ "--no-wizard"; "--no-guest-shim" ] base_path in
+    expect_install_exit0 ~label:"upgrade keeps config" output status;
     let body = Filename.concat base_path ".masc/skills/browser-lanes/SKILL.md" in
     check bool "upgrade installs builtin Skill" true (Sys.file_exists body);
     check bool "upgrade installs reference" true
@@ -739,7 +757,7 @@ let test_config_seed_skips_each_existing_file_without_force () =
     check bool "omitted prompt stays absent" false (Sys.file_exists omitted);
     write_file body "operator's browser skill";
     let output, status = run_install_status ~seed_config:true ["--no-wizard"; "--no-guest-shim"] base_path in
-    check bool output true (status = Unix.WEXITED 0);
+    expect_install_exit0 ~label:"reinstall keeps config" output status;
     check string "reinstall preserves Skill edit" "operator's browser skill" (read_file body))
 ;;
 

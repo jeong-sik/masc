@@ -693,6 +693,7 @@ let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
   let slice_failure ?cleanup_failure error =
     let cause = match error with
       | Fs_compat.Private_jsonl_slice.Incomplete_tail _ -> Incomplete_wal_tail
+      | Non_regular_file _ -> Invalid_entry
       | Io_failed _ -> Io_failure
       | Negative_offset _ | Missing_file_after_offset _ | Offset_beyond_end _
       | Offset_not_at_row_boundary _ -> Coherence_failure

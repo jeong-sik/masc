@@ -1234,6 +1234,7 @@ module Private_jsonl_slice : sig
         }
     | Offset_not_at_row_boundary of int
     | Incomplete_tail of int
+    | Non_regular_file of Unix.file_kind
     | Io_failed of exn
 
   val error_to_string : error -> string
@@ -1343,8 +1344,10 @@ val private_jsonl_operation_failure_to_string :
 (** Read the exact complete JSONL bytes in [[from, end_offset)] while holding
     the same per-path in-process mutex and a cross-process read lock used by
     durable private JSONL writers. A missing file at offset zero is the empty
-    stream; every other cursor mismatch is explicit. Descriptor-close failure
-    preserves the successful slice or primary read error. *)
+    stream; every other cursor mismatch is explicit. The opened descriptor is
+    checked for a regular file before locking or reading; opening a FIFO for
+    reading does not wait for a writer. Descriptor-close failure preserves the
+    successful slice or primary read error. *)
 val read_private_jsonl_slice_locked_result :
   string ->
   from:int ->
@@ -1602,7 +1605,8 @@ val purge_private_jsonl_durable_locked_at_snapshot_result :
     after that exact file identity and offset. A replacement, truncation, or
     disappearance is a typed [Cursor_mismatch], never an implicit full rescan.
     The returned cursor distinguishes a missing store from a present empty
-    store. *)
+    store. The data path is opened nonblocking before its regular-file check,
+    so a FIFO with no writer is refused without waiting for one. *)
 val read_private_jsonl_durable_locked_result :
   string ->
   after:Private_jsonl_cursor.t option ->

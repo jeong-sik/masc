@@ -1,0 +1,41 @@
+{
+  "scope": "sanitized derivative of local receipts; exact extracted open helpers, slice reader and selected tests with transaction coordination, validation, settlement and Eio stubs",
+  "environment": {
+    "os": "macOS 26.6.1",
+    "arch": "arm64",
+    "ocaml": "5.5.1"
+  },
+  "source_base": "f04a41ff2658fff45f019e3fffd42079a0de26dd",
+  "runs": {
+    "baseline": {
+      "original_receipt_sha256": "5a6b357595f2adb5de9c3169383520f0a4498f9b1a9c89b90fb4e4d0c0c702a5",
+      "source_sha256": "65b4ab8d1a30f00cef545e4cc5bec25eed855d30391d5cdb1d576582b48f1334",
+      "test_sha256": "fae3d5fc87db9ac4060f7d4fcd14ab17d6eb25ae13e561c2b303d86a7883e1b6",
+      "baseline_variant_instrumented_for_test_typecheck": true,
+      "compile_exit": 0,
+      "test_exit": 1,
+      "test_wall_seconds": 10.571,
+      "cases": {
+        "transaction_fifo": "timeout waiting for FIFO writer",
+        "lock_fifo": "passed",
+        "slice_fifo": "timeout waiting for FIFO writer",
+        "regular_and_symlink_slice": "passed"
+      }
+    },
+    "fixed": {
+      "original_receipt_sha256": "a9a85d9f1434072fd185ead8ee6fcd1f4fca07dd29fc03b049cc8853aa5d94a4",
+      "source_sha256": "b2f6293ac06a8f95fc0694eed49ee0b7c2444856aca35f316ec9164b7a406de5",
+      "test_sha256": "fae3d5fc87db9ac4060f7d4fcd14ab17d6eb25ae13e561c2b303d86a7883e1b6",
+      "baseline_variant_instrumented_for_test_typecheck": false,
+      "compile_exit": 0,
+      "test_exit": 0,
+      "test_wall_seconds": 1.685,
+      "cases": {
+        "transaction_fifo": "passed",
+        "lock_fifo": "passed",
+        "slice_fifo": "passed",
+        "regular_and_symlink_slice": "passed"
+      }
+    }
+  }
+}

@@ -313,9 +313,12 @@ val split_acceptance_head : string -> acceptance_head
 (** Reads the front of a stderr stream. The frame is the first record
     separator in it: the transport may print a line of its own ahead of the
     shim, but the child cannot, because the shim writes the frame before the
-    child runs. Total: a head with no frame, one that diverges from every
-    frame this build reads, or one that does not resolve within the bound is
-    [Head_payload] and is released unchanged. *)
+    child runs. A frame is exactly the bytes {!render_acceptance_frame}
+    writes for a major this build speaks; anything else that follows the first
+    separator is payload. The answer for a head depends on the head alone, so
+    reading a stream piece by piece, holding bytes while this is
+    {!Head_pending}, ends in the answer for the whole stream. Total: a head
+    that is no frame is [Head_payload] and is released unchanged. *)
 
 val settle_acceptance_head : string -> string
 (** The bytes to release when the stream ends while the head is still

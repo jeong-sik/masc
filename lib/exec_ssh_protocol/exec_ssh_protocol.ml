@@ -584,43 +584,31 @@ let is_acceptance_frame_prefix tail =
     (fun v -> String.starts_with ~prefix:tail (render_acceptance_frame v))
     majors
 
+(* A frame is exactly the bytes [render_acceptance_frame] writes, so whether a
+   head is one depends only on its first bytes from the opening separator: a
+   reader that sees the stream in pieces and one that sees it whole cannot
+   disagree. A JSON reader would accept a frame spaced differently once it
+   closed, and refuse it earlier, at the first space. *)
 let split_acceptance_head (head : string) : acceptance_head =
   let n = String.length head in
   match String.index_opt head rs with
   | None -> if n >= acceptance_frame_max_bytes then Head_payload else Head_pending
-  (* The bound is on where the frame starts, not on how much has arrived, so
-     the answer for a whole stream equals the answer a stream reader reached
-     one chunk at a time: a frame that starts past it is payload to both. *)
+  (* The bound is on where the frame starts. With no separator by the bound,
+     the first one is past it, so this and the next arm say the same thing. *)
   | Some opening when opening >= acceptance_frame_max_bytes -> Head_payload
   | Some opening ->
     let tail = String.sub head opening (n - opening) in
-    (match String.index_from_opt tail 1 rs with
+    let whole v = render_acceptance_frame v in
+    (match List.find_opt (fun v -> String.starts_with ~prefix:(whole v) tail) majors with
+     | Some v ->
+       let length = String.length (whole v) in
+       Head_frame
+         { v
+         ; preamble = String.sub head 0 opening
+         ; rest = String.sub tail length (String.length tail - length)
+         }
      | None ->
-       if n < acceptance_frame_max_bytes && is_acceptance_frame_prefix tail
-       then Head_pending
-       else Head_payload
-     | Some closing ->
-       let decoded =
-         let* json =
-           parse_json ~what:"acceptance frame" (String.sub tail 1 (closing - 1))
-         in
-         let* fields = expect_assoc ~what:"acceptance frame" json in
-         let* body =
-           member ~what:"acceptance frame" acceptance_wrapper_key fields
-           >>= expect_assoc ~what:"acceptance frame"
-         in
-         member ~what:"acceptance frame" "v" body
-         >>= expect_int ~what:"acceptance frame" "v"
-         >>= check_version ~what:"acceptance frame"
-       in
-       (match decoded with
-        | Ok v ->
-          Head_frame
-            { v
-            ; preamble = String.sub head 0 opening
-            ; rest = String.sub tail (closing + 1) (String.length tail - closing - 1)
-            }
-        | Error _ -> Head_payload))
+       if is_acceptance_frame_prefix tail then Head_pending else Head_payload)
 
 (* The stream ended while [head] was still pending. A held tail that is a
    prefix of a frame is what the wire cut off, not payload. *)

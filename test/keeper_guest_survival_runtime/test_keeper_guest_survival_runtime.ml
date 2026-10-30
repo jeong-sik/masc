@@ -23,6 +23,7 @@ let value = function Ok value -> value | Error detail -> fail detail
 let keeper = "guest-survival-fixture"
 let backend = Backend.Apple_container
 let network_mode = Profile.Network_none
+let fixture_effect_stderr = "fixture-private-helper-stderr"
 
 let image_digest = "sha256:" ^ String.make 64 'a'
 let image_platform = `Assoc ["architecture", `String "arm64"; "os", `String "linux"]
@@ -223,7 +224,10 @@ let provider root args =
         "kind", `String kind;
         "bytes", `Int (String.length input);
         "sha256", `String Agent_core_sha256.(digest_string input |> to_hex)]);
-      if Sys.file_exists (file ("build-python-unavailable-" ^ kind)) then exit 127;
+      List.iter (fun status ->
+        if Sys.file_exists (file (Printf.sprintf "build-effect-status-%d-%s" status kind)) then (
+          prerr_endline fixture_effect_stderr;
+          exit status)) [127; 2];
       if kind = "mkdir" && Sys.file_exists (file "build-mkdir-fails") then exit 19)
     else if List.mem "--probe" rest then (
       print_string (Exec_ssh_protocol.render_probe {name="masc-exec-shim"; version="3.0.0"; capabilities=[]; release=None; boot_id=None});
@@ -454,21 +458,30 @@ let test_uncertain_link_effect_is_not_replayed_in_the_same_process () = with_fix
   check int "first-handoff cleanup was not replayed" 1 (List.length (entries root "requests"));
   assert_build_input root "mkdir" "/masc-build/ready\000/masc-build/new\000"
 
-(* The provider returns 127 for the selected effect. It models a missing
-   interpreter status without claiming that an actual guest was inspected. *)
-let test_build_effect_127_is_not_replayed_in_the_same_process () =
-  List.iter (fun (failed_kind, expected_links) -> with_fixture (fun root ->
+(* The provider returns a failure after receiving its input. Neither status
+   establishes which interpreter or module, if any, was unavailable. *)
+let test_build_effect_failure_is_not_replayed_in_the_same_process () =
+  List.iter (fun (failed_kind, failure_status, expected_links) -> with_fixture (fun root ->
     write (Filename.concat root "scan-output") scan_fixture_output;
-    write (Filename.concat root ("build-python-unavailable-" ^ failed_kind)) "";
+    write (Filename.concat root (Printf.sprintf "build-effect-status-%d-%s" failure_status failed_kind)) "";
     let status, stderr = step_captured root "scan-retry" in
     check bool "three turns remain usable" true (status = Unix.WEXITED 0);
+    let expected_warnings =
+      [ (if failed_kind = "mkdir" then "microvm_build_link_mkdir_failed"
+         else "microvm_build_link_apply_failed");
+        Printf.sprintf "exit=%d" failure_status;
+        "microvm_build_link_effect_unverified";
+        "Keeper User Manual: Build preparation reports a failure" ]
+      @ (if failure_status = 127 then
+          [ "/usr/bin/python3"; "/usr/local/bin/python3"; "/usr/bin/env";
+            "/usr/bin/perl"; "Digest::SHA";
+            "exit 127 alone does not establish the cause or effect outcome" ]
+         else []) in
     List.iter (fun expected ->
       check bool ("warning includes " ^ expected) true
-        (Astring.String.is_infix ~affix:expected stderr))
-      [ (if failed_kind = "mkdir" then "microvm_build_link_mkdir_failed"
-         else "microvm_build_link_apply_failed"); "exit=127";
-        "/usr/bin/python3"; "/usr/local/bin/python3";
-        "microvm_build_link_effect_unverified" ];
+        (Astring.String.is_infix ~affix:expected stderr)) expected_warnings;
+    check bool "raw helper stderr is not included in the warning" false
+      (Astring.String.is_infix ~affix:fixture_effect_stderr stderr);
     check int "the uncertain effect does not trigger another scan" 1
       (List.length (build_scan_calls root));
     check int "the target preparation is sent once" 1
@@ -481,7 +494,7 @@ let test_build_effect_127_is_not_replayed_in_the_same_process () =
     check int "the guest is not deleted" 0 (count "delete" root);
     assert_build_input root "mkdir" "/masc-build/ready\000/masc-build/new\000";
     if expected_links = 1 then assert_build_input root "link" "new\000/masc-build/new\000"))
-    [ "mkdir", 0; "link", 1 ]
+    [ "mkdir", 127, 0; "link", 127, 1; "mkdir", 2, 0; "link", 2, 1 ]
 
 let test_differently_targeted_build_link_is_preserved_without_effects () = with_fixture @@ fun root ->
   let scan_output = "new\000symlink\000/masc-build/old\000" in
@@ -846,7 +859,7 @@ let () =
         test_case "fresh process adopts without boot effects" `Quick test_fresh_process_adopts_without_boot_effects;
         test_case "failed scan retries next turn without repeating handoff" `Quick test_scan_failure_retries_on_the_next_turn_without_repeating_handoff;
         test_case "uncertain link effect is not replayed" `Quick test_uncertain_link_effect_is_not_replayed_in_the_same_process;
-        test_case "build effect status 127 is not replayed" `Quick test_build_effect_127_is_not_replayed_in_the_same_process;
+        test_case "build effect failure is not replayed" `Quick test_build_effect_failure_is_not_replayed_in_the_same_process;
         test_case "differently targeted build link is preserved without effects" `Quick test_differently_targeted_build_link_is_preserved_without_effects;
         test_case "invalid or oversized scan dispatches no link effects" `Quick test_invalid_or_oversized_scan_never_dispatches_link_effects;
         test_case "forgotten guest rejects old scan completion" `Quick test_forgotten_guest_rejects_old_scan_completion;

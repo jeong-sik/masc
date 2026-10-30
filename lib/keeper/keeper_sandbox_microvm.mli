@@ -801,22 +801,28 @@ val build_link_apply_request_for
   -> gid:int
   -> actions:(string * string) list
   -> string list * string
-(** The exec argv and its NUL-framed stdin, with path values absent from argv.
-    Python 3 in isolated mode verifies the complete payload length, field count
-    and SHA-256 before attempting any symlink. An existing destination is not
-    replaced. Checkout parents are not fenced. A failed effect may be partial. *)
+(** The exec argv and its NUL-framed stdin, with checkout and target payload
+    paths absent from argv; the working root is still an argv value. Python 3
+    in isolated mode, or Perl with [Digest::SHA] and a cleared environment,
+    verifies the complete payload length, field count and SHA-256 before
+    attempting any symlink. Perl is selected only if both fixed Python paths
+    fail the shell's [-x] check; a selected interpreter that fails is not
+    followed by another. An existing destination is not replaced. Checkout
+    parents are not fenced. A failed effect may be partial. *)
 
 val build_target_mkdir_request : container_name:string -> targets:string list -> string list * string
 (** The exec argv and NUL-framed stdin for creating each target with mode 0777,
-    run as root inside the guest by Python 3 after payload verification.
+    run as root inside the guest after payload verification by Python 3 or the
+    Perl fallback described in {!build_link_apply_request_for}.
     Necessary because dune does not create the directory a [_build] symlink
     points at -- it [lstat]s [_build], sees the link, and opens
     [_build/.lock] straight away, and the host cannot create the target
-    either since it lives inside the build volume's ext4 image. [-m] applies
+    either since it lives inside the build volume's ext4 image. Mode 0777 applies
     only to newly created directories, since Apple Container's user
     namespace refuses even guest root changing an existing one's mode. A
     failed or interrupted effect may be partial. Images need Python 3 at
-    [/usr/bin/python3] or [/usr/local/bin/python3]; some older images lack it. *)
+    [/usr/bin/python3] or [/usr/local/bin/python3], or [/usr/bin/env] and
+    [/usr/bin/perl] with [Digest::SHA] if neither Python path passes [-x]. *)
 
 val work_volume_search_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> string list option

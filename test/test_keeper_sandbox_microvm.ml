@@ -2308,26 +2308,33 @@ let gnu_tool names =
   find names
 ;;
 
-let python_args_after marker argv =
+let build_input_args_after ~perl_only ~root marker argv =
   let rec find = function
-    | "/bin/sh" :: "-c" :: wrapper :: helper :: script :: name :: size :: hash :: count :: _
+    | "/bin/sh" :: "-c" :: wrapper :: helper :: python_primary :: python_secondary
+      :: env_program :: perl_program :: script :: perl :: name :: size :: hash :: count :: _
       when String.equal helper "masc-build-helper" && String.equal name marker ->
-      [ "-c"; wrapper; helper; script; name; size; hash; count ]
+      let primary, secondary =
+        if perl_only then
+          Filename.concat root "missing-python-primary", Filename.concat root "missing-python-secondary"
+        else python_primary, python_secondary in
+      [ "/bin/sh"; "-c"; wrapper; helper; primary; secondary;
+        env_program; perl_program; script; perl; name; size; hash; count ]
     | _ :: rest -> find rest
-    | [] -> Alcotest.fail "generated Python request not found"
+    | [] -> Alcotest.fail "generated build input request not found"
   in
   find argv
 ;;
 
-let run_build_input ~root ~marker argv input =
+let run_build_input ?(perl_only = false) ~root ~marker argv input =
   let input_path = Filename.temp_file ~temp_dir:root "payload-" ".bin" in
   Fun.protect ~finally:(fun () -> Sys.remove input_path) (fun () ->
     Out_channel.with_open_bin input_path (fun output -> output_string output input);
     let input_fd = Unix.openfile input_path [ Unix.O_RDONLY ] 0 in
     let null_fd = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
     let args = Array.of_list
-      ([ "/bin/sh"; "-c"; "cd \"$1\" || exit 1; shift; exec /bin/sh \"$@\"";
-         "fixture"; root ] @ python_args_after marker argv) in
+      ([ "/bin/sh"; "-c";
+         "cd \"$1\" || exit 1; shift; PERL5LIB=\"$PWD\"; PERL5OPT=-MNonexistentInjectedModule; export PERL5LIB PERL5OPT; exec \"$@\"";
+         "fixture"; root ] @ build_input_args_after ~perl_only ~root marker argv) in
     let pid = Fun.protect ~finally:(fun () -> Unix.close input_fd; Unix.close null_fd)
       (fun () -> Unix.create_process "/bin/sh" args input_fd null_fd null_fd) in
     snd (Unix.waitpid [] pid))
@@ -2335,14 +2342,104 @@ let run_build_input ~root ~marker argv input =
 
 let replace_build_input_metadata argv ~input ~count =
   let rec replace = function
-    | "/bin/sh" :: "-c" :: wrapper :: helper :: script :: marker :: _size :: _hash :: _count :: rest
+    | "/bin/sh" :: "-c" :: wrapper :: helper :: python_primary :: python_secondary
+      :: env_program :: perl_program :: script :: perl :: marker :: _size :: _hash :: _count :: rest
       when String.equal helper "masc-build-helper" ->
-      [ "/bin/sh"; "-c"; wrapper; helper; script; marker; string_of_int (String.length input);
+      [ "/bin/sh"; "-c"; wrapper; helper; python_primary; python_secondary;
+        env_program; perl_program; script; perl; marker; string_of_int (String.length input);
         Agent_core_sha256.(digest_string input |> to_hex); string_of_int count ] @ rest
     | first :: rest -> first :: replace rest
-    | [] -> Alcotest.fail "generated Python request not found"
+    | [] -> Alcotest.fail "generated build input request not found"
   in
   replace argv
+;;
+
+let require_perl_if_requested perl_only =
+  if perl_only &&
+     Sys.command "/usr/bin/env -i /usr/bin/perl -MDigest::SHA -e 1 >/dev/null 2>&1" <> 0
+  then Alcotest.skip ()
+;;
+
+let replace_build_input_paths argv ~python_primary ~python_secondary ~env_program ~perl_program =
+  let rec replace = function
+    | "/bin/sh" :: "-c" :: wrapper :: helper :: _primary :: _secondary :: _env :: _perl :: rest
+      when String.equal helper "masc-build-helper" ->
+      [ "/bin/sh"; "-c"; wrapper; helper; python_primary; python_secondary;
+        env_program; perl_program ] @ rest
+    | first :: rest -> first :: replace rest
+    | [] -> Alcotest.fail "generated build input request not found"
+  in
+  replace argv
+;;
+
+(* Execute the generated wrapper unchanged. Only its four path arguments are
+   replaced in this fixture; the product request always uses fixed paths. *)
+let test_build_input_wrapper_selects_one_interpreter () =
+  let root = temp_dir "build-input-selection-" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let argv, input = M.build_link_apply_request_for Backend.Apple_container
+        ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1 ~actions:[] in
+    let rec paths = function
+      | "/bin/sh" :: "-c" :: _wrapper :: "masc-build-helper" :: primary :: secondary
+        :: env_program :: perl_program :: _ -> [ primary; secondary; env_program; perl_program ]
+      | _ :: rest -> paths rest
+      | [] -> Alcotest.fail "generated build input request not found"
+    in
+    Alcotest.(check (list string)) "product request uses fixed interpreter paths"
+      [ "/usr/bin/python3"; "/usr/local/bin/python3"; "/usr/bin/env"; "/usr/bin/perl" ]
+      (paths argv);
+    if not (Sys.file_exists "/usr/bin/env") then Alcotest.skip ();
+    let marker = Filename.concat root "selected" in
+    let create_program name label status ~perl =
+      let path = Filename.concat root name in
+      Out_channel.with_open_bin path (fun output ->
+        output_string output "#!/bin/sh\n";
+        if perl then
+          output_string output
+            "[ \"$1\" = '-C0' ] && [ \"$2\" = '-e' ] && [ \"$4\" = 'masc-build-link' ] || exit 90\n[ -z \"${PERL5OPT+x}\" ] && [ -z \"${PERL5LIB+x}\" ] || exit 91\n"
+        else
+          output_string output
+            "[ \"$1\" = '-I' ] && [ \"$2\" = '-S' ] && [ \"$3\" = '-c' ] && [ \"$5\" = 'masc-build-link' ] || exit 90\n";
+        Printf.fprintf output "printf '%%s\\n' %s >> %s\nexit %d\n"
+          (Filename.quote label) (Filename.quote marker) status);
+      Unix.chmod path 0o755;
+      path
+    in
+    let primary = create_program "python-primary" "primary" 0 ~perl:false in
+    let secondary = create_program "python-secondary" "secondary" 0 ~perl:false in
+    let failed_python = create_program "python-failed" "python-failed" 127 ~perl:false in
+    let non_executable = create_program "python-non-executable" "non-executable" 0 ~perl:false in
+    Unix.chmod non_executable 0o644;
+    let perl = create_program "perl" "perl" 0 ~perl:true in
+    let failed_perl = create_program "perl-failed" "perl-failed" 2 ~perl:true in
+    let absent = Filename.concat root "absent" in
+    let check_selection description ~python_primary ~python_secondary ~env_program ~perl_program
+        ~expected_status ~expected_marker =
+      Out_channel.with_open_bin marker (fun _ -> ());
+      let selected = replace_build_input_paths argv ~python_primary ~python_secondary ~env_program ~perl_program in
+      let status = run_build_input ~root ~marker:"masc-build-link" selected input in
+      Alcotest.(check bool) (description ^ " status") true (status = Unix.WEXITED expected_status);
+      Alcotest.(check string) (description ^ " selection") expected_marker
+        (In_channel.with_open_bin marker In_channel.input_all)
+    in
+    check_selection "primary Python wins" ~python_primary:primary ~python_secondary:secondary
+      ~env_program:"/usr/bin/env" ~perl_program:perl ~expected_status:0 ~expected_marker:"primary\n";
+    check_selection "secondary Python is selected" ~python_primary:absent ~python_secondary:secondary
+      ~env_program:"/usr/bin/env" ~perl_program:perl ~expected_status:0 ~expected_marker:"secondary\n";
+    check_selection "non-executable Python is skipped" ~python_primary:non_executable ~python_secondary:secondary
+      ~env_program:"/usr/bin/env" ~perl_program:perl ~expected_status:0 ~expected_marker:"secondary\n";
+    check_selection "Perl is selected with a cleared environment" ~python_primary:absent ~python_secondary:absent
+      ~env_program:"/usr/bin/env" ~perl_program:perl ~expected_status:0 ~expected_marker:"perl\n";
+    check_selection "no interpreter fails" ~python_primary:absent ~python_secondary:absent
+      ~env_program:"/usr/bin/env" ~perl_program:absent ~expected_status:127 ~expected_marker:"";
+    check_selection "missing env fails" ~python_primary:absent ~python_secondary:absent
+      ~env_program:absent ~perl_program:perl ~expected_status:127 ~expected_marker:"";
+    check_selection "failed Python does not retry Perl" ~python_primary:failed_python ~python_secondary:secondary
+      ~env_program:"/usr/bin/env" ~perl_program:perl ~expected_status:127 ~expected_marker:"python-failed\n";
+    check_selection "failed secondary Python does not retry Perl" ~python_primary:absent ~python_secondary:failed_python
+      ~env_program:"/usr/bin/env" ~perl_program:perl ~expected_status:127 ~expected_marker:"python-failed\n";
+    check_selection "failed Perl does not retry" ~python_primary:absent ~python_secondary:absent
+      ~env_program:"/usr/bin/env" ~perl_program:failed_perl ~expected_status:2 ~expected_marker:"perl-failed\n")
 ;;
 
 let test_build_scan_does_not_turn_newlines_into_checkout_rows () =
@@ -2384,7 +2481,8 @@ let test_build_scan_does_not_turn_newlines_into_checkout_rows () =
       (List.exists (fun (name, _) -> String.equal name "../victim") actions))
 ;;
 
-let test_build_link_apply_preserves_racing_entries_and_continues () =
+let test_build_link_apply_preserves_racing_entries_and_continues ?(perl_only = false) () =
+  require_perl_if_requested perl_only;
   let root = temp_dir "build-link-race-" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let checkout name =
@@ -2411,7 +2509,7 @@ let test_build_link_apply_preserves_racing_entries_and_continues () =
         [ "dir"; "file"; "linked"; "dangling"; "-leading" ] in
     let argv, input = M.build_link_apply_request_for Backend.Apple_container
         ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1 ~actions in
-    let status = run_build_input ~root ~marker:"masc-build-link" argv input in
+    let status = run_build_input ~perl_only ~root ~marker:"masc-build-link" argv input in
     Alcotest.(check bool) "collisions are reported" true (status <> Unix.WEXITED 0);
     Alcotest.(check (list int)) "existing entries keep their inodes" inodes
       (List.map (fun path -> (Unix.lstat path).st_ino) paths);
@@ -2448,7 +2546,8 @@ let test_build_target_mkdir_argv_runs_as_root_for_every_target () =
     "/masc-build/masc-t362\000/masc-build/repos:wt-370\000" input
 ;;
 
-let test_build_link_input_is_checked_before_effects () =
+let test_build_link_input_is_checked_before_effects ?(perl_only = false) () =
+  require_perl_if_requested perl_only;
   let root = temp_dir "build-link-input-" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let checkout = Filename.concat root "odd\nname\tvalue" in
@@ -2458,7 +2557,7 @@ let test_build_link_input_is_checked_before_effects () =
       ~actions:[ "odd\nname\tvalue", "/fixture/target" ] in
     let no_effect description invalid =
       Alcotest.(check bool) description true
-        (run_build_input ~root ~marker:"masc-build-link" argv invalid <> Unix.WEXITED 0);
+        (run_build_input ~perl_only ~root ~marker:"masc-build-link" argv invalid <> Unix.WEXITED 0);
       Alcotest.(check bool) "unverified input cannot create a link" false
         (match Unix.lstat (Filename.concat checkout "_build") with
          | _ -> true | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false) in
@@ -2468,11 +2567,20 @@ let test_build_link_input_is_checked_before_effects () =
     let missing_nul = String.sub input 0 (String.length input - 1) in
     let malformed_argv = replace_build_input_metadata argv ~input:missing_nul ~count:2 in
     Alcotest.(check bool) "matching hash without final NUL is rejected" true
-      (run_build_input ~root ~marker:"masc-build-link" malformed_argv missing_nul <> Unix.WEXITED 0);
+      (run_build_input ~perl_only ~root ~marker:"masc-build-link" malformed_argv missing_nul <> Unix.WEXITED 0);
     let odd = "odd\nname\tvalue\000" in
     let odd_argv = replace_build_input_metadata argv ~input:odd ~count:1 in
     Alcotest.(check bool) "matching hash with an odd field count is rejected" true
-      (run_build_input ~root ~marker:"masc-build-link" odd_argv odd <> Unix.WEXITED 0);
+      (run_build_input ~perl_only ~root ~marker:"masc-build-link" odd_argv odd <> Unix.WEXITED 0);
+    List.iter (fun (description, invalid, count) ->
+      let invalid_argv = replace_build_input_metadata argv ~input:invalid ~count in
+      Alcotest.(check bool) description true
+        (run_build_input ~perl_only ~root ~marker:"masc-build-link" invalid_argv invalid <> Unix.WEXITED 0))
+      [ "single NUL is not an empty payload", "\000", 0
+      ; "empty first field is rejected", "\000/fixture/target\000", 2
+      ; "empty last field is rejected", "odd\nname\tvalue\000\000", 2
+      ; "empty middle field is rejected", "odd\nname\tvalue\000\000/fixture/target\000", 3
+      ];
     Alcotest.(check bool) "malformed framing created no link" false
       (match Unix.lstat (Filename.concat checkout "_build") with
        | _ -> true | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false);
@@ -2480,35 +2588,56 @@ let test_build_link_input_is_checked_before_effects () =
     Out_channel.with_open_bin (Filename.concat root "hashlib.py") (fun output ->
       Printf.fprintf output "open(%S, 'w').write('bad')\n" marker);
     Alcotest.(check bool) "complete payload succeeds" true
-      (run_build_input ~root ~marker:"masc-build-link" argv input = Unix.WEXITED 0);
+      (run_build_input ~perl_only ~root ~marker:"masc-build-link" argv input = Unix.WEXITED 0);
     Alcotest.(check bool) "cwd module is never imported" false (Sys.file_exists marker);
     Alcotest.(check string) "newline and tab are preserved" "/fixture/target"
       (Unix.readlink (Filename.concat checkout "_build")))
 ;;
 
-let test_build_target_input_is_checked_before_effects () =
+let test_build_target_input_is_checked_before_effects ?(perl_only = false) () =
+  require_perl_if_requested perl_only;
   let root = temp_dir "build-target-input-" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let target = Filename.concat root "target" in
     let argv, input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ target ] in
     let short = String.sub input 0 (String.length input - 1) in
     Alcotest.(check bool) "incomplete stdin fails" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" argv short <> Unix.WEXITED 0);
+      (run_build_input ~perl_only ~root ~marker:"masc-build-mkdir" argv short <> Unix.WEXITED 0);
     Alcotest.(check bool) "no target made from incomplete input" false (Sys.file_exists target);
     let malformed = replace_build_input_metadata argv ~input:short ~count:1 in
     Alcotest.(check bool) "matching hash without final NUL still fails" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" malformed short <> Unix.WEXITED 0);
+      (run_build_input ~perl_only ~root ~marker:"masc-build-mkdir" malformed short <> Unix.WEXITED 0);
     Alcotest.(check bool) "complete target input succeeds" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" argv input = Unix.WEXITED 0);
+      (run_build_input ~perl_only ~root ~marker:"masc-build-mkdir" argv input = Unix.WEXITED 0);
     Unix.chmod target 0o700;
     Alcotest.(check bool) "existing target succeeds" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" argv input = Unix.WEXITED 0);
+      (run_build_input ~perl_only ~root ~marker:"masc-build-mkdir" argv input = Unix.WEXITED 0);
     Alcotest.(check int) "existing mode is preserved" 0o700 ((Unix.stat target).st_perm);
     let many = List.init 50000 (fun _ -> target) in
     let large_argv, large_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:many in
     Alcotest.(check bool) "payload is larger than one MiB" true (String.length large_input > 1_048_576);
     Alcotest.(check bool) "large payload is processed without argv expansion" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" large_argv large_input = Unix.WEXITED 0))
+      (run_build_input ~perl_only ~root ~marker:"masc-build-mkdir" large_argv large_input = Unix.WEXITED 0);
+    let nested = Filename.concat root "nested/child" in
+    let nested_argv, nested_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ nested ] in
+    Alcotest.(check bool) "missing parent directories are made" true
+      (run_build_input ~perl_only ~root ~marker:"masc-build-mkdir" nested_argv nested_input = Unix.WEXITED 0);
+    Alcotest.(check bool) "nested target exists" true (Sys.is_directory nested);
+    let alias = Filename.concat root "directory-alias" in
+    Unix.symlink nested alias;
+    let alias_argv, alias_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ alias ] in
+    Alcotest.(check bool) "an existing directory symlink succeeds" true
+      (run_build_input ~perl_only ~root ~marker:"masc-build-mkdir" alias_argv alias_input = Unix.WEXITED 0);
+    let blocked = Filename.concat root "regular-file" in
+    Out_channel.with_open_bin blocked (fun output -> output_string output "preserve");
+    let later = Filename.concat root "later" in
+    let failed_argv, failed_input = M.build_target_mkdir_request ~container_name:"fixture"
+        ~targets:[ Filename.concat blocked "child"; later ] in
+    Alcotest.(check bool) "a regular-file parent is reported" true
+      (run_build_input ~perl_only ~root ~marker:"masc-build-mkdir" failed_argv failed_input <> Unix.WEXITED 0);
+    Alcotest.(check string) "regular-file parent is preserved" "preserve"
+      (In_channel.with_open_bin blocked In_channel.input_all);
+    Alcotest.(check bool) "a later target is still made" true (Sys.is_directory later))
 ;;
 
 let test_volume_create_argv_carries_a_size () =
@@ -4650,14 +4779,22 @@ let () =
             test_build_link_apply_argv_carries_positional_pairs
         ; Alcotest.test_case "build link apply argv with no actions is still a valid script" `Quick
             test_build_link_apply_argv_with_no_actions_is_still_a_valid_script
+        ; Alcotest.test_case "build input wrapper selects one interpreter" `Quick
+            test_build_input_wrapper_selects_one_interpreter
         ; Alcotest.test_case "build scan preserves newlines and tabs as data" `Quick
             test_build_scan_does_not_turn_newlines_into_checkout_rows
         ; Alcotest.test_case "build link apply preserves racing entries and continues" `Quick
-            test_build_link_apply_preserves_racing_entries_and_continues
+            (test_build_link_apply_preserves_racing_entries_and_continues ~perl_only:false)
+        ; Alcotest.test_case "Perl build link preserves racing entries and continues" `Quick
+            (test_build_link_apply_preserves_racing_entries_and_continues ~perl_only:true)
         ; Alcotest.test_case "build link input is checked before effects" `Quick
-            test_build_link_input_is_checked_before_effects
+            (test_build_link_input_is_checked_before_effects ~perl_only:false)
+        ; Alcotest.test_case "Perl build link input is checked before effects" `Quick
+            (test_build_link_input_is_checked_before_effects ~perl_only:true)
         ; Alcotest.test_case "build target input is checked before effects" `Quick
-            test_build_target_input_is_checked_before_effects
+            (test_build_target_input_is_checked_before_effects ~perl_only:false)
+        ; Alcotest.test_case "Perl build target input is checked before effects" `Quick
+            (test_build_target_input_is_checked_before_effects ~perl_only:true)
         ; Alcotest.test_case "build target mkdir argv runs as root for every target" `Quick
             test_build_target_mkdir_argv_runs_as_root_for_every_target
         ] )

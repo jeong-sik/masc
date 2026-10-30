@@ -100,36 +100,54 @@ Apple 부팅은 이미지의 entrypoint를 요청한 실행 파일로 덮어씁�
 않습니다. 서버 프로세스의 첫 소유 턴 접속은 보존 표시가 없는 실제 `_build`를 별도
 디렉토리로 옮긴 뒤 삭제합니다. `.masc-keep-build`가 있으면 해당 출력을 보존합니다.
 
-#### 빌드 준비가 상태 127을 보고할 때
+#### 빌드 준비가 실패를 보고할 때
 
-`microvm_build_link_mkdir_failed` 또는 `microvm_build_link_apply_failed`의 상태가
-127이면 빌드 준비에 필요한 Python이 guest에 없을 수 있습니다. 실행 경로 또는 전송
-오류일 수도 있으므로 127만으로 아무 효과도 실행되지 않았다고 판단하지 마세요. guest,
+`microvm_build_link_mkdir_failed` 또는 `microvm_build_link_apply_failed`는 0이 아닌
+종료 상태나 signal을 보고할 수 있습니다. 127은 인터프리터를 시작하지 못한 경우일 수
+있고, Perl 모듈이 없으면 2처럼 다른 실패 상태가 나올 수 있습니다. 실행 경로 또는 전송
+오류일 수도 있으므로 어느 상태만으로도 원인이나 효과의 미실행을 판단하지 마세요. guest,
 볼륨, 링크와 이미 실행됐을 수 있는 효과의 결과를 미확인 상태로 보존하세요. 경고를
 없애려고 자동으로 재시도하거나 서비스·guest를 재시작하지 마세요. 프로세스 안의 미확인
 상태는 해당 guest 세대가 유지되는 동안에만 적용됩니다. 재시작, 망각 또는 교체는 이
 상태를 지워 다시 시도할 수 있습니다.
 
-영향받은 guest 안에서 실패한 단계를 실행한 사용자로 **두 경로를 모두** 확인하세요.
-대상 디렉터리 준비는 root, 링크 생성은 Keeper의 uid와 gid로 실행됩니다. 아래 확인은
-권한만 읽습니다.
+영향받은 guest 안에서 root와 Keeper uid·gid **양쪽으로** 고정 경로를 확인하세요. 대상
+디렉터리 준비는 root, 링크 생성은 Keeper 권한으로 실행되므로 한 사용자의 확인으로 다른
+사용자의 접근을 판단할 수 없습니다. helper는
+`/usr/bin/python3`, `/usr/local/bin/python3` 순서로 선택하며 둘 다 `-x`를 통과하지
+못할 때만 `Digest::SHA`가 있는 `/usr/bin/env -i /usr/bin/perl -C0`를 시도합니다.
+아래 확인은 권한만 읽으며 실행 여부를 검증하지 않습니다.
 
 ```sh
-for guest_python_candidate in /usr/bin/python3 /usr/local/bin/python3; do
-  if [ -x "$guest_python_candidate" ]; then
-    printf '%s: executable permission present\n' "$guest_python_candidate"
+for guest_runtime in /usr/bin/python3 /usr/local/bin/python3 /usr/bin/env /usr/bin/perl; do
+  if [ -x "$guest_runtime" ]; then
+    printf '%s: -x check passed; execution is not verified\n' "$guest_runtime"
   else
-    printf '%s: absent or not executable for this user\n' "$guest_python_candidate"
+    printf '%s: absent or not executable for this user\n' "$guest_runtime"
   fi
 done
 ```
 
-두 경로 모두 실행할 수 없다면 운영자에게 신뢰할 수 있는 호환 이미지 또는 인터프리터
-준비를 요청하세요. 실행 권한이 있어도 Python, 로더, guest 전송 경로 또는 이전 효과가
-정상이라는 증거는 아닙니다. 남은 효과의 결과와 다른 작업 공간의 소유자를 확인한 뒤
-변경을 계획하세요. 이 확인만으로 소프트웨어를 설치하거나 guest를 교체하고, 서비스를
-재시작하거나 재시도하지 마세요. 아래 Python 진단도 두 경로 중 신뢰할 수 있는 실행 파일이
-없으면 사용할 수 없습니다.
+두 Python 경로가 모두 `-x`를 통과하지 못하고 Perl 관련 두 경로가 통과한다면, 허가된
+운영자는 신뢰할 수 있는 guest에서 helper와 같은 빈 환경·절대 모듈 경로 제한으로
+`Digest::SHA`를 확인할 수 있습니다. root와 Keeper uid·gid로 각각 실행하세요.
+
+```sh
+/usr/bin/env -i /usr/bin/perl -C0 -e \
+  'BEGIN { @INC = grep { substr($_, 0, 1) eq "/" } @INC; } use Digest::SHA qw(sha256_hex); print "Digest::SHA loaded\n";'
+```
+
+이 명령은 Perl과 모듈 초기화를 실행합니다. 신뢰할 수 있는 guest 이미지에서만 사용하고
+오류 상세와 경로를 포함한 출력은 영향받는 소유자가 허용한 공유 범위 안에 두세요. 성공은
+그 시점에 해당 사용자로 모듈을 읽었다는 뜻일 뿐 helper나 이전 효과의 성공은 아닙니다.
+Perl 모듈이 없을 때도 127이 아닌 실패 상태가 나올 수 있습니다. Python 경로가 `-x`를
+통과한 뒤 실행에 실패하면 helper는 다음 후보로 넘어가지 않습니다. 권한 확인만으로 실행
+파일, 로더, guest 전송 경로나 이전 효과가 정상이라고 판단할 수 없습니다. 남은 효과의
+결과와 다른 작업 공간의 소유자를 확인한 뒤 변경을 계획하세요. 이 확인만으로 소프트웨어를 설치하거나
+guest를 교체하고, 서비스를 재시작하거나 재시도하지 마세요. 선택된 런타임을 사용할 수
+없다면 운영자에게 신뢰할 수 있는 호환 이미지 또는 인터프리터 준비를 요청하세요. Perl로
+빌드 준비가 가능해도 아래 Python 전용 진단에는 두 Python 경로 중 신뢰할 수 있는 실행
+파일이 필요합니다.
 
 #### 체크아웃을 옮긴 뒤 보존된 `_build` 링크
 

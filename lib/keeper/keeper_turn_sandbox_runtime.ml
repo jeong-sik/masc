@@ -1321,14 +1321,14 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation 
     let prepared ~expected = ignore (mark ~expected Build_links_prepared) in
     let effect_unverified () =
       Log.Keeper.warn ~keeper_name:t.meta.name
-        "microvm_build_link_effect_unverified: inspect the guest before retrying; this guest generation will not automatically retry while its state is retained" in
+        "microvm_build_link_effect_unverified: inspect the guest before retrying; this guest generation will not automatically retry while its state is retained; see Keeper User Manual: Build preparation reports a failure" in
     let effect_failed operation status =
       Log.Keeper.warn ~keeper_name:t.meta.name "%s: %s"
         operation (Keeper_sandbox_exec_failure.status_label status);
       (match status with
        | Unix.WEXITED 127 ->
          Log.Keeper.warn ~keeper_name:t.meta.name
-           "microvm_build_link_interpreter_unverified: check /usr/bin/python3 and /usr/local/bin/python3 in the guest; exit 127 alone does not establish the cause or effect outcome"
+           "microvm_build_link_interpreter_unverified: check guest /usr/bin/python3 and /usr/local/bin/python3, or /usr/bin/env, /usr/bin/perl and Digest::SHA if neither Python path passes -x; exit 127 alone does not establish the cause or effect outcome"
        | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> ());
       effect_unverified () in
     (match scanned with

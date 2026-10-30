@@ -868,6 +868,69 @@ let test_bind_error_after_child_effect_respects_fallback_policy () =
         check int "all Eio executions reached the injected read" 4 !injected_reads;
         check int "each Eio execution opened stdout and stderr pipes" 8 !pipe_calls))
 
+(* Fill a nonblocking pipe with no reader to measure its capacity on this
+   host. Finish byte by byte because a large atomic write can fail while a
+   smaller amount of space remains. Both ends are closed even on failure. *)
+let observed_pipe_capacity () =
+  let reader, writer = Unix.pipe ~cloexec:true () in
+  Fun.protect
+    ~finally:(fun () ->
+      Fun.protect ~finally:(fun () -> Unix.close reader) (fun () -> Unix.close writer))
+    (fun () ->
+      Unix.set_nonblock writer;
+      let chunk = String.make 4096 'x' in
+      let rec fill total length =
+        match Unix.write_substring writer chunk 0 length with
+        | written when written > 0 -> fill (total + written) length
+        | _ -> fail "pipe write made no progress"
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> fill total length
+        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          if length = 1 then total else fill total 1
+      in
+      fill 0 (String.length chunk))
+;;
+
+(* The child records its own execution before closing stdin without reading,
+   then records that it reached the close. Ignore TERM during these short
+   steps so cleanup racing the close cannot erase that observation. The payload
+   exceeds a separately observed host pipe with room for capacity differences.
+   Child exit and stdin-copy scheduling can produce different statuses, so
+   this does not assert EPIPE. A reported timeout fails the test. *)
+let test_eio_only_stdin_closed_early_does_not_replay () =
+  let root = Filename.temp_dir "process-eio-stdin-closed-" "" in
+  let marker = Filename.concat root "executions" in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists marker then Sys.remove marker;
+      Unix.rmdir root)
+    (fun () ->
+      let capacity = observed_pipe_capacity () in
+      check bool "the host pipe has positive capacity" true (capacity > 0);
+      let input_length = max (4 * capacity) (8 * 1024 * 1024) in
+      let stdin_content = String.make input_length 'x' in
+      with_timeout_observer @@ fun timeouts ->
+      with_runtime_reset @@ fun () ->
+      let status, _, _ =
+        Process_eio.run_argv_with_stdin_and_status_split
+          ~fallback_policy:Process_eio.Eio_only
+          ~timeout_sec:10.
+          ~stdin_content
+          [ "/bin/sh"; "-c";
+            "trap '' TERM; printf 'started\\n' >> \"$1\" || exit 3; exec 0<&-; printf 'closed\\n' >> \"$1\" || exit 3; exit 2";
+            "fixture"; marker ]
+      in
+      check int "the operation did not hit its timeout" 0 (List.length !timeouts);
+      check bool "a timeout status is not accepted as a passing test" false
+        (status = Process_eio.timed_out_status);
+      (match status with
+       | Unix.WEXITED 0 -> fail "the early-closing child must not report success"
+       | Unix.WEXITED _ | Unix.WSIGNALED _ -> ()
+       | Unix.WSTOPPED signal -> failf "child remained stopped with signal %d" signal);
+      check bool "the child wrote its execution marker" true (Sys.file_exists marker);
+      check string "one child started and closed stdin" "started\nclosed\n"
+        (In_channel.with_open_bin marker In_channel.input_all))
+;;
+
 (* With no initialized Eio process runtime, Eio_only must reject before even
    starting a child that could produce more than the capture ceiling. *)
 let with_uninitialized_eio_only_fixture run =
@@ -1615,6 +1678,8 @@ let () =
             test_bind_fallback_keeps_initialized_cwd_and_capability;
           test_case "bind failure after effect respects fallback policy" `Quick
             test_bind_error_after_child_effect_respects_fallback_policy;
+          test_case "Eio-only stdin closes early without a replay" `Quick
+            test_eio_only_stdin_closed_early_does_not_replay;
           test_case "uninitialized Eio-only stdin refuses before spawning" `Quick
             test_uninitialized_eio_only_stdin_never_starts_child;
           test_case "uninitialized Eio-only streaming refuses before spawning" `Quick

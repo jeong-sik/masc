@@ -634,15 +634,43 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
   let cache = release_identity_cache () in
-  check int "fixture copies the staged release"
+  ignore (Sys.command (Printf.sprintf "rm -rf %s && mkdir -p %s"
+     (Filename.quote (Filename.concat base_path ".release"))
+     (Filename.quote (Filename.concat base_path ".release"))));
+  let release_base_url = stage_release_mirror base_path in
+  check int "fixture copies the installed release identities"
     (Sys.command (Printf.sprintf "cp -R %s %s"
-       (Filename.quote (Filename.concat cache ".release"))
-       (Filename.quote (Filename.concat base_path ".release")))) 0;
-  let release_base_url = "file://" ^ Filename.concat base_path ".release" in
-  check int "fixture copies the installed identity"
-    (Sys.command (Printf.sprintf "cp -R %s %s"
-       (Filename.quote (Filename.concat cache ".local"))
+       (Filename.quote
+          (Filename.concat
+             (Filename.concat cache ".local")
+             ".masc-releases"))
        (Filename.quote prefix))) 0;
+  (* install.sh reads one symlink level and compares it against
+     <canonical prefix>/.masc-releases/<digest>/masc, so the copied
+     identity tree needs a case-local pointer: recreate it here. *)
+  let identity_dir =
+    let entries = Array.to_list (Sys.readdir (Filename.concat prefix ".masc-releases")) in
+    match entries with
+    | [ digest ] ->
+        Filename.concat (Filename.concat prefix ".masc-releases") digest
+    | _ ->
+        Alcotest.failf "expected exactly one cached release identity, got %d"
+          (List.length entries)
+  in
+  check int "fixture links the case-local release pointer"
+    (Sys.command (Printf.sprintf "ln -sfn %s %s"
+       (Filename.quote (Filename.concat identity_dir "masc"))
+       (Filename.quote (Filename.concat prefix "masc")))) 0;
+  let canonical_prefix = Unix.realpath prefix in
+  let expected_link = Filename.concat canonical_prefix
+      (Filename.concat ".masc-releases"
+         (Filename.concat (Filename.basename identity_dir) "masc")) in
+  let actual_link =
+    try Unix.readlink (Filename.concat prefix "masc")
+    with _ -> "<missing pointer>"
+  in
+  check string "fixture pointer matches install.sh readlink contract"
+    expected_link actual_link;
   Option.iter (fun version ->
     let installed = Filename.concat prefix "masc" in
     unlink_if_exists installed;

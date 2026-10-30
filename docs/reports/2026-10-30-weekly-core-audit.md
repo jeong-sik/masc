@@ -9,7 +9,8 @@
 ## 변경 흐름
 
 2026-10-30 17:08:10 KST를 끝으로, 각 행은 직전 24시간의 first-parent
-스냅샷 두 개를 비교한다. 파일 수와 증감은 문서와 테스트를 포함한다. 변경량은
+스냅샷 두 개를 비교한다. 파일 수와 증감은 문서와 테스트를 포함하고, rename
+감지를 끈 집계라 이동된 파일을 삭제·추가로 각각 센다. 변경량은
 검토한 코드의 양이나 결함 수가 아니다. 전체 SHA와 경로 분류는
 [집계 파일](../evidence/2026-10-30-weekly-core-audit/diff-windows.json)에 있다.
 
@@ -34,7 +35,7 @@
 | 기능 | 확인한 경계와 현재 판단 | 남은 검증 |
 | --- | --- | --- |
 | Runtime failover | 소스 확인: 후보 실패를 분류하고 요청 해결 의무·effect 관측을 확인한 뒤 다음 후보로 진행한다. [driver](../../lib/keeper/keeper_turn_driver.ml), [runtime 시도](../../lib/keeper/keeper_turn_driver_try_runtime.ml). | 재시작 후 표본에서 실패 뒤 다른 후보가 완료한 사례는 확인하지 못했다. 실제 failover 성공과 중복 effect 방지는 미검증. |
-| Keeper context 생명주기 | 운영 관측: 6개 Keeper의 전송 직전 기록 16건에서 본문 411,840–1,926,598 B, 메시지 270–4,387개. 큰 한 요청에는 외부화된 도구 결과의 마커와 호출 구조가 다수 남았다. | 크기 자체가 장애 증거는 아니다. Librarian continuity와 보존·삭제의 안전 조건을 연결해 여러 turn을 검증해야 한다. |
+| Keeper context 생명주기 | 운영 관측: 6개 Keeper에서 전송 전 직렬화한 본문을 저장한 기록 16건은 411,840–1,926,598 B, 메시지 270–4,387개다. 큰 한 요청에는 외부화된 도구 결과의 마커와 호출 구조가 다수 남았다. | 저장 시각으로 고른 각 turn의 마지막 관측이며 그 시간에 발송된 모든 요청은 아니다. 크기 자체가 장애 증거는 아니다. 여러 turn의 보존·삭제를 검증해야 한다. |
 | Tool schema / result / cache | 위 16건의 도구 스키마는 40–49개, 저장된 스키마 artifact 합의 중앙값은 91,665 B다. 도구 결과 outbox는 이 표본의 마지막 입력에는 없었다. | artifact 길이는 wire 분해나 토큰 수가 아니다. provider가 보고한 cache read도 요청마다 다르므로 전체를 미캐시 비용으로 계산하지 않는다. |
 | Retained tool result 신뢰 경계 | 소스 확인: 외부 도구 결과가 재전달 설명과 같은 높은 우선순위 입력에 들어가는 경로가 있다. [outbox](../../lib/keeper/keeper_client_tool_outbox.ml). | 공격 성공은 미검증. 모델·공식 클라이언트별 role과 ACK·재실행 방지 계약을 함께 검증해야 한다. |
 | Librarian 입력과 cursor | 소스 확인: 공식 client turn의 fragment가 전부 없거나 태그가 없으면 별도 채팅 구간을 읽기 전에 위치를 넘기는 분기가 있다. [consumer](../../lib/keeper/keeper_librarian_durable_consumer.ml). | 같은 구간의 speaker 채팅이 있는 재현과 다음 tick·실패 재시도·external offset 검증이 필요하다. 운영 발생 빈도는 미확인. |

@@ -6,8 +6,17 @@ import collections
 import datetime as dt
 import hashlib
 import json
+import math
 import statistics
 from pathlib import Path
+
+PROMPT_BLOCKS = frozenset({
+    "active_goals", "admitted_scheduled_input", "dynamic_context",
+    "keeper_instructions", "librarian_working_context", "memory_os_recall",
+    "recalled_memory", "recalled_memory_status", "skill_compositions", "temporal_summary",
+})
+RECALL_STATUSES = frozenset({"started", "response_received", "judgment_completed", "provider_failed"})
+RECALL_KINDS = frozenset({"turn", "candidates", "time"})
 
 
 def stamp(value):
@@ -49,6 +58,8 @@ def main():
     if end < start:
         parser.error("until-time precedes from-time")
     keepers = args.base_path / ".masc" / "keepers"
+    if not keepers.is_dir():
+        raise SystemExit("Keeper runtime directory is missing or unreadable")
     invalid = collections.Counter()
 
     snapshots = []
@@ -62,9 +73,22 @@ def main():
     for path in snapshot_paths:
         for item, _ in rows(path, invalid):
             captured = item.get("captured_at")
-            wire = item.get("wire") or {}
-            if (isinstance(captured, (int, float)) and start <= captured <= end
-                    and isinstance(wire.get("body_bytes"), int)):
+            wire = item.get("wire")
+            if (not isinstance(captured, (int, float)) or isinstance(captured, bool)
+                    or not math.isfinite(captured)
+                    or not isinstance(wire, dict) or type(wire.get("body_bytes")) is not int
+                    or wire["body_bytes"] < 0
+                    or not isinstance(item.get("messages"), list)
+                    or not isinstance(item.get("tool_schemas"), list)):
+                invalid["invalid_provider_records"] += 1
+                continue
+            schemas = item["tool_schemas"]
+            if any(not isinstance(schema, dict) or not isinstance(schema.get("artifact"), dict)
+                   or type(schema["artifact"].get("bytes")) is not int
+                   or schema["artifact"]["bytes"] < 0 for schema in schemas):
+                invalid["invalid_provider_records"] += 1
+                continue
+            if start <= captured <= end:
                 snapshots.append(item)
                 snapshot_keepers.add(path.parts[-4])
     bodies = sorted(item["wire"]["body_bytes"] for item in snapshots)
@@ -78,10 +102,18 @@ def main():
         try:
             with path.open("r", encoding="utf-8") as source:
                 item = json.load(source)
+            if not isinstance(item, dict) or not isinstance(item.get("blocks"), list):
+                invalid["invalid_prompt_files"] += 1
+                continue
             for block in item.get("blocks", []):
                 if (isinstance(block, dict) and isinstance(block.get("id"), str)
-                        and isinstance(block.get("bytes"), int)):
-                    prompt_blocks[block["id"]].append(block["bytes"])
+                        and type(block.get("bytes")) is int and block["bytes"] >= 0):
+                    if block["id"] in PROMPT_BLOCKS:
+                        prompt_blocks[block["id"]].append(block["bytes"])
+                    else:
+                        invalid["unknown_prompt_blocks"] += 1
+                else:
+                    invalid["invalid_prompt_blocks"] += 1
         except (OSError, ValueError, UnicodeDecodeError):
             invalid["unreadable_prompt_files"] += 1
 
@@ -97,22 +129,35 @@ def main():
         keeper = path.parent.name
         for item, line_bytes in rows(path, invalid):
             status = item.get("status")
-            counts[str(status)] += 1
+            if not isinstance(status, str) or status not in RECALL_STATUSES:
+                invalid["unknown_recall_statuses"] += 1
+                continue
+            counts[status] += 1
             recorded = item.get("recorded_at")
-            if isinstance(recorded, (int, float)):
+            if isinstance(recorded, (int, float)) and not isinstance(recorded, bool) and math.isfinite(recorded):
                 times.append(recorded)
             if status == "started":
                 started_bytes.append(line_bytes)
                 kind = item.get("kind")
+                if not isinstance(kind, str) or kind not in RECALL_KINDS:
+                    invalid["unknown_recall_kinds"] += 1
+                    continue
                 counts[f"started_{kind}"] += 1
                 if kind == "time":
-                    state = item.get("state") or {}
+                    state = item.get("state")
+                    if not isinstance(state, dict) or not isinstance(state.get("candidates"), list):
+                        invalid["invalid_recall_records"] += 1
+                        continue
                     for candidate in state.get("candidates", []):
                         candidate_keys[(keeper, digest(candidate))] += 1
                     request = [item.get("destinations"), state, item.get("questions")]
                     request_keys[(keeper, digest(request))] += 1
             elif status == "response_received":
-                reported = (item.get("response") or {}).get("usage")
+                response = item.get("response")
+                if not isinstance(response, dict):
+                    invalid["invalid_recall_records"] += 1
+                    continue
+                reported = response.get("usage")
                 if isinstance(reported, dict):
                     counts["responses_with_usage"] += 1
                     for field in ("input_tokens", "output_tokens"):

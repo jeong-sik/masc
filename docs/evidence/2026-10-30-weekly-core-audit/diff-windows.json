@@ -12,18 +12,7 @@
       "first_parent_commits": 135,
       "files": 1547,
       "added": 73929,
-      "deleted": 14822,
-      "categories": {
-        "other": 156,
-        "workflow-scripts": 9,
-        "tui-dashboard": 134,
-        "docs-changelog": 839,
-        "board-task-goal-schedule": 29,
-        "keeper-other": 117,
-        "runtime-context": 15,
-        "keeper-memory-librarian": 21,
-        "tests": 227
-      }
+      "deleted": 14822
     },
     {
       "window_days_ago": 2,
@@ -34,18 +23,7 @@
       "first_parent_commits": 143,
       "files": 1398,
       "added": 89793,
-      "deleted": 12287,
-      "categories": {
-        "other": 286,
-        "tui-dashboard": 78,
-        "docs-changelog": 369,
-        "keeper-other": 229,
-        "runtime-context": 63,
-        "keeper-memory-librarian": 61,
-        "board-task-goal-schedule": 1,
-        "workflow-scripts": 24,
-        "tests": 287
-      }
+      "deleted": 12287
     },
     {
       "window_days_ago": 3,
@@ -56,18 +34,7 @@
       "first_parent_commits": 175,
       "files": 2933,
       "added": 175428,
-      "deleted": 16868,
-      "categories": {
-        "other": 692,
-        "tui-dashboard": 138,
-        "docs-changelog": 1222,
-        "board-task-goal-schedule": 35,
-        "keeper-other": 301,
-        "keeper-memory-librarian": 56,
-        "runtime-context": 94,
-        "workflow-scripts": 15,
-        "tests": 380
-      }
+      "deleted": 16868
     },
     {
       "window_days_ago": 4,
@@ -78,18 +45,7 @@
       "first_parent_commits": 154,
       "files": 3517,
       "added": 153694,
-      "deleted": 59114,
-      "categories": {
-        "other": 723,
-        "workflow-scripts": 55,
-        "tui-dashboard": 619,
-        "docs-changelog": 1680,
-        "board-task-goal-schedule": 24,
-        "keeper-other": 131,
-        "keeper-memory-librarian": 10,
-        "runtime-context": 64,
-        "tests": 211
-      }
+      "deleted": 59114
     },
     {
       "window_days_ago": 5,
@@ -100,18 +56,7 @@
       "first_parent_commits": 179,
       "files": 2333,
       "added": 177611,
-      "deleted": 16837,
-      "categories": {
-        "other": 282,
-        "workflow-scripts": 28,
-        "tui-dashboard": 119,
-        "docs-changelog": 1252,
-        "board-task-goal-schedule": 26,
-        "keeper-other": 240,
-        "runtime-context": 100,
-        "keeper-memory-librarian": 6,
-        "tests": 280
-      }
+      "deleted": 16837
     },
     {
       "window_days_ago": 6,
@@ -122,17 +67,7 @@
       "first_parent_commits": 63,
       "files": 789,
       "added": 41613,
-      "deleted": 5268,
-      "categories": {
-        "other": 90,
-        "workflow-scripts": 22,
-        "tui-dashboard": 62,
-        "docs-changelog": 337,
-        "keeper-other": 115,
-        "runtime-context": 61,
-        "board-task-goal-schedule": 1,
-        "tests": 101
-      }
+      "deleted": 5268
     },
     {
       "window_days_ago": 7,
@@ -143,18 +78,7 @@
       "first_parent_commits": 180,
       "files": 1797,
       "added": 74530,
-      "deleted": 17680,
-      "categories": {
-        "workflow-scripts": 23,
-        "other": 353,
-        "tui-dashboard": 109,
-        "docs-changelog": 711,
-        "board-task-goal-schedule": 17,
-        "keeper-other": 202,
-        "runtime-context": 87,
-        "keeper-memory-librarian": 22,
-        "tests": 273
-      }
+      "deleted": 17680
     }
   ]
 }

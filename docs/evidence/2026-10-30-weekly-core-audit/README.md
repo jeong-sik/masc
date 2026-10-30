@@ -7,13 +7,16 @@ claim is retained here.
 
 * `diff-windows.json` compares adjacent rolling 24-hour first-parent snapshots,
   ending at 2026-10-30 17:08:10 Asia/Seoul. Each endpoint is a full commit id.
-  File and line counts include all paths, including documentation and tests.
-  The categories are path classifications, not a review of their contents.
+  File and line counts use `git diff --no-renames --numstat <older> <newer>`
+  and include all paths, including documentation and tests. A moved file is
+  counted as a deletion and an addition; this can inflate both figures.
 * `runtime-aggregate.json` was captured at the timestamp inside that file from
   the running workspace, whose binary commit was
   `bac52cac7934ce3f75c315d474cc23f2561268c9`. Provider-input records are restricted
-  to the stated interval after that server started. `body_bytes` is the recorded
-  serialization before dispatch, not proof of transmission or acceptance. The
+  to the stated storage interval after that server started. Each turn retains
+  its last observed provider input and earlier attempts can be absent. Storage
+  time does not establish dispatch time. `body_bytes` records serialization
+  before dispatch, not proof of transmission or acceptance. The
   tool-schema byte sums are stored artifact lengths, not a wire-byte breakdown.
 * Last-prompt block lengths come from the latest retained snapshot for each
   keeper at capture time. These files are a separate population, can predate the
@@ -24,7 +27,8 @@ claim is retained here.
   not a price or a cache-miss measurement. Counts of identical candidate JSON
   and complete request JSON are scoped to the same keeper; neither establishes
   that a model response can safely be reused. There may be other missing or
-  rotated-away records. Capture reports malformed or unreadable input counts.
+  rotated-away records. Capture reports malformed or unreadable input counts;
+  unknown block, status, or kind labels are counted without exposing their values.
 
 Regenerate a current aggregate without emitting record contents, after selecting
 the actual effective workspace base and a UTC provider-input window:

@@ -103,42 +103,11 @@ class GitHub:
     def commit_accounts(self, base, head):
         path = f"compare/{base}...{head}?per_page=100"
         pages = self.api(path, pages=True)
-        if not isinstance(pages, list) or not pages:
-            raise Unavailable(f"GET {path}: expected comparison pages")
-        total = None
-        commits, accounts, account_names = set(), {}, {}
-        complete = True
-        for page in pages:
-            if (not isinstance(page, dict) or not isinstance(page.get("base_commit"), dict)
-                    or page["base_commit"].get("sha") != base
-                    or type(page.get("total_commits")) is not int
-                    or page["total_commits"] < 0 or not isinstance(page.get("commits"), list)):
-                raise Unavailable(f"GET {path}: invalid comparison page")
-            if total is not None and total != page["total_commits"]:
-                raise Unavailable(f"GET {path}: inconsistent commit count")
-            total = page["total_commits"]
-            for commit in page["commits"]:
-                if not isinstance(commit, dict) or not isinstance(commit.get("sha"), str) \
-                        or re.fullmatch(r"[0-9a-f]{40}", commit["sha"]) is None \
-                        or commit["sha"] in commits:
-                    raise Unavailable(f"GET {path}: invalid or duplicate commit")
-                commits.add(commit["sha"])
-                for role in ("author", "committer"):
-                    person = commit.get(role)
-                    login = person.get("login") if isinstance(person, dict) else None
-                    actor_id = person.get("id") if isinstance(person, dict) else None
-                    if (not isinstance(login, str) or not login or any(c.isspace() for c in login)
-                            or type(actor_id) is not int or actor_id < 1):
-                        complete = False
-                    else:
-                        key = login.casefold()
-                        if ((key in accounts and accounts[key][1] != actor_id)
-                                or (actor_id in account_names and account_names[actor_id] != key)):
-                            complete = False
-                        accounts.setdefault(key, (login, actor_id))
-                        account_names.setdefault(actor_id, key)
-        complete = complete and len(commits) == total
-        return tuple(accounts[k] for k in sorted(accounts)), complete
+        identities = module("review_commit_accounts", "review-commit-accounts.py")
+        try:
+            return identities.accounts_from_pages(base, pages)
+        except identities.InvalidComparison as error:
+            raise Unavailable(f"GET {path}: {error}") from error
 
     def admission(self, pr, reviews, commit_accounts, identities_complete):
         if not identities_complete or pr["draft"] or pr["state"] != "open" or not any(

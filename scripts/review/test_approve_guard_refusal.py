@@ -18,8 +18,10 @@ SCOPE = json.dumps({"base_ref": "main", "base_sha": BASE, "stack": None}, separa
 
 FAKE_GH = r"""#!/usr/bin/env bash
 # api [--paginate] <path> [--jq <expr>] over canned JSON in $FAKE_DIR.
+set -o pipefail
 shift
 [ "$1" != --paginate ] || shift
+[ "$1" != --slurp ] || shift
 path="$1"; shift
 printf '%s\n' "$path" >> "$FAKE_DIR/calls.log"
 expr="."
@@ -27,6 +29,11 @@ expr="."
 case "$path" in
   user) f="$FAKE_DIR/user.json";;
   repos/*/commits/*/status) f="$FAKE_DIR/status.json";;
+  repos/*/compare/*)
+    count_file="$FAKE_DIR/compare-count"
+    count=0; [ ! -f "$count_file" ] || count=$(cat "$count_file")
+    count=$((count + 1)); printf '%s' "$count" > "$count_file"
+    f="$FAKE_DIR/compare-$count.json"; [ -f "$f" ] || f="$FAKE_DIR/compare.json";;
   repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review.json";;
   repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json";;
   repos/*/issues/*/comments*) f="$FAKE_DIR/comments.json";;
@@ -35,7 +42,8 @@ case "$path" in
   repos/*/pulls/*) f="$FAKE_DIR/pr.json";;
   *) echo "fake gh: unexpected $path" >&2; exit 9;;
 esac
-exec jq -r "$expr" "$f"
+jq 'def uid: if .login == "author-keeper" then 10 elif .login == "reviewer-account" then 20 elif .login == "reviewer-keeper" then 30 elif .login == "second-reviewer" then 40 else 50 end;
+    walk(if type == "object" and (.login | type) == "string" and (has("id") | not) then .id = uid else . end)' "$f" | jq -r "$expr"
 """
 
 
@@ -63,7 +71,7 @@ class GuardHarness(unittest.TestCase):
         self.scripts.mkdir()
         for name in ("approve-guard.sh", "ci-checks.sh", "review-verdict.sh", "review-decisions.py",
                      "review-scope.py", "review-refusal.py", "_gh_merge_base.py",
-                     "prepare-approved-batch.py"):
+                     "prepare-approved-batch.py", "review-commit-accounts.py"):
             shutil.copy(HERE / name, self.scripts / name)
         # The real review-diff.py needs Git objects; the diff identity is a fixed fixture here.
         (self.scripts / "review-diff.py").write_text(f"#!/usr/bin/env python3\nprint('{DIFF}')\n")
@@ -77,6 +85,10 @@ class GuardHarness(unittest.TestCase):
             "base": {"ref": "main", "sha": BASE}, "head": {"sha": HEAD, "ref": "fix/x"},
             "user": {"login": "author-keeper"}}))
         (self.data / "user.json").write_text(json.dumps({"login": "reviewer-account"}))
+        (self.data / "compare.json").write_text(json.dumps([{
+            "base_commit": {"sha": BASE}, "total_commits": 1,
+            "commits": [{"sha": HEAD, "author": {"login": "content-author", "id": 555},
+                         "committer": {"login": "content-author", "id": 555}}]}]))
         (self.data / "status.json").write_text(json.dumps({"statuses": []}))
         (self.data / "reviews.json").write_text("[]")
         (self.data / "comments.json").write_text("[]")
@@ -137,6 +149,87 @@ class ReadFailureNaming(GuardHarness):
         r = self.run_guard("--source-receipt")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stdout)["pr"], 41487)
+
+
+class CommitIndependence(GuardHarness):
+    def set_pages(self, pages, name="compare.json"):
+        (self.data / name).write_text(json.dumps(pages))
+
+    def page(self, commits, total=None):
+        return {"base_commit": {"sha": BASE},
+                "total_commits": len(commits) if total is None else total, "commits": commits}
+
+    def commit(self, sha, author, committer):
+        return {"sha": sha, "author": author, "committer": committer}
+
+    def test_unknown_commit_role_refuses_publication_and_receipt(self):
+        self.review(footer_line())
+        author = {"login": "content-author", "id": 555}
+        for author_role, committer_role in ((None, author), (author, None)):
+            self.set_pages([self.page([self.commit(HEAD, author_role, committer_role)])])
+            for mode in ("--check", "--source-receipt"):
+                with self.subTest(author=author_role, committer=committer_role, mode=mode):
+                    result = self.run_guard(mode)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("identity is incomplete", result.stderr)
+                    self.assertIn(f"{HEAD} {'author' if author_role is None else 'committer'} account unavailable", result.stderr)
+                    self.assertEqual(result.stdout, "")
+
+    def test_matching_account_is_not_admitted_or_allowed_to_publish(self):
+        self.review(footer_line())
+        # Different spelling cannot defeat matching the immutable account id.
+        person = {"login": "content-alias", "id": 30}
+        self.set_pages([self.page([self.commit(HEAD, person, person)])])
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 2, receipt.stderr)
+        self.assertIn("content commit account", receipt.stderr)
+        self.set_pages([self.page([self.commit(HEAD, {"login": "reviewer-account", "id": 20}, person)])])
+        publication = self.run_guard("--check")
+        self.assertEqual(publication.returncode, 2, publication.stderr)
+        self.assertIn("content commit author or committer", publication.stderr)
+
+    def test_later_compare_page_is_included(self):
+        self.review(footer_line())
+        other = {"login": "content-author", "id": 555}
+        reviewer = {"login": "reviewer-keeper", "id": 30}
+        self.set_pages([self.page([self.commit("1" * 40, other, other)], total=2),
+                        self.page([self.commit(HEAD, other, reviewer)], total=2)])
+        result = self.run_guard("--source-receipt")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("content commit account", result.stderr)
+
+    def test_incomplete_pagination_and_failed_read_do_not_admit(self):
+        self.review(footer_line())
+        other = {"login": "content-author", "id": 555}
+        self.set_pages([self.page([self.commit(HEAD, other, other)], total=2)])
+        incomplete = self.run_guard("--source-receipt")
+        self.assertEqual(incomplete.returncode, 2, incomplete.stderr)
+        (self.data / "compare.json").unlink()
+        unavailable = self.run_guard("--source-receipt")
+        self.assertEqual(unavailable.returncode, 1, unavailable.stderr)
+        self.assertIn("commit identities unavailable", unavailable.stderr)
+
+    def test_identity_mapping_change_before_consumption_is_refused(self):
+        self.review(footer_line())
+        changed = {"login": "content-author", "id": 556}
+        self.set_pages([self.page([self.commit(HEAD, changed, changed)])], "compare-2.json")
+        result = self.run_guard("--source-receipt")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("identities changed", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_unknown_existing_reviewer_does_not_prevent_another_publication(self):
+        self.review(footer_line())
+        review = json.loads((self.data / "review.json").read_text())
+        review["user"]["id"] = None
+        (self.data / "review.json").write_text(json.dumps(review))
+        (self.data / "reviews.json").write_text(json.dumps([review]))
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 2, receipt.stderr)
+        self.assertIn("reviewer account identity unavailable", receipt.stderr)
+        publication = self.run_guard("--check")
+        self.assertEqual(publication.returncode, 0, publication.stderr)
+        self.assertIn("WOULD APPROVE", publication.stdout)
 
 
 class Case(GuardHarness):
@@ -221,7 +314,9 @@ class Case(GuardHarness):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stderr, "")
         calls = (self.data / "calls.log").read_text().splitlines()
-        self.assertFalse(any("/compare/" in path for path in calls))
+        # Commit-account checks compare the live base to head. They must not
+        # trigger the rejected review's separate old-base scope diagnostic.
+        self.assertFalse(any(f"/compare/{'f' * 40}..." in path for path in calls))
 
 
 class ReleaseSecondApprover(GuardHarness):
@@ -563,6 +658,18 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
         for rid in replace_ids:
             args += ["--replace-own-cr", str(rid)]
         return self.run_guard(*args)
+
+    def test_identity_change_after_post_reports_posted_review_for_reconciliation(self):
+        self.install_publication_fake()
+        changed = {"login": "content-author", "id": 556}
+        (self.data / "compare-3.json").write_text(json.dumps([{
+            "base_commit": {"sha": BASE}, "total_commits": 1,
+            "commits": [{"sha": HEAD, "author": changed, "committer": changed}]}]))
+        result = self.publish()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("was posted but account identities changed", result.stderr)
+        self.assertEqual(len(json.loads((self.data / "reviews.json").read_text())), 1)
+        self.assertEqual(sum(line.startswith("POST ") for line in (self.data / "calls.log").read_text().splitlines()), 1)
 
     def test_body_with_guard_metadata_is_refused_before_post(self):
         self.install_publication_fake()

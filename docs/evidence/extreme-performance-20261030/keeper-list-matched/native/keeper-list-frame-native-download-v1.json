@@ -1,0 +1,19 @@
+{
+  "command": [
+    "gh",
+    "run",
+    "download",
+    "41025395547",
+    "--repo",
+    "jeong-sik/masc",
+    "-n",
+    "tui-macos-arm64-5de2eb7684f0e4fecee1c48caef50010c2f951fa-41025395547",
+    "-D",
+    "artifacts/extreme-perf-20261030/keeper-list-frame-native-v1"
+  ],
+  "started_unix": 1793349220.757868,
+  "ended_unix": 1793349277.0259788,
+  "returncode": 0,
+  "stdout": "",
+  "stderr": ""
+}

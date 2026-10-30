@@ -1,0 +1,146 @@
+{
+  "source_sha": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+  "workflow_sha": "f06ab8f4fb3dd2c18e92366922c13a7c73f140f3",
+  "scenario": "rich-chat-workspace",
+  "platform": "macos-arm64",
+  "sha256": "e1e41a1ed79de05ba563bb1fd7d517c7578b475c9eaa6a606da28e89028d991d",
+  "key_reference": {
+    "path": "key-reference.md",
+    "sha256": "072e320dcdef1de5cb257d3daa69476ba48835f9c9b3c2498165daa3771c3e46",
+    "producer": "bin/masc_tui_keys_doc_cli.exe"
+  },
+  "server_sha256": "464fc0090639d89b03e85e73435632a9a709506dc139ccdb50f586e8ead0fc2e",
+  "native_addon_launcher": null,
+  "browser_addon_worker": null,
+  "build_targets": [
+    "bin/masc_tui.exe",
+    "bin/masc_tui_keys_doc_cli.exe",
+    "bin/main_eio.exe",
+    "test/test_repo_git.exe",
+    "test/test_tui_workspace_entries.exe",
+    "test/test_workspace_file_confidentiality.exe",
+    "test/test_lsp_position.exe",
+    "test/test_tui_music_launcher.exe",
+    "test/test_tui_alphatex.exe",
+    "test/test_tui_chat_call_reader.exe"
+  ],
+  "expected_tests": [
+    "test_repo_git",
+    "test_tui_workspace_entries",
+    "test_workspace_file_confidentiality",
+    "test_lsp_position",
+    "test_tui_music_launcher",
+    "test_tui_alphatex",
+    "test_tui_chat_call_reader"
+  ],
+  "executed_tests": [
+    "test_repo_git",
+    "test_tui_workspace_entries",
+    "test_workspace_file_confidentiality",
+    "test_lsp_position",
+    "test_tui_music_launcher",
+    "test_tui_alphatex",
+    "test_tui_chat_call_reader"
+  ],
+  "test_results": [
+    {
+      "suite": "test_repo_git",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_workspace_entries",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_workspace_file_confidentiality",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_lsp_position",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_music_launcher",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_alphatex",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_chat_call_reader",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    }
+  ],
+  "test_invocations": [
+    {
+      "suite": "test_repo_git",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_workspace_entries",
+      "arguments": []
+    },
+    {
+      "suite": "test_workspace_file_confidentiality",
+      "arguments": []
+    },
+    {
+      "suite": "test_lsp_position",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_music_launcher",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_alphatex",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_chat_call_reader",
+      "arguments": []
+    }
+  ],
+  "expected_invocations": [
+    {
+      "suite": "test_repo_git",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_workspace_entries",
+      "arguments": []
+    },
+    {
+      "suite": "test_workspace_file_confidentiality",
+      "arguments": []
+    },
+    {
+      "suite": "test_lsp_position",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_music_launcher",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_alphatex",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_chat_call_reader",
+      "arguments": []
+    }
+  ],
+  "behavior_passed": true,
+  "installed_runtime_verified": false,
+  "visible_ui_verified": false,
+  "packaging": "native executable; see native-dependencies.txt for dynamic libraries"
+}

@@ -1,0 +1,15 @@
+{
+  "actual_model_calls": 4,
+  "max_provider_requests_in_flight": 2,
+  "per_keeper_sequences": {
+    "scale-keeper-0000": [
+      1,
+      2
+    ],
+    "scale-keeper-0001": [
+      1,
+      2
+    ]
+  },
+  "errors": []
+}

@@ -47,7 +47,7 @@
 | World Curator | 운영 24시간 표본에서 등록 46건 중 45건이 완료됐고 그중 32건 성공·13건 실패로 기록됐다. 실패에는 context 초과 4건과 결과 불명 5건이 포함된다. 입력 사용량이 기록된 35건의 합은 11,316,415 tokens, p95는 863,201 tokens다. 10건은 사용량이 없고 1건은 캡처 시 미완료다. [Curator](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/server/server_workspace_memory_curator.ml). | 등록 수는 provider 요청 수가 아니다. 소스는 초과 시 나눈 뒤 성공한 root가 가득 차면 다음 크기를 두 배로 늘린다. 표본 중 관련 요청 6건을 UUIDv7로 정렬하면 86개 초과→자식 43개 성공→나머지 43개에 대한 결과 불명 2건→나머지 43개 성공→86개 초과다. 완료·dispatch 순서, 각 실행의 바이너리와 당시 전체 상태가 확인되지 않아 원인으로 단정하지 않는다. 입력 필요성과 합성 품질도 미검증이다. [익명 집계](../evidence/2026-10-30-weekly-core-audit/curator-overflow-chain.json). |
 | Skills 생성·사용 | 소스 확인: Skill은 Memory Fact와 별도이며 Keeper가 절차를 판단해 [publish 도구](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/keeper/keeper_skill_publish.ml)를 호출하는 경로가 있다. 보존된 last-prompt 중 `skill_compositions` 블록 29개의 중앙값은 303 B다. | 이 블록은 Skill의 전체 입력·실행 비용이 아니다. 자동 반복 발견, 추출·중복·적용·폐기와 토큰 비용은 미확인. |
 | Board visibility / 접근 제어 | 소스 확인: 제한 공개 글의 주소 없는 댓글이 비참여 Keeper의 semantic attention 후보가 될 수 있다. 기존 [#37152](https://github.com/jeong-sik/masc/issues/37152)는 viewer 없는 읽기 등 더 넓은 문제를 추적한다. [audience](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/keeper/keeper_board_audience.ml), [dispatch](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/board/board_dispatch.ml). | 새 후보 차단만으로 이미 기록된 Pending/Judged 후보, Direct 명시 수신자·broadcast, 읽기·HTTP/cache 권한이 해결되지는 않는다. 실제 유출 발생은 미확인. |
-| Board 수신과 재기동 | 소스 후보: metadata는 남고 registry에는 없는 Keeper에게 지정된 글을 쓸 때 durable 수신과 재시작 후 재생이 누락될 수 있다. 만료된 부모 댓글 때문에 같은 글의 뒤쪽 댓글 재생이 중단될 수도 있다. | 중지·retire·재기동 계약과 실제 재현을 확인해야 한다. 저장된 수신자를 큐 소비 때 현재 별칭으로 다시 해석하는 경계도 남는다. |
+| Board 수신과 재기동 | 소스 후보: metadata는 남고 registry에는 없는 Keeper에게 지정된 글을 쓸 때 durable 수신과 재시작 후 재생이 누락될 수 있다. 만료된 부모 댓글 때문에 같은 글의 뒤쪽 댓글 재생이 중단될 수도 있다. 주소로 기록된 별칭은 당시 Keeper를 식별하지 않고, 재생은 저장된 별칭을 현재 Keeper 설정의 대상 ID와 대조한다. | 중지·retire·재기동 계약과 실제 재현을 확인해야 한다. 별칭이 다른 Keeper에게 옮겨간 기록은 옛 수신자를 그 기록만으로 복원할 수 없다. 이미 큐에 든 attention의 소비 경계도 남는다. |
 | Goal / Task | 소스 확인: 모든 진행 가능한 Goal의 기준·review note·측정치를 Keeper turn의 공유 Goal 목록으로 조립한다. 보존된 last-prompt 31개에서 해당 블록 중앙값은 53,522 B다. | 공유 Goal은 의도된 계약이다. 관련성·계속 증가하는 크기와 task 링크 실패를 측정한 뒤 개선해야 하며 크기만으로 임의 삭제하지 않는다. |
 | HITL / 접근 권한 | 소스 확인: 승인 요청을 저장하고 결정을 저널에 남긴다. 일회 승인 소비 시 Keeper·도구·입력 지문을 대조하며, 승인과 효과 적용을 별도로 기록한다. 소비 후 결과가 없으면 결과 불명으로 남기는 경로도 있다. [승인 큐](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/keeper/keeper_approval_queue.ml), [효과 재개](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/keeper/keeper_gate_replay.ml). | 실제 승인 생성→전달→결정→효과의 전체 성공, 중간 재시작, actor와 capability 적용은 미검증이다. Board read 권한은 별도로 남는다. |
 | Schedule / drain | 소스 확인: 일부 반복 예약의 다음 발화나 명시적 취소가 이미 turn에 선택된 발화를 철회할 수 있다. 그 turn은 이미 받은 입력을 계속 실행할 수 있으며, 해당 발화의 ACK를 시도하면 철회된 항목으로 처리된다. [취소](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/keeper/keeper_registry_event_queue.ml), [turn 정산](https://github.com/jeong-sik/masc/blob/8ef0028e911dd83c78bc57362904e0787df72c3e/lib/keeper/keeper_heartbeat_loop.ml). | 결과 전달 없는 Interval은 대상 큐에서 이전 미소비 발화가 관측되면 다음 due 발화를 hold한다. 기존 [#40006](https://github.com/jeong-sik/masc/pull/40006)은 철회를 의도했지만, 감사 기준 Glossary에는 이전 보존 정책이 남았다. 취소·대체와 실행 증거의 계약 및 실제 운영 발생을 확인해야 한다. |
@@ -77,13 +77,14 @@ boundary·range receipt·progress는 이 turn들을 읽어 기억을 갱신할 �
 
 ## 조사에서 분리한 변경
 
-2026-10-30 조사 중 [TUI 재개 ID](https://github.com/jeong-sik/masc/pull/46951)와
-[예약 발화 용어](https://github.com/jeong-sik/masc/pull/46952)는 독립 소스 리뷰를
-거쳐 별도 PR로 제안됐다. 재개 ID 수정은 위 202와 pause 세대 경합을 해결하지
-않는다. [Board 후보](https://github.com/jeong-sik/masc/pull/46949)와
+2026-10-30 조사 중 [TUI 재개 ID](https://github.com/jeong-sik/masc/pull/46951)는
+독립 소스 승인과 가드 확인 후 main의 `865bbe5e0490bf5861e56ff1057da8f35ed970e0`에
+병합됐다. 이 수정은 위 202와 pause 세대 경합을 해결하지 않는다.
+[예약 발화 용어](https://github.com/jeong-sik/masc/pull/46952)는 별도 PR이다.
+[Board 후보](https://github.com/jeong-sik/masc/pull/46949)와
 [Librarian 범위](https://github.com/jeong-sik/masc/pull/46950)는 남은 경계가 있어
-보류했으며, Librarian PR에는 독립 리뷰의 변경 요청이 있다. 어느 항목도 설치·운영
-적용의 증거는 아니다.
+보류했으며, Librarian PR에는 독립 리뷰의 변경 요청이 있다. 병합은 설치·운영 적용의
+증거가 아니다.
 
 ## 우선순위
 

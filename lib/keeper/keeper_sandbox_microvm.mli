@@ -930,6 +930,8 @@ val container_listing_for : Keeper_microvm_backend.t -> container_listing
     (they live in msb inspect under active_config.labels). *)
 
 val list_live_containers_for :
+  ?env:string array ->
+  ?cwd:string ->
   Keeper_microvm_backend.t ->
   base_path:string ->
   keeper_name:string ->
@@ -937,7 +939,48 @@ val list_live_containers_for :
   (Keeper_sandbox_runtime.live_container list, string) result
 (** Read the labelled guest inventory for one microvm Keeper.
     [microvm_container_listing_unsupported] when this runtime's listing
-    cannot be scoped, rather than an empty inventory that reads as "none". *)
+    cannot be scoped, rather than an empty inventory that reads as "none".
+    [env] and [cwd], when supplied, apply to the listing and its state reads.
+    A non-positive or invalid timeout is refused before starting a command. *)
+
+type kata_name_observation =
+  | Kata_name_absent
+  | Kata_name_expected_runtime
+  | Kata_name_other_runtime
+  | Kata_name_runtime_unreported
+  | Kata_name_unavailable
+(** A point-in-time listing of the expected name only. Runtime is what the
+    CLI reports; neither its value nor a label establishes ownership. *)
+
+val kata_name_observation_of_json_lines :
+  guest_name:string -> string -> kata_name_observation
+(** Decode every row before reporting a name not seen. A missing or empty
+    runtime is distinct from a failed or ambiguous listing. No ownership
+    labels are compared; the provider may derive its reported name from
+    metadata. *)
+
+val observe_kata_name :
+  env:string array -> cwd:string ->
+  base_path:string -> keeper_name:string ->
+  network_mode:Keeper_types_profile_sandbox.network_mode -> timeout_sec:float ->
+  kata_name_observation
+(** Query using the execution CLI's environment and cwd and complete stdout.
+    This is observation only, not authority for a later lifecycle operation. *)
+
+module Kata_observation_for_testing : sig
+  val observe :
+    run:(timeout_sec:float -> env:string array -> cwd:string -> argv:string list ->
+         (Unix.process_status * string, unit) result) ->
+    env:string array -> cwd:string -> base_path:string -> keeper_name:string ->
+    network_mode:Keeper_types_profile_sandbox.network_mode -> timeout_sec:float ->
+    kata_name_observation
+
+  val inventory :
+    run:(timeout_sec:float -> string list -> Unix.process_status * string * string) ->
+    Keeper_microvm_backend.t -> base_path:string -> keeper_name:string ->
+    timeout_sec:float -> (Keeper_sandbox_runtime.live_container list, string) result
+
+end
 
 val guest_listing_argv_for : Keeper_microvm_backend.t -> string list
 (** The listing that settles a guest name after {!inspect_argv_for} ended any

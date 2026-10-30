@@ -141,11 +141,26 @@ module For_testing : sig
     Yojson.Safe.t
 end
 
+val kata_name_observation_json :
+  config:Workspace.config -> meta:keeper_meta -> timeout_sec:float -> Yojson.Safe.t
+(** A separate name-only runtime observation. It uses the turn probe's
+    scrubbed context. If known host selectors differ or are unavailable, the
+    name result is unavailable; matching them does not attest the binary,
+    daemon, config file, or a later invocation. It does not establish ownership. *)
+
+type kata_host_environment_alignment =
+  | Kata_selectors_match
+  | Kata_selectors_differ
+  | Kata_selectors_unavailable
+(** A comparison of known CLI selectors at one instant, not a daemon or
+    configuration-file identity proof. *)
+
 val live_status_json :
   ?include_preflight:bool ->
   ?preflight_override:Keeper_sandbox_runtime.docker_preflight option ->
   ?containers_override:(Keeper_sandbox_runtime.live_container list, string) result ->
   ?include_repository_checkouts:bool ->
+  ?include_kata_name_observation:bool ->
   config:Workspace.config ->
   meta:keeper_meta ->
   timeout_sec:float ->
@@ -166,15 +181,47 @@ val live_status_json :
     [include_repository_checkouts=false] skips Git checkout inspection for
     dashboard hot paths.
 
+    [include_kata_name_observation=true] adds a separate, point-in-time
+    name/runtime listing for Kata. It does not establish ownership and does
+    not read a guest's logs or files. Its scoped-list comparison is from a
+    different observation, not an atomic snapshot. The per-command timeout is
+    not a deadline for the whole status request.
+
     A failed container inventory leaves [effective_mode] null and preserves
-    the failure in [container_error]. Only a successful inventory can establish
-    that a microVM is running or absent.
+    the failure in [container_error]. A successful scoped inventory reports
+    matching instances; an empty result does not prove a name is available.
+    With a separate Kata name observation, [effective_mode] remains null:
+    equal names in separate reads do not establish the same current guest.
 
     Apple microVM [resource_config.work_volume_discard_default] freshly reads
     the actual volume source and ext4 superblock under [timeout_sec] on every
     status request. It is [{state:"set"|"absent",error:null}] or
     [{state:"unreadable",error:string}]; other backends expose null. This
     read-only observation is never cached and never starts a helper. *)
+
+module Kata_status_for_testing : sig
+  val environment_alignment :
+    ambient:string array -> cwd:string -> kata_host_environment_alignment
+
+  val observe_name :
+    run:(timeout_sec:float -> env:string array -> cwd:string -> argv:string list ->
+         (Unix.process_status * string, unit) result) ->
+    config:Workspace.config -> meta:keeper_meta -> ambient:string array -> cwd:string ->
+    timeout_sec:float -> (string * Keeper_sandbox_microvm.kata_name_observation) option
+
+  val observe_inventory :
+    run:(execution_context:(string array * string) option ->
+         config:Workspace.config -> meta:keeper_meta -> timeout_sec:float ->
+         (Keeper_sandbox_runtime.live_container list, string) result) ->
+    config:Workspace.config -> meta:keeper_meta -> ambient:string array -> cwd:string ->
+    timeout_sec:float -> (Keeper_sandbox_runtime.live_container list, string) result
+
+  val project :
+    observation:Keeper_sandbox_microvm.kata_name_observation ->
+    scoped_name_seen:bool option -> has_containers:bool ->
+    initial_effective_mode:string option -> initial_why_no_container:string option ->
+    string option * string option
+end
 
 type sandbox_log_backend =
   | Docker_logs
@@ -202,11 +249,9 @@ type sandbox_logs_error =
   | Sandbox_logs_meta_read_failed of string
   | Sandbox_logs_keeper_not_found
   | Sandbox_logs_backend_failed of string
-      (** A container runtime was asked for this Keeper's instances and the
-          call failed. Neither neighbouring case reaches this constructor: a
-          profile that keeps no container on this host answers
-          [No_local_stream], and a runtime that answers an empty inventory is
-          an [Ok] result carrying no instances. *)
+      (** The local log runtime could not be read, or its execution context
+          could not be established before invoking it. A profile that keeps no
+          local stream and a successful empty inventory remain [Ok] results. *)
 
 val resolve_sandbox_log_target :
   config:Workspace.config ->
@@ -232,10 +277,29 @@ val logs_json :
     remains label-scoped to [config.base_path] and the effective Keeper
     name.
 
+    Kata inventory and log commands use the turn runner's scrubbed env and
+    captured cwd. Their selector comparison is carried as
+    [kata_host_environment_alignment]; it does not prove CLI, configuration,
+    daemon identity, or stability across calls.
+
     Three success shapes, all under one constant key set ([keeper],
-    [backend], [state], [reason], [tail], [instances]): [state="available"]
+    [backend], [state], [reason], [reason_code], [tail], [instances],
+    [kata_host_environment_alignment]): [state="available"]
     with a backend and one or more instances, [state="no_instance"] with a
     backend and none, and [state="no_local_stream"] with [backend] null,
-    [instances] empty, and [reason] carrying the sentence for the operator.
+    [instances] empty, [reason] carrying the existing sentence, and
+    [reason_code="remote_ssh"] for the SSH endpoint. Other shapes use null.
     A caller separates the last two on [state], and again on whether
     [backend] is null. *)
+
+module Sandbox_logs_for_testing : sig
+  val collect :
+    list_containers:(env:string array option -> cwd:string option ->
+      backend:sandbox_log_backend -> config:Workspace.config -> keeper_name:string ->
+      timeout_sec:float -> (Keeper_sandbox_runtime.live_container list, string) result) ->
+    read_logs:(env:string array option -> cwd:string option -> timeout_sec:float ->
+      argv:string list -> Unix.process_status * string * string) ->
+    config:Workspace.config -> meta:keeper_meta -> backend:sandbox_log_backend ->
+    ambient:string array -> cwd:string -> timeout_sec:float -> tail:int ->
+    (Yojson.Safe.t, sandbox_logs_error) result
+end

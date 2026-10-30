@@ -46,6 +46,10 @@ let expected : (string * Route_access.t * string * string) list =
     , Route_access.Tool { tool_name = "masc_status" }
     , "refused:kind_not_served"
     , "refused:kind_not_served" )
+  ; ( "tool_observation"
+    , Route_access.Tool_observation { tool_name = "masc_status" }
+    , "refused:kind_not_served"
+    , "refused:kind_not_served" )
   ; ( "tool_actor"
     , Route_access.Tool_actor { tool_name = "masc_status" }
     , "refused:kind_not_served"

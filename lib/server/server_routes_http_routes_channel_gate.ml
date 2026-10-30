@@ -404,10 +404,8 @@ let gate_keeper_ctx ?config ~sw ~clock state =
    its producers spell two ways, so a wording change silently turned 404
    into 502 (RFC-0371 B4). Invalid names now read as [Ok false] (404)
    instead of surfacing a resolver error. *)
-let keeper_exists state keeper_name =
-  Keeper_status_detail.keeper_exists_config
-    ~config:(Mcp_server.workspace_config state)
-    keeper_name
+let keeper_exists ~config keeper_name =
+  Keeper_status_detail.keeper_exists_config ~config keeper_name
 
 let keeper_tool_response ~(config : Workspace.config) ~project ~sw ~clock state ~tool_name ~args =
   match
@@ -436,17 +434,20 @@ let keeper_tool_response ~(config : Workspace.config) ~project ~sw ~clock state 
   | None ->
       `Service_unavailable, Channel_gate.error_json "keeper dispatch unavailable"
 
-let respond_keeper_tool_json ?config ?(project = Fun.id) ~sw ~clock state request reqd ~tool_name ~args =
+let sandbox_read_work_kind = Pool_work.Io
+
+let respond_keeper_tool_json ?config ?(project = Fun.id) ?(kind = Pool_work.Cpu)
+    ~sw ~clock state request reqd ~tool_name ~args =
   let config = match config with
     | Some config -> config
     | None -> Mcp_server.workspace_config state in
-  (* The only callers dispatch Keeper list/status reads. Metadata, history,
-     ledger projection and JSON encoding belong off the HTTP scheduler;
-     writing the completed response stays on the request's own domain. *)
+  (* Metadata, history, ledger projection and JSON encoding belong off the
+     HTTP scheduler; the sandbox read uses IO weight because it can wait for
+     runtime processes. The response stays on the request's own domain. *)
   let status, body =
     Server_dashboard_http_runtime_support.run_dashboard_compute
       ~mode:Server_dashboard_http_runtime_support.Offloaded_readonly
-      ~sw ~clock ~config ~kind:Pool_work.Cpu ~name:__FUNCTION__
+      ~sw ~clock ~config ~kind ~name:__FUNCTION__
       (fun ~config ~sw ->
         let status, json =
           keeper_tool_response ~config ~project ~sw ~clock state ~tool_name ~args
@@ -514,7 +515,8 @@ let handle_gate_keepers ~sw ~clock state request reqd =
 (** GET /api/v1/gate/keeper-status?name=<keeper>
 
     Authenticated single-keeper status for connector control routes. *)
-let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
+let handle_gate_keeper_status_by_name ?config ?(sandbox_observation = false) ~sw ~clock state request reqd =
+  let config = match config with Some config -> config | None -> Mcp_server.workspace_config state in
   match query_param request "name" with
   | Some raw_name ->
       let name = String.trim raw_name in
@@ -525,7 +527,7 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
         (* Typed 404: existence is answered by the meta layer before the
            status dispatch runs, so the proxy below never has to guess
            not-found back out of a rendered error. *)
-        match keeper_exists state name with
+        match keeper_exists ~config name with
         | Error err ->
             respond_json_value_with_cors ~status:`Service_unavailable request
               reqd
@@ -534,12 +536,66 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
             respond_json_value_with_cors ~status:`Not_found request reqd
               (Channel_gate.error_json ("unknown keeper: " ^ name))
         | Ok true ->
-            let args = `Assoc [ ("name", `String name) ] in
-            respond_keeper_tool_json ~sw ~clock state request reqd
+            let args = `Assoc
+              ([ ("name", `String name) ]
+               @ if sandbox_observation then
+                   [ ("fast", `Bool true)
+                   ; ("include_repository_checkouts", `Bool false) ]
+                 else []) in
+            let kind = if sandbox_observation then sandbox_read_work_kind else Pool_work.Cpu in
+            respond_keeper_tool_json ~config ~kind ~sw ~clock state request reqd
               ~tool_name:"masc_keeper_status" ~args)
   | None ->
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (Channel_gate.error_json "name is required")
+
+let handle_gate_keeper_kata_name ~config ~sw ~clock _state request reqd =
+  match query_param request "name" with
+  | None | Some "" ->
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (Channel_gate.error_json "name is required")
+  | Some raw_name ->
+    let name = String.trim raw_name in
+    if name = "" then
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (Channel_gate.error_json "name is required")
+    else
+      let status, body =
+        Server_dashboard_http_runtime_support.run_dashboard_compute
+          ~mode:Server_dashboard_http_runtime_support.Offloaded_readonly
+          ~sw ~clock ~config ~kind:sandbox_read_work_kind ~name:__FUNCTION__
+          (fun ~config ~sw:_ ->
+             match Keeper_status_detail.kata_name_observation_config ~config ~keeper_name:name
+                     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()) with
+             | Ok json -> `OK, Yojson.Safe.to_string json
+             | Error detail -> `Bad_gateway, Yojson.Safe.to_string (Channel_gate.error_json detail)) in
+      respond_json_with_cors ~status request reqd body
+
+let capture_required_workspace state request =
+  (* Capture once: workspace_scope is atomic and can switch while a read is
+     in flight. Admission and the handler must name the same config. *)
+  let config = Mcp_server.workspace_config state in
+  match Server_auth.validate_read_workspace_precondition
+      ~config request with
+  | Ok Server_auth.Workspace_read_unbound -> Error Workspace.Invalid_workspace_precondition
+  | Ok Server_auth.Workspace_read_matched -> Ok config
+  | Error error -> Error error
+;;
+
+module Sandbox_read_for_testing = struct
+  let work_kind = sandbox_read_work_kind
+  let capture_workspace = capture_required_workspace
+end
+
+let with_required_workspace_read state handler request reqd =
+  match capture_required_workspace state request with
+  | Ok config ->
+    Http_server_eio.Response.with_scoped_headers [Workspace.read_precondition_admission_header]
+      (fun () -> handler ~config state request reqd)
+  | Error error ->
+    let body, status = Server_auth.read_workspace_precondition_error_response error in
+    respond_json_value_with_cors ~status request reqd body
+;;
 
 (** GET /api/v1/gate/keeper-sandbox-logs?name=<keeper>&tail=<n>
 
@@ -548,8 +604,8 @@ let handle_gate_keeper_status_by_name ~sw ~clock state request reqd =
     container id.
 
     A profile that keeps no container on this host is a normal answer, not a
-    gateway fault: it returns 200 with state="no_local_stream". 502 stays
-    reserved for a container runtime that was asked and failed. *)
+    gateway fault: it returns 200 with state="no_local_stream". A 502 means
+    that the local log execution context or runtime could not be read. *)
 let handle_gate_keeper_sandbox_logs state request reqd =
   let respond ?(status = `OK) value =
     (* Container stdout/stderr can contain credentials. It is deliberately
@@ -793,6 +849,17 @@ let add_routes ~sw ~clock router =
 
   |> Server_route.get (Server_route.Tool { tool_name = "channel_gate" }) "/api/v1/gate/keeper-status" (fun state request reqd ->
          handle_gate_keeper_status_by_name ~sw ~clock state request reqd
+       )
+
+  |> Server_route.get (Server_route.Tool_observation { tool_name = "channel_gate" }) "/api/v1/gate/keeper-sandbox-status" (fun state request reqd ->
+         with_required_workspace_read state
+           (fun ~config state request reqd ->
+              handle_gate_keeper_status_by_name ~config ~sandbox_observation:true
+                ~sw ~clock state request reqd) request reqd
+       )
+
+  |> Server_route.get (Server_route.Tool_observation { tool_name = "channel_gate" }) "/api/v1/gate/keeper-kata-name" (fun state request reqd ->
+         with_required_workspace_read state (handle_gate_keeper_kata_name ~sw ~clock) request reqd
        )
 
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/gate/keeper-sandbox-logs" (fun state _agent_name request reqd ->

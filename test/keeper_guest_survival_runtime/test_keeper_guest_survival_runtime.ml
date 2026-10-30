@@ -762,13 +762,21 @@ let process_step root operation =
             ~network_mode:effective_network () in
         Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () ->
           Turn.microvm_remote_endpoint ~timeout_sec:10. next) in
-      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
-        Result.bind (next_turn ()) (fun _ -> next_turn ()))
+      let first = Turn.microvm_remote_endpoint ~timeout_sec:10. runtime in
+      let second = next_turn () in
+      let third = next_turn () in
+      save_json (Filename.concat root "handoff-results")
+        (`List (List.map (fun result -> `Bool (Result.is_ok result)) [first; second; third]));
+      third
     | ("resource-network-alias" | "resource-base-alias"
       | "resource-link-unknown-network-alias" | "resource-link-unknown-base-alias") as change ->
-      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
-        let unknown_link = change = "resource-link-unknown-network-alias"
-          || change = "resource-link-unknown-base-alias" in
+      let unknown_link = change = "resource-link-unknown-network-alias"
+        || change = "resource-link-unknown-base-alias" in
+      let first = Turn.microvm_remote_endpoint ~timeout_sec:10. runtime in
+      (match first, unknown_link with
+       | Error _, true | Ok _, false -> ()
+       | Error detail, false -> fail detail
+       | Ok _, true -> fail "unresolved symlink application supplied an execution endpoint");
         let later = Filename.concat (fixture_work_root root) "later" in
         Fs_compat.mkdir_p later;
         write (Filename.concat later "dune-project") "(lang dune 3.20)\n";
@@ -802,8 +810,27 @@ let process_step root operation =
         let next = Turn.create ~config:next_config ~meta:next_meta ~image:(Ok "fixture:image")
             ~network_mode:next_network () in
         Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () ->
-          Turn.microvm_remote_endpoint ~timeout_sec:10. next))
-    | "resource-reboot" ->
+          Turn.microvm_remote_endpoint ~timeout_sec:10. next)
+    | "resource-return-scan-retry" ->
+      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
+        let guest_path = Filename.concat root "guest.json" in
+        let running = json guest_path in
+        save_json guest_path (replace "status" (`Assoc ["state", `String "stopped"]) running);
+        (match Turn.microvm_attached_endpoint ~timeout_sec:10. ~config ~meta:(meta ()) () with
+         | Error _ -> () | Ok _ -> fail "the stopped guest supplied an endpoint");
+        save_json guest_path running;
+        (* Retain this runtime object's Running state, while modeling an
+           empty disposable build disk behind its retained work-tree links. *)
+        Fs_compat.remove_tree (fixture_build_root root);
+        Fs_compat.mkdir_p (fixture_build_root root);
+        write (Filename.concat root "scan-fail-first") "";
+        check bool "the cached runtime refuses its failed scan" true
+          (Result.is_error (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime));
+        check bool "work-root readiness alone does not finish build preparation" true
+          (Turn.is_microvm_guest_booted ~config ~meta:(meta ()) ());
+        Turn.microvm_remote_endpoint ~timeout_sec:10. runtime)
+    | ("resource-reboot" | "resource-reboot-target-failure"
+      | "resource-reboot-scan-failure") as change ->
       Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
         let later = Filename.concat (fixture_work_root root) "later" in
         Fs_compat.mkdir_p (Filename.concat later "_build");
@@ -818,6 +845,11 @@ let process_step root operation =
         check bool "the stopped observation invalidates root readiness" false
           (Turn.is_microvm_guest_booted ~config ~meta:(meta ()) ());
         Turn.cleanup runtime;
+        (match change with
+         | "resource-reboot-target-failure" -> write (Filename.concat root "build-mkdir-fails") ""
+         | "resource-reboot-scan-failure" -> write (Filename.concat root "scan-fail-first") ""
+         | "resource-reboot" -> ()
+         | _ -> fail "unknown reboot preparation scenario");
         let next = Turn.create ~config ~meta:(meta ()) ~image:(Ok "fixture:image") ~network_mode () in
         Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () ->
           Turn.microvm_remote_endpoint ~timeout_sec:10. next))
@@ -863,7 +895,8 @@ let process_step root operation =
       Error detail
     | ("effect-stopped-return" | "effect-absent-return" | "effect-replacement"
       | "effect-unknown-return" | "effect-missing-snapshot-return") as change ->
-      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
+      let first = Turn.microvm_remote_endpoint ~timeout_sec:10. runtime in
+      save_json (Filename.concat root "initial-handoff") (`Bool (Result.is_ok first));
         let guest_path = Filename.concat root "guest.json" in
         let saved = json guest_path in
         let snapshot = Keeper_microvm_github_identity.host_path ~base_path:root
@@ -902,9 +935,10 @@ let process_step root operation =
         let next = Turn.create ~config ~meta:(meta ()) ~image:(Ok "fixture:image")
             ~network_mode:effective_network () in
         Fun.protect ~finally:(fun () -> Turn.cleanup next) (fun () ->
-          Turn.microvm_remote_endpoint ~timeout_sec:10. next))
+          Turn.microvm_remote_endpoint ~timeout_sec:10. next)
     | "replace-failed-after-uncertain-build" ->
-      Result.bind (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime) (fun _ ->
+      check bool "the uncertain preparation refuses its initial handoff" true
+        (Result.is_error (Turn.microvm_remote_endpoint ~timeout_sec:10. runtime));
         (* End the first turn without stopping its persistent guest. The build
            effect was sent but its outcome was not confirmed. *)
         Turn.cleanup runtime;
@@ -925,7 +959,7 @@ let process_step root operation =
              (Astring.String.is_infix ~affix:"microvm_teardown_failed" detail)
          | Ok _ -> fail "replacement unexpectedly removed the guest");
         check string "failed replacement kept the original guest" original (read guest_path);
-        run_turn "fixture:image")
+        run_turn "fixture:image"
     | "identity-foreign" ->
       Result.bind (prepare_identity ()) (fun _ ->
         let directory = value (Keeper_github_identity.ensure_config_dir ~config ~keeper_name:keeper) in
@@ -1519,14 +1553,47 @@ let test_confirmed_reboot_recreates_targets_without_cleanup_replay () = with_fix
     (List.length (entries root "requests"));
   check int "the recreated volume triggered a fresh scan" 2 (List.length (build_scan_calls root))
 
+let test_reboot_refuses_unprepared_build_targets () =
+  List.iter (fun operation -> with_fixture (fun root ->
+    initialize_build_filesystem root;
+    let status, stderr = step_captured root operation in
+    check bool (operation ^ ": unprepared targets refuse execution: " ^ stderr)
+      true (status = Unix.WEXITED 2);
+    List.iter (fun checkout ->
+      let link = Filename.concat (Filename.concat (fixture_work_root root) checkout) "_build" in
+      check string "the persistent build link is preserved" ("/masc-build/" ^ checkout)
+        (Unix.readlink link);
+      check bool "an absent target is not reported ready" false
+        (Sys.file_exists (Filename.concat (fixture_build_root root) checkout))) ["ready"; "new"];
+    check string "later work survives refused preparation" "output after the first handoff"
+      (read (Filename.concat (fixture_work_root root) "later/_build/new-output"));
+    check int "the refused reboot does not replay cleanup" 1
+      (List.length (entries root "requests"));
+    check int "the failed read or mkdir does not replay symlink application" 1
+      (List.length (calls root |> List.filter (List.mem "masc-build-link")))))
+    ["resource-reboot-target-failure"; "resource-reboot-scan-failure"]
+
+let test_cached_runtime_retries_an_incomplete_scan () = with_fixture @@ fun root ->
+  initialize_build_filesystem root;
+  let status, stderr = step_captured root "resource-return-scan-retry" in
+  check bool ("the same runtime recovers after its failed scan: " ^ stderr)
+    true (status = Unix.WEXITED 0);
+  List.iter (assert_modeled_build_link root) ["ready"; "new"];
+  check int "the cached runtime re-enters preparation after a failed scan" 3
+    (List.length (build_scan_calls root));
+  check int "retry does not repeat cleanup" 1 (List.length (entries root "requests"));
+  check int "the guest remains the existing running guest" 1 (count "run" root);
+  check int "only the initial link application is sent" 1
+    (List.length (calls root |> List.filter (List.mem "masc-build-link")))
+
 let test_unknown_symlink_effect_survives_resource_aliases () =
   List.iter (fun operation -> with_fixture (fun root ->
     initialize_build_filesystem root;
     write (Filename.concat root "build-effect-status-2-link") "";
     write (Filename.concat root "apply-before-build-failure") "";
     let status, stderr = step_captured root operation in
-    (match status with Unix.WEXITED 0 -> ()
-     | _ -> failf "%s: alias recovery failed: %s" operation stderr);
+    check bool (operation ^ ": unresolved symlink refuses alias handoff: " ^ stderr)
+      true (status = Unix.WEXITED 2);
     List.iter (assert_modeled_build_link root) ["ready"; "new"];
     let later = Filename.concat (fixture_work_root root) "later" in
     check string "the later checkout source survives" "(lang dune 3.20)\n"
@@ -1583,7 +1650,9 @@ let test_terminal_cleanup_failure_permits_handoff_without_resending () =
 let test_scan_failure_retries_on_the_next_turn_without_repeating_handoff () = with_fixture @@ fun root ->
   write (Filename.concat root "scan-fail-first") "";
   write (Filename.concat root "scan-output") scan_fixture_output;
-  check bool "three turns remain usable" true (step root "scan-retry" = Unix.WEXITED 0);
+  check bool "a later verified scan recovers the handoff" true (step root "scan-retry" = Unix.WEXITED 0);
+  check bool "the failed scan withholds only the first endpoint" true
+    (json (Filename.concat root "handoff-results") = `List [`Bool false; `Bool true; `Bool true]);
   check int "failed scan and one successful retry" 2 (List.length (build_scan_calls root));
   check int "first-handoff cleanup was sent only once" 1 (List.length (entries root "requests"));
   let mkdirs = calls root |> List.filter (List.mem "masc-build-mkdir") in
@@ -1596,7 +1665,9 @@ let test_scan_failure_retries_on_the_next_turn_without_repeating_handoff () = wi
 let test_uncertain_link_effect_is_not_replayed_in_the_same_process () = with_fixture @@ fun root ->
   write (Filename.concat root "scan-output") scan_fixture_output;
   write (Filename.concat root "build-mkdir-fails") "";
-  check bool "three turns remain usable" true (step root "scan-retry" = Unix.WEXITED 0);
+  check bool "unconfirmed target preparation refuses execution" true (step root "scan-retry" = Unix.WEXITED 2);
+  check bool "every unprepared handoff is refused" true
+    (json (Filename.concat root "handoff-results") = `List [`Bool false; `Bool false; `Bool false]);
   check int "the uncertain effect does not cause another scan" 1 (List.length (build_scan_calls root));
   let mkdirs = calls root |> List.filter (List.mem "masc-build-mkdir") in
   check int "the possibly applied mkdir is not replayed" 1 (List.length mkdirs);
@@ -1610,9 +1681,8 @@ let test_failed_replacement_keeps_uncertain_build_effect () =
     write (Filename.concat root "scan-output") scan_fixture_output;
     write (Filename.concat root ("build-effect-status-2-" ^ failed_kind)) "";
     let status, stderr = step_captured root "replace-failed-after-uncertain-build" in
-    (match status with
-     | Unix.WEXITED 0 -> ()
-     | _ -> failf "%s: same-process replacement and re-adoption failed: %s" failed_kind stderr);
+    check bool (failed_kind ^ ": replacement does not authorize unverified preparation: " ^ stderr)
+      true (status = Unix.WEXITED 2);
     check bool "the first effect outcome is reported unverified" true
       (Astring.String.is_infix ~affix:"microvm_build_link_effect_unverified" stderr);
     check int "the same guest is booted once" 1 (count "run" root);
@@ -1634,13 +1704,16 @@ let test_guest_readiness_changes_do_not_replay_work_volume_effects () =
       write (Filename.concat root "scan-output") scan_fixture_output;
       Option.iter (fun marker -> write (Filename.concat root marker) "") marker;
       let status, stderr = step_captured root operation in
-      (match status with
-       | Unix.WEXITED 0 -> ()
-       | _ -> failf "%s: retained effect fixture failed: %s" operation stderr);
-      check int "cleanup is sent once despite guest readiness loss" 1
-        (List.length (entries root "requests"));
       let invalidated = List.mem operation
           ["effect-stopped-return"; "effect-absent-return"; "effect-replacement"] in
+      let recovered = marker = None
+        || (invalidated && marker = Some "build-effect-status-2-mkdir") in
+      check bool (operation ^ ": only verified preparation admits execution: " ^ stderr)
+        true (status = Unix.WEXITED (if recovered then 0 else 2));
+      check bool "the initial failed preparation withheld its endpoint" true
+        (json (Filename.concat root "initial-handoff") = `Bool (marker = None));
+      check int "cleanup is sent once despite guest readiness loss" 1
+        (List.length (entries root "requests"));
       let scans = if invalidated then 2 else 1 in
       let links = if invalidated && first_links = 0 then 1 else first_links in
       check int "only readiness invalidation permits another read-only scan" scans
@@ -1670,7 +1743,9 @@ let test_build_effect_failure_is_not_replayed_in_the_same_process () =
     write (Filename.concat root "scan-output") scan_fixture_output;
     write (Filename.concat root (Printf.sprintf "build-effect-status-%d-%s" failure_status failed_kind)) "";
     let status, stderr = step_captured root "scan-retry" in
-    check bool "three turns remain usable" true (status = Unix.WEXITED 0);
+    check bool "unverified preparation withholds execution endpoints" true (status = Unix.WEXITED 2);
+    check bool "all subsequent unverified handoffs are refused" true
+      (json (Filename.concat root "handoff-results") = `List [`Bool false; `Bool false; `Bool false]);
     let expected_warnings =
       [ (if failed_kind = "mkdir" then "microvm_build_link_mkdir_failed"
          else "microvm_build_link_apply_failed");
@@ -1746,7 +1821,7 @@ let test_real_build_warning_on_the_actual_scan_path () =
 let test_invalid_or_oversized_scan_never_dispatches_link_effects () =
   List.iter (fun output -> with_fixture (fun root ->
     write (Filename.concat root "scan-output") output;
-    check bool "three turns remain usable" true (step root "scan-retry" = Unix.WEXITED 0);
+    check bool "unverified scan never supplies an execution endpoint" true (step root "scan-retry" = Unix.WEXITED 2);
     check int "each new turn retries only the read" 3 (List.length (build_scan_calls root));
     check int "first handoff is still sent once" 1 (List.length (entries root "requests"));
     let effects = calls root |> List.filter (fun args ->
@@ -2283,6 +2358,8 @@ let () =
         test_case "fresh process adopts without boot effects" `Quick test_fresh_process_adopts_without_boot_effects;
         test_case "work resource aliases preserve later build output" `Quick test_work_resource_alias_does_not_cleanup_later_output;
         test_case "reboot restores targets without replaying cleanup" `Quick test_confirmed_reboot_recreates_targets_without_cleanup_replay;
+        test_case "reboot refuses unprepared build targets" `Quick test_reboot_refuses_unprepared_build_targets;
+        test_case "cached runtime retries an incomplete scan" `Quick test_cached_runtime_retries_an_incomplete_scan;
         test_case "unknown symlink effect survives work resource aliases" `Quick test_unknown_symlink_effect_survives_resource_aliases;
         test_case "unresolved cleanup refuses later owner handoffs" `Quick test_unresolved_cleanup_refuses_later_handoffs_without_resending;
         test_case "terminal cleanup failures permit later owner handoffs" `Quick test_terminal_cleanup_failure_permits_handoff_without_resending;

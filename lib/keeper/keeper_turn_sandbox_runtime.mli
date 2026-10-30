@@ -82,8 +82,8 @@ val microvm_remote_endpoint_of_running :
     host-side credential snapshot, observes the named running guest and checks
     its workspace, keeper and network labels before returning the endpoint.
     This proves neither the guest's mounted inode nor a fence against later
-    guest replacement. Refuses an unresolved first-handoff cleanup on the
-    shared work volume; diagnostic reads use {!microvm_attached_endpoint}.
+    guest replacement. Refuses unresolved cleanup or link applications on
+    the shared work volume; diagnostic reads use {!microvm_attached_endpoint}.
     Consumes any still-available cleanup opportunity before granting execution
     so a later prepared handoff preserves output created through this endpoint.
     Does not start a guest or prepare build output. *)
@@ -104,8 +104,12 @@ val microvm_remote_endpoint :
     cleanup refuses handoff because it may still act on later build output.
     Guest invalidation retains these effects while allowing a fresh read-only
     scan and idempotent target creation on the disposable build volume.
-    Unresolved link applications are not resent; only targets of observed
-    correct links are prepared in that case. This is
+    Unresolved link applications are not resent and refuse execution handoff:
+    a current read-only scan does not prove the original application stopped.
+    Handoff also requires a completed link scan and target preparation in the
+    current guest readiness generation. Scan or target failures do not supply
+    an execution endpoint. A later call re-enters incomplete preparation even
+    when the work root is already ready. This is
     process-local evidence, not a durable receipt across server restarts or an
     instance/mount fence against an externally replaced guest.
     If the snapshot is missing or

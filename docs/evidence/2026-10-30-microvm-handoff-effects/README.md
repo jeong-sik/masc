@@ -55,6 +55,25 @@ preservation, reboot target restoration, unknown cleanup/link effects, terminal
 nonzero/timeout and explicit refusal. Parse checks are not test execution.
 Focused CI is requested separately for the exact published head.
 
+## Follow-up execution admission
+
+An extraction of the complete handoff and owned endpoint admission at parent
+`899a6dbafcef29f9e84a4c38f97003f3397f3955` reproduced successful handoff after
+a failed link scan, failed target mkdir, or retained unresolved link application.
+The follow-up requires current-generation build preparation and retains the
+shared unresolved-effect refusal through final endpoint admission. A separate
+extraction reproduced a cached Running runtime skipping a failed scan's retry;
+its outer endpoint path now re-enters incomplete Apple build preparation.
+
+The follow-up extraction executes actual state/classifier, pure build plan,
+handoff, owned endpoint admission and outer endpoint source with dependency
+stubs: 20 scenarios and 111 assertions passed with warning 4 fatal. The real
+cleanup shell runs only in temporary host directories. Native transport,
+identity/owner observations, target effects and the already-Running state are
+modeled; this does not execute the registered provider suite or a real guest.
+Before/after source hashes and results are under
+`artifacts/pr-4c-response-20261030T0900Z/46924-resource-effects-review/`.
+
 ## Remaining limits
 
 No local Dune build, full regression, deployment or live Apple recovery probe

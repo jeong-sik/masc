@@ -226,6 +226,14 @@ let microvm_build_cleanup_admission ~backend ~keeper_name =
   | Build_cleanup_confirmed | Build_cleanup_finished_incomplete -> Ok ()
 ;;
 
+let microvm_build_link_effect_admission ~backend ~keeper_name =
+  if (register_microvm_work_effects ~backend ~keeper_name).links_unverified then
+    Error (Printf.sprintf
+      "microvm_build_link_effect_unverified: keeper %s has an unresolved symlink application; a read-only scan does not prove it stopped, so a new execution handoff is unavailable"
+      keeper_name)
+  else Ok ()
+;;
+
 type microvm_work_root_ready =
   { key : microvm_work_root_key
   ; generation : unit ref
@@ -292,6 +300,16 @@ let rec set_microvm_build_links_state ~base_path ~backend ~container_name genera
     then set_microvm_build_links_state ~base_path ~backend ~container_name generation ~expected state
     else true
   | Some _ | None -> false
+;;
+
+let microvm_build_links_admission ~base_path ~backend ~keeper_name ~container_name =
+  let open Result.Syntax in
+  let* () = microvm_build_link_effect_admission ~backend ~keeper_name in
+  match microvm_work_root_entry ~base_path ~backend ~container_name with
+  | Some {root_ready=true; build_links_state=Build_links_prepared; _} -> Ok ()
+  | Some {build_links_state=(Build_links_not_prepared | Build_links_effect_unverified | Build_links_prepared); _}
+  | None ->
+    Error "microvm_build_preparation_unverified: the current guest link scan and target preparation are incomplete; execution handoff is unavailable"
 ;;
 
 let rec forget_microvm_work_root ~backend ~container_name =
@@ -1468,7 +1486,8 @@ module For_testing_microvm = struct
 end
 
 
-(** Best-effort Apple build-link preparation. A read-only scan failure can be
+(** Apple build-link preparation. Its caller admits execution only after the
+    current generation is prepared. A read-only scan failure can be
     retried by a later turn. Once an effect may have been sent, its unknown
     outcome survives guest readiness invalidation for this server process.
     A process restart loses this evidence; retention does not establish
@@ -2499,7 +2518,13 @@ let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
      | Build_links_prepared | Build_links_effect_unverified -> ()
      | Build_links_not_prepared ->
        ensure_microvm_build_links ~timeout_sec t ~container_name ~generation:entry.generation);
-  Ok ()
+  (match microvm_work_root_entry ~base_path:t.config.base_path ~backend ~container_name with
+   | Some ready when ready.generation == generation ->
+     microvm_build_links_admission ~base_path:t.config.base_path ~backend
+       ~keeper_name:t.meta.name ~container_name
+     |> Result.map_error (fun detail -> Guest_provisions_unavailable detail)
+   | Some _ | None ->
+     Error (Adopted_guest_volume_unverified "microvm guest readiness changed during build preparation"))
 
 let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
   let open Result.Syntax in
@@ -3263,7 +3288,8 @@ let apple_endpoint_of_snapshot_owned ~fs ~scope
            let* () = match admission with
              | Diagnostic_read -> Ok ()
              | Existing_execution | Prepared_execution ->
-               microvm_build_cleanup_admission ~backend ~keeper_name:meta.name in
+               let* () = microvm_build_cleanup_admission ~backend ~keeper_name:meta.name in
+               microvm_build_link_effect_admission ~backend ~keeper_name:meta.name in
            match admission with
            | Diagnostic_read -> Ok ()
            | Existing_execution ->
@@ -3273,9 +3299,8 @@ let apple_endpoint_of_snapshot_owned ~fs ~scope
                ~expected:Build_cleanup_available Build_cleanup_skipped_not_sent);
              Ok ()
            | Prepared_execution ->
-             if microvm_work_root_ready ~base_path:config.base_path ~backend ~container_name
-             then Ok ()
-             else Error "microvm guest readiness changed; retry to prepare it before execution") in
+             microvm_build_links_admission ~base_path:config.base_path ~backend
+               ~keeper_name:meta.name ~container_name) in
     let* () = Keeper_microvm_shim_readiness.verify ~fs ~base_path:config.base_path
         ~backend ~guest_name:container_name
       |> Result.map_error Keeper_microvm_shim_readiness.error_message in
@@ -3342,7 +3367,13 @@ let microvm_remote_endpoint ?timeout_sec (t : t) =
   | Ok container_name ->
     let root =
       Result.bind (microvm_backend_of t) (fun backend ->
-        if microvm_work_root_ready ~base_path:t.config.base_path ~backend ~container_name
+        let prepared = match backend with
+          | Keeper_microvm_backend.Apple_container ->
+            Result.is_ok (microvm_build_links_admission ~base_path:t.config.base_path
+              ~backend ~keeper_name:t.meta.name ~container_name)
+          | Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox ->
+            microvm_work_root_ready ~base_path:t.config.base_path ~backend ~container_name in
+        if prepared
         then Ok ()
         else match backend with
           | Keeper_microvm_backend.Apple_container ->

@@ -169,6 +169,12 @@ aliases and are not resent; only targets of links currently observed to be
 correct are prepared in that case. Real directories and differently targeted
 links are preserved.
 
+An unresolved symlink application still refuses execution handoff: a current
+read-only scan does not prove the original operation stopped. Execution also
+requires a completed link scan and required target preparation in the current
+guest readiness generation. A failed read-only scan may be retried by a later
+handoff; a warning does not supply a usable execution endpoint.
+
 These records are process-local and use nominal resource names. A server
 restart loses them and its first handoff can attempt cleanup again. Do not
 restart to recover an unknown effect. Neither durable no-replay across server

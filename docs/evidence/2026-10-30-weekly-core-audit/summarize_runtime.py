@@ -11,9 +11,9 @@ import statistics
 from pathlib import Path
 
 PROMPT_BLOCKS = frozenset({
-    "active_goals", "admitted_scheduled_input", "dynamic_context",
+    "active_goals", "admitted_scheduled_input", "completion_authority", "dynamic_context",
     "keeper_instructions", "librarian_working_context", "memory_os_recall",
-    "recalled_memory", "recalled_memory_status", "skill_compositions", "temporal_summary",
+    "operator_note", "recalled_memory", "recalled_memory_status", "skill_compositions", "temporal_summary",
 })
 RECALL_STATUSES = frozenset({"started", "response_received", "judgment_completed", "provider_failed", "cancelled"})
 RECALL_KINDS = frozenset({"turn", "candidates", "time"})
@@ -159,10 +159,13 @@ def main():
                     continue
                 reported = response.get("usage")
                 if isinstance(reported, dict):
-                    counts["responses_with_usage"] += 1
-                    for field in ("input_tokens", "output_tokens"):
-                        if isinstance(reported.get(field), int):
+                    fields = ("input_tokens", "output_tokens")
+                    if all(type(reported.get(field)) is int and reported[field] >= 0 for field in fields):
+                        counts["responses_with_usage"] += 1
+                        for field in fields:
                             usage[field] += reported[field]
+                    else:
+                        invalid["invalid_recall_usage"] += 1
 
     result = {
         "captured_at_utc": time_string(dt.datetime.now(dt.timezone.utc).timestamp()),

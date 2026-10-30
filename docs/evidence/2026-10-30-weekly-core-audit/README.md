@@ -44,3 +44,5 @@ The provider window stays fixed in this command, but last-prompt and retained
 recall files change as the server operates and rotates files. A later aggregate
 is a new observation, not a byte-identical reproduction of this capture. The
 script is read-only and outputs aggregated numbers, times, and closed block names.
+It rejects a missing Keeper runtime directory; an empty result does not prove
+that a rotated or missing file never existed.

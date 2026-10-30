@@ -641,34 +641,30 @@ let test_slack_credential_error_is_a_closed_sum () =
 let test_telegram_connector_json_reads_runtime_status () =
   with_temp_dir @@ fun dir ->
   with_sidecar_paths "telegram" dir (fun () ->
-    ignore
-      (Channel_gate_telegram_state.bind ~channel_id:"12345" ~keeper_name:"luna"
-         ~actor_name:"dashboard");
-    let status_path = Filename.concat dir "telegram-status.json" in
-    Yojson.Safe.to_file status_path
-      (`Assoc
-        [
-          ("updated_at", `String (python_utc_iso_now ()));
-          ("connected", `Bool true);
-          ("gate_base_url", `String "http://127.0.0.1:8935");
-          ("gate_healthy", `Bool true);
-          ("gate_health_checked_at", `String (python_utc_iso_now ()));
-          ("last_message_at", `String "2026-06-06T00:00:00Z");
-          ("messages_processed", `Int 7);
-          ("messages_failed", `Int 1);
-          ("binding_source", `String "persisted");
-          ("runtime_bindings_count", `Int 1);
-          ("pid", `Int 4242);
-        ]);
-    let json = Channel_gate_telegram_state.connector_json () in
-    check string "connector id" "telegram"
-      (json |> U.member "connector_id" |> U.to_string);
-    check bool "available" true (json |> U.member "available" |> U.to_bool);
-    check bool "connected" true (json |> U.member "connected" |> U.to_bool);
-    check int "messages processed" 7
-      (json |> U.member "messages_processed" |> U.to_int);
-    check int "configured bindings count" 1
-      (json |> U.member "configured_bindings" |> U.to_list |> List.length))
+    with_env "TELEGRAM_BOT_TOKEN" (Some "fixture-telegram-token") (fun () ->
+      Fun.protect ~finally:Channel_gate_telegram_state.record_not_configured (fun () ->
+        (match Channel_gate_telegram_state.bind ~channel_id:"12345" ~keeper_name:"luna"
+                 ~actor_name:"dashboard" with
+         | Ok _ -> ()
+         | Error detail -> fail detail);
+        (* Telegram now owns liveness in its native poll loop. A stale sidecar
+           file must not replace the in-process observation. *)
+        Yojson.Safe.to_file (Filename.concat dir "telegram-status.json")
+          (`Assoc ["connected", `Bool false; "messages_processed", `Int 99]);
+        Channel_gate_telegram_state.record_poll_ok ~bot_user_id:4242L ~next_offset:(Some 17L);
+        let json = Channel_gate_telegram_state.connector_json () in
+        check string "connector id" "telegram"
+          (json |> U.member "connector_id" |> U.to_string);
+        check string "status source" "in_process_gateway"
+          (json |> U.member "status_source" |> U.to_string);
+        check bool "available" true (json |> U.member "available" |> U.to_bool);
+        check bool "connected from the native poll" true (json |> U.member "connected" |> U.to_bool);
+        check bool "native bot identity" true (json |> U.member "bot_user_id" = `Intlit "4242");
+        check bool "native poll cursor" true (json |> U.member "next_offset" = `Intlit "17");
+        check bool "sidecar message count is not projected" true
+          (json |> U.member "messages_processed" = `Null);
+        check int "configured bindings count" 1
+          (json |> U.member "configured_bindings" |> U.to_list |> List.length))))
 
 let test_slack_connector_json_carries_identity () =
   with_temp_dir @@ fun dir ->

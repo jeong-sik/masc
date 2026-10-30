@@ -16,7 +16,7 @@ let fleet_fsm_action_payload ~keeper_name ~kind ~reason ~snapshot ~execution =
 let fleet_fsm_message_payload ~keeper_name ~reason ~snapshot ~execution =
   let open Result.Syntax in
   let+ message = Prompt_registry.render_prompt_template Prompt_names.keeper_fleet_diagnose
-    ["keeper_name", keeper_name; "reason", reason] in
+    ["keeper_name", keeper_name; "reason", reason] |> Result.map String.trim in
   match
     fleet_fsm_action_payload ~keeper_name ~kind:"diagnose" ~reason ~snapshot ~execution
   with

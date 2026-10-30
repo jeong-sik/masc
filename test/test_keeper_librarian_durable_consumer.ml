@@ -1960,9 +1960,17 @@ let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
          commit_called := true;
          Consumer.Memory_committed)
    with
-   | Error (Consumer.Counterpart_interval_non_monotone { after; before }) ->
+   | Error (Consumer.Counterpart_interval_non_monotone
+       { after; before; first_boundary_line; end_boundary_line; end_turn_ref
+       ; atom_bound; official_bound }) ->
      check (float 0.001) "prior boundary time" 20.0 after;
-     check (float 0.001) "range end time" 10.0 before
+     check (float 0.001) "range end time" 10.0 before;
+     check int "selected range begins at the second boundary" 2 first_boundary_line;
+     check int "selected range ends at the second boundary" 2 end_boundary_line;
+     check string "selected trace" trace_id (Ids.Turn_ref.trace_id end_turn_ref);
+     check int "selected turn" 2 (Ids.Turn_ref.absolute_turn end_turn_ref);
+     check (option (pair int (float 0.001))) "atom witness" (Some (1, 20.0)) atom_bound;
+     check (option (pair int (float 0.001))) "no official witness" None official_bound
    | Error error -> fail (Consumer.error_to_string error)
    | Ok _ -> fail "non-monotone interval advanced as empty evidence");
   check bool "memory commit is not attempted" false !commit_called;
@@ -4529,20 +4537,39 @@ let test_official_cursor_above_the_range_end_refuses_the_hand_off () =
   append_boundary
     config ~trace_id:trace_c ~turn:1 ~recorded_at:(now +. 300.0) [ message "c" ];
   write_meta config trace_c;
-  (match
-     Consumer.consume_one ~config ~keeper_name
-       ~commit:(fun _original ->
-         fail "the hand-off committed a range that strands the row")
-   with
-   | Error (Consumer.Counterpart_interval_non_monotone { after; before }) ->
-     check (float 0.001) "the refusal names the carried bound" a_ended after;
-     check (float 0.001) "and this range's end" (now -. 100.0) before
-   | Error error -> fail (Consumer.error_to_string error)
-   | Ok _ -> fail "the hand-off advanced past a row no later range would read");
-  match read_progress config with
-  | Some progress ->
-    check string "the position stays on the retired trace" trace_a progress.position.trace_id
-  | None -> fail "the refused pass removed progress"
+  for _attempt = 1 to 2 do
+    (match
+       Consumer.consume_one ~config ~keeper_name
+         ~commit:(fun _original ->
+           fail "the hand-off committed a range that strands the row")
+     with
+     | Error (Consumer.Counterpart_interval_non_monotone
+         { after; before; first_boundary_line; end_boundary_line; end_turn_ref
+         ; atom_bound; official_bound } as error) ->
+       check (float 0.001) "the refusal names the carried bound" a_ended after;
+       check (float 0.001) "and this range's end" (now -. 100.0) before;
+       check int "first selected boundary" 3 first_boundary_line;
+       check int "last selected boundary" 3 end_boundary_line;
+       check string "selected trace" trace_b (Ids.Turn_ref.trace_id end_turn_ref);
+       check int "selected turn" 1 (Ids.Turn_ref.absolute_turn end_turn_ref);
+       check (option (pair int (float 0.001))) "atom witness" (Some (1, a_ended)) atom_bound;
+       check (option (pair int (float 0.001))) "official witness" (Some (2, a_ended)) official_bound;
+       check string "the queued error contains the cursor and selected-range coordinates"
+         (Printf.sprintf
+            "counterpart interval is not monotone: after=%.17g before=%.17g first_boundary_line=3 end_boundary_line=3 end_turn=%s atom_bound=(line=1,recorded_at=%.17g) official_bound=(line=2,recorded_at=%.17g)"
+            a_ended (now -. 100.0) (Ids.Turn_ref.to_string end_turn_ref) a_ended a_ended)
+         (Consumer.error_to_string error)
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "the hand-off advanced past a row no later range would read");
+    (match read_progress config with
+     | Some progress ->
+       check string "the position stays on the retired trace" trace_a progress.position.trace_id
+     | None -> fail "the refused pass removed progress");
+    (match Official.read ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name with
+     | Ok (Some { Official.boundary_line }) -> check int "official cursor remains" 2 boundary_line
+     | Ok None -> fail "the refused pass removed the official cursor"
+     | Error error -> fail (Official.read_error_to_string error))
+  done
 ;;
 
 let test_memory_count_cleanup_without_history () =

@@ -4595,10 +4595,11 @@ let test_official_cursor_above_the_range_end_refuses_the_hand_off () =
   in
   let external_source_before = Fs_compat.load_file_opt external_source_path in
   check bool "fixture has an external source file" true (Option.is_some external_source_before);
-  for attempt = 1 to 2 do
-    (* Reset only the consumer's process-local narrowing marker; this is a
+  for attempt = 1 to 3 do
+    (* Attempt 2 keeps the failure marker and retries the narrowed read.
+       Before attempt 3, reset only that process-local marker; this is a
        restart simulation, not a new process or a reset of other caches. *)
-    if attempt = 2 then Consumer.For_testing.reset_process_state ();
+    if attempt = 3 then Consumer.For_testing.reset_process_state ();
     (match
        Consumer.consume_one ~config ~keeper_name
          ~commit:(fun _original ->

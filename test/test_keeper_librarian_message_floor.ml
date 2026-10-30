@@ -477,19 +477,19 @@ let test_a_restored_omitted_step_cannot_become_a_live_program_decision () =
   let context=step_context () and question=question_input () in
   let prepared=Runtime.prepare_durable_step ~now:1_000_000. ~context question |> ok in
   let runtime=runtime_step ~base_path ~keepers_dir context question in
-  let key=Masc.Prompt_names.librarian in
-  let previous=(Masc.Prompt_registry.resolve_prompt key).override_value in
+  let key=Prompt_names.librarian in
+  let previous=(Prompt_registry.resolve_prompt key).override_value in
   Fun.protect ~finally:(fun () -> match previous with
-    | None -> Masc.Prompt_registry.clear_prompt_override key
-    | Some value -> Masc.Prompt_registry.set_override key value |> ok) (fun () ->
-    Masc.Prompt_registry.set_override key "Legacy question omitting counterpart observations" |> ok;
+    | None -> Prompt_registry.clear_prompt_override key
+    | Some value -> Prompt_registry.set_override key value |> ok) (fun () ->
+    Prompt_registry.set_override key "Legacy question omitting counterpart observations" |> ok;
     let counterpart : Masc.Keeper_counterpart_observation.t =
       {origin=Durable_chat;channel="direct";workspace_id=None;user_id=None;user_name=None;
        authority=External;content="Retained observation not sent by the legacy question"} in
     let p=prepared.preparation in
     let legacy=Runtime.restore_durable_step_preparation ~context
       ~source_input:{p.source_input with counterpart_observations=[counterpart]} ~parsing_now:p.parsing_now
-      ~policy:p.policy ~rule_prompt:p.rule_prompt ~prompt:(Masc.Prompt_registry.resolve_prompt key)
+      ~policy:p.policy ~rule_prompt:p.rule_prompt ~prompt:(Prompt_registry.resolve_prompt key)
       ~output_schema:p.output_schema |> ok in
     Runtime.validate_durable_step_preparation legacy |> ok;
     let proposal=Runtime.validate_durable_step_proposal legacy first_answer

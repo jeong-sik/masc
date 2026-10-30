@@ -2390,14 +2390,20 @@ let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
         | Build_cleanup_not_sent | Build_cleanup_confirmed -> ()))));
   ignore (complete_microvm_work_root ~base_path:t.config.base_path ~backend ~container_name generation);
   (match microvm_work_root_entry ~base_path:t.config.base_path ~backend ~container_name with
-   | Some { generation; root_ready = true; build_cleanup_state = Build_cleanup_confirmed;
-            build_links_state = Build_links_not_prepared; _ } ->
-     ensure_microvm_build_links ~timeout_sec t ~container_name ~generation
-   | Some { build_links_state = Build_links_effect_unverified; _ } ->
-     Log.Keeper.warn ~keeper_name:t.meta.name
-       "microvm_build_link_effect_unverified: guest %s retains an earlier build-link effect or lost its readiness; this process will not resend it or certify the current instance's build links"
-       container_name
-   | Some _ | None -> ());
+   | None -> ()
+   | Some entry ->
+     (match entry.build_links_state with
+      | Build_links_prepared -> ()
+      | Build_links_effect_unverified ->
+        Log.Keeper.warn ~keeper_name:t.meta.name
+          "microvm_build_link_effect_unverified: guest %s retains an earlier build-link effect or lost its readiness; this process will not resend it or certify the current instance's build links"
+          container_name
+      | Build_links_not_prepared ->
+        (match entry.root_ready, entry.build_cleanup_state with
+         | true, Build_cleanup_confirmed ->
+           ensure_microvm_build_links ~timeout_sec t ~container_name ~generation:entry.generation
+         | (true | false), (Build_cleanup_not_sent | Build_cleanup_effect_unverified)
+         | false, Build_cleanup_confirmed -> ())));
   Ok ()
 
 let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =

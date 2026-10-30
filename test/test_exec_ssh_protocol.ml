@@ -506,6 +506,22 @@ let test_acceptance_head_that_is_not_a_frame_is_payload () =
   check bool "short output with no separator is pending" true
     (split_acceptance_head "hello\n" = Head_pending)
 
+(* A stream reader decides one chunk at a time and the host decides again on
+   the whole text afterwards. Both must reach the same answer, so a frame
+   that starts at or past the bound is payload however it arrives. *)
+let test_a_frame_starting_past_the_bound_is_payload () =
+  let open Exec_ssh_protocol in
+  let frame = render_acceptance_frame newest in
+  let last_inside = String.make (acceptance_frame_max_bytes - 1) 'x' in
+  check bool "a frame starting at the last byte inside the bound is read" true
+    (split_acceptance_head (last_inside ^ frame ^ "out")
+     = Head_frame { v = newest; preamble = last_inside; rest = "out" });
+  let first_outside = String.make acceptance_frame_max_bytes 'x' in
+  check bool "a frame starting at the bound is payload" true
+    (split_acceptance_head (first_outside ^ frame) = Head_payload);
+  check bool "so is one starting far past it" true
+    (split_acceptance_head (first_outside ^ first_outside ^ frame) = Head_payload)
+
 (* The stream ended on a head still pending. A frame the wire cut off is not
    payload; everything else is. *)
 let test_a_cut_off_frame_is_not_payload () =
@@ -551,6 +567,8 @@ let () =
           test_acceptance_frame_after_a_transport_line
       ; test_case "is held until it closes" `Quick
           test_acceptance_frame_is_held_until_it_closes
+      ; test_case "a frame starting past the bound is payload" `Quick
+          test_a_frame_starting_past_the_bound_is_payload
       ; test_case "a cut off frame is not payload" `Quick
           test_a_cut_off_frame_is_not_payload
       ; test_case "a head that is not a frame is payload" `Quick

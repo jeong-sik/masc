@@ -588,6 +588,10 @@ let split_acceptance_head (head : string) : acceptance_head =
   let n = String.length head in
   match String.index_opt head rs with
   | None -> if n >= acceptance_frame_max_bytes then Head_payload else Head_pending
+  (* The bound is on where the frame starts, not on how much has arrived, so
+     the answer for a whole stream equals the answer a stream reader reached
+     one chunk at a time: a frame that starts past it is payload to both. *)
+  | Some opening when opening >= acceptance_frame_max_bytes -> Head_payload
   | Some opening ->
     let tail = String.sub head opening (n - opening) in
     (match String.index_from_opt tail 1 rs with

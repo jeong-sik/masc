@@ -306,7 +306,8 @@ type acceptance_head =
         [preamble ^ rest] *)
 
 val acceptance_frame_max_bytes : int
-(** A head that has not resolved within this many bytes is payload. *)
+(** A frame must start before this byte. A head with no record separator by
+    then, or whose first one comes later, is payload. *)
 
 val split_acceptance_head : string -> acceptance_head
 (** Reads the front of a stderr stream. The frame is the first record

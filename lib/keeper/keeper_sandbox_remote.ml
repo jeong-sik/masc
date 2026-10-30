@@ -493,7 +493,7 @@ let trailer_tail_limit = 64 * 1024
 (* The front of a stderr stream is held only while it could still become the
    acceptance frame, and only for a request that asked for one. *)
 type stderr_head =
-  | Head_settled
+  | Head_released
   | Awaiting_head of string
 
 type stderr_stream =
@@ -537,16 +537,16 @@ let stream_payload_chunk stream chunk =
 
 let stream_stderr_chunk stream chunk =
   match stream.head with
-  | Head_settled -> stream_payload_chunk stream chunk
+  | Head_released -> stream_payload_chunk stream chunk
   | Awaiting_head held ->
     let head = held ^ chunk in
     (match Exec_ssh_protocol.split_acceptance_head head with
      | Exec_ssh_protocol.Head_pending -> stream.head <- Awaiting_head head
      | Exec_ssh_protocol.Head_payload ->
-       stream.head <- Head_settled;
+       stream.head <- Head_released;
        stream_payload_chunk stream head
      | Exec_ssh_protocol.Head_frame { preamble; rest; _ } ->
-       stream.head <- Head_settled;
+       stream.head <- Head_released;
        stream.on_accepted ();
        let payload = preamble ^ rest in
        if payload <> "" then stream_payload_chunk stream payload)
@@ -556,9 +556,9 @@ let stream_stderr_chunk stream chunk =
    payload, less a frame the wire cut off. *)
 let settle_stderr_head stream =
   match stream.head with
-  | Head_settled -> ()
+  | Head_released -> ()
   | Awaiting_head held ->
-    stream.head <- Head_settled;
+    stream.head <- Head_released;
     let payload = Exec_ssh_protocol.settle_acceptance_head held in
     if payload <> "" then stream_payload_chunk stream payload
 ;;
@@ -1067,7 +1067,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
            let stderr_stream =
              { callback = Option.map fst stderr_path_stream
              ; tail = ""
-             ; head = (if acceptance_frame then Awaiting_head "" else Head_settled)
+             ; head = (if acceptance_frame then Awaiting_head "" else Head_released)
              ; on_accepted =
                  (fun () ->
                    observation := Execution_unavailable (Transport_unavailable Acceptance_read))

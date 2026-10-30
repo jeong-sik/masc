@@ -104,3 +104,8 @@ including revised placement, selected-action hints, layers/drafts, repeated
 event requests, acknowledged-result/read-failure separation and discarded
 pointer tails. Its own manifest identifies the earlier baseline captures used
 in the paired notice probe; it does not relabel the 38b6 evidence above.
+
+The [2026-10-30 pixel follow-up](pixels-20261030/README.md) adds 11 original
+browser screenshots of that same final executable. It covers the layout
+pairs, Help/detail, event acknowledgement and Context/Help draft return, with
+its own capture conditions and limits.

@@ -2,6 +2,7 @@
 
 Status: final source compiled and manually observed with synthetic data;
 conditional placement revised from actual same-data comparisons.
+Final-source browser pixel observation was completed on 2026-10-30.
 This follows the
 [information-priority study](2026-10-29-tui-panel-input-observation.md) and
 [retained baseline observations](../evidence/research/tui-panel-input-2026-10-29/README.md).
@@ -175,7 +176,7 @@ layout and size changes, `n` then `l` sent `immediate` and `low` for the same
 `fixture-event-01`, incarnation `1`. The fixture acknowledged the requests but
 did not apply or execute them. These observations establish targeting in this
 sequence, not real-server urgency semantics, physical IME/chord delivery or
-human task time. Browser pixel comparison remains unperformed;
+human task time. Those earlier observations did not include browser pixels;
 no user preference or general comprehension
 improvement has been measured.
 
@@ -234,3 +235,26 @@ fits, and Full for overflow or explicit detail. The active panel owns keys;
 Help/detail form explicit children and the conversation preview stays read
 only. This is a supported engineering choice under these conditions, not a
 universal best layout or a measured improvement in human comprehension.
+
+## Final-source pixel follow-up
+
+The [2026-10-30 pixel bundle](../evidence/research/tui-queue-layout-2026-10-29/pixels-20261030/README.md)
+adds 11 original browser PNGs of the same native executable, with synthetic
+data via read-only ttyd. It confirms the displayed Side/Full pair at 120×36,
+Bottom/Full pair for one event at 80×24, and automatic Full for 18 events at
+80×24. The selected event and n/l hints remain visible. Side retains the eight
+authored messages while shortening event text; the tiny Bottom preview can
+show only diagnostics. Detail exposes the selected event's exact identity.
+These visible tradeoffs support the conditional choice above without claiming
+a human readability optimum.
+
+Help/detail return was followed by immediate/low requests for the same exact
+event. Help above Context displayed a paste-loss notice and returned through
+Context to the unchanged draft. The bundle binds browser/terminal geometry,
+font, exported image dimensions, source/binary/fixture hashes and the two operator
+requests. Browser pixel observation is now complete for this bounded scope;
+physical input, human performance, real-server execution and production
+deployment remain separate. No product source or build changed in this phase.
+The captured `23c5ea8` candidate predates the subsequently confirmed merged
+PR #46699 head `9808d2cc2d78ed82d77012cb5f48a5c0df89fb1a`; this is not runtime
+proof for that later head, current main or an installed executable.

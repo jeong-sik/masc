@@ -94,6 +94,9 @@ val librarian_working_context : string
     [working_contexts_rule] variable, so the rule has one text. *)
 val librarian_working_contexts_rule : string
 
+val keeper_memory_selection : string
+val keeper_memory_selection_candidate : string
+val keeper_memory_successor_selection : string
 val workspace_memory_curator : string
 val workspace_memory_briefing : string
 

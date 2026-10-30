@@ -1,0 +1,88 @@
+module O = Keeper_chat_operation
+
+let states =
+  [| None; Some O.Queued; Some (O.Running {started_at=1.});
+     Some (O.Running {started_at=Float.nan});
+     Some (O.Succeeded {completed_at=3.;outcome_ref="done"});
+     Some (O.Failed {completed_at=4.;failure={kind=O.Turn_exception;detail="failure";outcome_ref=None}});
+     Some (O.Cancelled {completed_at=5.}) |]
+
+let same old fresh =
+  if Old_log.operation_state old != New_log.operation_state fresh
+     || Old_log.revision old <> New_log.revision fresh
+     || (Old_log.terminal_replay old = Old_log.Replayed_after_terminal)
+        <> (New_log.terminal_replay fresh = New_log.Replayed_after_terminal)
+  then failwith "operation observations differ"
+
+let differential () =
+  let random = Random.State.make [|2026;10;30|] in
+  for batch = 1 to 2500 do
+    let old, fresh =
+      if batch mod 2 = 0 then
+        Old_log.create ~keeper_name:"k" ~request_id:"r" ~started_at:1.,
+        New_log.create ~keeper_name:"k" ~request_id:"r" ~started_at:1.
+      else
+        Old_log.create_for_source ~keeper_name:"k" ~source:(Old_log.Autonomous_turn "t") ~started_at:1.,
+        New_log.create_for_source ~keeper_name:"k" ~source:(New_log.Autonomous_turn "t") ~started_at:1. in
+    for _ = 1 to 40 do
+      (match Random.State.int random 5 with
+       | 0 -> Old_log.observe_terminal_replay old Old_log.Replay_pending;
+              New_log.observe_terminal_replay fresh New_log.Replay_pending
+       | 1 -> Old_log.observe_terminal_replay old Old_log.Replayed_after_terminal;
+              New_log.observe_terminal_replay fresh New_log.Replayed_after_terminal
+       | _ -> let state = states.(Random.State.int random (Array.length states)) in
+              Old_log.observe_operation_state old state;
+              New_log.observe_operation_state fresh state);
+      same old fresh
+    done
+  done;
+  Printf.printf "differential: 100000 operation and replay observations passed\n%!"
+
+let sink = ref 0
+let old_log () = Old_log.create ~keeper_name:"k" ~request_id:"r" ~started_at:1.
+let new_log () = New_log.create ~keeper_name:"k" ~request_id:"r" ~started_at:1.
+let queued = Some O.Queued
+let running = Some (O.Running {started_at=2.})
+let terminal = Some (O.Succeeded {completed_at=3.;outcome_ref="done"})
+
+let sample oc ~case ~variant ~n f =
+  Gc.full_major ();
+  let allocated = Gc.allocated_bytes () in
+  let cpu = Sys.time () and wall = Unix.gettimeofday () in
+  for _ = 1 to n do f () done;
+  Printf.fprintf oc "%s,%s,%d,%.9f,%.9f,%.0f\n%!" case variant n
+    (Sys.time () -. cpu) (Unix.gettimeofday () -. wall) (Gc.allocated_bytes () -. allocated)
+
+let bench path =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc "case,variant,n,cpu_seconds,wall_seconds,allocated_bytes\n";
+    List.iter (fun case ->
+      for round = 0 to 6 do
+        let old = old_log () and fresh = new_log () in
+        (match case with
+         | "read_replayed" ->
+             Old_log.observe_operation_state old terminal; New_log.observe_operation_state fresh terminal;
+             Old_log.observe_terminal_replay old Old_log.Replayed_after_terminal;
+             New_log.observe_terminal_replay fresh New_log.Replayed_after_terminal
+         | "same_state" | "changing_state" ->
+             Old_log.observe_operation_state old queued; New_log.observe_operation_state fresh queued
+         | _ -> ());
+        let old_f, new_f = match case with
+          | "read_replayed" ->
+              (fun () -> if Option.is_some (Old_log.operation_state old) then incr sink),
+              (fun () -> if Option.is_some (New_log.operation_state fresh) then incr sink)
+          | "same_state" ->
+              (fun () -> Old_log.observe_operation_state old queued),
+              (fun () -> New_log.observe_operation_state fresh queued)
+          | "changing_state" ->
+              (fun () -> Old_log.observe_operation_state old running; Old_log.observe_operation_state old queued),
+              (fun () -> New_log.observe_operation_state fresh running; New_log.observe_operation_state fresh queued)
+          | _ -> assert false in
+        let old_sample () = sample oc ~case ~variant:"old" ~n:500000 old_f in
+        let new_sample () = sample oc ~case ~variant:"new" ~n:500000 new_f in
+        if round mod 2 = 0 then (old_sample (); new_sample ()) else (new_sample (); old_sample ())
+      done) ["read_replayed";"same_state";"changing_state"]);
+  Printf.printf "benchmark sink %d\n%!" !sink
+
+let () = differential (); bench Sys.argv.(1)

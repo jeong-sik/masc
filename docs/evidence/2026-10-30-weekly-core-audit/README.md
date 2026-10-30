@@ -77,6 +77,9 @@ claim is retained here.
   event ID per kind; these are physical rows, not four distinct event IDs.
   The source identifiers and input are not included. Turn-start recording is
   before dispatch, so it does not prove that a provider received the input.
+  An authenticated Ask progress response for that same source reported the
+  earlier start and finish timestamps rather than the later ledger rows. The
+  observations do not establish that those rows are distinct provider calls.
 
 Regenerate a current aggregate without emitting record contents, after selecting
 the actual effective workspace base and a UTC provider-input window:

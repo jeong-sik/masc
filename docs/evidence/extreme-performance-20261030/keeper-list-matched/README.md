@@ -33,7 +33,9 @@ That probe is outside this matrix. The retained corrected receipt says so.
 The executed controller is [v1/run.py](keeper-list-matched-v1/run.py), not v2.
 Order: 2 control, 2 candidate, 30 candidate, 30 control, 300 control, 300 candidate.
 Each arm owns its base, HOME, server, loopback scripted provider and native TUI.
-The checkout remained `227de7fbd64d9925590f4725bc100806e5d0bf82` throughout.
+All twelve observer health readbacks report repository head `227de7fbd64`, and
+all six identities record the same runtime-fixture digest. These are observations
+at those reads, not continuous checkout monitoring.
 No OS stack sampler was attached. One complete `3` byte write requests Keepers;
 the window ends eight seconds after the first paired DEC2026 transport block,
 not eight seconds after key application. There is no key-application receipt.
@@ -72,8 +74,8 @@ established by this pair.
 
 The server remains a separate unresolved latency boundary. In the released-model
 phase, control/candidate health maxima are 14,127.573/9,563.735 ms and p95 values
-74.047/29.031 ms. HTTP 429 counts are 40/49, with 40.141/49.171 seconds of recorded
-client fallback wait. Both runs completed 600 original operations, but their
+74.047/29.031 ms. Across each whole workload, HTTP 429 counts are 40/49, with
+40.141/49.171 seconds of recorded client fallback wait. Both runs completed 600 original operations, but their
 workload durations and health tails are not a server optimization result: server
 library source is unchanged between these two native sources. The earlier
 [sampled 300-owner failure](../keeper-list-sampling/README.md) is preserved and
@@ -121,7 +123,8 @@ post-shutdown SQLite exports. Digests reflect the later qualification/retention
 read, not an invented capture-time manifest. Complete binaries, raw terminal
 streams, auth/config files, full SQLite/WAL and provider/request logs remain in
 ignored `artifacts/`. Eighteen owned credential values were checked privately
-against the selected files with zero matches; no credentials are retained.
+against the selected files with zero matches. Original credential/config files
+are excluded; that value scan does not certify absence of every possible secret.
 
 For a new run, copy the prospective helper/probe files into a new ignored working
 directory and supply a config with the exact native paths/digests, actual probe

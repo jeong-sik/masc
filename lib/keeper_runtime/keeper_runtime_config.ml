@@ -588,6 +588,29 @@ let load_failure_to_string { kind; message } =
   Printf.sprintf "%s %s" verb message
 ;;
 
+(* The first registry row whose reader rejects what the store and the process
+   environment hold now, as [(toml key, reader message)]. [validate_doc] checks
+   the type and range of each key; a reader also checks what the value means (a
+   blank wake prompt, a prompt over its byte bound), which would otherwise raise
+   on the first turn that reads it. *)
+let first_rejecting_reader () =
+  List.find_map
+    (fun (row : Keeper_runtime_setting_registry.setting) ->
+       match Keeper_runtime_setting_registry.effective_value row with
+       | (_ : string) -> None
+       | exception Env_config_core.Config_error message ->
+         let toml_key =
+           match Keeper_runtime_setting_registry.toml_key_opt row with
+           | Some key -> key
+           | None ->
+             invalid_arg
+               (Printf.sprintf
+                  "toml_settings row %s has no TOML key"
+                  row.env_name)
+         in
+         Some (toml_key, message))
+    Keeper_runtime_setting_registry.toml_settings
+
 let load_and_apply_document ~base_path =
   let path = toml_path ~base_path in
   if not (Sys.file_exists path) then
@@ -609,37 +632,60 @@ let load_and_apply_document ~base_path =
              ; message = Printf.sprintf "%s: %s: %s" path issue.key issue.detail
              }
          | None ->
-           Hashtbl.clear toml_shadow;
+           let stored_before =
+             List.map
+               (fun (_, env_name) -> env_name, Config_boot_overrides.get_opt env_name)
+               key_to_env
+           in
            let count =
              List.fold_left
-               (fun acc (toml_key, env_name) ->
-                  (* Populate shadow registry for every known key that has a
-                     TOML value, regardless of whether env preempts it. *)
-                  (match List.assoc_opt toml_key doc with
-                   | None -> ()
-                   | Some v ->
-                     match value_to_string v with
-                     | None -> ()
-                     | Some s -> Hashtbl.replace toml_shadow env_name s);
-                  if apply_one doc (toml_key, env_name) then acc + 1 else acc)
+               (fun acc pair -> if apply_one doc pair then acc + 1 else acc)
                0
                key_to_env
            in
-           Atomic.set last_applied_at (Some (Time_compat.now ()));
-           Ok count)
+           (* The readers see the file's values only once the store holds them. *)
+           (match first_rejecting_reader () with
+            | Some (toml_key, message) ->
+              (* A file that did not load fed nothing: the store, the shadow
+                 registry and the applied time stay as the other failures
+                 above leave them. *)
+              List.iter
+                (fun (env_name, stored) ->
+                   match stored with
+                   | Some value -> Config_boot_overrides.set env_name value
+                   | None -> Config_boot_overrides.clear env_name)
+                stored_before;
+              Result.Error
+                { kind = Validate
+                ; message = Printf.sprintf "%s: %s: %s" path toml_key message
+                }
+            | None ->
+              Hashtbl.clear toml_shadow;
+              List.iter
+                (fun (toml_key, env_name) ->
+                   (* Populate shadow registry for every known key that has a
+                      TOML value, regardless of whether env preempts it. *)
+                   match List.assoc_opt toml_key doc with
+                   | None -> ()
+                   | Some v ->
+                     (match value_to_string v with
+                      | None -> ()
+                      | Some s -> Hashtbl.replace toml_shadow env_name s))
+                key_to_env;
+              Atomic.set last_applied_at (Some (Time_compat.now ()));
+              Ok count))
 
 let load_and_apply ~base_path : (int, load_failure) result =
   (* First, so the validation below and every later read of these names leave
      the process environment out. *)
   Config_boot_overrides.declare_file_owned
     Keeper_runtime_setting_registry.file_owned_env_names;
+  (* Before the file adds anything: the process environment and the defaults. A
+     malformed variable is reported as one, not blamed on the file. *)
   let validation =
-    try
-      List.iter (fun setting ->
-        ignore (Keeper_runtime_setting_registry.effective_value setting))
-        Keeper_runtime_setting_registry.toml_settings;
-      Ok ()
-    with Env_config_core.Config_error message -> Result.Error {kind=Validate; message}
+    match first_rejecting_reader () with
+    | Some (_, message) -> Result.Error { kind = Validate; message }
+    | None -> Ok ()
   in
   let result =
     match validation with

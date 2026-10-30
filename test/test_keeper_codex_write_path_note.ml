@@ -4,8 +4,8 @@
 open Alcotest
 module Codex = Masc.Keeper_codex_runtime.For_testing
 module Posture = Runtime_native_tools
-module Registry = Masc.Prompt_registry
-module Names = Masc.Prompt_names
+module Registry = Prompt_registry
+module Names = Prompt_names
 
 let require = function Ok value -> value | Error detail -> fail detail
 

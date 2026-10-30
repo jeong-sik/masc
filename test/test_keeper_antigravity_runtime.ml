@@ -795,7 +795,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                         (String_util.contains_substring final_prompt "MANAGED_EXTRA_DIRS []");
                       let module Store = Keeper_official_client_session_store in
                       let session_before = match Store.load ~base_path ~keeper_name:"antigravity-fixture" with
-                        | Ok (Some {phase=Store.Ready; _}) as observed -> observed
+                        | Ok (Some {phase=Store.Settled _; _}) as observed -> observed
                         | Ok _ -> fail "fixture has no settled native session"
                         | Error detail -> fail (Store.read_error_to_string detail) in
                       let empty_prompts = Filename.concat base_path "empty-prompts" in

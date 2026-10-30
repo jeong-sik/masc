@@ -344,30 +344,6 @@ let managed_release_dir prefix id =
   Filename.concat (Filename.concat prefix ".masc-releases") id
 ;;
 
-let install_real_masc_binary prefix =
-  ignore (Sys.command ("mkdir -p " ^ Filename.quote prefix));
-  let canonical_prefix = Unix.realpath prefix in
-  let dest = Filename.concat canonical_prefix "masc" in
-  let slot =
-    managed_release_dir canonical_prefix (String.make 64 '0')
-  in
-  ignore (Sys.command ("mkdir -p " ^ Filename.quote slot));
-  let staged = Filename.concat slot "masc" in
-  unlink_if_exists staged;
-  (* stage_release_mirror serves every release asset as a symlink to the
-     same real_masc_binary (), so a pointer to those exact bytes keeps the
-     installer's same-release checksum comparison true; a cp would diverge. *)
-  Unix.symlink (Unix.realpath (real_masc_binary ())) staged;
-  unlink_if_exists dest;
-  (* install.sh reads one symlink level: readlink $DEST must literally be
-     $canonical_prefix/.masc-releases/<64hex>/masc, and the pointer check
-     compares it with $(cd "$PREFIX" && pwd -P).  Both the slot path and the
-     dest symlink must therefore be planted under the realpath-normalized
-     prefix — a symlinked TMPDIR or /var → /private/var would otherwise
-     re-trip the same gate. *)
-  Unix.symlink staged dest
-;;
-
 let assert_contains label text needle =
   check bool label true (string_contains text needle)
 ;;
@@ -549,11 +525,45 @@ lines = [hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name
   "file://" ^ Filename.concat base_path ".release"
 ;;
 
+let masc_dashboard_archive () =
+  let name = platform_release_asset () in
+  let suffix = String.sub name 5 (String.length name - 5) in
+  "masc-dashboard-" ^ suffix ^ ".tar.gz"
+;;
+let install_real_masc_binary prefix mirror_dir =
+  (* The installer's no-force path only accepts a dest that points into the
+     release identity the mirrored bundle actually installs: the receipt
+     digest directory that release-dashboard-bundle.py creates under
+     $PREFIX/.masc-releases. Plant exactly that layout by running the same
+     bundle helper install step the installer runs, then pointing dest at
+     the installed identity. A hand-made 64-'0' slot never matches because
+     the digest is computed from the staged receipt bytes. *)
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote prefix));
+  let canonical_prefix = Unix.realpath prefix in
+  let dest = Filename.concat canonical_prefix "masc" in
+  let archive = Filename.concat mirror_dir (masc_dashboard_archive ()) in
+  let bundle_helper =
+    Filename.concat (source_root ()) "scripts/release-dashboard-bundle.py"
+  in
+  let install_command =
+    String.concat " "
+      (List.map Filename.quote
+         ([ "python3"; bundle_helper; "install"; "--binary"; real_masc_binary ()
+          ; "--archive"; archive; "--prefix"; canonical_prefix
+          ; "--binary-asset"; platform_release_asset () ] ))
+  in
+  unlink_if_exists dest;
+  check int "fixture installs the managed release identity" 0
+    (Sys.command install_command)
+;;
+
+
 let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_version args base_path =
   let root = source_root () in
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
-  install_real_masc_binary prefix;
+  let release_base_url = stage_release_mirror base_path in
+  install_real_masc_binary prefix (Filename.concat base_path ".release");
   Option.iter (fun version ->
     let installed = Filename.concat prefix "masc" in
     unlink_if_exists installed;
@@ -561,7 +571,6 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
       (Printf.sprintf "#!/bin/sh\nif [ \"$1\" = --version ]; then printf '%%s\\n' %s; else exec %s \"$@\"; fi\n"
          (Filename.quote version) (Filename.quote (Unix.realpath (real_masc_binary ()))));
     Unix.chmod installed 0o755) existing_version;
-  let release_base_url = stage_release_mirror base_path in
   let quoted_args = String.concat " " (List.map Filename.quote args) in
   let cmd =
     Printf.sprintf

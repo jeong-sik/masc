@@ -414,10 +414,10 @@ again). The tab works the same for Docker, microVM and `remote_ssh` Keepers,
 because all of them stream through the same server-side ring. It reads that
 ring over HTTP, so it is not a PTY: nothing typed in the TUI reaches the
 command. The stream needs a connection that stays open: a proxy between the TUI
-and the server that buffers responses holds the rows back, and the server sends
-`x-accel-buffering: no` for the proxies that honour it. A pipeline with a file redirect, or another shape the dispatcher
-chains without streaming, shows its output when the command ends rather
-than line by line.
+and the server that buffers responses can hold the rows back, and the server
+sends `x-accel-buffering: no` for the proxies that honour it. A pipeline with a
+file redirect, or another shape the dispatcher chains without streaming, shows
+its output when the command ends rather than line by line.
 
 `l` opens the logs view instead. Its Execute section
 shows the most recently observed command summaries and stdout/stderr, newest

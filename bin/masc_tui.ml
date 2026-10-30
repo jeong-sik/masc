@@ -10650,7 +10650,7 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
       launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper
         (Inbox.Prioritize_event (reference, incarnation, urgency))
     | Some (Inbox.Running_message _) -> notice "This message is already running"
-    | Some (Inbox.Schedule _) -> notice "A scheduled job runs at its due time; this queue cannot run it early" in
+    | Some (Inbox.Schedule _) -> notice "Can't reorder schedule here; due work may wait" in
   if key = "?" then begin
     state.help_open <- true;
     state.help_scroll <- 0

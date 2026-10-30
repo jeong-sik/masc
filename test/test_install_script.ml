@@ -350,11 +350,10 @@ let install_real_masc_binary prefix =
   ignore (Sys.command ("mkdir -p " ^ Filename.quote slot));
   let staged = Filename.concat slot "masc" in
   unlink_if_exists staged;
-  ignore
-    (Sys.command
-       (String.concat " "
-          (List.map Filename.quote [ "cp"; real_masc_binary (); staged ])));
-  ignore (Sys.command ("chmod +x " ^ Filename.quote staged));
+  (* stage_release_mirror serves every release asset as a symlink to the
+     same real_masc_binary (), so a pointer to those exact bytes keeps the
+     installer's same-release checksum comparison true; a cp would diverge. *)
+  Unix.symlink (Unix.realpath (real_masc_binary ())) staged;
   unlink_if_exists dest;
   (* install.sh compares the readlink target with the canonical prefix path
      ($(cd "$PREFIX" && pwd -P)), so the fixture must plant the canonical

@@ -204,7 +204,15 @@ let with_read_authority_endpoint ?timeout_sec authority ~(config : Workspace.con
   else if Option.exists (fun scope -> scope <> (meta.microvm_backend, meta.network_mode)) authority.microvm_scope
   then Error "captured read authority microVM backend or network changed"
   else match authority.apple_revision with
-    | None -> use authority.endpoint
+    | None ->
+      let* () = match authority.profile with
+        | Micro_vm ->
+          let* fs = Keeper_microvm_shim_readiness.current_fs ()
+            |> Result.map_error Keeper_microvm_shim_readiness.error_message in
+          Keeper_microvm_shim_readiness.ensure_config ~fs ~base_path:authority.base_path
+          |> Result.map_error Keeper_microvm_shim_readiness.error_message
+        | Docker | Remote_ssh -> Ok () in
+      use authority.endpoint
     | Some expected_revision ->
       let* () = Keeper_turn_sandbox_runtime.with_apple_attached_endpoint ?timeout_sec ~config ~meta (fun ~revision current ->
         let same_route = Yojson.Safe.equal (apple_endpoint_route current)

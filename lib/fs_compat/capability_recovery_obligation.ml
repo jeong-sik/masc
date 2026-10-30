@@ -1629,8 +1629,7 @@ let open_ensured_directory
   opened
 ;;
 
-let open_registry ~sw ~registry_root =
-  run_layout (fun () ->
+let open_registry_under ~sw ~registry_root =
     let root_stat =
       raise_io ~operation:Inspect_directory ~subject:Registry_root (fun () ->
         Eio.Path.stat ~follow:true registry_root)
@@ -1656,7 +1655,23 @@ let open_registry ~sw ~registry_root =
         ~leaf:lanes_directory_leaf
         ~subject:Lanes_root
     in
-    { lanes })
+    { lanes }
+;;
+
+let open_registry ~sw ~registry_root =
+  run_layout (fun () -> open_registry_under ~sw ~registry_root)
+;;
+
+let open_namespaced_registry ~sw ~registry_root ~namespace =
+  run_layout (fun () ->
+    let leaf = match Capability_leaf.of_string namespace with
+      | Some leaf -> Capability_leaf.to_string leaf
+      | None ->
+        raise_validation ~operation:Create_directory ~subject:Registry_root
+          (Invalid_parent_component {index = 0; value = namespace}) in
+    with_ensured_directory ~parent:registry_root ~parent_subject:Registry_root
+      ~leaf ~subject:Registry_root (fun namespaced ->
+        open_registry_under ~sw ~registry_root:namespaced))
 ;;
 
 type owner_discovery_row =

@@ -576,8 +576,8 @@ let set_lane_store_failure registry key failure =
         { registry.health with retryable_lane_failure_count }))
 ;;
 
-let open_registry ~sw ~fs ~registry_root =
-  match Core.open_registry ~sw ~registry_root with
+let from_core ~fs result =
+  match result with
   | Error _ as error -> error
   | Ok core ->
     let discovery_settled, resolve_discovery_settled = Eio.Promise.create () in
@@ -592,6 +592,14 @@ let open_registry ~sw ~fs ~registry_root =
       ; lane_store_failures = Owner_map.empty
       ; health = initial_health_snapshot
       }
+;;
+
+let open_registry ~sw ~fs ~registry_root =
+  from_core ~fs (Core.open_registry ~sw ~registry_root)
+;;
+
+let open_namespaced_registry ~sw ~fs ~registry_root ~namespace =
+  from_core ~fs (Core.open_namespaced_registry ~sw ~registry_root ~namespace)
 ;;
 
 let map_owner_discovery_row = function

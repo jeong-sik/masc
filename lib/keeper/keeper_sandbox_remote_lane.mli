@@ -19,8 +19,10 @@ val with_read_authority_endpoint :
     workspace, Keeper, profile and captured microVM backend/network. Apple
     additionally checks observed ownership labels, the host-side credential
     snapshot revision and the route under the process-local Keeper lifecycle
-    owner, then releases that owner before the callback. This does not prove
-    the observed guest's mounted inode. The timeout bounds the Apple inspect,
+    owner, then releases that owner before the callback. A captured microVM
+    also reconciles the host shim config before dispatch; this neither selects
+    another endpoint nor proves that the guest can read its mount. The Apple
+    check does not prove the observed guest's mounted inode. The timeout bounds the Apple inspect,
     not the entire call. SSH keeps the captured endpoint without reading
     current configuration. Any process may replace a guest between inspection
     and use. *)

@@ -1041,7 +1041,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   (* Settle the shared mounted shim configuration before this state can be
      returned to a transport and admit an attached endpoint. Verification
      reads this actual result; the asynchronous startup sweep cannot race it. *)
-  (match Keeper_microvm_shim_readiness.initialize ~base_path:config.base_path
+  (match Keeper_microvm_shim_readiness.initialize ~fs ~base_path:config.base_path
       ~payload_path:(Env_config_sandbox.Runtime.microvm_payload_path ()) with
    | Ok () -> ()
    | Error error ->

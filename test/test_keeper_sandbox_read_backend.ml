@@ -519,7 +519,8 @@ let initialize_apple_attached_read_fixture
   let binary = Filename.concat shim_dir Keeper_sandbox_microvm.shim_binary_name in
   write_file binary "#!/bin/sh\nexit 0\n";
   Unix.chmod binary 0o700;
-  (match Masc.Keeper_microvm_shim_readiness.initialize ~base_path:base ~payload_path:"/usr/bin:/bin" with
+  let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
+  (match Masc.Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin" with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Masc.Keeper_microvm_shim_readiness.error_message error));
   let captured =
@@ -527,7 +528,6 @@ let initialize_apple_attached_read_fixture
     | Ok captured -> captured
     | Error error -> Alcotest.fail error
   in
-  let fs = match Fs_compat.get_fs_opt () with Some fs -> fs | None -> Alcotest.fail "fixture needs Eio FS" in
   let module Lifecycle = Masc.Keeper_microvm_lifecycle in
   let coordinator = Lifecycle.create () in
   Lifecycle.with_keeper_scope coordinator ~keeper_name:meta.name (fun scope ->
@@ -560,12 +560,12 @@ let initialize_apple_attached_read_fixture
   write_file (Filename.concat base "guest-inspect.json") (Yojson.Safe.to_string inspect)
 ;;
 
-let test_attached_guest_endpoint_names_the_derived_guest () =
+let test_attached_guest_endpoint_names_the_derived_guest ~fs () =
   let context = Eio_context.snapshot_state () in
-  Eio_main.run @@ fun env ->
+  let previous_fs = Fs_compat.get_fs_opt () in
   Eio.Switch.run @@ fun sw ->
   Eio_context.set_switch sw;
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fs_compat.set_fs fs;
   let base, config, docker = setup_config "read-microvm-attach" in
   let microvm =
     { docker with
@@ -581,6 +581,7 @@ let test_attached_guest_endpoint_names_the_derived_guest () =
   Fun.protect
     ~finally:(fun () ->
       Eio_context.restore_state context;
+      (match previous_fs with None -> Fs_compat.clear_fs () | Some fs -> Fs_compat.set_fs fs);
       cleanup_fixture_dir base;
       cleanup_dir bin_dir)
   @@ fun () ->
@@ -605,7 +606,48 @@ let test_attached_guest_endpoint_names_the_derived_guest () =
     Alcotest.(check string)
       "reads land on this keeper's guest workspace, not the host playground"
       (Filename.concat Keeper_sandbox_microvm.work_volume_guest_root microvm.name)
-      (Keeper_sandbox_remote.workspace_root endpoint)
+      (Keeper_sandbox_remote.workspace_root endpoint);
+    let authority = match Keeper_sandbox_remote_lane.capture_read_authority ~config ~meta:microvm () with
+      | Ok (Some authority) -> authority
+      | Ok None -> Alcotest.fail "microvm read authority was absent"
+      | Error error -> Alcotest.fail error in
+    let route = Keeper_sandbox_remote_lane.read_authority_route authority |> Yojson.Safe.to_string in
+    let config_path = Filename.concat (Config_dir_resolver.microvm_shim_dir ~base_path:base)
+        Keeper_sandbox_microvm.shim_config_name in
+    Unix.unlink config_path;
+    let other_backend = { microvm with microvm_backend = Some Keeper_microvm_backend.Nerdctl_kata } in
+    let dispatched = ref false in
+    let refused = Keeper_sandbox_remote_lane.with_read_authority_endpoint authority
+        ~config ~meta:other_backend (fun _ -> dispatched := true; Ok ()) in
+    (match refused with
+     | Error _ -> ()
+     | Ok () -> Alcotest.fail "changed backend accepted a captured read authority");
+    Alcotest.(check bool) "changed backend did not dispatch" false !dispatched;
+    Alcotest.(check bool) "changed backend did not recreate the host config" false (Sys.file_exists config_path);
+    let result = with_env "PATH" path (fun () ->
+      Keeper_sandbox_read_backend.run_command ~read_authority:authority ~config ~meta:microvm
+        ~command_argv:["cat"; "/masc-work/fixture"] ~max_bytes:4096 ~timeout_sec:5. ()) in
+    (match result with
+     | Ok text -> Alcotest.(check string) "captured endpoint answered" "remote-file-content" text
+     | Error error -> Alcotest.fail error);
+    Alcotest.(check bool) "captured read restored the missing host config" true (Sys.file_exists config_path);
+    Alcotest.(check string) "captured route remains unchanged" route
+      (Keeper_sandbox_remote_lane.read_authority_route authority |> Yojson.Safe.to_string);
+    let kata = { microvm with microvm_backend = Some Keeper_microvm_backend.Nerdctl_kata } in
+    let kata_authority = match Keeper_sandbox_remote_lane.capture_read_authority ~config ~meta:kata () with
+      | Ok (Some authority) -> authority
+      | Ok None -> Alcotest.fail "Kata read authority was absent"
+      | Error error -> Alcotest.fail error in
+    let kata_route = Keeper_sandbox_remote_lane.read_authority_route kata_authority |> Yojson.Safe.to_string in
+    let kata_root = Keeper_sandbox_remote_lane.read_authority_workspace_root kata_authority in
+    Unix.unlink config_path;
+    (match Keeper_sandbox_remote_lane.with_read_authority_endpoint kata_authority ~config ~meta:kata
+        (fun endpoint -> Ok (Keeper_sandbox_remote.workspace_root endpoint)) with
+     | Ok root -> Alcotest.(check string) "Kata callback kept the captured endpoint" kata_root root
+     | Error error -> Alcotest.fail error);
+    Alcotest.(check bool) "Kata captured read restored the missing host config" true (Sys.file_exists config_path);
+    Alcotest.(check string) "Kata captured route remains unchanged" kata_route
+      (Keeper_sandbox_remote_lane.read_authority_route kata_authority |> Yojson.Safe.to_string)
 
 (* The reachable half of the same guard: attaching is reached by routing, and
    routing must not send a Docker keeper there. Its tree is a shared mount, so
@@ -1532,7 +1574,7 @@ esac
 
 (* Exercise the public result producers through real endpoint dispatch, with
    the existing SSH shim fixture and an Apple-container CLI fixture. *)
-let test_read_and_grep_report_the_endpoint_profile () =
+let test_read_and_grep_report_the_endpoint_profile ~fs () =
   let check_results ~config ~meta ~expected =
     let check tool body_field expected_body (result : Masc.Keeper_tool_execution.t) =
       let json = Yojson.Safe.from_string result.raw_output in
@@ -1580,11 +1622,13 @@ sandbox_profile = "microvm"
   Unix.chmod cli_path 0o755;
   let path = cli_dir ^ ":" ^ Option.value ~default:"" (Sys.getenv_opt "PATH") in
   let context = Eio_context.snapshot_state () in
-  Fun.protect ~finally:(fun () -> Eio_context.restore_state context) @@ fun () ->
-  Eio_main.run @@ fun env ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fun.protect ~finally:(fun () ->
+    Eio_context.restore_state context;
+    match previous_fs with None -> Fs_compat.clear_fs () | Some fs -> Fs_compat.set_fs fs) @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   Eio_context.set_switch sw;
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fs_compat.set_fs fs;
   with_env "PATH" path (fun () ->
     initialize_apple_attached_read_fixture ~base ~config ~meta;
     check_results ~config ~meta ~expected:"microvm")
@@ -3248,7 +3292,7 @@ let test_read_window_directory_fails () =
       | (Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> Alcotest.fail "read window was signalled")
     [ 1; 10 ]
 
-let run_tests ~clock () =
+let run_tests ~clock ~fs () =
   Alcotest.run "Keeper_sandbox_read_backend"
     [
       ( "read_window_argv",
@@ -3334,7 +3378,7 @@ let run_tests ~clock () =
           Alcotest.test_case "own tree translates even under a declared root" `Quick
             test_own_tree_translates_even_under_a_declared_root;
           Alcotest.test_case "Read and Grep report the endpoint profile" `Quick
-            test_read_and_grep_report_the_endpoint_profile;
+            (test_read_and_grep_report_the_endpoint_profile ~fs);
           Alcotest.test_case "read of a declared path asks the endpoint for that path"
             `Quick test_read_of_a_declared_path_asks_the_endpoint_for_that_path;
           Alcotest.test_case "raw prefix keeps remote bytes that spell the workspace root"
@@ -3353,7 +3397,7 @@ let run_tests ~clock () =
           Alcotest.test_case "microvm without a turn factory routes to the attached guest"
             `Quick test_microvm_without_a_turn_factory_routes_to_the_attached_guest;
           Alcotest.test_case "an attached endpoint names the derived guest" `Quick
-            test_attached_guest_endpoint_names_the_derived_guest;
+            (test_attached_guest_endpoint_names_the_derived_guest ~fs);
           Alcotest.test_case "attaching refuses a docker keeper" `Quick
             test_attached_guest_endpoint_refuses_docker;
           Alcotest.test_case "docker without a turn factory keeps the container route"
@@ -3462,4 +3506,4 @@ let () =
     ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock;
-  run_tests ~clock ()
+  run_tests ~clock ~fs:(Eio.Stdenv.fs env) ()

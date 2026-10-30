@@ -72,10 +72,17 @@ CLI 문법과 볼륨 동작이 다르므로 `container` 만 다른 이름으로 
 | 3 | 정적 arm64 shim: `<base>/.masc/microvm/shim/masc-exec-shim` (실행 권한). 옆의 `masc-exec-shim.sha256` 은 설치기가 쓴 릴리즈 해시이며, 있으면 부팅이 바이너리와 맞춰 본다 | `microvm_shim_missing` — 부팅 거부. 해시가 다르면 `microvm_shim_hash_mismatch` — 부팅 거부 |
 | 4 | 디스크 여유. 볼륨 상한은 `MASC_KEEPER_MICROVM_WORK_VOLUME_SIZE` (기본 256g, sparse) | `microvm_work_volume_create_failed` |
 
-shim 설정(`masc-exec-shim.conf`)은 서버가 부팅마다 같은 디렉터리에 다시
-쓴다. 내용은 `remote_root=/masc-work`, `path=<이미지의 PATH>`
+shim 설정(`masc-exec-shim.conf`)은 서버가 시작할 때 같은 디렉터리에 다시
+쓴다. 시작 실패 뒤 shim을 설치하면 다음 endpoint 접속에서 다시 준비한다. 실행 중
+호스트 설정 파일이 사라지면 다음 endpoint 접속이나 캡처한 Read 전에 기존 파일을
+덮어쓰지 않는 방식으로 다시 만든다. 예상과 다르거나 읽을 수 없는 파일은 보존하고
+오류를 낸다. 호스트의 복구는 guest 마운트나 guest UID의 읽기 성공을 보증하지 않는다.
+미확정 게시를 정리하는 중 `microvm_shim_config_sync_failed`와 `owner_mismatch`가
+나면 shim 디렉터리와 정본 설정의 소유자·권한을 확인한다. 이 동기화는 서버의 유효 UID가
+소유한, 다른 사용자에게 쓰기 권한이 없는 디렉터리와 단일 링크 설정 파일을 요구한다.
+내용은 `remote_root=/masc-work`, `path=<이미지의 PATH>`
 (`MASC_KEEPER_MICROVM_PAYLOAD_PATH`), `env_allowlist=MASC_BASE_PATH,
-MASC_CONFIG_DIR`. 손으로 고칠 것이 없다. `scratch_root=` 는
+MASC_CONFIG_DIR`. `scratch_root=` 는
 쓰지 않는다. shim 은 그 줄이 없으면 `/tmp` 를 쓰고, 부팅은 거기에 tmpfs 를 올린다.
 한 상수를 양쪽이 같이 읽는다.
 서버와 shim 은 따로 배포되므로 한 버전 차이는 서로 참는다. 서버는 첫 실행 전에

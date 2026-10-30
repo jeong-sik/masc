@@ -415,6 +415,50 @@ module Publication_recovery = struct
     | Reconciliation_blocked _ -> Reconciliation_blocked_category
     | Store_failed _ -> Store_failed_category
   ;;
+
+  module Core = Capability_recovery_obligation
+
+  let safe_exception = function
+    | Unix.Unix_error (error, _, _) -> "os=" ^ Unix.error_message error
+    | Eio.Io (Eio.Fs.E error, _) ->
+      (match error with
+       | Eio.Fs.Permission_denied _ -> "permission_denied"
+       | Eio.Fs.Not_found _ -> "not_found"
+       | Eio.Fs.Already_exists _ -> "already_exists"
+       | Eio.Fs.File_too_large -> "file_too_large"
+       | Eio.Fs.Not_native _ -> "not_native")
+    | Eio.Io _ -> "io_error"
+    | Sys_error _ -> "system_io_error"
+    | _ -> "other_error"
+  ;;
+
+  let safe_failure (failure : Core.failure) =
+    let cause = match failure.cause with
+      | Validation_failed _ -> "invalid_record_or_input"
+      | Io_failed {exception_; _} | Write_failed {exception_; _} -> safe_exception exception_
+      | Unexpected_resource_kind _ -> "unexpected_resource_kind"
+      | Resource_identity_changed _ -> "identity_changed"
+      | Posix_descriptor_unavailable -> "descriptor_unavailable"
+      | Existing_record_does_not_match -> "record_mismatch"
+      | Created_record_identity_unavailable -> "identity_unavailable"
+      | Missing_record -> "record_missing" in
+    Printf.sprintf "stage=%s cause=%s" (Core.operation_to_string failure.operation) cause
+  ;;
+
+  let safe_registry_error (error : registry_error) =
+    Printf.sprintf "%s cleanup_failures=%d" (safe_failure error.failure)
+      (List.length error.cleanup_failures)
+  ;;
+
+  let safe_lane_open_error = function
+    | Invalid_owner _ -> "invalid_owner"
+    | Reconciliation_blocked _ -> "reconciliation_blocked"
+    | Store_failed error -> "store_failed " ^ safe_registry_error error
+  ;;
+
+  let safe_lane_release_failure (error : lane_release_failure) =
+    safe_failure error.failure
+  ;;
 end
 
 let capability_publication_target = Atomic_write.capability_publication_target

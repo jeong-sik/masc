@@ -126,11 +126,17 @@ independent evidence does not establish ownership, preserve the guest and its
 volumes; do not relabel, remove or restart it merely to clear the warning.
 
 The shared exec shim configuration is initialized before endpoint admission.
-A missing or invalid installation is reported; repair it and restart the server
-if startup initialization failed. Attached file reads validate the host-side
-identity snapshot and shim without starting a guest or cleaning build output.
-For Apple they also inspect the guest's scope labels, but this does not prove
-which identity inode the guest mounted or fence a later replacement. The first
+A missing or invalid installation is reported. After the shim installation is
+repaired, the next endpoint admission reconciles a failed startup without a
+server restart when the required config can be safely prepared. During runtime
+recovery a missing host shim config is recreated without replacing an existing
+file; an unreadable or unexpected config is preserved and reported.
+Attached reads recheck the host config while keeping their captured endpoint.
+Attached file reads validate the host-side identity snapshot and shim without
+starting a guest or cleaning build output. For Apple they also inspect the
+guest's scope labels. Neither check proves that the guest can see or read the
+mount, proves which identity inode the guest mounted, or fences a later guest
+replacement. The first
 owned turn handoff per server process stages unkept real `_build` directories
 before deleting them. `.masc-keep-build` preserves a checkout's output.
 

@@ -323,10 +323,10 @@ let process_step root operation =
       let binary = Filename.concat shim Microvm.shim_binary_name in
       write binary "#!/bin/sh\nexit 0\n"; Unix.chmod binary 0o700) [base; other]) other_base;
   let config = Workspace.default_config base in
-  value (Keeper_microvm_shim_readiness.initialize ~base_path:base ~payload_path:"/usr/bin:/bin"
+  value (Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin"
     |> Result.map_error Keeper_microvm_shim_readiness.error_message);
   Option.iter (fun other ->
-    value (Keeper_microvm_shim_readiness.initialize ~base_path:other ~payload_path:"/usr/bin:/bin"
+    value (Keeper_microvm_shim_readiness.initialize ~fs ~base_path:other ~payload_path:"/usr/bin:/bin"
       |> Result.map_error Keeper_microvm_shim_readiness.error_message);
     Fs_compat.mkdir_p (Workspace.keepers_runtime_dir config);
     let directory = value (Keeper_github_identity.ensure_config_dir ~config ~keeper_name:keeper) in
@@ -891,9 +891,9 @@ let process_step root operation =
         Fs_compat.mkdir_p other_shim;
         let other_binary = Filename.concat other_shim Microvm.shim_binary_name in
         write other_binary "#!/bin/sh\nexit 0\n"; Unix.chmod other_binary 0o700;
-        value (Keeper_microvm_shim_readiness.initialize ~base_path:other_base ~payload_path:"/usr/bin:/bin"
+        value (Keeper_microvm_shim_readiness.initialize ~fs ~base_path:other_base ~payload_path:"/usr/bin:/bin"
           |> Result.map_error Keeper_microvm_shim_readiness.error_message);
-        let verify ~base_path ~backend = Keeper_microvm_shim_readiness.verify ~base_path ~backend ~guest_name:guest in
+        let verify ~base_path ~backend = Keeper_microvm_shim_readiness.verify ~fs ~base_path ~backend ~guest_name:guest in
         value (verify ~base_path:other_base ~backend |> Result.map_error Keeper_microvm_shim_readiness.error_message);
         value (verify ~base_path:root ~backend:Backend.Nerdctl_kata
           |> Result.map_error Keeper_microvm_shim_readiness.error_message);
@@ -988,9 +988,9 @@ let process_step root operation =
         let other_binary = Filename.concat other_shim Microvm.shim_binary_name in
         write other_binary "#!/bin/sh\nexit 0\n"; Unix.chmod other_binary 0o700;
         let verify_name ~base_path ~backend ~guest_name =
-          Keeper_microvm_shim_readiness.verify ~base_path ~backend ~guest_name in
+          Keeper_microvm_shim_readiness.verify ~fs ~base_path ~backend ~guest_name in
         let verify ~base_path ~backend = verify_name ~base_path ~backend ~guest_name:guest in
-        value (Keeper_microvm_shim_readiness.initialize ~base_path:other_base ~payload_path:"/usr/bin:/bin"
+        value (Keeper_microvm_shim_readiness.initialize ~fs ~base_path:other_base ~payload_path:"/usr/bin:/bin"
           |> Result.map_error Keeper_microvm_shim_readiness.error_message);
         value (verify ~base_path:other_base ~backend |> Result.map_error Keeper_microvm_shim_readiness.error_message);
         value (verify_name ~base_path:other_base ~backend ~guest_name:other_guest

@@ -255,6 +255,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_server_dashboard_http_keeper_efficiency)
+ (modules test_server_dashboard_http_keeper_efficiency)
+ (libraries masc_test_deps))
+
+(test
  (name test_keeper_producer_route)
  (modules test_keeper_producer_route)
  (libraries masc_test_deps))

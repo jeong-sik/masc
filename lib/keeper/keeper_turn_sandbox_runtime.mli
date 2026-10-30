@@ -308,6 +308,14 @@ module For_testing_microvm : sig
     -> (unit, string) result
   (** Exercise the same guest mount admission used during boot and adoption. *)
 
+  val ensure_keeper_work_root
+    :  ?timeout_sec:float
+    -> t
+    -> backend:Keeper_microvm_backend.t
+    -> container_name:string
+    -> (unit, string) result
+  (** Exercise mount, directory creation, and the keeper-identity write probe. *)
+
   val provision_guest
     : t -> backend:Keeper_microvm_backend.t -> timeout_sec:float -> (unit, string) result
   (** Exercise the boot provisioning path without exposing its private record. *)

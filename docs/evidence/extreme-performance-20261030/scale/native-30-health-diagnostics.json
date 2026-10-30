@@ -1,0 +1,93 @@
+{
+  "health-before.json": {
+    "gc": {
+      "compactions": 0,
+      "heap_words": 2214428,
+      "live_words": 1411681,
+      "minor_heap_size": 4194304,
+      "space_overhead": 100,
+      "minor_collections": 78,
+      "major_collections": 7,
+      "forced_major_collections": 0,
+      "minor_words": 58726665.0,
+      "promoted_words": 1052665.0,
+      "major_words": 1779593.0
+    },
+    "scheduler": {
+      "pool_domains": 8,
+      "read_pool_domains": 2,
+      "interval_ms": 100.0,
+      "window_s": 60.0,
+      "lag": {
+        "samples": 0
+      }
+    },
+    "health_detail": "full"
+  },
+  "health-model-held.json": {
+    "gc": {
+      "compactions": 0,
+      "heap_words": 21871126,
+      "live_words": 20542610,
+      "minor_heap_size": 4194304,
+      "space_overhead": 100,
+      "minor_collections": 105,
+      "major_collections": 10,
+      "forced_major_collections": 0,
+      "minor_words": 184840641.0,
+      "promoted_words": 3458757.0,
+      "major_words": 33151068.0
+    },
+    "scheduler": {
+      "pool_domains": 8,
+      "read_pool_domains": 2,
+      "interval_ms": 100.0,
+      "window_s": 60.0,
+      "lag": {
+        "samples": 29,
+        "p50_ms": 0.3102919999999898,
+        "p95_ms": 2.8803749999999906,
+        "p99_ms": 4.380957999999991,
+        "max_ms": 4.380957999999991,
+        "mean_ms": 0.7238333793103382,
+        "stalls": 0,
+        "over_50ms_count": 0,
+        "over_200ms_count": 0
+      }
+    },
+    "health_detail": "full"
+  },
+  "health-after.json": {
+    "gc": {
+      "compactions": 0,
+      "heap_words": 40089520,
+      "live_words": 38042227,
+      "minor_heap_size": 4194304,
+      "space_overhead": 100,
+      "minor_collections": 151,
+      "major_collections": 14,
+      "forced_major_collections": 0,
+      "minor_words": 554588599.0,
+      "promoted_words": 10016014.0,
+      "major_words": 132993135.0
+    },
+    "scheduler": {
+      "pool_domains": 8,
+      "read_pool_domains": 2,
+      "interval_ms": 100.0,
+      "window_s": 60.0,
+      "lag": {
+        "samples": 90,
+        "p50_ms": 0.46570799999999524,
+        "p95_ms": 2.1845839999999894,
+        "p99_ms": 7.147041999999992,
+        "max_ms": 7.147041999999992,
+        "mean_ms": 0.7621407555555494,
+        "stalls": 0,
+        "over_50ms_count": 0,
+        "over_200ms_count": 0
+      }
+    },
+    "health_detail": "full"
+  }
+}

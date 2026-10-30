@@ -1,0 +1,77 @@
+{
+  "workload": {
+    "keepers": 30,
+    "messages": 60,
+    "succeeded_operations": 60,
+    "actual_model_calls": 60,
+    "max_provider_requests_in_flight": 30,
+    "latency_samples": 81,
+    "valid_latency_samples": 81,
+    "scope": "Installed-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.",
+    "latency_by_phase": {
+      "submitting_model_held": {
+        "samples": 21,
+        "valid": 21,
+        "failures": 0,
+        "p50_ms": 1.287083,
+        "p95_ms": 3.2585,
+        "max_ms": 4.721291
+      },
+      "model_held_queue_observation": {
+        "samples": 24,
+        "valid": 24,
+        "failures": 0,
+        "p50_ms": 1.100792,
+        "p95_ms": 1.710708,
+        "max_ms": 1.849542
+      },
+      "running_model_released": {
+        "samples": 35,
+        "valid": 35,
+        "failures": 0,
+        "p50_ms": 1.443,
+        "p95_ms": 12.067125,
+        "max_ms": 16.831458
+      },
+      "settled": {
+        "samples": 1,
+        "valid": 1,
+        "failures": 0,
+        "p50_ms": 0.812292,
+        "p95_ms": 0.812292,
+        "max_ms": 0.812292
+      }
+    },
+    "rejected_429_count": 4,
+    "rate_limit_wait_s": 4.016899333,
+    "rate_limit_wait_by_source_s": {
+      "client_fallback_no_retry_after": 4.016899333
+    },
+    "denied_read_only_inventory_attempts": 2,
+    "unexpected_guest_command_attempts": 0
+  },
+  "cleanup": {
+    "server_returncode": 0,
+    "server_reaped": true,
+    "forced_kill": false,
+    "sampler_stopped": true,
+    "model_server_stopped": true,
+    "base_retained": true,
+    "provider_requests_drained": true,
+    "active_provider_requests": 0,
+    "provider_handler_threads": 0
+  },
+  "audit": {
+    "overall_original_run_verdict": "PASS",
+    "post_run_workload_validation": "PASS",
+    "inventory_final_segment_complete": true
+  },
+  "inventory": {
+    "scope": "Observed coverage groups, not producer sweep IDs. A final unique known-volume subset is incomplete; missing volumes are unobserved coverage, not proven lost log records. Wrappers refuse126 by source authority, not per-attempt exit receipts. Spans include concurrency and scheduling, not isolated subprocess overhead.",
+    "expected_volumes_per_segment": 60,
+    "observed_inspection_commands": 0,
+    "complete_observed_segments": 0,
+    "last_partial_observed_volume_count": null
+  },
+  "source": "d55ec56c6227e65a07f3fefffec28e6d425ac47b"
+}

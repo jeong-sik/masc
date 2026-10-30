@@ -1,0 +1,53 @@
+{
+  "scope": "Later read-only inspection; does not bind every earlier baseline sample. Subtree lengths are compact Python UTF8 re-encodings, not independently timed wire chunks.",
+  "original_sha256": "84b90436cf628f0ae7cd97f99a78a9a47e23d4bca9c311b5c57976909679ccbb",
+  "wire_bytes": 866529,
+  "status": 200,
+  "query": {
+    "actor": "admin",
+    "fixture": null,
+    "full": false,
+    "light": true,
+    "default_light_request": false,
+    "force": false
+  },
+  "cache": {
+    "scope": "dashboard_execution",
+    "cache_state": "request_swr_or_inline_compute",
+    "projection_surface": "execution",
+    "last_success_at": null,
+    "last_attempt_at": null,
+    "last_error_at": null,
+    "stale_reason": null,
+    "stale_age_ms": null,
+    "background_refresh_interval_s": 60.0,
+    "policy": "cached_surface plus HTTP stale-while-revalidate"
+  },
+  "subtree_reencoding_bytes": {
+    "dashboard_surface": 29,
+    "source": 32,
+    "generated_at_iso": 22,
+    "retention": 322,
+    "query": 102,
+    "cache": 551,
+    "execution_publication_epoch": 38,
+    "execution_publication_generation": 3,
+    "execution_invalidated": 5,
+    "projection_diagnostics": 135,
+    "continuity_briefs": 56415,
+    "keepers": 277430,
+    "generated_at": 22,
+    "candle": 88,
+    "candle_observation_sequence": 5,
+    "status": 174,
+    "execution_queue": 27443,
+    "operation_briefs": 8942,
+    "worker_support_briefs": 876,
+    "offline_worker_briefs": 2,
+    "agents": 7331,
+    "keepers_unread": 2,
+    "keepers_listing": 18,
+    "tasks": 485869,
+    "task_counts": 39
+  }
+}

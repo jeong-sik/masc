@@ -1,13 +1,24 @@
 module Exact = Lane_addon_exact
 module Store = Lane_addon_store
 open Result.Syntax
-type configuration = {store_root:string; outputs:Lane_addon_types.exact_output list}
+type configuration = {store_root:string; outputs:Lane_addon_types.exact_output list;
+  locate_system:(string,string) result option}
+let locate_output_name = "locate"
+let has_locator outputs = List.exists (fun (output:Lane_addon_types.exact_output) ->
+  String.equal output.name locate_output_name) outputs
+let prepare_configuration ~store_root ~outputs =
+  let locate_system = if has_locator outputs then
+      Some (Prompt_registry.render_prompt_template Prompt_names.browser_locate []) else None in
+  {store_root;outputs;locate_system}
 let configuration_to_json configuration = `Assoc ["store_root",`String configuration.store_root;
+  "locate_system",(match configuration.locate_system with
+    | None -> `Null | Some (Ok text) -> `Assoc ["rendered",`String text]
+    | Some (Error detail) -> `Assoc ["unavailable",`String detail]);
   "outputs",`Assoc (List.map (fun (output:Lane_addon_types.exact_output) -> output.name,
     `Assoc ["schema",output.schema;"request_schema",`Bool (match output.request_schema with
       | Package_schema_only -> false | Consumer_request_schema -> true)]) configuration.outputs)]
 let configuration_label = "browser model configuration"
-let configuration_keys = ["outputs";"store_root"]
+let configuration_keys = ["locate_system";"outputs";"store_root"]
 let output_keys = ["request_schema";"schema"]
 let not_object label value =
   Printf.sprintf "%s must be a JSON object; it is %s" label (Yojson.Safe.to_string value)
@@ -45,11 +56,26 @@ let configuration_of_json = function
               Ok ({Lane_addon_types.name;schema;request_schema}::rest)) outputs (Ok [])
         | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as value ->
             Error (not_object (configuration_label ^ " field outputs") value) in
-      Ok {store_root;outputs}
+      let* locate_system = match List.assoc "locate_system" fields with
+        | `Null -> Ok None
+        | `Assoc ["rendered",`String text] when String.trim text<>"" -> Ok (Some (Ok text))
+        | `Assoc ["unavailable",`String detail] when String.trim detail<>"" -> Ok (Some (Error detail))
+        | value -> Error (Printf.sprintf "%s locator guidance must be rendered text, an unavailable reason, or null; it is %s"
+            configuration_label (Yojson.Safe.to_string value)) in
+      let* () = if has_locator outputs = Option.is_some locate_system then Ok ()
+        else Error "browser locator guidance must match the selected locate output" in
+      Ok {store_root;outputs;locate_system}
   | `Assoc fields ->
       Error (Resource_requirement.keys ~label:configuration_label ~found:(List.map fst fields) ~required:configuration_keys)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ as value ->
       Error (not_object configuration_label value)
+let load_configuration ~directory =
+  let* value = Fs_compat.load_owned_regular_file ~ownership_root:directory (Filename.concat directory "models.json")
+    |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+  let* text = Option.to_result ~none:"missing browser model configuration" value in
+  try configuration_of_json (Yojson.Safe.from_string text)
+  with Yojson.Json_error detail -> Error detail
+
 type error = Retired | Output_disabled of string | Request_in_use
   | Receipt_failed of string | Invalid_result of string | Schema_refused of string
 let error_to_string = function
@@ -72,6 +98,11 @@ let output t ~name = match t.phase with
   | Closed -> None
   | Serving -> List.find_opt (fun (output:Lane_addon_types.exact_output) -> output.name=name)
       t.configuration.outputs
+let locate_system t = match t.phase,t.configuration.locate_system with
+  | Closed,_ -> Error "browser model owner is retired"
+  | Serving,None -> Error "browser locate output is not selected"
+  | Serving,Some system -> system
+
 let create ~incarnation ~configuration =
   let* _ = Browser_lane.client_id_of_string incarnation in
   let* configuration = configuration_of_json (configuration_to_json configuration) in

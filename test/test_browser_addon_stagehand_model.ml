@@ -28,8 +28,8 @@ let scenario manifest fixture =
             (Lane_addon_manifest.error_to_string error) in
       let owner=Owner.create ~incarnation |> ok in
       check bool "unselected model publishes no callback" true (Model.for_owner owner=Ok None);
-      let models=Models.create ~incarnation ~configuration:{Models.store_root=Filename.concat base_path "receipts";
-        outputs=package.exact_outputs} |> ok in
+      let models=Models.create ~incarnation ~configuration:(Models.prepare_configuration ~store_root:(Filename.concat base_path "receipts")
+        ~outputs:package.exact_outputs) |> ok in
       Owner.attach_models owner models |> ok;
       let model=match Model.for_owner owner |> ok with Some model -> model | None -> fail "selected Stagehand callback" in
       let params=match Yojson.Safe.from_file fixture with `List [_;_;act] -> act | _ -> fail "captured three-request fixture" in

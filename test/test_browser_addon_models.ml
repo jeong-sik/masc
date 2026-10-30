@@ -21,8 +21,8 @@ let scenario () =
     let clock=Eio.Stdenv.clock env and net=Eio.Stdenv.net env in
     Eio.Time.with_timeout_exn clock 15. (fun () ->
     Eio_context.with_test_env ~sw ~clock ~net ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
-      let configuration={Models.store_root=Filename.concat root "receipts";
-        outputs=[{Lane_addon_types.name="locate";schema;request_schema=Lane_addon_types.Package_schema_only}]} in
+      let configuration=Models.prepare_configuration ~store_root:(Filename.concat root "receipts")
+        ~outputs:[{Lane_addon_types.name="locate";schema;request_schema=Lane_addon_types.Package_schema_only}] in
       let models=Models.create ~incarnation ~configuration |> ok in
       let disabled=Models.create ~incarnation ~configuration:{configuration with outputs=[]} |> ok in
       check bool "selection off refuses immediately" true
@@ -97,7 +97,7 @@ let request_schema_scenario () =
       let baseline=match schema with `Assoc fields -> `Assoc (List.remove_assoc "required" fields)
         | _ -> fail "object fixture schema" in
       let output={Lane_addon_types.name="locate";schema=baseline;request_schema=Lane_addon_types.Package_schema_only} in
-      let configuration={Models.store_root=Filename.concat root "receipts";outputs=[output]} in
+      let configuration=Models.prepare_configuration ~store_root:(Filename.concat root "receipts") ~outputs:[output] in
       let original=request ~schema "requested" in
       let fixed=Models.create ~incarnation ~configuration |> ok in
       check bool "grant refused before publishing a pending request" true

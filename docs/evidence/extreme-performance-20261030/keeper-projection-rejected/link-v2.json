@@ -1,0 +1,24 @@
+{
+  "command": [
+    "ocamlfind",
+    "ocamlopt",
+    "-w",
+    "+4+32+69",
+    "-warn-error",
+    "+a",
+    "-package",
+    "unix,mtime.clock.os",
+    "-linkpkg",
+    "fixture_types.cmx",
+    "control_baseline.cmx",
+    "control_candidate.cmx",
+    "projection_baseline.cmx",
+    "projection_candidate.cmx",
+    "benchmark_v2.ml",
+    "-o",
+    "benchmark-v2"
+  ],
+  "returncode": 0,
+  "stdout": "",
+  "stderr": "ocamlfind: [WARNING] Package `mtime.clock.os': Deprecated, use the mtime.clock library.\n"
+}

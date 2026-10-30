@@ -1,0 +1,35 @@
+{
+  "scope": "Exact product source fragments compiled against reduced typed fixture records. Date/activity projection and sorting are stubbed identically and excluded from timing. This is a component lookup/preparation experiment, not a full module/TUI compile, screen ordering test, native fleet benchmark or target proof.",
+  "inputs": [
+    {
+      "file": "bin/masc_tui_keeper_control.ml",
+      "candidate": false,
+      "base": "d0a4db845644cf946f419b47687223700c7e79ce",
+      "sha256": "b8ae40f0e502dd3b30582527a2eac07fc5374eae486625a8e4bfaf4a4333e7f2"
+    },
+    {
+      "file": "bin/masc_tui_keeper_control.ml",
+      "candidate": false,
+      "base": "d0a4db845644cf946f419b47687223700c7e79ce",
+      "sha256": "b8ae40f0e502dd3b30582527a2eac07fc5374eae486625a8e4bfaf4a4333e7f2"
+    },
+    {
+      "file": "bin/masc_tui_types.ml",
+      "candidate": false,
+      "base": "d0a4db845644cf946f419b47687223700c7e79ce",
+      "sha256": "5abb93df87a43443a8ffca1a46bb4d01f8082faea6680c39adfee783dde379c7"
+    },
+    {
+      "file": "bin/masc_tui_keeper_control.ml",
+      "candidate": true,
+      "base": "d0a4db845644cf946f419b47687223700c7e79ce",
+      "sha256": "1cf2b816b045dc347354605a8c90eb9e9a45c40bcf7d01b2b3afd3bf1bb4a537"
+    },
+    {
+      "file": "bin/masc_tui_types.ml",
+      "candidate": true,
+      "base": "d0a4db845644cf946f419b47687223700c7e79ce",
+      "sha256": "64b62a12bcb24c73d8ae2ed6b059be57245afc832b9f7310ae40176ad0b6db70"
+    }
+  ]
+}

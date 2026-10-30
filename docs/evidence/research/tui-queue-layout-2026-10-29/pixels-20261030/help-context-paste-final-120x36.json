@@ -1,0 +1,26 @@
+{
+  "viewport": [
+    1165,
+    694,
+    2
+  ],
+  "terminal": {
+    "cols": 120,
+    "rows": 36,
+    "fontSize": 16,
+    "fontFamily": "Menlo,Monaco,monospace"
+  },
+  "screen": {
+    "x": 5,
+    "y": 5,
+    "width": 1140,
+    "height": 684,
+    "top": 5,
+    "right": 1145,
+    "bottom": 689,
+    "left": 5
+  },
+  "captured_at": "2026-10-30T00:25:14.516Z",
+  "task_space": 124,
+  "page": "p1"
+}

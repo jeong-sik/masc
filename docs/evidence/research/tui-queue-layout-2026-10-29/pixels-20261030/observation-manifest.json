@@ -1,0 +1,21 @@
+{
+  "started_at": "2026-10-30T00:17:10.872762+00:00",
+  "purpose": "authorized resumed pixel observation, new synthetic phase after prior owned fixtures closed",
+  "repository_head": "fe88e17bf56e03e33b3b487ec861470048e38294",
+  "source_sha": "23c5ea834f89a0988c02ffe3e492980152869179",
+  "binary_sha256": "38e081df1926332e59e5f8edcfed8cad76c40e21afda8cde4b4fc428f9c48bab",
+  "fixture_sha256": "017aa45118a86c84fa14e22a1243b8ca5ae5d4d2d3ba8221da163c10abb1149e",
+  "fixture_pid": 6891,
+  "fixture_port": 50409,
+  "ttyd_pid": 6906,
+  "ttyd_port": 50413,
+  "ttyd_read_only": true,
+  "tmux_socket": "masc-queue-pixels-20261030",
+  "session": "pixels",
+  "initial_terminal": "120x36",
+  "task_space_id": 124,
+  "page": "p1",
+  "font_size": 16,
+  "font_family": "Menlo,Monaco,monospace",
+  "scope": "actual native TUI via readonly ttyd and Ego; synthetic health source claim, no real server mutation/model/production data"
+}

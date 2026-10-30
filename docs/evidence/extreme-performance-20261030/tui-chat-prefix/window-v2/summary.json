@@ -1,0 +1,158 @@
+{
+  "decision_checks": 113100,
+  "scope": "Extracted actual viewport/anchor algorithms with synthetic metadata/body rows; state and input-anchor decisions only. Not full formatting, TUI Build/Present or display latency. Eight AB/BA batches, shared host and default runtime.",
+  "summary": [
+    {
+      "entries": 30,
+      "mode": "hot",
+      "before": {
+        "wall_us": 0.59961665,
+        "cpu_us": 0.5652500000000005,
+        "allocated_bytes": 9752.0256
+      },
+      "after": {
+        "wall_us": 0.50506455,
+        "cpu_us": 0.504449999999998,
+        "allocated_bytes": 9488.0256
+      },
+      "ratio": {
+        "wall_us": 0.842312417442044,
+        "cpu_us": 0.8924369747899116,
+        "allocated_bytes": 0.972928701089546
+      }
+    },
+    {
+      "entries": 30,
+      "mode": "cold",
+      "before": {
+        "wall_us": 1.1083250000000002,
+        "cpu_us": 1.1250000000004312,
+        "allocated_bytes": 14916.8
+      },
+      "after": {
+        "wall_us": 1.11875,
+        "cpu_us": 1.1499999999997623,
+        "allocated_bytes": 14652.8
+      },
+      "ratio": {
+        "wall_us": 1.009406085760043,
+        "cpu_us": 1.022222222221619,
+        "allocated_bytes": 0.9823018341735493
+      }
+    },
+    {
+      "entries": 300,
+      "mode": "hot",
+      "before": {
+        "wall_us": 1.7378646,
+        "cpu_us": 1.5107000000000037,
+        "allocated_bytes": 15888.0256
+      },
+      "after": {
+        "wall_us": 0.5388791500000001,
+        "cpu_us": 0.5331999999999976,
+        "allocated_bytes": 9440.0256
+      },
+      "ratio": {
+        "wall_us": 0.3100812054057607,
+        "cpu_us": 0.3529489640563952,
+        "allocated_bytes": 0.5941597677184005
+      }
+    },
+    {
+      "entries": 300,
+      "mode": "cold",
+      "before": {
+        "wall_us": 10.0531,
+        "cpu_us": 7.624999999999993,
+        "allocated_bytes": 63668.8
+      },
+      "after": {
+        "wall_us": 7.47085,
+        "cpu_us": 6.949999999997235,
+        "allocated_bytes": 57284.8
+      },
+      "ratio": {
+        "wall_us": 0.7431389322696482,
+        "cpu_us": 0.9114754098357039,
+        "allocated_bytes": 0.8997311084864172
+      }
+    },
+    {
+      "entries": 3000,
+      "mode": "hot",
+      "before": {
+        "wall_us": 11.7077583,
+        "cpu_us": 10.10229999999999,
+        "allocated_bytes": 74128.0256
+      },
+      "after": {
+        "wall_us": 0.5210229500000001,
+        "cpu_us": 0.5191500000000016,
+        "allocated_bytes": 9360.0256
+      },
+      "ratio": {
+        "wall_us": 0.04450236643508434,
+        "cpu_us": 0.051389287587975216,
+        "allocated_bytes": 0.12626837858204065
+      }
+    },
+    {
+      "entries": 3000,
+      "mode": "cold",
+      "before": {
+        "wall_us": 72.28852499999999,
+        "cpu_us": 69.27500000000197,
+        "allocated_bytes": 533908.8
+      },
+      "after": {
+        "wall_us": 61.9677,
+        "cpu_us": 62.02500000000443,
+        "allocated_bytes": 469204.8
+      },
+      "ratio": {
+        "wall_us": 0.8572273400238836,
+        "cpu_us": 0.8953446409238928,
+        "allocated_bytes": 0.8788107631865216
+      }
+    },
+    {
+      "entries": 30000,
+      "mode": "hot",
+      "before": {
+        "wall_us": 112.96491700000001,
+        "cpu_us": 98.20399999999995,
+        "allocated_bytes": 657408.128
+      },
+      "after": {
+        "wall_us": 0.566125,
+        "cpu_us": 0.5672500000000191,
+        "allocated_bytes": 9440.128
+      },
+      "ratio": {
+        "wall_us": 0.005011511671362534,
+        "cpu_us": 0.005776241293633858,
+        "allocated_bytes": 0.014359615584186997
+      }
+    },
+    {
+      "entries": 30000,
+      "mode": "cold",
+      "before": {
+        "wall_us": 1052.1021,
+        "cpu_us": 831.7750000000012,
+        "allocated_bytes": 5236868.8
+      },
+      "after": {
+        "wall_us": 921.84685,
+        "cpu_us": 734.4499999999865,
+        "allocated_bytes": 4588964.8
+      },
+      "ratio": {
+        "wall_us": 0.8761952380857333,
+        "cpu_us": 0.8829911935318872,
+        "allocated_bytes": 0.8762802688507301
+      }
+    }
+  ]
+}

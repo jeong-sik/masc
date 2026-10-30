@@ -1,0 +1,61 @@
+{
+  "scope": "Extracted actual viewport/anchor algorithms with synthetic metadata/body rows; state and input-anchor decisions only. Not full formatting, TUI Build/Present or display latency. Large single-entry controls; eight AB/BA batches, shared host and default runtime.",
+  "summary": [
+    {
+      "shape": "one-large-body",
+      "mode": "hot",
+      "before": {
+        "wall_us": 952.5802249999999,
+        "cpu_us": 892.2000000000013,
+        "allocated_bytes": 2404764.8
+      },
+      "after": {
+        "wall_us": 908.419775,
+        "cpu_us": 882.3749999999964,
+        "allocated_bytes": 2404796.8
+      }
+    },
+    {
+      "shape": "one-large-body",
+      "mode": "cold",
+      "before": {
+        "wall_us": 1915.5344,
+        "cpu_us": 1725.8750000000045,
+        "allocated_bytes": 3604932.8
+      },
+      "after": {
+        "wall_us": 2066.26355,
+        "cpu_us": 1759.9499999999962,
+        "allocated_bytes": 3605028.8
+      }
+    },
+    {
+      "shape": "large-body-with-empty-neighbors",
+      "mode": "hot",
+      "before": {
+        "wall_us": 936.996875,
+        "cpu_us": 860.2499999999957,
+        "allocated_bytes": 2404804.8
+      },
+      "after": {
+        "wall_us": 1086.3385250000001,
+        "cpu_us": 923.1250000000025,
+        "allocated_bytes": 2404812.8
+      }
+    },
+    {
+      "shape": "large-body-with-empty-neighbors",
+      "mode": "cold",
+      "before": {
+        "wall_us": 1979.766675,
+        "cpu_us": 1738.7749999999978,
+        "allocated_bytes": 3605084.8
+      },
+      "after": {
+        "wall_us": 1803.4948,
+        "cpu_us": 1625.224999999997,
+        "allocated_bytes": 3605156.8
+      }
+    }
+  ]
+}

@@ -10340,7 +10340,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   let panel_notice ~failure text =
     match action with
     | Inbox.Inspect_peers (token, _) ->
-      ignore (finish_keeper_peer_reading state ~keeper_name ~token (Error text))
+      ignore (stage_keeper_peer_reading state ~keeper_name ~token (Error text))
     | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
     | Cancel_event _ | Prioritize_event _ ->
       (match state.queue_panel with
@@ -19490,7 +19490,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
              | Error reason, _ -> Error reason
              | Ok _, Some page -> Ok page
              | Ok _, None -> Error "Keeper relationship page is unavailable") in
-      ignore (finish_keeper_peer_reading state ~keeper_name ~token observation)
+      ignore (stage_keeper_peer_reading state ~keeper_name ~token observation)
   | Keeper_queue_loaded (keeper_name, control_generation,
       ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _
        | Run_next _ | Edit _ | Cancel_event _ | Prioritize_event _) as action), result) ->
@@ -37072,6 +37072,19 @@ and is loaded on demand through keeper_skill.
        | Render_schedule.Render when defer_owned_frame ->
            Render_schedule.request render_schedule Render_schedule.Background
        | Render_schedule.Render ->
+           (* A response may arrive before a key that still belongs to the
+              displayed reader. Settle only when this exact reader is about to
+              be drawn and unfinished terminal input has been handled. *)
+           (match frame_choice, current_detail_reading state with
+            | `Detail_reading shown, Some current when shown == current ->
+                (match settle_keeper_peer_reading state
+                         ~input_pending:(asynchronous_input_pending ()) with
+                 | Peer_waiting_input -> Render_schedule.request render_schedule Render_schedule.Background
+                 | Peer_no_result | Peer_result_applied -> ())
+            | (`Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+              | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
+              | `Help | `Agenda | `Answering | `Queue _ | `Patch | `Link | `Client_detail _
+              | `Surface), (Some _ | None) -> ());
            (* Keys and async updates can change the pane reservation after
               the interaction snapshot. Store the focus the next frame shows. *)
            reconcile_chat_focus ();

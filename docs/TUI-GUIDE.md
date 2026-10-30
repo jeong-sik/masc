@@ -2947,7 +2947,10 @@ the first page. Each page is a separate observation of a changing queue; a
 nonempty page offers a further read and an empty page reports only that no
 requests followed its cursor in that read. The cursor does not identify a
 Keeper's storage generation; restart if that Keeper was deleted and recreated.
-If a read fails, the previous page remains available. The view does not list
+The current page and pending or failed read stay visible above the scrollable
+document. If a read fails, the previous page remains available. A new page
+opens at its beginning unless you changed the reader position during the read.
+The view does not list
 running or completed requests, and an unrecognized sender is not guessed from
 the submitter's name. Esc closes the view.
 A delegate-result mark represents a queued terminal result; its sentence may

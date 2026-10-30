@@ -1,4 +1,4 @@
-"""No OCaml source reads a file-owned setting from the process environment.
+"""Check literal-shaped getenv calls and report unresolved binding candidates.
 
 The settings registry marks a setting `Toml_only` when `runtime.toml` is its
 only input. `Env_config_core.raw_value_opt` answers such a name from the boot
@@ -7,11 +7,14 @@ started the server cannot change what the file says. A read that goes around
 it, such as `Sys.getenv_opt "MASC_KEEPER_DEBUG"`, makes that shell an owner of
 the setting again.
 
-The rule reports a call to `Sys.getenv`, `Sys.getenv_opt`, `Unix.getenv`, or any
-function whose name contains `getenv`, applied to a file-owned name (comments
-removed). The name is written as
+The blocking rule is syntactic: a function whose written name contains `getenv`
+is applied to a literal spelling of a file-owned name (comments removed).
+Parentheses and type constraints around the literal are accepted. It does not
+resolve the called function: a local function named `getenv` or a shadowed
+`Sys` module has the same syntax and is also reported.
 
-  - the string literal, `Sys.getenv_opt "MASC_KEEPER_DEBUG"`, or
+The scan also reports advisory candidates when the argument is
+
   - a name bound to it, `let debug_env = "MASC_KEEPER_DEBUG"` and then
     `Sys.getenv_opt debug_env` in the file that binds it (a local
     `let ... in` included), or through a module path from any file,
@@ -28,15 +31,18 @@ Reads built from pieces (`"MASC_" ^ suffix`) and a bound name used unqualified
 in another file, after an `open`, are not seen.
 
 The binding lookup is by identifier, not lexical scope or module ownership.
-It can flag unrelated bindings that happen to have the same name, and it does
-not follow aliases such as `let alias = key`. This is a syntactic ratchet, not
-proof that all process-environment reads are blocked.
+It can flag unrelated bindings that happen to have the same name, so these
+candidates do not fail the check. It does not follow aliases such as
+`let alias = key`. Neither a successful check nor an empty candidate list proves
+that all process-environment reads are blocked.
 
 usage: test_file_owned_env_reads.py <names file> <source root>...
 """
 
 import re
 import sys
+from dataclasses import dataclass
+from enum import Enum
 
 # The OCaml lexer helpers of the byte-cut scan: comments removed with literals
 # kept, string and quoted-string skipping. The scan files sit side by side.
@@ -68,6 +74,18 @@ LITERAL_READ = re.compile(
     READ
     + r'(?P<opens>(?:\s*\()*)\s*"#(?P<literal>\d+)"'
 )
+
+
+class Evidence(Enum):
+    LITERAL = "literal syntax"
+    BINDING_CANDIDATE = "unresolved binding"
+
+
+@dataclass(frozen=True)
+class Finding:
+    line: int
+    snippet: str
+    evidence: Evidence
 
 
 def literalize(code):
@@ -175,22 +193,24 @@ def literal_argument_end(code, match):
 
 
 def findings(text, names, own, reachable):
-    """(line, snippet) of each read of a file-owned name in [text].
+    """Literal-shaped calls and advisory binding candidates in [text].
 
     [own] are the identifiers bound to one in this file, [reachable] the ones a
     module path names in any file.
     """
     code, literals = literalize(blank_comments(text, keep_width=False))
     found = [
-        match
+        (match, Evidence.LITERAL)
         for match in LITERAL_READ.finditer(code)
         if literals[int(match.group("literal"))] in names
         and literal_argument_end(code, match) is not None
     ]
     if own:
-        found.extend(re.finditer(READ + OPEN + r"(?:" + alternation(own) + r")\b", code))
+        found.extend((match, Evidence.BINDING_CANDIDATE) for match in
+                     re.finditer(READ + OPEN + r"(?:" + alternation(own) + r")\b", code))
     if reachable:
         found.extend(
+            (match, Evidence.BINDING_CANDIDATE) for match in
             re.finditer(READ + OPEN + r"(?:[A-Z][A-Za-z0-9_']*\.)+(?:" + alternation(reachable) + r")\b", code)
         )
 
@@ -206,8 +226,8 @@ def findings(text, names, own, reachable):
         return " ".join(text.split())
 
     return [
-        (code.count("\n", 0, match.start()) + 1, shown(match))
-        for match in sorted(found, key=lambda m: m.start())
+        Finding(code.count("\n", 0, match.start()) + 1, shown(match), evidence)
+        for match, evidence in sorted(found, key=lambda item: item[0].start())
     ]
 
 
@@ -293,7 +313,7 @@ PAIRS = [
 
 
 def findings_of(texts, names):
-    """{index: [(line, snippet)]} for several files read together."""
+    """A finding list per file, keeping certainty separate from detection."""
     bound = [bindings_of(text, names) for text in texts]
     reachable = {}
     for _, reach in bound:
@@ -325,17 +345,32 @@ def main(names_path, roots):
         with open(path, encoding="utf-8", errors="replace") as handle:
             texts.append(handle.read())
     flagged = []
+    advisory = []
     for path, found in zip(paths, findings_of(texts, names)):
-        flagged.extend(f"{path}:{line}: {snippet}" for line, snippet in found)
+        for finding in found:
+            rendered = f"{path}:{finding.line}: {finding.snippet}"
+            match finding.evidence:
+                case Evidence.LITERAL:
+                    flagged.append(rendered)
+                case Evidence.BINDING_CANDIDATE:
+                    advisory.append(rendered)
+    if advisory:
+        print(
+            "Advisory: unresolved binding candidates; lexical scope and module ownership "
+            "are not checked. These candidates do not fail the check:\n  "
+            + "\n  ".join(advisory), file=sys.stderr
+        )
     if flagged:
         sys.exit(
-            "These reads take a setting that runtime.toml alone owns from the process "
-            "environment.\n"
-            "Read it through Env_config_core (get_bool, get_int, raw_value_opt), which answers "
-            "it from the boot override store:\n  "
+            "Prohibited literal-shaped getenv calls (function and module identity are "
+            "not resolved).\n"
+            "For environment reads, use Env_config_core (get_bool, get_int, raw_value_opt), "
+            "which respects file ownership:\n  "
             + "\n  ".join(flagged)
         )
-    print(f"{len(paths)} .ml files scanned, {len(names)} file-owned names, no direct environment read")
+    print(f"{len(paths)} .ml files scanned, {len(names)} file-owned names, "
+          f"no prohibited literal-shaped call; {len(advisory)} unresolved binding candidates "
+          "(advisory). This is not proof of no process-environment reads.")
 
 
 if __name__ == "__main__":

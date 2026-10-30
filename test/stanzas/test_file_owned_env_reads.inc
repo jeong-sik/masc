@@ -1,5 +1,6 @@
-; No OCaml source reads a setting that runtime.toml alone owns from the process
-; environment. The dump writes the names the settings registry marks file-owned;
+; Reject literal-shaped getenv calls for file-owned names. Binding candidates
+; are advisory because the scanner does not resolve lexical/module scope.
+; The dump writes the names the settings registry marks file-owned;
 ; the scan reads the source files of lib and bin. source_tree leaves out the .ml
 ; files that rules generate.
 (executable

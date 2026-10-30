@@ -6698,6 +6698,8 @@
 
 (include stanzas/test_byte_cut_previews.inc)
 
+(include stanzas/test_file_owned_env_reads.inc)
+
 (test
  (name test_tui_keeper_call_evidence)
  (modules test_tui_keeper_call_evidence)

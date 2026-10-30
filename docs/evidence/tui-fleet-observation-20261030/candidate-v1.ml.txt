@@ -1,0 +1,176 @@
+module F = Masc.Fleet_stream
+
+type reading =
+  { revision : F.Revision.t
+  ; measured_at : float
+  ; fleet : F.fleet
+  ; degraded : F.degradation option
+  }
+
+type trouble =
+  | Scans_failing of F.degradation
+  | Disconnected of { since : float }
+
+type failure =
+  | Refused of { status : int; detail : string }
+  | Schema_mismatch of { expected : int; received : int }
+  | Frame_rejected of string
+
+type view =
+  | Awaiting_first_reading
+  | Unreachable of { since : float }
+  | Reading of { reading : reading; trouble : trouble option }
+  | Unavailable of { degradation : F.degradation; disconnected_since : float option }
+  | Cannot_read of failure
+
+type step =
+  | Keep_reading
+  | Reconnect
+
+(* A scan cannot be both a reading and an unavailable snapshot. [following]
+   is this connection's last event revision, or [None] until its snapshot.
+   [down_since] is the first loss since a state arrived. *)
+type observation =
+  | Not_observed
+  | Observed_reading of reading
+  | Observed_unavailable of F.degradation
+
+type snapshot =
+  { observation : observation
+  ; following : F.Revision.t option
+  ; down_since : float option
+  ; failure : failure option
+  }
+
+type t = { mutable decoder : Sse_wire.decoder; mutable snapshot : snapshot }
+
+let create () =
+  { decoder = Sse_wire.create_decoder ()
+  ; snapshot =
+      { observation = Not_observed; following = None; down_since = None; failure = None }
+  }
+;;
+
+let started t =
+  let decoder = Sse_wire.create_decoder () in
+  let snapshot = { t.snapshot with following = None } in
+  t.decoder <- decoder;
+  t.snapshot <- snapshot
+;;
+
+let reject t failure =
+  t.snapshot <- { t.snapshot with failure = Some failure; following = None };
+  Reconnect
+;;
+
+let refused t ~status ~detail =
+  ignore (reject t (Refused { status; detail }) : step)
+;;
+
+let lost t ~now =
+  match t.snapshot.down_since with
+  | Some _ -> ()
+  | None -> t.snapshot <- { t.snapshot with down_since = Some now }
+;;
+
+let take_snapshot t reading =
+  t.snapshot <-
+    { observation = Observed_reading reading
+    ; following = Some reading.revision
+    ; down_since = None
+    ; failure = None
+    };
+  Keep_reading
+;;
+
+let take_unavailable_snapshot t revision degradation =
+  t.snapshot <-
+    { observation = Observed_unavailable degradation
+    ; following = Some revision
+    ; down_since = None
+    ; failure = None
+    };
+  Keep_reading
+;;
+
+(* A cursor can exist without a reading after an unavailable snapshot. A
+   Changed event then supplies the first reading; a Degraded event without a
+   reading violates the producer's lifecycle and requires a new snapshot. *)
+let take_next t revision update =
+  let snapshot = t.snapshot in
+  match snapshot.following with
+  | Some last when F.Revision.is_next ~after:last revision ->
+    (match update snapshot.observation with
+     | Some observation ->
+       t.snapshot <- { snapshot with observation; following = Some revision };
+       Keep_reading
+     | None ->
+       t.snapshot <- { snapshot with following = None };
+       Reconnect)
+  | Some _ ->
+    t.snapshot <- { snapshot with following = None };
+    Reconnect
+  | None -> Reconnect
+;;
+
+let apply t = function
+  | F.Snapshot { revision; measured_at; fleet; degraded } ->
+    take_snapshot t { revision; measured_at; fleet; degraded }
+  | F.Unavailable_snapshot { revision; degradation } ->
+    take_unavailable_snapshot t revision degradation
+  | F.Changed { revision; measured_at; fleet } ->
+    take_next t revision (fun (Not_observed | Observed_reading _ | Observed_unavailable _) ->
+      Some (Observed_reading { revision; measured_at; fleet; degraded = None }))
+  | F.Degraded { revision; degradation } ->
+    take_next t revision (function
+      | Not_observed | Observed_unavailable _ -> None
+      | Observed_reading reading ->
+        Some (Observed_reading { reading with revision; degraded = Some degradation }))
+;;
+
+let apply_frame t (frame : Sse_wire.frame) =
+  match Yojson.Safe.from_string frame.data with
+  | exception Yojson.Json_error detail ->
+    reject t (Frame_rejected ("not JSON: " ^ detail))
+  | json ->
+    (match F.decode json with
+     | Ok event -> apply t event
+     | Error (F.Schema_mismatch { expected; received }) ->
+       reject t (Schema_mismatch { expected; received })
+     | Error
+         (( F.Not_an_object _ | F.Missing_field _ | F.Unknown_field _
+          | F.Duplicate_field _ | F.Wrong_type _ | F.Out_of_range _
+          | F.Unknown_word _ | F.Not_canonical _ | F.Unknown_event _ ) as error) ->
+       reject t (Frame_rejected (F.decode_error_to_string error)))
+;;
+
+let feed t chunk =
+  let rec apply_all = function
+    | [] -> Keep_reading
+    | frame :: later ->
+      (match apply_frame t frame with
+       | Keep_reading -> apply_all later
+       | Reconnect -> Reconnect)
+  in
+  apply_all (Sse_wire.feed t.decoder chunk)
+;;
+
+let view t =
+  let snapshot = t.snapshot in
+  match snapshot.failure, snapshot.observation with
+  | Some failure, (Not_observed | Observed_reading _ | Observed_unavailable _) ->
+    Cannot_read failure
+  | None, Not_observed ->
+    (match snapshot.down_since with
+     | None -> Awaiting_first_reading
+     | Some since -> Unreachable { since })
+  | None, Observed_unavailable degradation ->
+    Unavailable { degradation; disconnected_since = snapshot.down_since }
+  | None, Observed_reading reading ->
+    let trouble =
+      match snapshot.down_since with
+      | Some since -> Some (Disconnected { since })
+      | None -> Option.map (fun degradation -> Scans_failing degradation) reading.degraded
+    in
+    Reading { reading; trouble }
+;;

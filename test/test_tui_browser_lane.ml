@@ -313,19 +313,19 @@ let test_viewport_cadence_skip_inputs () =
           "title", `String "moved"; "url", `String "https://example.org/";
           "mimeType", `String "image/png"; "data", `String "UE5H";
           "viewport", `Assoc [ "documentId", `String "fixture"; "width", `Int 800; "height", `Int 600;
-                               "scrollX", `Int 0; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ]) );
+                               "scrollX", `Int 0; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ] ]);
       ("url", `Assoc [ "ok", `Bool true; "data", `Assoc [
           "source", `String "live"; "clientId", `String firefox.client_id; "tabId", `Int 2;
           "title", `String "second"; "url", `String "https://example.org/moved";
           "mimeType", `String "image/png"; "data", `String "UE5H";
           "viewport", `Assoc [ "documentId", `String "fixture"; "width", `Int 800; "height", `Int 600;
-                               "scrollX", `Int 0; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ]) );
+                               "scrollX", `Int 0; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ] ]);
       ("viewport", `Assoc [ "ok", `Bool true; "data", `Assoc [
           "source", `String "live"; "clientId", `String firefox.client_id; "tabId", `Int 2;
           "title", `String "second"; "url", `String "https://example.org/";
           "mimeType", `String "image/png"; "data", `String "UE5H";
           "viewport", `Assoc [ "documentId", `String "fixture"; "width", `Int 800; "height", `Int 600;
-                               "scrollX", `Int 3; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ]) ) ];
+                               "scrollX", `Int 3; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ] ]) ];
   expect "the armed cadence keeps naming the settled viewport tab"
     (cadence_operation ~viewport:shot settled = Some (Viewport_cadence 2));
   expect "a busy view arms no cadence, so no skip input is produced at all"

@@ -58,7 +58,7 @@ type durable_snapshot =
 
 val inspect_outstanding : path:string -> (outstanding_snapshot, error) result
 (** Read-only current-schema/integrity checked snapshot of queued/running
-    operations, semantic executions owning retained checkpoints, and every
+    operations, nonterminal semantic executions, and every
     trace's current input checkpoint. A checkpoint whose pending_input is None
     is still ownership evidence. Never creates, upgrades or recovers a store.
     Missing files remain distinct from a validated empty queue. Mutation callers

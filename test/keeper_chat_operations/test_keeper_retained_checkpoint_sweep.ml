@@ -118,6 +118,36 @@ let test_removes_only_what_no_unsettled_execution_names () = with_root (fun root
   check bool "settled copy in another session removed" false (Sys.file_exists released_elsewhere);
   check bool "a file not named <sha>.json is left" true (Sys.file_exists other_file))
 
+(* A restart settles a native call that ended without an Owner receipt and
+   keeps the receipt on the settled execution. That execution never resumes,
+   so its receipt names no file the sweep must keep. *)
+let test_a_settled_native_receipt_names_nothing () = with_root (fun root ->
+  let seed = checkpoint "native seed" and latest = checkpoint "native latest"
+  and suspended = checkpoint "suspended" in
+  with_open (keeper_store root "alpha") (fun store ->
+    let operation = claimed_direct store "sweep-native" in
+    let call_id = "019a0010-1000-7000-8000-0000000000a1" in
+    let locator = Agent_core.Agent.execution_locator_of_yojson
+        (`Assoc ["version", `Int 1; "run_id", `String "execution-run-sweep-native"]) |> string_ok in
+    let call = Keeper_native_call.create ~call_id ~runtime_id:"native.primary"
+        ~operation_digest:operation.execution_digest ~api:Keeper_native_call.Continue_from_checkpoint
+        ~seed_checkpoint:seed ~locator |> string_ok in
+    let commit change =
+      ignore (Store.update_direct_native_call store ~now:12. ~operation_id:operation.operation_id
+                ~execution_digest:operation.execution_digest change |> store_ok) in
+    commit (Keeper_native_call.Bind {observed=Keeper_native_call.No_native_call; call});
+    commit (Keeper_native_call.Checkpoint {call_id; observed=seed; checkpoint=latest});
+    commit (Keeper_native_call.Terminal {call_id; disposition=
+      {Agent_core.Agent.outcome=Agent_core.Agent.Terminal_failed; recovery=Agent_core.Agent.Retire}});
+    ignore (Store.settle_running_after_restart store ~now:13. |> store_ok : Operation.t list);
+    ignore (defer_direct_checkpoint store "sweep-suspended" suspended));
+  let paths = List.map (retained root ~session:["sweep-trace"]) [seed; latest; suspended] in
+  List.iter (fun path -> write path "{}") paths;
+  let report = sweep root in
+  check int "only the suspension is live" 1 report.live_references;
+  check (list bool) "the receipt's seed and latest checkpoint are removed, the suspension kept"
+    [false; false; true] (List.map Sys.file_exists paths))
+
 let test_a_gate_wait_keeps_its_checkpoint () = with_root (fun root ->
   let gated = checkpoint "gated" in
   with_open (keeper_store root "gamma") (fun store -> defer_direct_gate store gated);
@@ -379,6 +409,8 @@ let () =
         test_input_owner_retains_only_current_checkpoint_after_restart;
       test_case "removes only what no unsettled execution names" `Quick
             test_removes_only_what_no_unsettled_execution_names
+        ; test_case "a settled native receipt names nothing" `Quick
+            test_a_settled_native_receipt_names_nothing
         ; test_case "a gate wait keeps its checkpoint" `Quick test_a_gate_wait_keeps_its_checkpoint
         ; test_case "symlinked keeper directories are read" `Quick
             test_symlinked_keeper_directories_are_read

@@ -197,7 +197,8 @@ val checkpoint_references : t -> Keeper_checkpoint_ref.t list
     retained continuation named by no record's list is never read again. A
     direct operation's references all live directly under the session root,
     in the directory named by the reference's trace id. A branch pins both its
-    historical root and current input head until semantic settlement. *)
+    historical root and current input head until semantic settlement. A
+    settled record names none, even when it keeps a native receipt. *)
 
 val gate_preparation_heads : t -> (Keeper_checkpoint_ref.t * string) list
 (** The checkpoint heads the record holds in itself: a Gate binding's Agent

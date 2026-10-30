@@ -79,10 +79,9 @@ let test_terminal_restart_never_dispatches () = with_store @@ fun path store ope
    | Some {Operation.state=Operation.Failed {failure={kind=Operation.Interrupted_by_restart; _}; _}; _} -> ()
    | _ -> fail "terminal call inferred completion instead of interruption");
   match Store.inspect_outstanding ~path |> ok with
-  | Store.Stored_operations {semantic_executions=[execution]; _} ->
-    check int "unacknowledged checkpoint refs retained" 2
-      (List.length (Keeper_semantic_execution.checkpoint_references execution))
-  | _ -> fail "unacknowledged native receipt excluded from retention"
+  | Store.Stored_operations {semantic_executions=[]; _} -> ()
+  | Store.Stored_operations _ | Store.Missing_store ->
+    fail "the settled execution was still outstanding"
 
 let test_unknown_effect_survives_failure_and_rejects_retry () = with_store @@ fun path store operation ->
   bind store operation (make_call operation);
@@ -292,38 +291,33 @@ let test_only_a_committed_transaction_releases () = with_store @@ fun _path stor
   advance store operation ~observed:3 ~next:4;
   released "the next commit releases only what it stopped naming" [checkpoint 3] store
 
-(* A restart settles a call that had no Owner receipt but keeps the receipt,
-   so the settled execution still names the call's checkpoints. A later
-   operation superseding a checkpoint with the same bytes must keep it. *)
-let test_a_settled_execution_with_a_receipt_keeps_its_checkpoints () =
-  let directory = Filename.temp_dir "native-call-owner" "" in
-  let path = Filename.concat directory Store.For_testing.database_file in
-  let store = Store.open_or_create ~path |> ok in
-  Fun.protect ~finally:(fun () -> ignore (Store.close store : (unit, Store.error) result)) (fun () ->
-    submit store operation_id "interrupted input";
-    let operation = claim store in
-    bind store operation (make_call operation);
-    advance store operation ~observed:1 ~next:2;
-    terminal store operation Agent.Retire;
-    ignore (Store.settle_running_after_restart store ~now:4. |> ok : Operation.t list);
-    released "a restart that keeps the receipt releases nothing" [] store;
-    let later_id = Operation.Operation_id.of_string "native-later-operation" |> value in
-    submit store later_id "later input";
-    let later = claim store in
-    let later_call = Native.create ~call_id:next_call_id ~runtime_id:"native.primary"
-        ~operation_digest:later.Operation.execution_digest
-        ~api:(Native.New_input {seed_message_count=3}) ~seed_checkpoint:(checkpoint 5)
-        ~locator:(locator next_call_id) |> value in
-    let later_commit change = Store.update_direct_native_call store ~now:5. ~operation_id:later_id
-        ~execution_digest:later.Operation.execution_digest change |> ok in
-    later_commit (Native.Bind {observed=Native.No_native_call; call=later_call});
-    later_commit (Native.Checkpoint {call_id=next_call_id; observed=checkpoint 5; checkpoint=checkpoint 6});
-    (* The bytes of the interrupted call's latest checkpoint, at a later turn. *)
-    let same_bytes = checkpoint_of_bytes ~turn_count:6 2 in
-    later_commit (Native.Checkpoint {call_id=next_call_id; observed=checkpoint 6; checkpoint=same_bytes});
-    released "the later call releases its own superseded checkpoint" [checkpoint 6] store;
-    later_commit (Native.Checkpoint {call_id=next_call_id; observed=same_bytes; checkpoint=checkpoint 7});
-    released "a checkpoint the settled receipt names is kept" [] store)
+(* A restart settles a call that had no Owner receipt and keeps the receipt.
+   The settled execution never resumes, so the receipt keeps the call's
+   identity and the settlement releases both of its checkpoints. *)
+let test_a_restart_settlement_releases_the_receipt_checkpoints () =
+  with_store @@ fun path store operation ->
+  retired_after_advancing store operation;
+  let receipt = read store in
+  ignore (Store.settle_running_after_restart store ~now:4. |> ok : Operation.t list);
+  released "the restart releases the receipt's seed and latest checkpoint"
+    [checkpoint 1; checkpoint 2] store;
+  check bool "the settled execution keeps the receipt" true (Native.equal_state receipt (read store));
+  with_reopened path store @@ fun reopened ->
+  check bool "the receipt survives a reopen" true (Native.equal_state receipt (read reopened))
+
+(* An unknown effect lets the operation fail and keeps its receipt. The failed
+   execution never resumes either, so its checkpoints are released. *)
+let test_an_unknown_effect_failure_releases_its_checkpoints () = with_store @@ fun _path store operation ->
+  bind store operation (make_call operation);
+  advance store operation ~observed:1 ~next:2;
+  terminal store operation (Agent.Operator_repair_required Agent.Effect_outcome_unknown);
+  let receipt = read store in
+  released "the unknown-effect call so far released nothing" [] store;
+  ignore (settle_failed store ~now:4. |> ok);
+  released "the failure releases the receipt's seed and latest checkpoint"
+    [checkpoint 1; checkpoint 2] store;
+  check bool "the failed execution keeps the unknown-effect receipt" true
+    (Native.equal_state receipt (read store))
 
 (* The release reads only the rows SQL lets through. On a store holding every
    kind of row, that selection is exactly what the startup sweep's inspection
@@ -385,7 +379,7 @@ let test_the_release_selection_matches_the_sweep () =
       | Store.Missing_durable_store -> fail "the store is missing" in
     check int "every kind of row is present" 5 (List.length all);
     check (list string) "the release selects what the sweep keeps" (ids swept) (ids selected);
-    check int "the gate wait, the receipt kept by the restart and the suspension" 3
+    check int "the gate wait and the suspension" 2
       (List.length selected))
 
 let input_updated = function
@@ -661,7 +655,7 @@ let () = run "native-call-owner-store" ["input ownership", [
   test_case "input owner shares native retained liveness" `Quick test_input_retention_shares_native_liveness];
   "recovery", [
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;
-  test_case "terminal restart retains incomplete receipt without dispatch" `Quick test_terminal_restart_never_dispatches;
+  test_case "terminal restart keeps its receipt without dispatch" `Quick test_terminal_restart_never_dispatches;
   test_case "unknown effect survives settlement and rejects retry" `Quick test_unknown_effect_survives_failure_and_rejects_retry;
   test_case "settling an active call is a precondition, not corruption" `Quick test_settling_an_active_call_is_a_precondition_not_corruption;
   test_case "unknown-effect receipt lets the operation fail but not complete" `Quick test_unknown_effect_receipt_lets_the_operation_fail_but_not_complete;
@@ -677,6 +671,8 @@ let () = run "native-call-owner-store" ["input ownership", [
   test_case "a suspend keeps the checkpoint it names" `Quick test_a_suspend_keeps_the_checkpoint_it_names;
   test_case "a reference another execution names is kept" `Quick test_a_reference_another_execution_names_is_kept;
   test_case "only a committed transaction releases" `Quick test_only_a_committed_transaction_releases;
-  test_case "a settled execution with a receipt keeps its checkpoints" `Quick
-    test_a_settled_execution_with_a_receipt_keeps_its_checkpoints;
+  test_case "a restart settlement releases the receipt's checkpoints" `Quick
+    test_a_restart_settlement_releases_the_receipt_checkpoints;
+  test_case "an unknown-effect failure releases its checkpoints" `Quick
+    test_an_unknown_effect_failure_releases_its_checkpoints;
   test_case "the release selection matches the sweep" `Quick test_the_release_selection_matches_the_sweep]]

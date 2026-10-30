@@ -498,7 +498,7 @@ let test_branch_strict_codec () = with_path @@ fun path -> with_store path @@ fu
   (match Semantic.apply ~now:22. (Semantic.Resume_checkpoint response_candidate) exhausted with
    | Error Semantic.Revision_exhausted -> ()
    | Error error -> fail (Semantic.error_to_string error) | Ok _ -> fail "branch resume wrapped exhausted revision")
-let test_branch_settlement_releases_only_branch_evidence () = with_path @@ fun path -> with_store path @@ fun store ->
+let test_branch_settlement_releases_every_checkpoint () = with_path @@ fun path -> with_store path @@ fun store ->
   let _,branched=staged_branch store in
   let running=transition (Semantic.Resume_checkpoint response_candidate) branched in
   List.iter (fun terminal ->
@@ -514,9 +514,11 @@ let test_branch_settlement_releases_only_branch_evidence () = with_path @@ fun p
     |> Result.map_error Semantic.error_to_string |> value in
   rejected (Semantic.apply ~now:24. (Semantic.Settle Semantic.Completed) unknown);
   let failed=transition (Semantic.Settle (Semantic.Failed "effect needs operator reconciliation")) unknown |> roundtrip in
-  check bool "failed branch removes only its own pin" true (failed.input_branch=None);
-  check bool "unknown native effect still retains exact checkpoint" true
-    (names response_candidate (Semantic.checkpoint_references failed))
+  check bool "failed settlement removes the branch" true (failed.input_branch=None);
+  check bool "the failed execution keeps the unknown-effect receipt" true
+    (Native.equal_state (Native.Terminal_unacknowledged (call,disposition)) failed.native_call);
+  check int "the settled execution names no checkpoint" 0
+    (List.length (Semantic.checkpoint_references failed))
 
 let branch_intent () = Semantic.input_response_intent ~waiting ~source:response_source ~candidate:response_candidate
   ~response:response_intent.response ~destination:Semantic.Operation_input |> value
@@ -621,7 +623,7 @@ let () = run "durable original input wait"
     test_case "branch native CAS and repeated input preserve original lineage" `Quick test_branch_native_cas_and_second_response;
     test_case "resumed runtime and Gate keep admission while branch input advances" `Quick test_branch_resumed_retry_and_gate_allow_new_input;
     test_case "branch persisted codec rejects inconsistent authority" `Quick test_branch_strict_codec;
-    test_case "branch settlement preserves unknown native evidence" `Quick test_branch_settlement_releases_only_branch_evidence;
+    test_case "branch settlement releases every checkpoint" `Quick test_branch_settlement_releases_every_checkpoint;
     test_case "prepared response survives restart and stays blocked" `Quick test_intent_survives_restart_without_resuming;
     test_case "conflicting intents and newer input preserve original facts" `Quick test_intent_conflicts_and_newer_input_preserve_facts;
     test_case "intent precommit failure does not invent retained intent" `Quick (test_intent_commit_uncertainty false);

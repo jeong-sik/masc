@@ -920,26 +920,15 @@ let input_checkpoint_rows db =
         else Error (Store_unavailable (sqlite_error db "inspect input checkpoints" rc))
       in read [])
 
-(* Executions whose checkpoint references keep retained files alive: every
-   nonterminal execution, and a settled one that still holds a native-call
-   receipt. The startup sweep's inspection and a native-call commit's release
-   both select with this, so they treat the same files as live. *)
-let owns_checkpoint_references (execution : Semantic.t) =
-  not (Semantic.is_terminal execution) || match execution.native_call with
-  | Keeper_native_call.No_native_call -> false
-  | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ -> true
-;;
-
-(* The executions that own checkpoint references, for a commit's release.
-   Settled rows are never deleted, so this does not decode them all: SQL skips
-   a row whose stored record is settled and has no native call, which names no
-   checkpoint. It reads the record itself, not the denormalized phase column,
-   and [owns_checkpoint_references] stays the authority on what is decoded. *)
+(* The executions that own checkpoint references, for a commit's release:
+   the nonterminal ones, as the startup sweep's inspection selects. Settled
+   rows are never deleted, so this does not decode them all: SQL skips a row
+   whose stored record is settled. It reads the record itself, not the
+   denormalized phase column, and the decoded phase stays the authority. *)
 let owning_semantic_rows db =
   read_semantic_rows db ~operation:"read semantic executions owning checkpoints"
-    ~where:" WHERE json_extract(record_json, '$.phase.kind') IS NOT 'settled' \
-            OR json_extract(record_json, '$.native_call') IS NOT NULL"
-    ~keep:owns_checkpoint_references
+    ~where:" WHERE json_extract(record_json, '$.phase.kind') IS NOT 'settled'"
+    ~keep:(fun execution -> not (Semantic.is_terminal execution))
 ;;
 
 (* [update_semantic] records the references one write stopped naming. *)
@@ -1172,8 +1161,7 @@ let inspect_store_with ~scope ~path =
     let* semantic_executions = match scope with
       | Pending_inputs -> Ok []
       | All_durable_records -> semantic_rows db ~active_only:false
-      | Outstanding_integrity_audit -> let* rows = semantic_rows db ~active_only:false in
-        Ok (List.filter owns_checkpoint_references rows) in
+      | Outstanding_integrity_audit -> semantic_rows db ~active_only:true in
     let* input_history = input_history_with_db db in
     let* input_checkpoints = match scope with
       | Pending_inputs -> Ok []

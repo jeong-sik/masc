@@ -540,7 +540,6 @@ let install_real_masc_binary prefix mirror_dir =
      the digest is computed from the staged receipt bytes. *)
   ignore (Sys.command ("mkdir -p " ^ Filename.quote prefix));
   let canonical_prefix = Unix.realpath prefix in
-  let dest = Filename.concat canonical_prefix "masc" in
   (* The mirror stages the dashboard tarball under <base>/.release/<tag>/
      next to the binary asset; the helper --archive wants that exact path. *)
   let archive =
@@ -590,9 +589,18 @@ let install_real_masc_binary prefix mirror_dir =
           ; "--binary-asset"; platform_release_asset () ]
             @ companion_args @ runtime_args ))
   in
-  unlink_if_exists dest;
+  let commit_command =
+    String.concat " "
+      (List.map Filename.quote
+         [ "python3"; bundle_helper; "commit"; "--prefix"; canonical_prefix ])
+  in
+  (* install leaves the transaction journal behind on purpose; commit is what
+     publishes it, and a second installer run would otherwise refuse to start
+     with "unfinished install transaction". *)
   check int "fixture installs the managed release identity" 0
-    (Sys.command install_command)
+    (Sys.command install_command);
+  check int "fixture commits the install transaction" 0
+    (Sys.command commit_command)
 ;;
 
 

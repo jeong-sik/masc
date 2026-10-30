@@ -673,8 +673,6 @@ let test_fleet_schedule_occurrence_payload_identity () =
 ;;
 
 let test_fleet_ambiguous_ledger_id_requires_attention () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "ambiguous-ledger-id" in
   let initial = schedule_due_stimulus () in
   let schedule = match initial.payload with
     | Keeper_event_queue.Schedule_due wake ->
@@ -687,17 +685,29 @@ let test_fleet_ambiguous_ledger_id_requires_attention () =
     | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
       fail "schedule fixture has a non-schedule payload" in
   let board = board_stimulus ~post_id:"shared-post" () in
-  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name schedule;
-  Keeper_registry_event_queue.enqueue ~base_path keeper_name schedule;
-  let attention () =
-    Keeper_reaction_ledger.fleet_summary_json
+  List.iter (fun (label, stimuli, expected_attention) ->
+    with_temp_base @@ fun base_path ->
+    let keeper_name = "ambiguous-ledger-id" in
+    List.iter (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
+      stimuli;
+    Keeper_registry_event_queue.enqueue ~base_path keeper_name schedule;
+    let rows = read_recent_rows ~base_path ~keeper_name ~limit:10 in
+    let event_ids = List.map (fun row -> row |> member "event_id" |> to_string) rows in
+    check int "all fixture rows were read" (List.length stimuli) (List.length event_ids);
+    check int "the canonical event ID is shared" 1
+      (List.length (List.sort_uniq String.compare event_ids));
+    let fleet = Keeper_reaction_ledger.fleet_summary_json
       ~base_path ~keeper_names:[keeper_name]
       ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
-      ~limit_per_keeper:10
-    |> member "attention_required_stimulus_count" |> to_int in
-  check int "schedule entry alone is explained" 0 (attention ());
-  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name board;
-  check int "colliding Board row makes the ledger ID ambiguous" 1 (attention ())
+      ~limit_per_keeper:10 in
+    check int label expected_attention
+      (fleet |> member "attention_required_stimulus_count" |> to_int))
+    [ "repeated same schedule stays explained", [schedule; schedule], 0
+    ; "schedule then Board is ambiguous", [schedule; board], 1
+    ; "Board then schedule is ambiguous", [board; schedule], 1
+    ; "schedule, Board, schedule stays ambiguous", [schedule; board; schedule], 1
+    ; "Board, schedule, Board stays ambiguous", [board; schedule; board], 1
+    ]
 ;;
 
 let test_fleet_pending_mismatch_beyond_display_cap () =

@@ -15,7 +15,7 @@ PROMPT_BLOCKS = frozenset({
     "keeper_instructions", "librarian_working_context", "memory_os_recall",
     "recalled_memory", "recalled_memory_status", "skill_compositions", "temporal_summary",
 })
-RECALL_STATUSES = frozenset({"started", "response_received", "judgment_completed", "provider_failed"})
+RECALL_STATUSES = frozenset({"started", "response_received", "judgment_completed", "provider_failed", "cancelled"})
 RECALL_KINDS = frozenset({"turn", "candidates", "time"})
 
 

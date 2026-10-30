@@ -157,6 +157,21 @@ class ReadFailureNaming(GuardHarness):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stdout)["pr"], 41487)
 
+    def test_same_account_other_keeper_comment_still_blocks_receipt(self):
+        self.review(footer_line())
+        for state in ("FAIL", "HOLD"):
+            for keeper, expected in (("other-keeper", 2), ("reviewer-keeper", 0)):
+                with self.subTest(state=state, keeper=keeper):
+                    comment = {
+                        "id": 88, "body": f"verdict: {state} head: {HEAD} by: {keeper}",
+                        "user": {"login": "reviewer-keeper"}, "author_association": "COLLABORATOR",
+                        "created_at": "2026-10-06T03:45:54Z", "updated_at": "2026-10-06T03:45:54Z"}
+                    (self.data / "comments.json").write_text(json.dumps([comment]))
+                    result = self.run_guard("--source-receipt")
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    if expected:
+                        self.assertIn(f"structured verdict is {state}", result.stderr)
+
 
 class CommitIndependence(GuardHarness):
     def set_pages(self, pages, name="compare.json"):

@@ -99,10 +99,36 @@ class ReviewDecisionCases(unittest.TestCase):
                         item("PASS", actor="reviewer-b", by="same-claimed-name", at=T2, rid=2))
         self.assertEqual(result.selected.state, M.State.FAIL)
 
-    def test_actor_can_change_claimed_name_without_losing_ownership(self):
+    def test_different_keeper_claim_on_same_account_cannot_clear_fail(self):
         result = reduce(item("FAIL", by="first-keeper"),
                         item("PASS", by="second-keeper", at=T2, rid=2))
-        self.assertEqual(result.verdict(), "PASS - second-keeper")
+        self.assertEqual(result.verdict(), "FAIL - first-keeper")
+        self.assertEqual(len(result.blockers), 1)
+
+    def test_signed_hold_can_only_be_cleared_by_same_account_and_claim(self):
+        hold = item("HOLD", by="first-keeper")
+        other = item("PASS", by="second-keeper", at=T2, rid=2)
+        result = reduce(hold, other)
+        self.assertEqual(result.verdict(), "HOLD - first-keeper")
+        own = item("PASS", by="first-keeper", at=T3, rid=3)
+        self.assertFalse(reduce(hold, other, own).blockers)
+
+    def test_unknown_claim_stays_blocked_until_the_record_is_repaired(self):
+        hold = item("HOLD", body=f"verdict: HOLD head: {HEAD}")
+        passed = item("PASS", by="first-keeper", at=T2, rid=2)
+        result = reduce(hold, passed)
+        self.assertEqual(result.selected.state, M.State.HOLD)
+        self.assertEqual(result.selected.by, "-")
+        repaired = item("HOLD", by="first-keeper")
+        self.assertFalse(reduce(repaired, passed).blockers)
+
+    def test_malformed_negative_does_not_erase_a_separate_signed_fail(self):
+        malformed = item("FAIL", at=T2, rid=2,
+                         body=f"verdict: FAIL head: {HEAD} by: first-keeper extra")
+        result = reduce(item("FAIL", by="first-keeper"), malformed,
+                        item("PASS", by="first-keeper", at=T3, rid=3))
+        self.assertEqual(result.selected.state, M.State.INVALID)
+        self.assertEqual(result.selected.record_id, 2)
 
     def test_all_independent_refusals_are_retained_in_diagnostics(self):
         result = reduce(item("FAIL"), item("HOLD", actor="reviewer-b", at=T2, rid=2))

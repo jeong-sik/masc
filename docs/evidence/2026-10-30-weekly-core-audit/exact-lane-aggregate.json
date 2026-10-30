@@ -1,0 +1,348 @@
+{
+  "capture_finished_at_utc": "2026-10-30T08:46:31.262072Z",
+  "capture_started_at_utc": "2026-10-30T08:46:29.460685Z",
+  "index": {
+    "complete_lines": 9011,
+    "duplicate_completions": 0,
+    "duplicate_registrations": 0,
+    "malformed_rows": 0,
+    "orphan_completions": 0,
+    "sampled_bytes": 3270003,
+    "short_read_bytes": 0,
+    "truncated_tail": 0,
+    "unknown_lane_rows": 0
+  },
+  "lanes": {
+    "librarian_exact": {
+      "completion_invalid_status": 0,
+      "completion_missing": 0,
+      "completions": 63,
+      "excluded_duplicate_ids": 0,
+      "input_artifact": {
+        "declared_file_bytes": {
+          "count": 63,
+          "max": 12665,
+          "min": 7790,
+          "p50": 8980,
+          "p95": 10826,
+          "sum": 570990
+        },
+        "state": {
+          "digest_mismatch": 0,
+          "inline": 0,
+          "invalid_json": 0,
+          "invalid_ref": 0,
+          "missing": 0,
+          "not_regular": 0,
+          "size_mismatch": 0,
+          "unreadable": 0,
+          "verified": 63
+        },
+        "verified_file_bytes": {
+          "count": 63,
+          "max": 12665,
+          "min": 7790,
+          "p50": 8980,
+          "p95": 10826,
+          "sum": 570990
+        }
+      },
+      "input_projection": {
+        "state": {
+          "artifact_unavailable": 0,
+          "invalid": 0,
+          "missing": 0,
+          "observed": 63,
+          "unsupported": 0
+        },
+        "values": {
+          "rendered_prompt_bytes": {
+            "count": 63,
+            "max": 10303,
+            "min": 5866,
+            "p50": 6304,
+            "p95": 9025,
+            "sum": 410410
+          }
+        }
+      },
+      "origins": {
+        "producer": 63,
+        "restart_replay": 0
+      },
+      "outcomes": {
+        "cancelled": 0,
+        "failed": 0,
+        "succeeded": 63
+      },
+      "output_artifact": {
+        "declared_file_bytes": {
+          "count": 63,
+          "max": 2843,
+          "min": 445,
+          "p50": 446,
+          "p95": 1684,
+          "sum": 37171
+        },
+        "state": {
+          "digest_mismatch": 0,
+          "inline": 0,
+          "invalid_json": 0,
+          "invalid_ref": 0,
+          "missing": 0,
+          "not_regular": 0,
+          "size_mismatch": 0,
+          "unreadable": 0,
+          "verified": 63
+        },
+        "verified_file_bytes": {
+          "count": 63,
+          "max": 2843,
+          "min": 445,
+          "p50": 446,
+          "p95": 1684,
+          "sum": 37171
+        }
+      },
+      "registrations": 63,
+      "usage": {
+        "state": {
+          "artifact_unavailable": 0,
+          "invalid": 0,
+          "missing": 0,
+          "observed": 63
+        },
+        "values": {
+          "cache_creation_input_tokens": {
+            "count": 63,
+            "max": 0,
+            "min": 0,
+            "p50": 0,
+            "p95": 0,
+            "sum": 0
+          },
+          "cache_read_input_tokens": {
+            "count": 63,
+            "max": 2112,
+            "min": 0,
+            "p50": 0,
+            "p95": 2112,
+            "sum": 39744
+          },
+          "input_tokens": {
+            "count": 63,
+            "max": 3464,
+            "min": 2010,
+            "p50": 2127,
+            "p95": 2943,
+            "sum": 137702
+          },
+          "output_tokens": {
+            "count": 63,
+            "max": 7702,
+            "min": 69,
+            "p50": 221,
+            "p95": 1249,
+            "sum": 30720
+          }
+        }
+      }
+    },
+    "workspace_curator_exact": {
+      "completion_invalid_status": 0,
+      "completion_missing": 1,
+      "completions": 45,
+      "excluded_duplicate_ids": 0,
+      "input_artifact": {
+        "declared_file_bytes": {
+          "count": 46,
+          "max": 3804534,
+          "min": 120038,
+          "p50": 2264916,
+          "p95": 3696396,
+          "sum": 80968376
+        },
+        "state": {
+          "digest_mismatch": 0,
+          "inline": 0,
+          "invalid_json": 0,
+          "invalid_ref": 0,
+          "missing": 0,
+          "not_regular": 0,
+          "size_mismatch": 0,
+          "unreadable": 0,
+          "verified": 46
+        },
+        "verified_file_bytes": {
+          "count": 46,
+          "max": 3804534,
+          "min": 120038,
+          "p50": 2264916,
+          "p95": 3696396,
+          "sum": 80968376
+        }
+      },
+      "input_projection": {
+        "state": {
+          "artifact_unavailable": 0,
+          "invalid": 0,
+          "missing": 0,
+          "observed": 46,
+          "unsupported": 0
+        },
+        "values": {
+          "briefing_raw_previous_summary_bytes": {
+            "count": 22,
+            "max": 60244,
+            "min": 0,
+            "p50": 7676,
+            "p95": 49886,
+            "sum": 331074
+          },
+          "briefing_raw_selected_text_bytes": {
+            "count": 22,
+            "max": 1584902,
+            "min": 200,
+            "p50": 32054,
+            "p95": 1582752,
+            "sum": 15451610
+          },
+          "briefing_runs": {
+            "count": 22,
+            "max": 1,
+            "min": 1,
+            "p50": 1,
+            "p95": 1,
+            "sum": 22
+          },
+          "briefing_selected_entries": {
+            "count": 22,
+            "max": 1845,
+            "min": 1,
+            "p50": 41,
+            "p95": 1842,
+            "sum": 17961
+          },
+          "classification_exact_duplicate_fact_text_rows": {
+            "count": 24,
+            "max": 0,
+            "min": 0,
+            "p50": 0,
+            "p95": 0,
+            "sum": 0
+          },
+          "classification_fact_rows": {
+            "count": 24,
+            "max": 1557,
+            "min": 44,
+            "p50": 1047,
+            "p95": 1517,
+            "sum": 18991
+          },
+          "classification_neighbor_references": {
+            "count": 24,
+            "max": 3698,
+            "min": 43,
+            "p50": 1849,
+            "p95": 3698,
+            "sum": 37413
+          },
+          "classification_new_facts": {
+            "count": 24,
+            "max": 86,
+            "min": 1,
+            "p50": 43,
+            "p95": 86,
+            "sum": 874
+          },
+          "classification_raw_fact_text_bytes": {
+            "count": 24,
+            "max": 2191099,
+            "min": 61935,
+            "p50": 1576384,
+            "p95": 2173122,
+            "sum": 28835420
+          },
+          "classification_runs": {
+            "count": 24,
+            "max": 1,
+            "min": 1,
+            "p50": 1,
+            "p95": 1,
+            "sum": 24
+          }
+        }
+      },
+      "origins": {
+        "producer": 45,
+        "restart_replay": 0
+      },
+      "outcomes": {
+        "cancelled": 0,
+        "failed": 13,
+        "succeeded": 32
+      },
+      "output_artifact": {
+        "declared_file_bytes": {
+          "count": 45,
+          "max": 6802181,
+          "min": 706,
+          "p50": 2551933,
+          "p95": 4828862,
+          "sum": 108316498
+        },
+        "state": {
+          "digest_mismatch": 0,
+          "inline": 0,
+          "invalid_json": 0,
+          "invalid_ref": 0,
+          "missing": 0,
+          "not_regular": 0,
+          "size_mismatch": 0,
+          "unreadable": 0,
+          "verified": 45
+        },
+        "verified_file_bytes": {
+          "count": 45,
+          "max": 6802181,
+          "min": 706,
+          "p50": 2551933,
+          "p95": 4828862,
+          "sum": 108316498
+        }
+      },
+      "registrations": 46,
+      "usage": {
+        "state": {
+          "artifact_unavailable": 0,
+          "invalid": 0,
+          "missing": 10,
+          "observed": 35
+        },
+        "values": {
+          "input_tokens": {
+            "count": 35,
+            "max": 893127,
+            "min": 3582,
+            "p50": 59228,
+            "p95": 863201,
+            "sum": 11316415
+          },
+          "output_tokens": {
+            "count": 35,
+            "max": 68438,
+            "min": 1065,
+            "p50": 16686,
+            "p95": 67043,
+            "sum": 765219
+          }
+        }
+      }
+    }
+  },
+  "schema": "masc.exact-lane.aggregate.v1",
+  "window_utc": {
+    "end_exclusive": "2026-10-30T08:41:32Z",
+    "start_inclusive": "2026-10-29T08:41:32Z"
+  }
+}

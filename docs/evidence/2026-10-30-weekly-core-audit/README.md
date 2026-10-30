@@ -29,6 +29,48 @@ claim is retained here.
   that a model response can safely be reused. There may be other missing or
   rotated-away records. Capture reports malformed or unreadable input counts;
   unknown block, status, or kind labels are counted without exposing their values.
+* `largest-provider-input-aggregate.json` describes the single largest saved
+  provider-input observation in the same fixed window. It counts repeated
+  pairs of message role and content-addressed artifact reference, excluding
+  the first occurrence. The retained message artifact serializes internal
+  message fields and is not the provider wire representation. The marker
+  syntax and declared lengths were checked, but blob content was not rehashed.
+  Different references do not establish different meaning, and artifact bytes
+  are not a token or wire-byte saving.
+* `exact-lane-aggregate.json` summarizes registrations started during the UTC
+  window recorded in that file. The index was read only through its starting
+  length at capture time; completions arriving after the window but before the
+  index read are included. Registration and completion are joined by their
+  internal run ID, with duplicate and malformed rows counted. The input and
+  output file references were checked for regular-file status, declared length,
+  and SHA-256. The files can change during capture, so this is not an atomic
+  snapshot. The 24-hour window spans server restarts; a registration is not
+  attributed to the binary running at capture time. The original index is
+  `<base>/.masc/exact-lane-runs-v7.jsonl`;
+  referenced artifacts remain in the runtime, not in this report.
+  `workspace_curator_exact` usage comes from `payload.provider_usage` in the
+  checked completion artifact; `librarian_exact` usage comes from the completion
+  record. Null usage is missing, not zero. Stored artifact lengths, rendered
+  prompts, provider wire bytes, and reported tokens are different measurements.
+  Registration counts are not model request counts, and usage records may omit
+  failed attempts. Percentiles are nearest-rank over observed values.
+* `curator-failure-kinds.json` counts only the closed result labels in verified
+  completion artifacts for the same registrations. `curator-overflow-chain.json`
+  records selected requests ordered by UUIDv7: a refused root, its committed
+  child, two uncertain requests, a committed root covering the remaining
+  parent facts, and another refused root. Ordering IDs does not establish
+  dispatch or completion order. The child's selected facts and neighbors match
+  the first half of its parent. The analysis reread the same initial index byte count and
+  rechecked artifact lengths and digests; the index could have changed between
+  reads. Identifiers, input text, and artifact paths are not included. This
+  sequence alone does not identify the binary used for each request or establish
+  the quality of the committed classifications.
+* The microVM observation is one review-request chat operation at 17:45–17:47
+  KST. Its operation, turn manifest, raw trace, and execution receipt were
+  joined in the live workspace without publishing their IDs or contents. The
+  same server PID started before that turn and reported the installed commit
+  named in the report. A later host inventory is not evidence of the guest's
+  mount state at the time of the probe.
 
 Regenerate a current aggregate without emitting record contents, after selecting
 the actual effective workspace base and a UTC provider-input window:

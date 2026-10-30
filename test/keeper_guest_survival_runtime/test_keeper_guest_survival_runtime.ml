@@ -453,7 +453,8 @@ let process_step root operation =
                 verdict=Some (AR.Approve "legacy original admitted")});
           let run () = W.run_attempt ~store ~verification_id ~attempt:0 ~installation_id ~package_id
               ~prepare_notes:(fun _ -> "fixture review notes") ~base_path:base
-              ~prepare_authority:(fun () -> Ok old) ~provider_rest:(fun _ -> AR.No_stated_rest) () in
+              ~prepare_authority:(fun () -> Ok old) ~provider_rest:(fun _ -> AR.No_stated_rest) ()
+              |> Result.map snd in
           Atomic.set Workspace_hooks.get_verifier_exact_lane_slots_fn
             (fun () -> Error "fixture admission unavailable");
           (match run () with Ok {AR.verdict=None; _} -> ()
@@ -604,7 +605,8 @@ let process_step root operation =
                 verdict=Some (AR.Approve "submitted evidence inspected")});
           match W.run_attempt ~store ~verification_id ~attempt:0 ~installation_id ~package_id
               ~prepare_notes:(fun _ -> "fixture review notes") ~base_path:base
-              ~prepare_authority:(fun () -> Ok prepared) ~provider_rest:(fun _ -> AR.No_stated_rest) () with
+              ~prepare_authority:(fun () -> Ok prepared) ~provider_rest:(fun _ -> AR.No_stated_rest) ()
+              |> Result.map snd with
           | Ok {AR.verdict=Some (Approve "submitted evidence inspected"); _} -> ()
           | Ok _ | Error _ -> fail "reviewer did not complete with submitted evidence");
         check int "reviewer ran once" 1 !calls;

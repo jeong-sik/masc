@@ -3025,7 +3025,7 @@ status: reference
   - 미기동·정지 대상 수락: 대상 Keeper가 등록되어 있으나 fiber가 돌지 않는 상태
     (`offline`·`crashed`·`restarting`·`draining`)이거나 일시정지(`paused`) 상태일 때의
     due 발화는 재시도 실패로 튕기지 않고 단 1회 수락(`accepted`)되어 해당 Keeper의
-    durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화는
+    durable 큐에 대기한다(#38523). 이후 턴에서 선택되면 stimulus로 읽히며, 새 발화는
     기본 대상 Keeper 큐의 이전 pending 발화를 대체한다. 다른 Keeper로 이관된
     발화는 그 Keeper의 별도 큐에 있다.
     턴이 이미 가져간 발화도 이후 발화로 대체되거나 예약이 취소되면 durable 큐에서

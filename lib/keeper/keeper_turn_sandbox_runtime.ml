@@ -3253,8 +3253,9 @@ let microvm_guest_absence_reason ?timeout_sec ~(config : Workspace.config)
        invalidate a newer handoff after the owner has been released. *)
     match backend, Fs_compat.execution_context () with
     | Keeper_microvm_backend.Apple_container, Fs_compat.Non_eio -> None
-    | (Keeper_microvm_backend.Apple_container | Keeper_microvm_backend.Nerdctl_kata
-      | Keeper_microvm_backend.Microsandbox), _ ->
+    | Keeper_microvm_backend.Apple_container, Fs_compat.Eio_fiber
+    | (Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox),
+      (Fs_compat.Eio_fiber | Fs_compat.Non_eio) ->
       with_microvm_lifecycle_lock ~keeper_name:meta.name ~operation:"absence_probe" observe
 ;;
 

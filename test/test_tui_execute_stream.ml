@@ -541,6 +541,40 @@ let test_a_followed_stream_matches_a_fresh_snapshot_after_the_ring_wraps env =
   Alcotest.check rows "the rows" (reader_rows fresh) (reader_rows followed)
 ;;
 
+(* A log whose last 5,000 numbers hold few rows: the server's ring has dropped
+   every row the reader still holds, and a new snapshot would list none. *)
+let test_rows_the_servers_ring_has_dropped_are_not_held _env =
+  let reader = new_reader ~capacity:3 () in
+  feed reader (snapshot_frame ~first_retained:1 ~last:3 ~row_seqs:[ 2; 3 ] ());
+  let opened seq =
+    sse_data
+      (Printf.sprintf
+         {|{"type":"task_opened","keeper":"alpha","seq":%d,"stream_id":1,"task_id":null}|}
+         seq)
+  in
+  feed
+    reader
+    (String.concat "" (List.init EO.event_log_capacity (fun index -> opened (4 + index))));
+  let reading = observed reader in
+  Alcotest.(check int) "the oldest number the server keeps" 4 reading.first_seq;
+  Alcotest.(check (list string)) "no row is held" [] (texts reading.lines);
+  Alcotest.(check int) "and none is left out" 0 reading.lines_omitted
+;;
+
+(* What one connection counted does not carry over to the next: a snapshot with
+   fewer rows says how many the server keeps now, not how many the reader saw
+   before. *)
+let test_a_new_connections_snapshot_replaces_what_the_reader_counted _env =
+  let reader = new_reader ~capacity:3 () in
+  feed reader (snapshot_frame ~first_retained:1 ~last:6 ~row_seqs:[ 1; 2; 3; 4; 5; 6 ] ());
+  Alcotest.(check int) "three of six rows did not fit" 3 (observed reader).lines_omitted;
+  S.started reader;
+  feed reader (snapshot_frame ());
+  let reading = observed reader in
+  Alcotest.(check (list string)) "only the new snapshot's row" [ "x" ] (texts reading.lines);
+  Alcotest.(check int) "and nothing is left out" 0 reading.lines_omitted
+;;
+
 let test_a_frame_that_is_not_json_is_refused _env =
   let reader = new_reader () in
   match reconnect_reason reader "data: {not json\n\n" with
@@ -588,6 +622,9 @@ let () =
         ; case
             "a followed stream matches a fresh snapshot after the ring wraps"
             test_a_followed_stream_matches_a_fresh_snapshot_after_the_ring_wraps
+        ; case
+            "rows the server's ring has dropped are not held"
+            test_rows_the_servers_ring_has_dropped_are_not_held
         ] )
     ; ( "losing the thread"
       , [ case
@@ -622,6 +659,9 @@ let () =
       , [ case
             "a new connection replaces the rows at its snapshot"
             test_a_new_connection_replaces_the_rows_at_its_snapshot
+        ; case
+            "a new connection's snapshot replaces what the reader counted"
+            test_a_new_connections_snapshot_replaces_what_the_reader_counted
         ; case
             "a keepalive moves the time and not the rows"
             test_a_keepalive_moves_the_time_and_not_the_rows

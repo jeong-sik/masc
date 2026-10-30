@@ -11795,14 +11795,20 @@ let stop_keeper_execute_poll state =
   held
 
 (* Stop following the stream; whether one was running. What the tab drew from
-   it stays in the cell, with a read still pending retired. *)
+   it stays in the cell. A wait the stream opened and never settled ends with
+   it, but only while the cell still holds the stream's own window: leaving the
+   Terminal for the logs view starts the logs read, which asks for another
+   window of the same cell, before the loop stops the stream. *)
 let stop_keeper_execute_stream state =
   match state.keeper_execute_stream with
   | None -> false
-  | Some (_, stop) ->
+  | Some (stream, stop) ->
     stop ();
     state.keeper_execute_stream <- None;
-    state.keeper_execute_output <- Masc_tui_fetched.suspend state.keeper_execute_output;
+    (match Masc_tui_fetched.current_key state.keeper_execute_output with
+     | Some key when keeper_log_equal_key key stream.kxf_key ->
+       state.keeper_execute_output <- Masc_tui_fetched.suspend state.keeper_execute_output
+     | Some _ | None -> ());
     true
 
 (* One message of the stream the Terminal tab follows. A message from a job

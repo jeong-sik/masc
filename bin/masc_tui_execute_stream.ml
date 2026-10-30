@@ -135,7 +135,20 @@ let decode_active json =
   Ok { id; task; command }
 ;;
 
-let json_status json = Option.value (field "status" json) ~default:`Null
+(* The server always sends [status], and [null] when no command has ended. *)
+let read_json _name value = Ok value
+
+(* The rows of a snapshot are the ones the server still keeps, so each is
+   numbered between the oldest number kept and the last one logged. A snapshot
+   that says otherwise cannot anchor the numbers the events after it must
+   follow. *)
+let check_snapshot_numbers ~rows ~first_retained ~last =
+  if first_retained > last + 1
+  then Error "first_retained_seq is past last_seq"
+  else if List.exists (fun (row : line) -> row.seq < first_retained || row.seq > last) rows
+  then Error "a row is numbered outside first_retained_seq and last_seq"
+  else Ok ()
+;;
 
 let decode_event kind json =
   match kind with
@@ -146,7 +159,9 @@ let decode_event kind json =
     let* last = required "last_seq" read_int json in
     let* active_count = required "active_count" read_int json in
     let* closed = required "closed" read_bool json in
-    Ok (Snapshot { rows; running; first_retained; last; active_count; closed; status = json_status json })
+    let* status = required "status" read_json json in
+    let* () = check_snapshot_numbers ~rows ~first_retained ~last in
+    Ok (Snapshot { rows; running; first_retained; last; active_count; closed; status })
   | "no_task" -> Ok No_task
   | "line" ->
     let* line = required "line" (fun _ value -> decode_line value) json in
@@ -162,7 +177,8 @@ let decode_event kind json =
     let* task = optional "task_id" read_string json in
     let* active_count = required "active_count" read_int json in
     let* closed = required "closed" read_bool json in
-    Ok (Closed { seq; id; task; active_count; closed; status = json_status json })
+    let* status = required "status" read_json json in
+    Ok (Closed { seq; id; task; active_count; closed; status })
   | "gap" ->
     let* from_seq = required "missing_from_seq" read_int json in
     let* to_seq = required "missing_to_seq" read_int json in
@@ -186,7 +202,11 @@ type phase =
    refused, so an event never lands on rows from another connection.
    [following] is the number of the last event of this connection; it is
    [None] after [no_task], which carries no number, and the next event then
-   sets it. *)
+   sets it.
+   [rows] holds the newest rows, at most [capacity] of them. [retained] holds
+   the number of every row the server still keeps, oldest first, so a reading
+   can say how many the server has that [rows] does not. [first_retained] is
+   the oldest number the snapshot said the server kept. *)
 type t =
   { keeper : string
   ; capacity : int
@@ -195,8 +215,8 @@ type t =
   ; mutable synced : bool
   ; mutable following : int option
   ; rows : line Queue.t
-  ; mutable omitted : int
-  ; mutable first_seq : int
+  ; retained : int Queue.t
+  ; mutable first_retained : int
   ; mutable active : active list
   ; mutable active_count : int
   ; mutable closed : bool
@@ -214,8 +234,8 @@ let create ~keeper ~capacity =
   ; synced = false
   ; following = None
   ; rows = Queue.create ()
-  ; omitted = 0
-  ; first_seq = 1
+  ; retained = Queue.create ()
+  ; first_retained = 1
   ; active = []
   ; active_count = 0
   ; closed = true
@@ -239,18 +259,20 @@ let reject t failure =
 
 let push_row t line =
   Queue.push line t.rows;
-  if Queue.length t.rows > t.capacity
-  then (
-    ignore (Queue.pop t.rows : line);
-    t.omitted <- t.omitted + 1)
+  Queue.push line.seq t.retained;
+  if Queue.length t.rows > t.capacity then ignore (Queue.pop t.rows : line)
 ;;
 
 let take_snapshot t ~rows ~running ~first_retained ~last ~active_count ~closed ~status =
   Queue.clear t.rows;
+  Queue.clear t.retained;
   let held_from = max 0 (List.length rows - t.capacity) in
-  List.iteri (fun index line -> if index >= held_from then Queue.push line t.rows) rows;
-  t.omitted <- held_from;
-  t.first_seq <- first_retained;
+  List.iteri
+    (fun index (line : line) ->
+       Queue.push line.seq t.retained;
+       if index >= held_from then Queue.push line t.rows)
+    rows;
+  t.first_retained <- first_retained;
   t.active <- running;
   t.active_count <- active_count;
   t.closed <- closed;
@@ -263,8 +285,8 @@ let take_snapshot t ~rows ~running ~first_retained ~last ~active_count ~closed ~
 
 let take_nothing t =
   Queue.clear t.rows;
-  t.omitted <- 0;
-  t.first_seq <- 1;
+  Queue.clear t.retained;
+  t.first_retained <- 1;
   t.active <- [];
   t.active_count <- 0;
   t.closed <- true;
@@ -336,6 +358,36 @@ let take_closed t ~seq ~id ~task ~active_count ~closed ~status =
   t.status <- status
 ;;
 
+(* The server's log keeps the last [event_log_capacity] numbers. Once a
+   connection has followed past that many events, the rows its snapshot listed
+   first are gone from the server, and a new snapshot would not list them. *)
+let oldest_retained t =
+  match t.following with
+  | Some last ->
+    max t.first_retained (last + 1 - Dashboard_execute_output.event_log_capacity)
+  | None -> t.first_retained
+;;
+
+let trim t =
+  let oldest = oldest_retained t in
+  let rec drop_rows () =
+    match Queue.peek_opt t.rows with
+    | Some (line : line) when line.seq < oldest ->
+      ignore (Queue.pop t.rows : line);
+      drop_rows ()
+    | Some _ | None -> ()
+  in
+  let rec drop_retained () =
+    match Queue.peek_opt t.retained with
+    | Some seq when seq < oldest ->
+      ignore (Queue.pop t.retained : int);
+      drop_retained ()
+    | Some _ | None -> ()
+  in
+  drop_rows ();
+  drop_retained ()
+;;
+
 let next t ~seq take =
   if not t.synced
   then reject t (Frame_rejected "an event came before the snapshot")
@@ -346,6 +398,7 @@ let next t ~seq take =
     | Some _ | None ->
       t.following <- Some seq;
       take ();
+      trim t;
       Keep_reading)
 ;;
 
@@ -354,6 +407,9 @@ let apply t (keeper, event) =
   then reject t (Another_keeper { expected = t.keeper; received = keeper })
   else (
     match event with
+    (* A snapshot is the first frame of a connection and only that. *)
+    | Snapshot _ | No_task when t.synced ->
+      reject t (Frame_rejected "a snapshot came after the first frame of the connection")
     | Snapshot { rows; running; first_retained; last; active_count; closed; status } ->
       take_snapshot t ~rows ~running ~first_retained ~last ~active_count ~closed ~status
     | No_task -> take_nothing t
@@ -391,8 +447,8 @@ let feed t ~now chunk =
 let reading t =
   { lines = List.of_seq (Queue.to_seq t.rows)
   ; active = List.filter (fun active -> not (String.equal active.command "")) t.active
-  ; lines_omitted = t.omitted
-  ; first_seq = t.first_seq
+  ; lines_omitted = Queue.length t.retained - Queue.length t.rows
+  ; first_seq = oldest_retained t
   ; active_count = t.active_count
   ; closed = t.closed
   ; status = t.status

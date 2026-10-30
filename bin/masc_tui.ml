@@ -15509,75 +15509,49 @@ let launch_keeper_execute_stream state ~mailbox ~expected_workspace ~key =
    | Masc_tui_fetched.Already_loading -> ());
   let enqueue_async = workspace_enqueue state in
   let deliver event = enqueue_async mailbox (Keeper_execute_streamed (stream, event)) in
+  (* The fiber that launches the job is also the only one that drains the
+     mailbox, so a job that cannot start is reported to the state directly:
+     queueing it could wait on a full mailbox that only this fiber empties. *)
+  let report_unstarted detail =
+    ignore (take_keeper_execute_stream state stream (Execute_stream_down detail) : bool) in
   let host = server_peer_host and port = state.port in
-  let exception Close_connection in
   let run () =
     match Eio_context.get_clock_opt () with
     | None -> deliver (Execute_stream_down "Eio clock is unavailable")
     | Some clock ->
-        let reader =
-          Masc_tui_execute_stream.create ~keeper:key.klk_keeper ~capacity:key.klk_limit in
-        let posted = ref (Masc_tui_execute_stream.version reader) in
-        let post () =
-          let version = Masc_tui_execute_stream.version reader in
-          if version <> !posted then begin
-            posted := version;
+        Masc_tui_execute_stream_job.run ~clock
+          ~reconnect_s:keeper_execute_stream_reconnect_s
+          ~post_interval_s:keeper_execute_stream_post_interval_s
+          ~reader:(Masc_tui_execute_stream.create ~keeper:key.klk_keeper ~capacity:key.klk_limit)
+          ~observe:(fun ~on_chunk ->
+            match
+              Masc_tui_http.observe_execute_output_stream ~clock ~expected_workspace ~host ~port
+                ~keeper:key.klk_keeper ~on_chunk
+            with
+            | Ok () -> Ok ()
+            | Error (Masc_tui_http.Http_refused { detail; _ }) -> Error detail
+            | Error (Masc_tui_http.Transport_failed detail) -> Error detail)
+          ~on_view:(fun view ->
             Option.iter
               (fun (reading, observed_at) ->
                  deliver (Execute_stream_reading (reading, observed_at)))
-              (keeper_execute_reading_of_stream ~now:(Eio.Time.now clock)
-                 (Masc_tui_execute_stream.view reader))
-          end
-        in
-        let read_one_connection () =
-          Masc_tui_execute_stream.started reader;
-          let refused = ref None in
-          let outcome =
-            try
-              Masc_tui_http.observe_execute_output_stream ~clock ~expected_workspace ~host ~port
-                ~keeper:key.klk_keeper
-                ~on_chunk:(fun chunk ->
-                  match Masc_tui_execute_stream.feed reader ~now:(Eio.Time.now clock) chunk with
-                  | Masc_tui_execute_stream.Keep_reading -> ()
-                  | Masc_tui_execute_stream.Reconnect failure ->
-                      refused := Some failure;
-                      raise Close_connection)
-            with Close_connection -> Ok ()
-          in
-          let ended =
-            match !refused, outcome with
-            | Some failure, (Ok () | Error _) -> Masc_tui_execute_stream.failure_to_string failure
-            | None, Ok () -> "the server closed the Execute output stream"
-            | None, Error (Masc_tui_http.Http_refused { detail; _ }) -> detail
-            | None, Error (Masc_tui_http.Transport_failed detail) -> detail
-          in
-          Log.Transport.warn "tui_execute_stream_ended keeper=%s detail=%s" key.klk_keeper ended;
-          (* Rows the connection delivered last go out before it is said to
-             have ended, so the screen shows them under that notice. *)
-          post ();
-          deliver (Execute_stream_down ended)
-        in
-        let keep_connected () =
-          while true do
-            read_one_connection ();
-            Eio.Time.sleep clock keeper_execute_stream_reconnect_s
-          done
-        in
-        let keep_posting () =
-          while true do
-            Eio.Time.sleep clock keeper_execute_stream_post_interval_s;
-            post ()
-          done
-        in
-        Eio.Fiber.both keep_connected keep_posting
+              (keeper_execute_reading_of_stream ~now:(Eio.Time.now clock) view))
+          ~on_ended:(fun detail ->
+            Log.Transport.warn "tui_execute_stream_ended keeper=%s detail=%s" key.klk_keeper detail;
+            deliver (Execute_stream_down detail))
   in
   match Eio_context.get_switch_opt () with
-  | None -> deliver (Execute_stream_down "Eio switch is unavailable")
+  | None -> report_unstarted "Eio switch is unavailable"
   | Some sw ->
-      fork_workspace_job ~observation:true state ~sw (fun () ->
-        try Eio.Fiber.first run (fun () -> Eio.Promise.await stopped) with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> deliver (Execute_stream_down (Printexc.to_string exn)))
+      (match
+         fork_workspace_job ~observation:true state ~sw (fun () ->
+           try Eio.Fiber.first run (fun () -> Eio.Promise.await stopped) with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn -> deliver (Execute_stream_down (Printexc.to_string exn)))
+       with
+       | () -> ()
+       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+       | exception exn -> report_unstarted (Printexc.to_string exn))
 
 (* Keep the stream running for what the Terminal tab shows: one for the Keeper
    under the cursor while the tab is on screen, none otherwise. True when this

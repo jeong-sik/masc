@@ -276,6 +276,26 @@ let test_stopping_the_stream_keeps_what_it_drew_and_retires_what_it_awaited () =
      | Absent | Loading | Ready _ | Stale _ -> false)
 ;;
 
+(* Leaving the Terminal for the logs view starts the logs read in the key
+   handler, and the loop stops the stream on its next pass. The logs read asks
+   for another window of the same cell, and stopping the stream must not retire
+   it. *)
+let test_stopping_the_stream_leaves_a_read_for_another_window_waiting () =
+  let state = terminal_state () in
+  let _job, stopped = start_stream state in
+  state.view <- Tui_types.Keepers Keeper_logs;
+  (match
+     Tui_types.begin_keeper_execute_read state ~intent:Tui_types.Snapshot_read.Poll ~limit:200
+       (keeper "analyst")
+   with
+   | Some _ -> ()
+   | None -> Alcotest.fail "the logs read did not start");
+  check Alcotest.string "the logs read is out" "loading" (describe state);
+  check Alcotest.bool "the stream was running" true (Tui_types.stop_keeper_execute_stream state);
+  check Alcotest.bool "its owner was told to stop" true !stopped;
+  check Alcotest.string "the logs read is still waiting" "loading" (describe state)
+;;
+
 let test_stopping_the_poll_says_whether_one_was_held () =
   let state = terminal_state () in
   check Alcotest.bool "none yet" false (Tui_types.stop_keeper_execute_poll state);
@@ -369,6 +389,10 @@ let () =
             "stopping the stream keeps what it drew and retires what it awaited"
             `Quick
             test_stopping_the_stream_keeps_what_it_drew_and_retires_what_it_awaited
+        ; Alcotest.test_case
+            "stopping the stream leaves a read for another window waiting"
+            `Quick
+            test_stopping_the_stream_leaves_a_read_for_another_window_waiting
         ; Alcotest.test_case "stopping the poll says whether one was held" `Quick
             test_stopping_the_poll_says_whether_one_was_held
         ; Alcotest.test_case "a hold stands while the stream goes on" `Quick

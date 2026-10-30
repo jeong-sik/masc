@@ -4884,6 +4884,8 @@
 (include stanzas/test_tui_scroll.inc)
 (include stanzas/test_tui_execute_terminal.inc)
 (include stanzas/test_tui_execute_stream.inc)
+(include stanzas/test_tui_execute_stream_job.inc)
+(include stanzas/test_tui_execute_stream_http.inc)
 (include stanzas/test_tui_keeper_terminal_state.inc)
 (include stanzas/test_tui_keeper_terminal_stream_state.inc)
 (include stanzas/test_tui_hit.inc)

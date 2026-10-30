@@ -1241,8 +1241,8 @@
 (library
  (name masc_tui_execute_stream)
  (wrapped false)
- (modules masc_tui_execute_stream)
- (libraries masc masc.dashboard masc.sse_wire yojson))
+ (modules masc_tui_execute_stream masc_tui_execute_stream_job)
+ (libraries masc masc.dashboard masc.sse_wire yojson eio))
 
 (library
  (name masc_tui_table)

@@ -412,6 +412,135 @@ let test_the_version_moves_only_when_the_view_may_have_changed env =
     (match S.view reader with S.Observed _ -> true | S.Awaiting_first_frame | S.Nothing_observed -> false)
 ;;
 
+(* Frames the server never sends, written by hand: what the reader does with
+   them is the question, so they cannot come from the server's own module.
+   The defaults are a valid snapshot of a log whose last number is 2. *)
+let sse_data json = "data: " ^ json ^ "\n\n"
+
+let snapshot_frame
+      ?(first_retained = 1)
+      ?(last = 2)
+      ?(row_seqs = [ 2 ])
+      ?(status = Some "null")
+      ()
+  =
+  let row seq =
+    Printf.sprintf
+      {|{"seq":%d,"stream_id":1,"task_id":null,"stream":"stdout","text":"x","ansi":false,"ts_ms":0}|}
+      seq
+  in
+  sse_data
+    (Printf.sprintf
+       {|{"type":"snapshot","keeper":"alpha","lines":[%s],"active_streams":[],"active_count":0,"first_retained_seq":%d,"last_seq":%d,"closed":true%s}|}
+       (String.concat "," (List.map row row_seqs))
+       first_retained
+       last
+       (match status with
+        | Some value -> {|,"status":|} ^ value
+        | None -> ""))
+;;
+
+let refused_for reader frame =
+  match reconnect_reason reader frame with
+  | S.Frame_rejected detail -> detail
+  | other -> Alcotest.failf "unexpected failure: %s" (S.failure_to_string other)
+;;
+
+let test_a_snapshot_or_a_close_without_a_status_is_refused _env =
+  let says_status detail = String_util.contains_substring detail "status" in
+  Alcotest.(check bool)
+    "a snapshot"
+    true
+    (says_status (refused_for (new_reader ()) (snapshot_frame ~status:None ())));
+  let reader = new_reader () in
+  feed reader (snapshot_frame ());
+  let close =
+    sse_data
+      {|{"type":"task_closed","keeper":"alpha","seq":3,"stream_id":1,"task_id":null,"closed":true,"active_count":0}|}
+  in
+  Alcotest.(check bool) "a close" true (says_status (refused_for reader close));
+  (* [null] is the server's way to say no command has ended; it is a status. *)
+  feed (new_reader ()) (snapshot_frame ~status:(Some "null") ())
+;;
+
+let test_a_second_snapshot_on_one_connection_is_refused _env =
+  let reader = new_reader () in
+  feed reader (snapshot_frame ());
+  ignore (refused_for reader (snapshot_frame ()) : string);
+  (* The next connection starts again with its own snapshot. *)
+  S.started reader;
+  feed reader (snapshot_frame ());
+  let no_task = sse_data {|{"type":"no_task","keeper":"alpha"}|} in
+  let reader = new_reader () in
+  feed reader no_task;
+  ignore (refused_for reader no_task : string);
+  let reader = new_reader () in
+  feed reader (snapshot_frame ());
+  ignore (refused_for reader no_task : string)
+;;
+
+let test_a_snapshot_whose_numbers_do_not_fit_is_refused _env =
+  let refused label frame =
+    let reader = new_reader () in
+    ignore (refused_for reader frame : string);
+    Alcotest.(check bool) (label ^ ": nothing was taken") true
+      (S.view reader = S.Awaiting_first_frame)
+  in
+  refused "a row past the last number" (snapshot_frame ~row_seqs:[ 9 ] ());
+  refused "a row before the oldest kept" (snapshot_frame ~first_retained:3 ~last:5 ~row_seqs:[ 2 ] ());
+  refused "an oldest number past the last" (snapshot_frame ~first_retained:5 ~last:2 ~row_seqs:[] ());
+  (* One past the last number is how an empty log looks. *)
+  feed (new_reader ()) (snapshot_frame ~first_retained:3 ~last:2 ~row_seqs:[] ());
+  feed (new_reader ()) (snapshot_frame ~first_retained:3 ~last:5 ~row_seqs:[ 3; 5 ] ())
+;;
+
+(* The question this file asks, put to a log long enough for the server's ring
+   to have wrapped: after following it, does the reader hold what a reader that
+   connects now is told? *)
+let test_a_followed_stream_matches_a_fresh_snapshot_after_the_ring_wraps env =
+  open_stream ();
+  let capacity = 500 in
+  let batch = 100 in
+  let rounds = (EO.event_log_capacity / batch) + 3 in
+  let clock = Eio.Stdenv.clock env in
+  let followed = new_reader ~capacity () in
+  (match EO.subscribe ~keeper_name:keeper with
+   | None -> Alcotest.fail "the server gave no subscriber"
+   | Some subscriber ->
+     Fun.protect
+       ~finally:(fun () -> EO.unsubscribe subscriber)
+       (fun () ->
+          feed followed ("retry: 1500\n\n" ^ EO.sse_frame (EO.initial_event_json subscriber));
+          for round = 0 to rounds - 1 do
+            let rows =
+              List.init batch (fun index -> Printf.sprintf "row %d\n" ((round * batch) + index))
+            in
+            EO.append_stream_chunk
+              ~keeper_name:keeper
+              ~stream_id:1
+              ~stream:`Stdout
+              (String.concat "" rows);
+            for _ = 1 to batch do
+              feed
+                followed
+                (Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+                   EO.sse_frame (EO.stream_event_json (EO.take_event subscriber))))
+            done
+          done));
+  let fresh = new_reader ~capacity () in
+  let fresh_head, _ = connection env ~events:0 ~produce:ignore in
+  feed fresh fresh_head;
+  let held = observed followed
+  and expected = observed fresh in
+  Alcotest.(check bool) "the server's ring has wrapped" true (expected.first_seq > 1);
+  Alcotest.(check int) "the oldest number the server keeps" expected.first_seq held.first_seq;
+  Alcotest.(check int)
+    "the rows the server keeps and the reader does not hold"
+    expected.lines_omitted
+    held.lines_omitted;
+  Alcotest.check rows "the rows" (reader_rows fresh) (reader_rows followed)
+;;
+
 let test_a_frame_that_is_not_json_is_refused _env =
   let reader = new_reader () in
   match reconnect_reason reader "data: {not json\n\n" with
@@ -456,6 +585,9 @@ let () =
         ; case
             "the chunking of the bytes does not matter"
             test_the_chunking_of_the_bytes_does_not_matter
+        ; case
+            "a followed stream matches a fresh snapshot after the ring wraps"
+            test_a_followed_stream_matches_a_fresh_snapshot_after_the_ring_wraps
         ] )
     ; ( "losing the thread"
       , [ case
@@ -476,6 +608,15 @@ let () =
         ; case
             "an event this build does not know is refused"
             test_an_event_this_build_does_not_know_is_refused
+        ; case
+            "a snapshot or a close without a status is refused"
+            test_a_snapshot_or_a_close_without_a_status_is_refused
+        ; case
+            "a second snapshot on one connection is refused"
+            test_a_second_snapshot_on_one_connection_is_refused
+        ; case
+            "a snapshot whose numbers do not fit is refused"
+            test_a_snapshot_whose_numbers_do_not_fit_is_refused
         ] )
     ; ( "connections"
       , [ case

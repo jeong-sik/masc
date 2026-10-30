@@ -37,10 +37,13 @@ type reading =
         (** Commands that have not ended. One that began after the snapshot is
             named by its first [cmd] row, and left out until that row comes. *)
   ; lines_omitted : int
-        (** Rows the server kept that this reading does not hold: those past
-            [capacity] in the snapshot, and those pushed out since. *)
+        (** Rows the server still keeps that this reading does not hold. Rows
+            the server has dropped since the snapshot are not counted, which
+            is what a new snapshot would say. *)
   ; first_seq : int
-        (** The oldest number the server kept when the snapshot was taken. *)
+        (** The oldest number the server still keeps, as far as this
+            connection has followed it. The server's log holds a fixed count of
+            numbers, so this moves forward as events arrive. *)
   ; active_count : int
   ; closed : bool
   ; status : Yojson.Safe.t  (** How the last command ended; [`Null] if none has. *)

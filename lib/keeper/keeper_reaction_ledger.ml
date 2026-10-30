@@ -1778,26 +1778,32 @@ let fleet_summary_json ~base_path ~keeper_names ~owner_lifecycle ~limit_per_keep
           if health.read_errors <> []
           then Queue_unobserved
           else
-            let stimulus_ids =
+            let stimulus_ids, _, ambiguous_ids =
               List.fold_left
-                (fun ids (selection : Keeper_event_queue_state.pending_selection) ->
+                (fun (ids, seen, ambiguous) (selection : Keeper_event_queue_state.pending_selection) ->
                   match selection.source.payload with
-                  | Keeper_event_queue.Schedule_due wake
-                    when String.equal wake.occurrence_id ""
-                      || String.equal wake.occurrence_id selection.source.post_id ->
-                    Event_id_set.add (stimulus_id_of_event_queue selection.source) ids
-                  | Schedule_due _ | Board_signal _ | Board_attention _ | Bootstrap
+                  | Keeper_event_queue.Schedule_due wake ->
+                    let id = stimulus_id_of_event_queue selection.source in
+                    let valid = String.equal wake.occurrence_id ""
+                      || String.equal wake.occurrence_id selection.source.post_id in
+                    let ambiguous =
+                      if not valid || Event_id_set.mem id seen
+                      then Event_id_set.add id ambiguous
+                      else ambiguous in
+                    let ids = if valid then Event_id_set.add id ids else ids in
+                    ids, Event_id_set.add id seen, ambiguous
+                  | Board_signal _ | Board_attention _ | Bootstrap
                   | Fusion_completed _ | Connector_attention _ | Hitl_resolved _
                   | Ask_answered _ | Completion_authority_rejected _ | Task_outcome _
                   | Task_cancelled _ | Workspace_message _ | Delegate_completed _
                   | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _
-                  | Addon_operation_changed _ -> ids)
-                Event_id_set.empty
+                  | Addon_operation_changed _ -> ids, seen, ambiguous)
+                (Event_id_set.empty, Event_id_set.empty, Event_id_set.empty)
                 health.selections
             in
             Queue_observed
               { owner_lifecycle = owner_lifecycle ~keeper_name:health.keeper_name
-              ; stimulus_ids
+              ; stimulus_ids = Event_id_set.diff stimulus_ids ambiguous_ids
               }
         in
         summary_with_status

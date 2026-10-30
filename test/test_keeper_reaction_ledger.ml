@@ -672,6 +672,75 @@ let test_fleet_schedule_occurrence_payload_identity () =
     [ "", 0; "different-occurrence", 1 ]
 ;;
 
+let test_fleet_schedule_reprioritized_occurrence () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "reprioritized-scheduled-occurrence" in
+  let original = schedule_due_stimulus () in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name original;
+  Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+    ~base_path ~keeper_name original |> require_ok "enqueue schedule" |> ignore;
+  let pending () =
+    Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
+    |> require_ok "load pending selections" in
+  let selected = match pending () with
+    | [selected] -> selected
+    | _ -> fail "expected one scheduled selection" in
+  Keeper_event_queue_persistence.reprioritize_pending_result
+    ~base_path ~keeper_name ~selection:selected ~urgency:Keeper_event_queue.Low ()
+    |> require_ok "reprioritize schedule" |> ignore;
+  let updated = match pending () with
+    | [selected] -> selected
+    | _ -> fail "reprioritization must retain one selection" in
+  check bool "priority changed" true (updated.source.urgency = Keeper_event_queue.Low);
+  check bool "arrival is preserved" true (updated.arrival = selected.arrival);
+  let fleet () = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+    ~limit_per_keeper:10 in
+  check int "reprioritization does not make one occurrence actionable" 0
+    (fleet () |> member "attention_required_stimulus_count" |> to_int);
+  (* The bounded ledger is keyed by occurrence, not by queue incarnation. *)
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name updated.source;
+  check int "two urgency observations still describe one queued occurrence" 0
+    (fleet () |> member "attention_required_stimulus_count" |> to_int)
+;;
+
+let test_fleet_duplicate_scheduled_queue_entries_require_attention () =
+  let original = schedule_due_stimulus () in
+  let other = { original with urgency = Keeper_event_queue.Low } in
+  let malformed_occurrence = match other.payload with
+    | Keeper_event_queue.Schedule_due wake ->
+      { other with payload = Schedule_due { wake with occurrence_id = "different-occurrence" } }
+    | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+    | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+    | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+    | Workspace_message _ | Delegate_completed _ | Composition_completed _
+    | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+      fail "schedule fixture has a non-schedule payload" in
+  List.iter (fun (label, entries) ->
+    with_temp_base @@ fun base_path ->
+    let keeper_name = "duplicate-scheduled-queue-entries" in
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name original;
+    List.iter (fun entry ->
+      match Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+              ~base_path ~keeper_name entry |> require_ok "enqueue selection" with
+      | Keeper_event_queue_persistence.Enqueued -> ()
+      | Already_present -> fail "different priorities must be separate queue entries") entries;
+    let pending = Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
+      |> require_ok "load pending selections" in
+    check int "both durable entries were observed" 2 (List.length pending);
+    let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~base_path ~keeper_names:[keeper_name]
+      ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+      ~limit_per_keeper:10 in
+    check int label 1 (fleet |> member "attention_required_stimulus_count" |> to_int))
+    [ "different priorities", [original; other]
+    ; "different priorities reversed", [other; original]
+    ; "bad payload alongside matching occurrence", [original; malformed_occurrence]
+    ; "bad payload first", [malformed_occurrence; original]
+    ]
+;;
+
 let test_fleet_ambiguous_ledger_id_requires_attention () =
   let initial = schedule_due_stimulus () in
   let schedule = match initial.payload with
@@ -2383,6 +2452,12 @@ let () =
         ; test_case
             "schedule payload occurrence identity"
             `Quick test_fleet_schedule_occurrence_payload_identity
+        ; test_case
+            "reprioritized schedule remains one occurrence"
+            `Quick test_fleet_schedule_reprioritized_occurrence
+        ; test_case
+            "duplicate scheduled queue entries require attention"
+            `Quick test_fleet_duplicate_scheduled_queue_entries_require_attention
         ; test_case
             "ambiguous ledger identity requires attention"
             `Quick test_fleet_ambiguous_ledger_id_requires_attention

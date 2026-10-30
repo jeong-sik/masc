@@ -301,7 +301,9 @@ let test_missing_policy_carries_evidence_and_explicit_error () =
        | Some (`String detail) -> String.length detail > 0
        | Some _ | None -> false) in
   check_error (compose continuity messages).projection.messages;
-  let official=Host.project_source ~unread:expected None old
+  let official=Host.project_source
+    ~input_source:(Masc.Keeper_request_source.Keeper_history {trace_id})
+    ~unread:expected None old
     |> Result.map_error Agent_core.Error.to_string |> require in
   check_error official;
   check int "replacement removes the stale observation even without guidance" 1

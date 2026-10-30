@@ -108,6 +108,8 @@ The results support the conditional layout decision and these ownership,
 targeting and recovery sequences. They do not measure human completion time,
 preference, comprehension, physical chords/IME/mouse, every async interleaving,
 real queue execution or production deployment. Browser pixel comparison was
-not performed: the existing observation TaskSpace 112 was unavailable, and no
-replacement was created. No local Dune build, screen-text/row-layout assertion
+not performed in this phase: observation TaskSpace 112 was unavailable, and no
+replacement was created then. The resumed
+[2026-10-30 pixel phase](../pixels-20261030/README.md) subsequently observed the
+same executable in a newly authorized TaskSpace. No local Dune build, screen-text/row-layout assertion
 or automated PTY scenario was added for these observations.

@@ -27,6 +27,11 @@ first, so a setting that becomes file-owned is covered without a line here.
 Reads built from pieces (`"MASC_" ^ suffix`) and a bound name used unqualified
 in another file, after an `open`, are not seen.
 
+The binding lookup is by identifier, not lexical scope or module ownership.
+It can flag unrelated bindings that happen to have the same name, and it does
+not follow aliases such as `let alias = key`. This is a syntactic ratchet, not
+proof that all process-environment reads are blocked.
+
 usage: test_file_owned_env_reads.py <names file> <source root>...
 """
 
@@ -56,7 +61,13 @@ OPEN = r"\s*\(?\s*"
 CONSTANT = re.compile(
     r"\blet\s+(?:rec\s+)?([a-z_][A-Za-z0-9_']*)\s*(?::\s*string\s*)?=\s*\"#(\d+)\"(\s+in\b)?"
 )
-LITERAL_READ = re.compile(READ + OPEN + r"\"#(\d+)\"")
+# Capture the literal and its enclosing opening parentheses. The rest of the
+# argument is checked below: a type constraint preserves the literal, whereas
+# [("MASC_..." ^ suffix)] computes a different expression.
+LITERAL_READ = re.compile(
+    READ
+    + r'(?P<opens>(?:\s*\()*)\s*"#(?P<literal>\d+)"'
+)
 
 
 def literalize(code):
@@ -132,6 +143,37 @@ def alternation(identifiers):
     return "|".join(re.escape(identifier) for identifier in sorted(identifiers))
 
 
+def literal_argument_end(code, match):
+    """End of a transparent parenthesized literal, or None for an expression.
+
+    A type ascription can contain nested parentheses and quoted attribute data;
+    neither closes the expression that contains the annotation. This scanner
+    does not validate the type syntax or expand PPX transformations.
+    """
+    pos = match.end()
+    for _ in range(match.group("opens").count("(")):
+        while pos < len(code) and code[pos].isspace():
+            pos += 1
+        if pos < len(code) and code[pos] == ":":
+            pos += 1
+            nesting = 0
+            while pos < len(code):
+                if code[pos] == '"':
+                    pos = skip_string(code, pos)
+                    continue
+                if code[pos] == "(":
+                    nesting += 1
+                elif code[pos] == ")":
+                    if nesting == 0:
+                        break
+                    nesting -= 1
+                pos += 1
+        if pos >= len(code) or code[pos] != ")":
+            return None
+        pos += 1
+    return pos
+
+
 def findings(text, names, own, reachable):
     """(line, snippet) of each read of a file-owned name in [text].
 
@@ -142,7 +184,8 @@ def findings(text, names, own, reachable):
     found = [
         match
         for match in LITERAL_READ.finditer(code)
-        if literals[int(match.group(1))] in names
+        if literals[int(match.group("literal"))] in names
+        and literal_argument_end(code, match) is not None
     ]
     if own:
         found.extend(re.finditer(READ + OPEN + r"(?:" + alternation(own) + r")\b", code))
@@ -152,7 +195,14 @@ def findings(text, names, own, reachable):
         )
 
     def shown(match):
-        text = re.sub(r'"#(\d+)"', lambda hole: '"' + literals[int(hole.group(1))] + '"', match.group(0))
+        text = match.group(0)
+        if match.re is LITERAL_READ:
+            # Extra closing parentheses can belong to an enclosing expression,
+            # not to this argument. Do not attribute them to the reported call.
+            end = literal_argument_end(code, match)
+            assert end is not None
+            text = code[match.start() : end]
+        text = re.sub(r'"#(\d+)"', lambda hole: '"' + literals[int(hole.group(1))] + '"', text)
         return " ".join(text.split())
 
     return [
@@ -179,6 +229,13 @@ SHOULD_MATCH = [
     'let f () = Stdlib.Sys.getenv_opt "MASC_KEEPER_DEBUG"',
     'let f () = Sys.getenv_opt\n    "MASC_KEEPER_DEBUG"',
     'let f () = Sys.getenv_opt ("MASC_KEEPER_DEBUG")',
+    'let f () = Sys.getenv_opt (("MASC_KEEPER_DEBUG"))',
+    'let f () = Sys.getenv_opt ( (* outer *) ( ("MASC_KEEPER_DEBUG") ) )',
+    'let f () = Sys.getenv_opt ("MASC_KEEPER_DEBUG" : string)',
+    'let f () = Sys.getenv_opt ((("MASC_KEEPER_DEBUG" : (string)) : string))',
+    'module T = struct type t = string end\nlet f () = Sys.getenv_opt ("MASC_KEEPER_DEBUG" : T.t)',
+    'let f () = Sys.getenv "MASC_KEEPER_DEBUG" ^ "_OTHER"',
+    'let f () = Sys.getenv ("MASC_KEEPER_DEBUG") ^ "_OTHER"',
     'let f () = Sys.getenv_opt (* why *) "MASC_KEEPER_DEBUG"',
     'let f () = Sys.getenv_opt {|MASC_KEEPER_DEBUG|}',
     'let getenv = Sys.getenv_opt\nlet f () = getenv "MASC_KEEPER_DEBUG"',
@@ -197,6 +254,16 @@ SHOULD_NOT_MATCH = [
     'let f () = raw_value_opt "MASC_KEEPER_DEBUG"',
     'let f () = Env_config_core.raw_value_opt "MASC_H2_MAX_CONCURRENT_STREAMS"',
     'let f () = Sys.getenv_opt "HOME"',
+    'let f () = Sys.getenv_opt (("HOME"))',
+    # This is outside the direct-literal rule, even though an empty suffix
+    # evaluates to the file-owned name and the old prefix match caught it.
+    'let f () = Sys.getenv_opt ("MASC_KEEPER_DEBUG" ^ "")',
+    'let f () = Sys.getenv_opt ("MASC_KEEPER_DEBUG" ^ "_OTHER")',
+    'let f () = Sys.getenv_opt (("MASC_KEEPER_DEBUG" ^ "_OTHER"))',
+    'let f () = Sys.getenv_opt (("MASC_KEEPER_DEBUG") ^ "_OTHER")',
+    'let f () = Sys.getenv_opt ((("MASC_KEEPER_DEBUG")) ^ "_OTHER")',
+    'let f () = Sys.getenv_opt (("MASC_KEEPER_DEBUG" : string) ^ "_OTHER")',
+    'let f () = Sys.getenv_opt (("MASC_KEEPER_DEBUG" : string); "MASC_KEEPER_DEBUG_OTHER")',
     'let f () = Sys.getenv_opt "MASC_KEEPER_DEBUG_LEVEL"',
     'let f () = Sys.getenv_opt "XMASC_KEEPER_DEBUG"',
     '(* Sys.getenv_opt "MASC_KEEPER_DEBUG" *)\nlet f () = ()',

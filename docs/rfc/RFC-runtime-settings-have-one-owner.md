@@ -14,7 +14,7 @@ related: ["0335", "settings-typed-delivery", "keeper-guests-stay-inside-a-host-m
 - 근거: 코드 사실은 `origin/main` `59faef0be37` 에서 읽었고, 수치는 2026-10-29 에 센 값이다. 시각은 모두 KST 다. 세는 방법은 부록 A.
 - 운영자 답(2026-10-29): 근본 개선이 필요하다고 했다. 결정 D1~D3 은 이 문서의 기본안대로 가기로 했다(§8).
 - 운영자 답(2026-10-30): D6 은 `masc config set`, D7 은 4층을 이 RFC 에서 빼는 안으로 정했다(§8).
-- 사람 결정 필요: D4(§8).
+- 사람 결정 필요: D4(§8). D5 도 열려 있지만 이 RFC 의 범위에는 영향을 주지 않는다.
 - 3층은 이름 기준으로 센 범위(§2)에 맞춰 검사 하나로 두고 #46858 에 구현했다(§3.6). 4층은 이 RFC 에서 다루지 않는다(§3.7).
 
 ## 0. 요약
@@ -25,9 +25,9 @@ related: ["0335", "settings-typed-delivery", "keeper-guests-stay-inside-a-host-m
 
 이 RFC 는 이렇게 바꾼다.
 
-- 설정마다 주인을 하나로 한다. `runtime.toml` 에 키가 있는 설정 38개는 환경변수를 읽지 않는다. 환경변수는 환경 전용 설정 26개(비밀, 경로)만 남는다.
+- 설정마다 주인을 하나로 한다. `runtime.toml` 에 키가 있는 설정 38개는 환경변수를 읽지 않는다. 레지스트리의 환경 전용 설정 26개는 그대로 남고, 레지스트리 밖 환경 읽기와 자격 증명도 이 RFC 의 범위 밖에 남는다.
 - 강제하는 곳은 읽는 함수 한 군데(`Env_config_core.raw_value_opt`)다. 설정마다 고치지 않는다.
-- 파일 소유 이름을 `raw_value_opt` 밖에서 직접 읽으면 CI 가 실패하게 한다(3층).
+- 파일 소유 이름을 `raw_value_opt` 밖에서 직접 읽는 경로를 탐지하는 검사를 둔다(3층). 탐지 범위와 누락은 확인해야 한다(§3.6).
 - `masc restart` 가 넘기는 환경은 이 RFC 에서 다루지 않는다(§3.7).
 
 RFC-0335 가 같은 방향을 7월에 정했지만 코드에 들어간 단계가 없다. 이 RFC 는 0335 의 W2·W3 를 지금 있는 레지스트리 위에서 다시 자른다(§1.4).
@@ -102,7 +102,7 @@ RFC settings-typed-delivery(2026-09-02, Draft)는 비목표에 "env 를 입력�
 
 `raw_value_opt` 가 파일 소유 이름을 받으면 환경변수를 보지 않고, 서버가 켜질 때 읽어 둔 값만 본다. 부르는 82줄은 그대로다.
 
-지금 `raw_value_opt` 안의 두 번째 조회(`Sys.getenv_opt`)는 첫 번째(`Unix.getenv`)와 같은 조회라서 닿지 않는다. 같은 층에서 지운다.
+기준 코드의 `raw_value_opt` 안에서는 두 번째 조회(`Sys.getenv_opt`)가 첫 번째(`Unix.getenv`)와 같은 환경을 본다. 2a 구현은 첫 조회를 지우고 `Sys.getenv_opt` 하나를 남긴다.
 
 `Keeper_runtime_config.resolve_one` 과 `Config_boot_overrides.source` 의 "환경변수가 먼저" 규칙도 같은 기준으로 맞춘다. #46805 가 넣은 `file_only_env_names` 같은 특수 처리는 일반 규칙으로 대체된다.
 
@@ -117,13 +117,13 @@ RFC settings-typed-delivery(2026-09-02, Draft)는 비목표에 "env 를 입력�
 | 나쁜 점 | 선언 전에 읽는 값은 환경변수가 이긴다. 모듈 초기화 때 읽는 곳이 있으면 구멍이다 | 레지스트리 행의 구조를 바꾸는 큰 작업이다 |
 | 기본안 | 이쪽 | |
 
-(a) 의 구멍은 두 가지로 줄인다. 파일 소유 설정은 부를 때마다 읽는 쪽으로 이미 짜여 있다(모듈 불러올 때 캐시하지 않는다). 그리고 §7 의 시험이 선언 뒤 값을 확인한다. 모듈 초기화 때 읽는 곳은 3층의 목록에서 함께 찾는다.
+(a) 의 선언 전 읽기는 아직 전수 확인하지 못했다. 예를 들어 2b 에 남겨 둔 `MASC_OTEL_ENABLED` 는 `Otel_config.enabled` 가 모듈 초기화 때 읽어 캐시한다. 이 시점은 부팅 로더보다 앞이므로 나중에 `runtime.toml` 을 읽어도 기존 캐시는 바뀌지 않는다. 2b 에서 읽는 순서와 실제 exporter 소비자를 함께 고치고 확인해야 한다. 3층의 직접 환경 읽기 검사는 이런 캐시를 찾아주지 않는다.
 
-`apply_runtime_toml` 은 서버 시작(`Server_runtime_bootstrap`)과 `keeper_capability_probe_cli` 가 부른다. 선언은 그 함수 맨 앞에 둔다.
+`apply_runtime_toml` 은 서버 시작(`Server_runtime_bootstrap`)과 `keeper_capability_probe_cli` 가 부른다. 파일 소유 이름의 선언은 그 함수가 부르는 `load_and_apply` 에서 한다.
 
 ### 3.4 시험
 
-선언은 `load_and_apply` 가 하므로, 로더를 부르지 않는 시험은 지금과 같이 환경변수가 먼저인 규칙으로 돈다. 로더를 거치는 시험(`test_runtime_toml_overrides`, `test_server_runtime_bootstrap`, `test_keeper_runtime_config_leaf` 등)은 환경변수 대신 `Config_boot_overrides.set` 으로 값을 넣게 바꾼다(#46805 의 시험 helper `with_boot_override`). 로더를 부르지 않으면서 파일 소유 이름을 `putenv` 하는 시험은 (a) 방식의 구멍과 같은 모양이라, 3층의 목록에 넣어 함께 정리한다. 이 이름을 쓰는 시험 파일은 37개(256곳)지만 대부분은 이름을 기대값으로 적거나 로더 없이 읽기만 한다.
+선언은 `load_and_apply` 가 하므로, 선언이 아직 없거나 시험에서 초기화한 프로세스에서는 로더를 부르지 않는 시험이 환경변수가 먼저인 규칙으로 돈다. 선언은 프로세스에 남으므로 같은 프로세스의 이전 시험이 로더를 불렀다면 결과가 다를 수 있다. 로더를 거치는 시험(`test_runtime_toml_overrides`, `test_server_runtime_bootstrap`, `test_keeper_runtime_config_leaf` 등)은 환경변수 대신 `Config_boot_overrides.set` 으로 값을 넣게 바꾼다(#46805 의 시험 helper `with_boot_override`). 로더를 부르지 않으면서 파일 소유 이름을 `putenv` 하는 시험은 (a) 방식의 구멍과 같은 모양이라 별도로 조사해 정리한다. 3층 검사는 `lib`, `bin` 을 대상으로 하므로 이 시험을 찾는 수단은 아니다. 이 이름을 쓰는 시험 파일은 37개(256곳)지만 대부분은 이름을 기대값으로 적거나 로더 없이 읽기만 한다.
 
 ### 3.5 스크립트와 compose
 
@@ -148,6 +148,10 @@ harness 는 둘로 나뉜다.
 
 compose 는 `docker-compose.yml` 의 `MASC_OTEL_ENABLED` 한 곳이다. 2b-2 에서 옮기는 방법을 정한다(컨테이너 시작 전에 같은 명령을 부르거나 `MASC_CONFIG_DIR` 의 파일에 키를 더한다).
 
+기본 compose 서비스는 `MASC_CONFIG_DIR=/app/config` 를 지정하므로 부팅 시 그 디렉터리를 시드하지 않는다. oneclick 서비스는 `/app/.masc` 를 볼륨으로 보존한다. `masc config set` 을 이 경로들에 적용할 방법과 쓰기 권한을 확인해야 한다. 이미지의 `/app/config` 를 그대로 수정할 수 있다고 가정하지 않는다.
+
+oneclick 의 `scripts/docker-entrypoint.sh` 는 classic 팀에서 키와 운영자 환경 지정이 없을 때 자동 시작을 끈다. 2b 는 키가 없을 때, 나중에 추가됐을 때, 운영자가 값을 지정했을 때와 재시작할 때의 동작을 보존하거나 명시적으로 다시 결정하고 검증해야 한다. 단순히 파일에 `false` 를 저장하는 것만으로 이 전이가 보존되지는 않는다.
+
 옮길 파일은 34개다(주석만 있는 fixture 1개 포함). 셸 harness 12개는 `scripts/harness/lib/server_bootstrap.sh` 를 같이 쓰고, 파이썬 12개는 서버 환경 묶음(`MASC_GRPC_ENABLED` 등)을 각자 만든다. `start-masc.sh` 는 `.env` 파일을 읽은 뒤에도 부른 쪽의 값을 지키려고 이름 6개를 따로 보존한다.
 
 33개 파일 대부분은 서버를 임시 base path 에 띄우면서 `MASC_KEEPER_AUTONOMOUS_ENABLED=false` 로 Keeper 자동 시작을 끄는 harness 다. 릴리스 스모크(`release-binary-smoke.sh`, `install-smoke.sh`, `release-evidence.sh`)도 들어 있다. 로컬에서 돌려 보지 않고 한 번에 바꾸기에는 범위가 커서 명령(2b-1)과 스크립트 이전(2b-2)으로 나눈다(§6). 파일 위치를 정하는 `MASC_BASE_PATH`, `MASC_CONFIG_DIR` 는 파일을 읽기 전에 필요해서 파일 안에 둘 수 없다. 환경 전용으로 남는다. `MASC_BASE_PATH` 는 0335 의 결정 6항과 같다.
@@ -160,19 +164,19 @@ compose 는 `docker-compose.yml` 의 `MASC_OTEL_ENABLED` 한 곳이다. 2b-2 에
 - `MASC_` 로 시작하지 않는 이름이 25개 있다.
 - 이름을 `runtime.toml` 이 정하는 읽기가 있다(provider 자격 증명).
 
-이 RFC 가 지키려는 것은 "파일 키가 있는 설정은 환경변수를 읽지 않는다"는 보장이다. 파일 키가 없는 135개는 이 보장과 상관이 없다. 보장이 깨지는 길은 파일 소유 이름을 `raw_value_opt` 밖에서 읽는 것이다. 그래서 3층은 이 길을 막는 검사 하나다(#46858).
+이 RFC 가 지키려는 것은 "파일 키가 있는 설정은 환경변수를 읽지 않는다"는 보장이다. 파일 키가 없는 135개는 이 보장과 상관이 없다. 파일 소유 이름을 `raw_value_opt` 밖에서 직접 읽는 것은 이 보장이 깨지는 경로 중 하나다. 3층은 이 경로를 탐지하는 검사다(#46858). 선언 전 읽기와 캐시는 별도로 다룬다(§3.3).
 
-- `lib`, `bin` 의 `.ml` 에서 파일 소유 이름을 `Sys.getenv`, `Sys.getenv_opt`, `Unix.getenv`(이름에 `getenv` 가 든 함수 포함)에 넘기면 실패한다. 이름을 상수에 묶어 읽는 경우도 잡는다.
+- `lib`, `bin` 의 `.ml` 에서 파일 소유 이름을 `Sys.getenv`, `Sys.getenv_opt`, `Unix.getenv` 등에 넘기는 형태를 탐지하려 한다. 이름을 상수에 묶어 읽는 형태도 대상이지만, 모든 형태를 잡는다고 확인된 것은 아니다.
 - 파일 소유 이름은 레지스트리에서 오므로 2b 로 이름이 늘어도 검사가 따라온다.
-- 지금 위반은 0이다.
+- #46858 의 기존 검사 결과는 위반 0이었다. 하지만 head `af98525c695f58d2b78490bfae4c2ad50931aa4c` 에서 서로 다른 지역 바인딩의 오탐과 함수 별칭 등의 누락이 재현됐다. 검사를 고치고 해당 범위를 다시 검증하기 전에는 이 결과를 모든 직접 읽기가 없다는 증거로 쓰지 않는다.
 
-0335 W3 는 `Sys.getenv`, `Unix.getenv` 를 `Env_config_core` 와 허용 파일 목록 밖에서 부르면 실패하게 하자고 했다. 이 RFC 는 그렇게 하지 않는다. 직접 읽는 파일이 `lib` 에 96개라서 허용 목록은 지금 상태를 굳힐 뿐이고, 파일 키가 있는 설정을 지키는 데는 위 검사로 충분하다.
+0335 W3 는 `Sys.getenv`, `Unix.getenv` 를 `Env_config_core` 와 허용 파일 목록 밖에서 부르면 실패하게 하자고 했다. 이 RFC 는 그렇게 하지 않는다. 직접 읽는 파일이 `lib` 에 96개라서 허용 목록은 지금 상태를 굳힐 수 있다. 파일 키가 있는 설정을 지키는 데 이 검사로 충분한지는 탐지 범위와 놓치는 경로를 확인해야 한다.
 
 ### 3.7 `masc restart` 가 넘기는 환경
 
 이 RFC 는 `masc restart` 가 넘기는 환경을 바꾸지 않는다. 별도 RFC 로 정한다(이슈 #46865, 결정 D7).
 
-2a, 2b, 3층이 끝나면 이 RFC 가 풀려는 사고, 곧 파일 값을 환경이 덮는 일은 닫힌다. 남는 길은 환경 전용 설정과 레지스트리 밖 이름에 옛 탭의 낡은 값이 새는 것이다(§2). 봄의 이슈 #4568 이 그런 사고였다.
+2a, 2b, 3층으로 이 RFC 가 풀려는 사고, 곧 파일 값을 환경이 덮는 일을 막는 것이 목표다. 초기화 순서와 검사 범위의 확인은 아직 남았다. 환경 전용 설정과 레지스트리 밖 이름에는 옛 탭의 낡은 값이 새는 길도 남는다(§2). 봄의 이슈 #4568 이 그런 사고였다.
 
 ## 4. 하지 않는 것
 
@@ -214,8 +218,8 @@ compose 는 `docker-compose.yml` 의 `MASC_OTEL_ENABLED` 한 곳이다. 2b-2 에
 | 1 | 이 RFC | 문서 검사 |
 | 2a | 읽는 함수 한 군데에서 강제한다. `Config_boot_overrides` 에 파일 소유 이름을 선언하고 `raw_value_opt` 가 따른다. 스크립트가 쓰지 않는 32행을 `Toml_only` 로 바꾸고 로더를 거치는 시험을 옮긴다. #46805 의 특수 처리를 일반 규칙으로 대체하고 `docs/ENV-CONTRACT.md` 와 헤더 주석을 고친다 | §7 의 엉뚱한 환경값 시험, `Test` 워크플로 |
 | 2b-1 | `masc config set KEY=VALUE --base-path P` 를 더한다(§3.5). 시드한 뒤 키를 고치고 `validate_doc` 로 확인한다 | 명령의 시험(시드, 고치기, 거절, 시드된 파일로 부팅), `Test` 워크플로 |
-| 2b-2 | 스크립트가 쓰는 네 이름(4행)을 `Toml_only` 로 바꾸고, 스크립트 33개와 compose 를 `masc config set` 이나 fixture 의 키로 옮긴 뒤 `Toml_and_env` 를 지운다 | 옮긴 스크립트 중 돌려 볼 수 있는 것은 돌린다. 릴리스 스모크는 따로 표시한다 |
-| 3 | 파일 소유 이름을 `raw_value_opt` 밖에서 직접 읽으면 실패하는 검사를 넣는다(#46858) | 검사의 자체 점검, 실제 소스에 읽기를 붙인 변이 확인, `Test` 워크플로 |
+| 2b-2 | 스크립트가 쓰는 네 이름(4행)을 `Toml_only` 로 바꾸고, 스크립트와 compose 를 `masc config set` 이나 fixture 의 키로 옮긴다. OTel 초기화 순서를 고친 뒤 `Toml_and_env` 를 지운다 | 실제 OTel 소비자와 위 oneclick 전이를 확인한다. 옮긴 스크립트 중 돌려 볼 수 있는 것은 돌리고, 릴리스 스모크는 따로 표시한다 |
+| 3 | 파일 소유 이름을 `raw_value_opt` 밖에서 직접 읽는 경로를 탐지하는 검사를 넣는다(#46858) | 탐지·오탐·누락 범위 확인, 실제 소스에 읽기를 붙인 변이 확인, `Test` 워크플로 |
 
 ## 7. 검증
 
@@ -239,7 +243,7 @@ compose 는 `docker-compose.yml` 의 `MASC_OTEL_ENABLED` 한 곳이다. 2b-2 에
 
 ## 9. 되돌리기
 
-각 층은 PR 하나라서 되돌릴 수 있다. 호환 읽기를 만들지 않으므로 2층을 되돌리면 환경변수 덮어쓰기가 다시 열린다. 2층의 변경 기록(Upgrade notes)에 "파일 소유 설정의 환경변수는 무시된다. `runtime.toml` 로 옮겨라"를 적는다.
+각 층은 PR 하나라서 되돌릴 수 있다. 호환 읽기를 만들지 않으므로 2층을 되돌리면 환경변수 덮어쓰기가 다시 열린다. 2층의 변경 기록(Upgrade notes)에 "파일 소유 설정의 환경변수는 무시된다. `runtime.toml` 로 옮겨라"를 적는다. 2a 를 적용하기 전에 서버를 띄울 환경에서 해당 파일 소유 이름을 확인하고, 유지할 값은 `runtime.toml` 에 옮겨 둔다. 파일에서 값이 빠지면 해당 환경값은 적용되지 않으므로 설정별 기본·대체 경로를 확인한다.
 
 ## 부록 A. 세는 방법
 

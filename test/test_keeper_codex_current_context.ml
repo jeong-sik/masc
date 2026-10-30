@@ -1073,19 +1073,24 @@ let turn_start_to_string = Keeper_carried_front.turn_start_to_string
 
 let test_completion_evidence_without_a_keeper_boundary_keeps_every_atom () =
   let seed_reads = ref 0 and librarian_reads = ref 0 in
+  (* The review owns even an unread-tagged message: it is submitted evidence,
+     not a current Keeper observation to be replaced by this dispatch. *)
+  let evidence = large_history @
+    Keeper_librarian_request_unread.attach ~include_empty:true
+      ~role:Agent_core.Types.System Keeper_librarian_request_unread.empty [] in
   let sent = Keeper_codex_runtime.For_testing.carried_projection
       ~input_source:Masc.Keeper_request_source.Completion_review ~capacity_bytes:1
       ~carried_front_seed:(fun () -> incr seed_reads; (seed_at 60) ())
       ~librarian_front:(fun _ -> incr librarian_reads;
         Error (Agent_core.Error.Internal "completion evidence has no Keeper continuity"))
       ~turn_start:(Keeper_carried_front.Turn_boundary_unknown { reason = "program-owned completion evidence" })
-      ~keeper_name:"completion-review-fixture" ~runtime_id:"codex.context" large_history
+      ~keeper_name:"completion-review-fixture" ~runtime_id:"codex.context" evidence
     |> Result.map_error Agent_core.Error.to_string
     |> function Ok messages -> messages | Error error -> fail error
   in
   check bool "Codex receives the exact full evidence, despite a tiny capacity" true
     (List.map Agent_core.Checkpoint.message_to_json sent
-     = List.map Agent_core.Checkpoint.message_to_json large_history);
+     = List.map Agent_core.Checkpoint.message_to_json evidence);
   check int "the native completion review does not read a Keeper seed" 0 !seed_reads;
   check int "the native completion review does not query the Librarian" 0 !librarian_reads
 

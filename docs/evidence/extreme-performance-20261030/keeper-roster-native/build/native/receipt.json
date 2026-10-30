@@ -1,0 +1,82 @@
+{
+  "source_sha": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+  "workflow_sha": "50011c4550cb49153c189586f60bee6438b2f232",
+  "scenario": "workspace-files",
+  "platform": "macos-arm64",
+  "sha256": "56c907eff3ddc752f73160414ea3d1799a68688394a710a2f849ed7c0adc22de",
+  "key_reference": {
+    "path": "key-reference.md",
+    "sha256": "072e320dcdef1de5cb257d3daa69476ba48835f9c9b3c2498165daa3771c3e46",
+    "producer": "bin/masc_tui_keys_doc_cli.exe"
+  },
+  "server_sha256": "71eeee4314600f1431d587b5ae2377a707aa5230f4930cd418435ef6046b59cc",
+  "native_addon_launcher": null,
+  "browser_addon_worker": null,
+  "build_targets": [
+    "bin/masc_tui.exe",
+    "bin/masc_tui_keys_doc_cli.exe",
+    "bin/main_eio.exe",
+    "test/test_repo_git.exe",
+    "test/test_tui_workspace_entries.exe",
+    "test/test_workspace_file_confidentiality.exe"
+  ],
+  "expected_tests": [
+    "test_repo_git",
+    "test_tui_workspace_entries",
+    "test_workspace_file_confidentiality"
+  ],
+  "executed_tests": [
+    "test_repo_git",
+    "test_tui_workspace_entries",
+    "test_workspace_file_confidentiality"
+  ],
+  "test_results": [
+    {
+      "suite": "test_repo_git",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_workspace_entries",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_workspace_file_confidentiality",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    }
+  ],
+  "test_invocations": [
+    {
+      "suite": "test_repo_git",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_workspace_entries",
+      "arguments": []
+    },
+    {
+      "suite": "test_workspace_file_confidentiality",
+      "arguments": []
+    }
+  ],
+  "expected_invocations": [
+    {
+      "suite": "test_repo_git",
+      "arguments": []
+    },
+    {
+      "suite": "test_tui_workspace_entries",
+      "arguments": []
+    },
+    {
+      "suite": "test_workspace_file_confidentiality",
+      "arguments": []
+    }
+  ],
+  "behavior_passed": true,
+  "installed_runtime_verified": false,
+  "visible_ui_verified": false,
+  "packaging": "native executable; see native-dependencies.txt for dynamic libraries"
+}

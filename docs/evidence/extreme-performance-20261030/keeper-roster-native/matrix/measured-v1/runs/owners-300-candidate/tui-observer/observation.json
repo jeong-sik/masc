@@ -1,0 +1,1098 @@
+{
+  "scope": "Unsampled list-only native TUI with real owned Keeper owners and a scripted loopback provider. Input writes, protocol frame ends and native phase samples are separate observations. No text/layout assertions, per-key application acknowledgement, physical emulator/paint or real peer authority proof.",
+  "source": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+  "binary_sha256": "56c907eff3ddc752f73160414ea3d1799a68688394a710a2f849ed7c0adc22de",
+  "binary_sha256_after": "56c907eff3ddc752f73160414ea3d1799a68688394a710a2f849ed7c0adc22de",
+  "server_before": {
+    "build": {
+      "release_version": "0.66.0",
+      "binary_version": "0.66.0",
+      "repo_version": "0.66.0",
+      "commit": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "commit_source": "embedded",
+      "binary_commit": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "71eeee4314600f1431d587b5ae2377a707aa5230f4930cd418435ef6046b59cc",
+      "binary_commit_unix_ts": 1793356436.0,
+      "binary_commit_age_seconds": 1607,
+      "repo_head_commit": "c275c5e18bd",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793356436.0,
+      "repo_head_commit_age_seconds": 1607,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/masc-installed-copy",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+      "runtime_instance_id": "01a18c77-6c41-7000-922d-3741dc87a4cb",
+      "started_at": "2026-10-30T10:59:59Z",
+      "uptime_seconds": 44
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base",
+      "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base",
+      "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base/.masc",
+      "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base",
+      "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base",
+      "resolution_source": "explicit_cli"
+    },
+    "keeper_fibers": 300
+  },
+  "server_after": {
+    "build": {
+      "release_version": "0.66.0",
+      "binary_version": "0.66.0",
+      "repo_version": "0.66.0",
+      "commit": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "commit_source": "embedded",
+      "binary_commit": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "71eeee4314600f1431d587b5ae2377a707aa5230f4930cd418435ef6046b59cc",
+      "binary_commit_unix_ts": 1793356436.0,
+      "binary_commit_age_seconds": 1617,
+      "repo_head_commit": "c275c5e18bd",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793356436.0,
+      "repo_head_commit_age_seconds": 1617,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/masc-installed-copy",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+      "runtime_instance_id": "01a18c77-6c41-7000-922d-3741dc87a4cb",
+      "started_at": "2026-10-30T10:59:59Z",
+      "uptime_seconds": 54
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base",
+      "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base",
+      "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base/.masc",
+      "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base",
+      "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-candidate/owned-base",
+      "resolution_source": "explicit_cli"
+    },
+    "keeper_fibers": 300
+  },
+  "same_runtime": true,
+  "server_pid": 67984,
+  "server_returncode_at_end": null,
+  "tui_pid": 76053,
+  "started_ns": "506404310325333",
+  "ended_ns": "506412610571916",
+  "clock": {
+    "implementation": "mach_absolute_time()",
+    "monotonic": true,
+    "adjustable": false,
+    "resolution": 4.166666666666666e-08
+  },
+  "exit_code": 0,
+  "forced_kill": false,
+  "error": null,
+  "sent_actions": 1,
+  "planned_actions": 1,
+  "protocol_ready": true,
+  "timing_file_present": true,
+  "sync_block_open_at_end": false,
+  "denied_autostart_attempts": [],
+  "observer_source_sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+  "pty_eof_observed": true,
+  "native_raw_frame_records": 190,
+  "native_raw_stage_records": 440,
+  "native_raw_ask_omissions": [],
+  "native_diagnostic_omissions": [],
+  "native_declared_frames": {
+    "build": 95,
+    "present": 95
+  },
+  "native_declared_stage_calls": 440,
+  "native_malformed_json_lines": [],
+  "native_malformed_summary_lines": [],
+  "native_report_consistent": true,
+  "user_cpu_seconds": 1.137942,
+  "system_cpu_seconds": 0.242398,
+  "terminal_bytes": 103168,
+  "events": [
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404399459750",
+      "read_end_ns": "506404399470041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404399544208",
+      "read_end_ns": "506404399548583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404417626666",
+      "read_end_ns": "506404417640166"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404436470958",
+      "read_end_ns": "506404436481333"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404436550291",
+      "read_end_ns": "506404436551541"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404453500916",
+      "read_end_ns": "506404453511291"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404453571208",
+      "read_end_ns": "506404453573000"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404470972083",
+      "read_end_ns": "506404470981000"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404471020375",
+      "read_end_ns": "506404471025541"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404506460333",
+      "read_end_ns": "506404506467041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404611113875",
+      "read_end_ns": "506404611125458"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404611236958",
+      "read_end_ns": "506404611238625"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404628838041",
+      "read_end_ns": "506404628849541"
+    },
+    {
+      "kind": "sent_input",
+      "action": "keepers",
+      "bytes_hex": "33",
+      "bytes_written": 1,
+      "write_start_ns": "506404810723250",
+      "write_end_ns": "506404810778208"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404858557958",
+      "read_end_ns": "506404858567583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404858711541",
+      "read_end_ns": "506404858718666"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506404918945125",
+      "read_end_ns": "506404918953375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405080855250",
+      "read_end_ns": "506405080869583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405080905291",
+      "read_end_ns": "506405080907125"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405135788458",
+      "read_end_ns": "506405135811791"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405152862166",
+      "read_end_ns": "506405152864375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405170845458",
+      "read_end_ns": "506405170860000"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405189308958",
+      "read_end_ns": "506405189319250"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405208847833",
+      "read_end_ns": "506405208857125"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405223509916",
+      "read_end_ns": "506405223514958"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405263332291",
+      "read_end_ns": "506405263339916"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405325630125",
+      "read_end_ns": "506405325638041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405403549625",
+      "read_end_ns": "506405403559041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405565018791",
+      "read_end_ns": "506405565026875"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405565043750",
+      "read_end_ns": "506405565045458"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405739876000",
+      "read_end_ns": "506405739903625"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506405891122208",
+      "read_end_ns": "506405891135458"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406051322333",
+      "read_end_ns": "506406051336541"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406212947250",
+      "read_end_ns": "506406212956833"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406212988333",
+      "read_end_ns": "506406212990625"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406385457875",
+      "read_end_ns": "506406385474791"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406385589166",
+      "read_end_ns": "506406385594458"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406407210833",
+      "read_end_ns": "506406407221541"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406407267375",
+      "read_end_ns": "506406407269000"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406424721166",
+      "read_end_ns": "506406424730333"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406443428750",
+      "read_end_ns": "506406443448041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406499708458",
+      "read_end_ns": "506406499717458"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406499754333",
+      "read_end_ns": "506406499756250"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406523523041",
+      "read_end_ns": "506406523536333"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406583459458",
+      "read_end_ns": "506406583469500"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406601244166",
+      "read_end_ns": "506406601251166"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406622907500",
+      "read_end_ns": "506406622922250"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406654517375",
+      "read_end_ns": "506406654526500"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406710980791",
+      "read_end_ns": "506406710988291"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406873539750",
+      "read_end_ns": "506406873553125"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506406873637250",
+      "read_end_ns": "506406873640000"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407045187625",
+      "read_end_ns": "506407045196416"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407196006458",
+      "read_end_ns": "506407196023791"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407196074458",
+      "read_end_ns": "506407196077541"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407351742000",
+      "read_end_ns": "506407351759000"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407351806208",
+      "read_end_ns": "506407351809000"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407498823250",
+      "read_end_ns": "506407498848375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407498917458",
+      "read_end_ns": "506407498924458"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407660622375",
+      "read_end_ns": "506407660630000"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407822077750",
+      "read_end_ns": "506407822086791"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407822121208",
+      "read_end_ns": "506407822123375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506407983432041",
+      "read_end_ns": "506407983439083"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408143380500",
+      "read_end_ns": "506408143388708"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408143421750",
+      "read_end_ns": "506408143423583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408305073833",
+      "read_end_ns": "506408305085083"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408305123750",
+      "read_end_ns": "506408305125125"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408415007458",
+      "read_end_ns": "506408415034791"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408415154208",
+      "read_end_ns": "506408415157958"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408432382375",
+      "read_end_ns": "506408432395958"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408450150166",
+      "read_end_ns": "506408450158333"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408486759583",
+      "read_end_ns": "506408486770333"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408486810458",
+      "read_end_ns": "506408486812625"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408511572458",
+      "read_end_ns": "506408511581750"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408590970458",
+      "read_end_ns": "506408590981666"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408612271625",
+      "read_end_ns": "506408612281375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408629730250",
+      "read_end_ns": "506408629738958"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408661300166",
+      "read_end_ns": "506408661309375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408787997625",
+      "read_end_ns": "506408788009833"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506408951073166",
+      "read_end_ns": "506408951085666"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506409111790541",
+      "read_end_ns": "506409111798958"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506409111833000",
+      "read_end_ns": "506409111834666"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506409272919166",
+      "read_end_ns": "506409272929291"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506409272977166",
+      "read_end_ns": "506409272979000"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506409436366583",
+      "read_end_ns": "506409436375875"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506409436411833",
+      "read_end_ns": "506409436413875"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506409596520250",
+      "read_end_ns": "506409596529666"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506409596564083",
+      "read_end_ns": "506409596566041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506409756792583",
+      "read_end_ns": "506409756806416"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506409918373458",
+      "read_end_ns": "506409918381625"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410090779333",
+      "read_end_ns": "506410090794833"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410090859833",
+      "read_end_ns": "506410090863041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410254103583",
+      "read_end_ns": "506410254111958"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410254145125",
+      "read_end_ns": "506410254154375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410416292958",
+      "read_end_ns": "506410416301791"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410416352583",
+      "read_end_ns": "506410416354333"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410433340416",
+      "read_end_ns": "506410433350166"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410450953416",
+      "read_end_ns": "506410450964500"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410468329416",
+      "read_end_ns": "506410468337750"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410486493875",
+      "read_end_ns": "506410486503041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410560785083",
+      "read_end_ns": "506410560794125"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410578621916",
+      "read_end_ns": "506410578630916"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410599872916",
+      "read_end_ns": "506410599879291"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410740660000",
+      "read_end_ns": "506410740668791"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506410902212541",
+      "read_end_ns": "506410902218916"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506411064502625",
+      "read_end_ns": "506411064513375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506411064552125",
+      "read_end_ns": "506411064553875"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506411226408250",
+      "read_end_ns": "506411226416583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506411226444291",
+      "read_end_ns": "506411226448958"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506411388482208",
+      "read_end_ns": "506411388493458"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506411388530916",
+      "read_end_ns": "506411388532666"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506411549352333",
+      "read_end_ns": "506411549361583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506411549397791",
+      "read_end_ns": "506411549417041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506411726702083",
+      "read_end_ns": "506411726715083"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506411875837208",
+      "read_end_ns": "506411875845958"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506412036399125",
+      "read_end_ns": "506412036408458"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506412197627416",
+      "read_end_ns": "506412197639375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506412197679708",
+      "read_end_ns": "506412197681375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "506412359333500",
+      "read_end_ns": "506412359342416"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "506412359374541",
+      "read_end_ns": "506412359376333"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 0,
+      "unpaired_ends": 1,
+      "read_start_ns": "506412411343750",
+      "read_end_ns": "506412411358291"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 0,
+      "unpaired_ends": 1,
+      "read_start_ns": "506412552511791",
+      "read_end_ns": "506412552518458"
+    }
+  ],
+  "capture_qualified": true,
+  "qualification_scope": "Transport/control and native phase capture only; input application, complete stage coverage, peer effects, physical paint and the performance target are not certified."
+}

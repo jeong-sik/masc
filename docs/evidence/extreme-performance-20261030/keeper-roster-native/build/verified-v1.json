@@ -1,0 +1,34 @@
+{
+  "verified_at_unix": 1793357490.678622,
+  "source": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+  "wrapper": "50011c4550cb49153c189586f60bee6438b2f232",
+  "native_run": 41041914326,
+  "test_run": 41041918389,
+  "binary_checks": [
+    {
+      "binary": "artifacts/extreme-perf-20261030/keeper-roster-native-v1/native/masc",
+      "sha256": "71eeee4314600f1431d587b5ae2377a707aa5230f4930cd418435ef6046b59cc",
+      "command": [
+        "masc",
+        "build-commit"
+      ],
+      "returncode": 0,
+      "source_readback": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "stderr": "[2026-10-30 19:51:28] [INFO] [MCP] Tag registry initialized: 182 tools registered\n"
+    },
+    {
+      "binary": "artifacts/extreme-perf-20261030/keeper-roster-native-v1/native/masc-tui",
+      "sha256": "56c907eff3ddc752f73160414ea3d1799a68688394a710a2f849ed7c0adc22de",
+      "command": [
+        "masc-tui",
+        "--build-commit"
+      ],
+      "returncode": 0,
+      "source_readback": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "stderr": ""
+    }
+  ],
+  "receipt_sha256": "e12021551ea4376ac16996582454d987a31feb53bcc1c510be069474d14cb596",
+  "target_suite_log_sha256": "b05055756dcdfcb643fffd6ab426814b4a5576bcf04248e6ec6845a3b159086e",
+  "scope": "Native server/TUI source and digest readback; native receipt three workspace suites, separate Test requested only test_tui_keeper_control. No installed/visible UI/full regression claim."
+}

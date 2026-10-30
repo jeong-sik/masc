@@ -1,0 +1,48 @@
+{
+  "scope": "Direct owned resource receipts and recorded source/digests only; no global host quiescence, descendant absence, applied key, UI row cardinality or physical paint claim.",
+  "cleanup_ok": true,
+  "next_arm_safe": true,
+  "eligible": false,
+  "checks": {
+    "expected_pins_valid": true,
+    "qualifier_parser_source": true,
+    "main_cleanup_complete": true,
+    "no_cleanup_errors": true,
+    "cleanup_receipts_readable": true,
+    "fallback_consistent": true,
+    "failure_receipts_match_exit": true,
+    "execution_output_binding": true,
+    "owned_base_binding": true,
+    "source_identity": true,
+    "server_digest": true,
+    "owned_process_binding": true,
+    "tui_digest": true,
+    "server_before_identity": true,
+    "server_after_identity": true,
+    "same_runtime": true,
+    "probe_identity": true,
+    "tui_exit": true,
+    "capture_record": true,
+    "current_native_report_consistent": true,
+    "captured_probe_copies_match": true,
+    "list_builds_observed": true,
+    "workload": false,
+    "required_inputs_readable": false
+  },
+  "missing_or_invalid": [
+    "summary.json"
+  ],
+  "native_list_builds": 89,
+  "inputs_sha256": {
+    "cleanup.json": "a2c8e9531556c704d307c80f4612fb590df71be606d593a518a0116e2cca743a",
+    "fallback-cleanup.json": "e4002cdbd41242e7ab4d778fd6ba650f83a944f95331edc1204c933b10e22688",
+    "failure.json": "3045f04525bb812c1b1976a2f18bbc736ae8d62741c142ced5a7339c4a6034af",
+    "identity.json": "86dccb6b54d473e95311ad0e83453853dcb28853cd0d57cc90c570d7f1b1338b",
+    "owned-process.json": "c8a1e233a5b296c514e1be7c9a19ed8de311b725a84650a0f9a89b9e6fdf12a5",
+    "tui-observer/observation.json": "c4291e11887f6cdffa2656ffe14d481d1beeb7491a6adddd9390cbad5a06088b",
+    "tui-observer/frame-timing.txt": "26341813df71c84a6155f87aa07e8e98454beffd29b9309a84dc89090f756576",
+    "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+    "tui_observer.py": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+    "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+  }
+}

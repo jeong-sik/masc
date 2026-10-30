@@ -1,0 +1,38 @@
+{
+  "population": 300,
+  "variant": "control",
+  "source_expected": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-only-probe-v1/keeper_scale_session.py",
+    "--binary",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-frame-native-v1/masc",
+    "--tui-binary",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-frame-native-v1/masc-tui",
+    "--repo",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-control",
+    "--keepers",
+    "300",
+    "--messages-per-keeper",
+    "2"
+  ],
+  "started_unix": 1793357722.248425,
+  "loadavg_before": [
+    46.80615234375,
+    37.4892578125,
+    31.6650390625
+  ],
+  "cpu_count": 16,
+  "source_actual": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+  "ended_unix": 1793357996.150972,
+  "returncode": 1,
+  "stdout": "",
+  "stderr": "{\"original_error_type\": \"ProbeError\", \"cleanup_errors\": []}\nTraceback (most recent call last):\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-only-probe-v1/keeper_scale_session.py\", line 1149, in <module>\n    main()\n    ~~~~^^\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-only-probe-v1/keeper_scale_session.py\", line 1111, in main\n    run(args, owner)\n    ~~~^^^^^^^^^^^^^\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-only-probe-v1/keeper_scale_session.py\", line 916, in run\n    status = observe_operation(operation, \"settlement\", deadline)\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-only-probe-v1/keeper_scale_session.py\", line 866, in observe_operation\n    require(time.monotonic() < deadline,\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n            \"read-only operation observation deadline; owner still live\")\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-only-probe-v1/keeper_scale_session.py\", line 50, in require\n    raise ProbeError(detail)\nProbeError: read-only operation observation deadline; owner still live\n",
+  "loadavg_after": [
+    60.484375,
+    50.7060546875,
+    38.98486328125
+  ]
+}

@@ -1,0 +1,546 @@
+{
+  "scope": "Unsampled list-only native TUI with real owned Keeper owners and a scripted loopback provider. Input writes, protocol frame ends and native phase samples are separate observations. No text/layout assertions, per-key application acknowledgement, physical emulator/paint or real peer authority proof.",
+  "source": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+  "binary_sha256": "5366682357b8c5ca6cc9f62cca3a87b9187acc527bdf7207566597324fafdadf",
+  "binary_sha256_after": "5366682357b8c5ca6cc9f62cca3a87b9187acc527bdf7207566597324fafdadf",
+  "server_before": {
+    "build": {
+      "release_version": "0.66.0",
+      "binary_version": "0.66.0",
+      "repo_version": "0.66.0",
+      "commit": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "commit_source": "embedded",
+      "binary_commit": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "70216f78f9171cb7eaa1b0a072ac6a365838e594c6a9e9ddd2f18c4c686ca4ad",
+      "binary_commit_unix_ts": 1793348101.0,
+      "binary_commit_age_seconds": 9518,
+      "repo_head_commit": "c275c5e18bd",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793356436.0,
+      "repo_head_commit_age_seconds": 1183,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/masc-installed-copy",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+      "runtime_instance_id": "01a18c71-5dcc-7000-8ec1-d6c1373298be",
+      "started_at": "2026-10-30T10:53:22Z",
+      "uptime_seconds": 16
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base",
+      "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base",
+      "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base/.masc",
+      "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base",
+      "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base",
+      "resolution_source": "explicit_cli"
+    },
+    "keeper_fibers": 2
+  },
+  "server_after": {
+    "build": {
+      "release_version": "0.66.0",
+      "binary_version": "0.66.0",
+      "repo_version": "0.66.0",
+      "commit": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "commit_source": "embedded",
+      "binary_commit": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "70216f78f9171cb7eaa1b0a072ac6a365838e594c6a9e9ddd2f18c4c686ca4ad",
+      "binary_commit_unix_ts": 1793348101.0,
+      "binary_commit_age_seconds": 9528,
+      "repo_head_commit": "c275c5e18bd",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793356436.0,
+      "repo_head_commit_age_seconds": 1193,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/masc-installed-copy",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+      "runtime_instance_id": "01a18c71-5dcc-7000-8ec1-d6c1373298be",
+      "started_at": "2026-10-30T10:53:22Z",
+      "uptime_seconds": 27
+    },
+    "paths": {
+      "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base",
+      "effective_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base",
+      "effective_masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base/.masc",
+      "current_task_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base",
+      "env_masc_base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control/owned-base",
+      "resolution_source": "explicit_cli"
+    },
+    "keeper_fibers": 2
+  },
+  "same_runtime": true,
+  "server_pid": 23180,
+  "server_returncode_at_end": null,
+  "tui_pid": 25547,
+  "started_ns": "505980424320333",
+  "ended_ns": "505988816900416",
+  "clock": {
+    "implementation": "mach_absolute_time()",
+    "monotonic": true,
+    "adjustable": false,
+    "resolution": 4.166666666666666e-08
+  },
+  "exit_code": 0,
+  "forced_kill": false,
+  "error": null,
+  "sent_actions": 1,
+  "planned_actions": 1,
+  "protocol_ready": true,
+  "timing_file_present": true,
+  "sync_block_open_at_end": false,
+  "denied_autostart_attempts": [],
+  "observer_source_sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+  "pty_eof_observed": true,
+  "native_raw_frame_records": 178,
+  "native_raw_stage_records": 464,
+  "native_raw_ask_omissions": [],
+  "native_diagnostic_omissions": [],
+  "native_declared_frames": {
+    "build": 89,
+    "present": 89
+  },
+  "native_declared_stage_calls": 464,
+  "native_malformed_json_lines": [],
+  "native_malformed_summary_lines": [],
+  "native_report_consistent": true,
+  "user_cpu_seconds": 0.385957,
+  "system_cpu_seconds": 0.148536,
+  "terminal_bytes": 50777,
+  "events": [
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980651815000",
+      "read_end_ns": "505980651907416"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980653521125",
+      "read_end_ns": "505980653526958"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980690810375",
+      "read_end_ns": "505980690817583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980728092208",
+      "read_end_ns": "505980728116708"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980728237125",
+      "read_end_ns": "505980728241791"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980745541250",
+      "read_end_ns": "505980745556625"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980764629250",
+      "read_end_ns": "505980764649333"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980791026208",
+      "read_end_ns": "505980791035125"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980792992416",
+      "read_end_ns": "505980793001208"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980811063708",
+      "read_end_ns": "505980811072291"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980828596041",
+      "read_end_ns": "505980828606458"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980847990125",
+      "read_end_ns": "505980848000541"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980849136500",
+      "read_end_ns": "505980849150250"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980862281583",
+      "read_end_ns": "505980862289666"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980862496375",
+      "read_end_ns": "505980862498083"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980880883708",
+      "read_end_ns": "505980880891041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980899436833",
+      "read_end_ns": "505980899450791"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980914553250",
+      "read_end_ns": "505980914561125"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980932890041",
+      "read_end_ns": "505980932899000"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980950228750",
+      "read_end_ns": "505980950242750"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505980967420458",
+      "read_end_ns": "505980967433708"
+    },
+    {
+      "kind": "sent_input",
+      "action": "keepers",
+      "bytes_hex": "33",
+      "bytes_written": 1,
+      "write_start_ns": "505981061847083",
+      "write_end_ns": "505981061864500"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 0,
+      "unpaired_ends": 0,
+      "read_start_ns": "505981171305583",
+      "read_end_ns": "505981171322208"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505981172643875",
+      "read_end_ns": "505981172645875"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505981646771625",
+      "read_end_ns": "505981646781041"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505982608217416",
+      "read_end_ns": "505982608226500"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505982663303375",
+      "read_end_ns": "505982663312291"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505982686862083",
+      "read_end_ns": "505982686874583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505982704023000",
+      "read_end_ns": "505982704039750"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505982721287375",
+      "read_end_ns": "505982721296875"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505982739140750",
+      "read_end_ns": "505982739153291"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505983564794875",
+      "read_end_ns": "505983564856583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505984511969541",
+      "read_end_ns": "505984511980375"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505984686999583",
+      "read_end_ns": "505984687008208"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505984704408916",
+      "read_end_ns": "505984704416833"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505984723538041",
+      "read_end_ns": "505984723546333"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505984755615875",
+      "read_end_ns": "505984755628500"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505984772809625",
+      "read_end_ns": "505984772817583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505984794074458",
+      "read_end_ns": "505984794089333"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505984819163375",
+      "read_end_ns": "505984819173125"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505985641329583",
+      "read_end_ns": "505985641340875"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505986607991250",
+      "read_end_ns": "505986608004750"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505986689594583",
+      "read_end_ns": "505986689614708"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505986708406958",
+      "read_end_ns": "505986708420416"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505986753881500",
+      "read_end_ns": "505986753901166"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505986817025000",
+      "read_end_ns": "505986817036583"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505986835338875",
+      "read_end_ns": "505986835353166"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505986953432083",
+      "read_end_ns": "505986953448625"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505987602373583",
+      "read_end_ns": "505987602385625"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 1,
+      "completed_blocks": 1,
+      "unpaired_ends": 0,
+      "read_start_ns": "505988584691416",
+      "read_end_ns": "505988584700791"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 0,
+      "unpaired_ends": 1,
+      "read_start_ns": "505988654460250",
+      "read_end_ns": "505988654472208"
+    },
+    {
+      "kind": "sync_transport_controls",
+      "begins": 0,
+      "completed_blocks": 0,
+      "unpaired_ends": 1,
+      "read_start_ns": "505988805799791",
+      "read_end_ns": "505988805814583"
+    }
+  ],
+  "capture_qualified": true,
+  "qualification_scope": "Transport/control and native phase capture only; input application, complete stage coverage, peer effects, physical paint and the performance target are not certified."
+}

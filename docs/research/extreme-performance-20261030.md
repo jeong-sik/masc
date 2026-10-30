@@ -241,6 +241,18 @@ Exact product-fragment checks compare 1,262 readings and 2,524 lifecycle-choice
 pairs, while product whole-module build and native execution remain separate
 pending evidence at this capture boundary.
 
+The later [native prepared-roster record](../evidence/extreme-performance-20261030/keeper-roster-native/README.md)
+builds source `c275c5e18bdf0977ec3cfdd33e16bd65d3367236` and passes the actual
+Keeper-control suite, 61/61. Valid 2/30-owner native pairs retain list Build
+p50 0.324 to 0.303 ms and 0.921 to 0.847 ms respectively. This is a single
+arm/source/population observation with different build wrappers and host noise,
+not a stable speedup. The 300-control API observation misses its deadline with
+351 observed successes, while its post-cleanup durable reread has 600 succeeded
+rows. The candidate independently verifies 600/600 and records Build p50
+3.049 ms, p95 7.833 ms. The matrix fails and the 300 pair is ineligible for an
+improvement ratio. Actual UI cardinality, key application, physical paint,
+installed performance and full regression remain unverified.
+
 ## Measurement matrix still required for completion
 
 Use 100 us as the explicit target for every relevant boundary below. Report

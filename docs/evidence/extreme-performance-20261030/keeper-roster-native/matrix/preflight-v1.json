@@ -1,0 +1,35 @@
+{
+  "at_unix": 1793357556.002296,
+  "checks": [
+    {
+      "variant": "control",
+      "binary": "server",
+      "sha256": "70216f78f9171cb7eaa1b0a072ac6a365838e594c6a9e9ddd2f18c4c686ca4ad",
+      "source_readback": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "returncode": 0
+    },
+    {
+      "variant": "control",
+      "binary": "tui",
+      "sha256": "5366682357b8c5ca6cc9f62cca3a87b9187acc527bdf7207566597324fafdadf",
+      "source_readback": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "returncode": 0
+    },
+    {
+      "variant": "candidate",
+      "binary": "server",
+      "sha256": "71eeee4314600f1431d587b5ae2377a707aa5230f4930cd418435ef6046b59cc",
+      "source_readback": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "returncode": 0
+    },
+    {
+      "variant": "candidate",
+      "binary": "tui",
+      "sha256": "56c907eff3ddc752f73160414ea3d1799a68688394a710a2f849ed7c0adc22de",
+      "source_readback": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "returncode": 0
+    }
+  ],
+  "repo_head": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+  "scope": "Matched native source/digest identities; common lib/build/fixture source equal between source heads. Build wrapper revisions differ; actual UI population and physical paint unobserved."
+}

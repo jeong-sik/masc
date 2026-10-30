@@ -1225,7 +1225,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
             in
             let run_result =
               let* attempt,original = prepared_original in
-              let* result =
+              let* reviewed_original,result =
               with_original_publication_guard ~store:owner_store ~verification_id ~attempt
                 ~installation_id ~package_id (fun () -> Verifier_review_worker.run_attempt
                 ~prepare_observer_registration:(fun result ->
@@ -1253,7 +1253,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                 ~base_path:runtime.config.base_path ~prepare_authority
                 ~provider_rest:Verification_retry.provider_rest
                 ())
-              in Ok (attempt,result)
+              in Ok (attempt,reviewed_original,result)
             in
             match run_result with
             | Error (Verifier_review_worker.Execution_pending detail) -> stop (Execution_pending {detail})
@@ -1264,7 +1264,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
               defer_unavailable ~stage:Verification_run_registry.Review_preparation ~detail
             | Error Verifier_review_worker.Original_not_found -> stop (Raised {detail="verifier original not found"})
             | Error (Verifier_review_worker.Original_corrupt detail | Grants_mismatch detail) -> stop (Raised {detail})
-            | Ok (attempt,result) ->
+            | Ok (attempt,original,result) ->
             (* Every verdict lands in the calibration ledger the Harness
                surface reads — which evaluator judged, and whether a fallback
                answered for the intended one. The judge kept running after the
@@ -1273,8 +1273,12 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                (last record 2026-07-27; the surface read as a museum). A
                non-verdict is a no-op inside; the stalled path below already
                reaches the Board. *)
-            Eval_calibration.record_verdict ?producer_execution:prepared.producer_execution ~task_id:task.id
-              ~req:prepared.review_request ~result ();
+            let reviewed_request = Verifier_review_original.review_request original in
+            (* The v3 original freezes the generator runtime, not the submitting
+               response identity. The current wake cannot bind that identity to
+               this original, even when both name the same runtime. *)
+            Eval_calibration.record_verdict ~task_id:reviewed_request.task_id
+              ~req:reviewed_request ~result ();
             let evaluator_runtime = result.evaluator_runtime in
             match result.verdict with
        | None ->

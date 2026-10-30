@@ -22,7 +22,7 @@ val run_attempt :
   base_path:string ->
   prepare_authority:(unit -> (Verification_authority_tools.task_review, string) result) ->
   provider_rest:(string -> Task.Anti_rationalization.provider_rest) -> unit ->
-  (Task.Anti_rationalization.review_result, error) result
+  (Verifier_review_original.t * Task.Anti_rationalization.review_result, error) result
 (** Strictly load the original for its recorded destination, then compare the
     host's opaque authority with its canonical binding and subject. Refuse a
     changed workspace, producer, full schema or submitted snapshot before
@@ -35,7 +35,9 @@ val run_attempt :
     original; pending native executions are observed through their pre-effect
     journal bindings without reconnecting to the producer. Neither observation
     nor restored judgments rebuild lookup authority or dispatch another model. The host's actual observer registration, when
-    supplied, is published atomically with the judgment in one owner record. *)
+    supplied, is published atomically with the judgment in one owner record.
+    A successful result includes the exact original loaded by this worker, so
+    callers need not associate the verdict with a separate owner read. *)
 
 type 'error apply_failure =
   | Outcome_unknown of { error : 'error; detail : string }
@@ -84,7 +86,7 @@ module For_testing : sig
   base_path:string ->
   prepare_authority:(unit -> (Verification_authority_tools.task_review, string) result) ->
   provider_rest:(string -> Task.Anti_rationalization.provider_rest) -> unit ->
-  (Task.Anti_rationalization.review_result, error) result
+  (Verifier_review_original.t * Task.Anti_rationalization.review_result, error) result
 end
 (** Scoped publication effect injection through the same runner; production
     always uses the original owner's canonical publisher. No global hook. *)

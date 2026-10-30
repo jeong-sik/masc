@@ -1,6 +1,6 @@
 ---
 status: partial
-updated: 2026-10-24
+updated: 2026-10-30
 ---
 
 # Verification model identity observation
@@ -65,19 +65,34 @@ model.
 invocation under `output.producer_execution` only when its host actor equals
 the request worker. It replaces any reserved field from the source output;
 model/tool arguments cannot supply that host value. Missing capture is
-`null`. This value is part of the original request file, so later turns,
-configuration changes, process restarts, and retries do not replace it.
+`null`. The captured value remains in the submitted request file; the
+calibration policy below does not remove or rewrite it.
 `Verification.producer_execution` diagnoses malformed, duplicate, and
 worker-mismatched metadata. The completion authority treats such diagnostics
 as unknown observation; they do not block Task review or approve/reject it.
 
+The retained Task verifier original currently uses schema
+`verifier_review_original/v3`. It freezes the submitting runtime name when
+available, but does not bind the full `producer_execution` identity. A
+request file read by a later wake is therefore not proof of the exact identity
+associated with that original, even if its actor and runtime name match.
+Every newly written v3 Task calibration verdict row records
+`producer_execution: null`, including a fresh review, to avoid assigning an
+unbound identity. This is an observation loss for all such new rows, not a
+claim that the original submission lacked an identity. The retained original's
+`generator_runtime` and the request file's captured identity remain in place.
+A v4 original or other durable binding of the full submitting identity has not
+been implemented.
+
 The reviewer hook in `workspace_metric_hooks.ml` freezes
 `evaluator_execution` exactly when `report_review_verdict` records its single
 accepted verdict. It does not use the final response of the review, which can
-arrive after that tool call. The winning reply carries the same immutable
-identity through `Anti_rationalization.review_result`, review notes, and the
-calibration ledger. Goal proof review shares the result type; its completion
-and person-confirmation policies are unchanged.
+arrive after that tool call. On the ordinary response path, the winning reply
+carries the same immutable identity through `Anti_rationalization.review_result`,
+review notes, and the calibration ledger. In `Dispatch_pending` journal recovery,
+the reconstructed result sets `evaluator_execution` to `None`, so the evaluator
+is also unobserved. Goal proof review shares the result type; its completion and
+person-confirmation policies are unchanged.
 
 ## Measurements
 
@@ -96,6 +111,17 @@ The ledger checks producer actor and evaluator runtime consistency before a
 pair can count. Missing or malformed identity data never becomes a measured
 zero. The dashboard projects the ledger observation directly and exports no
 raw provider/model identity in its overview.
+
+A new v3 Task row is counted as producer-unobserved when a valid, matching
+evaluator identity is present, or both-unobserved when that identity is absent
+or invalid. It is excluded from the complete-pair denominator; the retained
+runtime-name comparison is not a substitute for model identity. Earlier rows
+are not rewritten and can still contribute their recorded pairs; this change
+does not retrospectively verify their producer identities.
+
+The ledger is not a census of attempts or judgments: a result without a verdict
+writes no row, and already-Judged or commit recovery does not backfill a row
+missed before recovery. Coverage counts describe the rows actually present.
 
 ## Remaining boundaries
 

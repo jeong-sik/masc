@@ -57,7 +57,7 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
         | Some json -> O.result_of_json json |> Result.map_error (fun detail -> Original_corrupt detail)
         | None -> Error (Original_corrupt "retained reviewer refusal has no exact result"))
     | _ -> Error (Original_corrupt "retained reviewer refusal is malformed") in
-  match Progress.phase (O.progress retained) with
+  let* result = match Progress.phase (O.progress retained) with
   | Progress.Judged json -> restored json
   | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
     restored commit.judgment
@@ -169,6 +169,8 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
             | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> ())
         | Error _ -> ());
       raise exn
+  in
+  Ok (original, result)
 
 let run_attempt = run_attempt_with ~advance_events:O.advance_events
 module For_testing = struct

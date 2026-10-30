@@ -91,11 +91,38 @@ val retained_keeper_names_read_only_result :
 val persisted_keeper_names : Workspace.config -> string list
 
 
+(** What to do with a file at a Keeper's path that this binary cannot decode
+    as the current schema ({!meta_presence}'s [Meta_not_current]). *)
+type undecodable_meta =
+  | Skip_undecodable_meta
+      (** Read it as no Keeper, as {!read_meta_file_path} does. *)
+  | Fail_on_undecodable_meta
+      (** Make it the error, for a reader that must not take "cannot read" for
+          "no such Keeper". *)
+
+(** Every persisted Keeper's TOML-overlaid metadata with its canonical
+    filename, in name order. The first Keeper that cannot be read is the
+    error. *)
+val persisted_effective_metas :
+  on_undecodable:undecodable_meta ->
+  Workspace.config ->
+  ((string * Keeper_meta_contract.keeper_meta) list, string) result
+
+(** The Keeper among [metas] (from {!persisted_effective_metas}) whose
+    [mention_targets] contain [mention_target]. [Ok None] when none does, and
+    an error when more than one does. *)
+val keeper_for_mention_target_in :
+  (string * Keeper_meta_contract.keeper_meta) list ->
+  mention_target:string ->
+  ((string * Keeper_meta_contract.keeper_meta) option, string) result
+
 (** Resolve an exact configured [mention_target] against effective metadata.
     The canonical filename and the same TOML-overlaid metadata snapshot are
     returned together so delivery and pending-message classification use one
     authority. Duplicate claims, configuration errors, and metadata read
-    failures are explicit errors. *)
+    failures are explicit errors. This is {!keeper_for_mention_target_in} over
+    {!persisted_effective_metas}, so a mention target that is not a Keeper id
+    reads no file. *)
 val persisted_keeper_for_mention_target :
   Workspace.config ->
   mention_target:string ->

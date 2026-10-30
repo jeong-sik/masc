@@ -49,7 +49,7 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   f ()
 
 let create_post_exn ~author ~content =
@@ -194,7 +194,7 @@ let test_restart_recomputes_reply_count_from_comment_wal () =
      comment WAL row alone must restore both. *)
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   match Board_dispatch.get_post ~post_id with
   | Ok loaded ->
     Alcotest.(check int)
@@ -297,7 +297,7 @@ let test_creation_commits_before_releasing_persistence () =
   flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   let reloaded =
     match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
   in

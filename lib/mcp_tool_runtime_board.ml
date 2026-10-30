@@ -65,12 +65,12 @@ let result_after_activity_projection
        Tool_result.Completed { output with metadata=Some metadata })
 
 (* The post handler returns the created post as its typed data
-   ([Board.post_to_yojson]); its id is read from there, not parsed back out of
-   the message text written for the client. *)
+   ([Board.post_to_yojson] plus the names no Keeper declares); its id is read
+   from there, not parsed back out of the message text written for the client. *)
 let created_post_id result =
   Option.map
     (fun (post : Board.post) -> Board.Post_id.to_string post.id)
-    (Board.post_of_yojson (Tool_result.data result))
+    (Board_tool.post_of_write_data (Tool_result.data result))
 
 module For_testing = struct
   let result_after_activity_projection = result_after_activity_projection

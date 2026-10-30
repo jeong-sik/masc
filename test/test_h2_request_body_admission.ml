@@ -818,7 +818,7 @@ let test_board_reads_require_a_token_under_strict_auth () =
   @@ fun () ->
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
-  Masc.Board_dispatch.init_jsonl ();
+  Masc.Board_dispatch.init_jsonl ~recipient_lookup:Masc.Recipient_lookup.none_declared ();
   Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1")
   @@ fun () ->
   let slug = "h2-strict-read" in

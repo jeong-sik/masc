@@ -93,6 +93,7 @@ val validate_sub_board_post_policy_unlocked :
 
 val create_post :
   store ->
+  lookup:Recipient_lookup.t ->
   author:string ->
   content:string ->
   ?title:string ->
@@ -113,6 +114,7 @@ type create_post_once_result =
 
 val create_post_once_by_fusion_run_id :
   store ->
+  lookup:Recipient_lookup.t ->
   fusion_run_id:string ->
   author:string ->
   content:string ->
@@ -130,6 +132,7 @@ val create_post_once_by_fusion_run_id :
 
 val create_post_with_audience :
   store ->
+  lookup:Recipient_lookup.t ->
   author:string ->
   content:string ->
   ?title:string ->
@@ -155,16 +158,19 @@ val create_post_with_audience :
     cannot silently drop metadata.
     [post_kind]/[visibility]/[hearth] are preserved. *)
 (** What an edit stored: the post as saved, the audience recorded with the saved
-    text, and whether the normalized title, body or author changed, compared
-    under the store lock. *)
+    text, the names in that text no Keeper declares (for the response only,
+    never stored), and whether the normalized title, body or author changed,
+    compared under the store lock. *)
 type post_edit =
   { edited : post
   ; recorded_audience : audience
+  ; unresolved : string list
   ; content_changed : bool
   }
 
 val update_post_with_outcome :
   store ->
+  lookup:Recipient_lookup.t ->
   post_id:string ->
   editor:string ->
   content:string ->

@@ -231,6 +231,7 @@ let comment_count_cap_error_unlocked store pid =
 
 let add_comment_with_audience
       store
+      ~lookup
       ~post_id
       ~author
       ~content
@@ -256,7 +257,7 @@ let add_comment_with_audience
   else if String.length content = 0
   then Error (Validation_error "Content cannot be empty")
   else
-    let* audience = Board_audience.audience_for_comment ~content in
+    let* audience, unresolved = Board_audience.audience_for_comment ~lookup ~content in
     (* Write-ahead (PR #28934 class, #28952): validate under [with_lock]
        with no mutation, then hold the persistence lock across the durable
        append and commit under [with_lock] from a fresh read. The previous shape mutated
@@ -363,7 +364,7 @@ let add_comment_with_audience
                    mark_dirty_comment store comment_key;
                    invalidate_post_caches store;
                    invalidate_comment_caches store;
-                   Ok { comment; audience }))))) with
+                   Ok { comment; audience; unresolved }))))) with
         | Error _ as e -> e
         | Ok committed ->
           (match committed with
@@ -382,9 +383,10 @@ let add_comment_with_audience
              e)))
 ;;
 
-let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () =
+let add_comment store ~lookup ~post_id ~author ~content ?parent_id ?ttl_hours () =
   add_comment_with_audience
     store
+    ~lookup
     ~post_id
     ~author
     ~content

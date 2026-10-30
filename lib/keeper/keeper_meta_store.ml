@@ -436,55 +436,72 @@ let persisted_keeper_names config =
 ;;
 
 
-let persisted_keeper_for_mention_target config ~mention_target =
-  let target = Keeper_identity.Keeper_id.of_string mention_target in
-  let read_effective keeper_name =
-    match
-      read_meta_file_path
-        (keeper_meta_path config keeper_name)
-    with
-    | Error _ as error -> error
-    | Ok None -> Ok None
-    | Ok (Some meta) ->
+type undecodable_meta =
+  | Skip_undecodable_meta
+  | Fail_on_undecodable_meta
+
+let persisted_effective_metas ~on_undecodable config =
+  let read_effective keeper_name : (meta_presence, string) result =
+    match read_meta_file_path_presence (keeper_meta_path config keeper_name) with
+    | Ok (Meta_present meta) ->
       Keeper_meta_contract.effective_meta_result
         ~base_path:config.Workspace.base_path
         meta
-      |> Result.map Option.some
+      |> Result.map (fun effective -> Meta_present effective)
+    | (Ok (Meta_absent | Meta_not_current _) | Error _) as other -> other
   in
-  let rec collect matches = function
-    | [] -> Ok (List.rev matches)
+  let rec collect metas = function
+    | [] -> Ok (List.rev metas)
     | keeper_name :: rest ->
       (match read_effective keeper_name with
        | Error detail -> Error detail
-       | Ok None -> collect matches rest
-       | Ok (Some meta) ->
-         if
-           List.exists
-             (fun alias ->
-                match Keeper_identity.Keeper_id.of_string alias, target with
-                | Some alias_id, Some target_id ->
-                  Keeper_identity.Keeper_id.equal alias_id target_id
-                | None, _ | _, None -> false)
-             meta.mention_targets
-         then collect ((keeper_name, meta) :: matches) rest
-         else collect matches rest)
+       | Ok Meta_absent -> collect metas rest
+       | Ok (Meta_not_current detail) ->
+         (match on_undecodable with
+          | Skip_undecodable_meta -> collect metas rest
+          | Fail_on_undecodable_meta ->
+            Error
+              (Printf.sprintf
+                 "Keeper %s has settings this build cannot read: %s"
+                 keeper_name
+                 detail))
+       | Ok (Meta_present meta) -> collect ((keeper_name, meta) :: metas) rest)
   in
-  if Option.is_none target
+  match persisted_keeper_names_result config with
+  | Error _ as error -> error
+  | Ok keeper_names -> collect [] keeper_names
+;;
+
+let keeper_for_mention_target_in metas ~mention_target =
+  match Keeper_identity.Keeper_id.of_string mention_target with
+  | None -> Ok None
+  | Some target_id ->
+    let claims (_keeper_name, (meta : Keeper_meta_contract.keeper_meta)) =
+      List.exists
+        (fun alias ->
+           match Keeper_identity.Keeper_id.of_string alias with
+           | Some alias_id -> Keeper_identity.Keeper_id.equal alias_id target_id
+           | None -> false)
+        meta.mention_targets
+    in
+    (match List.filter claims metas with
+     | [] -> Ok None
+     | [ match_ ] -> Ok (Some match_)
+     | matches ->
+       Error
+         (Printf.sprintf
+            "multiple persisted Keepers claim mention_target=%s: %s"
+            (String.trim mention_target)
+            (matches |> List.map fst |> String.concat ",")))
+;;
+
+let persisted_keeper_for_mention_target config ~mention_target =
+  if Option.is_none (Keeper_identity.Keeper_id.of_string mention_target)
   then Ok None
   else
-    match persisted_keeper_names_result config with
-    | Error _ as error -> error
-    | Ok keeper_names ->
-      (match collect [] keeper_names with
-       | Error _ as error -> error
-       | Ok [] -> Ok None
-       | Ok [ match_ ] -> Ok (Some match_)
-       | Ok matches ->
-         Error
-           (Printf.sprintf
-              "multiple persisted Keepers claim mention_target=%s: %s"
-              (String.trim mention_target)
-              (matches |> List.map fst |> String.concat ",")))
+    Result.bind
+      (persisted_effective_metas ~on_undecodable:Skip_undecodable_meta config)
+      (fun metas -> keeper_for_mention_target_in metas ~mention_target)
 ;;
 
 let configured_keeper_names config =

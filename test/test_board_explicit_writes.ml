@@ -22,7 +22,7 @@ let with_board f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   f ()
 ;;
 
@@ -156,7 +156,7 @@ let test_post_file_past_ten_mib_is_not_renamed () =
     (Sys.file_exists (Board.persist_path () ^ ".1"));
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   List.iter
     (fun (label, (post : Board.post)) ->
        match Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id) with

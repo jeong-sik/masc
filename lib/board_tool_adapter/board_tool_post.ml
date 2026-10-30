@@ -144,7 +144,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
           | None -> Board_tool_format.normalize_board_post_meta ~attachments args
         in
         (match
-           Board_dispatch.create_post
+           Board_dispatch.create_post_with_unresolved
              ~author
              ~content
              ?title
@@ -157,8 +157,10 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
              ?thread_id
              ()
          with
-         | Ok post ->
-              let json = Board.post_to_yojson post in
+         | Ok (post, unresolved) ->
+              let json =
+                Board_tool_format.with_unresolved (Board.post_to_yojson post) unresolved
+              in
               Tool_result.make_ok ~tool_name ~start_time ~data:json ()
          | Error e ->
            Board_tool_format.error_of_board_error ~tool_name ~start_time e)
@@ -214,9 +216,14 @@ let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
         "author is required"
     | Some editor ->
       let new_author = get_string_opt args "new_author" in
-      (match Board_dispatch.update_post ~post_id ~editor ~content ?title ?body ?new_author () with
-       | Ok post ->
-         let json = Board.post_to_yojson post in
+      (match
+         Board_dispatch.update_post_with_unresolved
+           ~post_id ~editor ~content ?title ?body ?new_author ()
+       with
+       | Ok (post, unresolved) ->
+         let json =
+           Board_tool_format.with_unresolved (Board.post_to_yojson post) unresolved
+         in
          Tool_result.make_ok ~tool_name ~start_time ~data:json ()
        | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
@@ -555,7 +562,7 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
         "author is required"
     | Some author ->
       (match
-         Board_dispatch.add_comment
+         Board_dispatch.add_comment_with_unresolved
            ~post_id
            ~author
            ~content
@@ -563,8 +570,10 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
            ~ttl_hours
            ()
        with
-       | Ok comment ->
-         let json = Board.comment_to_yojson comment in
+       | Ok (comment, unresolved) ->
+         let json =
+           Board_tool_format.with_unresolved (Board.comment_to_yojson comment) unresolved
+         in
          Tool_result.make_ok ~tool_name ~start_time ~data:json ()
        | Error e ->
          Board_tool_format.error_of_board_error ~tool_name ~start_time e)

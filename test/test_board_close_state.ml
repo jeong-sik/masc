@@ -28,7 +28,7 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   f ()
 
 let create_post_exn ~author ~content =
@@ -45,7 +45,7 @@ let store () =
 let restart () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ()
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ()
 
 let get_post_exn post_id =
   match Board_dispatch.get_post ~post_id with

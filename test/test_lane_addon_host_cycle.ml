@@ -185,7 +185,7 @@ let with_installation ?await_change ?deliver_reply ?during_delivery ?owner_setup
                              ; on_deliver = ref ignore } in
                 Board.reset_global_for_test ();
                 Board_dispatch.reset_for_test ();
-                Board_dispatch.init_jsonl ();
+                Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
                 let state = { mode = ref mode; resolutions = ref 0 } in
                 Runtime.register_exact_runner ~authorize_request (make_runner state);
                 let config = Workspace.default_config root in

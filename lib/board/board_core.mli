@@ -228,11 +228,13 @@ val reaction_key
 type post_edit =
   { edited : post
   ; recorded_audience : audience
+  ; unresolved : string list
   ; content_changed : bool
   }
 
 val update_post_with_outcome
   :  store
+  -> lookup:Recipient_lookup.t
   -> post_id:string
   -> editor:string
   -> content:string
@@ -254,6 +256,7 @@ val update_post_with_outcome
     readers on filesystem writes. *)
 val create_post
   :  store
+  -> lookup:Recipient_lookup.t
   -> author:string
   -> content:string
   -> ?title:string
@@ -274,6 +277,7 @@ type create_post_once_result =
 
 val create_post_once_by_fusion_run_id
   :  store
+  -> lookup:Recipient_lookup.t
   -> fusion_run_id:string
   -> author:string
   -> content:string
@@ -289,6 +293,7 @@ val create_post_once_by_fusion_run_id
 
 val create_post_with_audience
   :  store
+  -> lookup:Recipient_lookup.t
   -> author:string
   -> content:string
   -> ?title:string
@@ -366,6 +371,7 @@ val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
 
 val add_comment
   :  store
+  -> lookup:Recipient_lookup.t
   -> post_id:string
   -> author:string
   -> content:string
@@ -376,6 +382,7 @@ val add_comment
 
 val add_comment_with_audience
   :  store
+  -> lookup:Recipient_lookup.t
   -> post_id:string
   -> author:string
   -> content:string

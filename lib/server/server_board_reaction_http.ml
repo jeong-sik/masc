@@ -166,14 +166,14 @@ let status_of_board_error = function
   | Board.Already_voted _ | Board.Already_exists _ -> `Conflict
   | Board.Post_not_found _ | Board.Comment_not_found _ -> `Not_found
   | Board.Unauthorized _ -> `Forbidden
-  | Board.Io_error _ -> `Internal_server_error
+  | Board.Io_error _ | Board.Recipient_lookup_failed _ -> `Internal_server_error
 ;;
 
 let code_and_details_of_board_error = function
   | Board.Invalid_id _ -> Invalid_id, []
   | Board.Post_not_found _ -> Post_not_found, []
   | Board.Comment_not_found _ -> Comment_not_found, []
-  | Board.Io_error _ -> Io_error, []
+  | Board.Io_error _ | Board.Recipient_lookup_failed _ -> Io_error, []
   | Board.Validation_error _ -> Validation_error, []
   | Board.Already_voted _ -> Already_voted, []
   | Board.Already_exists _ -> Already_exists, []
@@ -184,7 +184,7 @@ let of_board_error board_error =
   let code, details = code_and_details_of_board_error board_error in
   let message =
     match board_error with
-    | Board.Io_error detail ->
+    | Board.Io_error detail | Board.Recipient_lookup_failed detail ->
       Log.Server.error "Board reaction storage operation failed: %s" detail;
       "Board reaction storage operation failed"
     | Board_types.Invalid_id _ | Board_types.Post_not_found _ | Board_types.Comment_not_found _

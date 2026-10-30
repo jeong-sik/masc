@@ -23,6 +23,16 @@ val format_expiry : float -> string
 val board_error_to_string : Board.board_error -> string
 val board_error_failure_class : Board.board_error -> Tool_result.tool_failure_class
 val error_of_board_error : tool_name:string -> start_time:Tool_timing.started -> Board.board_error -> Tool_result.result
+
+val with_unresolved : Yojson.Safe.t -> string list -> Yojson.Safe.t
+(** [with_unresolved written names] adds the [unresolved] list to the JSON of a
+    post or comment a write just returned: the names in the text that look
+    like addresses but no Keeper declares, as the author wrote them. *)
+
+val post_of_write_data : Yojson.Safe.t -> Board.post option
+(** The post that {!with_unresolved} wrapped, or [None] when the data is not a
+    post.  Use it instead of {!Board.post_of_yojson} on a write response: the
+    post decoder rejects the extra [unresolved] field. *)
 val visibility_of_string : string -> Board.visibility option
 val format_post : ?viewer_vote:Board.vote_direction -> replies:int -> Board.post -> string
 (** [viewer_vote] is the reading agent's own vote on the post, rendered as a

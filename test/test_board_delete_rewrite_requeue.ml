@@ -48,7 +48,7 @@ let with_eio f () =
   ignore (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   f ()
 
 let store () =
@@ -165,7 +165,7 @@ let test_individual_snapshot_failure path () =
   flush ();
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   let restored = store () in
   Alcotest.(check int) "restart has no deleted posts" 0 (Hashtbl.length restored.posts);
   Alcotest.(check int) "restart has no deleted replies" 0 (Hashtbl.length restored.comments);

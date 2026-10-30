@@ -64,6 +64,8 @@ let board_error_to_string = function
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
   | Board.Already_exists s -> Printf.sprintf "Already exists: %s" s
   | Board.Unauthorized s -> Printf.sprintf "Unauthorized: %s" s
+  | Board.Recipient_lookup_failed s ->
+    Printf.sprintf "Recipient lookup failed, nothing was written: %s" s
 ;;
 
 let board_error_failure_class = function
@@ -78,7 +80,11 @@ let board_error_failure_class = function
   | Board.Io_error _
   | Board.Validation_error _
   | Board.Already_voted _
-  | Board.Already_exists _ ->
+  | Board.Already_exists _
+  (* The Keeper settings could not be read, or two Keepers claim one alias.
+     The author cannot fix that, and the same call can succeed once it is
+     fixed, so it is a runtime failure. *)
+  | Board.Recipient_lookup_failed _ ->
     Tool_result.Runtime_failure
 ;;
 
@@ -93,6 +99,25 @@ let error_of_board_error ~tool_name ~start_time e : Tool_result.result =
     ~class_:(board_error_failure_class e)
     ~start_time
     (board_error_to_string e)
+;;
+
+(* A write answers with the names in its text that look like addresses but no
+   Keeper declares, as the author wrote them.  Such a name reaches nobody, and
+   this response is the only place the author learns it: the names are not
+   stored.  The list is there on every write, empty when every name resolved. *)
+let with_unresolved written unresolved =
+  let names = `List (List.map (fun name -> `String name) unresolved) in
+  match written with
+  | `Assoc fields -> `Assoc (fields @ [ "unresolved", names ])
+  | other -> `Assoc [ "result", other; "unresolved", names ]
+;;
+
+(* The post a write response carries: [with_unresolved] put the list beside the
+   post's own fields, and the post decoder accepts an exact set of fields. *)
+let post_of_write_data = function
+  | `Assoc fields ->
+    Board.post_of_yojson (`Assoc (List.remove_assoc "unresolved" fields))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
 let visibility_of_string = Board.visibility_of_string

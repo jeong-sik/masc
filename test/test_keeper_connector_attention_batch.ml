@@ -328,7 +328,7 @@ let with_ctx keeper_name f =
   Unix.putenv "MASC_BASE_PATH" base_path;
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
   Keeper_registry.For_testing.clear ();
   Fun.protect
     ~finally:(fun () ->

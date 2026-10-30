@@ -4,6 +4,16 @@ open Masc
 module KKS = Keeper_keepalive_signal
 module KBAC = Keeper_board_attention_candidate
 
+(* These tests pin how a comment or an edit reaches the cursor, not who is
+   declared: every name with the shape of a Board identity stands for itself.
+   Which names are declared is pinned in test_board_recipient_resolution. *)
+let every_name_declared =
+  Recipient_lookup.make (fun candidate ->
+    Ok
+      (Result.to_option
+         (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate))))
+;;
+
 let rec remove_tree path =
   if Sys.file_exists path
   then
@@ -28,6 +38,7 @@ let with_temp_workspace f =
        ignore (Workspace.init config ~agent_name:None : string);
        Board_dispatch.reset_for_test ();
        Board.reset_global_for_test ();
+       Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
        f config)
 ;;
 

@@ -70,7 +70,7 @@ let with_board f =
          Fs_compat.set_fs (Eio.Stdenv.fs env);
          Board.reset_global_for_test ();
          Board_dispatch.reset_for_test ();
-         Board_dispatch.init_jsonl ();
+         Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
          f ()))
 ;;
 

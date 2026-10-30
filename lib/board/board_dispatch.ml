@@ -51,9 +51,18 @@ type board_backend =
     independent CAS sites.  Folding the flag in collapses that surface. *)
 type flusher_handle = bool
 
+(** Whether the server handed the backend its recipient lookup.  A backend
+    that a read started on its own has none, and its writes refuse every
+    address ({!Recipient_lookup.unavailable}) until [init_jsonl] installs one.
+    The lookup lives in the variant, like the flusher flag, so the backend and
+    its lookup cannot drift apart. *)
+type lookup_state =
+  | Lookup_not_installed
+  | Lookup_installed of Recipient_lookup.t
+
 type backend_state =
   | Uninitialized
-  | Active of board_backend * flusher_handle
+  | Active of board_backend * flusher_handle * lookup_state
 
 type board_comment_identity =
   { comment_id : Board.Comment_id.t
@@ -124,8 +133,8 @@ type board_sse_event =
 let backend_state : backend_state Atomic.t = Atomic.make Uninitialized
 let flusher_started_for_test () =
   match Atomic.get backend_state with
-  | Active (_, true) -> true
-  | Active (_, false) | Uninitialized -> false
+  | Active (_, true, _) -> true
+  | Active (_, false, _) | Uninitialized -> false
 
 let start_flusher_actor ~sw store =
   Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -173,12 +182,12 @@ let ensure_flusher_actor store =
         let current = Atomic.get backend_state in
         match current with
         | Uninitialized -> ()
-        | Active (_, true) -> ()
-        | Active (b, false) ->
+        | Active (_, true, _) -> ()
+        | Active (b, false, lookup) ->
             (* [Atomic.compare_and_set] compares physically, so the rollback
                below must name the very value this CAS stored; a fresh
                [Active (b, true)] never matches and the flag stayed set. *)
-            let started = Active (b, true) in
+            let started = Active (b, true, lookup) in
             if Atomic.compare_and_set backend_state current started then
               try start_flusher_actor ~sw store
               with exn ->  (* cancel-guard-ok: re-raises after rolling the flag back *)
@@ -186,7 +195,7 @@ let ensure_flusher_actor store =
                    roll back if the state hasn't been swapped out from
                    under us. *)
                 let _ : bool =
-                  Atomic.compare_and_set backend_state started (Active (b, false))
+                  Atomic.compare_and_set backend_state started (Active (b, false, lookup))
                 in
                 match exn with
                 | Invalid_argument msg when String.equal msg "Switch finished!" ->
@@ -258,19 +267,29 @@ let warn_comment_cap_once () =
   | Some msg -> Log.BoardLog.warn "%s" msg
   | None -> ()
 
-let init_jsonl () =
-  if match Atomic.get backend_state with Active _ -> true | Uninitialized -> false then
-    Log.BoardLog.debug "already initialized, ignoring init_jsonl"
-  else begin
-    let store = Board.global () in
-    let backend = Active (Jsonl store, false) in
-    if Atomic.compare_and_set backend_state Uninitialized backend then begin
-      ensure_flusher_actor store;
-      warn_comment_cap_once ();
-      Log.BoardLog.info "JSONL backend initialized"
-    end else
-      Log.BoardLog.debug "already initialized concurrently, ignoring init_jsonl"
-  end
+let init_jsonl ~recipient_lookup () =
+  let installed = Lookup_installed recipient_lookup in
+  let rec install () =
+    match Atomic.get backend_state with
+    | Active (_, _, Lookup_installed _) ->
+      Log.BoardLog.debug "already initialized, ignoring init_jsonl"
+    | Active (backend, flusher, Lookup_not_installed) as current ->
+      (* A read started the backend before the server did, so it has no
+         lookup and refuses every address.  The server's lookup goes in now. *)
+      if Atomic.compare_and_set
+           backend_state current (Active (backend, flusher, installed))
+      then Log.BoardLog.info "JSONL backend recipient lookup installed"
+      else install ()
+    | Uninitialized ->
+      let store = Board.global () in
+      let backend = Active (Jsonl store, false, installed) in
+      if Atomic.compare_and_set backend_state Uninitialized backend then begin
+        ensure_flusher_actor store;
+        warn_comment_cap_once ();
+        Log.BoardLog.info "JSONL backend initialized"
+      end else install ()
+  in
+  install ()
 
 let reset_for_test () =
   (* D-7: dropping [Active] also drops the flusher-started flag, since
@@ -282,26 +301,35 @@ let reset_for_test () =
 
 let backend () =
   match Atomic.get backend_state with
-  | Active (Jsonl store as backend, _) ->
+  | Active (Jsonl store as backend, _, _) ->
       ensure_flusher_actor store;
       backend
   | Uninitialized ->
       Log.BoardLog.warn "backend() called before server init, auto-initializing JSONL";
       let store = Board.global () in
       let b = Jsonl store in
-      let backend_val = Active (b, false) in
+      let backend_val = Active (b, false, Lookup_not_installed) in
       let won = Atomic.compare_and_set backend_state Uninitialized backend_val in
       (* Same emission contract as [init_jsonl]: the call that performs the
          Uninitialized -> Active transition warns once when the cap is off,
          so the auto-init path cannot stay silent (wool-nova P2). *)
       if won then warn_comment_cap_once ();
       match Atomic.get backend_state with
-      | Active (Jsonl active_store as active_b, _) ->
+      | Active (Jsonl active_store as active_b, _, _) ->
           ensure_flusher_actor active_store;
           active_b
       | Uninitialized ->
           ensure_flusher_actor store;
           b
+
+(* The lookup the writes ask.  [backend ()] runs first so a write on a backend
+   nobody started still starts it; the lookup it then finds is the server's, or
+   [Recipient_lookup.unavailable] when none was handed over. *)
+let recipient_lookup () =
+  let _ : board_backend = backend () in
+  match Atomic.get backend_state with
+  | Active (_, _, Lookup_installed lookup) -> lookup
+  | Active (_, _, Lookup_not_installed) | Uninitialized -> Recipient_lookup.unavailable
 
 let sort_posts_in_memory ~sort_by (posts : Board.post list) =
   (* Ranking formulas live in [Board_sort] (single source of truth) so the
@@ -362,13 +390,14 @@ let emit_post_created ~(audience : Board.audience) (post : Board.post) =
          content = post.body; post_kind = post.post_kind;
          hearth = post.hearth })
 
-let create_post ~author ~content ?title ?body ~post_kind ?meta_json
+let create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_json
     ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
   match backend () with
   | Jsonl store ->
     (match
        Board.create_post_with_audience
          store
+         ~lookup:(recipient_lookup ())
          ~author
          ~content
          ?title
@@ -384,15 +413,22 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
      with
      | Ok creation ->
        emit_post_created ~audience:creation.audience creation.post;
-       Ok creation.post
+       Ok (creation.post, creation.unresolved)
      | Error _ as error -> error)
+
+let create_post ~author ~content ?title ?body ~post_kind ?meta_json
+    ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
+  create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_json
+    ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
+  |> Result.map fst
 
 let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
     ?meta_json ~visibility ~ttl_hours ~origin () =
   match backend () with
   | Jsonl store ->
     (match
-       Board.create_post_once_by_fusion_run_id store ~fusion_run_id ~author
+       Board.create_post_once_by_fusion_run_id store
+         ~lookup:(recipient_lookup ()) ~fusion_run_id ~author
          ~content ~post_kind ?meta_json ~visibility ~ttl_hours ~origin ()
      with
      | Ok (Board.Post_created creation as outcome) ->
@@ -401,16 +437,17 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
      | Ok (Board.Post_already_present _ as outcome) -> Ok outcome
      | Error _ as error -> error)
 
-let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
+let update_post_with_unresolved ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with
   | Jsonl store ->
-      match Board.update_post_with_outcome store ~post_id ~editor ~content ?title
-        ?body ?new_author () with
+      match Board.update_post_with_outcome store ~lookup:(recipient_lookup ())
+        ~post_id ~editor ~content ?title ?body ?new_author () with
       | Error _ as error -> error
-      | Ok { edited = post; content_changed = false; recorded_audience = _ } ->
+      | Ok { edited = post; content_changed = false; recorded_audience = _; unresolved } ->
         emit_board_write ();
-        Ok post
-      | Ok { edited = post; content_changed = true; recorded_audience = audience } ->
+        Ok (post, unresolved)
+      | Ok { edited = post; content_changed = true; recorded_audience = audience
+           ; unresolved } ->
         emit_board_write ();
         emit_board_signal
           { signal =
@@ -424,7 +461,11 @@ let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
               }
           ; audience
           };
-        Ok post
+        Ok (post, unresolved)
+
+let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
+  update_post_with_unresolved ~post_id ~editor ~content ?title ?body ?new_author ()
+  |> Result.map fst
 
 let read_post ~post_id =
   match backend () with
@@ -558,7 +599,7 @@ let get_post_and_comments ~post_id =
 
 (* One owner for board-operation failure lines. A re-vote is a routine
    re-click at debug, a missing target is an ordinary race at info, and
-   only malformed input, IO, auth and duplicate-create problems warn. *)
+   only malformed input, IO, auth, duplicate-create and recipient-lookup problems warn. *)
 let log_board_error ~op ~ids (e : Board_types.board_error) =
   (match e with
    | Board_types.Already_voted _ ->
@@ -566,7 +607,8 @@ let log_board_error ~op ~ids (e : Board_types.board_error) =
    | Board_types.Post_not_found _ | Board_types.Comment_not_found _ ->
        Log.BoardLog.info
    | Board_types.Invalid_id _ | Board_types.Io_error _ | Board_types.Validation_error _
-   | Board_types.Already_exists _ | Board_types.Unauthorized _ -> Log.BoardLog.warn)
+   | Board_types.Already_exists _ | Board_types.Unauthorized _
+   | Board_types.Recipient_lookup_failed _ -> Log.BoardLog.warn)
     "board %s failed: %s: %s" op ids (Board_types.show_board_error e)
 
 (* One owner for skipped board-signal lines: the write landed, only the
@@ -574,13 +616,13 @@ let log_board_error ~op ~ids (e : Board_types.board_error) =
 let log_signal_skip ~op ~read ~id detail =
   Log.BoardLog.warn "board %s skipped: %s failed for %s: %s" op read id detail
 
-let add_comment ~post_id ~author ~content ?parent_id
+let add_comment_with_unresolved ~post_id ~author ~content ?parent_id
     ?(ttl_hours = Board.Limits.default_ttl_hours) () =
   match backend () with
   | Jsonl store ->
       (match
-         Board.add_comment_with_audience store ~post_id ~author ~content ?parent_id
-           ~ttl_hours ()
+         Board.add_comment_with_audience store ~lookup:(recipient_lookup ())
+           ~post_id ~author ~content ?parent_id ~ttl_hours ()
        with
       | Ok creation ->
           let comment = creation.comment in
@@ -607,8 +649,12 @@ let add_comment ~post_id ~author ~content ?parent_id
                 (Board_types.show_board_read_error e));
           emit_board_sse_event
             (Comment_added { post_id; comment_id = cid; author = auth });
-          Ok comment
+          Ok (comment, creation.unresolved)
       | Error _ as err -> err)
+
+let add_comment ~post_id ~author ~content ?parent_id ?ttl_hours () =
+  add_comment_with_unresolved ~post_id ~author ~content ?parent_id ?ttl_hours ()
+  |> Result.map fst
 
 let current_vote_for_post ~voter ~post_id =
   match backend () with
@@ -829,7 +875,7 @@ let search ~query ~limit =
 
 let flush () =
   match Atomic.get backend_state with
-  | Active (Jsonl store, _) -> Board.flush_dirty store
+  | Active (Jsonl store, _, _) -> Board.flush_dirty store
   | Uninitialized -> ()
 
 let get_all_karma () =
@@ -860,7 +906,7 @@ let post_to_yojson_with_karma (p : Board.post) ~author_karma =
 
 let backend_name () =
   match Atomic.get backend_state with
-  | Active (Jsonl _, _) -> "jsonl"
+  | Active (Jsonl _, _, _) -> "jsonl"
   | Uninitialized -> "uninitialized"
 
 (* AI curation delegate — thin wrappers around Board_curation *)

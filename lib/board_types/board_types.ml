@@ -29,6 +29,10 @@ type board_error =
     (** Actor attempted an owner-gated mutation (e.g. editing a post they
         do not own). Distinct from [Validation_error] so callers can map it
         to a 403-class rejection rather than a generic input error. *)
+  | Recipient_lookup_failed of string
+    (** The declared-recipient lookup could not answer for a name in the
+        text: a Keeper's settings could not be read, or two Keepers claim one
+        alias. The write is refused and nothing is stored. *)
   [@@deriving show]
 
 (* What a Board read answers when it has no row to give. Reads are served from
@@ -252,11 +256,13 @@ type comment = {
 type post_creation = {
   post: post;
   audience: audience;
+  unresolved: string list;
 }
 
 type comment_creation = {
   comment: comment;
   audience: audience;
+  unresolved: string list;
 }
 
 type reaction_target_type =

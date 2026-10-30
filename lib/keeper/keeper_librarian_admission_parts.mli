@@ -35,6 +35,8 @@ type admit =
 
 val scope : Keeper_librarian_admission_capture.owner -> string
 val partition_scope : Keeper_librarian_admission_capture.owner -> string
+val is_scope : string -> bool
+val is_partition_scope : string -> bool
 (** Distinct original-owner/physical Memory-epoch namespaces, derived from the
     canonical complete owner identity. Not a second registry or index. *)
 val part_id : part -> string

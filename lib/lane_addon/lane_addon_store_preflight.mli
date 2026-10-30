@@ -5,10 +5,10 @@
     A Lane Add-on record the new build cannot decode is refused by its reader
     long after the deploy: a native claim whose cleanup descriptor no longer
     decodes kept its installation [failed] and refused every new start
-    (#45106), and old-shape bindings failed a declaration (#44651). Every one
-    is a file the operator moves aside between stopping the old server and
-    starting the new build, so the report names each file rather than the
-    first, and the fresh-state step for it.
+    (#45106), and old-shape bindings failed a declaration (#44651). Reports
+    name every refused file and its store-specific fresh-state requirements.
+    Generic records can name individual move scopes; a Librarian original
+    requires review of its complete linked bundle.
 
     The scan only lists directories and reads files. It takes no slot gate or
     store lock, syncs nothing, and creates, moves or writes nothing, so it can
@@ -58,11 +58,12 @@ type refusal =
   ; decoder : decoder
   ; detail : string  (** The decoder's own message. *)
   ; aside : string list
-        (** What the operator moves aside with the server stopped. For a record
+        (** Generic stopped-writer move scope. For a record
             it is that file. For a native claim it is the slot directory, then
             the binding and observations of the instance the slot names, when
             that could be read and they exist; recovering #45106 moved all
-            three. *)
+            three. For [Tool_request_payload] these are diagnostic locators,
+            not a complete cut list: linked original bundles require review. *)
   }
 
 type report =
@@ -78,8 +79,9 @@ val on_refusal : Store.t -> string
     decode. *)
 
 val fresh_state_step : refusal -> string
-(** The step for one refused record: stop the server, move [aside] away, start
-    the new build. *)
+(** Store-specific fresh-state guidance. Generic records name their stopped-
+    writer move scope; consumer payload refusals require reconciliation and
+    backup of the complete linked bundle before any reviewed cut. *)
 
 val scan : ?validate_tool_request:payload_validator -> Store.t -> base_path:string -> (report, string) result
 (** Read every record of the store under [base_path] with this build's

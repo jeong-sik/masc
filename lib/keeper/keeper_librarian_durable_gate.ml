@@ -3,8 +3,9 @@ module Capture = Keeper_librarian_durable_request
 module Journal = Keeper_librarian_original_gate.Make (struct
   type owner = Capture.owner
   type t = Capture.t
+  let gate_scope_prefix = "keeper-librarian-durable-gate/"
   let gate_scope owner =
-    "keeper-librarian-durable-gate/" ^ Agent_core_sha256.(digest_string (Capture.scope owner) |> to_hex)
+    gate_scope_prefix ^ Agent_core_sha256.(digest_string (Capture.scope owner) |> to_hex)
   let gate_kind = "librarian-durable-gate"
   let scope = Capture.scope
   let keeper_id = Capture.keeper_id

@@ -32,8 +32,12 @@ let rec ordered (json:Yojson.Safe.t) : Yojson.Safe.t = match json with
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value -> value
 let owner_hash owner =
   Capture.scope_hash (Capture.scope_identity owner)
-let scope owner = "keeper-librarian-parts/" ^ owner_hash owner
-let partition_scope owner = "keeper-librarian-partitions/" ^ owner_hash owner
+let scope_prefix = "keeper-librarian-parts/"
+let partition_scope_prefix = "keeper-librarian-partitions/"
+let is_scope value = String.starts_with ~prefix:scope_prefix value
+let is_partition_scope value = String.starts_with ~prefix:partition_scope_prefix value
+let scope owner = scope_prefix ^ owner_hash owner
+let partition_scope owner = partition_scope_prefix ^ owner_hash owner
 let destination_json (d:Capture.destination) = `Assoc [
   "installation_id",`String d.installation_id;"package_id",`String d.package_id;
   "tool",`String d.tool;"source_revision",`String d.source_revision;

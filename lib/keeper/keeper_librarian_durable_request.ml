@@ -51,7 +51,9 @@ let address ~workspace ~keepers ~runtime ~keeper_id =
   Yojson.Safe.to_string (`Assoc ["workspace",physical_json workspace;
     "keepers",physical_json keepers;"runtime",physical_json runtime;"keeper_id",`String keeper_id])
 let hash text = Agent_core_sha256.(to_hex (digest_string text))
-let scope_for_hash hash = "keeper-librarian-history-execution-" ^ hash
+let scope_prefix = "keeper-librarian-history-execution-"
+let is_scope value = String.starts_with ~prefix:scope_prefix value
+let scope_for_hash hash = scope_prefix ^ hash
 let owner_hash owner = hash (address ~workspace:owner.workspace ~keepers:owner.keepers ~runtime:owner.runtime ~keeper_id:owner.keeper_id)
 let scope owner = scope_for_hash (owner_hash owner)
 let discovery_scope ~base_path ~keepers_dir ~keeper_id =

@@ -457,6 +457,258 @@ let test_lane_addon_record_refuses_deploy exe () = with_lane_store (fun base roo
   check bool ("the refusal names the file: " ^ output) true
     (String_util.contains_substring (diagnostic_words output) (diagnostic_words path)))
 
+module Original = Lane_addon_tool_request_owner
+module Admission = Keeper_librarian_admission_capture
+module Original_gate = Keeper_librarian_admission_gate
+module Absorb = Keeper_librarian_absorb_gate
+module Progress = Lane_addon_request_progress
+let require = function Ok value -> value | Error detail -> fail detail
+let original_result result = Result.map_error Original.error_to_string result |> require
+let advance_original store expected events =
+  match Original.advance_events ~store ~expected ~events with
+  | Ok (Original.Stored record | Already_stored record) -> record
+  | Ok (Unconfirmed detail) -> fail detail
+  | Error error -> fail (Original.update_error_to_string error)
+let owner_path root (record:Original.retained) = grouped root Lane_addon_store.tool_request_owners_directory
+  ~group:record.scope ~id:record.request_id
+let replace_member name value = function
+  | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+  | _ -> fail "expected an original payload object"
+let replace_original_request root store (record:Original.retained) request =
+  let request=Lane_addon_action.canonical request |> require in
+  let bytes=Yojson.Safe.to_string request in
+  let request_digest=Lane_addon_store.digest bytes in
+  Lane_addon_store.save_tool_request_body store ~scope:record.scope ~request_digest bytes |> require;
+  let path=owner_path root record in
+  put path (Yojson.Safe.from_string (read path) |> replace_member "request_digest" (`String request_digest));
+  Original.load ~store ~scope:record.scope ~request_id:record.request_id |> original_result
+  |> Option.to_result ~none:"altered original disappeared" |> require
+let unchanged_workspace base f =
+  let state ()=tree base |> List.filter (fun (path,_) ->
+    path<>Filename.concat base "stdout" && path<>Filename.concat base "stderr") in
+  let before=state () in
+  let result=f () in
+  check (list (pair string string)) "preflight changes no workspace state, epoch, receipt or ACK" before (state ());
+  result
+type librarian_payload_fixture = {
+  base:string; root:string; store:Lane_addon_store.t; owner:Admission.owner;
+  capture:Admission.t; parent:Original.retained; gate_id:string; gate_request:Yojson.Safe.t;
+}
+let with_librarian_payload f = with_lane_store (fun base root ->
+  let module Queue=Keeper_memory_admission_queue in
+  let module L=Keeper_librarian in
+  let keeper_id="preflight-librarian" in
+  let keepers_dir=Filename.concat base ".masc/config/keepers" in
+  Fs_compat.mkdir_p keepers_dir;
+  let fact=Keeper_memory_os_types.observed ~claim:"Original pending evidence"
+    ~category:Keeper_memory_os_types.Fact ~now:10.
+    ~origin:{kind=Keeper_memory_os_types.Authored;trace_id="preflight-original"} in
+  Queue.append ~keepers_dir ~keeper_id ~request_id:"source" fact
+    |> Result.map_error Queue.append_error_to_string |> require |> ignore;
+  let batch=Queue.read_pending ~keepers_dir ~keeper_id |> require
+    |> Option.to_result ~none:"fixture queue absent" |> require in
+  let physical path=let stat=Unix.stat path in `Assoc ["path",`String path;
+    "device",`Int stat.Unix.st_dev;"inode",`Int stat.st_ino] in
+  let owner=Admission.owner_of_json (`Assoc ["workspace",physical base;"keepers",physical keepers_dir;
+    "keeper_id",`String keeper_id;"epoch",`String "captured-historical-epoch";
+    "queue_generation",`String (List.hd (Queue.candidate_ids batch)).queue_generation]) |> require in
+  (* No live Memory epoch exists. A valid captured payload must still be
+     inspectable without observing/reinitializing current authority. *)
+  let input:L.input={turn_ref=Ids.Turn_ref.make ~trace_id:"preflight-original" ~absolute_turn:1;
+    keeper_id=Masc_test_deps.keeper_id_fixture keeper_id;keeper_instructions="Retain source evidence";
+    goal_context=L.No_task;historical_task_contexts=[];current=None;
+    working_context=Keeper_librarian_context.empty;messages=[];tool_observations=[];counterpart_observations=[]} in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  let retirement=Keeper_memory_admission_judgment.Available [] in
+  let preparation=Keeper_librarian_runtime.prepare_admission ~batch ~retirement input |> require in
+  let destination:Admission.destination={installation_id=Original.installation_id (Original.Configuration "librarian");
+    package_id=Admission.package_id;tool=Admission.tool;source_revision="source";configuration_revision="configuration"} in
+  let capture=Admission.create ~request_id:(Admission.fresh_request_id owner) ~parent_part_id:"part"
+    ~owner ~destination ~batch ~input ~expected_revision:None ~now:10. ~retirement ~preparation |> require in
+  let request=Admission.to_json capture in
+  let part=`Assoc ["schema",`Int 1;"kind",`String "candidate_part";"part_id",`String "part";
+    "owner",Admission.owner_to_json owner;"destination",Yojson.Safe.Util.member "destination" request;
+    "predecessor",`Null;"original_through",`Int (List.hd (Queue.candidates batch)).sequence;
+    "supersession",`Null;"candidate_ids",Yojson.Safe.Util.member "candidate_ids" request;
+    "batch",Queue.batch_to_json batch] in
+  let store=Lane_addon_store.create ~root in
+  let retain scope request_id request =
+    Original.retain ~store ~scope ~request_id ~installation_id:destination.installation_id
+      ~package_id:destination.package_id ~tool:destination.tool ~summary:`Null ~request |> original_result;
+    Original.load ~store ~scope ~request_id |> original_result
+      |> Option.to_result ~none:"fixture original absent" |> require in
+  ignore (retain (Keeper_librarian_admission_parts.scope owner) "part" part);
+  let parent=retain (Admission.scope owner) (Admission.request_id capture) request in
+  let proposal=`Assoc ["memory",`Assoc ["new_claims",`List [`Assoc ["claim",`String fact.claim;
+    "category",`String "fact";"board_post_id",`Null;"board_comment_id",`Null;
+    "supersedes",`Null;"absorbs",`List []]];"dropped",`List [];"working_state",`Null;"working_contexts",`List []];
+    "candidates",`List [`Assoc ["request_id",`String "source";"outcome",`String "incorporated";
+      "memory_claim",`String fact.claim;"reason",`String "The original source supports this claim."]];
+    "change_support",`List [`String "source"]] in
+  let exact=Admission.request capture |> require in
+  let output:Lane_addon_types.exact_output={name=exact.output;schema=Option.get exact.schema;
+    request_schema=Lane_addon_types.Consumer_request_schema} in
+  let checked=Lane_addon_exact.validate_answer ~output exact proposal |> require in
+  let judgment=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final
+    (Lane_addon_exact.Answered {output=checked;slot="fixture";usage=None})) in
+  let parent=advance_original store parent [Progress.Dispatch_intended;Progress.Judgment_retained judgment] in
+  let guidance=Absorb.resolve_guidance () |> require in
+  let gate_id="captured-gate" in
+  let gate_request=`Assoc ["version",`Int 3;"kind",`String "librarian-admission-gate";
+    "request_id",`String gate_id;"owner",Admission.owner_to_json owner;
+    "execution_id",`String parent.request_id;"execution_digest",`String parent.request_digest;
+    "proposal",proposal;"authority",Absorb.replay_authority_to_yojson (Absorb.Gate_unavailable Typesafeai_config.Absorb_gate_disabled);
+    "guidance",Absorb.guidance_to_yojson guidance;"predecessor",`Null] in
+  f {base;root;store;owner;capture;parent;gate_id;gate_request})
+let retain_gate fixture ~request_id request =
+  Original.retain ~store:fixture.store ~scope:(Original_gate.scope fixture.owner) ~request_id
+    ~installation_id:fixture.parent.installation_id ~package_id:fixture.parent.package_id
+    ~tool:fixture.parent.tool ~summary:`Null ~request
+    |> original_result;
+  Original.load ~store:fixture.store ~scope:(Original_gate.scope fixture.owner) ~request_id
+    |> original_result |> Option.to_result ~none:"fixture gate absent" |> require
+let publish_gate fixture request =
+  let parent=advance_original fixture.store fixture.parent
+    [Progress.Preparation_intended {request_id=fixture.gate_id;request}] in
+  let gate=retain_gate fixture ~request_id:fixture.gate_id request in
+  ignore (advance_original fixture.store parent [Progress.Preparation_observed fixture.gate_id]);gate
+let assert_domain_refusal exe fixture (record:Original.retained) expected =
+  check int "the generic envelope/body decoder accepts this fixture" 0
+    (List.length (scan P.Store.Tool_request_owners ~base_path:fixture.base).P.refusals);
+  let status,output=unchanged_workspace fixture.base (fun () -> invoke exe fixture.base) in
+  check bool ("domain payload refusal stops installation: " ^ output) true (status<>Unix.WEXITED 0);
+  List.iter (fun text -> check bool ("reports " ^ text ^ ": " ^ output) true
+    (String_util.contains_substring (diagnostic_words output) (diagnostic_words text)))
+    [owner_path fixture.root record;Printf.sprintf "scope=%S" record.scope;
+     Printf.sprintf "request_id=%S" record.request_id;"request_digest=" ^ record.request_digest;expected]
+let test_current_librarian_payloads exe () = with_librarian_payload (fun fixture ->
+  ignore (publish_gate fixture fixture.gate_request);
+  let status,output=unchanged_workspace fixture.base (fun () -> invoke exe fixture.base) in
+  check bool ("current captures and their captured gate pass without a live epoch: " ^ output) true
+    (status=Unix.WEXITED 0);
+  check bool "the actual consumer examines the part, execution and gate" true
+    (String_util.contains_substring output "lane-addon tool request owners rows=3 refused=0"))
+let test_old_librarian_execution exe () = with_librarian_payload (fun fixture ->
+  let record=replace_original_request fixture.root fixture.store fixture.parent
+    (fixture.parent.request |> replace_member "schema" (`Int 1)) in
+  assert_domain_refusal exe fixture record "Unknown original Librarian execution schema/kind")
+let test_missing_librarian_policy exe () = with_librarian_payload (fun fixture ->
+  let prepared=Yojson.Safe.Util.member "preparation" fixture.parent.request |> Yojson.Safe.Util.to_assoc in
+  let record=replace_original_request fixture.root fixture.store fixture.parent
+    (fixture.parent.request |> replace_member "preparation" (`Assoc (List.remove_assoc "admission_prompt" prepared))) in
+  assert_domain_refusal exe fixture record "Original Librarian capture has unknown, missing or repeated fields")
+let test_librarian_source_parent exe () = with_librarian_payload (fun fixture ->
+  let record=replace_original_request fixture.root fixture.store fixture.parent
+    (fixture.parent.request |> replace_member "parent_part_id" (`String "missing-original-part")) in
+  assert_domain_refusal exe fixture record "Original parent record is absent")
+let test_librarian_host_binding exe () = with_librarian_payload (fun fixture ->
+  let record=replace_original_request fixture.root fixture.store fixture.parent
+    (fixture.parent.request |> replace_member "request_id" (`String (Admission.fresh_request_id fixture.owner))) in
+  assert_domain_refusal exe fixture record "Original execution differs from its retained host owner")
+let test_old_librarian_gate exe () = with_librarian_payload (fun fixture ->
+  let gate=publish_gate fixture (fixture.gate_request |> replace_member "version" (`Int 2)) in
+  assert_domain_refusal exe fixture gate "Original gate request is not version 3")
+let test_old_gate_preparation exe () = with_librarian_payload (fun fixture ->
+  let request=fixture.gate_request |> replace_member "version" (`Int 2) in
+  let parent=advance_original fixture.store fixture.parent
+    [Progress.Preparation_intended {request_id=fixture.gate_id;request}] in
+  assert_domain_refusal exe fixture parent "Original gate request is not version 3")
+let test_current_gate_preparation exe () = with_librarian_payload (fun fixture ->
+  ignore (advance_original fixture.store fixture.parent
+    [Progress.Preparation_intended {request_id=fixture.gate_id;request=fixture.gate_request}]);
+  let status,output=unchanged_workspace fixture.base (fun () -> invoke exe fixture.base) in
+  check bool ("a current pending preparation needs no child publication or recovery: " ^ output) true
+    (status=Unix.WEXITED 0);
+  ignore (retain_gate fixture ~request_id:fixture.gate_id fixture.gate_request);
+  let status,output=unchanged_workspace fixture.base (fun () -> invoke exe fixture.base) in
+  check bool ("an unacknowledged Captured root remains a valid retained state: " ^ output) true
+    (status=Unix.WEXITED 0))
+let test_orphan_gate_root exe () = with_librarian_payload (fun fixture ->
+  let gate=retain_gate fixture ~request_id:fixture.gate_id fixture.gate_request in
+  assert_domain_refusal exe fixture gate "Original gate root has no full parent preparation intent")
+let test_mismatched_gate_root exe () = with_librarian_payload (fun fixture ->
+  ignore (publish_gate fixture fixture.gate_request);
+  let request_id="another-root" in
+  let gate=retain_gate fixture ~request_id
+    (fixture.gate_request |> replace_member "request_id" (`String request_id)) in
+  assert_domain_refusal exe fixture gate "Original parent names another gate root")
+let test_missing_gate_predecessor exe () = with_librarian_payload (fun fixture ->
+  ignore (publish_gate fixture fixture.gate_request);
+  let request_id="retry" in
+  let gate=retain_gate fixture ~request_id (fixture.gate_request
+    |> replace_member "request_id" (`String request_id) |> replace_member "predecessor" (`String "missing-gate")) in
+  assert_domain_refusal exe fixture gate "Original predecessor gate is absent")
+let test_wrong_gate_predecessor exe () = with_librarian_payload (fun fixture ->
+  ignore (publish_gate fixture fixture.gate_request);
+  let request_id="retry" in
+  let gate=retain_gate fixture ~request_id (fixture.gate_request
+    |> replace_member "request_id" (`String request_id) |> replace_member "predecessor" (`String fixture.gate_id)) in
+  assert_domain_refusal exe fixture gate "Gate child has no original forward publication intent")
+let test_cyclic_gate_predecessors exe () = with_librarian_payload (fun fixture ->
+  ignore (publish_gate fixture fixture.gate_request);
+  let request request_id predecessor=fixture.gate_request
+    |> replace_member "request_id" (`String request_id) |> replace_member "predecessor" (`String predecessor) in
+  let gate=retain_gate fixture ~request_id:"cycle-a" (request "cycle-a" "cycle-b") in
+  ignore (retain_gate fixture ~request_id:"cycle-b" (request "cycle-b" "cycle-a"));
+  assert_domain_refusal exe fixture gate "Cyclic gate retry ancestry")
+let test_gate_predecessor_identity exe ~wrong_id () = with_librarian_payload (fun fixture ->
+  let prior=publish_gate fixture fixture.gate_request in
+  let request_id="retry" in
+  let request=fixture.gate_request |> replace_member "request_id" (`String request_id)
+    |> replace_member "predecessor" (`String prior.request_id) in
+  let intended_id=if wrong_id then "another-retry" else request_id in
+  let intended=request |> replace_member "request_id" (`String intended_id)
+    |> replace_member "authority" (Absorb.replay_authority_to_yojson (Absorb.Gate_unavailable Typesafeai_config.Lane_disabled)) in
+  let successor=Original.prepare_successor ~store:fixture.store ~scope:prior.scope ~request_id:intended_id
+    ~request:intended |> original_result in
+  ignore (advance_original fixture.store prior [Progress.Dispatch_intended;
+    Progress.Refused {stage=Progress.Execution;evidence=`Null};Progress.Successor_intended successor]);
+  let child=retain_gate fixture ~request_id request in
+  assert_domain_refusal exe fixture child (if wrong_id then "Gate predecessor names another original child"
+    else "Gate child differs from original successor intent"))
+let test_unacknowledged_root_progress exe () = with_librarian_payload (fun fixture ->
+  ignore (advance_original fixture.store fixture.parent
+    [Progress.Preparation_intended {request_id=fixture.gate_id;request=fixture.gate_request}]);
+  let gate=retain_gate fixture ~request_id:fixture.gate_id fixture.gate_request in
+  let gate=advance_original fixture.store gate [Progress.Dispatch_intended] in
+  assert_domain_refusal exe fixture gate "Unacknowledged original gate root has execution progress")
+let test_unacknowledged_retry_child exe () = with_librarian_payload (fun fixture ->
+  let gate=publish_gate fixture fixture.gate_request in
+  let request_id="pending-retry" in
+  let request=fixture.gate_request |> replace_member "request_id" (`String request_id)
+    |> replace_member "predecessor" (`String gate.request_id) in
+  let successor=Original.prepare_successor ~store:fixture.store ~scope:gate.scope ~request_id ~request |> original_result in
+  ignore (advance_original fixture.store gate [Progress.Dispatch_intended;
+    Progress.Refused {stage=Progress.Execution;evidence=`Null};Progress.Successor_intended successor]);
+  let child=retain_gate fixture ~request_id request in
+  let status,output=unchanged_workspace fixture.base (fun () -> invoke exe fixture.base) in
+  check bool ("the captured pending retry is readable without publication recovery or ACK: " ^ output) true
+    (status=Unix.WEXITED 0);
+  let child=advance_original fixture.store child [Progress.Dispatch_intended] in
+  assert_domain_refusal exe fixture child "Unacknowledged original gate child has execution progress")
+let test_historical_gate_namespaces exe () =
+  List.iter (fun (namespace,kind) -> with_librarian_payload (fun fixture ->
+    let request_id="historical-gate" in
+    let scope=namespace ^ Lane_addon_store.digest "captured-history" in
+    let request=fixture.gate_request |> replace_member "version" (`Int 2)
+      |> replace_member "kind" (`String kind) |> replace_member "request_id" (`String request_id) in
+    Original.retain ~store:fixture.store ~scope ~request_id
+      ~installation_id:fixture.parent.installation_id ~package_id:fixture.parent.package_id ~tool:fixture.parent.tool
+      ~summary:`Null ~request |> original_result;
+    let record=Original.load ~store:fixture.store ~scope ~request_id |> original_result |> Option.get in
+    assert_domain_refusal exe fixture record "Original gate request is not version 3"))
+    ["keeper-librarian-durable-gate/","librarian-durable-gate";
+     "keeper-librarian-floor-step-gate/","librarian-floor-step-gate"]
+let test_old_gate_successor_body exe () = with_librarian_payload (fun fixture ->
+  let gate=publish_gate fixture fixture.gate_request in
+  let request_id="unpublished-retry" in
+  let request=fixture.gate_request |> replace_member "version" (`Int 2)
+    |> replace_member "request_id" (`String request_id) |> replace_member "predecessor" (`String gate.request_id) in
+  let successor=Original.prepare_successor ~store:fixture.store ~scope:gate.scope ~request_id ~request |> original_result in
+  let gate=advance_original fixture.store gate [Progress.Dispatch_intended;
+    Progress.Refused {stage=Progress.Execution;evidence=`Null};Progress.Successor_intended successor] in
+  assert_domain_refusal exe fixture gate "Original gate request is not version 3")
+
 let () =
   let exe = Sys.getenv "MASC_TEST_DEPLOYMENT_PREFLIGHT_EXE" in
   let permission_tests =
@@ -487,4 +739,24 @@ let () =
       test_case "a record settled while it is checked is absent" `Quick
         test_a_record_settled_while_it_is_checked_is_absent;
       test_case "a refused record stops validate-stores" `Quick
-        (test_lane_addon_record_refuses_deploy exe)]]
+        (test_lane_addon_record_refuses_deploy exe)];
+     "Librarian current payloads",
+     [test_case "current originals and gates need no live epoch" `Quick (test_current_librarian_payloads exe);
+      test_case "old execution payload refuses deployment" `Quick (test_old_librarian_execution exe);
+      test_case "absent captured policy is not reconstructed" `Quick (test_missing_librarian_policy exe);
+      test_case "the original part source must exist" `Quick (test_librarian_source_parent exe);
+      test_case "captured request identity must match its host record" `Quick (test_librarian_host_binding exe);
+      test_case "old gate payload refuses deployment" `Quick (test_old_librarian_gate exe);
+      test_case "old unpublished gate preparation refuses deployment" `Quick (test_old_gate_preparation exe);
+      test_case "current unpublished gate preparation is readable" `Quick (test_current_gate_preparation exe);
+      test_case "orphan roots cannot pass payload preflight" `Quick (test_orphan_gate_root exe);
+      test_case "a root must match its parent's preparation" `Quick (test_mismatched_gate_root exe);
+      test_case "a retry must retain its predecessor" `Quick (test_missing_gate_predecessor exe);
+      test_case "retry links must be reciprocal" `Quick (test_wrong_gate_predecessor exe);
+      test_case "retry ancestry cannot cycle" `Quick (test_cyclic_gate_predecessors exe);
+      test_case "predecessor names the exact child ID" `Quick (test_gate_predecessor_identity exe ~wrong_id:true);
+      test_case "predecessor names the exact child digest" `Quick (test_gate_predecessor_identity exe ~wrong_id:false);
+      test_case "an unacknowledged root cannot have execution progress" `Quick (test_unacknowledged_root_progress exe);
+      test_case "a pending retry permits only a Captured child" `Quick (test_unacknowledged_retry_child exe);
+      test_case "historical gate namespaces are not skipped" `Quick (test_historical_gate_namespaces exe);
+      test_case "old unpublished retry body refuses deployment" `Quick (test_old_gate_successor_body exe)]]

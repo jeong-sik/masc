@@ -430,8 +430,9 @@ let check_directive_workspace fields =
       ; "masc_root", `String (Decode.Canonical_path.to_string directive_workspace.sid_masc_root) ]))
 
 let test_resume_body_carries_the_operation_id () =
+  let operation_id = Control.mint_operation_id () in
   let body =
-    Control.directive_body ~expected_workspace:directive_workspace ~operator_operation_id:"masc-tui-resume-analyst-3"
+    Control.directive_body ~expected_workspace:directive_workspace ~operator_operation_id:operation_id
       "resume"
   in
   match Yojson.Safe.from_string body with
@@ -443,7 +444,7 @@ let test_resume_body_carries_the_operation_id () =
          | Some (`String v) -> Some v
          | _ -> None);
       Alcotest.(check (option string))
-        "operation id" (Some "masc-tui-resume-analyst-3")
+        "operation id" (Some operation_id)
         (match List.assoc_opt "operator_operation_id" fields with
          | Some (`String v) -> Some v
          | _ -> None)
@@ -459,24 +460,23 @@ let test_non_resume_directive_omits_the_operation_id () =
         (List.mem_assoc "operator_operation_id" fields)
   | _ -> Alcotest.fail "pause body must be a JSON object"
 
-(* The id has to be the same for both requests of one boot recovery, and
-   different from the next attempt's, or a retry either looks like fresh work
-   or collides with the previous one. *)
+(* One attempt retains its id in every resume body. A new attempt, including
+   the first attempt after reopening the TUI, must not name the old receipt. *)
 let test_operation_id_is_per_attempt () =
-  Alcotest.(check string)
-    "stable within an attempt"
-    (Control.mint_operation_id ~keeper:"analyst" ~serial:7)
-    (Control.mint_operation_id ~keeper:"analyst" ~serial:7);
-  Alcotest.(check bool)
-    "distinct across attempts" false
-    (String.equal
-       (Control.mint_operation_id ~keeper:"analyst" ~serial:7)
-       (Control.mint_operation_id ~keeper:"analyst" ~serial:8));
-  Alcotest.(check bool)
-    "distinct across keepers" false
-    (String.equal
-       (Control.mint_operation_id ~keeper:"analyst" ~serial:7)
-       (Control.mint_operation_id ~keeper:"bandleader" ~serial:7))
+  let operation_id = Control.mint_operation_id () in
+  let next_operation_id = Control.mint_operation_id () in
+  let resume_body operation_id =
+    Control.directive_body ~expected_workspace:directive_workspace
+      ~operator_operation_id:operation_id "resume"
+  in
+  Alcotest.(check bool) "operation id is nonempty" true
+    (String.trim operation_id <> "");
+  Alcotest.(check bool) "a fresh attempt names a different receipt" false
+    (String.equal operation_id next_operation_id);
+  Alcotest.(check string) "the attempt reuses its id in a retry"
+    (resume_body operation_id) (resume_body operation_id);
+  Alcotest.(check bool) "a new attempt sends a different request" false
+    (String.equal (resume_body operation_id) (resume_body next_operation_id))
 
 (* {1 Roster completeness} *)
 

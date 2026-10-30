@@ -9571,7 +9571,6 @@ type state = {
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
   mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
-  mutable keeper_action_serial: int;
   (* The composer occupies the last terminal row on every surface. It is drawn
      whether or not it holds the keystrokes: an input line that appears only
      once it is already receiving text cannot be found by looking. Focus is
@@ -17820,7 +17819,6 @@ let create_state
   candle_authority_generation = 0;
   keeper_action_inflight = None;
   keeper_action_pending = None;
-  keeper_action_serial = 0;
   composer_focused = false;
   voice_capture = None;
   voice_capture_phase = Voice_starting;

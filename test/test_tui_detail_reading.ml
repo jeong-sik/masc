@@ -119,7 +119,31 @@ let test_section_authority_requires_complete_visibility () =
       [Reading.Content "sender"] held in
   check bool "prepared text has no source-section authority" false (visible prepared);
   check bool "an absent section supplies no target" false
-    (Reading.section_fully_visible ~width:80 ~height:4 ~index:2 held)
+    (Reading.section_fully_visible ~width:80 ~height:4 ~index:2 held);
+  check bool "zero content width supplies no target" false
+    (Reading.section_fully_visible ~width:0 ~height:80 ~index:0 held);
+  check bool "negative content width supplies no target" false
+    (Reading.section_fully_visible ~width:(-1) ~height:80 ~index:0 held);
+  let empty = Reading.create_observation ~title:"relationships"
+      [{heading=""; body=""}] in
+  check bool "even blank rows cannot supply a target at zero width" false
+    (Reading.section_fully_visible ~width:0 ~height:4 ~index:0 empty);
+  check bool "zero height supplies no target" false
+    (Reading.section_fully_visible ~width:80 ~height:0 ~index:0 held);
+  let narrow = Reading.create_observation ~title:"relationships"
+      [{heading="A"; body="B"}; {heading="C"; body="밤"}] in
+  check bool "another section's wide glyph does not revoke this section" true
+    (Reading.section_fully_visible ~width:1 ~height:8 ~index:0 narrow);
+  check bool "a wide body glyph clipped to one cell supplies no target" false
+    (Reading.section_fully_visible ~width:1 ~height:8 ~index:1 narrow);
+  check bool "the same glyph fits when two cells are available" true
+    (Reading.section_fully_visible ~width:2 ~height:8 ~index:1 narrow);
+  let emoji = Reading.create_observation ~title:"relationships"
+      [{heading="👩‍💻"; body="x"}] in
+  check bool "a clipped multi-scalar heading supplies no target" false
+    (Reading.section_fully_visible ~width:1 ~height:8 ~index:0 emoji);
+  check bool "a complete multi-scalar heading can supply a target" true
+    (Reading.section_fully_visible ~width:2 ~height:8 ~index:0 emoji)
 
 let () = run "detail reading ownership"
   [ "capture", [test_case "selection stays read-only" `Quick test_selection_does_not_retarget_capture;

@@ -396,3 +396,6 @@ val wait_direct_preparation : base_path:string -> keeper_name:string ->
 val retry_direct_preparation : base_path:string -> keeper_name:string ->
   operation_id:Keeper_chat_operation.Operation_id.t -> expected_revision:int64 -> execution_digest:string ->
   (Keeper_owner.Chat_operation.t,command_error) result
+
+val enter_direct_preparation : base_path:string -> keeper_name:string -> operation_id:Keeper_chat_operation.Operation_id.t ->
+  execution_digest:string -> (unit,command_error) result

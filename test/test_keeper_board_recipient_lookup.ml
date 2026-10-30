@@ -505,12 +505,16 @@ let test_a_read_that_raises_fails_the_lookup () =
    that case mkdir uses Unix and raises Unix_error for a non-directory. *)
 let test_a_unix_read_that_raises_fails_the_lookup () =
   let previous_fs = Fs_compat.get_fs_opt () in
+  let previous_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   let file = Filename.temp_file "keeper-recipient-lookup-unix" "" in
   Fun.protect
     ~finally:(fun () ->
       (match previous_fs with
        | Some fs -> Fs_compat.set_fs fs
        | None -> Fs_compat.clear_fs ());
+      (match previous_base_path with
+       | Some base_path -> Unix.putenv "MASC_BASE_PATH" base_path
+       | None -> Unix.unsetenv "MASC_BASE_PATH");
       try Sys.remove file with Sys_error _ -> ())
     (fun () ->
       Fs_compat.clear_fs ();

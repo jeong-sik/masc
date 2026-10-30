@@ -1432,34 +1432,79 @@ let handle_note_add ~tool_name ~start_time ctx args =
            ]))
 ;;
 
+(* Notes are returned in chronological order within the newest eligible
+   window. A note id is an exclusive anchor. Refuse an unknown anchor rather
+   than silently returning the first page of another schedule. *)
+let notes_before_id notes before_note_id =
+  match before_note_id with
+  | None -> Ok notes
+  | Some id ->
+    let rec find previous = function
+      | [] -> Error (Refusal "before_note_id does not belong to this schedule")
+      | (note : Schedule_domain.schedule_note) :: rest ->
+        if String.equal note.note_id id then Ok (List.rev previous)
+        else find (note :: previous) rest
+    in
+    find [] notes
+;;
+
+type notes_page =
+  { values : Schedule_domain.schedule_note list
+  ; total_count : int
+  ; has_more_older : bool
+  ; next_before_note_id : string option
+  }
+
+let make_notes_page ~limit ~before_note_id all_notes =
+  let* eligible = notes_before_id all_notes before_note_id in
+  let count = List.length eligible in
+  let has_more_older = count > limit in
+  let values = List.filteri (fun i _ -> i >= count - limit) eligible in
+  let next_before_note_id =
+    match has_more_older, values with
+    | true, (first : Schedule_domain.schedule_note) :: _ -> Some first.note_id
+    | true, [] | false, _ -> None
+  in
+  Ok { values; total_count = List.length all_notes; has_more_older; next_before_note_id }
+;;
+
+let notes_before_id_of_args args =
+  match Json_util.assoc_member_opt "before_note_id" args with
+  | None | Some `Null -> Ok None
+  | Some (`String raw) ->
+    (match String_util.trim_nonempty raw with
+     | None -> Error (Refusal "before_note_id is empty; omit it for the newest page")
+     | Some id -> Ok (Some id))
+  | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) ->
+    Error (Refusal "before_note_id must be a string")
+;;
+
 let handle_notes_list ~tool_name ~start_time ctx args =
   match
     let* schedule_id = plain (required_string args "schedule_id") in
     let* limit = list_limit_of_args args in
-    Ok (schedule_id, limit)
+    let* before_note_id = notes_before_id_of_args args in
+    Ok (schedule_id, limit, before_note_id)
   with
   | Error refusal -> refusal_result ~tool_name ~start_time refusal
-  | Ok (schedule_id, limit) ->
+  | Ok (schedule_id, limit, before_note_id) ->
     (match Schedule_store.read_state_result ctx.config with
      | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
      | Ok state ->
-       let notes =
-         Schedule_store.notes_for_schedule state ~schedule_id
-         |> fun notes ->
-         let count = List.length notes in
-         if count <= limit then notes
-         else
-           (* Oldest-first promise stays intact: trim from the head, keep the
-              newest [limit], still returned oldest first. *)
-           List.filteri (fun i _ -> i >= count - limit) notes
-       in
-       ok ~tool_name ~start_time
-         (`Assoc
-           [ "status", `String "ok"
-           ; "schedule_id", `String schedule_id
-           ; "limit", `Int limit
-           ; "notes", `List (List.map Schedule_domain.schedule_note_to_yojson notes)
-           ]))
+       let all_notes = Schedule_store.notes_for_schedule state ~schedule_id in
+       (match make_notes_page ~limit ~before_note_id all_notes with
+        | Error refusal -> refusal_result ~tool_name ~start_time refusal
+        | Ok page ->
+          ok ~tool_name ~start_time
+            (`Assoc
+              [ "status", `String "ok"
+              ; "schedule_id", `String schedule_id
+              ; "limit", `Int limit
+              ; "total_count", `Int page.total_count
+              ; "has_more_older", `Bool page.has_more_older
+              ; "next_before_note_id", optional_string_json page.next_before_note_id
+              ; "notes", `List (List.map Schedule_domain.schedule_note_to_yojson page.values)
+              ])))
 ;;
 
 let dispatch ctx ~name ~args : Tool_result.result option =

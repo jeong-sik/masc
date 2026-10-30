@@ -907,9 +907,11 @@ let create_post_once_by_fusion_run_id
    [visibility] and [meta_json], and the audience asks the recipient lookup,
    which reads Keeper settings from disk. They are worked out before the locks
    on the post as it stands. Under the locks that result is used only if what
-   it was worked out from is unchanged; otherwise it is worked out again
-   there, so no write is based on a post it did not see. An edit that leaves
-   the text alone keeps the recorded audience. *)
+   it was worked out from is unchanged; otherwise both locks are released and
+   it is worked out again, so no write is based on a post it did not see.
+   Repeated concurrent changes can delay the edit; yielding between attempts
+   lets other fibers run and permits cancellation without holding either lock.
+   An edit that leaves the text alone keeps the recorded audience. *)
 let update_post_with_outcome
       store
       ~lookup
@@ -995,71 +997,81 @@ let update_post_with_outcome
     (* Persist-before-commit: acquire persistence first, then state. Keeping
        state locked through the write preserves unrelated concurrent fields
        without a rollback or a stale staged-row replacement. *)
-    with_persist_lock store (fun () ->
-      with_lock store (fun () ->
-        match Hashtbl.find_opt store.posts key with
-        | None -> Error (Post_not_found post_id)
-        | Some existing ->
-          let owner = Agent_id.to_string existing.author in
-          let editor_str = Agent_id.to_string editor_id in
-          if not (String.equal owner editor_str)
-          then
-            Error
-              (Unauthorized
-                 (Printf.sprintf
-                    "agent %s cannot edit post %s owned by %s"
-                    editor_str
-                    key
-                    owner))
-          else
-            let next_author_result =
-              match new_author with
-              | None -> Ok existing.author
-              | Some value -> Agent_id.of_string value
-            in
-            (match next_author_result with
-             | Error e -> Error e
-             | Ok next_author ->
-            (* Normalized identically to create. [post_kind] is passed through
-               and the result kind is discarded: the existing post's kind is
-               preserved via [{ existing with }]. *)
-            match
-              (match planned with
-               | Some (seen, result) when same_plan_inputs seen existing -> result
-               | Some _ | None -> plan existing)
-            with
-            | Error error -> Error error
-            | Ok (normalized_title, normalized_body, normalized_meta, audience, unresolved) -> (
-                let content_changed =
-                  not (String.equal existing.title normalized_title
-                       && String.equal existing.body normalized_body
-                       && String.equal (Agent_id.to_string existing.author)
-                            (Agent_id.to_string next_author))
+    let rec commit planned =
+      let outcome =
+        with_persist_lock store (fun () ->
+          with_lock store (fun () ->
+            match Hashtbl.find_opt store.posts key with
+            | None -> `Finished (Error (Post_not_found post_id))
+            | Some existing ->
+              let owner = Agent_id.to_string existing.author in
+              let editor_str = Agent_id.to_string editor_id in
+              if not (String.equal owner editor_str)
+              then
+                `Finished
+                  (Error
+                     (Unauthorized
+                        (Printf.sprintf
+                           "agent %s cannot edit post %s owned by %s"
+                           editor_str
+                           key
+                           owner)))
+              else
+                let next_author_result =
+                  match new_author with
+                  | None -> Ok existing.author
+                  | Some value -> Agent_id.of_string value
                 in
-                let now = Time_compat.now () in
-                let updated =
-                  { existing with
-                    author = next_author
-                  ; title = normalized_title
-                  ; body = normalized_body
-                  ; meta_json = normalized_meta
-                  ; audience = Some audience
-                  ; content_updated_at =
-                      if content_changed then now else existing.content_updated_at
-                  ; updated_at = now
-                  }
-                in
-                let snapshot = posts_jsonl_unlocked ~replacement:updated store in
-                match save_posts_snapshot store snapshot with
-                | Error _ as error -> error
-                | Ok () ->
-                  Hashtbl.replace store.posts key updated;
-                  mark_dirty_post store key;
-                  invalidate_post_caches store;
-                  Ok
-                    { edited = updated
-                    ; recorded_audience = audience
-                    ; unresolved
-                    ; content_changed
-                    }))))
+                (match next_author_result with
+                 | Error e -> `Finished (Error e)
+                 | Ok next_author ->
+                   (* Normalized identically to create. [post_kind] is passed
+                      through and the existing post's kind is preserved. *)
+                   match planned with
+                   | Some (seen, result) when same_plan_inputs seen existing ->
+                     `Finished
+                       (match result with
+                        | Error error -> Error error
+                        | Ok (normalized_title, normalized_body, normalized_meta, audience, unresolved) ->
+                          let content_changed =
+                            not (String.equal existing.title normalized_title
+                                 && String.equal existing.body normalized_body
+                                 && String.equal (Agent_id.to_string existing.author)
+                                      (Agent_id.to_string next_author))
+                          in
+                          let now = Time_compat.now () in
+                          let updated =
+                            { existing with
+                              author = next_author
+                            ; title = normalized_title
+                            ; body = normalized_body
+                            ; meta_json = normalized_meta
+                            ; audience = Some audience
+                            ; content_updated_at =
+                                if content_changed then now else existing.content_updated_at
+                            ; updated_at = now
+                            }
+                          in
+                          let snapshot = posts_jsonl_unlocked ~replacement:updated store in
+                          match save_posts_snapshot store snapshot with
+                          | Error _ as error -> error
+                          | Ok () ->
+                            Hashtbl.replace store.posts key updated;
+                            mark_dirty_post store key;
+                            invalidate_post_caches store;
+                            Ok
+                              { edited = updated
+                              ; recorded_audience = audience
+                              ; unresolved
+                              ; content_changed
+                              })
+                   | Some _ | None -> `Replan existing)))
+      in
+      match outcome with
+      | `Finished result -> result
+      | `Replan existing ->
+        Eio.Fiber.yield ();
+        commit (Some (existing, plan existing))
+    in
+    commit planned
 ;;

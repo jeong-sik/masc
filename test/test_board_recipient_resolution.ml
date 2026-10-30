@@ -428,10 +428,9 @@ let test_an_edit_works_out_again_when_the_post_changed_during_the_lookup =
       if String.equal (spelled candidate) "alice"
       then (
         incr alice_asked;
+        require_no_lock_is_held ();
         if !alice_asked = 1
-        then (
-          require_no_lock_is_held ();
-          !during_the_lookup ()));
+        then !during_the_lookup ());
       declared_from table candidate)
   in
   started ~lookup (fun () ->
@@ -461,6 +460,175 @@ let test_an_edit_works_out_again_when_the_post_changed_during_the_lookup =
       (target_names edited.audience);
     let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
     check string "the stored text is the edit's" "@alice @bob" stored.body)
+;;
+
+(* Several changes to the same post can invalidate consecutive plans. Every
+   lookup must be outside both locks and the eventual write uses the last plan. *)
+let test_an_edit_replans_after_repeated_changes_without_holding_a_lock =
+  let alice_asked = ref 0 in
+  let during_the_lookup = ref (fun () -> ()) in
+  let lookup =
+    Recipient_lookup.make (fun candidate ->
+      if String.equal (spelled candidate) "alice"
+      then (
+        incr alice_asked;
+        require_no_lock_is_held ();
+        if !alice_asked <= 2 then !during_the_lookup ());
+      declared_from table candidate)
+  in
+  started ~lookup (fun () ->
+    let post, _ = get (write ~visibility:Board.Public "first") in
+    during_the_lookup :=
+      (fun () ->
+         ignore
+           (get
+              (Board_dispatch.update_post_with_unresolved
+                 ~post_id:(post_id post)
+                 ~editor:"writer"
+                 ~content:(Printf.sprintf "other edit %d" !alice_asked)
+                 ())));
+    let edited, unresolved =
+      get
+        (Board_dispatch.update_post_with_unresolved
+           ~post_id:(post_id post)
+           ~editor:"writer"
+           ~content:"@alice @missing"
+           ())
+    in
+    check int "the lookup was asked after both changes" 3 !alice_asked;
+    check (list string) "the final audience" [ "alice" ] (target_names edited.audience);
+    check (list string) "the final unresolved name" [ "missing" ] unresolved;
+    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    check string "the final text was stored" "@alice @missing" stored.body)
+;;
+
+(* An adversarial lookup that always changes the same post prevents a stable
+   plan. The retry yields without a lock, so the caller can cancel it. *)
+let test_an_edit_can_be_cancelled_during_continuous_changes =
+  let alice_asked = ref 0 in
+  let during_the_lookup = ref (fun () -> ()) in
+  let lookup =
+    Recipient_lookup.make (fun candidate ->
+      if String.equal (spelled candidate) "alice"
+      then (
+        incr alice_asked;
+        !during_the_lookup ());
+      declared_from table candidate)
+  in
+  started ~lookup (fun () ->
+    let post, _ = get (write ~visibility:Board.Public "first") in
+    during_the_lookup :=
+      (fun () ->
+         ignore
+           (get
+              (Board_dispatch.update_post_with_unresolved
+                 ~post_id:(post_id post)
+                 ~editor:"writer"
+                 ~content:(Printf.sprintf "other edit %d" !alice_asked)
+                 ())));
+    let result =
+      Eio.Fiber.first
+        (fun () ->
+           ignore
+             (Board_dispatch.update_post_with_unresolved
+                ~post_id:(post_id post)
+                ~editor:"writer"
+                ~content:"@alice never stable"
+                ());
+           `Finished)
+        (fun () ->
+           while !alice_asked < 3 do Eio.Fiber.yield () done;
+           `Cancel)
+    in
+    check bool "the caller cancelled repeated replanning" true (result = `Cancel);
+    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    check bool "the cancelled edit did not land" false
+      (String.equal stored.body "@alice never stable");
+    ignore (get (write "a later write")))
+;;
+
+(* A changed owner is checked again before using the first plan. *)
+let test_an_edit_refuses_if_the_owner_changes_during_lookup =
+  let alice_asked = ref 0 in
+  let during_the_lookup = ref (fun () -> ()) in
+  let lookup =
+    Recipient_lookup.make (fun candidate ->
+      if String.equal (spelled candidate) "alice"
+      then (
+        incr alice_asked;
+        require_no_lock_is_held ();
+        if !alice_asked = 1 then !during_the_lookup ());
+      declared_from table candidate)
+  in
+  started ~lookup (fun () ->
+    let post, _ = get (write ~visibility:Board.Public "first") in
+    during_the_lookup :=
+      (fun () ->
+         ignore
+           (get
+              (Board_dispatch.update_post_with_unresolved
+                 ~post_id:(post_id post)
+                 ~editor:"writer"
+                 ~new_author:"other"
+                 ~content:"ownership transferred"
+                 ())));
+    (match
+       Board_dispatch.update_post_with_unresolved
+         ~post_id:(post_id post)
+         ~editor:"writer"
+         ~content:"@alice stale edit"
+         ()
+     with
+     | Error (Board.Unauthorized _) -> ()
+     | Ok _ -> fail "the previous owner must not write after the transfer"
+     | Error error -> fail (Board.show_board_error error));
+    check int "there was no lookup after the transfer" 1 !alice_asked;
+    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    check string "the transfer stayed stored" "other" (Board.Agent_id.to_string stored.author);
+    check string "the stale edit was not stored" "ownership transferred" stored.body)
+;;
+
+(* A failed replan must not overwrite the concurrent change. *)
+let test_an_edit_keeps_the_concurrent_write_if_the_replan_fails =
+  let alice_asked = ref 0 in
+  let during_the_lookup = ref (fun () -> ()) in
+  let lookup =
+    Recipient_lookup.make (fun candidate ->
+      if String.equal (spelled candidate) "alice"
+      then (
+        incr alice_asked;
+        require_no_lock_is_held ();
+        if !alice_asked = 1 then !during_the_lookup ());
+      if String.equal (spelled candidate) "alice" && !alice_asked = 2
+      then Error "lookup failed during replan"
+      else declared_from table candidate)
+  in
+  started ~lookup (fun () ->
+    let post, _ = get (write ~visibility:Board.Public "first") in
+    during_the_lookup :=
+      (fun () ->
+         ignore
+           (get
+              (Board_dispatch.update_post_with_unresolved
+                 ~post_id:(post_id post)
+                 ~editor:"writer"
+                 ~content:"concurrent edit zzmarker-peer"
+                 ())));
+    (match
+       Board_dispatch.update_post_with_unresolved
+         ~post_id:(post_id post)
+         ~editor:"writer"
+         ~content:"@alice rejected edit zzmarker-rejected"
+         ()
+     with
+     | Error (Board.Recipient_lookup_failed _) -> ()
+     | Ok _ -> fail "a failed replan must not be written"
+     | Error error -> fail (Board.show_board_error error));
+    check int "the second lookup failed" 2 !alice_asked;
+    let stored = get (Board_dispatch.get_post ~post_id:(post_id post)) in
+    check string "the concurrent edit stayed stored" "concurrent edit zzmarker-peer" stored.body;
+    check bool "the concurrent edit reached disk" true (persisted_text_contains "zzmarker-peer");
+    check bool "the failed edit did not reach disk" false (persisted_text_contains "zzmarker-rejected"))
 ;;
 
 (* An edit that leaves the text alone does not address anybody anew.  The
@@ -671,6 +839,22 @@ let () =
             "an edit works out again when the post changed during the lookup"
             `Quick
             test_an_edit_works_out_again_when_the_post_changed_during_the_lookup
+        ; test_case
+            "an edit replans after repeated changes without holding a lock"
+            `Quick
+            test_an_edit_replans_after_repeated_changes_without_holding_a_lock
+        ; test_case
+            "an edit can be cancelled during continuous changes"
+            `Quick
+            test_an_edit_can_be_cancelled_during_continuous_changes
+        ; test_case
+            "an edit refuses if the owner changes during lookup"
+            `Quick
+            test_an_edit_refuses_if_the_owner_changes_during_lookup
+        ; test_case
+            "an edit keeps the concurrent write if the replan fails"
+            `Quick
+            test_an_edit_keeps_the_concurrent_write_if_the_replan_fails
         ; test_case
             "an edit that leaves the text alone keeps the recorded audience"
             `Quick

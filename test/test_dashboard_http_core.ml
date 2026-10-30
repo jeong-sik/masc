@@ -3763,7 +3763,10 @@ let test_board_address_overlay_follows_effective_config_after_cache () =
       { kind = Masc.Board_dispatch.Board_post_created; post_id = "post-effective-address"
       ; author = "external-author"; title = "address fixture"; content = "@" ^ target
       ; hearth = None; updated_at = Some 123. } in
-    let audience = match Masc.Keeper_board_audience.classify ~post_kind:Masc.Board.Human_post ~visibility:Masc.Board.Internal signal with
+    let board_audience = match Masc.Board.audience_for_post ~post_kind:Masc.Board.Human_post ~visibility:Masc.Board.Internal
+        ~title:signal.Masc.Board_dispatch.title ~content:signal.Masc.Board_dispatch.content with
+      | Ok board_audience -> board_audience | Error error -> fail (Masc.Board.show_board_error error) in
+    let audience = match Masc.Keeper_board_audience.of_board_audience board_audience with
       | Ok audience -> audience | Error error -> fail (Masc.Keeper_board_audience.classification_error_to_string error) in
     let effective = match Masc.Keeper_meta_store.read_effective_meta config name with
       | Ok (Some meta) -> meta | Ok None -> fail "effective meta missing" | Error detail -> fail detail in

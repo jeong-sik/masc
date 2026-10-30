@@ -10,6 +10,7 @@ type t =
 type classification_error =
   | Invalid_board_audience of Board.board_error
   | Invalid_board_target of string
+  | Audience_not_recorded
 
 type route =
   | Deliver of Board_signal.wake_reason
@@ -39,22 +40,14 @@ let of_board_audience = function
   | Board.Discoverable -> Ok Discoverable
 ;;
 
-let classify ~post_kind ~visibility signal =
-  let board_audience =
-    match signal.Board_dispatch.kind with
-    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
-      Board.audience_for_post
-        ~post_kind
-        ~visibility
-        ~title:signal.title
-        ~content:signal.content
-    | Board_dispatch.Board_comment_added _ ->
-      Board.audience_for_comment ~content:signal.content
-    | Board_dispatch.Board_reaction_changed _ ->
-      Ok Board.audience_for_reaction
-    | Board_dispatch.Board_vote_cast _ -> Ok Board.audience_for_vote
-  in
-  match board_audience with
+let of_post (post : Board.post) =
+  match post.audience with
+  | Some audience -> of_board_audience audience
+  | None -> Error Audience_not_recorded
+;;
+
+let of_comment_text ~content =
+  match Board.audience_for_comment ~content with
   | Error error -> Error (Invalid_board_audience error)
   | Ok audience -> of_board_audience audience
 ;;
@@ -114,4 +107,5 @@ let classification_error_to_string = function
   | Invalid_board_audience error -> Board.show_board_error error
   | Invalid_board_target target ->
     Printf.sprintf "Board audience target cannot identify a Keeper lane: %s" target
+  | Audience_not_recorded -> "Board post records no audience"
 ;;

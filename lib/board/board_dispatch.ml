@@ -395,22 +395,8 @@ let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
        Board.create_post_once_by_fusion_run_id store ~fusion_run_id ~author
          ~content ~post_kind ?meta_json ~visibility ~ttl_hours ~origin ()
      with
-     | Ok (Board.Post_created post as outcome) ->
-       (match
-          Board.audience_for_post
-            ~post_kind:post.post_kind
-            ~visibility:post.visibility
-            ~title:post.title
-            ~content:post.body
-        with
-        | Ok audience -> emit_post_created ~audience post
-        | Error error ->
-          (* Unreachable: [create_post_once_by_fusion_run_id] commits through
-             [create_post], which validates this exact audience at the write
-             boundary before persisting. *)
-          Log.BoardLog.error
-            "post-created signal not emitted: audience re-derivation failed: %s"
-            (Board_types.show_board_error error));
+     | Ok (Board.Post_created creation as outcome) ->
+       emit_post_created ~audience:creation.audience creation.post;
        Ok outcome
      | Ok (Board.Post_already_present _ as outcome) -> Ok outcome
      | Error _ as error -> error)
@@ -421,29 +407,24 @@ let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
       match Board.update_post_with_outcome store ~post_id ~editor ~content ?title
         ?body ?new_author () with
       | Error _ as error -> error
-      | Ok (post, false) ->
+      | Ok { edited = post; content_changed = false; recorded_audience = _ } ->
         emit_board_write ();
         Ok post
-      | Ok (post, true) ->
+      | Ok { edited = post; content_changed = true; recorded_audience = audience } ->
         emit_board_write ();
-        match Board.audience_for_post ~post_kind:post.post_kind
-            ~visibility:post.visibility
-            ~title:post.title ~content:post.body with
-        | Error error -> Error error
-        | Ok audience ->
-          emit_board_signal
-            { signal =
-                { kind = Board_post_updated { content_updated_at = post.content_updated_at }
-                ; post_id = Board.Post_id.to_string post.id
-                ; author = Board.Agent_id.to_string post.author
-                ; title = post.title
-                ; content = post.body
-                ; hearth = post.hearth
-                ; updated_at = Some post.updated_at
-                }
-            ; audience
-            };
-          Ok post
+        emit_board_signal
+          { signal =
+              { kind = Board_post_updated { content_updated_at = post.content_updated_at }
+              ; post_id = Board.Post_id.to_string post.id
+              ; author = Board.Agent_id.to_string post.author
+              ; title = post.title
+              ; content = post.body
+              ; hearth = post.hearth
+              ; updated_at = Some post.updated_at
+              }
+          ; audience
+          };
+        Ok post
 
 let read_post ~post_id =
   match backend () with

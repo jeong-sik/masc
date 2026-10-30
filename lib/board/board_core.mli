@@ -222,8 +222,15 @@ val reaction_key
     empty/oversized content or invalid [new_author].  When provided by the
     current owner, [new_author] transfers persisted ownership.
     [post_kind]/[visibility]/[hearth] are preserved. *)
-(** Returns the persisted post and whether its normalized title, body or author
-    changed, compared under the store lock. *)
+(** What an edit stored: the post as saved, the audience recorded with the saved
+    text, and whether the normalized title, body or author changed, compared
+    under the store lock. *)
+type post_edit =
+  { edited : post
+  ; recorded_audience : audience
+  ; content_changed : bool
+  }
+
 val update_post_with_outcome
   :  store
   -> post_id:string
@@ -233,7 +240,7 @@ val update_post_with_outcome
   -> ?body:string
   -> ?new_author:string
   -> unit
-  -> (post * bool, board_error) Result.t
+  -> (post_edit, board_error) Result.t
 
 (** Creates a new post.  Validates [author] via
     {!Agent_id.of_string}, normalises [hearth] (lowercased +
@@ -262,7 +269,7 @@ val create_post
   -> (post, board_error) Result.t
 
 type create_post_once_result =
-  | Post_created of post
+  | Post_created of post_creation
   | Post_already_present of post
 
 val create_post_once_by_fusion_run_id

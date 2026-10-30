@@ -3292,6 +3292,8 @@
 
 (include stanzas/test_keeper_keepalive_helpers.inc)
 
+(include stanzas/test_keeper_board_recorded_audience.inc)
+
 (test
  (name test_keeper_board_discoverable_cursor)
  (modules test_keeper_board_discoverable_cursor)

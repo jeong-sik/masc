@@ -11,34 +11,23 @@ type t =
 type classification_error =
   | Invalid_board_audience of Board.board_error
   | Invalid_board_target of string
+  | Audience_not_recorded
 
 type route =
   | Deliver of Keeper_world_observation_board_signal.wake_reason
   | Judge_discoverable
   | Ignore
 
-val classify
-  :  post_kind:Board.post_kind
-  -> visibility:Board.visibility
-  -> Board_dispatch.board_signal
-  -> (t, classification_error) result
-(** A created or edited [System_post] reads no address from its text: its audience
-    follows its visibility alone. Exact explicit address wins. Otherwise comments and reactions are scoped
-    to structural thread participants, while a newly-created unaddressed post
-    is discoverable — unless its visibility is [Unlisted], which keeps it out
-    of every keeper's feed: that post is thread activity too and never enters
-    attention judgment on its own.
+val of_post : Board.post -> (t, classification_error) result
+(** The audience the write boundary recorded with the post. A post that
+    records none is [Error Audience_not_recorded]: its title and body are not
+    read for an address. *)
 
-    Fail-closed address/visibility contract (validated through the typed
-    {!Board.audience} write boundary, surfaced as [Invalid_board_audience]):
-    - an unsupported [@@name] selector or a malformed [@target] token rejects
-      the whole signal, even when valid [@keeper] targets are mixed in (no
-      partial routing);
-    - [@@all] on a [Direct] post is rejected: [Direct] means "mentioned
-      agents only", so a fleet broadcast would contradict the visibility the
-      author chose.  [@@all] on [Public]/[Unlisted]/[Internal] classifies as
-      {!Broadcast};
-    - a [Direct] post-creation without any explicit address is rejected. *)
+val of_comment_text : content:string -> (t, classification_error) result
+(** A comment records no audience, so it is read from its own content. An exact
+    explicit address wins, otherwise the comment is scoped to
+    [Thread_participants]. The post a comment belongs to is not part of it.
+    An unsupported [@@name] selector is [Invalid_board_audience]. *)
 
 val of_board_audience : Board.audience -> (t, classification_error) result
 (** Project generic Board identities into canonical Keeper lane identities.

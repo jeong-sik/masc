@@ -771,8 +771,14 @@ let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
 ;;
 
 type create_post_once_result =
-  | Post_created of post
+  | Post_created of post_creation
   | Post_already_present of post
+
+type post_edit =
+  { edited : post
+  ; recorded_audience : audience
+  ; content_changed : bool
+  }
 
 let create_post_once_by_fusion_run_id
       store
@@ -871,9 +877,9 @@ let create_post_once_by_fusion_run_id
                          "conflicting Fusion Board projection for run_id=%S"
                          fusion_run_id))
              | None ->
-               create_post store ~author ~content ~post_kind ?meta_json
+               create_post_with_audience store ~author ~content ~post_kind ?meta_json
                  ~visibility ~ttl_hours ~origin ()
-               |> Result.map (fun post -> Post_created post)))
+               |> Result.map (fun creation -> Post_created creation)))
     | Some origin_run_id ->
       Error
         (Validation_error
@@ -905,7 +911,7 @@ let update_post_with_outcome
       ?body
       ?new_author
       ()
-  : (post * bool, board_error) Result.t
+  : (post_edit, board_error) Result.t
   =
   match Post_id.of_string post_id with
   | Error e -> Error e
@@ -995,5 +1001,5 @@ let update_post_with_outcome
                   Hashtbl.replace store.posts key updated;
                   mark_dirty_post store key;
                   invalidate_post_caches store;
-                  Ok (updated, content_changed)))))
+                  Ok { edited = updated; recorded_audience = audience; content_changed }))))
 ;;

@@ -8,6 +8,11 @@
     Each sub-stage is best-effort: non-cancel exceptions are logged and
     counted, never propagated.  [Eio.Cancel.Cancelled] is re-raised. *)
 
+val completed_history_changed : config:Workspace.config -> keeper_name:string -> unit
+(** Signal the existing Keeper Librarian lane after completed history was
+    durably recorded. Disabled or invalid Librarian configuration wakes nothing.
+    This performs no Memory inference in the turn's foreground path. *)
+
 val run :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

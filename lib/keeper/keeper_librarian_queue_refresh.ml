@@ -19,20 +19,16 @@ let input_capacities :
     ((string * string), Keeper_lane_cli_oneshot.input_capacity) Hashtbl.t =
   Hashtbl.create 16
 
-(* How many atoms one continuity pass may read for a Keeper, with the trace
-   the width was measured in. Absent means the pass reads the whole backlog.
-
-   RFC-librarian-lifecycle §4.3: a pass that failed while reading more than
-   one unit reads the oldest unit at a time until the backlog is empty, and
-   the marker lives in the loop's memory only. A width is kept rather than an
-   end atom so the pass that follows a committed unit reads the next one at
-   the same width instead of stopping where the last one did.
-
-   Without the marker every pass prepares the whole backlog again: a Keeper
-   whose snapshot no longer fits its history prepares from atom 0, and on
-   2026-09-22 one walked 12756 -> 6378 -> 3189 ninety-six times and committed
-   nothing, because a pass holds as many attempts as the walk has slots
-   (#37793). *)
+(* A real refusal chooses the next source unit, not an atom count to reuse
+   across differently sized turns. Message descent belongs only to the exact
+   refused source; after its commit the next turn is tried whole again. These
+   observations live in this process and are not a second durable cursor. *)
+type read_limit = Oldest_turn | Oldest_turn_messages
+type limited_read =
+  { source : Keeper_memory_os_current.durable_range_id
+  ; mode : read_limit
+  ; messages : Keeper_librarian_unread.source list
+  }
 type problem_site =
   | Durable_drain
   | Unread_count
@@ -43,7 +39,7 @@ let all_problem_sites =
   [ Durable_drain; Unread_count; Explicit_admission; Memory_cleanup ]
 ;;
 
-let limited_widths : ((string * string), (string * int)) Hashtbl.t = Hashtbl.create 16
+let limited_reads : ((string * string), limited_read) Hashtbl.t = Hashtbl.create 16
 let reported_problems : (((string * string) * problem_site), string) Hashtbl.t =
   Hashtbl.create 16
 let measurements_mu = Stdlib.Mutex.create ()
@@ -79,36 +75,37 @@ let forget_measurement ~config ~keeper_name =
   Stdlib.Mutex.protect measurements_mu (fun () ->
     Hashtbl.remove measurements key;
     Hashtbl.remove input_capacities key;
-    Hashtbl.remove limited_widths key;
+    Hashtbl.remove limited_reads key;
     List.iter
       (fun site -> Hashtbl.remove reported_problems (key, site))
       all_problem_sites)
 ;;
 
-let limited_width ~config ~keeper_name ~trace_id =
+let limited_read ~config ~keeper_name ~trace_id =
   let key = measurement_key ~config ~keeper_name in
   Stdlib.Mutex.protect measurements_mu (fun () ->
-    match Hashtbl.find_opt limited_widths key with
-    | Some (measured_in, width) when String.equal measured_in trace_id -> Some width
+    match Hashtbl.find_opt limited_reads key with
+    | Some limited when String.equal limited.source.trace_id trace_id -> Some limited
     | Some _ | None -> None)
 ;;
 
-(* A trace change renumbers the atoms, so a width measured in another trace
-   is replaced rather than compared. Within one trace only a narrower width
-   is news: a pass that already read a wider unit says nothing about the one
-   that refused. *)
-let limit_width ~config ~keeper_name ~trace_id width =
+let remember_read_limit ~config ~keeper_name ~source ~messages mode =
   let key = measurement_key ~config ~keeper_name in
   Stdlib.Mutex.protect measurements_mu (fun () ->
-    match Hashtbl.find_opt limited_widths key with
-    | Some (measured_in, narrowest)
-      when String.equal measured_in trace_id && narrowest <= width -> ()
-    | Some _ | None -> Hashtbl.replace limited_widths key (trace_id, width))
+    Hashtbl.replace limited_reads key {source;mode;messages})
 ;;
 
-let release_width ~config ~keeper_name =
+let release_read_limit ~config ~keeper_name =
   let key = measurement_key ~config ~keeper_name in
-  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove limited_widths key)
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.remove limited_reads key)
+;;
+
+let committed_read_limit ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    match Hashtbl.find_opt limited_reads key with
+    | Some limited -> Hashtbl.replace limited_reads key {limited with mode=Oldest_turn;messages=[]}
+    | None -> ())
 ;;
 
 (* A pass can report more than once: the walk fails, then recording that
@@ -326,7 +323,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   let capacity = ref (last_input_capacity ~config ~keeper_name) in
   (* RFC-0467: a committed round loops only while nothing waits on the lane.
      A waiting unit starts with the durable pass for the turns that ended
-     meanwhile, then resumes continuity at the same position and width, so
+     meanwhile, then resumes continuity at the same position and source mode, so
      ending here loses no progress and keeps Memory following the turns. *)
   let has_waiting = match has_waiting with
     | Some has_waiting -> has_waiting
@@ -352,6 +349,9 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
       historical_task_contexts=List.rev contexts} in
   let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
   let external_capture = ref None in
+  (* One wake owns a fixed completed frontier. Re-reading after a commit may
+     discover newer turns, but they belong to the next signalled unit. *)
+  let completed_frontier = ref None in
   let memory_input (base : Keeper_librarian.input) unit =
     let open Result.Syntax in
     let input = source_input ~include_observations:true base unit in
@@ -384,17 +384,14 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         trace_id := Some current_trace;
         let settle_no_source = function
           | P.Drained ->
-            (* §4.3 releases the limit when the backlog is read to its end, and
-               on no other outcome: one narrowed commit does not show that the
-               range which refused now fits. A superseded checkpoint has no
-               backlog left, and the width was measured on atoms no pass
-               reads again. *)
-            release_width ~config ~keeper_name;
+            (* Release the source mode only when the backlog is drained.
+               A superseded checkpoint also has no readable backlog. *)
+            release_read_limit ~config ~keeper_name;
             observe O.No_source
           | P.Source_unreadable | P.Empty_range ->
             (* Not evidence that the backlog was read. The checkpoint this
                trace names is absent, or the prefix asked for sits at the
-               start. Releasing the width here would send the next pass back
+               start. Releasing the mode here would send the next pass back
                at the whole backlog, which is the loop this limit exists to
                stop. *)
             observe O.No_source
@@ -411,32 +408,57 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         | Error detail -> report O.Source_unavailable O.Source_read_failed detail
         | Ok (P.No_source no_source) -> settle_no_source no_source
         | Ok (P.Ready prepared) ->
-          (match limited_width ~config ~keeper_name ~trace_id:current_trace with
-           | None -> attempt ~keeper_id meta prepared
-           | Some width when P.end_atom prepared - P.start_atom prepared <= width ->
-             attempt ~keeper_id meta prepared
-           | Some width ->
-             (* Cut at the width: the unit read is then the width the last
-                refusal left, and the logged number is the number of atoms
-                this pass sends. *)
-             let end_atom = P.start_atom prepared + width in
-             (* The prepared source already owns the exact checkpoint and
-                validated boundaries. Re-reading it here decoded and hashed
-                the whole history again just to choose a smaller endpoint. *)
-             (match Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-                P.select_prefix ~end_atom prepared) with
+          let frozen =
+            let open Result.Syntax in
+            let* source = P.memory_range_id ~config ~keeper_name prepared in
+            let history = source.Keeper_memory_os_current.history_start_boundary_line in
+            let* through = match !completed_frontier with
+              | None ->
+                let through = P.completed_end_atom prepared in
+                completed_frontier := Some (current_trace,history,through);
+                Ok through
+              | Some (trace,generation,through)
+                when String.equal trace current_trace && generation = history -> Ok through
+              | Some _ -> Error "continuity history changed during this wake" in
+            if P.start_atom prepared >= through then Ok None
+            else if P.end_atom prepared <= through then Ok (Some prepared)
+            else Result.map Option.some (P.select_prefix ~end_atom:through prepared) in
+          (match frozen with
+           | Error detail -> report O.Source_unavailable O.Source_read_failed detail
+           | Ok None -> observe O.No_source
+           | Ok (Some prepared) ->
+             let selected =
+               let open Result.Syntax in
+               let* source = P.memory_range_id ~config ~keeper_name prepared in
+               match limited_read ~config ~keeper_name ~trace_id:current_trace with
+               | None -> Ok (prepared,false)
+               | Some limited when limited.source.history_start_boundary_line <>
+                   source.history_start_boundary_line ->
+                 release_read_limit ~config ~keeper_name;
+                 Ok (prepared,false)
+               | Some limited ->
+                 let oldest = P.oldest_completed_turn prepared in
+                 let* selected =
+                   if limited.mode = Oldest_turn_messages
+                      && limited.source.start_atom = P.start_atom oldest
+                      && limited.source.end_atom <= P.end_atom oldest
+                   then P.select_prefix ~end_atom:limited.source.end_atom oldest
+                   else Ok oldest in
+                 let* selected_source = P.memory_range_id ~config ~keeper_name selected in
+                 let* messages = if limited.mode = Oldest_turn_messages
+                   then P.memory_sources selected else Ok [] in
+                 let same_source =
+                   selected_source.start_atom = limited.source.start_atom
+                   && selected_source.end_atom = limited.source.end_atom
+                   && selected_source.end_boundary_line = limited.source.end_boundary_line
+                   && String.equal selected_source.last_atom_digest limited.source.last_atom_digest
+                   && messages = limited.messages in
+                 if limited.mode = Oldest_turn_messages && same_source
+                 then Ok (selected,true) else Ok (oldest,false) in
+             (match selected with
               | Error detail -> report O.Input_unavailable O.Input_build_failed detail
-              | Ok one_unit ->
-                (* completed_end_atom names the last completed turn inside the
-                   prepared range: when it equals start_atom the range holds no
-                   turn cut, and the unit is an atom cut rather than a turn. *)
-                Log.Keeper.info ~keeper_name
-                  "continuity pass reads one unit; width=%d start_atom=%d completed_end_atom=%d \
-                   end_atom=%d -> %d"
-                  width (P.start_atom prepared) (P.completed_end_atom prepared)
-                  (P.end_atom prepared) (P.end_atom one_unit);
-                attempt ~keeper_id meta one_unit))
-  and attempt ~keeper_id meta prepared =
+              | Ok (selected,by_message) -> attempt ~by_message ~keeper_id meta selected))
+  and attempt ?(by_message=false) ~keeper_id meta prepared =
     select prepared;
     let inputs = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       let open Result.Syntax in
@@ -451,6 +473,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
           messages = P.messages prepared;
           tool_observations = []; counterpart_observations = [] } in
       let* fitted = match !capacity with
+        | Some _ when by_message -> Ok (Some prepared)
         | None -> Ok (Some prepared)
         | Some capacity -> Runtime.fit_continuity ~capacity ~base_path
             ~keeper_id:keeper_name ~input_for:(memory_input input) prepared in
@@ -486,6 +509,11 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
           (P.end_atom prepared) (P.end_atom selected);
       select selected;
       observe O.Running;
+      if by_message then
+        (if memory_committed then message_floor ~selected ~input
+         else memory_message_floor ~selected ~input)
+      else
+      (
       let saved = ref false and cli_limit = ref None and cause = ref None in
       Runtime.run_best_effort ?cli_runner
         ~write_scope:(if memory_committed then Runtime.Context_only else Context_and_memory)
@@ -511,6 +539,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
              forget_input_capacity ~config ~keeper_name;
              capacity := None
            | Runtime.Cli_slot _ -> ());
+          committed_read_limit ~config ~keeper_name;
           saved := true; observe O.Committed)
         ~base_path ~keepers_dir ~keeper_id:keeper_name
         ~expected_revision:(Option.map (fun (value : Keeper_memory_os_current.t) -> value.revision) current)
@@ -527,62 +556,58 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
               Keeper_librarian_input_refusal.to_string
               outcome.provider_input_refusals))
         | None -> "no provider attempt settled the pass" in
-      (* No verdict at all means nothing said the size was the problem, so
-         the width stands. A pass can end without one -- a snapshot commit
+      (* No verdict at all means nothing justified reading less, so
+         the source mode stands. A pass can end without one -- a snapshot commit
          that failed on disk, a raise before any request was composed -- and
          reading less would answer a local failure by shrinking the source. *)
       let may_descend = Runtime.may_descend_messages (Option.to_list !cause) in
       match !cli_limit with
       | (None | Some _) when not may_descend ->
         (* The complete walk either has no descent evidence or contains an
-           invalid-output veto. Keep the source width unchanged for the next
+           invalid-output veto. Keep the source mode unchanged for the next
            signal rather than treating a quota or malformed output as a reason
            to walk down toward one atom. *)
         report O.Not_committed O.No_smaller_range_evidence
-          (Printf.sprintf "failed walk does not permit reading less; the width stands; cause=%s"
+          (Printf.sprintf "failed walk does not permit reading less; the source mode stands; cause=%s"
              (cause_detail ()))
       | None ->
-        (* Something the walk met could have been answered by sending less, so
-           §4.3 applies: a pass that failed while reading more than one unit
-           reads the oldest unit at a time from then on. The refusals this
-           answers (model limit, timeout, refused output) do not announce
-           themselves in one shape, which is why the question asked above is
-           the narrower one -- whether a smaller request would have met the
-           same wall -- and why it is asked of every failure in the walk. The
-           verdict used to come from the slot the walk happened to end on, so
-           the same set of causes answered differently depending on the order
-           the slots were tried. *)
+        (* The existing typed whole-walk policy permits descent. A batch
+           selects the oldest real completed turn at the next signal; that
+           turn's own refusal may select its exact message walk. *)
         (match P.narrow selected with
-         | Some smaller ->
-           (* §4.3 again: a failed pass does not retry here and sets no timer.
-              It records the narrower unit and waits for the next signal, so a
-              failure that is not about size costs one provider call rather
-              than one per step down to a single atom. *)
-           limit_width ~config ~keeper_name
-             ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-             (P.end_atom smaller - P.start_atom smaller);
-           report O.Not_committed O.Narrowed_for_next_signal
-             (Printf.sprintf
-                "the next pass reads %d atoms instead of %d; cause=%s"
-                (P.end_atom smaller - P.start_atom smaller)
-                (P.end_atom selected - P.start_atom selected)
-                (cause_detail ()))
          | None ->
-           (* An existing Memory receipt can cover several atoms and cannot be
-              split. Infer the continuation without publishing partial state;
-              the original prepared range remains the sole commit boundary. *)
+           (* Existing indivisible-source descent: the original range cannot
+              be shrunk, so the message walk retains its publication boundary. *)
            (match memory_committed, input.messages with
             | true, _ :: _ -> message_floor ~selected ~input
             | false, _ :: _ -> memory_message_floor ~selected ~input
             | false, [] | true, [] ->
-              report O.Not_committed O.Indivisible_unit_uncommitted
-                (Printf.sprintf "one unit remains and the pass did not commit; cause=%s" (cause_detail ()))))
+              report O.Not_committed O.Indivisible_unit_uncommitted (cause_detail ()))
+         | Some _ ->
+        match P.memory_range_id ~config ~keeper_name selected with
+         | Error detail -> report O.Input_unavailable O.Input_build_failed detail
+         | Ok source ->
+           let oldest = P.oldest_completed_turn selected in
+           let mode = if P.end_atom oldest < P.end_atom selected
+             then Oldest_turn else Oldest_turn_messages in
+           let messages = match mode with
+             | Oldest_turn -> Ok []
+             | Oldest_turn_messages -> P.memory_sources selected in
+           (match messages with
+            | Error detail -> report O.Input_unavailable O.Input_build_failed detail
+            | Ok messages ->
+           remember_read_limit ~config ~keeper_name ~source ~messages mode;
+           report O.Not_committed O.Narrowed_for_next_signal
+             (Printf.sprintf "the next signal reads %s; cause=%s"
+                (match mode with Oldest_turn -> "the oldest completed turn"
+                 | Oldest_turn_messages -> "messages of the refused original range")
+                (cause_detail ()))))
       | Some observed ->
         remember_input_capacity ~config ~keeper_name observed;
         capacity := Some observed;
         (* A CLI slot named the character limit it refused at, so the size
            that fits is computed rather than searched: this arm retries inside
-           the pass and records no width, where the arm above, which only
+           the pass and records no source mode, where the arm above, which only
            knows that something was too large, steps down once and waits. *)
         let fitted = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
           Runtime.fit_continuity ~capacity:observed ~base_path
@@ -605,7 +630,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
              (P.end_atom selected) (P.end_atom smaller);
            attempt ~keeper_id meta smaller
          | Ok (Some _) ->
-           report O.Capacity_refused O.Observed_capacity_disagrees "provider capacity refusal disagrees with local prompt measurement")
+           report O.Capacity_refused O.Observed_capacity_disagrees "provider capacity refusal disagrees with local prompt measurement"))
   and memory_message_floor ~selected ~(input : Keeper_librarian.input) =
     let module Current = Keeper_memory_os_current in
     let module Floor = Keeper_librarian_message_floor in
@@ -665,6 +690,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
            (Printf.sprintf "message floor publication stopped; Memory committed=%b; %s"
               !published_memory detail)
        | Ok _ ->
+         committed_read_limit ~config ~keeper_name;
          (match served_by with
           | Some (Runtime.Api_slot _) ->
             forget_input_capacity ~config ~keeper_name; capacity := None
@@ -750,6 +776,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
         (match result with
          | Error detail -> report O.Not_committed O.Input_build_failed detail
          | Ok _ ->
+           committed_read_limit ~config ~keeper_name;
            (match served_by with
             | Some (Runtime.Api_slot _) ->
               forget_input_capacity ~config ~keeper_name; capacity := None
@@ -775,7 +802,7 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
    capture ends without a model call; a pass is still needed once the
    inputs change, a pocket needs reconsideration, or a store unread at the
    last pass can be read. The record lives in this process's memory only,
-   like [limited_widths]: another writer's version or a restart falls back
+   like [limited_reads]: another writer's version or a restart falls back
    to the stored references, at the cost of at most one pass. *)
 type observed_inputs =
   { version : Keeper_librarian_context.version
@@ -1010,7 +1037,8 @@ let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
 ;;
 
 module For_testing = struct
-  let limited_width = limited_width
+  let read_limit ~config ~keeper_name ~trace_id =
+    Option.map (fun limited -> limited.mode) (limited_read ~config ~keeper_name ~trace_id)
   let last_input_capacity = last_input_capacity
   let merge_not_committed = merge_not_committed
   let run_continuity = run_continuity

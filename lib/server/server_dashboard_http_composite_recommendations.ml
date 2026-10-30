@@ -14,16 +14,9 @@ let fleet_fsm_action_payload ~keeper_name ~kind ~reason ~snapshot ~execution =
 ;;
 
 let fleet_fsm_message_payload ~keeper_name ~reason ~snapshot ~execution =
-  let message =
-    Printf.sprintf
-      "Fleet FSM supervised resolve request for %s.\n\
-       Reason: %s.\n\
-       Inspect the latest runtime evidence, distinguish configuration/tool-contract \
-       blockers from restartable runtime stalls, and reply with the safest next operator \
-       action. Do not self-restart."
-      keeper_name
-      reason
-  in
+  let open Result.Syntax in
+  let+ message = Prompt_registry.render_prompt_template Prompt_names.keeper_fleet_diagnose
+    ["keeper_name", keeper_name; "reason", reason] in
   match
     fleet_fsm_action_payload ~keeper_name ~kind:"diagnose" ~reason ~snapshot ~execution
   with
@@ -39,21 +32,19 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
     { action; target_id = Some keeper_name; severity; reason; suggested_payload }
   in
   let probe action_reason =
-    make
+    Ok (make
       Operator_action_catalog.Keeper_probe
       Operator_digest_types.Sev_warn
       action_reason
-      (fleet_fsm_action_payload ~keeper_name ~kind:"probe" ~reason ~snapshot ~execution)
+      (fleet_fsm_action_payload ~keeper_name ~kind:"probe" ~reason ~snapshot ~execution))
   in
   let message action_reason =
-    make
-      Operator_action_catalog.Keeper_message
-      Operator_digest_types.Sev_warn
-      action_reason
-      (fleet_fsm_message_payload ~keeper_name ~reason:action_reason ~snapshot ~execution)
+    fleet_fsm_message_payload ~keeper_name ~reason:action_reason ~snapshot ~execution
+    |> Result.map (make Operator_action_catalog.Keeper_message
+         Operator_digest_types.Sev_warn action_reason)
   in
   let recover action_reason =
-    make
+    Ok (make
       Operator_action_catalog.Keeper_recover
       Operator_digest_types.Sev_bad
       action_reason
@@ -62,7 +53,7 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
          ~kind:"recover"
          ~reason:action_reason
          ~snapshot
-         ~execution)
+         ~execution))
   in
   let actions =
     if not attention.cra_needs_attention
@@ -94,6 +85,12 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution ~attent
   in
   `List
     (actions
+     |> List.filter_map (function
+       | Ok action -> Some action
+       | Error detail ->
+         Log.Keeper.warn ~keeper_name
+           "Fleet diagnostic recommendation unavailable: %s" detail;
+         None)
      |> Operator_digest_types.dedup_recommendations
      |> List.map (Operator_digest_types.recommended_action_to_yojson ~actor:"fleet_fsm"))
 ;;

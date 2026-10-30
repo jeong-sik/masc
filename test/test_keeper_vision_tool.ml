@@ -206,6 +206,15 @@ let test_structured_response_states_never_accept_valid_vision_json () =
    (NOT the raw bytes), media_type preserved, source_type "base64". The JSON
    response contract is explicit prompt prose because the provider request has
    [response_format = Off]. *)
+let with_managed_prompt key value f =
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  let set value = match Prompt_registry.set_override key value with
+    | Ok () -> () | Error detail -> failwith detail in
+  set value;
+  Fun.protect ~finally:(fun () -> match previous with
+    | Some value -> set value
+    | None -> Prompt_registry.clear_prompt_override key) f
+
 let test_message_of_request () =
   let bytes = "\x89PNG\r\n\x1a\n\x00raw\xffbytes" in
   match
@@ -214,13 +223,12 @@ let test_message_of_request () =
   with
   | Error e -> failwith e
   | Ok req ->
-    let msg = Vt.message_of_request req in
+    let prompt = "FROZEN_VISION_REQUEST" in
+    let msg = Vt.message_of_request ~prompt req in
     assert (msg.Llm_provider.Types.role = Agent_core.Types.User);
     (match msg.Llm_provider.Types.content with
      | [ Llm_provider.Types.Text q; Llm_provider.Types.Image img ] ->
-       assert (String_util.contains_substring q "what color?");
-       assert (String_util.contains_substring q "Return only a JSON object");
-       assert (String_util.contains_substring q "field named text");
+       assert (String.equal q prompt);
        assert (String.equal img.media_type "image/png");
        assert (
          String.equal
@@ -2670,7 +2678,29 @@ let test_artifact_failures_are_classified () =
 (* Real PNG bytes through the production sandbox runner and store, with a fake
    Docker transport and provider spy. This proves byte admission/transport, not
    an actual container execution or semantic image understanding. *)
+let test_missing_vision_guidance_never_calls_provider () =
+  let directory = match Prompt_registry.get_markdown_dir () with
+    | Some value -> value | None -> failwith "fixture prompt directory unavailable" in
+  let empty = Filename.temp_dir "missing-vision-guidance-" "" in
+  Fun.protect
+    ~finally:(fun () -> Prompt_registry.set_markdown_dir directory; Fs_compat.remove_tree empty)
+    (fun () ->
+      Prompt_registry.set_markdown_dir empty;
+      with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
+        Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+          let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages:_ ?tools:_ () =
+            failwith "missing guidance reached provider" in
+          let result = Vt.run_vision ~complete ~sw ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env) ~query:"Read the image"
+            ~media_type:"image/png"
+            ~bytes:(Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=") () in
+          match result with
+          | Vt.Vo_provider {failure_class=Tool_result.Runtime_failure;_} -> ()
+          | _ -> failwith "missing guidance was not a runtime configuration failure"))))
+
 let test_generated_sandbox_image_reaches_vision () =
+  with_managed_prompt Prompt_names.keeper_vision_request_header "MANAGED_VISION_HEADER" @@ fun () ->
+  with_managed_prompt Prompt_names.keeper_vision_output "MANAGED_VISION_OUTPUT" @@ fun () ->
   with_temp_runtime_toml image_capable_vision_runtime_toml (fun () ->
     with_temp_base (fun base ->
       Masc_test_deps.write_sandbox_image_catalog ~base_path:base [ "base", "alpine:test" ];
@@ -2709,6 +2739,7 @@ let test_generated_sandbox_image_reaches_vision () =
         let complete ~sw:_ ~net:_ ~clock:_ ~config:_ ~messages ?tools:_ () =
           incr calls;
           let expected = Vt.message_of_request
+              ~prompt:"MANAGED_VISION_HEADER\nread generated image\n\nMANAGED_VISION_OUTPUT"
               { Va.query = "read generated image"; image_media_type = "image/png"; image_bytes = bytes } in
           assert (messages = [expected]);
           Ok (ok_response "generated image read") in
@@ -2908,6 +2939,7 @@ let run_all () =
   test_native_image_read_artifact_and_authority ();
   test_native_image_admission ();
   test_structured_response_states_never_accept_valid_vision_json ();
+  test_missing_vision_guidance_never_calls_provider ();
   test_generated_sandbox_image_reaches_vision ();
   test_artifact_failures_are_classified ();
   test_browser_screenshot_rejects_invalid_client ();

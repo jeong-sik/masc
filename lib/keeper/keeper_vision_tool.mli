@@ -40,9 +40,11 @@ val validate_image_size : string -> (unit, string) result
 (** Validate raw image bytes against {!max_image_bytes}. *)
 
 val message_of_request
-  :  Multimodal.Vision_analyze.request
+  :  prompt:string
+  -> Multimodal.Vision_analyze.request
   -> Llm_provider.Types.message
-(** One-shot user message [text query; image], with bytes base64-encoded and
+(** One-shot user message with an already rendered prompt and image. The
+    caller retains query text structurally beside managed guidance. Bytes are base64-encoded and
     an [Llm_provider.Types.Base64] source (the OpenAI/ollama serializer emits
     [data:<media_type>;base64,<data>]). *)
 

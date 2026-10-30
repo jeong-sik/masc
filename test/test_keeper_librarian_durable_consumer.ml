@@ -4055,6 +4055,126 @@ let test_untagged_fragments_are_passed_without_a_commit () =
   | Consumer.Memory_not_committed _ -> fail "the untagged line was not passed"
 ;;
 
+let test_untagged_turn_preserves_counterparts ~fail_position_after_commit () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-untagged-counterparts" in
+  let base_dir = config.Workspace.base_path in
+  write_meta config trace_id;
+  let path = Masc.Keeper_turn_fragments.path
+      ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_id)
+      Masc.Keeper_turn_fragments.Main in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path
+    ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External } in
+  Keeper_chat_store.append_user_message ~base_dir ~keeper_name ~speaker
+    ~content:"independent chat" ();
+  let surface = Keeper_external_attention.Agent in
+  let conversation_id = "agent:untagged" and message_id = "untagged-external" in
+  let now = Time_compat.now () in
+  let item : Keeper_external_attention.item =
+    { event_id = Keeper_external_attention.event_id_of_dedupe_key message_id
+    ; dedupe_key = message_id; keeper_name
+    ; conversation = { conversation_id; surface }
+    ; external_message = Some { surface; message_id; reply_to_message_id = None }
+    ; source_label = "agent"
+    ; actor = { actor_id = Some "external"; display_name = Some "External"
+              ; authority = Keeper_chat_store.External }
+    ; urgency = Keeper_external_attention.Ambient
+    ; content_preview = "external delivery"; content_ref = None; received_at = now; metadata = [] } in
+  (match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> now)
+      ~base_path:base_dir item with
+   | `Recorded -> ()
+   | `Duplicate _ -> fail "duplicate external fixture"
+   | `Error detail -> fail detail);
+  Keeper_chat_store.append_user_message ~base_dir ~keeper_name ~speaker
+    ~conversation_id ~external_message_id:message_id ~content:"external delivery" ();
+  let first_end = Time_compat.now () +. 100. in
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:first_end;
+  let external_path = Masc.Keeper_external_read_cursor.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
+  let check_external ~after ~prepared =
+    let open Yojson.Safe.Util in
+    let state = Fs_compat.load_file external_path |> Yojson.Safe.from_string in
+    check int "external offset" after (member "after" state |> to_int);
+    check bool "external preparation" prepared (member "pending" state <> `Null) in
+  let check_input original =
+    let input = Original.input original in
+    check (list string) "untagged turn has no messages" [] (text_markers input);
+    check (list string) "independent chat and external delivery each appear once"
+      ["external delivery"; "independent chat"]
+      (List.sort String.compare (counterpart_contents input));
+    check bool "official receipt remains bound to the turn" true
+      (Option.is_some (Original.official_range_id original));
+    input in
+  (match consume config (fun original -> ignore (check_input original); Consumer.Memory_pending) with
+   | Consumer.Pending -> () | _ -> fail "counterparts did not remain pending");
+  check bool "pending preserves the official cursor" true (Option.is_none (read_official config));
+  check_external ~after:0 ~prepared:true;
+  (match consume config (fun original -> ignore (check_input original); Consumer.Memory_refused []) with
+   | Consumer.Memory_not_committed [] -> () | _ -> fail "refused counterpart input advanced");
+  check bool "refusal preserves the official cursor" true (Option.is_none (read_official config));
+  check_external ~after:0 ~prepared:true;
+  let commits = ref 0 in
+  let commit original =
+    let input = check_input original in
+    incr commits;
+    commit_pending_memory config ~expected_revision:(Original.expected_revision original)
+      ~range_id:(Original.range_id original) ~official_range_id:(Original.official_range_id original) input in
+  if fail_position_after_commit then (
+    let fail_official ~keepers_dir:_ ~keeper_id:_ _ =
+      Error (Official.Write_failed { path = "injected-official-progress"; message = "write failed" }) in
+    (match Consumer.For_testing.consume_one_with_progress_writer
+        ~write_progress_store:Progress.write ~write_official_progress_store:fail_official
+        ~config ~keeper_name ~commit with
+     | Error (Consumer.Official_progress_write_failed _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "official cursor failure was not reported");
+    check bool "failed cursor write leaves the official position" true (Option.is_none (read_official config));
+    check_external ~after:1 ~prepared:false;
+    (match consume config (fun _ -> fail "committed counterparts were synthesized twice") with
+     | Consumer.Official_advanced { atom = None; official } ->
+       check int "receipt recovers the official position" 1 official.boundary_line
+     | _ -> fail "receipt did not recover the official position"))
+  else
+    (match consume config commit with
+     | Consumer.Official_advanced { atom = None; official } ->
+       check int "successful commit advances the official position" 1 official.boundary_line
+     | _ -> fail "counterparts were not committed");
+  check int "the original input was committed once" 1 !commits;
+  check_external ~after:1 ~prepared:false;
+  write_official_turn config ~trace_id ~turn:2 ~user:"next question" ~assistant:"next answer" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:(first_end +. 100.);
+  (match consume config (fun original ->
+       let input = Original.input original in
+       check (list string) "the next turn does not repeat counterparts" [] (counterpart_contents input);
+       commit_pending_memory config ~expected_revision:(Original.expected_revision original)
+         ~range_id:(Original.range_id original) ~official_range_id:(Original.official_range_id original) input) with
+   | Consumer.Official_advanced { atom = None; official } ->
+     check int "next turn advances normally" 2 official.boundary_line
+   | _ -> fail "the following official turn did not commit");
+  (match consume config (fun _ -> fail "settled input was read again") with
+   | Consumer.Nothing_to_read -> () | _ -> fail "settled input remains unread")
+;;
+
+let test_untagged_turn_with_unreadable_counterparts_keeps_cursor () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-untagged-unreadable-counterpart" in
+  write_meta config trace_id;
+  let path = Keeper_chat_store.chat_path ~base_dir:config.Workspace.base_path ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path
+    ({|{"id":"broken","role":"user","content":"unreadable","ts":1.0,"speaker_id":"external"}|} ^ "\n");
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:2.;
+  (match Consumer.consume_one ~config ~keeper_name ~commit:(fun _ -> fail "unreadable chat committed") with
+   | Error (Consumer.Counterpart_observations_unreadable _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "unreadable chat advanced the official cursor");
+  check bool "unreadable chat preserves the official cursor" true (Option.is_none (read_official config))
+;;
+
 (* A history line the decoder refuses, after the first named one, stops the
    pass with a typed error naming the line; nothing is skipped. *)
 let test_a_refused_fragment_line_stops_the_pass () =
@@ -4822,6 +4942,12 @@ let () =
             (test_official_receipt_rejects_replaced_history ~bad_message_hash:true)
         ; test_case "untagged fragments are passed without a commit" `Quick
             test_untagged_fragments_are_passed_without_a_commit
+        ; test_case "untagged turn retains counterpart observations" `Quick
+            (test_untagged_turn_preserves_counterparts ~fail_position_after_commit:false)
+        ; test_case "untagged counterparts recover a failed cursor write" `Quick
+            (test_untagged_turn_preserves_counterparts ~fail_position_after_commit:true)
+        ; test_case "untagged turn cannot skip unreadable counterpart input" `Quick
+            test_untagged_turn_with_unreadable_counterparts_keeps_cursor
         ; test_case "a refused fragment line stops the pass" `Quick
             test_a_refused_fragment_line_stops_the_pass
         ; test_case "an official line older than the baseline is read" `Quick

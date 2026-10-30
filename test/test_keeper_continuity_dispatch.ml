@@ -220,7 +220,7 @@ let test_real_dispatch_freezes_unread_across_refusal () =
       (has_content rows "Build the patch.");
     let row=match List.find_opt (fun row -> U.member "runtime_id" row=`String runtime) evidence with
       | Some row -> row | None -> fail "frozen request diagnostic missing" in
-    check string "diagnostic uses the unread observation schema" "masc.continuity-request.v2"
+    check string "diagnostic uses the unread observation schema" "masc.continuity-request.v3"
       (row |> U.member "schema" |> U.to_string);
     check bool "diagnostic binds precisely the sent frozen observation" true
       (U.member "unread" row=Frozen.to_json frozen);

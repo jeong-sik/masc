@@ -25,6 +25,7 @@ let keeper_suffix_raw_traces = "/raw-traces"
 let keeper_suffix_raw_trace = "/raw-trace"
 let keeper_suffix_provider_input = "/provider-input"
 let keeper_suffix_provider_input_part = "/provider-input/part"
+let keeper_suffix_provider_input_continuity = "/provider-input/continuity"
 let keeper_suffix_memory_journal = "/memory-journal"
 let keeper_suffix_memory_facts = "/memory-facts"
 let keeper_suffix_working_context = "/working-context"
@@ -216,6 +217,7 @@ let keeper_get_permission ?(include_thinking = false) req_path =
     (* Same data, same gate: a part is one item of the request the list
        door above describes. *)
     || keeper_path_ends_with req_path keeper_suffix_provider_input_part
+    || keeper_path_ends_with req_path keeper_suffix_provider_input_continuity
     || keeper_path_ends_with req_path keeper_suffix_memory_journal
     (* Same data, same gate: the fact rows are the journal's committed
        content, read back as the current set. *)

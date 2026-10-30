@@ -1641,7 +1641,7 @@ let measurement_text_lines ~width lines =
         |> List.map (fun line -> style, line)))
     lines
 
-let measurement_input_lines ~width ~sha256 (measurement : Measurement.t) =
+let measurement_input_lines ~width ~sha256 (measurement : Measurement.snapshot) =
   let report = measurement.report in
   let module R = Continuity_report in
   let metadata =
@@ -1753,24 +1753,99 @@ let measurement_output_lines ~width (report : Continuity_report.t) =
   in
   measurement_output_preview ~width ~output_path:report.output_path (probabilities @ samples)
 
+module Temporal = Masc.Tui_decode_temporal_continuity
+
+let temporal_summary_lines (report : Temporal.t) =
+  let provenance = match report.provenance with
+    | Temporal.Live_keeper -> "LIVE KEEPER CAPTURE"
+    | Temporal.Assessment -> "ASSESSMENT OF CAPTURED EVIDENCE" in
+  let status = match report.status with
+    | Temporal.Recording -> "RECORDING" | Temporal.Recorded -> "RECORDED"
+    | Temporal.Incomplete -> "INCOMPLETE" in
+  [ Ansi.reset, "  KEEPER CONTINUITY  " ^ Terminal_text.single_line report.keeper
+  ; Ansi.dim, "  " ^ provenance ^ "  ·  " ^ status
+  ; Ansi.dim, "  " ^ Terminal_text.single_line report.started_at
+      ^ "  ·  " ^ string_of_int (List.length report.timeline) ^ " STEPS · NO VERDICT"
+  ]
+
+let temporal_input_lines ~width ~sha256 (report : Temporal.t) =
+  let optional label = function None -> [label ^ "unavailable"] | Some value -> [label ^ value] in
+  let metadata =
+    [ "AUTHORITATIVE REPORT  " ^ report.report_path
+    ; "REPORT SHA256  " ^ report.report_sha256
+    ; "VIEW BLOB SHA256  " ^ sha256
+    ; "HARNESS SHA256  " ^ report.harness_source_sha256 ]
+    @ optional "SOURCE CAPTURE SHA256  " report.source_capture_sha256
+    @ optional "BINARY COMMIT  " report.binary_commit
+    @ optional "EXECUTABLE SHA256  " report.executable_sha256
+    @ [ "Durable originals are retained. Omission describes prepared organic ranges."
+      ; "Provider receipt and Librarian-only causal attribution remain unestablished."
+      ; "Probabilities are separate observations with no pass threshold." ] in
+  measurement_text_lines ~width (List.map (fun text -> Ansi.dim, text) metadata)
+
+let temporal_output_lines ~width (report : Temporal.t) =
+  let module T = Temporal in
+  let natural = function None -> "unknown" | Some value -> string_of_int value in
+  let detail (value : T.omission_detail) =
+    ("TARGET EXCLUSIVE END  " ^ string_of_int value.target_end_atom)
+    :: List.concat_map (fun (request : T.request_range) ->
+      [ "REQUEST  " ^ request.capture_id ^ "  ·  W END " ^ natural request.summary_end_atom
+        ^ "  ·  ORGANIC FIRST " ^ string_of_int request.first_atom
+      ; "BODY SHA256  " ^ request.body_sha256 ]) value.requests in
+  let steps = List.concat_map (fun (step : T.step) ->
+    let kind = match step.kind with T.Message -> "MESSAGE" | T.Restart -> "LANE RESTART" | T.Await_summary -> "WAIT FOR W" in
+    let status = match step.status with
+      | T.Started -> "STARTED" | T.Collecting -> "COLLECTING" | T.Captured -> "CAPTURED"
+      | T.Restart_observed -> "RESTART OBSERVED" | T.Summary_ready_observed -> "W READY · READINESS ONLY" in
+    let identity = [step.id ^ "  ·  " ^ kind ^ "  ·  " ^ status]
+      @ (match step.turn_ref with None -> [] | Some value -> ["TURN  " ^ value])
+      @ (match step.operation_state with None -> [] | Some value -> ["OPERATION  " ^ value])
+      @ (match step.kind with T.Message -> ["W MESSAGES IN LAST REQUEST  " ^ natural step.working_state_messages] | _ -> [])
+      @ (match step.target_end_atom with None -> [] | Some value -> ["WAIT TARGET END  " ^ string_of_int value]) in
+    let omitted = match step.omission with
+      | T.Not_requested -> []
+      | T.Omission_unavailable reason -> ["PREFIX OMISSION  UNAVAILABLE"; reason]
+      | T.Not_observed (reason, value) -> ["PREFIX OMISSION  NOT OBSERVED"; reason] @ detail value
+      | T.Observed value -> ["PREFIX OMISSION  OBSERVED · ALL ATTRIBUTED PREPARED REQUESTS"] @ detail value in
+    let judgments = List.map (fun (value : T.judgment) ->
+      let scope = match value.scope with T.Reply -> "reply" | T.Working_state -> "W" | T.Tool_calls -> "tool calls" in
+      let observation = match value.result with
+        | T.Unavailable -> "unavailable" | T.Pending -> "pending"
+        | T.Measured { probability; model } ->
+          "p=" ^ Yojson.Safe.to_string (`Float probability) ^ "  ·  " ^ model in
+      value.criterion_id ^ " (" ^ scope ^ ")  " ^ observation) step.judgments in
+    let working_state = match step.working_state with
+      | None | Some [] -> []
+      | Some messages -> ["W IN LAST PREPARED REQUEST"; Yojson.Safe.pretty_to_string (`List messages)] in
+    [Ansi.dim, ""] @ List.map (fun value -> Ansi.reset, value)
+      (identity @ omitted @ working_state
+       @ (if step.reply = [] then [] else "ORIGINAL REPLY" :: step.reply) @ judgments)) report.timeline in
+  let errors = match report.error with None -> [] | Some value -> [Theme.warn (), value] in
+  measurement_output_preview ~width ~output_path:report.report_path (errors @ steps)
+
 let inspection_summary_lines ~cols = function
   | Inspection_lane detail -> lane_run_summary_lines ~cols detail
-  | Inspection_measurement (_, measurement) -> measurement_summary_lines measurement.report
+  | Inspection_measurement (_, Measurement.Snapshot measurement) -> measurement_summary_lines measurement.report
+  | Inspection_measurement (_, Measurement.Temporal report) -> temporal_summary_lines report
 
 let inspection_panel_titles = function
   | Inspection_lane detail -> lane_run_panel_titles detail
-  | Inspection_measurement (_, measurement) ->
+  | Inspection_measurement (_, Measurement.Snapshot measurement) ->
     (match measurement.report.provenance with
      | Continuity_report.Synthetic -> "INPUT · SYNTHETIC CASES"),
     "OBSERVATIONS · NO VERDICT"
+  | Inspection_measurement (_, Measurement.Temporal _) ->
+    "SOURCE · PREPARED REQUEST EVIDENCE", "TIMELINE · NO VERDICT"
 
 let inspection_input_lines ~width = function
   | Inspection_lane detail -> lane_run_input_lines ~width detail
-  | Inspection_measurement (sha256, report) -> measurement_input_lines ~width ~sha256 report
+  | Inspection_measurement (sha256, Measurement.Snapshot report) -> measurement_input_lines ~width ~sha256 report
+  | Inspection_measurement (sha256, Measurement.Temporal report) -> temporal_input_lines ~width ~sha256 report
 
 let inspection_output_lines ~details ~width = function
   | Inspection_lane detail -> lane_run_output_lines ~details ~width detail
-  | Inspection_measurement (_, measurement) -> measurement_output_lines ~width measurement.report
+  | Inspection_measurement (_, Measurement.Snapshot measurement) -> measurement_output_lines ~width measurement.report
+  | Inspection_measurement (_, Measurement.Temporal report) -> temporal_output_lines ~width report
 
 let lane_run_stacked_lines ~details ~width detail =
   let input_title, output_title = inspection_panel_titles detail in

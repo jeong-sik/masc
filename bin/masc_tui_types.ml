@@ -3278,7 +3278,8 @@ type lanes_mode =
 module Measurement = struct
   module R = Masc.Librarian_continuity_report
 
-  type t = { report : R.t; context_hashes : (string * string) list }
+  type snapshot = { report : R.t; context_hashes : (string * string) list }
+  type t = Snapshot of snapshot | Temporal of Masc.Tui_decode_temporal_continuity.t
 
   type counts = { scored : int; failed : int; incomplete : int }
 
@@ -3316,13 +3317,18 @@ module Measurement = struct
            else
              (match Yojson.Safe.from_string content with
               | json ->
-                Result.map (fun (report : R.t) ->
+                let schema = match json with
+                  | `Assoc fields -> List.assoc_opt "schema" fields | _ -> None in
+                if schema = Some (`String Masc.Tui_decode_temporal_continuity.schema) then
+                  Result.map (fun report -> Temporal report)
+                    (Masc.Tui_decode_temporal_continuity.of_yojson json)
+                else Result.map (fun (report : R.t) ->
                   let context_hashes = List.map (fun (sample : R.sample) ->
                     sample.case.id,
                     Agent_core_sha256.(to_hex (digest_string
                       (Yojson.Safe.to_string (R.answer_context_to_yojson sample.case.context)))))
                     report.samples in
-                  { report; context_hashes }) (R.of_yojson json)
+                  Snapshot { report; context_hashes }) (R.of_yojson json)
               | exception Yojson.Json_error detail ->
                 Error ("Measurement artifact is not JSON: " ^ detail))
        | _ -> Error "Measurement artifact response requires sha256, bytes and content fields")

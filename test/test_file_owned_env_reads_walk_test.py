@@ -13,6 +13,27 @@ import test_byte_cut_previews as byte_cut
 import test_file_owned_env_reads as env_reads
 
 
+class MappedScandir:
+    """Keep scandir's iterator and context-manager protocols when mapping entries."""
+
+    def __init__(self, entries, convert):
+        self.entries = entries
+        self.convert = convert
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return self.convert(next(self.entries))
+
+    def __enter__(self):
+        self.entries.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self.entries.__exit__(*args)
+
+
 class SourceWalkTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -36,7 +57,6 @@ class SourceWalkTest(unittest.TestCase):
             raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
         return self.real_scandir(path)
 
-    @contextlib.contextmanager
     def deny_entry_type(self, path, vanished=False, denied=None):
         denied = self.denied if denied is None else denied
 
@@ -50,8 +70,10 @@ class SourceWalkTest(unittest.TestCase):
                     return False
                 raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), self.path)
 
-        with self.real_scandir(path) as entries:
-            yield (UnreadableEntry(entry) if Path(entry.path) == denied else entry for entry in entries)
+        return MappedScandir(
+            self.real_scandir(path),
+            lambda entry: UnreadableEntry(entry) if Path(entry.path) == denied else entry,
+        )
 
     def deny_lstat(self, path, *args, **kwargs):
         if Path(path) == self.denied:
@@ -74,6 +96,30 @@ class SourceWalkTest(unittest.TestCase):
     def test_environment_scan_rejects_an_incomplete_walk(self):
         with mock.patch("os.scandir", side_effect=self.deny_directory):
             self.assert_incomplete_walk_fails()
+
+    def test_scandir_mock_supports_both_walk_iterator_protocols(self):
+        def check(entries):
+            paths = set()
+            while True:
+                try:
+                    entry = next(entries)
+                except StopIteration:
+                    break
+                paths.add(Path(entry.path))
+                if Path(entry.path) == self.denied:
+                    with self.assertRaises(PermissionError):
+                        entry.is_dir()
+            self.assertEqual(paths, {self.safe, self.denied})
+
+        # Python 3.12 walks by calling next() on the context manager itself.
+        scanner = self.deny_entry_type(self.sources)
+        with scanner:
+            self.assertIs(iter(scanner), scanner)
+            check(scanner)
+        # Newer Python walks the value returned by __enter__ instead.
+        with self.deny_entry_type(self.sources) as entries:
+            self.assertIs(iter(entries), entries)
+            check(entries)
 
     def test_environment_scan_rejects_an_unknown_entry_type(self):
         with mock.patch("os.scandir", side_effect=self.deny_entry_type):
@@ -122,10 +168,11 @@ class SourceWalkTest(unittest.TestCase):
                 os.replace(replacement, self.path)
                 return result
 
-        @contextlib.contextmanager
         def replace_after_is_dir(path):
-            with self.real_scandir(path) as entries:
-                yield (ReplacedEntry(entry) if Path(entry.path) == racing else entry for entry in entries)
+            return MappedScandir(
+                self.real_scandir(path),
+                lambda entry: ReplacedEntry(entry) if Path(entry.path) == racing else entry,
+            )
 
         output = io.StringIO()
         with mock.patch("os.scandir", side_effect=replace_after_is_dir):

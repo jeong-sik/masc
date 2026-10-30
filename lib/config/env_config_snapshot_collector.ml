@@ -21,7 +21,14 @@ let entry
       description
   =
   { spec = Env_config_snapshot_core.make_spec ~sensitive ~default env_name description
-  ; collect = (fun () -> Env_config_snapshot_core.Raw_environment (getenv env_name))
+  ; collect =
+      (fun () ->
+        (* A name the runtime file alone feeds is answered from the file: the
+           shell that started the server does not change what the server runs,
+           so it must not be shown as if it did. *)
+        if Config_boot_overrides.is_file_owned env_name
+        then Env_config_snapshot_core.Runtime_file (Config_boot_overrides.get_opt env_name)
+        else Env_config_snapshot_core.Raw_environment (getenv env_name))
   }
 ;;
 

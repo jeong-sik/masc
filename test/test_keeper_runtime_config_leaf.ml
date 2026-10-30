@@ -44,17 +44,23 @@ let test_memory_count_settings () =
 
 let test_resolve_overrides_keeps_env_precedence () =
   let env_lookup = function
-    | "MASC_KEEPER_BATCH_LIMIT" -> Some "from-env"
+    | "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" | "MASC_KEEPER_BATCH_LIMIT" -> Some "from-env"
     | _ -> None
   in
   let count, overrides =
     K.resolve_overrides
       ~env_lookup
-      [ "turn.batch_limit", T.Toml_int 9; "turn.temperature", T.Toml_float 0.25 ]
+      [ "heartbeat.interval_sec", T.Toml_int 9
+      ; "turn.batch_limit", T.Toml_int 9
+      ; "turn.temperature", T.Toml_float 0.25
+      ]
   in
-  check int "count" 1 count;
-  check (option string) "env preempts toml"
+  check int "count" 2 count;
+  check (option string) "env preempts a row that still reads the environment"
     None
+    (List.assoc_opt "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" overrides);
+  check (option string) "env does not preempt a row the file alone feeds"
+    (Some "9")
     (List.assoc_opt "MASC_KEEPER_BATCH_LIMIT" overrides);
   check (option string) "unset key applies"
     (Some "0.25")
@@ -72,13 +78,13 @@ let test_h2_listener_capacity_maps_from_toml () =
     (List.assoc_opt "MASC_H2_MAX_PENDING_RESPONSE_BYTES" overrides)
 ;;
 
-let test_h2_listener_capacity_rejects_invalid_env () =
-  let name="MASC_H2_MAX_CONCURRENT_STREAMS" in
-  let previous=Sys.getenv_opt name in
-  Fun.protect ~finally:(fun () -> match previous with
-    | Some value -> Unix.putenv name value | None -> Unix.unsetenv name)
-    (fun () -> List.iter (fun value ->
-      Unix.putenv name value;
+let test_h2_listener_capacity_rejects_invalid_values () =
+  let name = "MASC_H2_MAX_CONCURRENT_STREAMS" in
+  Fun.protect ~finally:Config_boot_overrides.reset_for_tests (fun () ->
+    List.iter (fun value ->
+      Config_boot_overrides.reset_for_tests ();
+      Config_boot_overrides.declare_file_owned [name];
+      Config_boot_overrides.set name value;
       match H2_response_limits.max_concurrent_streams () with
       | _ -> failf "invalid transport capacity accepted: %S" value
       | exception Env_config_core.Config_error _ -> ())
@@ -162,7 +168,7 @@ let () =
         ; test_case "H2 listener capacities map from TOML" `Quick
             test_h2_listener_capacity_maps_from_toml
         ; test_case "invalid H2 capacity fails startup" `Quick
-            test_h2_listener_capacity_rejects_invalid_env
+            test_h2_listener_capacity_rejects_invalid_values
         ] )
     ; ( "setting_registry"
       , [ test_case "registry identities and consumers are valid" `Quick

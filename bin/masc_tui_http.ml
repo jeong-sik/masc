@@ -49,7 +49,7 @@ let preset_restore_timeout_sec = 120.0
    stops the lane for the restart, and that stop waits the turn out with no
    deadline of its own. The budget is the provider-call failsafe floor, so
    it cannot drift from the one deadline the code already maintains; observed
-   turns ran 12-160s (2026-09-21). An env or runtime.toml
+   turns ran 12-160s (2026-09-21). A runtime.toml
    provider_call_deadline_sec above the floor can still outlive this budget,
    and a healthy long turn can outlive any budget -- both drop the save; the
    server-side fix is #37612. *)

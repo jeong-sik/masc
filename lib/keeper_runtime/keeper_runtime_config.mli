@@ -14,7 +14,9 @@
 
     A row the registry declares [Toml_only] has no step 1: the process
     environment is not read for it, so the shell that started the server
-    cannot change what the file says.
+    cannot change what the file says. {!load_and_apply} declares those names to
+    {!Config_boot_overrides} before it reads anything; a name read before that
+    call is read with the process environment first.
 
     The TOML loader runs at server startup, after OCaml module initialization.
     It stores boot defaults in a process-local override table; TOML-backed
@@ -59,7 +61,12 @@ val load_failure_to_string : load_failure -> string
 (** Renders as before: "read <path>: <detail>", "parse …", "validate …". *)
 
 val load_and_apply : base_path:string -> (int, load_failure) result
-(** Validates the registry's effective readers before applying overrides, even
+(** Declares the registry's file-owned names first
+    ({!Config_boot_overrides.declare_file_owned}), so the validation below and
+    every later read of them leave the process environment out. A load that
+    fails withdraws the declaration.
+
+    Validates the registry's effective readers before applying overrides, even
     with no TOML file. Strict malformed environment input is a [Validate]
     failure at startup rather than a later Keeper-cycle exception. *)
 

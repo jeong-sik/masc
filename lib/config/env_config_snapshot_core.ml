@@ -29,6 +29,7 @@ type effective_source =
 
 type observation =
   | Raw_environment of string option
+  | Runtime_file of string option
   | Applied_value of
       { value : string
       ; source : effective_source
@@ -114,6 +115,24 @@ let source_provenance (spec : spec) ~raw_env raw =
       let provenance = default_provenance spec in
       { provenance with raw_env_present; raw_env_blank }
 
+(* A name the runtime file alone feeds: the shell is not consulted, so the
+   provenance never claims an environment variable. *)
+let runtime_file_provenance (spec : spec) raw =
+  match raw with
+  | Some _ ->
+      { kind = "runtime"
+      ; detail = "value from runtime.toml, loaded when the server started"
+      ; derived_from = []
+      ; env_name = spec.env_name
+      ; raw_source = "runtime_toml"
+      ; raw_env_present = false
+      ; raw_env_blank = false
+      ; default_display = spec.default_display
+      ; sensitive = spec.sensitive
+      ; value_redacted = spec.sensitive
+      }
+  | None -> default_provenance spec
+
 let applied_provenance (spec : spec) source =
   let raw_env_present = match source with Default -> false | Environment -> true in
   { kind = (match source with Default -> "default" | Environment -> "env")
@@ -151,6 +170,14 @@ let to_json (spec : spec) observation =
     | Applied_value { value; source } ->
       let value = if spec.sensitive then mask_sensitive value else value in
       applied_provenance spec source, Some value
+    | Runtime_file raw_file ->
+      let display_value =
+        match raw_file with
+        | Some v when spec.sensitive -> Some (mask_sensitive v)
+        | Some v -> Some v
+        | None -> None
+      in
+      runtime_file_provenance spec raw_file, display_value
     | Raw_environment raw_env ->
       let raw = String_util.option_trim raw_env in
       let provenance = source_provenance spec ~raw_env raw in

@@ -15,7 +15,7 @@
     rotated when it is at the limit, before the first row of the next
     judgment, so a judgment never splits across two files. The limit and the
     number of kept files are those of the other Keeper logs
-    ([MASC_KEEPER_METRICS_MAX_BYTES], [MASC_KEEPER_METRICS_MAX_ROTATED]).
+    ([metrics] max_bytes, max_rotated).
 
     A Keeper runs one turn at a time and a turn makes one judgment, so one
     file has one judgment writing to it. Two judgments of one Keeper at once

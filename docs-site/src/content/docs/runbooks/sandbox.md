@@ -111,13 +111,12 @@ microVM backend carries this mode). The default for `docker` and `microvm`
 is `none`, which is why `masc keeper-create` refuses to proceed without the
 flag rather than choosing for you.
 
-For microVM Keepers that need custom guest DNS resolvers, set `microvm_dns` under
-`[sandbox]` in `<base-path>/.masc/config/runtime.toml` (or via
-`MASC_KEEPER_MICROVM_DNS`):
+For microVM Keepers that need a custom guest DNS resolver, set `microvm_dns` under
+`[sandbox]` in `<base-path>/.masc/config/runtime.toml`:
 
 ```toml
 [sandbox]
-microvm_dns = ["1.1.1.1", "8.8.8.8"]
+microvm_dns = "1.1.1.1"
 ```
 
 ---

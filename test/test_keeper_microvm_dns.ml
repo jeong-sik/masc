@@ -14,12 +14,9 @@ module Runtime = Masc.Keeper_turn_sandbox_runtime
 module Profile = Keeper_types_profile_sandbox
 module Backend = Masc.Keeper_microvm_backend
 
-let with_env name value f =
-  let previous = Sys.getenv_opt name in
-  Unix.putenv name value;
-  Fun.protect
-    ~finally:(fun () -> Unix.putenv name (Option.value previous ~default:""))
-    f
+(* The workspace's [sandbox] microvm_dns, as the loader leaves it. *)
+let with_file_dns value f =
+  Masc_test_deps.with_file_owned_values [ "MASC_KEEPER_MICROVM_DNS", value ] f
 ;;
 
 let refusal_label = function
@@ -217,9 +214,9 @@ let dns_row_error () =
 ;;
 
 let test_the_registry_row_reads_through_the_surface () =
-  with_env "MASC_KEEPER_MICROVM_DNS" "168.126.63.1" (fun () ->
+  with_file_dns "168.126.63.1" (fun () ->
     check bool "a usable value reads" true (dns_row_error () = `Null));
-  with_env "MASC_KEEPER_MICROVM_DNS" "fe80::1%en0" (fun () ->
+  with_file_dns "fe80::1%en0" (fun () ->
     check bool "an unusable value is a configuration error" true
       (dns_row_error () <> `Null))
 ;;
@@ -239,7 +236,7 @@ let boot_nameserver ~backend ~network_mode =
    refuses the default network later, with a refusal about msb: a nameserver
    requirement must not come first. *)
 let test_only_a_boot_that_spells_dns_reads_the_setting () =
-  with_env "MASC_KEEPER_MICROVM_DNS" "fe80::1%en0" (fun () ->
+  with_file_dns "fe80::1%en0" (fun () ->
     List.iter
       (fun backend ->
          check string "inherit refuses" "error"
@@ -254,7 +251,7 @@ let test_only_a_boot_that_spells_dns_reads_the_setting () =
       [ Backend.Apple_container; Backend.Nerdctl_kata; Backend.Microsandbox ];
     check string "microsandbox is not asked" "none"
       (boot_nameserver ~backend:Backend.Microsandbox ~network_mode:Profile.Network_inherit));
-  with_env "MASC_KEEPER_MICROVM_DNS" "168.126.63.1" (fun () ->
+  with_file_dns "168.126.63.1" (fun () ->
     List.iter
       (fun backend ->
          check string "the named nameserver is handed on" "ok 168.126.63.1"

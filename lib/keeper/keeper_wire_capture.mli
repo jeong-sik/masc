@@ -29,14 +29,14 @@
 
     Writes are best-effort and dated under
     [<masc_root>/wire-capture/YYYY-MM/DD.jsonl] (same [Dated_jsonl] per-day
-    store the cost ledger uses). [MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES] is
+    store the cost ledger uses). [wire_capture] max_bytes is
     the store byte budget: the current day file rotates to a completed
     [DD.NNN.jsonl] segment at an eighth of the budget and capture
     continues in a fresh file, while the budget prunes the oldest
     completed files — so a busy day keeps a ring of its newest segments
     and sheds its oldest instead of going dark after the cap
     ([Dated_jsonl.append_rotating]). The server's prune pass removes day
-    files older than [MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS], whether
+    files older than [wire_capture] retention_days, whether
     capture is on or off. A write failure is logged and never interrupts
     the turn.
 
@@ -51,12 +51,11 @@
     product prefixes or lengths. See
     [docs/masc-keeper-repetition-blast-radius-design-2026-07-02.html] (Phase O).
 
-    Disabled unless [MASC_KEEPER_WIRE_CAPTURE] is enabled through the feature
-    flag registry / runtime config. *)
+    Disabled unless [wire_capture] enabled is set in runtime.toml. *)
 
 val enabled : unit -> bool
-(** [enabled ()] is [true] when [MASC_KEEPER_WIRE_CAPTURE] is enabled through
-    {!Env_config_keeper.KeeperWireCapture}. When [false], {!capture_request} is
+(** [enabled ()] is [true] when [wire_capture] enabled is set, as
+    {!Env_config_keeper.KeeperWireCapture} reads it. When [false], {!capture_request} is
     a no-op with no filesystem access. *)
 
 val capture_request :

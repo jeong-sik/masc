@@ -115,8 +115,8 @@ enabled = true
 jsonl_retention_days = 30
 
 [sandbox]
-# Optional guest DNS servers for microVM Keepers (overridden by MASC_KEEPER_MICROVM_DNS).
-microvm_dns = ["1.1.1.1", "8.8.8.8"]
+# Optional nameserver for microVM Keeper guests (one IPv4 or IPv6 address).
+microvm_dns = "1.1.1.1"
 
 [tui]
 # Optional SoundFont (.sf2 / .sf3) path for Board MIDI attachment playback via fluidsynth.

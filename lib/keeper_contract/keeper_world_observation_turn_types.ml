@@ -90,7 +90,7 @@ type skip_reason =
   | No_periodic_or_scheduled_stimulus
   | Reactive_disabled
       (** RFC-0297 P0-1: the global reactive kill-switch
-          (MASC_KEEPER_REACTIVE_ENABLED) is off, so a pending reactive trigger
+          ([reactive] enabled) is off, so a pending reactive trigger
           (mention / board event / scope message) does not open a turn. *)
 
 type turn_verdict =

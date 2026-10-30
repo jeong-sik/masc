@@ -2145,7 +2145,7 @@ let run_turn
                                     after response finalization has applied
                                     suppression and internal-markup stripping. The
                                     capture is best-effort and gated by
-                                    MASC_KEEPER_WIRE_CAPTURE. *)
+                                    [wire_capture] enabled. *)
                                  Keeper_wire_capture.capture_response
                                    ~base_path:config.base_path
                                    ~keeper_name:meta.name

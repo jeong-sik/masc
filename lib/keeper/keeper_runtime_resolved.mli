@@ -1,7 +1,9 @@
 (** Keeper_runtime_resolved — freeze keeper runtime knobs after bootstrap.
 
-    Values resolve with the existing precedence order:
-    environment > runtime.toml boot override > compiled default.
+    The three turn deadlines ([stream_idle_timeout_sec],
+    [first_event_timeout_sec], [provider_call_deadline_sec]) resolve as
+    runtime.toml boot override > compiled default. The body timeout has no
+    runtime.toml key and reads the environment.
 
     Before [init] is called, readers see a live snapshot of the current env/boot
     override state. After [init], reads are frozen to the bootstrap snapshot so
@@ -53,12 +55,12 @@ val stream_idle_failsafe_floor_sec : float
     in seconds (600.0 = 10 min). Substituted for [stream_idle_timeout_sec] when
     no explicit value is configured, so a hung provider stream cannot freeze the
     keeper chat lane indefinitely (#25128). A universal liveness ceiling, not a
-    per-provider tuned default; an explicit env/toml value overrides it. *)
+    per-provider tuned default; an explicit runtime.toml value overrides it. *)
 
 val stream_idle_timeout_sec : unit -> float
 (** Streaming-provider inter-line idle-gap timeout, in seconds: an explicit
-    [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC] (or runtime.toml
-    [turn.stream_idle_timeout_sec]) honoured verbatim, or when unset the
+    runtime.toml [turn.stream_idle_timeout_sec] honoured verbatim, or when
+    unset the
     RFC-0345 fail-safe floor {!stream_idle_failsafe_floor_sec}, so a hung
     stream cannot freeze the keeper chat lane indefinitely (#25128). MASC
     does not synthesize a per-provider/model tuned default and does not clamp
@@ -77,7 +79,7 @@ val first_event_failsafe_floor_sec : float
     the much shorter inter-line idle knob through AGENT_CORE's fallback chain
     (RFC-AC-037; measured silent prefill: 152s mimo 1M-context, ~200-525s
     local MLX 20.7K-token keeper prompts). A universal liveness ceiling, not a
-    per-provider tuned default; an explicit env/toml value overrides it. *)
+    per-provider tuned default; an explicit runtime.toml value overrides it. *)
 
 val first_event_timeout_sec : unit -> float
 (** Streaming-provider first-event (TTFT/prefill) timeout, in seconds. One
@@ -85,8 +87,8 @@ val first_event_timeout_sec : unit -> float
     connection and response headers included (an opening frame such as
     Responses [response.created] neither ends
     it nor extends it); [stream_idle_timeout_sec] arms the inter-line gaps
-    after it (RFC-AC-037). An explicit [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC]
-    (or runtime.toml [turn.first_event_timeout_sec]) honoured verbatim, or
+    after it (RFC-AC-037). An explicit runtime.toml
+    [turn.first_event_timeout_sec] honoured verbatim, or
     when unset {!first_event_failsafe_floor_sec}. AGENT_CORE's
     [?first_event_timeout_s] stays optional for callers outside the keeper;
     the keeper always has a value and passes it.
@@ -115,7 +117,7 @@ val provider_call_deadline_failsafe_floor_sec : float
     quarter of the wedge it caught (65 min); above the two stream floors,
     so a silent prefill is ended by the reader's typed first-token timeout
     first. A universal liveness ceiling, not a per-provider tuned default;
-    an explicit env/toml value overrides it. *)
+    an explicit runtime.toml value overrides it. *)
 
 (** The keeper's no-progress threshold for a provider call attempt on the
     Agent Core HTTP lane (#27349, measured against the turn's progress
@@ -125,9 +127,8 @@ val provider_call_deadline_failsafe_floor_sec : float
     ({!Keeper_provider_subcall}), and so does the identity tools' MCP
     transport ({!Keeper_identity_tools}). The official-client lanes (Codex,
     Claude Code, Antigravity) do not pass through it; their protocol-idle window is
-    declared on their bindings. An explicit
-    [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC] (or runtime.toml
-    [turn.provider_call_deadline_sec]) honoured verbatim, or when unset
+    declared on their bindings. An explicit runtime.toml
+    [turn.provider_call_deadline_sec] honoured verbatim, or when unset
     {!provider_call_deadline_failsafe_floor_sec}. There is no "off": a
     keeper turn that could not be ended by this threshold would be one only
     an operator could end. It is never shorter than a stream budget the

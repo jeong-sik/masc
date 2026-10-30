@@ -166,7 +166,7 @@ let all =
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperReactive.enabled ())))
       ~env_name:"MASC_KEEPER_REACTIVE_ENABLED"
-      ~exposure:(Toml_and_env "reactive.enabled")
+      ~exposure:(Toml_only "reactive.enabled")
       ~value_kind:Boolean
       ~default:"true"
       ~consumers:[ "Keeper_lifecycle_gate_env"; "Keeper_world_observation" ]
@@ -189,10 +189,9 @@ let all =
                  panel and the turn agree. *)
               Env_config_keeper.KeeperAutonomous.wake_prompt ()))
       ~env_name:"MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT"
-      ~exposure:(Toml_and_env "autonomous.wake_prompt")
+      ~exposure:(Toml_only "autonomous.wake_prompt")
       ~value_kind:String
       ~default:Env_config_keeper.KeeperAutonomous.default_wake_prompt
-      ~reload_class:Next_turn
       ~consumers:[ "Keeper_unified_prompt" ]
       ~category:Lifecycle
       "User message an autonomous turn is woken with, before any keeper override"
@@ -210,7 +209,7 @@ let all =
       ~range:(int_range ~min:15 ~max:3600 ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperRuntime.snapshot_sec ())))
       ~env_name:"MASC_KEEPER_SNAPSHOT_SEC"
-      ~exposure:(Toml_and_env "heartbeat.snapshot_sec")
+      ~exposure:(Toml_only "heartbeat.snapshot_sec")
       ~value_kind:Integer
       ~default:"300"
       ~consumers:[ "Env_config_keeper.KeeperRuntime"; "Keeper_heartbeat_loop" ]
@@ -219,7 +218,7 @@ let all =
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.WorkAsHeartbeat.enabled ())))
       ~env_name:"MASC_KEEPER_WORK_AS_HEARTBEAT"
-      ~exposure:(Toml_and_env "heartbeat.work_as_heartbeat")
+      ~exposure:(Toml_only "heartbeat.work_as_heartbeat")
       ~value_kind:Boolean
       ~default:"true"
       ~consumers:[ "Env_config_keeper.WorkAsHeartbeat"; "Keeper_heartbeat_loop" ]
@@ -229,7 +228,7 @@ let all =
       ~range:(float_range ~min:0.1 ~max:10.0 ())
       ~effective:(Reader (fun () -> display_float (Env_config_keeper.KeeperKeepalive.sleep_chunk_sec ())))
       ~env_name:"MASC_KEEPER_SLEEP_CHUNK_SEC"
-      ~exposure:(Toml_and_env "heartbeat.sleep_chunk_sec")
+      ~exposure:(Toml_only "heartbeat.sleep_chunk_sec")
       ~value_kind:Float
       ~default:"0.5"
       ~consumers:[ "Env_config_keeper.KeeperKeepalive"; "Keeper_heartbeat_loop" ]
@@ -257,29 +256,24 @@ let all =
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperWireCapture.enabled ())))
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE"
-      ~exposure:(Toml_and_env "wire_capture.enabled")
+      ~exposure:(Toml_only "wire_capture.enabled")
       ~value_kind:Boolean
       ~default:"false"
       ~consumers:[ "Env_config_keeper.KeeperWireCapture"; "Keeper wire capture" ]
       ~category:Diagnostics
       "Enable diagnostic provider wire capture"
-  ; (* Sized in TOML beside the switch that turns the feature on. These two were
-       [Env_only] while [wire_capture.enabled] was [Toml_and_env], so the table
-       accepted one key and made its siblings a boot FATAL: [wire_capture] is an
-       owned namespace, so [max_bytes] resolved to no setting and was rejected
-       as unknown. An operator who enabled capture in TOML and then tried to
-       size it there took the server down, and the recovery was to comment the
-       keys out and reach for env vars instead.
+  ; (* Sized in TOML beside the switch that turns the feature on. [wire_capture]
+       is an owned namespace: a key with no setting of its own is rejected as
+       unknown at load, so sizing capture there needs a row for each key.
 
-       Both are bounded diagnostic budgets — the range below is enforced on
-       either path — and the consequential switch, whether raw provider payloads
-       are captured at all, was already operator-editable here. The asymmetry
-       was in how the three were declared, not in what they do. *)
+       Both are bounded diagnostic budgets — the range below is enforced when
+       the file loads — and the consequential switch, whether raw provider
+       payloads are captured at all, is operator-editable here too. *)
     setting
       ~range:(int_range ~min:1 ~max:30 ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperWireCapture.retention_days ())))
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS"
-      ~exposure:(Toml_and_env "wire_capture.retention_days")
+      ~exposure:(Toml_only "wire_capture.retention_days")
       ~value_kind:Integer
       ~default:"3"
       ~consumers:[ "Env_config_keeper.KeeperWireCapture"; "Keeper wire capture retention" ]
@@ -289,7 +283,7 @@ let all =
       ~range:(int_range ~min:1 ~max:1073741824 ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperWireCapture.max_bytes ())))
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES"
-      ~exposure:(Toml_and_env "wire_capture.max_bytes")
+      ~exposure:(Toml_only "wire_capture.max_bytes")
       ~value_kind:Integer
       ~default:"67108864"
       ~consumers:[ "Env_config_keeper.KeeperWireCapture"; "Keeper wire capture retention" ]
@@ -298,7 +292,7 @@ let all =
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperRuntime.debug ())))
       ~env_name:"MASC_KEEPER_DEBUG"
-      ~exposure:(Toml_and_env "debug.enabled")
+      ~exposure:(Toml_only "debug.enabled")
       ~value_kind:Boolean
       ~default:"false"
       ~consumers:[ "Env_config_keeper.KeeperRuntime"; "Keeper logging" ]
@@ -312,7 +306,7 @@ let all =
            ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperTurn.batch_limit ())))
       ~env_name:"MASC_KEEPER_BATCH_LIMIT"
-      ~exposure:(Toml_and_env "turn.batch_limit")
+      ~exposure:(Toml_only "turn.batch_limit")
       ~value_kind:Integer
       ~default:(display_int Env_config_keeper.KeeperTurn.batch_limit_default)
       ~consumers:[ "Keeper_config.keeper_batch_limit"; "Keeper unified turn" ]
@@ -326,7 +320,7 @@ let all =
            ())
       ~effective:(Reader (fun () -> display_float (Env_config_keeper.KeeperTurn.temperature ())))
       ~env_name:"MASC_KEEPER_UNIFIED_TEMP"
-      ~exposure:(Toml_and_env "turn.temperature")
+      ~exposure:(Toml_only "turn.temperature")
       ~value_kind:Float
       ~default:(display_float Env_config_keeper.KeeperTurn.temperature_default)
       ~consumers:[ "Keeper_config.keeper_unified_temperature"; "Runtime_inference" ]
@@ -340,7 +334,7 @@ let all =
               | Some enabled -> display_bool enabled
               | None -> provider_default_display)))
       ~env_name:"MASC_KEEPER_ENABLE_THINKING"
-      ~exposure:(Toml_and_env "turn.enable_thinking")
+      ~exposure:(Toml_only "turn.enable_thinking")
       ~value_kind:Boolean
       ~default:provider_default_display
       ~consumers:[ "Keeper_config.keeper_enable_thinking"; "Keeper_agent_run" ]
@@ -361,7 +355,7 @@ let all =
                 display_float
                   Env_config_keeper.KeeperKeepalive.stream_idle_failsafe_floor_sec)))
       ~env_name:Env_config_keeper.KeeperKeepalive.stream_idle_timeout_env_key
-      ~exposure:(Toml_and_env "turn.stream_idle_timeout_sec")
+      ~exposure:(Toml_only "turn.stream_idle_timeout_sec")
       ~value_kind:Float
       ~default:
         (Printf.sprintf
@@ -385,7 +379,7 @@ let all =
                 display_float
                   Env_config_keeper.KeeperKeepalive.first_event_failsafe_floor_sec)))
       ~env_name:Env_config_keeper.KeeperKeepalive.first_event_timeout_env_key
-      ~exposure:(Toml_and_env "turn.first_event_timeout_sec")
+      ~exposure:(Toml_only "turn.first_event_timeout_sec")
       ~value_kind:Float
       ~default:
         (Printf.sprintf
@@ -409,7 +403,7 @@ let all =
                 display_float
                   Env_config_keeper.KeeperKeepalive.provider_call_deadline_failsafe_floor_sec)))
       ~env_name:Env_config_keeper.KeeperKeepalive.provider_call_deadline_env_key
-      ~exposure:(Toml_and_env "turn.provider_call_deadline_sec")
+      ~exposure:(Toml_only "turn.provider_call_deadline_sec")
       ~value_kind:Float
       ~default:
         (Printf.sprintf
@@ -467,7 +461,7 @@ let all =
         ~max:Env_config_keeper.KeeperSupervisor.sweep_interval_max_sec ())
       ~effective:(Reader (fun () -> display_float (Env_config_keeper.KeeperSupervisor.sweep_interval_sec ())))
       ~env_name:"MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
-      ~exposure:(Toml_and_env "supervisor.sweep_sec")
+      ~exposure:(Toml_only "supervisor.sweep_sec")
       ~value_kind:Float
       ~default:"30.0"
       ~consumers:[ "Env_config_keeper_supervisor"; "Keeper_supervisor" ]
@@ -477,7 +471,7 @@ let all =
       ~range:(int_range ~min:0 ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMetrics.max_file_bytes ())))
       ~env_name:"MASC_KEEPER_METRICS_MAX_BYTES"
-      ~exposure:(Toml_and_env "metrics.max_bytes")
+      ~exposure:(Toml_only "metrics.max_bytes")
       ~value_kind:Integer
       ~default:"10485760"
       ~consumers:[ "Env_config_keeper.KeeperMetrics"; "Keeper_types_support.append_jsonl_line" ]
@@ -487,7 +481,7 @@ let all =
       ~range:(int_range ~min:Env_config_keeper.KeeperMetrics.max_rotated_files_min ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMetrics.max_rotated_files ())))
       ~env_name:"MASC_KEEPER_METRICS_MAX_ROTATED"
-      ~exposure:(Toml_and_env "metrics.max_rotated")
+      ~exposure:(Toml_only "metrics.max_rotated")
       ~value_kind:Integer
       ~default:"1"
       ~consumers:[ "Env_config_keeper.KeeperMetrics"; "Keeper_types_support.append_jsonl_line" ]
@@ -497,7 +491,7 @@ let all =
       ~range:(int_range ~min:0 ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMetrics.store_max_bytes ())))
       ~env_name:"MASC_KEEPER_METRICS_STORE_MAX_BYTES"
-      ~exposure:(Toml_and_env "metrics.store_max_bytes")
+      ~exposure:(Toml_only "metrics.store_max_bytes")
       ~value_kind:Integer
       ~default:"0"
       ~consumers:[ "Keeper_types_support.keeper_metrics_storage"; "Keeper_metrics_storage" ]
@@ -528,7 +522,7 @@ let all =
       ~range:(int_range ~min:1 ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMemoryOs.category_cap ())))
       ~env_name:Env_config_keeper.KeeperMemoryOs.category_cap_env_key
-      ~exposure:(Toml_and_env "memory.category_cap")
+      ~exposure:(Toml_only "memory.category_cap")
       ~value_kind:Integer
       ~default:"30"
       ~consumers:[ "Keeper_librarian"; "Keeper_tool_memory_runtime" ]
@@ -538,7 +532,7 @@ let all =
       ~range:(int_range ~min:1 ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperMemoryOs.facts_per_category_cap ())))
       ~env_name:Env_config_keeper.KeeperMemoryOs.facts_per_category_cap_env_key
-      ~exposure:(Toml_and_env "memory.facts_per_category_cap")
+      ~exposure:(Toml_only "memory.facts_per_category_cap")
       ~value_kind:Integer
       ~default:"30"
       ~consumers:[ "Keeper_librarian"; "Keeper_tool_memory_runtime" ]
@@ -547,7 +541,7 @@ let all =
   ; setting
       ~effective:(Reader (fun () -> display_bool (Env_config_keeper.KeeperWikiContents.enabled ())))
       ~env_name:Env_config_keeper.KeeperWikiContents.enabled_env_key
-      ~exposure:(Toml_and_env "wiki_contents.enabled")
+      ~exposure:(Toml_only "wiki_contents.enabled")
       ~value_kind:Boolean
       ~default:"true"
       ~consumers:[ "Keeper_wiki_contents" ]
@@ -586,7 +580,7 @@ let all =
       ~range:(int_range ~min:4096 ~max:131072 ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperVision.max_output_tokens ())))
       ~env_name:"MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS"
-      ~exposure:(Toml_and_env "vision.max_output_tokens")
+      ~exposure:(Toml_only "vision.max_output_tokens")
       ~value_kind:Integer
       ~default:"65536"
       ~consumers:[ "Keeper vision tool" ]
@@ -616,7 +610,7 @@ let all =
       ~range:(int_range ~min:256 ~max:8192 ())
       ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperVision.max_dimension ())))
       ~env_name:"MASC_KEEPER_VISION_MAX_DIMENSION"
-      ~exposure:(Toml_and_env "vision.max_dimension")
+      ~exposure:(Toml_only "vision.max_dimension")
       ~value_kind:Integer
       ~default:"1568"
       ~consumers:[ "Keeper_vision_downscale" ]
@@ -666,7 +660,7 @@ let all =
       ~range:(int_range ~min:1 ~max:0x7fffffff ())
       ~effective:(Reader (fun () -> display_int (H2_response_limits.max_concurrent_streams ())))
       ~env_name:"MASC_H2_MAX_CONCURRENT_STREAMS"
-      ~exposure:(Toml_and_env "transport.h2_max_concurrent_streams")
+      ~exposure:(Toml_only "transport.h2_max_concurrent_streams")
       ~value_kind:Integer
       ~default:(display_int H2_response_limits.default_max_concurrent_streams)
       ~consumers:["Server_bootstrap_http H2 and Auto listeners"]
@@ -676,7 +670,7 @@ let all =
       ~range:(int_range ~min:1 ~max:max_int ())
       ~effective:(Reader (fun () -> display_int (H2_response_limits.max_pending_bytes ())))
       ~env_name:"MASC_H2_MAX_PENDING_RESPONSE_BYTES"
-      ~exposure:(Toml_and_env "transport.h2_max_pending_response_bytes")
+      ~exposure:(Toml_only "transport.h2_max_pending_response_bytes")
       ~value_kind:Integer
       ~default:(display_int H2_response_limits.default_max_pending_bytes)
       ~consumers:["Server_h2_response_resources listener payload admission"]
@@ -764,7 +758,7 @@ let all =
               | Ok shown -> shown
               | Error detail -> raise (Env_config_core.Config_error detail))))
       ~env_name:"MASC_KEEPER_MICROVM_DNS"
-      ~exposure:(Toml_and_env "sandbox.microvm_dns")
+      ~exposure:(Toml_only "sandbox.microvm_dns")
       ~value_kind:String
       ~default:"(the host's first resolver)"
       ~consumers:[ "Keeper_turn_sandbox_runtime microvm boot" ]
@@ -789,7 +783,7 @@ let all =
   ; setting
       ~effective:(Reader (fun () -> display_string_option (Env_config_runtime.Tools.web_search_provider_opt ())))
       ~env_name:"MASC_WEB_SEARCH_PROVIDER"
-      ~exposure:(Toml_and_env "web_search.provider")
+      ~exposure:(Toml_only "web_search.provider")
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
@@ -802,7 +796,7 @@ let all =
               display_string_option
                 (Env_config_runtime.Tools.web_search_provider_order_opt ())))
       ~env_name:"MASC_WEB_SEARCH_PROVIDER_ORDER"
-      ~exposure:(Toml_and_env "web_search.provider_order")
+      ~exposure:(Toml_only "web_search.provider_order")
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
@@ -811,7 +805,7 @@ let all =
   ; setting
       ~effective:(Reader (fun () -> display_string_option (Env_config_runtime.Tools.web_search_fallbacks_opt ())))
       ~env_name:"MASC_WEB_SEARCH_FALLBACKS"
-      ~exposure:(Toml_and_env "web_search.fallbacks")
+      ~exposure:(Toml_only "web_search.fallbacks")
       ~value_kind:String
       ~default:"(none)"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
@@ -889,7 +883,7 @@ let all =
       ~range:(int_range ~min:1 ~max:60 ())
       ~effective:(Reader (fun () -> display_int (Env_config_runtime.Tools.web_search_timeout_sec ())))
       ~env_name:"MASC_WEB_SEARCH_TIMEOUT_SEC"
-      ~exposure:(Toml_and_env "web_search.timeout_sec")
+      ~exposure:(Toml_only "web_search.timeout_sec")
       ~value_kind:Integer
       ~default:"15"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
@@ -899,7 +893,7 @@ let all =
       ~range:(float_range ~min:0.0 ())
       ~effective:(Reader (fun () -> display_float (Env_config_runtime.Tools.web_search_cache_ttl_sec ())))
       ~env_name:"MASC_WEB_SEARCH_CACHE_TTL_SEC"
-      ~exposure:(Toml_and_env "web_search.cache_ttl_sec")
+      ~exposure:(Toml_only "web_search.cache_ttl_sec")
       ~value_kind:Float
       ~default:"900.0"
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
@@ -930,6 +924,11 @@ let reads_process_env setting =
 ;;
 
 let toml_settings = List.filter (fun row -> Option.is_some (toml_key_opt row)) all
+
+let file_owned_env_names =
+  List.filter_map
+    (fun row -> if reads_process_env row then None else Some row.env_name)
+    toml_settings
 
 let toml_env_mappings =
   List.filter_map

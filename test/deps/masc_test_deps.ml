@@ -40,10 +40,11 @@ let with_server_root_switch ~sw f =
 external unsetenv : string -> unit = "masc_test_unsetenv"
 
 (* Runs [f] with [key] set to [value] ([None]: absent) in the process
-   environment -- the channel an operator declares a keeper setting through,
-   and the one that outranks a boot override -- then puts back what the
-   shell running the suite had exported. A case declares its value over an
-   inherited one instead of skipping under it. *)
+   environment -- the channel a shell declares a setting through. It outranks
+   a boot override for a [Toml_and_env] setting and is not read for a
+   [Toml_only] one. Puts back what the shell running the suite had exported.
+   A case declares its value over an inherited one instead of skipping under
+   it. *)
 let with_process_env key value f =
   let inherited = Sys.getenv_opt key in
   let install = function
@@ -52,6 +53,19 @@ let with_process_env key value f =
   in
   install value;
   Fun.protect ~finally:(fun () -> install inherited) f
+;;
+
+(* Runs [f] with [values] ((name, value) pairs) as the runtime file's values,
+   the way the loader leaves them: every file-owned registry name declared and
+   the given values in the boot store, so the shell's own values for any of
+   those names are not consulted. The store and the declaration are emptied
+   before and after. *)
+let with_file_owned_values values f =
+  Config_boot_overrides.reset_for_tests ();
+  Config_boot_overrides.declare_file_owned
+    (Keeper_runtime_setting_registry.file_owned_env_names @ List.map fst values);
+  List.iter (fun (name, value) -> Config_boot_overrides.set name value) values;
+  Fun.protect ~finally:Config_boot_overrides.reset_for_tests f
 ;;
 
 (** Publish a [typesafeai] policy for the duration of [f], then restore the

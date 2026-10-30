@@ -28,7 +28,10 @@ exception Config_error of string
 val raw_value_opt : string -> string option
 (** Read [name] via {!Sys.getenv_opt}, falling back to
     {!Config_boot_overrides} when the parent process did not export
-    the variable.  Returns [None] when neither source has it. *)
+    the variable.  Returns [None] when neither source has it.
+
+    A name declared file-owned ({!Config_boot_overrides.declare_file_owned})
+    never reads the process environment: only the boot override store answers. *)
 
 (** {1 Typed getters with defaults} *)
 

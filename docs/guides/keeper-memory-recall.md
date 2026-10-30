@@ -151,8 +151,8 @@ the Keepers added to or dropped from the list, or that nothing changes.
 - **Journal.** `memory-recall-evaluations.jsonl` in the Keeper's runtime
   directory holds every request, every response and the outcome of each
   judgment. It contains private Keeper memory: treat it like the Keeper's other
-  private logs. It rotates with them (`MASC_KEEPER_METRICS_MAX_BYTES`,
-  `MASC_KEEPER_METRICS_MAX_ROTATED`).
+  private logs. It rotates with them (`[metrics] max_bytes`,
+  `[metrics] max_rotated`).
 - **Metrics**, each labeled by `keeper`:
   - `masc_keeper_memory_recall_total{outcome}`: `selected`, `none_found`,
     `none_needed` or `unavailable`, one per judgment

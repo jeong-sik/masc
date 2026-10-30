@@ -312,7 +312,7 @@ type model_spec =
   ; streaming : bool
   ; temperature : float option
     (** [temperature] — per-model sampling temperature for keeper turns. [None]
-        keeps the caller fallback ([MASC_KEEPER_UNIFIED_TEMP], then the AGENT_CORE
+        keeps the caller fallback ([turn] temperature, then the AGENT_CORE
         [agent_default] profile). [Some t] overrides it for every turn on this
         model. A model whose endpoint fixes the value declares that on its
         AGENT_CORE catalog row ([ignored_sampling_parameters]) instead. Resolved via

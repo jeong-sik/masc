@@ -12,8 +12,10 @@ val bootstrap_base_path_config_root : base_path:string -> unit
 val apply_runtime_toml : base_path:string -> unit
 (** Apply the keeper runtime overrides from the resolved config root's
     runtime.toml into the boot-override layer the
-    [Env_config_keeper.KeeperKeepalive] readers consult. Process env vars
-    already set take precedence. Every process that resolves keeper settings
+    [Env_config_keeper.KeeperKeepalive] readers consult. A setting the
+    registry marks [Toml_only] ignores the process env from then on; a
+    [Toml_and_env] setting keeps the env ahead of the file. Every process that
+    resolves keeper settings
     for a provider call runs this after {!bootstrap_base_path_config_root}:
     the server at boot, the capability probe CLI before its call. Raises
     [Env_config_core.Config_error] when the file does not load. *)

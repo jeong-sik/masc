@@ -426,9 +426,10 @@ let record_runtime_toml_load_failure (failure : Keeper_runtime_config.load_failu
    resolves them: the server at boot, and a CLI that makes a provider call
    under the keeper's settings (the capability probe), which otherwise reads
    the process env alone and runs its call with none of what the operator
-   declared in the file. Existing process env vars take precedence; TOML only
-   fills unset slots. A file that does not load is a configuration error and
-   stops the process. *)
+   declared in the file. A setting the registry marks [Toml_only] ignores the
+   process env once the file is applied; a [Toml_and_env] setting keeps the env
+   ahead of the file, which only fills its unset slot. A file that does not
+   load is a configuration error and stops the process. *)
 let apply_runtime_toml ~base_path =
   match Keeper_runtime_config.load_and_apply ~base_path with
   | Ok 0 -> ()
@@ -494,7 +495,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
     (Yojson.Safe.to_string
        (Keeper_runtime_resolved.to_yojson (Keeper_runtime_resolved.current ())));
   (* RFC-0345 (#25128): state the effective streaming idle timeout and whether it
-     came from an operator value (env/toml) or the fail-safe floor, so operators
+     came from an operator value (runtime.toml) or the fail-safe floor, so operators
      can see the floor is active and raise it if their provider legitimately
      idles longer. *)
   Keeper_runtime_resolved.(

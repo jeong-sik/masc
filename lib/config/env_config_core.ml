@@ -21,9 +21,9 @@ let () = Printexc.register_printer (function
   | _ -> None)
 
 let raw_value_opt name =
-  match Unix.getenv name with
-  | v -> Some v
-  | exception Not_found ->
+  if Config_boot_overrides.is_file_owned name
+  then Config_boot_overrides.get_opt name
+  else
     match Sys.getenv_opt name with
     | Some _ as value -> value
     | None -> Config_boot_overrides.get_opt name
@@ -121,7 +121,7 @@ let get_float ~default name =
         default)
 
 (** Variants that floor at zero.  An operator who sets a negative
-    value (e.g. [MASC_KEEPER_METRICS_MAX_BYTES=-5]) gets the default
+    value (e.g. [-5]) gets the default
     rather than the literal — negative budgets/counts are
     nonsensical for the call sites these feed
     ({!Env_config_keeper}, size budgets, retry caps).

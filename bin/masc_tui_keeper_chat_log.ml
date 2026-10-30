@@ -17,6 +17,13 @@ type entry =
 
 type terminal_replay = Replay_pending | Replayed_after_terminal
 
+(* The replay receipt belongs to the terminal operation it followed. Keep
+   both observations in one immutable value; [Replayed] is constructed only
+   after confirming that the retained operation is terminal. *)
+type operation_observation =
+  | Unreplayed of Keeper_chat_operation.state option
+  | Replayed of Keeper_chat_operation.state option
+
 type t =
   { keeper_name : string
   ; request_id : string
@@ -36,8 +43,7 @@ type t =
   ; mutable attempt : int
   ; mutable committed : bool
   ; mutable revision : int
-  ; mutable operation_state : Keeper_chat_operation.state option
-  ; mutable terminal_replay : terminal_replay
+  ; mutable operation_observation : operation_observation
   }
 
 let create_for_source ~keeper_name ~source ~started_at =
@@ -55,8 +61,7 @@ let create_for_source ~keeper_name ~source ~started_at =
   ; attempt = 0
   ; committed = false
   ; revision = 0
-  ; operation_state = None
-  ; terminal_replay = Replay_pending
+  ; operation_observation = Unreplayed None
   }
 
 let create ~keeper_name ~request_id ~started_at =
@@ -79,25 +84,31 @@ let revision t = t.revision
 
 let bump t = t.revision <- t.revision + 1
 
-let operation_state t = t.operation_state
-let terminal_replay t = t.terminal_replay
+let operation_state t =
+  match t.operation_observation with Unreplayed state | Replayed state -> state
+
+let terminal_replay t =
+  match t.operation_observation with
+  | Unreplayed _ -> Replay_pending
+  | Replayed _ -> Replayed_after_terminal
+
 let observe_terminal_replay t replay =
-  match replay, t.terminal_replay with
-  | Replayed_after_terminal, Replay_pending
-    when Option.exists Keeper_chat_operation.is_terminal t.operation_state ->
-      t.terminal_replay <- Replayed_after_terminal;
+  match replay, t.operation_observation with
+  | Replayed_after_terminal, Unreplayed ((Some state) as observed)
+    when Keeper_chat_operation.is_terminal state ->
+      t.operation_observation <- Replayed observed;
       bump t
-  | (Replayed_after_terminal, Replayed_after_terminal) | (Replay_pending, _)
-  | (Replayed_after_terminal, Replay_pending) -> ()
+  | Replay_pending, _ | Replayed_after_terminal, (Unreplayed _ | Replayed _) -> ()
 
 
 let observe_operation_state t state =
-  match t.source, t.operation_state with
+  match t.source, t.operation_observation with
   | Autonomous_turn _, _ -> ()
-  | Operation _, Some previous when Keeper_chat_operation.is_terminal previous -> ()
-  | Operation _, _ ->
-      if t.operation_state <> state then begin
-        t.operation_state <- state;
+  | Operation _, Replayed _ -> ()
+  | Operation _, Unreplayed (Some previous) when Keeper_chat_operation.is_terminal previous -> ()
+  | Operation _, Unreplayed previous ->
+      if previous <> state then begin
+        t.operation_observation <- Unreplayed state;
         bump t
       end
 ;;

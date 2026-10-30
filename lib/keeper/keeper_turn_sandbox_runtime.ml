@@ -1215,59 +1215,6 @@ let ensure_microvm_work_volume_mounted ?timeout_sec (t : t) ~backend ~container_
              else "; unverified probe output: " ^ detail)))
 ;;
 
-module For_testing_microvm = struct
-  type build_link_generation = unit ref
-
-  let build_link_generation ~base_path ~backend ~container_name =
-    Option.map (fun entry -> entry.generation)
-      (microvm_work_root_entry ~base_path ~backend ~container_name)
-  ;;
-
-  let complete_build_link_scan ~base_path ~backend ~container_name generation =
-    set_microvm_build_links_state ~base_path ~backend ~container_name generation
-      ~expected:Build_links_not_prepared Build_links_prepared
-  ;;
-
-  let build_link_scan_prepared ~base_path ~backend ~container_name =
-    match microvm_work_root_entry ~base_path ~backend ~container_name with
-    | Some { build_links_state = Build_links_prepared; _ } -> true
-    | Some { build_links_state = (Build_links_not_prepared | Build_links_effect_unverified); _ }
-    | None -> false
-  ;;
-
-  let microvm_container_name = microvm_container_name
-  let mark_microvm_work_root_ready = mark_microvm_work_root_ready
-  let microvm_work_root_ready = microvm_work_root_ready
-
-  let microvm_identity_snapshot_registered ~container_name =
-    Option.is_some (microvm_identity_snapshot container_name)
-  ;;
-
-  let mark_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
-    let container_name =
-      microvm_container_name
-        ~config
-        ~keeper_name:meta.name
-        ~network_mode:meta.network_mode
-    in
-    Option.iter (fun backend ->
-      mark_microvm_work_root_ready ~base_path:config.base_path ~backend ~container_name)
-      meta.microvm_backend
-  ;;
-
-  let record_process_boot ~container_name boot = record_microvm_boot container_name boot
-  let process_boot ~container_name = microvm_boot container_name
-  let register_process_identity ~container_name ~cleanup =
-    match claim_microvm_identity_snapshot container_name
-        {args=[]; host_dir=""; revision="fixture"; cleanup} with
-    | `Claimed -> true
-    | `Existing _ -> false
-
-  let ensure_work_volume_mounted = ensure_microvm_work_volume_mounted
-
-  let provision_guest t ~backend ~timeout_sec =
-    microvm_guest_provisions t ~backend ~timeout_sec |> Result.map (fun _ -> ())
-end
 
 (** The keeper's root on the work volume, made inside the guest once it is
     up. The volume outlives the guest, so this is a no-op after the first
@@ -1317,14 +1264,16 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
     in
     (match run_argv_with_status ?timeout_sec probe with
      | Unix.WEXITED 0, _ -> Ok ()
-     | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
+     | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), out ->
+       let detail = Keeper_sandbox_runtime.docker_failure_output_for_log out in
        Error
          (Printf.sprintf
-            "microvm_keeper_work_root_not_writable: %s as %d:%d: %s"
+            "microvm_keeper_work_root_probe_unverified: write access to %s as %d:%d was not established (%s)%s"
             root
             t.uid
             t.gid
-            (Keeper_sandbox_runtime.docker_failure_output_for_log out)))
+            (Keeper_sandbox_exec_failure.status_label status)
+            (if String.equal (String.trim detail) "" then "" else "; probe output: " ^ detail)))
   | (Unix.WEXITED _, out) | (Unix.WSIGNALED _, out) | (Unix.WSTOPPED _, out) ->
     Error
       (Printf.sprintf
@@ -1332,6 +1281,62 @@ let ensure_microvm_keeper_work_root ?timeout_sec (t : t) ~backend ~container_nam
          root
          (Keeper_sandbox_runtime.docker_failure_output_for_log out))
 ;;
+
+module For_testing_microvm = struct
+  type build_link_generation = unit ref
+
+  let build_link_generation ~base_path ~backend ~container_name =
+    Option.map (fun entry -> entry.generation)
+      (microvm_work_root_entry ~base_path ~backend ~container_name)
+  ;;
+
+  let complete_build_link_scan ~base_path ~backend ~container_name generation =
+    set_microvm_build_links_state ~base_path ~backend ~container_name generation
+      ~expected:Build_links_not_prepared Build_links_prepared
+  ;;
+
+  let build_link_scan_prepared ~base_path ~backend ~container_name =
+    match microvm_work_root_entry ~base_path ~backend ~container_name with
+    | Some { build_links_state = Build_links_prepared; _ } -> true
+    | Some { build_links_state = (Build_links_not_prepared | Build_links_effect_unverified); _ }
+    | None -> false
+  ;;
+
+  let microvm_container_name = microvm_container_name
+  let mark_microvm_work_root_ready = mark_microvm_work_root_ready
+  let microvm_work_root_ready = microvm_work_root_ready
+
+  let microvm_identity_snapshot_registered ~container_name =
+    Option.is_some (microvm_identity_snapshot container_name)
+  ;;
+
+  let mark_microvm_guest_booted ~(config : Workspace.config) ~(meta : keeper_meta) () =
+    let container_name =
+      microvm_container_name
+        ~config
+        ~keeper_name:meta.name
+        ~network_mode:meta.network_mode
+    in
+    Option.iter (fun backend ->
+      mark_microvm_work_root_ready ~base_path:config.base_path ~backend ~container_name)
+      meta.microvm_backend
+  ;;
+
+  let record_process_boot ~container_name boot = record_microvm_boot container_name boot
+  let process_boot ~container_name = microvm_boot container_name
+  let register_process_identity ~container_name ~cleanup =
+    match claim_microvm_identity_snapshot container_name
+        {args=[]; host_dir=""; revision="fixture"; cleanup} with
+    | `Claimed -> true
+    | `Existing _ -> false
+
+  let ensure_work_volume_mounted = ensure_microvm_work_volume_mounted
+  let ensure_keeper_work_root = ensure_microvm_keeper_work_root
+
+  let provision_guest t ~backend ~timeout_sec =
+    microvm_guest_provisions t ~backend ~timeout_sec |> Result.map (fun _ -> ())
+end
+
 
 (** Best-effort Apple build-link preparation. A read-only scan failure can be
     retried by a later turn. Once an effect may have been sent, its unknown

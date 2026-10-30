@@ -65,7 +65,7 @@ class SourceWalkTest(unittest.TestCase):
                 env_reads.main(str(self.names), [str(self.sources)])
         self.assertIn("cannot enumerate OCaml source files", str(raised.exception))
         self.assertIn(str(self.denied), str(raised.exception))
-        self.assertNotIn("no direct environment read", output.getvalue())
+        self.assertNotIn("no prohibited literal-shaped call", output.getvalue())
 
     def test_existing_caller_keeps_default_walk_behavior(self):
         with mock.patch("os.scandir", side_effect=self.deny_directory):
@@ -135,7 +135,7 @@ class SourceWalkTest(unittest.TestCase):
         self.assertTrue((racing / "owned.ml").is_file())
         self.assertIn("source entry changed", str(raised.exception))
         self.assertIn(str(racing), str(raised.exception))
-        self.assertNotIn("no direct environment read", output.getvalue())
+        self.assertNotIn("no prohibited literal-shaped call", output.getvalue())
 
     def test_strict_walk_preserves_excluded_directories(self):
         for name in byte_cut.SKIPPED_DIRECTORIES:
@@ -268,7 +268,42 @@ class SourceWalkTest(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             env_reads.main(str(self.names), [str(clean)])
         self.assertIn("1 .ml files scanned", output.getvalue())
-        self.assertIn("no direct environment read", output.getvalue())
+        self.assertIn("no prohibited literal-shaped call", output.getvalue())
+
+    def test_unresolved_bindings_are_advisory(self):
+        clean = Path(self.tmp.name) / "bindings"
+        clean.mkdir()
+        examples = [
+            'let key = "MASC_KEEPER_DEBUG"\nlet f key = Sys.getenv_opt key\n',
+            'module A = struct let key = "MASC_KEEPER_DEBUG" end\n'
+            'module B = struct let key = "HOME" end\n'
+            'let f () = Sys.getenv_opt B.key\n',
+            'let key = "MASC_KEEPER_DEBUG"\nlet f () = Sys.getenv_opt key\n',
+        ]
+        path = clean / "sample.ml"
+        for sample in examples:
+            with self.subTest(sample=sample):
+                path.write_text(sample, encoding="utf-8")
+                output, errors = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                    env_reads.main(str(self.names), [str(clean)])
+                self.assertIn("no prohibited literal-shaped call", output.getvalue())
+                self.assertIn("Advisory: unresolved binding candidates", errors.getvalue())
+
+    def test_literal_still_fails_when_bindings_are_advisory(self):
+        clean = Path(self.tmp.name) / "mixed"
+        clean.mkdir()
+        (clean / "sample.ml").write_text(
+            'let key = "MASC_KEEPER_DEBUG"\n'
+            'let a () = Sys.getenv_opt key\n'
+            'let b () = Sys.getenv_opt (("MASC_KEEPER_DEBUG"))\n',
+            encoding="utf-8",
+        )
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors), self.assertRaises(SystemExit) as raised:
+            env_reads.main(str(self.names), [str(clean)])
+        self.assertIn("Prohibited literal-shaped getenv calls", str(raised.exception))
+        self.assertIn("Advisory: unresolved binding candidates", errors.getvalue())
 
 
 if __name__ == "__main__":

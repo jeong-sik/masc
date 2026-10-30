@@ -1,0 +1,113 @@
+name: Viewport cadence bytes
+
+run-name: Before/After PTY bytes for the viewport cadence skip
+
+# Measures the browser-viewport cadence redraw skip (#46832) end to end:
+# raw PTY-master bytes, before vs after, one run, one image, no TUI
+# instrumentation patch. See board p-f704cbabf5d5ee8c9618db11f9827cc7
+# (mad-scientist conditions 1-3, measurement definition 1).
+on:
+  workflow_dispatch:
+    inputs:
+      before_sha:
+        description: Head just before the skip landed (default 11749bf34f...)
+        required: false
+        default: ''
+        type: string
+      after_ref:
+        description: Ref carrying the skip (default the repository main)
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DUNE_JOBS: '4'
+      DUNE_CACHE: enabled-except-user-rules
+      BEFORE_SHA: ${{ inputs.before_sha }}
+      AFTER_REF: ${{ inputs.after_ref }}
+    steps:
+      - name: Checkout after head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.AFTER_REF != '' && env.AFTER_REF || 'main' }}
+          fetch-depth: 0
+
+      - name: Resolve pinned heads
+        run: |
+          # Before: the parent of the #46832 merge commit (skip absent).
+          # After: default pin is the #46832 merge commit itself (eb39c50f3379)
+          # per mad-scientist c-5b12c920 condition 1; AFTER_REF overrides for
+          # reproductions on a later main.
+          if [ -z "$BEFORE_SHA" ]; then
+            BEFORE_SHA="$(git rev-parse eb39c50f3379^)"
+          fi
+          if [ -z "$AFTER_REF" ]; then
+            git checkout --quiet eb39c50f3379
+          fi
+          AFTER_SHA="$(git rev-parse HEAD)"
+          echo "BEFORE_SHA=$BEFORE_SHA" >> "$GITHUB_ENV"
+          echo "AFTER_SHA=$AFTER_SHA" >> "$GITHUB_ENV"
+          echo "before=$BEFORE_SHA after=$AFTER_SHA"
+
+      - name: Set up OCaml
+        uses: ./.github/actions/setup-ocaml-toolchain
+        with:
+          cache-prefix: viewport-bytes
+
+      - name: Pin external deps and install
+        run: |
+          scripts/opam-pin-external-deps.sh --with-bisect
+          opam install ./masc.opam --deps-only --yes
+
+      - name: Build both binaries (after tree first)
+        run: |
+          opam exec -- dune build bin/masc_tui.exe
+          cp _build/default/bin/masc_tui.exe /tmp/masc_tui_after.exe
+          git checkout --quiet "$BEFORE_SHA"
+          opam exec -- dune build bin/masc_tui.exe
+          cp _build/default/bin/masc_tui.exe /tmp/masc_tui_before.exe
+          sha256sum /tmp/masc_tui_before.exe /tmp/masc_tui_after.exe | tee /tmp/binary-sha256.txt
+
+      - name: Measure PTY bytes
+        run: |
+          # The measuring harness itself comes from the after tree.
+          git checkout --quiet "$AFTER_SHA"
+          python3 scripts/measure-viewport-cadence-bytes.py \
+            --before /tmp/masc_tui_before.exe \
+            --after /tmp/masc_tui_after.exe \
+            --out /tmp/viewport-cadence-bytes.json
+          cat /tmp/viewport-cadence-bytes.json
+
+      - name: Judge
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          report = json.load(open('/tmp/viewport-cadence-bytes.json'))
+          ok = report['skip_effective'] and report['control_flows_both']
+          print(f"before_constant={report['before']['constant_ticks_bytes']} "
+                f"after_constant={report['after']['constant_ticks_bytes']} "
+                f"delta={report['delta_constant']} "
+                f"skip_effective={report['skip_effective']} "
+                f"control_flows_both={report['control_flows_both']}")
+          # A failed positive control invalidates the measurement itself.
+          sys.exit(0 if report['control_flows_both'] else 3)
+          PY
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewport-cadence-bytes
+          path: |
+            /tmp/viewport-cadence-bytes.json
+            /tmp/binary-sha256.txt
+            /tmp/masc_tui_before.exe
+            /tmp/masc_tui_after.exe
+          retention-days: 30

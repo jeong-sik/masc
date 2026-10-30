@@ -392,6 +392,77 @@ let test_resume_owner_commits_receipt_and_preserves_pending () =
     | Error detail -> Alcotest.fail detail)
 ;;
 
+let test_tui_resume_attempts_use_distinct_receipts () =
+  with_seeded_owner ~paused:true (fun config keeper_name source ->
+    let resume request =
+      Resume_transaction.resume config ~keeper_name request
+      |> Result.map_error Resume_transaction.error_to_string
+      |> require_ok "resume with TUI operation id"
+    in
+    let first_request = resume_request ("masc-tui-resume-" ^ keeper_name ^ "-1") in
+    let first = resume first_request in
+    (match first.commit_status, first.projection with
+     | Resume_transaction.Committed, Resume_transaction.Applied _ -> ()
+     | Resume_transaction.Already_committed,
+       (Resume_transaction.Applied _ | Resume_transaction.Committed_followup_failed _) ->
+       Alcotest.fail "first attempt reused a receipt"
+     | Resume_transaction.Committed, Resume_transaction.Committed_followup_failed failure ->
+       Alcotest.fail
+         (Resume_transaction.error_to_string { cause = failure; reservation_release = None }));
+    let replay = resume first_request in
+    (match replay.commit_status with
+     | Resume_transaction.Already_committed -> ()
+     | Resume_transaction.Committed -> Alcotest.fail "same attempt did not replay its receipt");
+    let pause =
+      Keeper_owner_reducer.Pause
+        { reason = Keeper_latched_reason.Operator_paused
+            { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive }
+        ; updated_at = Keeper_meta_contract.now_iso ()
+        }
+    in
+    let paused =
+      Keeper_owner_registry.apply_meta ~base_path:config.Workspace.base_path ~keeper_name pause
+      |> Result.map_error Keeper_owner_registry.command_error_to_string
+      |> require_ok "pause owner again"
+      |> require_some "paused owner"
+    in
+    Alcotest.(check bool) "second pause is durable" true paused.paused;
+    (match Keeper_registry.dispatch_event ~base_path:config.Workspace.base_path
+             keeper_name Keeper_state_machine.Operator_pause with
+     | Ok _ -> ()
+     | Error error -> Alcotest.fail (Keeper_state_machine.transition_error_to_string error));
+    let next_request = resume_request (Masc_tui_keeper_control.mint_operation_id ()) in
+    Alcotest.(check bool) "new attempt has a fresh receipt id" false
+      (String.equal first_request.operator_operation_id next_request.operator_operation_id);
+    let next = resume next_request in
+    (match next.commit_status, next.projection with
+     | Resume_transaction.Committed, Resume_transaction.Applied _ -> ()
+     | Resume_transaction.Already_committed,
+       (Resume_transaction.Applied _ | Resume_transaction.Committed_followup_failed _) ->
+       Alcotest.fail "new attempt replayed the old receipt"
+     | Resume_transaction.Committed, Resume_transaction.Committed_followup_failed failure ->
+       Alcotest.fail
+         (Resume_transaction.error_to_string { cause = failure; reservation_release = None }));
+    let stored =
+      Disposition_receipt.load config ~keeper_name
+        ~operator_operation_id:next_request.operator_operation_id
+      |> require_ok "load new Resume_owner receipt"
+      |> require_some "new Resume_owner receipt"
+    in
+    Alcotest.(check bool) "new attempt persisted its own receipt" true
+      (Disposition_receipt.equal next.receipt stored);
+    let next_replay = resume next_request in
+    (match next_replay.commit_status with
+     | Resume_transaction.Already_committed -> ()
+     | Resume_transaction.Committed -> Alcotest.fail "new attempt did not replay its own receipt");
+    let queue =
+      Persistence.load_state_result ~base_path:config.Workspace.base_path ~keeper_name
+      |> require_ok "load pending queue after both attempts"
+    in
+    Alcotest.(check bool) "both attempts preserve pending work" true
+      (Queue.to_list (State.pending queue) = [ source ]))
+;;
+
 let test_resume_owner_completes_prepared_receipt_projection () =
   with_seeded_owner ~paused:true (fun config keeper_name _source ->
     let request = resume_request "operator-resume-prepared" in
@@ -558,6 +629,10 @@ let () =
             "Resume_owner commits receipt and preserves pending"
             `Quick
             test_resume_owner_commits_receipt_and_preserves_pending
+        ; Alcotest.test_case
+            "TUI resume attempts commit distinct receipts"
+            `Quick
+            test_tui_resume_attempts_use_distinct_receipts
         ; Alcotest.test_case
             "Resume_owner completes prepared receipt projection"
             `Quick

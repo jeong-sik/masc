@@ -14753,7 +14753,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.code_history_expanded <- None;
   state.code_diff_open <- false;
   state.code_notes_open <- false;
-  state.keeper_action_serial <- state.keeper_action_serial + 1;
   state.keeper_action_inflight <- None;
   retarget_message state None;
   state.msg_live <- None;
@@ -17878,8 +17877,6 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   let enqueue_async = workspace_enqueue state in
   let authority = state.workspace_authority in
   let identity = state.server_identity in
-  let serial = state.keeper_action_serial + 1 in
-  state.keeper_action_serial <- serial;
   state.keeper_action_inflight <- Some (keeper_name, action);
   state.keeper_action_pending <- None;
   report_action ~show_in_footer:false state "system"
@@ -17887,7 +17884,7 @@ let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   let host = server_peer_host in
   let port = state.port in
   let operator_operation_id =
-    Keeper_control.mint_operation_id ~keeper:keeper_name ~serial
+    Keeper_control.mint_operation_id ()
   in
   let check_request =
     workspace_check_sequence state ~mailbox ~authority ~identity ~host ~port

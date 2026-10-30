@@ -356,8 +356,8 @@ let directive_body ~(expected_workspace : Decode.server_identity) ~operator_oper
       ; "masc_root", `String (Decode.Canonical_path.to_string expected_workspace.sid_masc_root) ])
      :: fields))
 
-let mint_operation_id ~keeper ~serial =
-  Printf.sprintf "masc-tui-resume-%s-%d" keeper serial
+let mint_operation_id () =
+  "masc-tui-resume-" ^ Random_id.uuid_v7 ()
 
 
 type deletion_operation =

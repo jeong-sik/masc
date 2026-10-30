@@ -263,10 +263,9 @@ val purge_body : string -> string
 (** JSON body for a {!Purge} step: the keeper travels as [agent_name], the
     field the route reads and the one the dashboard sends. *)
 
-val mint_operation_id : keeper:string -> serial:int -> string
-(** The resume operation id for one attempt. Stable across the steps of that
-    attempt, so the resume inside a boot recovery names one operation rather
-    than a new one per step. *)
+val mint_operation_id : unit -> string
+(** A fresh resume operation id for one attempt. Retain the returned value
+    across its steps and retries, including the resume inside boot recovery. *)
 
 
 type deletion_operation =

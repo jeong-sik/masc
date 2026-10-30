@@ -1517,7 +1517,7 @@
  (name masc_tui_keeper_control)
  (wrapped false)
  (modules masc_tui_keeper_control)
- (libraries masc masc_tui_credential yojson))
+ (libraries masc masc.masc_random_id masc_tui_credential yojson))
 
 (library
  (name masc_tui_keeper_list_model)

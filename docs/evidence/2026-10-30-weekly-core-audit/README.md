@@ -71,6 +71,12 @@ claim is retained here.
   same server PID started before that turn and reported the installed commit
   named in the report. A later host inventory is not evidence of the guest's
   mount state at the time of the probe.
+* The queue observation uses one full health response and an exact match from a
+  selected pending `ask_answered` source to its dated reaction ledger. Four
+  start rows and four finish rows have distinct recorded times but reuse one
+  event ID per kind; these are physical rows, not four distinct event IDs.
+  The source identifiers and input are not included. Turn-start recording is
+  before dispatch, so it does not prove that a provider received the input.
 
 Regenerate a current aggregate without emitting record contents, after selecting
 the actual effective workspace base and a UTC provider-input window:

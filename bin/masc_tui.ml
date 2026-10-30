@@ -19634,9 +19634,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         (* Voice continues the whole draft even if its editing cursor moved
            during capture. Keep the separator and transcript together at the
            end, where send_on_stop will read the completed message. *)
-        if Masc_tui_message_input.length state.msg_input > 0
-        then Masc_tui_message_input.append state.msg_input " ";
-        Masc_tui_message_input.append state.msg_input text;
+        Masc_tui_message_input.append_separated state.msg_input ~separator:" " text;
         save_message_draft state;
         set_last_action state (Some ("voice: " ^ text, Unix.gettimeofday ()));
         (* [voice.stt].send_on_stop: the operator who says a sentence and

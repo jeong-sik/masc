@@ -1481,6 +1481,7 @@ let summarize_rows ~keeper_name ~pending_queue rows =
   let latest_recorded_at = ref None in
   let latest_stimulus_id = ref None in
   let stimulus_seen = Hashtbl.create 16 in
+  let scheduled_occurrence_ids = ref Event_id_set.empty in
   let reacted_stimulus_ids = ref Event_id_set.empty in
   let board_stimulus_tokens = Hashtbl.create 16 in
   let stimulus_order = ref [] in
@@ -1490,10 +1491,29 @@ let summarize_rows ~keeper_name ~pending_queue rows =
     incr quarantined_row_count;
     increment_count quarantine_reason_counts (row_quarantine_reason_to_string reason)
   in
-  let remember_stimulus stimulus_id =
+  (* Only schedule occurrences use [post_id] itself as the ledger identity.
+     For other kinds an ID can name more than one queue entry (for example,
+     separate comments on the same Board post). Do not let one such entry
+     certify another. *)
+  let is_scheduled_occurrence (metadata : current_row_metadata) stimulus_kind =
+    match stimulus_kind with
+       | Schedule_due ->
+         (match nested_string_field "stimulus" "post_id" metadata.raw with
+          | Some post_id -> String.equal post_id metadata.stimulus_id
+          | None -> false)
+       | Board_signal | Bootstrap | Fusion_completed | Connector_attention
+       | Hitl_resolved | Ask_answered | Completion_authority_rejected
+       | Task_outcome | Task_cancelled | Workspace_message | Delegate_completed
+       | Composition_completed | Tool_result_ready | Owned_job_completed
+       | Addon_operation_changed -> false
+  in
+  let remember_stimulus (metadata : current_row_metadata) stimulus_kind =
+    let stimulus_id = metadata.stimulus_id in
     if not (Hashtbl.mem stimulus_seen stimulus_id) then begin
       Hashtbl.add stimulus_seen stimulus_id
         (Event_id_set.mem stimulus_id !reacted_stimulus_ids);
+      if is_scheduled_occurrence metadata stimulus_kind then
+        scheduled_occurrence_ids := Event_id_set.add stimulus_id !scheduled_occurrence_ids;
       stimulus_order := stimulus_id :: !stimulus_order
     end
   in
@@ -1542,7 +1562,14 @@ let summarize_rows ~keeper_name ~pending_queue rows =
       | Current_reaction { metadata; _ } -> metadata
     in
     if Event_id_set.mem metadata.event_id !current_event_ids
-    then ()
+    then
+      (match current_row with
+       | Current_stimulus { metadata; stimulus_kind }
+         when not (is_scheduled_occurrence metadata stimulus_kind) ->
+         (* Two distinct rows can share the ledger event ID. The previous
+            schedule witness is no longer unambiguous in this window. *)
+         scheduled_occurrence_ids := Event_id_set.remove metadata.stimulus_id !scheduled_occurrence_ids
+       | Current_stimulus _ | Current_reaction _ -> ())
     else begin
       current_event_ids := Event_id_set.add metadata.event_id !current_event_ids;
       incr row_count;
@@ -1551,7 +1578,7 @@ let summarize_rows ~keeper_name ~pending_queue rows =
       match current_row with
       | Current_stimulus { metadata; stimulus_kind } ->
         incr stimulus_count;
-        remember_stimulus metadata.stimulus_id;
+        remember_stimulus metadata stimulus_kind;
         remember_board_stimulus metadata stimulus_kind
       | Current_reaction { metadata; reaction_kind; transition_receipt } ->
         incr reaction_count;
@@ -1579,7 +1606,9 @@ let summarize_rows ~keeper_name ~pending_queue rows =
   let pending_attention_count =
     List.fold_left
       (fun count stimulus_id ->
-        if pending_needs_attention pending_queue stimulus_id then count + 1 else count)
+        if not (Event_id_set.mem stimulus_id !scheduled_occurrence_ids)
+           || pending_needs_attention pending_queue stimulus_id
+        then count + 1 else count)
       0
       pending_stimulus_ids
   in
@@ -1752,7 +1781,17 @@ let fleet_summary_json ~base_path ~keeper_names ~owner_lifecycle ~limit_per_keep
             let stimulus_ids =
               List.fold_left
                 (fun ids (selection : Keeper_event_queue_state.pending_selection) ->
-                  Event_id_set.add (stimulus_id_of_event_queue selection.source) ids)
+                  match selection.source.payload with
+                  | Keeper_event_queue.Schedule_due wake
+                    when String.equal wake.occurrence_id ""
+                      || String.equal wake.occurrence_id selection.source.post_id ->
+                    Event_id_set.add (stimulus_id_of_event_queue selection.source) ids
+                  | Schedule_due _ | Board_signal _ | Board_attention _ | Bootstrap
+                  | Fusion_completed _ | Connector_attention _ | Hitl_resolved _
+                  | Ask_answered _ | Completion_authority_rejected _ | Task_outcome _
+                  | Task_cancelled _ | Workspace_message _ | Delegate_completed _
+                  | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _
+                  | Addon_operation_changed _ -> ids)
                 Event_id_set.empty
                 health.selections
             in

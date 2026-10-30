@@ -595,11 +595,116 @@ let test_fleet_other_queued_payload_does_not_explain_pending () =
     (fleet |> member "operator_action_required" |> to_bool)
 ;;
 
+let test_fleet_board_pending_is_not_certified_by_same_post () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "board-identity-is-not-queue-identity" in
+  let comment id =
+    let stimulus = board_stimulus ~post_id:"shared-post" () in
+    match stimulus.payload with
+    | Keeper_event_queue.Board_signal board ->
+      { stimulus with payload = Board_signal
+          { board with kind = Comment_added { comment_id = id; parent_id = None } } }
+    | Board_attention _ | Bootstrap | Fusion_completed _ | Schedule_due _
+    | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+    | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+    | Workspace_message _ | Delegate_completed _ | Composition_completed _
+    | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+      fail "board fixture has a non-board payload" in
+  let original = comment "comment-a" and other = comment "comment-b" in
+  check bool "different comments are different queue identities" false
+    (Keeper_event_queue.stimulus_identity_equal original other);
+  check string "the ledger still groups them under the same post"
+    (Keeper_reaction_ledger.stimulus_id_of_event_queue original)
+    (Keeper_reaction_ledger.stimulus_id_of_event_queue other);
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name original;
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name other;
+  let attention () =
+    let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~base_path ~keeper_names:[keeper_name]
+      ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+      ~limit_per_keeper:10 in
+    fleet |> member "attention_required_stimulus_count" |> to_int in
+  check int "another comment cannot explain the pending record" 1 (attention ());
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name original;
+  check int "even the same post remains conservative for Board events" 1 (attention ())
+;;
+
+let test_fleet_other_kind_cannot_certify_scheduled_occurrence () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "schedule-queue-kind-is-required" in
+  let schedule = { (schedule_due_stimulus ()) with post_id = "board:shared-post" } in
+  let board = board_stimulus ~post_id:"shared-post" () in
+  check string "fixture IDs collide across different kinds"
+    (Keeper_reaction_ledger.stimulus_id_of_event_queue schedule)
+    (Keeper_reaction_ledger.stimulus_id_of_event_queue board);
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name schedule;
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name board;
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+    ~limit_per_keeper:10 in
+  check int "a Board entry cannot certify a scheduled occurrence" 1
+    (fleet |> member "attention_required_stimulus_count" |> to_int)
+;;
+
+let test_fleet_schedule_occurrence_payload_identity () =
+  List.iter (fun (queued_occurrence, expected_attention) ->
+    with_temp_base @@ fun base_path ->
+    let keeper_name = "schedule-payload-identity" in
+    let original = schedule_due_stimulus () in
+    let queued = match original.payload with
+      | Keeper_event_queue.Schedule_due wake ->
+        { original with payload = Schedule_due { wake with occurrence_id = queued_occurrence } }
+      | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+      | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+      | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+      | Workspace_message _ | Delegate_completed _ | Composition_completed _
+      | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+        fail "schedule fixture has a non-schedule payload" in
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name original;
+    Keeper_registry_event_queue.enqueue ~base_path keeper_name queued;
+    let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~base_path ~keeper_names:[keeper_name]
+      ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+      ~limit_per_keeper:10 in
+    check int "legacy blank is accepted, a mismatched occurrence is not"
+      expected_attention (fleet |> member "attention_required_stimulus_count" |> to_int))
+    [ "", 0; "different-occurrence", 1 ]
+;;
+
+let test_fleet_ambiguous_ledger_id_requires_attention () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "ambiguous-ledger-id" in
+  let initial = schedule_due_stimulus () in
+  let schedule = match initial.payload with
+    | Keeper_event_queue.Schedule_due wake ->
+      { initial with post_id = "board:shared-post";
+        payload = Schedule_due { wake with occurrence_id = "board:shared-post" } }
+    | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+    | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+    | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+    | Workspace_message _ | Delegate_completed _ | Composition_completed _
+    | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+      fail "schedule fixture has a non-schedule payload" in
+  let board = board_stimulus ~post_id:"shared-post" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name schedule;
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name schedule;
+  let attention () =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path ~keeper_names:[keeper_name]
+      ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+      ~limit_per_keeper:10
+    |> member "attention_required_stimulus_count" |> to_int in
+  check int "schedule entry alone is explained" 0 (attention ());
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name board;
+  check int "colliding Board row makes the ledger ID ambiguous" 1 (attention ())
+;;
+
 let test_fleet_pending_mismatch_beyond_display_cap () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "pending-outside-display-cap" in
   let stimuli = List.init 9 (fun index ->
-    board_stimulus ~post_id:(Printf.sprintf "pending-%d" index) ()) in
+    schedule_due_stimulus ~schedule_id:(Printf.sprintf "pending-%d" index) ()) in
   List.iter (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
     stimuli;
   List.iter (Keeper_registry_event_queue.enqueue ~base_path keeper_name)
@@ -2259,6 +2364,18 @@ let () =
         ; test_case
             "other queued payload does not explain pending"
             `Quick test_fleet_other_queued_payload_does_not_explain_pending
+        ; test_case
+            "board pending is not certified by the same post"
+            `Quick test_fleet_board_pending_is_not_certified_by_same_post
+        ; test_case
+            "other queue kind cannot certify a scheduled occurrence"
+            `Quick test_fleet_other_kind_cannot_certify_scheduled_occurrence
+        ; test_case
+            "schedule payload occurrence identity"
+            `Quick test_fleet_schedule_occurrence_payload_identity
+        ; test_case
+            "ambiguous ledger identity requires attention"
+            `Quick test_fleet_ambiguous_ledger_id_requires_attention
         ; test_case
             "pending mismatch beyond display cap requires attention"
             `Quick test_fleet_pending_mismatch_beyond_display_cap

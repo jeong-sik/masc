@@ -355,10 +355,12 @@ let install_real_masc_binary prefix =
      installer's same-release checksum comparison true; a cp would diverge. *)
   Unix.symlink (Unix.realpath (real_masc_binary ())) staged;
   unlink_if_exists dest;
-  (* install.sh compares the readlink target with the canonical prefix path
-     ($(cd "$PREFIX" && pwd -P)), so the fixture must plant the canonical
-     path or /var -> /private/var style prefixes trip the pointer gate. *)
-  Unix.symlink (Unix.realpath staged) dest
+  (* install.sh reads one symlink level: readlink $DEST must literally be
+     $canonical_prefix/.masc-releases/<64hex>/masc, and the pointer check
+     compares it with $(cd "$PREFIX" && pwd -P), so plant exactly that
+     canonical slot path — realpath would collapse to the final binary and
+     fail the pattern.  The staged slot itself points at the mirror bytes. *)
+  Unix.symlink staged dest
 ;;
 
 let assert_contains label text needle =

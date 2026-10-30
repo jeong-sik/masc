@@ -548,6 +548,31 @@ let install_real_masc_binary prefix mirror_dir =
       (Filename.concat mirror_dir (release_tag ()))
       (masc_dashboard_archive ())
   in
+  let suffix =
+    let name = platform_release_asset () in
+    String.sub name 5 (String.length name - 5)
+  in
+  (* The receipt inside the staged archive records exactly the companion set
+     the mirror packaged (stage_release_mirror): the installer passes those
+     same names to the helper, so the fixture must too or the helper rejects
+     the install with "provided companions differ from receipt". Reuse the
+     mirror's own asset files so the digests match as well. *)
+  let mirror_tag_dir = Filename.concat mirror_dir (release_tag ()) in
+  let companion_spec =
+    [ "masc-tui", "masc-tui-" ^ suffix
+    ; "masc-browser-host", "masc-browser-host-" ^ suffix
+    ; "masc-deployment-preflight-helper",
+      "masc-deployment-preflight-helper-" ^ suffix
+    ; "masc-check-runtime-deployment-preflight",
+      "masc-check-runtime-deployment-preflight-" ^ suffix
+    ; "masc-exec-ssh-bootstrap", "masc-exec-ssh-bootstrap-" ^ suffix ]
+    |> List.map (fun (name, asset) -> (name, Filename.concat mirror_tag_dir asset))
+  in
+  let companion_args =
+    List.concat_map
+      (fun (name, path) -> [ "--companion"; name; path ])
+      companion_spec
+  in
   let bundle_helper =
     Filename.concat (source_root ()) "scripts/release-dashboard-bundle.py"
   in
@@ -556,7 +581,8 @@ let install_real_masc_binary prefix mirror_dir =
       (List.map Filename.quote
          ([ "python3"; bundle_helper; "install"; "--binary"; real_masc_binary ()
           ; "--archive"; archive; "--prefix"; canonical_prefix
-          ; "--binary-asset"; platform_release_asset () ] ))
+          ; "--binary-asset"; platform_release_asset () ]
+            @ companion_args ))
   in
   unlink_if_exists dest;
   check int "fixture installs the managed release identity" 0

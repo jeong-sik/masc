@@ -28155,6 +28155,9 @@ and is loaded on demand through keeper_skill.
             | Some ({installer=Some installer;_} as view) ->
                 state.lane_addons <- Some {view with installer=Some
                   (Masc_tui_lane_installer.paste ~text:paste.Masc_tui_paste.text installer);scroll=0}
+            | Some ({ records=Some _;_ } as view) ->
+                state.lane_addons <- Some (Masc_tui_lane_addons.paste_records
+                  ~text:paste.Masc_tui_paste.text view)
             | Some ({ action_menu=Some {form=Some _;_};_ } as view) ->
                 state.lane_addons <- Some (Masc_tui_lane_addons.paste_action
                   ~text:paste.Masc_tui_paste.text view)
@@ -29489,6 +29492,10 @@ and is loaded on demand through keeper_skill.
                            | Ok (next, request) -> update next; launch_lane_addons state ~mailbox:async_messages request
                            | Error detail -> update {view with evidence_prompt=None;error=lane_addons_input_failure detail})
                       | _ -> ())
+                 | None when Option.is_some view.records ->
+                     (match Addons.edit_records ~key view with
+                      | Ok next -> update next
+                      | Error detail -> update {view with error=lane_addons_input_failure detail})
                  | None -> match view.subscription_panel,view.action_menu,view.draft with
                  | Some panel,_,_ ->
                      let module Subs = Masc_tui_lane_subscriptions in
@@ -29593,6 +29600,10 @@ and is loaded on demand through keeper_skill.
                          state.palette_query <- "";
                          state.palette_cursor <- 0
                      | "A" -> update { view with draft = Some ""; naming=false; scroll = 0 }
+                     | "R" ->
+                         (match Addons.open_records view with
+                          | Ok next -> update next
+                          | Error detail -> update {view with error=lane_addons_input_failure detail})
                      | "E" ->
                          (match Addons.selected_document view with
                           | Some _ -> update {view with editor_ready=true}

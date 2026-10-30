@@ -99,7 +99,7 @@ type t = {
   draft : string option; naming : bool; configuration_cursor : int;
   documents : Document.session list; document_key : string option; editor_ready : bool; last_action : action_request option; action_receipt : Action.receipt option;
 }
-let initial = { installer=None;package_directory=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; detail_read_error=None; application_reading=Application.empty; receipt = None;
+let initial = { installer=None;package_directory=None;subscription_panel=None;evidence_prompt=None; pending_broadcasts=[]; presentation=Summary; screen=Overview; overview_mode=Current_installations; help_open=false; current_selection=Unvisited; history_selection=Unvisited; action_menu=None; records=None; snapshot = None; loading = false; error = None; snapshot_read_error=None; detail_read_error=None; application_reading=Application.empty; receipt = None;
   generation = 0; instance_cursor = 0; row_cursor = 0; selected = []; scroll = 0;
   focus = Instances; draft = None; naming = false; configuration_cursor = 0;
   documents = []; document_key = None; editor_ready = false; last_action=None;action_receipt=None }
@@ -114,6 +114,9 @@ let text_entry_open view =
   || (match view.action_menu with
       | Some { form = Some _; _ } -> true
       | Some _ | None -> false)
+  || (match view.records with
+      | Some overlay -> Masc_tui_lane_records.text_entry_open overlay
+      | None -> false)
   || Option.is_some view.draft
 open Result.Syntax
 let field name = function
@@ -511,8 +514,15 @@ let toggle_history view = match view.screen with
 let selected_document view = Option.bind view.document_key (fun key ->
   List.find_opt (fun (s : Document.session) -> s.file_name = key) view.documents)
 let put_document view (document : Document.session) =
+  (* The records overlay edits its own copy of the draft. A stored session
+     whose text moved on without it — a reload, a revision switch, an
+     external edit — leaves the overlay showing another text, so only an
+     unchanged text keeps it open. *)
+  let records = match view.records with
+    | Some overlay when String.equal (Masc_tui_lane_records.text overlay) document.text -> view.records
+    | Some _ | None -> None in
   {view with documents=document :: List.filter (fun (s : Document.session) -> s.file_name <> document.file_name) view.documents;
-    document_key=Some document.file_name}
+    document_key=Some document.file_name; records}
 let selected_row view = Option.bind view.snapshot (fun snapshot ->
   List.find_map (fun (index, row) ->
     let selectable = match view.screen, view.presentation, view.focus with
@@ -1195,7 +1205,7 @@ let instance_controls view (instance : instance) =
 let overview_hints view =
   if view.help_open then "Esc:close help"
   else if Option.is_some view.document_key then
-    "?:help  Esc:back  Space:on/off draft  E:edit  s:save  l:reload  u/U:revision  Colon:palette  A:command"
+    "?:help  Esc:back  Space:on/off draft  E:edit  R:records  s:save  l:reload  u/U:revision  Colon:palette  A:command"
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->
@@ -1280,6 +1290,27 @@ let edit_action ~key view =
   | Masc_tui_schema_form.Cancel -> Ok ({view with action_menu=None;error=None;scroll=0},None)
   | Updated form -> Ok ({view with action_menu=Some {menu with form=Some form};error=None;scroll=0},None)
   | Submit _ -> let* request = submit_action view in Ok (view,Some request)
+
+let open_records view =
+  let* session = match selected_document view with
+    | Some session -> Ok session | None -> Error "Open a TOML draft with n or E first" in
+  let* overlay = Masc_tui_lane_records.open_ ~title:session.file_name ~text:session.text in
+  Ok {view with records=Some overlay;scroll=0;error=None}
+
+let edit_records ~key view =
+  let* overlay = match view.records with
+    | Some overlay -> Ok overlay | None -> Error "No records overlay" in
+  let* event = Masc_tui_lane_records.handle ~key overlay in
+  match event with
+  | Masc_tui_lane_records.Cancel -> Ok ({view with records=None;error=None;scroll=0})
+  | Updated overlay -> Ok ({view with records=Some overlay;error=None;scroll=0})
+  | Apply (overlay, text) ->
+      let* session = match selected_document view with
+        | Some session -> Ok session | None -> Error "The open document changed; Esc closes the records overlay." in
+      Ok (put_document {view with records=Some overlay;error=None;scroll=0} {session with text})
+
+let paste_records ~text view =
+  {view with records=Option.map (Masc_tui_lane_records.insert_text ~text) view.records;scroll=0}
 
 (* A result value laid out as an outline instead of one line of JSON: an
    object field is a key, a list item is a bullet, a string is its text with
@@ -2198,12 +2229,12 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
   | Some prompt ->
       (diagnostic_lines view @ evidence_lines prompt)
       |> List.concat_map (document_rows ~width)
-  | None -> match view.subscription_panel,view.action_menu with
-  | Some panel,_ ->
+  | None -> match view.subscription_panel,view.action_menu,view.records with
+  | Some panel,_,_ ->
       (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)
        :: Masc_tui_lane_subscriptions.lines panel)
       |> List.concat_map (document_rows ~width)
-  | None,Some menu ->
+  | None,Some menu,_ ->
       (["Run action on " ^ menu.target_title]
        @ diagnostic_lines view
        @ (match menu.form with
@@ -2216,7 +2247,10 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
           | Some action -> action_fields "" action
           | None -> ["No selected action"])))
       |> List.concat_map (document_rows ~width)
-  | None,None ->
+  | _,_,Some overlay ->
+      (diagnostic_lines view @ Masc_tui_lane_records.lines overlay)
+      |> List.concat_map (document_rows ~width)
+  | None,None,None ->
       if view.help_open then List.concat_map (document_rows ~width) help_lines
       else if view.presentation = Flow then flow_lines view |> List.concat_map
         (document_rows ~width)

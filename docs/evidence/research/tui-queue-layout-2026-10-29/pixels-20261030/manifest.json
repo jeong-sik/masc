@@ -1,0 +1,144 @@
+{
+  "started_at": "2026-10-30T00:17:10.872762+00:00",
+  "purpose": "authorized resumed pixel observation, new synthetic phase after prior owned fixtures closed",
+  "repository_head": "fe88e17bf56e03e33b3b487ec861470048e38294",
+  "source_sha": "23c5ea834f89a0988c02ffe3e492980152869179",
+  "binary_sha256": "38e081df1926332e59e5f8edcfed8cad76c40e21afda8cde4b4fc428f9c48bab",
+  "fixture_sha256": "017aa45118a86c84fa14e22a1243b8ca5ae5d4d2d3ba8221da163c10abb1149e",
+  "fixture_pid": 6891,
+  "fixture_port": 50409,
+  "ttyd_pid": 6906,
+  "ttyd_port": 50413,
+  "ttyd_read_only": true,
+  "tmux_socket": "masc-queue-pixels-20261030",
+  "session": "pixels",
+  "initial_terminal": "120x36",
+  "task_space_id": 124,
+  "page": "p1",
+  "font_size": 16,
+  "font_family": "Menlo,Monaco,monospace",
+  "scope": "actual native TUI via readonly ttyd and Ego; synthetic health source claim, no real server mutation/model/production data",
+  "retained_at": "2026-10-30T00:26:53.425769+00:00",
+  "retained_files": {
+    "bottom-final-80x24.json": "d567def32904b853078453db43a10228dfa97460489bdc0a04e06c36a0fe5066",
+    "bottom-final-80x24.png": "f47e95cc82cba1990d6e64436330cb03f2a34f50ebb0dc220e095ddc6c811686",
+    "bottom-final-80x24.txt": "30979e3b894782105a4899ab3ee72037371db877f9478209144975d3a2dbf5a5",
+    "cleanup.json": "ccc3ab0eb8c5037652ca611d1188eed417627c6c361f767785e0fd039f16a051",
+    "context-final-120x36.json": "401ccb4c8b62e2b5ee4e4e5de1f9e08dd74b7b64af765ef9f65a7dabd5b57f1b",
+    "context-final-120x36.png": "c122dae8e404520ad7663e9d48d2e94ac45ff6b4457dfb2af3a39106a4bdee76",
+    "context-final-120x36.txt": "fe1e28f271a21836c0d6fde3e9847b594db95b877680da6acba38bb1be24fe2d",
+    "context-return-final-120x36.txt": "7c7ead896fa2e29accf54af1f4d45a698c150a1b46376de74b2dce7ad80d626a",
+    "detail-final-120x36.json": "3daeaf808fcfcbb09efeae614b35ccb937c92a821c980bfee466393618ab59c0",
+    "detail-final-120x36.png": "f68909f19496c23fe01094fdb397ce722b3b93fdb624cc09279ab9485394aa86",
+    "detail-final-120x36.txt": "0e0b352d91fd5288858f196f244c104065252a2f9c6afbf0e04a7432f201a7a7",
+    "draft-return-final-120x36.json": "8b855245a280089d1fa8fd3d2f2196092e627d162c497851bee9a3f119dbd8a1",
+    "draft-return-final-120x36.png": "4ee74d8b0569c0a1dcca4ab2b68a25e9c1dd1c9535eac1c80e5ea3d01df699bf",
+    "draft-return-final-120x36.txt": "14ade82181721a5103cd191e01bc8c2a647866ac3b13b0dc2da41b14b06e7f5e",
+    "events.jsonl": "413d07fee101d62632a11ca29566c7c8de3766c3b6c06351043d92116b986fd6",
+    "full-final-120x36.json": "dc02eadf2a3fd375ad071ccb6279755deddccfab4be0c927cf3da2d9039c9cbe",
+    "full-final-120x36.png": "46dbdd18966180cc6ef2ed21d59764badbc4a8926d64dc27fe5f831fe842b4f4",
+    "full-final-120x36.txt": "cc11f2d64a25658adb9b5a5e4b1dac900a7b6adcdbe11cd77d9f2cdd391df985",
+    "full-small-final-80x24.json": "78368bbfe266252a78f20657a93616b759bce17978f5e552c9b740f0cb96c7de",
+    "full-small-final-80x24.png": "426ee81871dda8690fa2bedee6b7d7f571fb16bdd7028153c2e1464e6fea192f",
+    "full-small-final-80x24.txt": "c70b1377ec1131846ec129e4dae874ffea51dd916ed897f684af6348cf446355",
+    "help-context-paste-final-120x36.json": "bf1cee98f9ccf63b8c1eba87fe3d2d80e52850a7649a9085c105a9bfea93526c",
+    "help-context-paste-final-120x36.png": "d8cab3b4e24d211df7ece552ccdeb56722a8237f0f7e51d818caa94a6b8aebf3",
+    "help-context-paste-final-120x36.txt": "1b93620c6a46f7fee31b9d5ba702065597e9b27dc9fbe934fc16673f235d988c",
+    "help-final-120x36.json": "9587b46b4c58a0f58fc9371a82e0614bd780a943c02f66de4e61cf5996f2c587",
+    "help-final-120x36.png": "44fdad5b4482f1a62058b30dfab1c7bf0e831d8335905161c6518cf585436323",
+    "help-final-120x36.txt": "c7074df58814cc8b2bb729f9f8e198d80d46a3ad44a099864825b5ee6b37b1b2",
+    "observation-manifest.json": "3ecf9a7cae2b169c7c471eea1259eccb58a011663ba579728b19fbdefeb03f23",
+    "overflow-final-80x24.json": "84373bc1fffec6b5a016d9de0c2232d588bfbdbb413aad631f7873b1a7921d2f",
+    "overflow-final-80x24.png": "278beb760bdacd70b0fd5ac07536efac30ec64d57d866ea1901054f2b2054756",
+    "overflow-final-80x24.txt": "68768c2cb422712a58a9041c3770d678cfc90026af4248c1592a48eb08ece695",
+    "receipt-final-120x36.json": "c9227430592a313ca08c520c68c84f8e69cf00d0e657303b8d8f4bc1bc13878d",
+    "receipt-final-120x36.png": "e916baa415644104440a9296f674e7bac1873b40c66ce2f4b3654040fb6fc701",
+    "receipt-final-120x36.txt": "b11c0d7a4b483fa6d377a8f6621030a170b075377518a9166f08fc05da977586",
+    "requests.jsonl": "e5231daac9e81357a604c3a34d51754b9f19e2f8c99a4b89fa8cfb0621994eae",
+    "side-final-120x36.json": "74ddc67d012f825c556e1ba20db88594184d19146e484356909b85f18afc8dc7",
+    "side-final-120x36.png": "7be21289f3e3232cb7b4fc209178235a06f8b3515755c4ddec17b813bb811615",
+    "side-final-120x36.txt": "c22591e984125f28a5f4f7c4eadbfbdc7f6e7637a99ec0fa01b2775f3e04c64e"
+  },
+  "image_dimensions": {
+    "bottom-final-80x24.png": {
+      "width": 785,
+      "height": 466
+    },
+    "full-small-final-80x24.png": {
+      "width": 785,
+      "height": 466
+    },
+    "overflow-final-80x24.png": {
+      "width": 785,
+      "height": 466
+    },
+    "side-final-120x36.png": {
+      "width": 1165,
+      "height": 694
+    },
+    "full-final-120x36.png": {
+      "width": 1165,
+      "height": 694
+    },
+    "help-final-120x36.png": {
+      "width": 1165,
+      "height": 694
+    },
+    "detail-final-120x36.png": {
+      "width": 1165,
+      "height": 694
+    },
+    "receipt-final-120x36.png": {
+      "width": 1165,
+      "height": 694
+    },
+    "context-final-120x36.png": {
+      "width": 1165,
+      "height": 694
+    },
+    "help-context-paste-final-120x36.png": {
+      "width": 1165,
+      "height": 694
+    },
+    "draft-return-final-120x36.png": {
+      "width": 1165,
+      "height": 694
+    }
+  },
+  "native_run": 40739146379,
+  "workflow_sha": "00559066e16f85e397786d64312b0a4b8f874dc2",
+  "ttyd_version": "1.7.7-unknown",
+  "ego_version": "0.6.1.11",
+  "tmux_version": "3.6a",
+  "client_options": {
+    "disableResizeOverlay": true,
+    "url": "http://127.0.0.1:50413/?disableResizeOverlay=true"
+  },
+  "setup_images": "Early clipped/transient resize-overlay captures remain local in artifacts; not selected for comparison. Native TUI was not restarted.",
+  "clock_scope": "Fixed synthetic timestamps unchanged from prior fixture; its schedule is due during this phase, not future. Age strings advance.",
+  "pixel_scope": "Original Ego PNG exports requested with raw:true of native TUI via readonly ttyd. Browser-reported DPR2; raster dimensions equal CSS viewport dimensions, export scaling not established. No image editing/compositing or injected DOM mock.",
+  "limits": [
+    "No human speed/preference/comprehension measurement",
+    "No physical IME/chords/mouse or OS clipboard proof",
+    "No real-server queue reorder, execution, install or deployment proof",
+    "No new UI assertion or automated PTY test"
+  ],
+  "cleanup": {
+    "closed_at": "2026-10-30T00:26:53.405654+00:00",
+    "fixture_pid": 6891,
+    "ttyd_pid": 6906,
+    "tmux_socket": "masc-queue-pixels-20261030",
+    "scope": "only verified owned synthetic observation processes",
+    "browser_finish": {
+      "task_space": 124,
+      "kept_pages": [],
+      "finished_at": "2026-10-30T00:25:50.899Z"
+    }
+  },
+  "later_merged_pr": {
+    "number": 46699,
+    "head": "9808d2cc2d78ed82d77012cb5f48a5c0df89fb1a",
+    "merge_commit": "f4dd15888670e49c947e1628960d202861159e94",
+    "scope": "captured23c candidate is older; these images do not validate this later head, currentmain, or installed runtime"
+  }
+}

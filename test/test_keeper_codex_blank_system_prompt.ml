@@ -235,8 +235,19 @@ let thread_start_request capture_path =
 
 let test_non_blank_system_prompt_reaches_thread_start_unchanged () =
   let base_path = temp_workspace () in
+  let key = Prompt_names.keeper_codex_native_read in
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  let posture_note = "CODEX_POSTURE_FROM_MANAGED_OVERRIDE" in
+  (match Prompt_registry.set_override key posture_note with
+   | Ok () -> () | Error detail -> fail detail);
   Fun.protect
-    ~finally:(fun () -> cleanup_tree base_path)
+    ~finally:(fun () ->
+      (match previous with
+       | Some value ->
+         (match Prompt_registry.set_override key value with
+          | Ok () -> () | Error detail -> fail detail)
+       | None -> Prompt_registry.clear_prompt_override key);
+      cleanup_tree base_path)
     (fun () ->
        let capture_path = Filename.concat base_path "requests.jsonl" in
        let cli_path = fixture_script ~base_path ~capture_path in
@@ -287,10 +298,7 @@ let test_non_blank_system_prompt_reaches_thread_start_unchanged () =
          let expected =
            String.concat
              "\n\n"
-             ((system_prompt
-               :: Keeper_codex_runtime.For_testing.native_posture_note
-                    Runtime_native_tools.codex_default)
-              @ [ unread_observation ])
+             [ system_prompt; posture_note; unread_observation ]
          in
          let received =
            Yojson.Safe.Util.(

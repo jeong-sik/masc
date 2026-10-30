@@ -289,7 +289,7 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
   let before = List.length (read_requests capture) in
   let continuation_goal =
     Keeper_direct_checkpoint_continuation.official_resume_message
-      ~operation_id in
+      ~operation_id |> require in
   successful
     (run ~official_task_reference ~official_client_continuation:checkpoint
        ~goal:continuation_goal
@@ -565,6 +565,13 @@ let test_rejected_context_never_submits_turn () =
   check int "rejected context never reports transmitted turn input" 0 (List.length !reports)
 
 let test_cooperative_resume_sends_only_remaining_work_instruction () =
+  let key = Prompt_names.keeper_official_client_resume in
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  Prompt_registry.set_override key "MANAGED_RESUME {{operation_id}}" |> require;
+  Fun.protect
+    ~finally:(fun () -> match previous with
+      | Some value -> Prompt_registry.set_override key value |> require
+      | None -> Prompt_registry.clear_prompt_override key) @@ fun () ->
   with_fixture @@ fun ~run ~capture ~reports:_ ->
   let original_task = "Create the requested artifact and report its path." in
   let initial = run ~goal:original_task ~instructions:"Keeper instructions" ~world:"Original work" () in
@@ -589,7 +596,9 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   let official_task_reference = Keeper_official_task_reference.create
     ~operation_id ~message:original_task ~original_turn:observed in
   let before = List.length (read_requests capture) in
-  let goal = Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id in
+  let goal = Keeper_direct_checkpoint_continuation.official_resume_message ~operation_id |> require in
+  check string "the managed template renders the admitted operation"
+    "MANAGED_RESUME cooperative-original" goal;
   let rejected = run ~official_task_reference ~official_client_continuation:checkpoint ~goal
     ~model_input_projection:(fun messages -> Ok (List.filter
       (fun (message : Agent_core.Types.message) -> message.role <> System) messages))

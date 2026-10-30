@@ -159,6 +159,10 @@ check_reviews() {
     owned_state=$(printf '%s\n' "$all_rows" | awk -F '\t' -v actor="$me" -v rid="$replacement_id" '$1==actor && ("id:" $2)==("id:" rid) {print $3}')
     [ "$owned_state" = CHANGES_REQUESTED ] || refuse "--replace-own-cr $replacement_id does not name this account's open request on this PR"
   done
+  # An older request can still be unresolved after another Keeper sharing the
+  # account has approved. Ownership is checked against the complete review list
+  # below; the account's latest review does not decide whether an ID is open.
+  replaced="$replace_cr"
   while IFS=$'\t' read -r who rid state; do
     [ -n "$who" ] || continue
     if [ "$state" = CHANGES_REQUESTED ]; then
@@ -166,7 +170,6 @@ check_reviews() {
         refuse "open CHANGES_REQUESTED from $who (review $rid)"
       elif [ "$who" = "$me" ]; then
         [ -n "$replace_cr" ] || refuse "open CHANGES_REQUESTED from $who (review $rid); use --replace-own-cr $rid after rereview"
-        replaced="$replace_cr"
       else
         # Recording one independent review must not wait for every other
         # reviewer to withdraw theirs. Consumption still refuses above.
@@ -210,7 +213,6 @@ $(printf '%s\n' "$bound" | sed 's/^/    - /')
       fi
     fi
   done <<<"$rows"
-  [ -z "$replace_cr" ] || [ "$replaced" = "$replace_cr" ] || refuse "--replace-own-cr does not name this account's current open request"
 }
 check_verdict() {
   local value state cited
@@ -347,7 +349,7 @@ fi
 # Main may advance later when the reviewed diff base remains identical.
 scope=$(compute_scope)
 footer=$(printf '\n\n---\nreview-scope: %s\napprove-guard: head `%s` · %s review' "$scope" "$head" "$review_policy")
-if [ -n "$own_approval" ]; then
+if [ -n "$own_approval" ] && [ -z "$replace_cr" ]; then
   previous_scope=$(ci_gh_object "repos/$repo/pulls/$pr/reviews/$own_approval" '.body | split("\n") | map(select(startswith("review-scope: "))) | if length == 1 then .[0] else "" end')
   own_verdict=$(verdict_for "$pr" "$head" "" "$me") || { echo "approve-guard: own verdict read failed" >&2; exit 1; }
   read -r own_state _ <<<"$own_verdict"

@@ -133,8 +133,13 @@ def main():
         if any(rid not in own or own[rid][1] != args.keeper for rid in requested):
             print("approve-guard: replacement request signer is unknown or differs from this Keeper", file=sys.stderr)
             return 2
+        # One Keeper can replace their own requests while other Keepers on the
+        # same account remain outstanding. Consumption still blocks on all of
+        # them. Without a replacement, retain the existing publication gate.
         blocked = tuple((rid, actor, keeper) for rid, actor, keeper in pending
-                        if actor is None or (actor == args.reviewer_id and rid not in requested))
+                        if actor is None or (actor == args.reviewer_id
+                            and rid not in requested
+                            and (not requested or keeper == args.keeper)))
     if blocked:
         ids = ", ".join(str(item[0]) for item in blocked)
         print(f"approve-guard: unresolved change requests (review IDs {ids}); their owners must resolve them", file=sys.stderr)

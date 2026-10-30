@@ -704,9 +704,9 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
             'repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review.json";;',
             'repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review-${path##*/}.json";;'))
 
-    def publish(self, *replace_ids):
+    def publish(self, *replace_ids, keeper="reviewer-keeper"):
         body = self.tmp / "replacement.md"
-        body.write_text(f"verdict: PASS head: {HEAD} by: reviewer-keeper\nindependent source review\n")
+        body.write_text(f"verdict: PASS head: {HEAD} by: {keeper}\nindependent source review\n")
         args = ["--review-base", BASE, "--review-diff", DIFF, "--body", str(body)]
         for rid in replace_ids:
             args += ["--replace-own-cr", str(rid)]
@@ -848,6 +848,100 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
         calls = (self.data / "calls.log").read_text()
         self.assertEqual(calls.count("POST repos/o/r/pulls/41487/reviews"), 2)
         self.assertNotIn("dismiss", calls)
+
+    def test_shared_account_keepers_replace_their_requests_separately(self):
+        first_request = self.negative_review()
+        second_request = self.negative_review(rid=89, submitted="2026-10-09T03:45:54Z")
+        second_request["body"] = second_request["body"].replace(
+            "by: reviewer-keeper", "by: other-keeper")
+        self.reviews(first_request, second_request)
+        self.install_publication_fake()
+
+        first = self.publish(88)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertIn("APPROVED #41487", first.stdout)
+        for mode in ("--source-receipt", "--merge-check"):
+            blocked = self.run_guard(mode)
+            self.assertEqual(blocked.returncode, 2, blocked.stderr)
+            # A later stack layer may reject the same current-head review first
+            # as a structured FAIL; either diagnostic must identify request 89.
+            self.assertTrue(
+                "unresolved change requests (review IDs 89)" in blocked.stderr
+                or "unresolved FAIL by reviewer-account at review:89" in blocked.stderr,
+                blocked.stderr,
+            )
+
+        second = self.publish(89, keeper="other-keeper")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("APPROVED #41487", second.stdout)
+        self.assertNotIn("SKIP", second.stdout)
+        for mode in ("--source-receipt", "--merge-check"):
+            admitted = self.run_guard(mode)
+            self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        reviews = json.loads((self.data / "reviews.json").read_text())
+        self.assertEqual([r["state"] for r in reviews],
+                         ["CHANGES_REQUESTED", "CHANGES_REQUESTED", "APPROVED", "APPROVED"])
+        self.assertIn("replaces own CHANGES_REQUESTED 88", reviews[2]["body"])
+        self.assertIn("replaces own CHANGES_REQUESTED 89", reviews[3]["body"])
+        calls = (self.data / "calls.log").read_text()
+        self.assertEqual(calls.count("POST repos/o/r/pulls/41487/reviews"), 2)
+        self.assertNotIn("dismiss", calls)
+
+    def test_shared_account_stale_request_remains_until_its_owner_replaces_it(self):
+        stale = self.negative_review(rid=89, submitted="2026-10-09T03:45:54Z")
+        stale["commit_id"] = "a" * 40
+        stale["body"] = (f"verdict: FAIL head: {'a' * 40} by: other-keeper\nsource findings")
+        self.reviews(self.negative_review(), stale)
+        self.install_publication_fake()
+
+        first = self.publish(88)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 2, receipt.stderr)
+        self.assertIn("unresolved change requests (review IDs 89)", receipt.stderr)
+        wrong_owner = self.publish(89)
+        self.assertEqual(wrong_owner.returncode, 2, wrong_owner.stderr)
+        self.assertIn("signer is unknown or differs", wrong_owner.stderr)
+        second = self.publish(89, keeper="other-keeper")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("APPROVED #41487", second.stdout)
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 0, receipt.stderr)
+
+    def test_older_request_is_replaced_after_same_account_approval(self):
+        request = self.negative_review()
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        approval.update(id=89, submitted_at="2026-10-09T03:45:54Z")
+        approval["user"]["login"] = "reviewer-account"
+        approval["body"] = approval["body"].replace("by: reviewer-keeper", "by: other-keeper")
+        self.reviews(request, approval)
+        (self.data / "review-89.json").write_text(json.dumps(approval))
+        self.install_publication_fake()
+
+        result = self.publish(88)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("APPROVED #41487", result.stdout)
+        self.assertNotIn("SKIP", result.stdout)
+        reviews = json.loads((self.data / "reviews.json").read_text())
+        self.assertIn("replaces own CHANGES_REQUESTED 88", reviews[-1]["body"])
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 0, receipt.stderr)
+
+    def test_unsigned_same_account_request_stays_blocked_after_owned_replacement(self):
+        unsigned = self.negative_review(rid=89, submitted="2026-10-09T03:45:54Z")
+        unsigned["body"] = "Please fix this"
+        self.reviews(self.negative_review(), unsigned)
+        self.install_publication_fake()
+
+        first = self.publish(88)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 2, receipt.stderr)
+        self.assertIn("unresolved change requests (review IDs 89)", receipt.stderr)
+        claim = self.publish(89)
+        self.assertEqual(claim.returncode, 2, claim.stderr)
+        self.assertIn("signer is unknown or differs", claim.stderr)
 
     def test_recording_a_new_review_does_not_clear_a_different_reviewers_findings(self):
         for login in ("reviewer-account", "another-reviewer"):

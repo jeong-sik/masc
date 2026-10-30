@@ -7,6 +7,10 @@ run-name: Before/After PTY bytes for the viewport cadence skip
 # instrumentation patch. See board p-f704cbabf5d5ee8c9618db11f9827cc7
 # (mad-scientist conditions 1-3, measurement definition 1).
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/viewport-cadence-bytes.yml'
+      - 'scripts/measure-viewport-cadence-bytes.py'
   workflow_dispatch:
     inputs:
       before_sha:

@@ -1,0 +1,160 @@
+{
+  "snapshot_head": "8ef0028e911dd83c78bc57362904e0787df72c3e",
+  "captured_at": "2026-10-30T17:08:10+09:00",
+  "interval": "rolling 24h Asia/Seoul, first-parent snapshots",
+  "rows": [
+    {
+      "window_days_ago": 1,
+      "from": "2026-10-29T17:08:10+09:00",
+      "to": "2026-10-30T17:08:10+09:00",
+      "older": "9b8b566fdb47bb0ae5bed7078f9a141129b2ac9e",
+      "newer": "8ef0028e911dd83c78bc57362904e0787df72c3e",
+      "first_parent_commits": 135,
+      "files": 1547,
+      "added": 73929,
+      "deleted": 14822,
+      "categories": {
+        "other": 156,
+        "workflow-scripts": 9,
+        "tui-dashboard": 134,
+        "docs-changelog": 839,
+        "board-task-goal-schedule": 29,
+        "keeper-other": 117,
+        "runtime-context": 15,
+        "keeper-memory-librarian": 21,
+        "tests": 227
+      }
+    },
+    {
+      "window_days_ago": 2,
+      "from": "2026-10-28T17:08:10+09:00",
+      "to": "2026-10-29T17:08:10+09:00",
+      "older": "3f5585167eee5315430009d0adc8c075ae91aefc",
+      "newer": "9b8b566fdb47bb0ae5bed7078f9a141129b2ac9e",
+      "first_parent_commits": 143,
+      "files": 1398,
+      "added": 89793,
+      "deleted": 12287,
+      "categories": {
+        "other": 286,
+        "tui-dashboard": 78,
+        "docs-changelog": 369,
+        "keeper-other": 229,
+        "runtime-context": 63,
+        "keeper-memory-librarian": 61,
+        "board-task-goal-schedule": 1,
+        "workflow-scripts": 24,
+        "tests": 287
+      }
+    },
+    {
+      "window_days_ago": 3,
+      "from": "2026-10-27T17:08:10+09:00",
+      "to": "2026-10-28T17:08:10+09:00",
+      "older": "90dd18193c860cae37dad6fd3976670d92b14266",
+      "newer": "3f5585167eee5315430009d0adc8c075ae91aefc",
+      "first_parent_commits": 175,
+      "files": 2933,
+      "added": 175428,
+      "deleted": 16868,
+      "categories": {
+        "other": 692,
+        "tui-dashboard": 138,
+        "docs-changelog": 1222,
+        "board-task-goal-schedule": 35,
+        "keeper-other": 301,
+        "keeper-memory-librarian": 56,
+        "runtime-context": 94,
+        "workflow-scripts": 15,
+        "tests": 380
+      }
+    },
+    {
+      "window_days_ago": 4,
+      "from": "2026-10-26T17:08:10+09:00",
+      "to": "2026-10-27T17:08:10+09:00",
+      "older": "6d526220bea8fcaf42c88239bfb995aa4b7c9a09",
+      "newer": "90dd18193c860cae37dad6fd3976670d92b14266",
+      "first_parent_commits": 154,
+      "files": 3517,
+      "added": 153694,
+      "deleted": 59114,
+      "categories": {
+        "other": 723,
+        "workflow-scripts": 55,
+        "tui-dashboard": 619,
+        "docs-changelog": 1680,
+        "board-task-goal-schedule": 24,
+        "keeper-other": 131,
+        "keeper-memory-librarian": 10,
+        "runtime-context": 64,
+        "tests": 211
+      }
+    },
+    {
+      "window_days_ago": 5,
+      "from": "2026-10-25T17:08:10+09:00",
+      "to": "2026-10-26T17:08:10+09:00",
+      "older": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+      "newer": "6d526220bea8fcaf42c88239bfb995aa4b7c9a09",
+      "first_parent_commits": 179,
+      "files": 2333,
+      "added": 177611,
+      "deleted": 16837,
+      "categories": {
+        "other": 282,
+        "workflow-scripts": 28,
+        "tui-dashboard": 119,
+        "docs-changelog": 1252,
+        "board-task-goal-schedule": 26,
+        "keeper-other": 240,
+        "runtime-context": 100,
+        "keeper-memory-librarian": 6,
+        "tests": 280
+      }
+    },
+    {
+      "window_days_ago": 6,
+      "from": "2026-10-24T17:08:10+09:00",
+      "to": "2026-10-25T17:08:10+09:00",
+      "older": "ac7fe109acc9a54d479317755a24efb556c004b0",
+      "newer": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+      "first_parent_commits": 63,
+      "files": 789,
+      "added": 41613,
+      "deleted": 5268,
+      "categories": {
+        "other": 90,
+        "workflow-scripts": 22,
+        "tui-dashboard": 62,
+        "docs-changelog": 337,
+        "keeper-other": 115,
+        "runtime-context": 61,
+        "board-task-goal-schedule": 1,
+        "tests": 101
+      }
+    },
+    {
+      "window_days_ago": 7,
+      "from": "2026-10-23T17:08:10+09:00",
+      "to": "2026-10-24T17:08:10+09:00",
+      "older": "2157302cca524ca7bbf58293bcb4c8bbb25a8fe5",
+      "newer": "ac7fe109acc9a54d479317755a24efb556c004b0",
+      "first_parent_commits": 180,
+      "files": 1797,
+      "added": 74530,
+      "deleted": 17680,
+      "categories": {
+        "workflow-scripts": 23,
+        "other": 353,
+        "tui-dashboard": 109,
+        "docs-changelog": 711,
+        "board-task-goal-schedule": 17,
+        "keeper-other": 202,
+        "runtime-context": 87,
+        "keeper-memory-librarian": 22,
+        "tests": 273
+      }
+    }
+  ]
+}

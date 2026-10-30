@@ -155,19 +155,24 @@ class GitHub:
             return False
         excluded = {actor_id for _, actor_id in commit_accounts} | {pr["user"]["id"]}
         latest = {}
-        for review in reviews:
-            if review.get("state") not in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
-                continue
+        order = module("worklist_formal_order", "review-formal-order.py")
+        try:
+            formal = [r for r in reviews if r.get("state") in order.FORMAL]
+            ordered_latest = order.latest_reviews(formal)
+            ownership = module("worklist_cr_ownership", "review-cr-ownership.py")
+            outstanding = ownership.outstanding([reviews])
+        except (ValueError, TypeError) as error:
+            raise Unavailable(f"#{pr['number']}: formal review ordering unavailable: {error}") from error
+        for review in ordered_latest.values():
             user = review.get("user")
             actor_id = user.get("id") if isinstance(user, dict) else None
-            rid = review.get("id")
-            if type(actor_id) is not int or actor_id < 1 or type(rid) is not int or rid < 1:
+            if type(actor_id) is not int or actor_id < 1 or actor_id in latest:
                 raise Unavailable(f"#{pr['number']}: review identity unavailable")
-            if actor_id not in latest or rid > latest[actor_id]["id"]:
-                latest[actor_id] = review
+            latest[actor_id] = review
         conflicts = any(r["id"] in excluded for r in pr["requested_reviewers"])
-        conflicts |= any(actor_id in excluded and r["state"] == "CHANGES_REQUESTED"
-                         for actor_id, r in latest.items())
+        if any(actor_id is None for _, actor_id, _ in outstanding):
+            raise Unavailable(f"#{pr['number']}: change request identity unavailable")
+        conflicts |= any(actor_id in excluded for _, actor_id, _ in outstanding)
         candidates = [r for actor_id, r in latest.items()
                       if actor_id not in excluded and r["state"] == "APPROVED"
                       and r.get("commit_id") == pr["head"]["sha"]]

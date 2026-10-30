@@ -280,6 +280,9 @@ verify actual ownership separately. Replacement order is determined from
 submission times, not review IDs. Missing times or a tie for an account's latest
 formal review leave ordering unavailable; a replacement must be strictly later
 than its request.
+The review worklist applies the same ordering and keeps each unresolved request
+owned by its reviewer; multiple requests on one account share a single planned
+rereview. A current-head request still waits for author action.
 Existing CRs and comment verdicts do not prevent recording a new independent
 approval from a different account. At merge/receipt consumption, unresolved
 FAIL/HOLD still blocks: a PASS from another account, including the PR author, or

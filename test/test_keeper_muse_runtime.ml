@@ -2937,22 +2937,34 @@ let test_native_none_is_refused_before_spawn () =
 ;;
 
 let test_attached_mcp_approvals_are_exact () =
-  with_scripted_host (fun ~base_path ->
-    (match (run_turn ~base_path ~tool:(masc_probe_tool (ref `Null))).outcome.result with
-     | Ok _ -> ()
-     | Error error -> fail (Agent_core.Error.to_string error));
-    check (list string) "answers"
-      [ "mcp__masc__masc_probe allow_once -"; "mcp__unattached__masc_probe abort -";
-        "mcp__masc__masc_probe abort -"; "mcp__masc__masc_probe abort -"; "bash abort -"; "read_file abort -" ]
-      (read_text (Filename.concat base_path "decisions.log")
-       |> String.split_on_char '\n'
-       |> List.filter (fun line -> line <> ""));
-    let start_prompt = read_text (Filename.concat base_path "start-prompt.txt") in
-    List.iter
-      (fun note ->
-         check bool "the start prompt states the posture" true
-           (String_util.contains_substring start_prompt note))
-      (Adapter.native_posture_note Runtime_native_tools.Native_read))
+  let key = Prompt_names.keeper_muse_native_read in
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  let note = "MUSE_POSTURE_FROM_MANAGED_OVERRIDE" in
+  let set value =
+    match Prompt_registry.set_override key value with
+    | Ok () -> ()
+    | Error detail -> fail detail
+  in
+  set note;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> set value
+      | None -> Prompt_registry.clear_prompt_override key)
+    (fun () ->
+      with_scripted_host (fun ~base_path ->
+        (match (run_turn ~base_path ~tool:(masc_probe_tool (ref `Null))).outcome.result with
+         | Ok _ -> ()
+         | Error error -> fail (Agent_core.Error.to_string error));
+        check (list string) "answers"
+          [ "mcp__masc__masc_probe allow_once -"; "mcp__unattached__masc_probe abort -";
+            "mcp__masc__masc_probe abort -"; "mcp__masc__masc_probe abort -"; "bash abort -"; "read_file abort -" ]
+          (read_text (Filename.concat base_path "decisions.log")
+           |> String.split_on_char '\n'
+           |> List.filter (fun line -> line <> ""));
+        let start_prompt = read_text (Filename.concat base_path "start-prompt.txt") in
+        check bool "the managed override reaches the native start prompt" true
+          (String_util.contains_substring start_prompt note)))
 ;;
 
 (* Exercise the actual adapter writer, then recover its serialized argument

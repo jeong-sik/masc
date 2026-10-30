@@ -129,6 +129,7 @@ let lane_cli_probe_hitl_system = "lane_cli_probe.hitl.system"
 let lane_cli_probe_hitl_user = "lane_cli_probe.hitl.user"
 let keeper_antigravity_system_instructions_label = "keeper.antigravity.system_instructions_label"
 let keeper_antigravity_current_goal_label = "keeper.antigravity.current_goal_label"
+let keeper_muse_native_read = "keeper.muse.native_read"
 let eval_calibration_few_shot = "eval.calibration.few_shot"
 let eval_calibration_few_shot_example = "eval.calibration.few_shot.example"
 

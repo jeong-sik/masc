@@ -1205,7 +1205,8 @@ module For_testing_microvm = struct
   let build_link_scan_prepared ~container_name =
     match microvm_work_root_entry container_name with
     | Some { build_links_state = Build_links_prepared; _ } -> true
-    | Some _ | None -> false
+    | Some { build_links_state = (Build_links_not_prepared | Build_links_effect_unverified); _ }
+    | None -> false
   ;;
 
   let microvm_container_name = microvm_container_name
@@ -1389,7 +1390,14 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation 
          "microvm_build_scan_failed: %s; limit %d bytes; reduce scanned checkouts before retrying"
          (Keeper_microvm_cli_output.error_message error)
          Common.max_process_capture_head_bytes
-     | Error error ->
+     | Error ({ reason =
+                  ( Keeper_microvm_cli_output.Capture_directory_unavailable
+                  | Keeper_microvm_cli_output.Capture_incomplete
+                  | Keeper_microvm_cli_output.Capture_failed
+                  | Keeper_microvm_cli_output.Capture_unreadable
+                  | Keeper_microvm_cli_output.Capture_permissions_invalid
+                  | Keeper_microvm_cli_output.Capture_length_mismatch
+                  | Keeper_microvm_cli_output.Capture_cleanup_failed ); _ } as error) ->
        Log.Keeper.warn ~keeper_name:t.meta.name
          "microvm_build_scan_failed: %s"
          (Keeper_microvm_cli_output.error_message error))

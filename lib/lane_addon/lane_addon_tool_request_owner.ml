@@ -147,11 +147,13 @@ let decode_published ~directory_name ~file_name json =
   else if not (String.equal file_name (Lane_addon_store.digest request_id ^ ".json"))
   then Error "original request filename does not match its ID"
   else Ok record
-let check_published ~read_body ~directory_name ~file_name json =
+let read_published ~read_body ~directory_name ~file_name json =
   let* record = decode_published ~directory_name ~file_name json in
   let* bytes = read_body ~scope:record.Record.scope ~request_digest:record.request_digest in
-  let* _ = request_of_body ~request_digest:record.request_digest bytes in
-  Ok ()
+  let+ request = request_of_body ~request_digest:record.request_digest bytes in
+  with_request record request
+let check_published ~read_body ~directory_name ~file_name json =
+  Result.map (fun _ -> ()) (read_published ~read_body ~directory_name ~file_name json)
 let unavailable result = Result.map_error (fun detail -> Store_unavailable detail) result
 let load_listed ~store (record : Record.t) =
   let* original = load ~store ~scope:record.scope ~request_id:record.request_id in

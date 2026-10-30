@@ -43,6 +43,18 @@ val destination : part -> Keeper_librarian_admission_capture.destination
 val predecessor : part -> string option
 val original_through : part -> int
 val to_json : part -> Yojson.Safe.t
+val validate_part_payload : owner:Keeper_librarian_admission_capture.owner ->
+  Lane_addon_tool_request_owner.retained -> (unit, string) result
+val validate_partition_payload : owner:Keeper_librarian_admission_capture.owner ->
+  Lane_addon_tool_request_owner.retained -> (unit, string) result
+val load_parent_payload :
+  read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+  owner:Keeper_librarian_admission_capture.owner -> request_id:string ->
+  (Keeper_memory_admission_queue.batch, string) result
+(** Pure current payload/binding and acknowledged-ancestry checks over an
+    explicit read-only original-record port. Does not inspect current Memory,
+    supersession receipt status, live ownership or perform recovery. This is
+    insufficient authority for execution; runtime uses {!discover}. *)
 
 val discover : store:Lane_addon_store.t ->
   owner:Keeper_librarian_admission_capture.owner -> restore_gate:gate_restore ->
@@ -52,7 +64,9 @@ val discover : store:Lane_addon_store.t ->
     unique ownership, explicit replacement lineage and disjoint active-root
     candidates are checked before
     returning. Pending transactions may have zero/one/two children; acknowledged
-    transactions require both. Nothing is repaired or written by discovery. *)
+    transactions require both. Full replacement validation reads Current
+    receipt status and may reconcile its publication state; do not use this
+    operation for deploy preflight. Use the pure payload ports above there. *)
 val roots : inventory -> part list
 (** Active roots only. Superseded immutable roots and their acknowledged
     descendants remain available to [find]/[load_parent] for historical reads. *)

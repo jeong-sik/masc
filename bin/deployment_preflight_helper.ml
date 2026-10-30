@@ -874,9 +874,9 @@ let media_reading_maintenance_cmd =
 
 (* Every store [Keeper_durable_store.preflight_scan] names: a deploy is where
    the operator watches, so any file or row this build cannot read stops it.
-   The Lane Add-on records follow, each refused file named with the step that
-   clears it: their fix is moving that file aside, not a store-wide upgrade
-   (#45106). *)
+   The Lane Add-on records follow, with current consumer payload checks for
+   Librarian originals. Refusals name the file and its store-specific fresh
+   state requirements; a coupled original is not repaired by moving one file. *)
 let validate_stores base_path =
   let module D = Masc.Keeper_durable_store in
   let module L = Masc.Lane_addon_store_preflight in
@@ -927,7 +927,8 @@ let validate_stores base_path =
   let lane_addon_reports =
     List.map
       (fun store ->
-         let report = L.name store, L.on_refusal store, L.scan store ~base_path in
+         let report = L.name store, L.on_refusal store,
+           L.scan ~validate_tool_request:Masc.Keeper_librarian_store_preflight.validate store ~base_path in
          print_lane_addon report;
          report)
       L.Store.all

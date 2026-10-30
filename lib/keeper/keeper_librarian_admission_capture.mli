@@ -19,6 +19,9 @@ val scope_hash : scope_identity -> string
     opaque identity grants no authority; restore always compares the full owner,
     including the original epoch and generation, before any effect. *)
 val owner_to_json : owner -> Yojson.Safe.t
+val owner_of_json : Yojson.Safe.t -> (owner, string) result
+(** Decode captured physical identity only. This pure operation neither
+    observes today's roots/epoch nor establishes execution authority. *)
 val owner_matches_json : owner -> Yojson.Safe.t -> (unit, string) result
 val observe_record_owner : base_path:string -> keepers_dir:string ->
   Lane_addon_tool_request_owner.retained -> (owner, string) result

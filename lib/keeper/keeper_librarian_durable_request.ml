@@ -185,6 +185,8 @@ let validate capture =
     "Original history source and preparation input differ" in
   let* ()=require (Keeper_identity.Keeper_id.to_string (Source.input capture.source).keeper_id=capture.owner.keeper_id)
     "Original history source belongs to another Keeper" in
+  let* ()=require (Source.runtime_keepers_dir capture.source=capture.owner.runtime.path)
+    "Original history source came from another captured runtime/output root" in
   let facts=match (Source.input capture.source).current with None -> [] | Some current -> current.facts in
   let ids=List.map Keeper_memory_os_types.memory_id facts in
   let* ()=require (List.length ids=List.length (List.sort_uniq String.compare ids))
@@ -226,16 +228,18 @@ let decode ~owner ~digest json =
   let+ digest=match digest with Some digest -> Ok digest | None -> Owner.request_digest json in
   {capture with digest}
 let of_json ~owner json = decode ~owner ~digest:None json
-let restore ~owner (record:Owner.retained) =
+let restore_payload ~owner (record:Owner.retained) =
   (* The record's digest named the body [Owner.load] verified, and [decode]
      requires that body to be this request's canonical encoding. *)
   let* capture=decode ~owner ~digest:(Some record.request_digest) record.request in
-  let* ()=confirm_source_root capture in
   let id=capture.id and destination=capture.destination in
   let* ()=require (record.scope=scope owner && record.request_id=id
     && record.installation_id=destination.installation_id && record.package_id=destination.package_id
     && record.tool=destination.tool) "Original history host binding differs" in
   let+ ()=equal record.request (to_json capture) "Original history request encoding differs" in capture
+let restore ~owner record =
+  let* capture=restore_payload ~owner record in
+  let+ ()=confirm_source_root capture in capture
 let confirm_record capture (record:Owner.retained) =
   let* ()=confirm_source_root capture in
   let destination=capture.destination in

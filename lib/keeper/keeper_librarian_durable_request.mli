@@ -52,6 +52,10 @@ val create : ?predecessor:predecessor -> request_id:string -> owner:owner -> des
     complete inventory must establish known basis supersession before dispatch.
     Retention/restore performs no provider, Gate, Memory, source or cursor effect. *)
 val restore : owner:owner -> Lane_addon_tool_request_owner.retained -> (t, string) result
+val restore_payload : owner:owner -> Lane_addon_tool_request_owner.retained -> (t, string) result
+(** Current strict source/preparation/host-binding decode, using only captured
+    data. Unlike {!restore}, this does not inspect the live source root. It is
+    preflight evidence, never live execution or publication authority. *)
 val confirm_record : t -> Lane_addon_tool_request_owner.retained -> (unit, string) result
 (** The record is this original's: same physical source root and host binding
     as {!restore} checks, and the digest of this request. Equal digests name

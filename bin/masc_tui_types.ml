@@ -8977,11 +8977,19 @@ type keeper_peer_frame_owner = {
   kpfo_page : unit ref;
 }
 
+type keeper_peer_target = {
+  kpt_owner : keeper_peer_frame_owner;
+  kpt_relation : Masc_tui_queue_inspection.peer_relation;
+  kpt_rows : int;
+  kpt_cols : int;
+}
+
 type keeper_peer_reading = {
   kpr_keeper : string;
   kpr_authority : unit ref;
   kpr_frame_owner : keeper_peer_frame_owner;
   kpr_committed : (keeper_peer_position * Masc_tui_queue_inspection.peer_page) option;
+  kpr_selected : string option;
   kpr_pending : keeper_peer_pending option;
   kpr_failure : keeper_peer_failure option;
 }
@@ -17573,7 +17581,7 @@ let begin_keeper_peer_reading (state : state) ~keeper_name =
   state.keeper_peer_reading <- Some {
     kpr_keeper = keeper_name; kpr_authority = state.workspace_read_authority;
     kpr_frame_owner = {kpfo_reader = ref (); kpfo_page = ref ()};
-    kpr_committed = None;
+    kpr_committed = None; kpr_selected = None;
     kpr_pending = Some {kpn_token = token;
       kpn_position = {kpp_after = None; kpp_previous = []}; kpn_reading = reading;
       kpn_result = None};
@@ -17595,6 +17603,20 @@ let keeper_peer_failure_lines failure =
    Printf.sprintf "Page %d read failed:" (keeper_peer_page_number failure.kpf_position);
    failure.kpf_reason]
 
+let keeper_peer_relation selected (page : Masc_tui_queue_inspection.peer_page) =
+  Option.bind selected (fun selected ->
+    List.find_opt (fun (relation : Masc_tui_queue_inspection.peer_relation) ->
+      String.equal relation.operation_id selected) page.snapshot.relations)
+
+let keeper_peer_sections ~selected ~committed ~lines =
+  let selected = Option.bind committed (fun (_, page) -> keeper_peer_relation selected page) in
+  let selection = match selected with
+    | None -> []
+    | Some relation -> [{Masc_tui_detail_reading.heading = "Selected sender · [ / ] choose · Enter open";
+                         body = Masc_tui_queue_inspection.peer_relation_line relation}] in
+  selection @ [{Masc_tui_detail_reading.heading = "Queued requests";
+                body = String.concat "\n" lines}]
+
 let finish_keeper_peer_reading (state : state) ~keeper_name ~token result =
   match current_detail_reading state, state.keeper_peer_reading with
   | Some reading, Some ({kpr_pending = Some pending; _} as peer)
@@ -17614,9 +17636,20 @@ let finish_keeper_peer_reading (state : state) ~keeper_name ~token result =
             let failure = {kpf_position = position; kpf_reason = reason} in
             peer.kpr_committed, Some failure,
             retained @ keeper_peer_failure_lines failure in
+      let selected = match result with
+        | Error _ -> peer.kpr_selected
+        | Ok page ->
+            let retained = match peer.kpr_committed with
+              | Some (previous, _) when previous = position -> keeper_peer_relation peer.kpr_selected page
+              | Some _ | None -> None in
+            let relation = match retained with
+              | Some _ as retained -> retained
+              | None -> Masc_tui_queue_inspection.select_peer ~move:Masc_tui_queue_inspection.Next_peer
+                  ~selected_operation:None page in
+            Option.map (fun (relation : Masc_tui_queue_inspection.peer_relation) -> relation.operation_id) relation in
       let updated =
         Masc_tui_detail_reading.replace ~title:("Keeper relationships · " ^ keeper_name)
-          [{ heading = "Queued requests"; body = String.concat "\n" lines }] reading in
+          (keeper_peer_sections ~selected ~committed ~lines) reading in
       let changed_page = match peer.kpr_committed with
         | Some (previous, _) -> previous <> position
         | None -> true in
@@ -17625,7 +17658,7 @@ let finish_keeper_peer_reading (state : state) ~keeper_name ~token result =
           Masc_tui_detail_reading.move ~count:1 ~height:1 Masc_tui_detail_reading.First updated
         else updated in
       update_detail_reading state updated;
-      state.keeper_peer_reading <- Some {peer with kpr_committed = committed;
+      state.keeper_peer_reading <- Some {peer with kpr_committed = committed; kpr_selected = selected;
         kpr_pending = None; kpr_failure = failure;
         kpr_frame_owner = {peer.kpr_frame_owner with kpfo_page = pending.kpn_token}};
       true
@@ -17689,6 +17722,67 @@ let request_keeper_peer_page state move =
               kpn_result = None}};
            Some (peer.kpr_keeper, token, destination.kpp_after))
   | (Some _ | None), (Some _ | None) -> None
+
+let move_keeper_peer_selection state ~move =
+  match current_detail_reading state, state.keeper_peer_reading with
+  | Some _, Some {kpr_pending = Some _; _} -> Error "Wait for the page read before choosing a sender"
+  | Some reading, Some ({kpr_committed = Some (position, page); _} as peer) ->
+      (match Masc_tui_queue_inspection.select_peer ~move ~selected_operation:peer.kpr_selected page with
+       | None -> Error "This page has no verified Keeper sender"
+       | Some relation when peer.kpr_selected = Some relation.operation_id ->
+           update_detail_reading state
+             (Masc_tui_detail_reading.move ~count:1 ~height:1 Masc_tui_detail_reading.First reading);
+           Ok ()
+       | Some relation ->
+           let selected = Some relation.operation_id in
+           let lines = Masc_tui_queue_inspection.peer_lines
+               ~page_number:(keeper_peer_page_number position) page in
+           let lines = lines @ Option.fold ~none:[] ~some:keeper_peer_failure_lines peer.kpr_failure in
+           let reading = Masc_tui_detail_reading.replace
+               ~title:("Keeper relationships · " ^ peer.kpr_keeper)
+               (keeper_peer_sections ~selected ~committed:peer.kpr_committed ~lines) reading in
+           update_detail_reading state
+             (Masc_tui_detail_reading.move ~count:1 ~height:1 Masc_tui_detail_reading.First reading);
+           state.keeper_peer_reading <- Some {peer with kpr_selected = selected};
+           Ok ())
+  | (Some _ | None), (Some _ | None) -> Error "No relationship page is available"
+
+(* A target records the exact verified relation, observation and terminal
+   geometry. The caller must additionally prove that its section was drawn. *)
+let keeper_peer_target state reading ~terminal_rows ~terminal_cols =
+  match current_detail_reading state, state.keeper_peer_reading with
+  | Some current, Some {kpr_pending = None; kpr_committed = Some (_, page);
+                        kpr_selected; kpr_frame_owner; _} when current == reading ->
+      Option.map (fun relation -> {kpt_owner = kpr_frame_owner; kpt_relation = relation;
+                                   kpt_rows = terminal_rows; kpt_cols = terminal_cols})
+        (keeper_peer_relation kpr_selected page)
+  | (Some _ | None), (Some _ | None) -> None
+
+let same_keeper_peer_target left right =
+  same_keeper_peer_frame_owner left.kpt_owner right.kpt_owner
+  && left.kpt_relation = right.kpt_relation
+  && left.kpt_rows = right.kpt_rows && left.kpt_cols = right.kpt_cols
+
+let keeper_peer_sender_target state target =
+  let current = Option.bind (current_detail_reading state) (fun reading ->
+    keeper_peer_target state reading ~terminal_rows:target.kpt_rows ~terminal_cols:target.kpt_cols) in
+  if not (Option.exists (same_keeper_peer_target target) current) then
+    Error "The selected relationship changed; review it before opening the sender"
+  else if not (server_authority_ready state)
+     || state.workspace_identity <> Workspace_identity_match
+     || state.local_keepers <> Local_workspace_read
+     || Option.is_some state.keepers_error then
+    Error "Keeper roster or workspace identity is unavailable; refresh before opening the sender"
+  else
+    let sender_id = Masc.Keeper_identity.Keeper_id.of_string target.kpt_relation.sender in
+    let matches = List.filter (fun (keeper : keeper) ->
+      match sender_id, Masc.Keeper_identity.Keeper_id.of_string keeper.k_name with
+      | Some left, Some right -> Masc.Keeper_identity.Keeper_id.equal left right
+      | (Some _ | None), (Some _ | None) -> false) (keepers_for_selection state) in
+    match matches with
+    | [keeper] -> Ok keeper
+    | [] -> Error "The recorded sender is not present in the current Keeper roster"
+    | _ :: _ :: _ -> Error "The recorded sender matches more than one Keeper in the roster"
 
 let modal_owns_keys (state : state) =
   Option.is_some (current_board_reader state)

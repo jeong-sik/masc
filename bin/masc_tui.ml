@@ -24673,6 +24673,7 @@ let main
       ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
       ~reader:None ~panel_owner:None) in
   let presented_peer_owner = ref None in
+  let presented_peer_target = ref None in
   let presented_chat_row_actions :
       (workspace_authority * unit ref) Masc_tui_chat_row_actions.t ref =
     ref Masc_tui_chat_row_actions.empty
@@ -25018,6 +25019,26 @@ let main
     | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
     | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
   in
+  let peer_target_on_screen ~terminal_rows ~terminal_cols =
+    (* Target identity uses the physical terminal geometry. The reader uses
+       the separately reserved content viewport, just as [render] does. *)
+    let content_rows, content_cols = Masc_tui_render_prim.get_terminal_size () in
+    if state.image_open || state.msx_open
+       || (terminal_rows, terminal_cols) <> Masc_tui_ansi.get_terminal_size () then None
+    else match Masc_tui_render.frame_choice state ~terminal_rows:content_rows with
+    | `Detail_reading reading ->
+        (match keeper_peer_target state reading ~terminal_rows ~terminal_cols with
+         | None -> None
+         | Some target ->
+             let _, height = Masc_tui_render_overlays.detail_reading_viewport_at
+                 state reading ~terminal_rows:content_rows ~cols:content_cols in
+             let width = Masc_tui_render_overlays.detail_reading_action_width content_cols in
+             if Masc_tui_detail_reading.section_fully_visible ~width ~height ~index:0 reading
+             then Some target else None)
+    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+    | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
+    | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
+  in
   let present_frame frame approval presses panes acting_pane chat_row_actions change_authority
       ~drawn_detail_reading ~input_pending ~write ~flush reader =
     (* Read once: each call copies the whole screen into a fresh list. *)
@@ -25026,6 +25047,9 @@ let main
         ~terminal_rows:frame.Frame_presenter.terminal_rows in
     let candidate_peer_owner = keeper_peer_drawn_owner state
         ~compact:frame.Frame_presenter.compact_frame ~drawn_reading:drawn_detail_reading in
+    let candidate_peer_target = Option.bind candidate_peer_owner (fun _ ->
+      peer_target_on_screen ~terminal_rows:frame.Frame_presenter.terminal_rows
+        ~terminal_cols:frame.Frame_presenter.terminal_cols) in
     let damaged = Terminal_write_repair.consume_damage () in
     let candidate_rejection = presented_input_rejection
         ~rows:(max 1 frame.Frame_presenter.terminal_rows)
@@ -25054,6 +25078,7 @@ let main
            ~candidate:(play_card_of_reader reader)
       || keeper_peer_frame_owner_changed ~presented:!presented_peer_owner
            ~candidate:candidate_peer_owner
+      || not (Option.equal same_keeper_peer_target !presented_peer_target candidate_peer_target)
       || Presented.panel_presentation_changed !presented ~current_owner:panel_owner
       || ((damaged || Option.is_none presented_rows)
           && (Option.is_some (!presented).panel_owner
@@ -25168,6 +25193,7 @@ let main
         presented := Presented.presented !presented ~approval ~presses ~panes ~reader
             ~panel_owner ~owner_changed ~input_pending;
         presented_peer_owner := candidate_peer_owner;
+        presented_peer_target := candidate_peer_target;
         state.acting_pane_presented <- acting_pane;
         presented_chat_row_actions := chat_row_actions;
         presented_change_authority := change_authority;
@@ -30567,6 +30593,36 @@ and is loaded on demand through keeper_skill.
                 | Some reading -> update_detail_reading state reading
                 | None ->
                   if k="esc" || k="v" then close_detail_reading state
+                  else if Option.is_some state.keeper_peer_reading && (k="[" || k="]") then
+                    (match move_keeper_peer_selection state
+                       ~move:(if k="[" then Masc_tui_queue_inspection.Previous_peer
+                              else Masc_tui_queue_inspection.Next_peer) with
+                     | Ok () -> ()
+                     | Error detail -> report_action state "info" detail)
+                  else if Option.is_some state.keeper_peer_reading
+                          && (k="enter" || k="\r" || k="\n") then begin
+                    let terminal_rows, terminal_cols = Masc_tui_ansi.get_terminal_size () in
+                    let target = match Masc_tui_ansi.probe_terminal_size () with
+                      | Some physical when physical = (terminal_rows, terminal_cols)
+                          && not (Terminal_write_repair.damage_pending ())
+                          && not (Atomic.get resize_requested) ->
+                          (match !presented_peer_target,
+                                 peer_target_on_screen ~terminal_rows ~terminal_cols with
+                           | Some presented, Some current
+                             when same_keeper_peer_target presented current -> Some presented
+                           | (Some _ | None), (Some _ | None) -> None)
+                      | Some _ | None -> None in
+                    (match target with
+                     | None -> report_action state "info"
+                         "Show the complete selected relationship before opening its sender"
+                     | Some target ->
+                         (match keeper_peer_sender_target state target with
+                          | Error detail -> report_action state "error" detail
+                          | Ok keeper ->
+                              close_detail_reading state;
+                              state.detail_tab <- Detail_info;
+                              open_keeper_detail state ~mailbox:async_messages keeper))
+                  end
                   else if Option.is_some state.keeper_peer_reading
                           && (k="<" || k=">" || k="r" || k="R") then begin
                     let move = match k with

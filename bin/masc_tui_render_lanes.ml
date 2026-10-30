@@ -1800,7 +1800,9 @@ let temporal_output_lines ~width (report : Temporal.t) =
     let identity = [step.id ^ "  ·  " ^ kind ^ "  ·  " ^ status]
       @ (match step.turn_ref with None -> [] | Some value -> ["TURN  " ^ value])
       @ (match step.operation_state with None -> [] | Some value -> ["OPERATION  " ^ value])
-      @ (match step.kind with T.Message -> ["W MESSAGES IN LAST REQUEST  " ^ natural step.working_state_messages] | _ -> [])
+      @ (match step.kind with
+         | T.Message -> ["W MESSAGES IN LAST REQUEST  " ^ natural step.working_state_messages]
+         | T.Restart | T.Await_summary -> [])
       @ (match step.target_end_atom with None -> [] | Some value -> ["WAIT TARGET END  " ^ string_of_int value]) in
     let omitted = match step.omission with
       | T.Not_requested -> []

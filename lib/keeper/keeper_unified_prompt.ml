@@ -1,0 +1,2142 @@
+(** Keeper_unified_prompt — Build a single unified prompt from keeper identity
+    and world observation.
+
+    Sections removed in #6814: Available Tools (AGENT_CORE tool schema handles),
+    Recent Tool Activity, Last Cycle Outcome, Tool Diversity Signal,
+    Peer Keepers, Your Recent Board Posts,
+    Behavioral Self-Assessment, Actionable Routes, Signal Interpretation.
+    Telemetry for removed sections is preserved via decision_audit and
+    independent storage paths.
+
+    "Your Recent Board Posts" was later restored as the [Own_board_posts]
+    context layer: raw observation rows (post_id, updated_at, title, preview)
+    with no advisory wording. #6814 was right to remove the scolding text; the
+    side effect was that a keeper could never see its own published posts
+    in-prompt (board events are cursor-based and exclude self-authors), which
+    produced near-duplicate posting loops in production.
+
+    @since Unified Keeper Loop *)
+
+open Keeper_unified_prompt_event_fields
+
+type turn_prompt_parts = {
+  world_state : string;
+  world_partition : Keeper_context_layers.rendered;
+  user_message : string;
+}
+
+module Layer_map = Map.Make (struct
+  type t = Keeper_context_layers.layer_id
+  let compare = Stdlib.compare
+end)
+
+type prepared_prompt =
+  { common_layers : Keeper_context_layers.prepared_content option Layer_map.t
+  ; frame : Keeper_context_layers.prepared_content
+  ; user_message : string
+  ; current_task_id : string option
+  ; own_recent_actions : (Keeper_own_recent_actions.turn list, Keeper_tool_call_log.index_error) result
+  ; workspace_memory : Workspace_memory_ledger.observation
+  ; wiki_contents : Keeper_wiki_contents.t
+  }
+
+(* Ordinary user input for an autonomous continuation. The durable checkpoint
+   carries this cue and the assistant/tool suffix in normal conversation order;
+   the fresh observation frame alone rides [world_state] and stays ephemeral.
+
+   This is the last resort behind the fleet setting. Nothing classifies a
+   turn by matching
+   this string -- autonomy is a typed property of the turn -- and nothing may
+   start, because the operator can change it. *)
+let autonomous_wake_marker = Env_config_keeper.KeeperAutonomous.default_wake_prompt
+
+(* Every line the keeper reads comes from a fragment under config/prompts, so
+   an operator rewords it without an OCaml change (RFC
+   prompts-and-tool-definitions-outside-ocaml). A render can only fail when a
+   template and its call disagree about variables, which is a build-time
+   mistake; the failure is placed in the line rather than dropped, because a
+   silently missing line reads as an absent condition rather than a broken
+   one. A slot paragraph is already trimmed by the loader (and an override at
+   validation), so the rendered text is used raw and the call site owns the
+   joining newlines — byte-identical to the [Printf.sprintf]/[String.concat]
+   assembly it replaces. *)
+let render_fragment key vars =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> text
+  | Error detail -> key ^ ": " ^ detail
+;;
+
+(* The diagnostic attached to an [unavailable] Skill catalog row lives in
+   keeper.md (one slot, two render sites: the current task and the other held
+   tasks). A slot that does not render is logged, and the failure text
+   becomes the property value — the same contract [render_fragment] above
+   documents: the failure is placed in the row rather than dropped, because a
+   silently missing key reads as an absent condition rather than a broken
+   one. *)
+let skills_unavailable_diagnostic_property () =
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.keeper_skills_unavailable_diagnostic
+      []
+  with
+  | Ok text -> [ "diagnostic", `String text ]
+  | Error detail ->
+    Log.Misc.error
+      "keeper skills-unavailable diagnostic prompt %s did not render: %s"
+      Prompt_names.keeper_skills_unavailable_diagnostic
+      detail;
+    [ ( "diagnostic"
+      , `String (Prompt_names.keeper_skills_unavailable_diagnostic ^ ": " ^ detail) )
+    ]
+;;
+
+let format_pending_messages
+      (messages : Keeper_world_observation_message_scope.pending_message list)
+  : string
+  =
+  messages
+  |> List.map (fun message ->
+    match message.Keeper_world_observation_message_scope.kind with
+    | Keeper_world_observation_message_scope.Mention ->
+      render_fragment
+        Prompt_names.keeper_world_pending_messages_mention_row
+        [ "speaker", message.speaker; "content", message.content ]
+    | Keeper_world_observation_message_scope.Scope ->
+      render_fragment
+        Prompt_names.keeper_world_pending_messages_scope_row
+        [ "speaker", message.speaker; "content", message.content ])
+  |> String.concat "\n"
+
+let format_fleet_messages
+      (messages : Keeper_world_observation_message_scope.fleet_message list)
+  : string
+  =
+  messages
+  |> List.map (fun (message : Keeper_world_observation_message_scope.fleet_message) ->
+    render_fragment
+      Prompt_names.keeper_world_fleet_messages_row
+      [ "speaker", message.fleet_speaker; "content", message.fleet_content ])
+  |> String.concat "\n"
+
+(* The argument object rides on a refusal and not on a success, for the reason
+   this module already gives for outputs: a call that landed is a fact, and
+   "the returned body is where the bytes are". The request body is the same
+   kind of bulk. What a keeper must not repeat is a refused call, and to
+   recognise that one it has to read what it sent.
+
+   The two are not the same size. Keeper [analyst], 2026-08-23: 1,312 calls
+   succeeded carrying 538,743 bytes of arguments, 20 were refused carrying
+   6,417. Replaying the successes put 120,951 bytes of this section into a
+   131,072-byte model input and the keeper refused every turn for eight hours.
+
+   This is a narrower section, not a truncated one -- no call disappears and
+   no argument is cut mid-string. A keeper that needs the arguments of a call
+   that succeeded is asking what it did, which is what the board, the task and
+   the goal sections answer. *)
+(* The rejected-call digest is rendered ahead of the rows. A refused call
+   replays its argument object, and an argument object has no size of its
+   own: five refusals carrying a 4 KB body would put 20 KB into the digest.
+
+   The digest exists to name the call so it is not repeated, which the tool
+   name and the head of the arguments do. With at most eight digests
+   (Keeper_own_recent_actions.digest_failures), bounding each one is what
+   makes the digest's worst case a number: about 2 KB. *)
+let rejected_digest_input_bytes = 240
+
+let rejected_digest_input input =
+  match Tool_output.decode_from_agent_core input with
+  | Tool_output.Decoded _ -> input
+  | Tool_output.Invalid_marker _ | Tool_output.Not_marker ->
+    String_util.utf8_safe ~max_bytes:rejected_digest_input_bytes ~suffix:"…" input
+    |> String_util.to_string
+;;
+
+let format_own_recent_actions_turn ~current_task_id (turn : Keeper_own_recent_actions.turn) : string =
+  let turn_id = string_of_int turn.turn_id in
+  turn.calls
+  |> List.map (fun (call : Keeper_own_recent_actions.call) ->
+    let provenance = Keeper_own_recent_actions.provenance_to_json
+      ~current_task_id call.provenance |> Yojson.Safe.to_string in
+    match call.outcome with
+    | Keeper_own_recent_actions.Ok_call ->
+      render_fragment
+        Prompt_names.keeper_world_own_recent_actions_turn_ok_row
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
+    | Keeper_own_recent_actions.Failed_call None ->
+      render_fragment
+        Prompt_names.keeper_world_own_recent_actions_turn_rejected_row
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", call.input ]
+    | Keeper_own_recent_actions.Failed_call (Some detail) ->
+      render_fragment
+        Prompt_names.keeper_world_own_recent_actions_turn_rejected_detail_row
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool; "input", call.input; "detail", detail ]
+    | Keeper_own_recent_actions.Deferred_call ->
+      render_fragment
+        Prompt_names.keeper_world_own_recent_actions_turn_deferred_row
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ]
+    | Keeper_own_recent_actions.Unrecorded_call ->
+      render_fragment
+        Prompt_names.keeper_world_own_recent_actions_turn_unrecorded_row
+        [ "provenance", provenance; "turn_id", turn_id; "tool", call.tool ])
+  |> String.concat "\n"
+;;
+
+
+(* Whether any task the keeper holds is linked to a goal.
+   [Held_task_link_unreadable]: the backlog or the goal-task link registry
+   could not be read authoritatively, so the answer is unknown and the row says
+   so instead of reading as unlinked. *)
+type held_task_link =
+  | Served_by_held_task
+  | Not_served_by_held_task
+  | Held_task_link_unreadable
+
+(* What the prompt knows about one active goal. [phase] and [criterion] are
+   options for a caller that states a summary directly;
+   [active_goal_summaries] always fills both from the store. RFC-0387 stage 2
+   carries the phase so a [Verifying] goal is annotated rather than reading as
+   ordinary open work — the gate must not make the goal disappear from the
+   keeper's view (review P0-1). *)
+type goal_summary =
+  { summary_goal_id : string
+  ; summary_title : string
+  ; summary_phase : Goal_phase.t option
+  ; summary_criterion : Goal_store.criterion option
+  ; summary_review_note : string option
+  ; summary_measurement : (Goal_measurement.t option, string) result
+  ; summary_held_task_link : held_task_link
+  }
+
+(** Format active Goal rows with their titles (RFC-0315). Empty summaries
+    supply no rows; the authoritative observation still carries its heading.
+    Unobserved summaries do not authorize a fallback Goal list.
+    A [Verifying] goal is annotated: completion is requested and the proof is
+    being judged out-of-band, so the keeper keeps working the linked tasks
+    instead of re-requesting completion. *)
+let format_goal_summaries (summaries : goal_summary list) : string =
+  String.concat "\n"
+    (List.map
+       (fun summary ->
+          let base =
+            if summary.summary_title = ""
+            then
+              render_fragment
+                Prompt_names.keeper_world_active_goals_row_untitled
+                [ "goal_id", summary.summary_goal_id ]
+            else
+              render_fragment
+                Prompt_names.keeper_world_active_goals_row
+                [ "goal_id", summary.summary_goal_id; "title", summary.summary_title ]
+          in
+          let details =
+            match summary.summary_criterion with
+            | None -> []
+            | Some criterion ->
+              [ render_fragment Prompt_names.keeper_world_active_goals_criterion
+                  [ "criterion", Goal_store.criterion_to_yojson criterion
+                    |> Yojson.Safe.to_string ] ]
+          in
+          let details = details @
+            (match summary.summary_review_note with
+             | None -> []
+             | Some note ->
+               [ render_fragment Prompt_names.keeper_world_active_goals_review
+                   [ "note", note ] ])
+          in
+          let measurement =
+            match summary.summary_measurement with
+            | Ok None ->
+              render_fragment
+                Prompt_names.keeper_world_active_goals_measurement_not_recorded []
+            | Ok (Some record) ->
+              render_fragment
+                Prompt_names.keeper_world_active_goals_measurement_reported
+                [ "measurement", Goal_measurement.to_yojson record
+                  |> Yojson.Safe.to_string ]
+            | Error reason ->
+              render_fragment
+                Prompt_names.keeper_world_active_goals_measurement_unavailable
+                [ "reason", reason ]
+          in
+          let details = details @ [ measurement ] in
+          let base = match summary.summary_phase with
+          | Some Goal_phase.Verifying ->
+            base
+            ^ " "
+            ^ render_fragment
+                Prompt_names.keeper_world_active_goals_verifying_annotation
+                []
+          | Some (Goal_phase.Awaiting_confirmation | Goal_phase.Executing | Goal_phase.Completed | Goal_phase.Dropped
+                 | Goal_phase.Paused _ | Goal_phase.Blocked _) | None
+            -> base
+          in
+          let base = match summary.summary_held_task_link with
+            | Served_by_held_task ->
+              base ^ " "
+              ^ render_fragment Prompt_names.keeper_world_active_goals_yours_annotation []
+            | Held_task_link_unreadable ->
+              base ^ " "
+              ^ render_fragment
+                  Prompt_names.keeper_world_active_goals_held_task_link_unreadable_annotation []
+            | Not_served_by_held_task -> base
+          in
+          String.concat "\n" (base :: details))
+       summaries)
+
+let format_task_skills ?surfaces skills =
+  let skill_surfaces =
+    (match surfaces with
+     | Some surfaces ->
+       `List (List.map Keeper_skill_catalog.exact_surface_to_yojson surfaces)
+     | None ->
+       `List
+         (List.map
+            (fun reference ->
+               `Assoc
+                 ([ "reference", Skill_reference.to_yojson reference
+                  ; "kind", `String "unavailable"
+                  ]
+                  @ skills_unavailable_diagnostic_property ()))
+            skills))
+    |> Yojson.Safe.to_string
+  in
+  match
+    Prompt_registry.render_prompt_template
+      Prompt_names.keeper_current_task_skills
+      [ "skill_surfaces", skill_surfaces ]
+  with
+  | Ok text -> String.trim text
+  | Error detail ->
+    Log.Misc.error
+      "keeper current-task skills prompt %s did not render, falling back to exact surfaces: %s"
+      Prompt_names.keeper_current_task_skills
+      detail;
+    "- skill_surfaces=" ^ skill_surfaces
+;;
+
+(* The other held tasks' skills, one line each, under their own heading. The
+   current task's block already names its skills; this covers a keeper that
+   holds more than one task, where the reconciler keeps the earlier one
+   current and the later claim's skills had no line at all (task-364).
+   Heading and lines are prompt templates; a template that does not render
+   is logged and falls back to the bare data, never to prose written here. *)
+let format_held_task_skills
+      ?(skill_surfaces_by_task = [])
+      (held : Keeper_world_observation_inputs.held_task_skills list)
+  : string option
+  =
+  match held with
+  | [] -> None
+  | held ->
+    let render key vars ~fallback =
+      match Prompt_registry.render_prompt_template key vars with
+      | Ok text -> String.trim text
+      | Error detail ->
+        Log.Misc.error
+          "keeper held-task skills prompt %s did not render, falling back to the bare data: %s"
+          key
+          detail;
+        fallback
+    in
+    let heading =
+      render Prompt_names.keeper_held_task_skills_heading [] ~fallback:""
+    in
+    let lines =
+      List.map
+        (fun (entry : Keeper_world_observation_inputs.held_task_skills) ->
+           let skill_surfaces =
+             let surfaces = List.assoc_opt entry.held_task_id skill_surfaces_by_task in
+             match surfaces with
+             | Some surfaces ->
+               `List
+                 (List.map Keeper_skill_catalog.exact_surface_to_yojson surfaces)
+               |> Yojson.Safe.to_string
+             | None ->
+               `List
+                 (List.map
+                    (fun reference ->
+                       `Assoc
+                         ([ "reference", Skill_reference.to_yojson reference
+                          ; "kind", `String "unavailable"
+                          ]
+                          @ skills_unavailable_diagnostic_property ()))
+                    entry.held_skills)
+               |> Yojson.Safe.to_string
+           in
+           render
+             Prompt_names.keeper_held_task_skills
+             [ "task_id", entry.held_task_id; "skill_surfaces", skill_surfaces ]
+             ~fallback:(entry.held_task_id ^ ": " ^ skill_surfaces))
+        held
+    in
+    Some (String.concat "\n" ((if String.equal heading "" then [] else [ heading ]) @ lines) ^ "\n\n")
+;;
+
+(** Render the keeper's own claimed task as standing context (RFC-0315).
+    The scheduled cycle always runs when proactive lifecycle is enabled, and
+    the model must see the work it is holding: id, title, status, and the prior
+    owner's handoff summary when one exists. *)
+let format_current_task_with_heading ?skill_surfaces ~heading
+      (task : Masc_domain.task) : string =
+  let status_line =
+    match task.Masc_domain.task_status with
+    | Masc_domain.Claimed { assignee; claimed_at } ->
+      render_fragment
+        Prompt_names.keeper_world_current_task_status_claimed
+        [ "assignee", assignee; "claimed_at", claimed_at ]
+    | Masc_domain.InProgress { assignee; started_at } ->
+      render_fragment
+        Prompt_names.keeper_world_current_task_status_in_progress
+        [ "assignee", assignee; "started_at", started_at ]
+    | Masc_domain.AwaitingVerification { submitted_at; _ } ->
+      render_fragment
+        Prompt_names.keeper_world_current_task_status_awaiting_verification
+        [ "submitted_at", submitted_at ]
+    | Masc_domain.Todo ->
+      render_fragment Prompt_names.keeper_world_current_task_status_todo []
+    | Masc_domain.Done _ ->
+      render_fragment Prompt_names.keeper_world_current_task_status_done []
+    | Masc_domain.Cancelled _ ->
+      render_fragment Prompt_names.keeper_world_current_task_status_cancelled []
+  in
+  let buf = Buffer.create 256 in
+  Buffer.add_string buf ("### " ^ heading ^ "\n");
+  Buffer.add_string buf
+    (render_fragment
+       Prompt_names.keeper_world_current_task_row
+       [ "task_id", task.Masc_domain.id
+       ; "title", task.Masc_domain.title
+       ; "status", status_line
+       ]
+     ^ "\n");
+  (match task.Masc_domain.handoff_context with
+   | Some h ->
+       (* RFC-0365: a handoff can now come from a previous owner, so the note
+          must say whose it is. Without this the model reads another agent's
+          first-person account ("I already verified the spec") as its own
+          recollection, which is worse than not showing the note at all. The
+          author is stated even when it is the current holder — a keeper that
+          has to compare cannot do so from a line that is sometimes attributed
+          and sometimes not. *)
+     let attribution =
+       match h.Masc_domain.updated_by, h.Masc_domain.updated_at with
+       | Some who, Some at ->
+         " "
+         ^ render_fragment
+             Prompt_names.keeper_world_current_task_attribution_full
+             [ "who", who; "at", at ]
+       | Some who, None ->
+         " "
+         ^ render_fragment
+             Prompt_names.keeper_world_current_task_attribution_who
+             [ "who", who ]
+       | None, Some at ->
+         " "
+         ^ render_fragment
+             Prompt_names.keeper_world_current_task_attribution_at
+             [ "at", at ]
+       | None, None ->
+         " " ^ render_fragment Prompt_names.keeper_world_current_task_attribution_none []
+     in
+     if h.Masc_domain.summary <> "" then
+       Buffer.add_string
+         buf
+         (render_fragment
+            Prompt_names.keeper_world_current_task_handoff
+            [ "attribution", attribution; "summary", h.Masc_domain.summary ]
+          ^ "\n");
+     (match h.Masc_domain.next_step with
+      | Some step when step <> "" ->
+        Buffer.add_string
+          buf
+          (render_fragment
+             Prompt_names.keeper_world_current_task_handoff_next_step
+             [ "attribution", attribution; "step", step ]
+           ^ "\n")
+      | Some _ | None -> ());
+     (* The refs are where the previous owner's work actually is. Dropping
+          them leaves prose that points at an address the model never receives,
+          and the artifact/board readers that resolve them are already
+          model-visible. *)
+     (match h.Masc_domain.evidence_refs with
+      | [] -> ()
+      | refs ->
+        Buffer.add_string
+          buf
+          (render_fragment
+             Prompt_names.keeper_world_current_task_handoff_evidence
+             [ "attribution", attribution; "refs", String.concat ", " refs ]
+           ^ "\n"))
+   | None -> ());
+  (* RFC skills-declared-not-discovered: the task names its skills, so this
+     block does not list what is available and let the model match — there is
+     nothing to choose between by the time the turn starts.
+
+     Exact references, not the instruction itself. A skill body is written to
+     be read whole and some run to tens of kilobytes (the published
+     im-ai-copyeditor carries an 80 KB reference pack), which would land on
+     every turn of the task rather than the one turn that uses it. The keeper
+     already has [Read]; spending one call is cheaper than carrying the file.
+
+     A task that names none adds no line, so the assembled prompt for every
+     existing task is byte-identical to what it was before skills existed. *)
+  (match task.Masc_domain.skills with
+   | [] -> ()
+   | skills ->
+       Buffer.add_string buf (format_task_skills ?surfaces:skill_surfaces skills ^ "\n"));
+  Buffer.add_string buf
+    "\n";
+  Buffer.contents buf
+
+(* "held by you" is true of the two statuses that actually hold a claim slot.
+   [Workspace_task.active_owned_task_ids_for_agent] counts [Claimed] and
+   [InProgress] and returns [None] for [AwaitingVerification]; the scheduler
+   states the same rule outright ("AwaitingVerification is still excluded: it is
+   no longer active implementation work for the claimant").
+
+   Under the old single heading a submitted task read as one the Keeper was
+   still holding, and the only visible way out of holding something is to give
+   it up. 10 of 56 cancellations in the live backlog are finished work cancelled
+   with the deliverable written into the cancel reason -- task-032 says
+   "useYupValidationResolver typed properly, tsc passes. Cancelling to free",
+   naming the belief in the act of acting on it. The claim it was freeing itself
+   for was never blocked.
+
+   The heading is the whole fix: no new field, no new line, and the status was
+   already on the row underneath. *)
+let format_current_task ?skill_surfaces (task : Masc_domain.task) =
+  let heading =
+    match task.Masc_domain.task_status with
+    | Masc_domain.AwaitingVerification _ ->
+      render_fragment Prompt_names.keeper_world_current_task_heading_submitted []
+    | Masc_domain.Claimed _
+    | Masc_domain.InProgress _
+    | Masc_domain.Todo
+    | Masc_domain.Done _
+    | Masc_domain.Cancelled _ ->
+      render_fragment Prompt_names.keeper_world_current_task_heading_held []
+  in
+  format_current_task_with_heading ?skill_surfaces ~heading task
+
+(** Format one conversation endpoint presence line. *)
+let format_surface_presence (p : Gate_surface.surface_presence) : string =
+  let endpoint =
+    match p.surface with
+    | Gate_surface.Dashboard -> "dashboard"
+    | Gate_surface.Discord { channel_id = Some channel; _ } ->
+        Printf.sprintf "discord #%s" channel
+    | Gate_surface.Discord { channel_id = None; _ } -> "discord"
+    | Gate_surface.Slack { channel_id = Some channel; _ } ->
+        Printf.sprintf "slack #%s" channel
+    | Gate_surface.Slack { channel_id = None; _ } -> "slack"
+    | Gate_surface.Gate { channel; channel_id = Some channel_id } ->
+        Printf.sprintf "%s #%s" channel channel_id
+    | Gate_surface.Gate { channel; channel_id = None } -> channel
+  in
+  let state =
+    render_fragment
+      (if p.alive
+       then Prompt_names.keeper_world_connected_surfaces_state_alive
+       else Prompt_names.keeper_world_connected_surfaces_state_offline)
+      []
+  in
+  Printf.sprintf "%s (%s)" endpoint state
+;;
+
+(* What a degraded observation permits the Keeper to conclude is prose, and it
+   lives with the other prompt text under [config/prompts]. This module keeps
+   the state detection and the task id.
+
+   The data-only fallback is not a second source of truth: it exists because
+   the fact that the current task is in a degraded state has to reach the
+   prompt even if its sentence cannot be rendered, and losing the fact is worse
+   than losing the wording. [test_prompt_templates_render] renders every
+   registered key with its declared variables, so a broken template is a CI
+   failure rather than something this branch quietly absorbs. *)
+let observation_prose key vars ~fallback =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> String.trim text ^ "\n\n"
+  | Error detail ->
+    Log.Misc.error
+      "keeper observation prompt %s did not render, falling back to the bare \
+       observation: %s"
+      key
+      detail;
+    fallback
+;;
+
+let format_current_task_observation ?skill_surfaces = function
+  | Keeper_world_observation_inputs.No_current_task -> None
+  | Keeper_world_observation_inputs.Current_task task ->
+    Some (format_current_task ?skill_surfaces task)
+  | Keeper_world_observation_inputs.Recovered_current_task { task; recovery } ->
+    Some
+      (format_current_task_with_heading
+         ?skill_surfaces
+         ~heading:
+           (render_fragment Prompt_names.keeper_world_current_task_heading_recovery [])
+         task
+       ^ observation_prose
+           Prompt_names.keeper_observation_recovered_current_task
+           []
+           ~fallback:("- recovery_path=" ^ recovery.recovery_path ^ "\n\n"))
+  | Keeper_world_observation_inputs.Current_task_missing { task_id; recovery = None } ->
+    let task_id = Keeper_id.Task_id.to_string task_id in
+    Some
+      (observation_prose
+         Prompt_names.keeper_observation_current_task_absent
+         [ "task_id", task_id ]
+         ~fallback:("### Current Task\n- task_id=" ^ task_id ^ "\n\n"))
+  | Keeper_world_observation_inputs.Current_task_missing
+      { task_id; recovery = Some recovery } ->
+    let task_id = Keeper_id.Task_id.to_string task_id in
+    Some
+      (observation_prose
+         Prompt_names.keeper_observation_current_task_absent_in_recovery
+         [ "task_id", task_id ]
+         ~fallback:
+           ("### Current Task\n- task_id="
+            ^ task_id
+            ^ " recovery_path="
+            ^ recovery.recovery_path
+            ^ "\n\n"))
+  | Keeper_world_observation_inputs.Current_task_unavailable { task_id; error = _ } ->
+    let task_id = Keeper_id.Task_id.to_string task_id in
+    Some
+      (observation_prose
+         Prompt_names.keeper_observation_current_task_unobservable
+         [ "task_id", task_id ]
+         ~fallback:("### Current Task\n- task_id=" ^ task_id ^ "\n\n"))
+;;
+
+let format_approval_authority_observation
+      (observation : Keeper_world_observation.approval_authority_observation)
+  =
+  let buffer = Buffer.create 512 in
+  let revision = string_of_int observation.revision in
+  let pending_count = string_of_int (List.length observation.pending) in
+  Buffer.add_string buffer
+    (render_fragment Prompt_names.keeper_context_approval_authority_heading []);
+  Buffer.add_char buffer '\n';
+  (match observation.state with
+   | Keeper_world_observation.Approval_authority_complete ->
+     Buffer.add_string buffer
+       (render_fragment
+          Prompt_names.keeper_context_approval_authority_state_complete
+          [ "revision", revision; "pending_count", pending_count ])
+   | Keeper_world_observation.Approval_authority_partial { read_error_count } ->
+     Buffer.add_string buffer
+       (render_fragment
+          Prompt_names.keeper_context_approval_authority_state_partial
+          [ "revision", revision
+          ; "pending_count", pending_count
+          ; "read_error_count", string_of_int read_error_count
+          ])
+   | Keeper_world_observation.Approval_authority_unavailable ->
+     Buffer.add_string buffer
+       (render_fragment
+          Prompt_names.keeper_context_approval_authority_state_unavailable
+          [ "revision", revision ]));
+  Buffer.add_char buffer '\n';
+  List.iter
+    (fun approval ->
+       Buffer.add_string buffer
+         (format_prompt_row (approval_observation_fields approval));
+       Buffer.add_char buffer '\n')
+    observation.pending;
+  Buffer.add_string buffer
+    (render_fragment Prompt_names.keeper_context_approval_authority_footer []);
+  Buffer.add_string buffer "\n\n";
+  Buffer.contents buffer
+;;
+
+type answered_ask_turn_input = {
+  ask_id : string;
+  evidence_fingerprint : string;
+  text : string;
+  answered_by : Keeper_input_speaker.person;
+}
+
+(* Fingerprint material: depends on [Keeper_ask.answer_to_json] and deterministic
+   [Yojson.Safe.to_string] float serialization of [answered_at]. Bump the
+   ["ask-answer-v1:"] prefix version if either serialization shape changes. *)
+let answered_ask_evidence_fingerprint
+    (input : Keeper_world_observation.answered_ask_input)
+  =
+  let canonical =
+    `Assoc
+      [ "ask_id", `String input.original_ask.ask_id
+      ; "answered_at", `Float input.answered_at
+      ; "answers", `List (List.map Keeper_ask.answer_to_json input.answers)
+      ]
+    |> Yojson.Safe.to_string
+  in
+  "ask-answer-v1:" ^ Agent_core_sha256.(digest_string canonical |> to_hex)
+;;
+
+let answered_ask_rows (observation : Keeper_world_observation.world_observation) =
+  observation.pending_board_events
+  |> List.filter_map (fun (event : Keeper_world_observation.pending_board_event) ->
+    match event.event_kind with
+    | Keeper_world_observation.Ask_answered_row { answered_by; input; _ } ->
+      Some (event, answered_by, input)
+    | Keeper_world_observation.Board_post_created | Keeper_world_observation.Board_post_updated
+    | Keeper_world_observation.Fusion_completed | Keeper_world_observation.Composition_completed
+    | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _
+    | Keeper_world_observation.Board_comment_added _
+    | Keeper_world_observation.Board_reaction_changed _ | Keeper_world_observation.Board_vote_cast _
+    | Keeper_world_observation.Delegate_completed _ | Keeper_world_observation.Schedule_due _
+    | Keeper_world_observation.External_attention _
+    | Keeper_world_observation.Completion_authority_rejected _
+    | Keeper_world_observation.Task_outcome _ | Keeper_world_observation.Task_cancelled _ -> None)
+;;
+
+let answered_ask_inputs observation =
+  answered_ask_rows observation
+  |> List.map (fun (event, answered_by, input) ->
+      { ask_id = event.Keeper_world_observation.post_id
+      ; evidence_fingerprint = answered_ask_evidence_fingerprint input
+      ; text = format_board_event_text event
+      ; answered_by
+      })
+;;
+
+(* The host writes the wake cue and quotes admitted scheduled work and answered
+   Asks after it. Ask attribution names only its responders; a scheduled wake
+   does not infer an operator identity or grant effect authority. *)
+let autonomous_input_speaker observation =
+  Keeper_input_speaker.Host_prompt
+    (Keeper_input_speaker.Autonomous_wake
+       { answered_asks =
+           List.map
+             (fun (_, answered_by, _) -> answered_by)
+             (answered_ask_rows observation)
+       })
+;;
+
+module For_testing = struct
+  let board_event_fields = board_event_fields
+  let scheduled_wake_fields = scheduled_wake_fields
+end
+
+let format_scheduled_automation_summary
+    (summary : Keeper_world_observation.scheduled_automation_observation)
+  : string option
+  =
+  let actionable = summary.due_ready_count > 0 in
+  if (not actionable) && summary.active_count = 0
+  then None
+  else (
+    let ubuf = Buffer.create 256 in
+    Buffer.add_string ubuf
+      (render_fragment Prompt_names.keeper_world_scheduled_automation_heading [] ^ "\n");
+    Buffer.add_string
+      ubuf
+      (render_fragment
+         Prompt_names.keeper_world_scheduled_automation_counts
+         [ "active", string_of_int summary.active_count
+         ; "ready", string_of_int summary.due_ready_count
+         ]
+       ^ "\n");
+    (match summary.next_due_at with
+     | None -> ()
+     | Some due_at ->
+       Buffer.add_string ubuf
+         (render_fragment
+            Prompt_names.keeper_world_scheduled_automation_next_due
+            [ "due_at", Masc_domain.iso8601_of_unix_seconds due_at ]
+          ^ "\n"));
+    if summary.items <> []
+    then (
+      Buffer.add_string
+        ubuf
+        (render_fragment
+           Prompt_names.keeper_world_scheduled_automation_attention_heading
+           []
+         ^ "\n");
+      List.iter
+        (fun item ->
+           Buffer.add_string ubuf (format_scheduled_automation_item item);
+           Buffer.add_char ubuf '\n')
+        summary.items;
+      Buffer.add_string
+        ubuf
+        (render_fragment Prompt_names.keeper_world_scheduled_automation_attention_note []
+         ^ "\n"));
+    Buffer.add_char ubuf '\n';
+    Some (Buffer.contents ubuf))
+;;
+
+let format_scheduled_wake_observations
+    (events : Keeper_world_observation.pending_board_event list) =
+  if events = []
+  then None
+  else (
+    let ubuf = Buffer.create 512 in
+    let groups = group_scheduled_wake_events events in
+    Buffer.add_string ubuf
+      ((match events, groups with
+        | [ _ ], [ _ ] ->
+          render_fragment Prompt_names.keeper_world_scheduled_wake_heading_single []
+        | _ ->
+          render_fragment
+            Prompt_names.keeper_world_scheduled_wake_heading_multi
+            [ "events", string_of_int (List.length events)
+            ; "series", string_of_int (List.length groups)
+            ])
+       ^ "\n");
+    Buffer.add_string ubuf
+      (render_fragment Prompt_names.keeper_world_scheduled_wake_intro [] ^ "\n");
+    List.iter
+      (fun group ->
+         Buffer.add_string ubuf
+           (format_prompt_row (scheduled_wake_group_fields group));
+         Buffer.add_char ubuf '\n')
+      groups;
+    Buffer.add_char ubuf '\n';
+    Some (Buffer.contents ubuf))
+;;
+
+let format_completion_authority_rejection_observations
+    (events : Keeper_world_observation.pending_board_event list) =
+  let rows =
+    List.filter_map
+      (fun (event : Keeper_world_observation.pending_board_event) ->
+         match event.event_kind with
+         | Keeper_world_observation.Completion_authority_rejected rejection ->
+           Some
+             (format_prompt_row
+                [ "post_id", event.post_id
+                ; "task_id", rejection.Keeper_event_queue.car_task_id
+                ; "verification_id", rejection.car_verification_id
+                ; ( "authority_kind"
+                  , Masc_domain.completion_authority_kind rejection.car_authority )
+                ; ( "authority_actor"
+                  , Masc_domain.completion_authority_actor rejection.car_authority )
+                ; "reason", rejection.car_reason
+                ]
+              ^ "\n")
+         | Keeper_world_observation.Task_outcome _
+         | Keeper_world_observation.Board_post_created
+  | Keeper_world_observation.Board_post_updated
+         | Keeper_world_observation.Board_comment_added _
+         | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
+         | Keeper_world_observation.Fusion_completed
+         | Keeper_world_observation.Schedule_due _
+         | Keeper_world_observation.External_attention _
+         | Keeper_world_observation.Task_cancelled _
+         | Keeper_world_observation.Delegate_completed _
+         | Keeper_world_observation.Ask_answered_row _
+         | Keeper_world_observation.Composition_completed
+         | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ -> None)
+      events
+  in
+  match rows with
+  | [] -> None
+  | _ ->
+    Some
+      (render_fragment
+         Prompt_names.keeper_world_completion_authority_heading
+         [ "count", string_of_int (List.length rows) ]
+       ^ "\n"
+       ^ render_fragment Prompt_names.keeper_world_completion_authority_intro []
+       ^ "\n"
+       ^ String.concat "" rows
+       ^ "\n")
+;;
+
+(* The approval twin of the renderer above, joined with it under the same
+   completion-authority layer. The outcome fields carry the correlation keys;
+   there is no reason field because an approval carries none. *)
+let format_task_outcome_observations
+    (events : Keeper_world_observation.pending_board_event list) =
+  let rows =
+    List.filter_map
+      (fun (event : Keeper_world_observation.pending_board_event) ->
+         match event.event_kind with
+         | Keeper_world_observation.Task_outcome outcome ->
+           Some
+             (format_prompt_row
+                [ "post_id", event.post_id
+                ; "task_id", outcome.Keeper_event_queue.to_task_id
+                ; "verification_id", outcome.to_verification_id
+                ; ( "authority_kind"
+                  , Masc_domain.completion_authority_kind outcome.to_authority )
+                ; ( "authority_actor"
+                  , Masc_domain.completion_authority_actor outcome.to_authority )
+                ]
+              ^ "\n")
+         | Keeper_world_observation.Board_post_created
+  | Keeper_world_observation.Board_post_updated
+         | Keeper_world_observation.Board_comment_added _
+         | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
+         | Keeper_world_observation.Fusion_completed
+         | Keeper_world_observation.Schedule_due _
+         | Keeper_world_observation.External_attention _
+         | Keeper_world_observation.Completion_authority_rejected _
+         | Keeper_world_observation.Task_cancelled _
+         | Keeper_world_observation.Delegate_completed _
+         | Keeper_world_observation.Ask_answered_row _
+         | Keeper_world_observation.Composition_completed
+         | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ -> None)
+      events
+  in
+  match rows with
+  | [] -> None
+  | _ ->
+    Some
+      (render_fragment
+         Prompt_names.keeper_world_task_outcomes_heading
+         [ "count", string_of_int (List.length rows) ]
+       ^ "\n"
+       ^ render_fragment Prompt_names.keeper_world_task_outcomes_intro []
+       ^ "\n"
+       ^ String.concat "" rows
+       ^ "\n")
+;;
+
+(* Cancellations of Tasks this Keeper authored. Rendered in their own section
+   rather than under Board Activity: no Board post exists to point at, and the
+   canceller's reason is the only account of why work the Keeper asked for
+   stopped. The [reason] field is emitted only when the canceller gave one:
+   collapsing [None] to the empty string would render "no reason was given"
+   and "the reason given was empty" as the same row. *)
+let format_task_cancellation_observations
+    (events : Keeper_world_observation.pending_board_event list) =
+  let rows =
+    List.filter_map
+      (fun (event : Keeper_world_observation.pending_board_event) ->
+         match event.event_kind with
+         | Keeper_world_observation.Task_cancelled cancellation ->
+           let identity =
+             [ "post_id", event.post_id
+             ; "task_id", cancellation.Keeper_event_queue.tc_task_id
+             ; "cancelled_by", cancellation.tc_cancelled_by
+             ]
+           in
+           let fields =
+             match cancellation.tc_reason with
+             | None -> identity
+             | Some reason -> identity @ [ "reason", reason ]
+           in
+           Some (format_prompt_row fields ^ "\n")
+         | Keeper_world_observation.Board_post_created
+  | Keeper_world_observation.Board_post_updated
+         | Keeper_world_observation.Board_comment_added _
+         | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Board_vote_cast _
+         | Keeper_world_observation.Fusion_completed
+         | Keeper_world_observation.Schedule_due _
+         | Keeper_world_observation.External_attention _
+         | Keeper_world_observation.Completion_authority_rejected _
+         | Keeper_world_observation.Task_outcome _
+         | Keeper_world_observation.Delegate_completed _
+         | Keeper_world_observation.Ask_answered_row _
+         | Keeper_world_observation.Composition_completed
+         | Keeper_world_observation.Owned_job_completed _ | Keeper_world_observation.Addon_operation_changed _ -> None)
+      events
+  in
+  match rows with
+  | [] -> None
+  | _ ->
+    Some
+      (render_fragment
+         Prompt_names.keeper_world_task_cancellations_heading
+         [ "count", string_of_int (List.length rows) ]
+       ^ "\n"
+       (* "another actor", not "another Keeper": the wake is enqueued for any
+          canceller, and an operator cancelling a Task is routine. Naming the
+          canceller a Keeper would assign an operator's decision to a peer and
+          change how the author follows it up. The cancelled_by field on each
+          row carries who it actually was. *)
+       ^ render_fragment Prompt_names.keeper_world_task_cancellations_intro []
+       ^ "\n"
+       ^ String.concat "" rows
+       ^ "\n")
+;;
+
+let combine_prompt_sections sections =
+  match List.filter_map Fun.id sections with
+  | [] -> None
+  | values -> Some (String.concat "" values)
+;;
+
+(* Every Board row crosses one neutral observation boundary. Author, post kind,
+   and exact-mention state remain source/routing context only; none of them
+   grants instruction authority. Relevance and action remain model decisions,
+   while external effects still cross the Gate. *)
+(* Claimable Tasks are a discovery list rather than already-admitted durable
+   input. Keep that projection bounded. Board Activity is intentionally not
+   bounded here: all-ready Event Queue admission ACKs the whole batch on turn
+   completion, so hiding any admitted row would claim the Keeper saw input that
+   never reached its prompt. *)
+let claimable_task_render_budget_rows = 10
+let claimable_task_newly_added_rows = 3
+let claimable_task_next_to_claim_rows =
+  claimable_task_render_budget_rows - claimable_task_newly_added_rows
+
+let take n xs = List.filteri (fun i _ -> i < n) xs
+
+let render_board_observations
+      (events : Keeper_world_observation.pending_board_event list)
+  : string
+  =
+  render_fragment Prompt_names.keeper_world_board_activity_intro []
+  ^ "\n"
+  ^ (events |> List.map format_board_event_text |> String.concat "\n")
+;;
+
+(* The keeper's own published posts, rendered as neutral observation rows.
+   post_id is included so the model can fetch the full body via board get and
+   judge for itself whether a new post would repeat earlier content. No
+   advisory wording: the rows are data, not instructions. *)
+let format_own_board_post_text (post : Board.post) : string =
+  format_prompt_row
+    [ "post_id", Board.Post_id.to_string post.id
+    ; "updated_at", Masc_domain.iso8601_of_unix_seconds post.updated_at
+      (* What the Board did with it. The record carries these; the row dropped
+         them, so a Keeper reading its own posts could not tell an answered one
+         from an ignored one. A new vote also arrives as a [vote_cast] Board
+         Activity row the moment it lands; this row is the running total.
+         Counts, not advice: the rows stay data. *)
+    ; "replies", string_of_int post.reply_count
+    ; "votes", Printf.sprintf "+%d/-%d" post.votes_up post.votes_down
+    ; "title", Keeper_types_profile.short_preview ~max_len:80 post.title
+    ; "preview", Keeper_types_profile.short_preview ~max_len:80 post.body
+    ]
+;;
+
+let autonomous_trigger_lines
+    ~(decision : Keeper_world_observation.keeper_cycle_decision) : string list =
+  match decision.channel, decision.should_run with
+  | Keeper_world_observation.Scheduled_autonomous, true ->
+    let lines =
+      [ Some
+          (render_fragment
+             Prompt_names.keeper_world_autonomous_trigger_scheduler_scheduled
+             [])
+      ; (match Keeper_world_observation.verdict_reasons_to_strings decision.verdict with
+         | [] -> None
+         | reasons ->
+           Some
+             (render_fragment
+                Prompt_names.keeper_world_autonomous_trigger_reasons
+                [ "reasons", String.concat ", " reasons ]))
+      ; (match decision.since_last_scheduled_autonomous with
+         | Some since_last ->
+           Some
+             (render_fragment
+                Prompt_names.keeper_world_autonomous_trigger_since_last
+                [ "seconds", string_of_int since_last ])
+         | None -> None)
+      ]
+    in
+    List.filter_map Fun.id lines
+  | Keeper_world_observation.Reactive, true ->
+      (* RFC-0315: when the scheduler's real decision is threaded in, a
+         stimulus-driven turn states its wake reasons instead of rendering
+         nothing. Reactive payloads (mentions, board events, scope messages)
+         still render in their own layers; event-queue stimuli (bootstrap,
+         no-progress recovery, schedule-due, connector attention) surface
+         ONLY here — before this arm the model had no trace of why it woke. *)
+    render_fragment Prompt_names.keeper_world_autonomous_trigger_scheduler_reactive []
+    ::
+    (match Keeper_world_observation.verdict_reasons_to_strings decision.verdict with
+     | [] -> []
+     | reasons ->
+       [ render_fragment
+           Prompt_names.keeper_world_autonomous_trigger_reasons
+           [ "reasons", String.concat ", " reasons ]
+       ])
+  | (Keeper_world_observation.Reactive, false)
+  | (Keeper_world_observation.Scheduled_autonomous, false) -> []
+
+let effective_instructions
+    ~(meta : Keeper_meta_contract.keeper_meta)
+    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+    ()
+  =
+  (* DET-OK: total default between two known sources (RFC-0282). *)
+  match profile_defaults with
+  | Some d -> Option.value d.instructions ~default:meta.instructions
+  | None -> meta.instructions
+;;
+(* Titles, phases and stored criteria of every Goal still open to progress,
+   read from the store under the same phase predicate the world observation
+   uses. The phase rides along so the Active Goals block can annotate a
+   [Verifying] goal (RFC-0387 stage 2: the gate must not make the goal read as
+   ordinary open work, nor disappear — review P0-1).
+
+   A Goal is shared intent and names no keeper, so every turn carries the same
+   list whether or not the keeper holds a task. The keeper chooses which Goal
+   its work advances. The tasks the keeper holds ([Claimed] or [InProgress],
+   any of them, not only the current task) mark the Goals their link registry
+   entries name. The backlog and the link registry are read authoritatively,
+   like the turn's task context, and only when an open Goal exists; when either
+   read fails, every row is marked unknown rather than unlinked. *)
+let active_goal_summaries ~(config : Workspace.config) ~(keeper_name : string) =
+  Result.map
+    (fun goals ->
+       let open_goals =
+         List.filter
+           (fun (goal : Goal_store.goal) ->
+              Goal_phase.admits_self_directed_progress goal.phase)
+           goals
+       in
+       let served_goal_ids () =
+         let open Result.Syntax in
+         let* backlog = Workspace_backlog.read_backlog_r config in
+         match
+           Workspace_task.active_owned_task_ids_for_agent
+             config ~agent_name:keeper_name backlog
+         with
+         | [] -> Ok []
+         | held_task_ids ->
+           let* links = Workspace_goal_index.read_goal_task_links_authoritative_r config in
+           Ok
+             (List.filter_map
+                (fun (goal_id, task_ids) ->
+                   if List.exists (fun task_id -> List.mem task_id held_task_ids) task_ids
+                   then Some goal_id
+                   else None)
+                links)
+       in
+       let held_task_link =
+         match open_goals with
+         | [] -> fun _goal_id -> Not_served_by_held_task
+         | _ :: _ ->
+           (match served_goal_ids () with
+            | Ok served ->
+              fun goal_id ->
+                if List.mem goal_id served
+                then Served_by_held_task
+                else Not_served_by_held_task
+            | Error detail ->
+              Log.Keeper.warn
+                "active goals: held-task goal links unreadable keeper=%s: %s"
+                keeper_name detail;
+              fun _goal_id -> Held_task_link_unreadable)
+       in
+       let measurements =
+         match open_goals with
+         | [] -> Ok []
+         | _ :: _ -> Goal_measurement.load config
+       in
+       List.map
+         (fun (goal : Goal_store.goal) ->
+            { summary_goal_id = goal.id
+            ; summary_title = goal.title
+            ; summary_phase = Some goal.phase
+            ; summary_criterion = Some (Goal_store.criterion_of_goal goal)
+            ; summary_review_note = goal.last_review_note
+            ; summary_measurement = Goal_measurement.latest_for_goal measurements goal
+            ; summary_held_task_link = held_task_link goal.id
+            })
+         open_goals)
+    (Goal_store.list_goals_result config ())
+;;
+
+(* RFC-0444 §2.3 row 6: the one projection of an unreadable goal store onto
+   the prompt. Each variable is the exhaustive renderer masc_types keeps
+   beside the type, so a new reason, mirror state or reset step is a compile
+   error there and never a silent blank here. The prompt is where the value
+   becomes text; nothing reads the text back. *)
+let goal_store_unavailable_fragment_vars
+      ({ file; reason; mirror; reset_step } : Goal_store.unavailable)
+  =
+  [ "reason", Goal_store_unavailable.reason_to_string reason
+  ; "file", file
+  ; "mirror", Goal_store_unavailable.mirror_status_to_string mirror
+  ; "reset", Goal_store_unavailable.reset_step_to_string reset_step
+  ]
+;;
+
+let format_active_goal_summaries = function
+  | Error unavailable ->
+    Some (render_fragment Prompt_names.keeper_world_active_goals_unavailable
+            (goal_store_unavailable_fragment_vars unavailable) ^ "\n\n")
+  | Ok summaries ->
+    Some
+      (render_fragment Prompt_names.keeper_world_active_goals_heading
+         [ "count", string_of_int (List.length summaries) ]
+       ^ "\n" ^ format_goal_summaries summaries ^ "\n\n")
+;;
+
+let build_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_meta)
+    ~(config : Workspace.config)
+    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+    ()
+  =
+  let instructions = effective_instructions ~meta ?profile_defaults () in
+  (* The world's own articles (RFC-0442). A missing ledger is a world that has
+     written no norms yet, and [load_articles] answers it as no articles. A
+     ledger that exists but cannot be read is not that world: rendering it as
+     no articles ran the turn without its norms and changed the prompt the
+     vendor session was settled against (#38354). The read error goes back
+     to the caller, which refuses the turn before dispatch. Articles only:
+     the decoded history grows without bound and this turn renders just the
+     held norms. *)
+  match World_constitution_store.load_articles ~base_path:config.Workspace.base_path with
+  | Error error -> Error error
+  | Ok articles ->
+  let constitution = World_constitution_render.articles articles in
+  let base_system_prompt =
+    Keeper_prompt.build_keeper_system_prompt
+      ~instructions
+      ~keeper_name:meta.name
+      ~workspace_root
+      ~constitution
+      ()
+  in
+  (* A second prompt asset used to be appended here as [## Turn Intent] on
+     every turn. It restated the capability catalog, the Task-claim rule and
+     the work-placement rule that [keeper] already carries, and its
+     in-binary fallback had drifted to hold continuity statements the asset
+     itself had dropped — so a keeper was told its checkpoint survives across
+     cycles only when prompt config was degraded. The permanent content now
+     lives in [keeper]; nothing in it varied per turn. *)
+  Ok base_system_prompt
+;;
+
+(* The backlog read produces three distinct facts, and the Namespace State
+   section must be able to state each one. "Readable and empty" used to be
+   encoded as an omitted section, which a reader of the rendered text cannot
+   tell apart from "not observed": the keeper was handed nothing rather than
+   an empty board. Typed here rather than left as a boolean disjunction so a
+   further backlog outcome forces an arm at the render site. *)
+type backlog_statement =
+  | Backlog_unreadable
+    (* Neither primary nor recovery was a valid current backlog. The
+       accompanying zero counts are not an observation. *)
+  | Backlog_readable_empty
+    (* Authoritative read that returned no unclaimed, claimable, or failed
+       rows. *)
+  | Backlog_readable_with_rows
+    (* Authoritative read with at least one counted row; the per-count lines
+       carry the numbers. *)
+
+let backlog_statement_of_observation
+      (observation : Keeper_world_observation.world_observation)
+  : backlog_statement
+  =
+  match observation.backlog_revision with
+  | None -> Backlog_unreadable
+  | Some _ ->
+    let claimable_task_count =
+      Keeper_world_observation.claimable_task_count observation
+    in
+    if
+      observation.unclaimed_task_count = 0
+      && claimable_task_count = 0
+      && observation.failed_task_count = 0
+    then Backlog_readable_empty
+    else Backlog_readable_with_rows
+;;
+
+(* The checkpoint carries the previous turn's calls; it does not carry the
+   reason the runtime ended that turn. Without the reason, a keeper whose turn
+   was cut by the repeated-call guard reads its own three identical calls as
+   unfinished work and makes them again. Measured 2026-09-01 from
+   turn-records: one live keeper ended 259 of 361 turns on the same
+   repeated query, lane-smith 136 of 342, polisher 84 of 424, and each next
+   turn repeated the call. The sentences live under [config/prompts] with the
+   other prompt text and name the tool and the count so the model can match
+   them against its history. A template that fails to render logs and
+   contributes no line: the checkpoint still carries the calls themselves.
+   The three yields that are not loop guards (a queued chat operation, a
+   newer durable stimulus, an awaited approval) explain themselves through
+   the stimulus that follows and render nothing here. *)
+let previous_turn_stop_lines (stop : Keeper_turn_checkpoint_reason.t option) :
+    string list =
+  let line key vars =
+    match String.trim (observation_prose key vars ~fallback:"") with
+    | "" -> []
+    | text -> [ text ]
+  in
+  match stop with
+  | None -> []
+  | Some (Keeper_turn_checkpoint_reason.Repeated_tool_call { tool_name; repeated_count })
+    ->
+      line
+        Prompt_names.keeper_observation_previous_turn_stop_repeated_tool_call
+        [ "tool_name", tool_name; "repeated_count", string_of_int repeated_count ]
+  | Some (Keeper_turn_checkpoint_reason.Repeated_assistant_text { repeated_count }) ->
+      line
+        Prompt_names.keeper_observation_previous_turn_stop_repeated_assistant_text
+        [ "repeated_count", string_of_int repeated_count ]
+  | Some
+      ( Keeper_turn_checkpoint_reason.Operation_queued
+      | Keeper_turn_checkpoint_reason.Durable_stimulus_arrived ) -> []
+
+let format_workspace_memory_observation ?access = function
+  | Workspace_memory_ledger.Missing -> None
+  | Workspace_memory_ledger.Unavailable _ ->
+    Some (render_fragment Prompt_names.keeper_context_workspace_memory_unavailable [] ^ "\n\n")
+  | Workspace_memory_ledger.Available descriptor ->
+    let briefing_status = match descriptor.briefing with
+      | Error _ -> render_fragment Prompt_names.keeper_context_workspace_memory_briefing_unavailable []
+      | Ok Workspace_memory_briefing.Missing ->
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_pending []
+      | Ok (Workspace_memory_briefing.Current _) ->
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_current []
+      | Ok (Workspace_memory_briefing.Stale _) ->
+        render_fragment Prompt_names.keeper_context_workspace_memory_briefing_stale [] in
+    let route = match access with
+      | None -> Prompt_names.keeper_context_workspace_memory_retrieval_preview
+      | Some access ->
+        match Keeper_request_tool_access.route access ~name:"keeper_workspace_memory_read" with
+        | Direct -> Prompt_names.keeper_context_workspace_memory_retrieval_direct
+        | Discoverable -> Prompt_names.keeper_context_workspace_memory_retrieval_discoverable
+        | Unavailable -> Prompt_names.keeper_context_workspace_memory_retrieval_unavailable in
+    Some (render_fragment Prompt_names.keeper_context_workspace_memory_available
+      [ "ledger_sha256", descriptor.ledger_sha256;
+        "claim_count", string_of_int descriptor.claim_count;
+        "conflict_count", string_of_int descriptor.conflict_count;
+        "classified_count", string_of_int descriptor.classified_count;
+        "briefing_status", briefing_status;
+        "retrieval_route", render_fragment route [] ] ^ "\n\n")
+
+(* The wiki table of contents (RFC keepers-see-the-wiki-table-of-contents).
+   Keepers did not read the wiki because nothing in a turn said it existed:
+   on 2026-10-13 a Keeper answered "I do not know" to a question whose answer
+   sat in a wiki page. The whole list rides every turn; choosing pages by the
+   current task is a later stage the RFC leaves to measurement. *)
+let format_wiki_observation ?access = function
+  | Keeper_wiki_contents.Off | Keeper_wiki_contents.Listed [] -> None
+  | Keeper_wiki_contents.Unlisted _ ->
+    Some (render_fragment Prompt_names.keeper_context_wiki_unavailable [] ^ "\n\n")
+  | Keeper_wiki_contents.Listed (_ :: _ as entries) ->
+    let route = match access with
+      | None -> Prompt_names.keeper_context_wiki_retrieval_preview
+      | Some access ->
+        match Keeper_request_tool_access.route access ~name:"keeper_wiki_read" with
+        | Direct -> Prompt_names.keeper_context_wiki_retrieval_direct
+        | Discoverable -> Prompt_names.keeper_context_wiki_retrieval_discoverable
+        | Unavailable -> Prompt_names.keeper_context_wiki_retrieval_unavailable in
+    Some (render_fragment Prompt_names.keeper_context_wiki_available
+      [ "page_count", string_of_int (List.length entries);
+        "index", String.concat "\n" (List.map Wiki_journal.render_entry entries);
+        "retrieval_route", render_fragment route [] ] ^ "\n\n")
+
+let format_recent_work = function
+  | Keeper_recent_work.Absent -> None
+  | Evidence evidence ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work
+            [ "evidence", evidence ] ^ "\n\n")
+  | Preview evidence ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work_preview
+            [ "evidence", evidence ] ^ "\n\n")
+  | Unavailable detail ->
+    Some (render_fragment Prompt_names.keeper_world_recent_work
+            [ "evidence", Yojson.Safe.to_string (`Assoc ["unavailable", `String detail]) ] ^ "\n\n")
+;;
+
+(* A row is a whole turn, and the heading counts turns. The rows go out as the
+   section's own rows ({!Keeper_context_layers.prepare_rows}): the window moves
+   one turn at a time, so a resumed official-client session already holds all
+   but the newest and is sent only the rows it lacks (#45131). *)
+let format_recent_actions_section ~current_task_id own_recent_actions
+  : Keeper_context_layers.prepared_content option =
+  match own_recent_actions with
+  | Ok [] -> None
+  | Error (Keeper_tool_call_log.Index_unavailable detail) ->
+    (* The history could not be read. Saying so is the whole section: a
+       silent absence reads as "no calls made", which is exactly the
+       repeat-a-finished-task failure this layer exists to prevent. *)
+    Some
+      (Keeper_context_layers.prepare_content
+         (render_fragment
+            Prompt_names.keeper_world_own_recent_actions_unavailable
+            [ "detail", detail ]
+          ^ "\n\n"))
+  | Ok turns ->
+    let failures = Keeper_own_recent_actions.digest_failures turns in
+    let rows = List.map (format_own_recent_actions_turn ~current_task_id) turns in
+    let ubuf = Buffer.create 1024 in
+    Buffer.add_string ubuf
+      (render_fragment
+         Prompt_names.keeper_world_own_recent_actions_heading
+         [ "count", string_of_int (List.length rows) ]
+       ^ "\n");
+    Buffer.add_string ubuf
+      (render_fragment Prompt_names.keeper_world_own_recent_actions_intro [] ^ "\n");
+    (* The digest is the section's reason to exist: refusals buried in a
+       hundred one-line rows below are the calls the keeper repeats
+       (2026-08-28: same nonexistent paths re-read every turn while the
+       refusals sat inside this very window). Rendered ahead of the rows. *)
+    (match failures with
+     | [] -> ()
+     | failures ->
+       (* Both lines are model-facing prose, so they live in
+          config/prompts assets (RFC prompts-and-tool-definitions-
+          outside-ocaml); a registry failure degrades to the bare data,
+          mirroring the held-task skills render above. *)
+       let render key vars ~fallback =
+         match Prompt_registry.render_prompt_template key vars with
+         | Ok text -> String.trim text
+         | Error detail ->
+           Log.Misc.error
+             "keeper rejected-call digest prompt %s did not render, falling back to \
+              the bare data: %s"
+             key
+             detail;
+           fallback
+       in
+       let heading =
+         render Prompt_names.keeper_observation_rejected_digest_heading [] ~fallback:""
+       in
+       if not (String.equal heading "")
+       then Buffer.add_string ubuf (heading ^ "\n");
+       List.iter
+         (fun (digest : Keeper_own_recent_actions.failure_digest) ->
+           let detail_suffix =
+             match digest.failure_detail with
+             | None -> ""
+             | Some detail -> " — " ^ detail
+           in
+           let provenance = Keeper_own_recent_actions.provenance_to_json
+             ~current_task_id digest.failure_provenance |> Yojson.Safe.to_string in
+           let count = string_of_int digest.failure_count in
+           let last_turn = string_of_int digest.failure_last_turn in
+           let input = rejected_digest_input digest.failure_input in
+           let row =
+             render
+               Prompt_names.keeper_observation_rejected_digest_row
+               [ "provenance", provenance
+               ; "tool", digest.failure_tool
+               ; "input", input
+               ; "count", count
+               ; "last_turn", last_turn
+               ; "detail_suffix", detail_suffix
+               ]
+               ~fallback:
+                 (String.concat
+                    " "
+                    [ "-"
+                    ; digest.failure_tool
+                    ; input
+                    ; "×" ^ count
+                    ; "@" ^ last_turn ^ detail_suffix
+                    ; provenance
+                    ])
+           in
+           Buffer.add_string ubuf (row ^ "\n"))
+         failures);
+    (* Each row ends its own line, and the tail is the blank line that closes
+       the section: the bytes are the rows joined by newlines and closed by a
+       blank line, and the newest row reads the same once a newer one follows. *)
+    Some
+      (Keeper_context_layers.prepare_rows
+         ~head:(Buffer.contents ubuf)
+         ~rows:(List.map (fun row -> row ^ "\n") rows)
+         ~tail:"\n")
+;;
+
+let prepare_prompt_internal
+    ?admitted_scheduled_input
+    ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
+    ?(previous_turn_stop : Keeper_turn_checkpoint_reason.t option)
+    ~(current_task : Keeper_world_observation_inputs.current_task_observation)
+    ?(task_skill_surfaces :
+        (string * Keeper_skill_catalog.exact_surface list) list = [])
+    ?(active_goal_summaries : (goal_summary list, Goal_store.unavailable) result option)
+    ?(lane_updates = Ok (`List []))
+    ?(workspace_memory = Workspace_memory_ledger.Missing)
+    ?(wiki_contents = Keeper_wiki_contents.Off)
+    ?(repository_freshness : Keeper_sandbox_control.freshness_row list = [])
+    ~(observation : Keeper_world_observation.world_observation)
+    () : prepared_prompt
+  =
+  (* No system prompt here. The turn sends the one
+     [Keeper_run_context.prepare_run_context] built, so a second read of the
+     constitution ledger cannot disagree with the first (#38354). *)
+  (* User message: structured world observation — reactive triggers + resource state only.
+     Runtime telemetry remains on decision_audit and independent observation paths.
+
+     The body is an ordered fold of typed context layers (Keeper_context_layers).
+     [content_of] below is an exhaustive match on [layer_id], so adding a
+     world-state signal fails to compile until this match renders it, and the
+     section order is the module's declared [ordered] SSOT rather than the
+     implicit order of buffer writes. Byte-identical to the prior imperative
+     buffer: each arm carries its own header and trailing separators, and
+     [assemble] concatenates the present layers in [ordered] order. *)
+  (* Prefix-cache ordering rationale and per-layer notes live on the matching
+     arms of [content_of] and in Keeper_context_layers.ordered. *)
+  let connector_presence =
+    List.filter
+      (fun (p : Gate_surface.surface_presence) ->
+        match p.surface with
+        | Gate_surface.Dashboard -> false
+        | Gate_surface.Discord _ | Gate_surface.Slack _ | Gate_surface.Gate _
+          ->
+            true)
+      observation.connected_surfaces
+  in
+  let connector_presence_failures = observation.connected_surface_failures in
+  let autonomous_trigger =
+    (match turn_decision with
+     | Some decision -> autonomous_trigger_lines ~decision
+     | None -> [])
+    @ previous_turn_stop_lines previous_turn_stop
+  in
+  let current_task_id =
+    match current_task with
+    | Keeper_world_observation_inputs.No_current_task -> None
+    | Current_task task | Recovered_current_task {task; _} -> Some task.Masc_domain.id
+    | Current_task_missing {task_id; _} | Current_task_unavailable {task_id; _} ->
+      Some (Keeper_id.Task_id.to_string task_id)
+  in
+  let content_of : Keeper_context_layers.layer_id -> string option = function
+    (* 1. Active goals — stable turn context. Titles render when the caller
+       resolved them (RFC-0315). The count and the list are read off the same
+       list, so the heading can never claim goals the body does not show. *)
+    | Keeper_context_layers.Active_goals ->
+      (match observation.active_goals, active_goal_summaries with
+       | Error unavailable, _ | _, Some (Error unavailable) ->
+         format_active_goal_summaries (Error unavailable)
+       | Ok _, Some (Ok summaries) ->
+         format_active_goal_summaries (Ok summaries)
+       | Ok [], None -> format_active_goal_summaries (Ok [])
+       | Ok (_ :: _), None -> None)
+    (* 1b. Current task — the claim that admitted this turn (RFC-0315).
+       Standing context: changes on claim/release, not per cycle. *)
+    | Keeper_context_layers.Current_task ->
+      let current_task_skill_surfaces =
+        match current_task with
+        | Keeper_world_observation_inputs.Current_task task
+        | Recovered_current_task { task; _ } ->
+          List.assoc_opt task.id task_skill_surfaces
+        | No_current_task
+        | Current_task_missing _
+        | Current_task_unavailable _ ->
+          None
+      in
+      (match
+         ( format_current_task_observation
+             ?skill_surfaces:current_task_skill_surfaces
+             current_task
+         , format_held_task_skills
+             ~skill_surfaces_by_task:task_skill_surfaces
+             observation.held_task_skills )
+       with
+       | None, None -> None
+       | Some block, None | None, Some block -> Some block
+       | Some current, Some held -> Some (current ^ held))
+    (* 1c. Current approval authority — a fresh typed Gate read on every turn.
+       It is intentionally explicit when empty: omitting a readable zero lets
+       a historical owner instruction keep an already-resolved approval alive
+       in the conversation checkpoint. *)
+    | Keeper_context_layers.Approval_authority ->
+      Some
+        (format_approval_authority_observation observation.approval_authority)
+    (* 2. Connected surfaces — connector presence, changes only on bind/unbind
+       or transport flaps (RFC-0223 P2). Omitted when only the implicit
+       dashboard is attached: every keeper has the dashboard, so dashboard-only
+       presence carries no signal. *)
+    | Keeper_context_layers.Connected_surfaces ->
+      if connector_presence <> [] || connector_presence_failures <> [] then (
+        let ubuf = Buffer.create 256 in
+        Buffer.add_string
+          ubuf
+          (render_fragment Prompt_names.keeper_world_connected_surfaces_heading [] ^ "\n");
+        List.iter
+          (fun p ->
+            Buffer.add_string ubuf
+              (Printf.sprintf "- %s\n" (format_surface_presence p)))
+          observation.connected_surfaces;
+        List.iter
+          (fun (failure : Gate_surface.presence_failure) ->
+             Buffer.add_string
+               ubuf
+               (render_fragment
+                  Prompt_names.keeper_world_connected_surfaces_failure
+                  [ "connector_id", failure.connector_id
+                  ; ( "error"
+                    , Channel_gate_binding_store.binding_store_error_to_string
+                        failure.error )
+                  ]
+                ^ "\n"))
+          connector_presence_failures;
+        Buffer.add_char ubuf '\n';
+        Buffer.add_char ubuf '\n';
+        Some (Buffer.contents ubuf))
+      else None
+    (* 3. Namespace state — usually lower churn than inbox/board detail.
+       Rendered on every turn: the backlog readability fact and the running
+       fiber count are observed on every turn, and an omitted section states
+       nothing about a backlog that was read and holds no rows. *)
+    | Keeper_context_layers.Namespace_state ->
+      Some
+        (let ubuf = Buffer.create 256 in
+         let claimable_task_count =
+           Keeper_world_observation.claimable_task_count observation
+         in
+         Buffer.add_string
+           ubuf
+           (render_fragment Prompt_names.keeper_world_namespace_state_heading [] ^ "\n");
+         (match backlog_statement_of_observation observation with
+          | Backlog_unreadable ->
+            Buffer.add_string
+              ubuf
+              (render_fragment
+                 Prompt_names.keeper_world_namespace_state_backlog_unreadable
+                 []
+               ^ "\n")
+          | Backlog_readable_empty ->
+            Buffer.add_string
+              ubuf
+              (render_fragment Prompt_names.keeper_world_namespace_state_backlog_empty []
+               ^ "\n")
+          | Backlog_readable_with_rows -> ());
+         (* The counts and ids below describe a set; they do not say whether it
+           is the set the last turn described. A keeper that concluded "nothing
+           actionable" reads "3 unclaimed" the same way whether those are the
+           same three tasks or three different ones, so the conclusion outlives
+           whatever made it true. A Keeper instructed to take
+           unclaimed work on sight -- repeated one verbatim across every turn of
+           a day while its stated reason, that the three were blocked, appeared
+           nowhere in the backlog (#27629).
+
+           The revision is what changes when the backlog does. It is an int the
+           snapshot already carries and until now spent only on a presence check
+           in [backlog_statement_of_observation], so nothing new is read and no
+           keeper-authored text crosses into the frame. *)
+         (match observation.backlog_revision with
+          | None -> ()
+          | Some revision ->
+            Buffer.add_string
+              ubuf
+              (render_fragment
+                 Prompt_names.keeper_world_namespace_state_backlog_revision
+                 [ "revision", string_of_int revision ]
+               ^ "\n"));
+         if observation.unclaimed_task_count > 0
+         then
+           Buffer.add_string
+             ubuf
+             (render_fragment
+                Prompt_names.keeper_world_namespace_state_unclaimed
+                [ "count", string_of_int observation.unclaimed_task_count ]
+              ^ "\n");
+         if claimable_task_count > 0
+         then (
+           Buffer.add_string
+             ubuf
+             (render_fragment
+                Prompt_names.keeper_world_namespace_state_claimable
+                [ "count", string_of_int claimable_task_count ]
+              ^ "\n");
+           (* The count says work exists; these say which. Without them a keeper
+             that wants to claim has to decide to spend a tool call first, and
+             one spent 286 turns reasoning about which tasks were open from a
+             12-hour-old memory rather than looking. The Goal blocks above name
+             their rows for the same reason.
+
+             Bounded like the Board activity render (#27369): a long backlog
+             would otherwise push the rest of the frame out, and the heading
+             says how many are shown against how many exist. *)
+           match observation.claimable_tasks with
+           | [] -> ()
+           | summaries ->
+             let row (summary : Keeper_world_observation_inputs.claimable_task_identity) =
+               Printf.sprintf
+                 "  - %s\n"
+                 (Yojson.Safe.to_string
+                    (`Assoc
+                        [ ( "task_id"
+                          , `String (Keeper_id.Task_id.to_string summary.task_id)
+                          )
+                        ]))
+             in
+             let next_to_claim = take claimable_task_next_to_claim_rows summaries in
+             Buffer.add_string ubuf (String.concat "" (List.map row next_to_claim));
+             if List.length summaries > List.length next_to_claim
+             then
+               Buffer.add_string
+                 ubuf
+                 (* The slot paragraph is trimmed at load, so the two-space
+                   indent the budget line carries is re-added here. *)
+                 ("  "
+                  ^ render_fragment
+                      Prompt_names.keeper_world_namespace_state_claimable_more
+                      [ "count", string_of_int (List.length summaries - List.length next_to_claim)
+                      ]
+                  ^ "\n");
+             (* The rows above are claim order -- oldest-first within a
+                priority -- so a task created minutes ago sits behind every
+                older sibling and past the budget. Name the newest rows too, or
+                the keeper never sees the work this turn just added (#29101).
+                Only when the backlog is larger than the claim window: a short
+                backlog already shows every row above. *)
+             if List.length summaries > claimable_task_next_to_claim_rows
+             then (
+               let newest_first
+                     (left : Keeper_world_observation_inputs.claimable_task_identity)
+                     (right : Keeper_world_observation_inputs.claimable_task_identity)
+                 =
+                 match String.compare right.created_at left.created_at with
+                 | 0 ->
+                   String.compare
+                     (Keeper_id.Task_id.to_string right.task_id)
+                     (Keeper_id.Task_id.to_string left.task_id)
+                 | order -> order
+               in
+               let newly_added =
+                 summaries
+                 |> List.sort newest_first
+                 |> take claimable_task_newly_added_rows
+               in
+               Buffer.add_string ubuf "  Newly added (most recent):\n";
+               Buffer.add_string ubuf (String.concat "" (List.map row newly_added))));
+         if observation.unclaimed_task_count > 0 && claimable_task_count = 0
+         then
+           Buffer.add_string
+             ubuf
+             (render_fragment
+                Prompt_names.keeper_world_namespace_state_claimable
+                [ "count", "0" ]
+              ^ "\n");
+         (* The difference is exactly two things: a Todo task still holding a
+           verification verdict, and a Todo task this keeper wrote itself. No
+           goal, tool, or keeper scope narrows the claim pool. *)
+         let unclaimed_not_offered =
+           max 0 (observation.unclaimed_task_count - claimable_task_count)
+         in
+         if unclaimed_not_offered > 0
+         then
+           Buffer.add_string
+             ubuf
+             (render_fragment
+                Prompt_names.keeper_world_namespace_state_unclaimed_not_offered
+                [ "count", string_of_int unclaimed_not_offered ]
+              ^ "\n");
+         if observation.failed_task_count > 0
+         then
+           Buffer.add_string
+             ubuf
+             (render_fragment
+                Prompt_names.keeper_world_namespace_state_failed
+                [ "count", string_of_int observation.failed_task_count ]
+              ^ "\n");
+         Buffer.add_string
+           ubuf
+           (render_fragment
+              Prompt_names.keeper_world_namespace_state_running_fibers
+              [ "count", string_of_int observation.running_keeper_fiber_count ]
+            ^ "\n");
+         Buffer.add_char ubuf '\n';
+         Buffer.contents ubuf)
+    (* Repository freshness — semi-stable standing context: it moves when the
+       keeper commits or upstream advances, not per cycle. Projection only —
+       it states where each checkout stands so the keeper can choose to
+       fetch/rebase; nothing here schedules or forces that work. *)
+    | Keeper_context_layers.Lane_updates -> Lane_addon_subscription.render lane_updates
+    (* These four layers are assembled from the actual request projection. *)
+    | Keeper_context_layers.Workspace_memory | Wiki | Own_recent_actions | Recent_work -> None
+    | Keeper_context_layers.Repository_freshness ->
+      (match repository_freshness with
+       | [] -> None
+       | rows ->
+         (* Measured rows render individually, drifted first — the layer
+            exists to surface drift, and a current checkout is the least
+            actionable line. Unmeasurable rows collapse into one count: a
+            live playground answered 19 of 32 rows with the same
+            budget-exhausted reason (2026-09-01 field probe), and repeating
+            an identical failure line 19 times per turn is noise. *)
+         let measured, unmeasured =
+           List.partition
+             (fun (row : Keeper_sandbox_control.freshness_row) ->
+               match row.Keeper_sandbox_control.row_freshness with
+               | Keeper_sandbox_control.Freshness_unavailable _ -> false
+               | Keeper_sandbox_control.Current _
+               | Keeper_sandbox_control.Stale_ref _
+               | Keeper_sandbox_control.Ahead _
+               | Keeper_sandbox_control.Behind _
+               | Keeper_sandbox_control.Diverged _ -> true)
+             rows
+         in
+         let drift_rank (row : Keeper_sandbox_control.freshness_row) =
+           match row.Keeper_sandbox_control.row_freshness with
+           | Keeper_sandbox_control.Diverged _ -> 0
+           | Keeper_sandbox_control.Behind _ -> 1
+           | Keeper_sandbox_control.Ahead _ -> 2
+           | Keeper_sandbox_control.Stale_ref _ -> 3
+           | Keeper_sandbox_control.Current _ -> 4
+           | Keeper_sandbox_control.Freshness_unavailable _ -> 5
+         in
+         let measured =
+           List.stable_sort
+             (fun left right -> compare (drift_rank left) (drift_rank right))
+             measured
+         in
+         let line (row : Keeper_sandbox_control.freshness_row) =
+           let branch_part =
+             match row.Keeper_sandbox_control.row_branch with
+             | Some branch -> " branch=" ^ branch
+             | None -> ""
+           in
+           let dirty_part =
+             match row.Keeper_sandbox_control.row_changed_files with
+             (* [Some 0] is a clean tree and [None] a failed status probe;
+                neither earns a line of the keeper's attention here — a
+                broken probe already surfaces as [Freshness_unavailable]. *)
+             | Some 0 | None -> ""
+             | Some changed -> Printf.sprintf " dirty_files=%d" changed
+           in
+           let standing =
+             match row.Keeper_sandbox_control.row_freshness with
+             | Keeper_sandbox_control.Current { target_ref; age_s; _ } ->
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_current
+                 [ "target", target_ref; "age", string_of_int age_s ]
+             | Keeper_sandbox_control.Stale_ref { target_ref; last_observed_at_unix; age_s; _ } ->
+               let age = match age_s with
+                 | Some seconds -> Printf.sprintf "%ds ago" seconds
+                 | None -> "age unknown" in
+               let as_of =
+                 match last_observed_at_unix with
+                 | None -> "unknown time"
+                 | Some timestamp ->
+                   let tm = Unix.gmtime (float_of_int timestamp) in
+                   Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d UTC"
+                     (tm.Unix.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
+                     tm.tm_hour tm.tm_min tm.tm_sec
+               in
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_stale_ref
+                 [ "target", target_ref; "as_of", as_of; "age", age ]
+             | Keeper_sandbox_control.Ahead { target_ref; ahead; _ } ->
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_ahead
+                 [ "target", target_ref; "ahead", string_of_int ahead ]
+             | Keeper_sandbox_control.Behind { target_ref; behind; _ } ->
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_behind
+                 [ "target", target_ref; "behind", string_of_int behind ]
+             | Keeper_sandbox_control.Diverged { target_ref; ahead; behind; _ } ->
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_diverged
+                 [ "target", target_ref
+                 ; "behind", string_of_int behind
+                 ; "ahead", string_of_int ahead
+                 ]
+             | Keeper_sandbox_control.Freshness_unavailable reason ->
+               render_fragment
+                 Prompt_names.keeper_context_checkouts_standing_unavailable
+                 [ "reason", reason ]
+           in
+           render_fragment Prompt_names.keeper_context_checkouts_row
+             [ "path", row.Keeper_sandbox_control.row_checkout_path
+             ; "branch", branch_part
+             ; "dirty", dirty_part
+             ; "standing", standing
+             ]
+         in
+         let unmeasured_line =
+           match List.length unmeasured with
+           | 0 -> []
+           | count ->
+             [ render_fragment Prompt_names.keeper_context_checkouts_unmeasured
+                 [ "count", string_of_int count ]
+             ]
+         in
+         Some
+           (render_fragment Prompt_names.keeper_context_checkouts_section
+              [ "count", string_of_int (List.length rows)
+              ; ( "rows"
+                , String.concat "\n" (List.map line measured @ unmeasured_line) )
+              ]
+            ^ "\n\n"))
+    (* 4. Autonomous trigger — lower churn than reactive inboxes. *)
+    | Keeper_context_layers.Autonomous_trigger ->
+      if autonomous_trigger <> [] then
+        Some
+          ("\n"
+           ^ render_fragment Prompt_names.keeper_world_autonomous_trigger_heading []
+           ^ "\n"
+           ^ String.concat "\n" autonomous_trigger
+           ^ "\n")
+      else None
+    (* Standing schedule-store observations remain ephemeral. The exact admitted
+       request is durable user input below, independent of discovery/tool rounds. *)
+    | Keeper_context_layers.Scheduled_automation ->
+      format_scheduled_automation_summary observation.scheduled_automation
+    (* 5b. Completion-authority decisions — a distinct system LLM boundary.
+       These rows are not Board activity and must not be routed through the
+       scheduled-work renderer merely because they share the historical
+       pending-event carrier. Both verdicts render here: the rejection with
+       its reason, the approval with its correlation keys. *)
+    | Keeper_context_layers.Completion_authority ->
+      combine_prompt_sections
+        [ format_completion_authority_rejection_observations
+            observation.pending_board_events
+        ; format_task_outcome_observations observation.pending_board_events
+        ]
+    | Keeper_context_layers.Admitted_scheduled_input -> admitted_scheduled_input
+    (* 6b. Cancellations of Tasks this Keeper authored — the author's only
+       in-prompt account of why work it filed stopped. Not Board activity: the
+       cancellation produces no post. *)
+    | Keeper_context_layers.Task_cancellations ->
+      format_task_cancellation_observations observation.pending_board_events
+    (* Pending message rows are rendered once in exact source order. Mention and
+       scope remain typed for wake metrics, but splitting them into two prompt
+       sections would reorder interleaved arrivals. *)
+    | Keeper_context_layers.Pending_mentions ->
+      if observation.pending_messages <> [] then
+        Some
+          (render_fragment
+             Prompt_names.keeper_world_pending_messages_heading
+             [ "count", string_of_int (List.length observation.pending_messages) ]
+           ^ "\n"
+           ^ render_fragment Prompt_names.keeper_world_pending_messages_intro []
+           ^ "\n"
+           ^ format_pending_messages observation.pending_messages
+           ^ "\n\n")
+      else None
+    | Keeper_context_layers.Scope_messages -> None
+    (* 9b. Own recent board posts — the keeper's own published posts, newest
+       first. Cursor-independent standing context: Board_activity only carries
+       other authors' unseen posts, so this is the only in-prompt view of what
+       the keeper itself has already said. Neutral rows, no advisory text. *)
+    | Keeper_context_layers.Own_board_posts ->
+      if observation.own_recent_board_posts <> [] then (
+        let ubuf = Buffer.create 256 in
+        Buffer.add_string ubuf
+          (render_fragment
+             Prompt_names.keeper_world_own_board_posts_heading
+             [ "count", string_of_int (List.length observation.own_recent_board_posts) ]
+           ^ "\n");
+        Buffer.add_string ubuf
+          (render_fragment Prompt_names.keeper_world_own_board_posts_intro [] ^ "\n");
+        Buffer.add_string ubuf
+          (observation.own_recent_board_posts
+           |> List.map format_own_board_post_text
+           |> String.concat "\n");
+        Buffer.add_string ubuf "\n\n";
+        Some (Buffer.contents ubuf))
+      else None
+    (* 10. Board activity — reactive trigger. All authors and post kinds share
+       one neutral observation renderer. Exact mention remains routing context;
+       it never promotes Board content to instruction authority. *)
+    | Keeper_context_layers.Board_activity ->
+      let board_events =
+        List.filter
+          Keeper_world_observation.is_board_context_event
+          observation.pending_board_events
+      in
+      if board_events <> [] then (
+        let total = List.length board_events in
+        let ubuf = Buffer.create 256 in
+        Buffer.add_string ubuf
+          (render_fragment
+             Prompt_names.keeper_world_board_activity_heading
+             [ "count", string_of_int total ]
+           ^ "\n");
+        Buffer.add_string ubuf (render_board_observations board_events);
+        Buffer.add_string ubuf "\n\n";
+        Some (Buffer.contents ubuf))
+      else None
+    (* 11. Fleet messages — what other keepers said, projected into this
+       keeper's transcript. Cursor-independent standing context: the reactive
+       lanes admit only rows addressed to this keeper, so without this section
+       a fleet broadcast reaches the dashboard and never the prompt. Neutral
+       rows, no advisory text; no watermark, so a keeper that never runs an
+       autonomous turn accumulates nothing. *)
+    (* What this keeper already did. Without it an autonomous turn re-claims a
+       task it finished and repeats a call the tool just rejected, because the
+       briefing describes the world and never the keeper's own history. Both
+       outcomes are shown: the rejections are what the keeper must not repeat,
+       the successes are what it must not redo. *)
+    | Keeper_context_layers.Fleet_messages ->
+      if observation.fleet_messages <> [] then (
+        let ubuf = Buffer.create 256 in
+        Buffer.add_string ubuf
+          (render_fragment
+             Prompt_names.keeper_world_fleet_messages_heading
+             [ "count", string_of_int (List.length observation.fleet_messages) ]
+           ^ "\n");
+        Buffer.add_string ubuf
+          (render_fragment Prompt_names.keeper_world_fleet_messages_intro [] ^ "\n");
+        Buffer.add_string ubuf (format_fleet_messages observation.fleet_messages);
+        Buffer.add_string ubuf "\n\n";
+        Some (Buffer.contents ubuf))
+      else None
+  in
+  (* The frame is injected as ephemeral context. The turn call site passes an
+     explicit [world_state_prompt] source to history persistence, so JSONL
+     routing does not depend on any markdown wording below.
+
+     The provenance line is what the sections underneath do not carry. A block
+     headed "### Your Recent Board Posts" reads as something the keeper did,
+     and nothing in the frame says the runtime assembled it, so a keeper that
+     then reports "I checked the board" is misreading its own frame rather than
+     inventing a tool call. Stating where the frame came from is what makes
+     that distinction available to the model. *)
+  let common_layers = List.fold_left (fun layers layer ->
+    Layer_map.add layer (Option.map Keeper_context_layers.prepare_content (content_of layer)) layers)
+      Layer_map.empty Keeper_context_layers.ordered in
+  let frame = Keeper_context_layers.prepare_content
+      (render_fragment Prompt_names.keeper_world_frame_frame [] ^ "\n\n") in
+  (* Delivered requests and answers are conversation input, not changing world
+     observations. Dynamic context disappears after a tool round. Preserve only
+     admitted typed stimuli here, never the standing schedule list or the full
+     world frame. Gate and queue selection still own authority and lifecycle. *)
+  let scheduled_requests =
+    observation.pending_board_events
+    |> List.filter Keeper_world_observation.is_scheduled_automation_event
+    |> format_scheduled_wake_observations
+    |> Option.to_list
+  in
+  let answered_asks =
+    List.map (fun (row : answered_ask_turn_input) -> row.text) (answered_ask_inputs observation)
+  in
+  let user_message =
+    String.concat "\n\n"
+      (Env_config_keeper.KeeperAutonomous.wake_prompt ()
+       :: (scheduled_requests @ answered_asks))
+  in
+  { common_layers; frame; user_message; current_task_id
+  ; own_recent_actions=observation.own_recent_actions; workspace_memory; wiki_contents }
+;;
+
+let project_prompt prepared ?workspace_memory_access ?own_recent_actions
+    ?(recent_work = Keeper_recent_work.Absent) () =
+  let own_recent_actions = match own_recent_actions with
+    | Some actions -> actions | None -> prepared.own_recent_actions in
+  let own_recent_actions_section =
+    format_recent_actions_section ~current_task_id:prepared.current_task_id own_recent_actions in
+  let content_of layer = match layer with
+    | Keeper_context_layers.Workspace_memory ->
+      format_workspace_memory_observation ?access:workspace_memory_access prepared.workspace_memory
+      |> Option.map Keeper_context_layers.prepare_content
+    | Wiki -> format_wiki_observation ?access:workspace_memory_access prepared.wiki_contents
+      |> Option.map Keeper_context_layers.prepare_content
+    | Own_recent_actions -> own_recent_actions_section
+    | Recent_work -> Option.map Keeper_context_layers.prepare_content (format_recent_work recent_work)
+    | Active_goals | Current_task | Approval_authority | Connected_surfaces | Namespace_state
+    | Lane_updates | Repository_freshness | Autonomous_trigger | Scheduled_automation
+    | Completion_authority | Admitted_scheduled_input | Task_cancellations | Pending_mentions | Scope_messages
+    | Own_board_posts | Board_activity | Fleet_messages ->
+      (* Captured and assembled through the same immutable [ordered] keys. *)
+      Layer_map.find layer prepared.common_layers
+  in
+  let world_partition = Keeper_context_layers.assemble_prepared ~content_of
+    |> Keeper_context_layers.prepend_prepared_unattributed World_frame prepared.frame in
+  {world_state=Keeper_context_layers.text world_partition;world_partition;user_message=prepared.user_message}
+;;
+
+let emit_prompt_metrics
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(system_prompt : string)
+      { world_state; user_message; _ }
+  =
+  (* Tool names and availability come exclusively from the typed schemas sent
+     with this turn. Prompt markdown describes behaviour rather than attempting
+     to mirror that catalog. World-state observations remain byte-for-byte
+     intact; unknown calls are rejected explicitly by typed dispatch. *)
+  (* The only caller is the pre-request hook of [run_turn]
+     (keeper_run_tools_hooks.ml, [prepare_request_dynamic_context]), for
+     autonomous turns. Its [user_message] is the message [run_turn] sends,
+     after [Keeper_agent_run.with_completion_clause] appended the wake's
+     completion clause, so the [user_message] segment counts that clause. *)
+  (* set_gauge only: a stray inc_counter here used to create this
+     (name, labels) cell as Counter first, so the system_prompt series
+     kept Counter kind, carried a non-monotonic byte length, and exported
+     as masc_keeper_prompt_segment_bytes_total while user_message exported
+     as the intended gauge. The store keys cells by (name, labels) and
+     never retypes an existing cell. *)
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string PromptSegmentBytes)
+    ~labels:[("keeper", meta.name); ("segment", "system_prompt")]
+    (Float.of_int (String.length system_prompt));
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string PromptSegmentBytes)
+    ~labels:[("keeper", meta.name); ("segment", "world_state")]
+    (Float.of_int (String.length world_state));
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string PromptSegmentBytes)
+    ~labels:[("keeper", meta.name); ("segment", "user_message")]
+    (Float.of_int (String.length user_message));
+  (* Instruction hash: emit a stable numeric fingerprint of the full prompt
+     composition (system + user) so Grafana can detect when the instruction
+     changes between turns without storing the prompt content itself.
+     Uses first 8 hex chars of SHA-256 as an integer (32-bit). *)
+  let prompt_hash =
+    let combined = system_prompt ^ world_state ^ user_message in
+    let hex =
+      Agent_core_sha256.(to_hex (digest_string combined))
+    in
+    Int32.to_float (Int32.of_string ("0x" ^ String.sub hex 0 8))
+  in
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string KeeperTurnInstructionHash)
+    ~labels:[("keeper", meta.name)]
+    prompt_hash
+;;
+
+let prepare_prompt
+      ~turn_ref ~admission
+      ~turn_decision
+      ?previous_turn_stop
+      ~current_task
+      ?task_skill_surfaces
+      ?active_goal_summaries
+      ?workspace_memory
+      ?wiki_contents
+      ?lane_updates
+      ?repository_freshness
+      ~observation
+      ()
+  =
+  prepare_prompt_internal
+    ~admitted_scheduled_input:(format_scheduled_admission ~turn_ref ~admission)
+    ~turn_decision:(Some turn_decision)
+    ?previous_turn_stop
+    ~current_task
+    ?task_skill_surfaces
+    ?active_goal_summaries
+    ?workspace_memory
+    ?wiki_contents
+    ?lane_updates
+    ?repository_freshness
+    ~observation
+    ()
+;;
+
+let build_prompt ~turn_ref ~admission ~turn_decision ?previous_turn_stop ~current_task ?task_skill_surfaces
+    ?active_goal_summaries ?workspace_memory ?workspace_memory_access ?wiki_contents
+    ?lane_updates ?repository_freshness ?recent_work ~observation () =
+  let prepared = prepare_prompt ~turn_ref ~admission ~turn_decision ?previous_turn_stop ~current_task
+    ?task_skill_surfaces ?active_goal_summaries ?workspace_memory ?wiki_contents
+    ?lane_updates ?repository_freshness ~observation () in
+  project_prompt prepared ?workspace_memory_access ?recent_work ()
+;;
+
+let build_prompt_preview
+      ~current_task
+      ?task_skill_surfaces
+      ?active_goal_summaries
+      ?workspace_memory
+      ?workspace_memory_access
+      ?wiki_contents
+      ?lane_updates
+      ?repository_freshness
+      ?recent_work
+      ~observation
+      ()
+  =
+  let prepared = prepare_prompt_internal
+    ~turn_decision:None
+    ~current_task
+    ?task_skill_surfaces
+    ?active_goal_summaries
+    ?workspace_memory
+    ?wiki_contents
+    ?lane_updates
+    ?repository_freshness
+    ~observation
+    () in
+  project_prompt prepared ?workspace_memory_access ?recent_work ()
+;;

@@ -1,0 +1,32 @@
+[
+  {
+    "with_schema": false,
+    "requested_model": "gpt-5.6-luna",
+    "reported_model": "gpt-5.6-luna",
+    "elapsed_s": 11.082,
+    "raw_answer": "{\"ok\":true,\"note\":\"hello\"}",
+    "strict_json": true,
+    "schema_ok": false,
+    "control_extra_key": true
+  },
+  {
+    "with_schema": true,
+    "requested_model": "gpt-5.6-luna",
+    "reported_model": "gpt-5.6-luna",
+    "elapsed_s": 9.403,
+    "raw_answer": "{\"ok\":true}",
+    "strict_json": true,
+    "schema_ok": true,
+    "control_extra_key": false
+  },
+  {
+    "with_schema": true,
+    "requested_model": "gpt-5.6-luna",
+    "reported_model": "gpt-5.6-luna",
+    "elapsed_s": 8.016,
+    "raw_answer": "{\"ok\":true}",
+    "strict_json": true,
+    "schema_ok": true,
+    "control_extra_key": false
+  }
+]

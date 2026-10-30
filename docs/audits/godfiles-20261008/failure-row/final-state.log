@@ -1,0 +1,13 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/keeper-state.test.ts -t 'reconciles a server failure visibly'
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 81 skipped (82)
+   Start at  20:17:49
+   Duration  1.34s (transform 36%, setup 30%, environment 28%, import 5%, tests 1%, worker 1%)
+

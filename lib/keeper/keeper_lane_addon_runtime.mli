@@ -1,0 +1,5 @@
+val snapshot : config:Workspace.config -> keeper_name:string ->
+  Lane_addon_runtime.export_snapshot
+val call : continuation:(Lane_addon_companion_origin.source, Lane_addon_companion_origin.error) result option ->
+  config:Workspace.config -> keeper_name:string ->
+  export:Lane_addon_tool_export.t -> arguments:Yojson.Safe.t -> Keeper_tool_execution.t

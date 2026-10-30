@@ -1,0 +1,363 @@
+(** Voice_config — voice (TTS / STT / session) configuration.
+
+    The source is the [\[voice\]] section of runtime.toml.  A standalone
+    \[<masc_dir>/voice_config.json\] is read only when that section is
+    absent: {!load_detailed} prefers the TOML and falls back to the JSON.
+
+    Persistent file shape: nested record with [tts] / [stt] /
+    [session] / [local_playback] sections.  Each section carries
+    its own endpoint list keyed by [endpoint_kind].
+
+    Internal: the parsing helpers stay private — JSON parsing
+    ([trim_nonempty_json], [require_string], etc.),
+    path resolution helpers, voice-tuning extractors, and the
+    \[default_*_*\] string constants for missing fields.  All
+    consumed only inside {!load}'s parsing pipeline. *)
+
+(** {1 Endpoint kind} *)
+
+type endpoint_kind =
+  | Openai_compat
+  | Elevenlabs_direct
+  | Voice_mcp
+  | Macos_say
+  | Espeak_ng
+  | Whisper_cli
+
+val endpoint_kind_of_name : string -> endpoint_kind option
+(** The kind this name stands for, or [None] when this binary has no kind by
+    that name. A reader that got the name from a running server and cannot name
+    it is looking at a newer one, so [None] means "unknown", never a default. *)
+
+val string_of_endpoint_kind : endpoint_kind -> string
+(** [string_of_endpoint_kind k] returns the canonical lowercase
+    label: ["openai_compat"] / ["elevenlabs_direct"] /
+    ["voice_mcp"] / ["macos_say"] / ["espeak_ng"] / ["whisper_cli"].
+    Used by config matchers and provider routing. *)
+
+(** {1 Endpoint record} *)
+
+type endpoint = {
+  id : string;
+  kind : endpoint_kind;
+  base_url : string option;
+  mcp_url : string option;
+  health_url : string option;
+  api_key_env : string option;
+  enabled : bool;
+  timeout_seconds : float option;
+  default_voice : string option;
+  agent_voices : (string * string) list;
+  command : string option;
+  model : string option;
+}
+(** Per-endpoint configuration.  [api_key_env] names the
+    environment variable holding the credential (not the
+    credential itself).  [base_url] / [mcp_url] / [health_url]
+    are populated based on [kind].
+
+    [default_voice] is the voice name this endpoint answers to. A voice id is
+    provider-specific vocabulary -- an ElevenLabs [voice_id] is 20-64
+    alphanumerics, an OpenAI voice is a name like ["alloy"] -- so the fallback
+    chain handing one endpoint's id to the next endpoint asks for a voice that
+    does not exist there (#24068). [None] means the endpoint has none declared
+    and falls back to the workspace voice selection. [agent_voices] overrides
+    this default for named agents using this endpoint's voice vocabulary.
+    These mappings are edited in the file; setup edits preserve them.
+
+    [model] is the model this endpoint is asked for: a provider's model name for
+    an address kind, the model file for [whisper_cli]. [None] falls back to the
+    section's [default_model]; see {!model_at_endpoint}. *)
+
+(** {1 Voice tuning} *)
+
+type voice_tuning = {
+  stability : float;
+  similarity_boost : float;
+  style : float;
+}
+(** ElevenLabs-style voice tuning parameters.  All in [\[0.0, 1.0\]]. *)
+
+(** {1 TTS / STT / session config} *)
+
+type tts_config = {
+  default_model : string option;
+      (** The fallback for endpoints that name no model of their own, never
+          blank. Absent when every endpoint names one or none is asked for one
+          (say takes a voice, not a model). *)
+  default_voice : string;
+  default_voice_settings : voice_tuning;
+  agent_voices : (string * string) list;
+      (** [(agent_id, voice_id)] override map. *)
+  agent_voice_settings : (string * voice_tuning) list;
+      (** [(agent_id, tuning)] override map — falls back to
+          [default_voice_settings] when missing. *)
+  endpoints : endpoint list;
+}
+
+type stt_config = {
+  default_model : string option;
+      (** The fallback for endpoints that name no model of their own. Absent
+          when every endpoint names one or none is asked for one. *)
+  endpoints : endpoint list;
+  send_on_stop : bool;
+      (** Whether ending a capture also sends what was heard.
+
+          Off unless the section says otherwise. The transcript lands in the
+          composer draft either way, and that draft is also where a spoken
+          half-sentence waits for typing; sending without the operator
+          confirming costs that operator more than the confirmation costs the
+          one who speaks whole sentences. Optional in the file for the same
+          reason: absent means off. *)
+}
+
+type session_config = { endpoints : endpoint list }
+
+type capture_config = {
+  calibration_seconds : float;
+      (** How long the room is measured before recording. Longer is steadier
+          against a passing noise; shorter is less delay between the key and
+          the tone. Must be greater than zero — a probe of no length measures
+          nothing, and the threshold would come from an empty file. *)
+  trigger_margin_db : float;
+      (** How far above the room a sound must rise for the capture to count as
+          speech having started. Raise it when captures begin on their own and
+          never end; lower it when speaking does not start one.
+
+          Read as RMS, the same as {!speech_margin_db} and the same as the
+          level the meter draws, so what an operator watches and what the
+          decision uses are one number. Peak is not that number: on room tone
+          it moves 1.9x across five probes a minute apart while RMS moves
+          1.2x, so a threshold derived from it wanders on a room that has not
+          changed.
+
+          A capture in which no reading ever clears this is not sent at all.
+          Whisper answers a room with a sentence: three captures of an empty
+          room returned "감사합니다.", "감사합니다." and "네", and once audio
+          reaches the endpoint a hallucinated transcript is indistinguishable
+          from a real one, so the refusal has to happen before that. *)
+  trailing_silence_seconds : float;
+      (** How long the room has to stay quiet after speech before the capture
+          stops. Long enough to sit through the pause inside a sentence, short
+          enough that an operator is not waiting on their own recording.
+
+          Must be greater than zero: a capture that stops the instant a
+          speaker draws breath cuts the sentence in half. *)
+  speech_margin_db : float;
+      (** How far above the room the level may still sit, once speech has
+          started, and count as quiet: under room + this margin for
+          {!trailing_silence_seconds}, the recording ends. Raise it when a
+          capture runs on after the speaker has stopped; lower it when one
+          ends inside a sentence.
+
+          Read as RMS, the same basis as {!trigger_margin_db}, and kept below
+          it so the two thresholds do not sit on one line, where a level
+          hovering at it would start and end speech on every reading. *)
+  noise_reduction : bool;
+      (** Subtract the room's profile from a capture before transcribing.
+          Measured on one sample it removed the floor entirely while keeping
+          81% of the speech, and corrected one word.
+
+          Off by default, on a small sample and because it cuts both ways:
+          applied to a capture with no speech it hands whisper a perfect
+          silence, which is what it hallucinates hardest against. It runs only
+          after {!speech_margin_db} has admitted the capture. *)
+}
+
+type local_playback_config = {
+  enabled : bool;
+  agents : string list;
+      (** Allow-list of agent ids permitted to play locally.
+          Empty list = all agents permitted (when [enabled = true]). *)
+}
+
+type gate_config = {
+  always_allow : bool;
+      (** Every agent bypasses Gate approval for voice speak. Absent from the
+          section, [false]: the Gate reviews each speak. Present, it must be a
+          boolean; the load refuses anything else naming [gate.always_allow]. *)
+  exempt_agents : string list;
+      (** Allow-list of agent ids permitted to bypass Gate approval for voice speak.
+          When [always_allow = true], all agents bypass Gate approval.
+
+          Absent, empty. Present, every element must be a non-blank string;
+          the load refuses any other element naming its index, as
+          [gate.exempt_agents\[1\]]. A key the section does not know is refused
+          by name, the way [capture] refuses one. *)
+}
+
+(** {1 Composite config} *)
+
+type t = {
+  tts : tts_config option;
+      (** [None] when the config has no [tts] section: voice output is not
+          set up. The speak path refuses before any endpoint is asked; a
+          record with [default_model = ""] in its place would reach
+          providers as [model_id ""]. *)
+  stt : stt_config option;
+      (** [None] when the config has no [stt] section; the transcribe path
+          refuses the same way. *)
+  session : session_config;
+  capture : capture_config;
+  local_playback : local_playback_config;
+  gate : gate_config;
+}
+(** Complete voice configuration. *)
+
+(** {1 Constants (runtime-visible)} *)
+
+val default_capture : capture_config
+(** The values used when [\[voice.capture\]] is absent. Every one was measured
+    on a single workstation, which is the reason the section exists: two
+    earlier margins chosen from one room were both wrong, and an operator
+    whose captures never start needs a knob rather than a release. *)
+
+val default_elevenlabs_base_url : string
+(** [https://api.elevenlabs.io/v1] — pinned as a fallback when
+    the [Elevenlabs_direct] endpoint omits [base_url].
+    Operator-visible so callers can assert / log the resolved
+    URL without re-deriving the default. *)
+
+(** {1 Path resolution} *)
+
+val voice_config_file_in : string -> string
+(** The standalone voice source for an explicit workspace, using the same
+    path as {!load_detailed}. A writer must not create a TOML
+    voice section over this active source when that section is absent. *)
+
+val config_path : unit -> string
+(** [config_path ()] returns the resolved config file path —
+    first existing candidate from
+    [base_path_voice_config_path_opt] / repo path / fallback,
+    or the last fallback when none exist (for error messages). *)
+
+(** {1 Loading} *)
+
+val parse_json : Yojson.Safe.t -> (t, string) result
+(** [parse_json json] parses an in-memory JSON value into a [t].
+    Composes the per-section parsers (tts, stt, session, capture,
+    local_playback, gate). Pure — no filesystem access. Used by
+    [load_detailed] after IO and by tests that exercise edge cases without
+    a file.
+
+    [tts] and [stt] are optional sections and parse to [None] when absent;
+    present, each requires a non-empty [endpoints] list (and [tts] its
+    [default_voice]). Every endpoint that is asked for a model must have one,
+    its own [model] or the section's [default_model]; a section whose endpoints
+    without a model include both a provider kind and [whisper_cli] cannot share
+    one fallback, and each of those endpoints must name its own. [capture] is
+    optional and defaults per key to {!default_capture}; a key it does not
+    know, or a key of the wrong type, is an [Error] naming
+    [capture.<key>], the same way an unknown endpoint field is. *)
+
+(** {1 Typed load status} *)
+
+type load_error =
+  | Not_configured
+      (** No [\[voice\]] section in runtime.toml and no
+          [voice_config.json] candidate exists: voice is simply not
+          set up in this environment.  Callers treat this as
+          "voice disabled", not as a failure. *)
+  | Invalid of string
+      (** A voice config source exists but could not be read or
+          parsed; the string names the source and the reason.
+          Callers must surface this to the operator instead of
+          substituting defaults. *)
+
+val parse_runtime_toml_text : string -> (t option, string) result
+(** Parse the [\[voice\]] section out of runtime.toml source text.  [Ok None]
+    when the section is absent, [Error] when the text does not parse as TOML or
+    the section is broken.
+
+    Taking text rather than a path lets a writer check its own edit before
+    committing it: the parser that will load the file is the one that answers
+    whether the edit is loadable, so a voice section cannot reach disk in a
+    shape that only fails later, at the first speak or transcribe. *)
+
+val load_standalone_file : string -> (t, string) result
+(** Read and parse the standalone JSON source at [path] exactly as
+    {!load_detailed} does when runtime.toml has no [\[voice\]] section. The
+    error names the read or parse failure. *)
+
+val load_detailed : unit -> (t, load_error) result
+(** [load_detailed ()] distinguishes "voice is not configured"
+    ({!Not_configured}) from "an explicit config exists but is
+    broken" ({!Invalid}). *)
+
+val load_error_to_string : load_error -> string
+(** Render a typed load error at an operator-facing boundary. *)
+
+(** {1 Endpoint selection} *)
+
+val model_at_endpoint : default_model:string option -> endpoint -> string option
+(** [model_at_endpoint ~default_model endpoint] is the model [endpoint] is asked
+    for: its own [model], else [default_model]. Every reader that sends or loads
+    a model goes through this, so a provider added beside a whisper-cli endpoint
+    cannot change which file or model name the other one uses. *)
+
+val select_endpoint :
+  ?endpoint_id:string -> endpoint list -> endpoint option
+(** [select_endpoint ?endpoint_id endpoints] picks an endpoint:
+
+    - When [endpoint_id = Some id] (non-empty after trim):
+      matches [endpoint.id = id] OR
+      [string_of_endpoint_kind endpoint.kind = id].
+    - When [endpoint_id = None] or empty: returns the first
+      enabled endpoint.
+
+    Disabled endpoints ([enabled = false]) are filtered out
+    before lookup. *)
+
+(** {1 Per-agent helpers} *)
+
+(** These take the [tts] section itself rather than the whole config, so a
+    caller has to have established that voice output is set up before it can
+    ask which voice to use. *)
+
+val voice_for_agent : tts_config -> string -> string
+(** [voice_for_agent tts agent_id] returns the agent-specific
+    voice id when present in [tts.agent_voices], else
+    [tts.default_voice]. This is the workspace-wide answer; a caller
+    speaking through a specific endpoint wants {!voice_for_agent_at_endpoint}. *)
+
+val voice_for_agent_at_endpoint : tts_config -> endpoint -> string -> string
+(** The voice to ask [endpoint] for on [agent_id]'s behalf: its [agent_voices]
+    mapping, then its [default_voice], otherwise {!voice_for_agent}. The
+    fallback chain resolves this per endpoint rather than once, so switching
+    endpoints does not carry the previous provider's voice vocabulary along. *)
+
+val tuning_for_agent : tts_config -> string -> voice_tuning
+(** [tuning_for_agent tts agent_id] returns the
+    agent-specific tuning when present in
+    [tts.agent_voice_settings], else
+    [tts.default_voice_settings]. *)
+
+val local_playback_enabled_for_agent : t -> string -> bool
+(** [local_playback_enabled_for_agent config agent_id] is true iff:
+
+    + [config.local_playback.enabled] is [true], AND
+    + [config.local_playback.agents] is empty (allow-all) OR
+      contains [agent_id]. *)
+
+val voice_gate_always_allow_for_agent : t -> string -> bool
+(** [voice_gate_always_allow_for_agent config agent_id] is true iff:
+
+    + [config.gate.always_allow] is [true], OR
+    + [config.gate.exempt_agents] contains [agent_id]. *)
+
+val available_voices : tts_config -> string list
+(** [available_voices tts] returns the section and endpoint defaults and
+    per-agent voice overrides, deduplicated — used by the voice-bridge
+    health endpoint to advertise the configured voice set. *)
+
+(** {1 Public JSON} *)
+
+val public_json : t -> Yojson.Safe.t
+(** [public_json config] renders the config as JSON suitable for
+    operator-visible endpoints.  API key env-var names are
+    redacted (only the env-var name is exposed, never the value).
+    Pinned at the contract seam — drift could leak credentials
+    via the public diagnostics surface.
+
+    An absent [tts] or [stt] section renders as [null], so a reader finds
+    no model there rather than a model named [""]. *)

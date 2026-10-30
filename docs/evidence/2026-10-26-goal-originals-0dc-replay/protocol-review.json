@@ -1,0 +1,203 @@
+{
+  "schema": "masc.goal.originals0dc.independent-protocol-review.v1",
+  "status": "FINAL_FROZEN",
+  "verdict": "PASS_PROTOCOL_INTEGRITY_WITH_PRESERVED_REJECT_SEMANTICS_UNASSESSED",
+  "reviewed_at_utc": "2026-10-25T20:06:40.285849+00:00",
+  "scope": "Read-only integrity/protocol audit of the154-original exact0dc replay. The actual REJECT is preserved. Original-eleven semantic sufficiency and correctness of the verdict reason are assigned to a separate audit and are not adjudicated here.",
+  "cohort_identity": {
+    "task_id": "task-2686",
+    "candidate_source_head": "9099a54530edc0a6ecee98117ea1ebab02cebe2e",
+    "candidate_prompt_bytes": 9182,
+    "candidate_prompt_sha256": "0dc483a9bd180bade6d53f1a54c92e2c98659e890aa67ecbaac51b6630d15400",
+    "execution_binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "execution_binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+    "managed_baseline_prompt_sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "fixture_criterion_revision": "b39a4c8dc8d4af965c4d87ef802c17db",
+    "original_primary_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "request_id": "44a299a96b28b6ff2d9bd2081ce0cfbc",
+    "run_id": "01a174a1-e0fb-7000-8c82-614a62d90870",
+    "measurement_id": "9c3a71e210ca7cf762e87f1563afdd12",
+    "boundary": "The local9099 source/0dc prompt is separate from the frozen3e executable and unchanged75c managed runtime prompt. The fresh isolatedB39 criterion is separate from original primary3067, although the Goal name is reused. No current Git-ref or primary-state claim is made."
+  },
+  "integrity": {
+    "manifest_label": "terminal-originals-private/manifest.json",
+    "manifest_bytes": 32204,
+    "manifest_sha256": "64bc1ecaf8fe34214aea02aab7696a6e7175f5b4d7459e05d18b7929fdacad41",
+    "leaf_entries": 154,
+    "inventory_including_manifest": 155,
+    "inventory_exact": true,
+    "all154_leaf_byte_counts_and_sha256_verified": true,
+    "leaf_total_bytes": 6171736,
+    "group_counts": {
+      "setup": 15,
+      "wire": 40,
+      "submission": 10,
+      "prompt-application": 6,
+      "inputs": 76,
+      "snapshot": 7
+    },
+    "sorted_path_NUL_bytes_NUL_sha256_LF_verification_stream_sha256": "7380bf962e5d3ce5fd0fe32a8ea627b200d0ea3a645f4da4fd1b8456afe10292",
+    "safe_result_label": "safe-results/result.json",
+    "safe_result_bytes": 11417,
+    "safe_result_sha256": "d96feffb77962c6c08885c005c0f7be465c90479b1476ec04e30e741b8b00f71",
+    "safe_protocol_bytes": 43738,
+    "safe_protocol_sha256": "df317d1631de7714c6ffb4c212d876f2b141777ff83e35e6c329f925a1121157",
+    "safe_persisted_outcome_sha256": "604e191251093669c5e674fbe6923a885846ed867d3774572c64413b55346e19",
+    "full_inventories_not_repeated_in_report": "The frozen manifest supplies all154 leaf identities; this audit independently recomputed every row rather than copying that inventory into this report."
+  },
+  "prepared_inputs_and_override": {
+    "frozen_copied_input_files": 76,
+    "all76_match_frozen_staged_manifest": true,
+    "canonical_acceptance_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+    "root_carrier_byte_equal_to_delivery_index": true,
+    "same_title_metric_target_in_plan_Original_and_isolated_store": true,
+    "same_reported_value_and_evidence_as_original_reporter_claim": true,
+    "candidate_equals_exact_private0dc_proposal_bytes": true,
+    "actual_local_binary_file_hash_matches_plan_and_saved_health": true,
+    "normal_proof_and_lookup_overrides": [
+      {
+        "key": "goal_verification.proof",
+        "bytes": 4491,
+        "sha256": "9ae476a08f68371c35c373208b6496442d0f6c63a85d8a8adf527e077d8f33a4",
+        "normal_ACK_and_effective_readback_match": true
+      },
+      {
+        "key": "goal_verification.lookup",
+        "bytes": 4285,
+        "sha256": "8d290c71a1836bf72ce39bbb1398305682e6ca6326e028d8ca5d0c27ca481442",
+        "normal_ACK_and_effective_readback_match": true
+      }
+    ],
+    "before_catalog_source": "file",
+    "after_catalog_source": "override",
+    "normal_ACK_and_effective_catalog_readback_equal_requested_values": true,
+    "candidate_literal_sections_present_in_retained_Original": true,
+    "Original_effective_base_resolves_inside_this_isolated_runtime": true,
+    "limit": "Input identity and historical evidence copies do not rerun their underlying behaviors or establish semantic success."
+  },
+  "provider_and_tool_protocol": {
+    "observed_Goal_runs": 1,
+    "provider_POSTs": 12,
+    "other_wire_requests": [
+      {
+        "wire_id": "request-000001",
+        "method": "GET",
+        "path": "/models"
+      }
+    ],
+    "all_provider_requested_and_reported_models": "glm-5.3-flash",
+    "all_wire_receipt_request_bytes_and_request_response_hashes_match": true,
+    "all_HTTP_status200": true,
+    "canonical_wire_identity_rows_sha256": "1ee4aa2ea1af85317bd3cb2e7234b5ef1264cbdb3c76024d97329d6420ec0c44",
+    "retained_user_bytes": 10925,
+    "retained_user_sha256": "2eaeef8e1415e532c22f6fa623649c220c7da4b261177a70091eae24aa41a249",
+    "retained_system_bytes": 1094,
+    "retained_system_sha256": "93ae8047102142a637b7c15f74277dff7b8d54a059bd4460ed1ff24fea2c4340",
+    "all12_actual_user_and_system_messages_equal_retained_Original": true,
+    "current_fixture_revision_and_measurement_id_in_actual_input": true,
+    "unique_assistant_call_ids": 41,
+    "unique_matching_result_ids": 41,
+    "each_result_follows_actual_call_in_a_later_provider_request": true,
+    "replayed_history_result_bytes_identical_per_call_id": true,
+    "read_calls": 40,
+    "verdict_calls": 1,
+    "unique_read_paths": 39,
+    "ok_read_pages": 40,
+    "nonempty_read_pages": 40,
+    "empty_read_pages": 0,
+    "truncated_read_responses": 2,
+    "all40_actual_content_bytes_equal_the_exact_original_line_slice": true,
+    "all40_offsets_returned_lines_bytes_and_file_bytes_verified": true,
+    "canonical_verified_page_identity_rows_sha256": "b3b3514e3c9e131a3b7ead5c874873bfe9c0ffd851dc84f86f9556047ca91d1d",
+    "safe_projection_all41_arguments_and_result_hashes_equal_actual_wire": true,
+    "read_scope_limit": "Forty nonempty returned pages are not forty complete original files or a proof-count gate. Truncation and selected ranges remain as actually returned; no unread remainder is credited.",
+    "model_limit": "Twelve POSTs form one tool-loop Goal run, not independent samples, model-weight independence, causal A/B or a reliability estimate."
+  },
+  "verdict_and_persistence": {
+    "actual_structured_decision": "REJECT",
+    "verdict_tool_and_ACK": {
+      "call_id": "call_-7137978600749268474",
+      "wire_id": "request-000012",
+      "decision": "REJECT",
+      "reason_sha256": "ec314464fa772304ed414c796ba5a4e5b46dbbe36e79080e37a56e1416e971a5",
+      "ACK_sha256": "24eddc7392c714d869ddcf2a4afdb31f7b7446f994ce9539dd37ad28a12c8932",
+      "ACK_contains_exact_reason": true
+    },
+    "safe_result_structured_verdict_equals_actual_tool_arguments": true,
+    "native_events": [
+      "register",
+      "reviewed",
+      "committed"
+    ],
+    "same_Goal_request_run_and_fixture_criterion_join": true,
+    "native_typed_decision": "rejected",
+    "same_exact_reason_in_Tool_ACK_reviewed_and_committed": true,
+    "native_reviewed_and_committed_each_record41_tools": true,
+    "final_isolated_completion": "proof_refuted",
+    "final_isolated_phase": "executing",
+    "three_frozen_stores_equal_safe_persisted_outcome": true,
+    "interpretation": "This confirms accepted REJECT and persistent isolated lifecycle. It neither endorses the semantic reason nor changes the result, original3067 Goal, or human-confirmation boundary."
+  },
+  "readiness_and_freeze": {
+    "saved_readonly_readiness_attempts": 15,
+    "saved_outcomes": {
+      "connection_refused_read_only": 14,
+      "http200": 1
+    },
+    "same_saved_server_identity_across_all15": true,
+    "saved_prompt_POSTs_before_readiness": 0,
+    "saved_Goal_requests_before_readiness": 0,
+    "later_effective0dc_and_provider_input_verified": true,
+    "readiness_record_bytes": 2792,
+    "readiness_record_sha256": "afc8b972a36a66b37e5cf7881a64c8fa5a95bf7c31e9a4909d25c256d1c37319",
+    "freezer_old_bytes": 9754,
+    "freezer_old_sha256": "f214a050b68af7327b6df63812bc697e1285877f9e5eb2b1c14e47b7d9fc2116",
+    "freezer_new_bytes": 9750,
+    "freezer_new_sha256": "74ce4d9b66cb8f998cc8ed81001befd0e307976f61ad72c3e20b6f52f46220f0",
+    "freezer_code_equal_after_four_root_schema428e_to0dc_substitutions": true,
+    "freezer_not_executed_by_reviewer": true,
+    "limit": "The preserved readiness record and artifacts support their recorded sequence; this reviewer performed no readiness query or process action. One frozen tree and the source delta are not treated as a forensic proof that no deleted historical artifact ever existed."
+  },
+  "owned_cleanup": {
+    "server_pid": 78828,
+    "proxy_pid": 78826,
+    "stop_receipt_bytes": 1224,
+    "stop_receipt_sha256": "50ff03de7599d24909b6e42ea684ece13a7db7a689e5475b06ee9618d268e2f1",
+    "safe_stop_projection_byte_equal_to_frozen_receipt": true,
+    "retained_raw_ps_observations": 9,
+    "each_pre_signal_full_stdout_equals_saved_spawn_identity": true,
+    "each_pre_signal_stdout_hash_matches_receipt": true,
+    "each_recorded_SIGTERM_calls": 1,
+    "same_birth_in_intermediate_saved_ps_rows": true,
+    "each_final_saved_ps_returncode": 1,
+    "each_final_saved_stdout_empty": true,
+    "raw_ps_observation_sha256": "6830ffa9943aa80415219617c800dc275661dd95a3bbcdb5dcd4a3bb8df757ac",
+    "limit": "Identity and PID absence are bounded to the saved observation times. No reviewerps/signal/restart, unrelated-process audit or future absence claim."
+  },
+  "limits": [
+    "Separate semantic audit must assess whether the REJECT and its cited evidence are sufficient; this protocol PASS does not make that decision.",
+    "No underlying original-eleven behavior rerun, primary3067 proof/update, human confirmation, installation, operational application, current9099 native binary execution or full CI/build result.",
+    "Historical428e159 semantic FAIL and0dc109 finite-control PASS remain unchanged and separate; no pooling or general verifier-reliability claim.",
+    "No formal GitHub approval, whole-stack admission or merge."
+  ],
+  "findings": {
+    "new_protocol_P0": [],
+    "new_protocol_P1": [],
+    "new_protocol_P2": [],
+    "semantic_verdict_quality": "NOT_ADJUDICATED"
+  },
+  "effects": {
+    "API_Git_model_test_CI_build_Docker_Board_or_runtime_process_control_calls": 0,
+    "source_PR_Task_Goal_store_runtime_or_existing_artifact_mutations": 0,
+    "new_agents": 0,
+    "external_messages": 0,
+    "only_new_output": "review.json outside source and frozen evidence trees"
+  },
+  "finalization": {
+    "all_read_inputs_rechecked_stable": true,
+    "154_leaf_inventory_rechecked_exact": true,
+    "actual_REJECT_preserved": true,
+    "single_new_report_no_existing_artifact_modified": true
+  }
+}

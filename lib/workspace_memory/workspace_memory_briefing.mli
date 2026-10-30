@@ -1,0 +1,112 @@
+(** Durable shared semantic briefing, independent of the classification ledger.
+    One serialized Curator owner prepares and accepts batches. Keepers only
+    observe the last completely published summary. *)
+
+type kind = Claim | Conflict
+type source = { id : string; kind : kind; text : string }
+type summary = { source_ids : string list; text : string }
+type t
+type observation = Missing | Current of summary | Stale of summary
+
+val empty : t
+val is_empty : t -> bool
+val path : directory:string -> string
+val load : directory:string -> (t, string) result
+val save : directory:string -> t -> (unit, string) result
+(** Missing file is [empty]; malformed state and I/O failures are errors.
+    Writes use strict atomic replacement. Eio cancellation propagates. *)
+val to_json : t -> Yojson.Safe.t
+val of_json : Yojson.Safe.t -> (t, string) result
+(** Complete strict state codec, also used by original commit recovery. *)
+
+val observe : sources:source list -> contract:string -> t -> observation
+(** Freshness requires the current prompt/schema contract and exact set of
+    (id, kind, text) identities, independent of source order. A changed contract
+    or source makes the summary stale even before its refresh can start.
+    No published summary means [Missing]. The empty source set is the exception:
+    it is always [Current {source_ids = []; text = ""}], where empty text means
+    there is no workspace evidence to summarize, not a failed model response.
+    The caller resolves the effective template and passes [contract ~template]. *)
+
+val needs_refresh : sources:source list -> contract:string -> t -> bool
+(** False for empty evidence or an identical published source/contract set.
+    The worker may skip provider admission entirely in that case, but must
+    still call [prepare] to persist any obsolete-pass cleanup. *)
+
+type batch
+val input : batch -> Yojson.Safe.t
+val rendered_prompt : batch -> string
+val selected_count : batch -> int
+val remaining_count : batch -> int
+val prepared_state : batch -> t
+(** Save this state before calling the model to retain the fixed pass target.
+    New additions wait for the next pass; removal or modification of a target
+    source resets the pass on the next [prepare]. *)
+
+val batch_contract : batch -> (string, string) result
+(** Original prepared pass contract. An inconsistent batch with no active pass
+    is an error; the current prompt registry is not consulted. *)
+val batch_is_current : sources:source list -> contract:string -> batch -> (bool, string) result
+(** Same pass-preservation rule as [prepare]: additions can wait, but a removed
+    or changed target or a changed contract invalidates this original batch.
+    Does not render, prepare, accept or publish another request. *)
+val state_is_current : sources:source list -> contract:string -> t -> (bool, string) result
+(** {!batch_is_current} for the pass a state is building: a batch is current
+    exactly when the state it prepared is. A state with no active pass is an
+    error. *)
+
+val batch_to_json : batch -> Yojson.Safe.t
+val batch_of_json :
+  render:(Yojson.Safe.t -> (string, string) result) -> Yojson.Safe.t -> (batch, string) result
+(** Restore the captured original chunk without re-preparing or publishing it.
+    The snapshot keeps the pass and how many of its unconsumed entries the
+    batch selected, between one and all; the rest stay remaining. It holds
+    neither the input nor the prompt: the input is built again from the prior
+    semantic summary and the selected sources, and [render] renders the prompt
+    from it. Prompt/contract provenance, and
+    evidence of the prompt that was sent, remain the host request owner's. *)
+
+type preparation = Unchanged | Cleanup of t | Prepared of batch
+
+val prepare
+  : sources:source list
+  -> contract:string
+  -> render:(Yojson.Safe.t -> (string, string) result)
+  -> t
+  -> (preparation, string) result
+(** [contract] identifies the effective prompt and output schema. A changed
+    contract rebuilds from current entries, without reusing the old summary.
+    Additions alone reuse the previous summary and send only new entries.
+    Deletions or changed source contents rebuild without old summary prose.
+    Model input contains only [previous_summary] and selected [entries].
+    Prepares all remaining entries without estimating provider capacity.
+    Sources must have unique, nonblank ids and nonblank text. Call before
+    provider admission, even when [needs_refresh] is false. [Unchanged] needs
+    no write or model work. [Cleanup state] must be saved without model work:
+    it discards an obsolete pass while retaining the current publication, or
+    clears all state when all sources disappear. Only [Prepared batch] renders
+    model input and needs inference. *)
+
+val narrow
+  : render:(Yojson.Safe.t -> (string, string) result)
+  -> batch
+  -> (batch option, string) result
+(** Call only after the provider rejects this batch for input size. Bisects
+    the selected entries, retaining a whole-entry prefix and prepending its
+    suffix to the existing remainder. The fixed target, prior summary, and
+    unconsumed durable state remain unchanged. No prose is truncated.
+    [Ok None] means one indivisible entry remains: report the refusal rather
+    than dropping evidence or retrying the same batch. *)
+
+val output_schema : Yojson.Safe.t
+val contract : template:string -> string
+(** Stable identity of the effective template and [output_schema], shared by
+    publishers and readers. Both must resolve the same effective template. *)
+val decode_output : Yojson.Safe.t -> (string, string) result
+(** Exactly [{"briefing": <nonblank string>}], with no additional fields. *)
+
+val accept : batch -> text:string -> (t, string) result
+(** Reject blank output. A successful chunk advances only its fixed pass;
+    the previous publication survives until the entire pass completes.
+    Save the returned state before scheduling the next wake. If inference or
+    saving fails, reload the last successful save rather than consuming work. *)

@@ -1,0 +1,139 @@
+(* Sandbox target abstraction for Shell_ir dispatch.
+
+   Why this exists
+   ---------------
+   Prior to 2026-04-28, [Exec_dispatch.dispatch_simple] called
+   [Process_eio.run_argv_with_status_split] directly. The Shell_ir record
+   carried no information about *where* the command should run, so every
+   parsed shell command short-circuited to a host-side fork/exec. When a
+   keeper was configured for [sandbox_profile = "docker"], the keeper's
+   bash dispatch path consulted [Keeper_sandbox_docker.run_docker_*]
+   functions, but any command that flowed through the Shell_ir IR
+   bypassed that branch entirely (defect A in the 2026-04-28 root-fix
+   audit).
+
+   This module introduces a callback-runner abstraction that lets
+   Shell_ir carry the sandbox decision *as data*, while keeping the
+   layering clean: [lib/exec] cannot depend on [lib/keeper], so we do
+   not embed [Keeper_turn_sandbox_runtime.t] in the kind. Instead, the
+   keeper layer constructs a [t] whose [runner] is a closure over its
+   own runtime; [lib/exec] only sees the shape of the closure.
+
+   [t] is a variant rather than a record so that the [Host] case needs
+   no runner closure.  [Exec_dispatch] routes [Host] directly to
+   [Process_eio], and guest / SSH targets via the carried [runner]. *)
+
+(* What kind of transport failure: the payload ran past its time budget and
+   the endpoint stopped it, or the lane never delivered the command's own
+   result (including a host budget that ran out before the endpoint answered). *)
+type transport_failure =
+  | Payload_timed_out
+  | Lane_unavailable
+
+(* The status a caller that needs one gives a transport failure. A timeout
+   takes the timeout status a host run takes ([Process_eio.timed_out_status],
+   124), so a remote timeout reads as a timeout everywhere a host one does.
+   A lane that delivered nothing still reads as [WEXITED 1] (#38890 types
+   that case in the Execute result). *)
+let status_of_transport_failure = function
+  | Payload_timed_out -> Process_eio.timed_out_status
+  | Lane_unavailable -> Unix.WEXITED 1
+
+(* Whether a runner delivered the command's own result, or the transport
+   failed before/instead of producing one. Keeping the two apart at the type
+   level is what stops a lane failure -- which the remote runner used to
+   report as [WEXITED 1] -- from reading as grep's real "no match" (exit 1).
+   That conflation is how a guest/SSH lane that was down returned
+   [{ok:true, matches:[]}] to Grep: an empty result that never ran. A local
+   docker/host exec has no transport that can fail before producing an exit,
+   so its runner is always [Ran]; only the remote lane raises
+   [Transport_failed]. *)
+type run_outcome =
+  | Ran of {
+      status : Unix.process_status;
+      stdout : string;
+      stderr : string;
+      output_files : Process_output_capture.files option;
+    }
+  | Transport_failed of {
+      failure : transport_failure;
+      reason : string;
+      stdout : string;
+      stderr : string;
+      output_files : Process_output_capture.files option;
+    }
+
+(* For a consumer that treats a transport failure the same as any command
+   failure -- a non-zero status with the error in stderr, which is what the
+   remote runner returned for every transport fault before run_outcome
+   existed. Collapsing the two is correct only when the consumer does not
+   accept a non-zero exit as success: the read backend must NOT use this
+   (its Grep lane accepts exit 1, so a collapsed transport fault would read
+   as "no match" again) -- it matches the variant directly. *)
+let status_tuple : run_outcome -> Unix.process_status * string * string =
+  function
+  | Ran { status; stdout; stderr; output_files = _ } -> status, stdout, stderr
+  | Transport_failed { failure; reason = _; stdout; stderr; output_files = _ } ->
+    status_of_transport_failure failure, stdout, stderr
+
+type runner =
+  on_stdout_chunk:(string -> unit) option ->
+  on_stderr_chunk:(string -> unit) option ->
+  stdin_content:string option ->
+  argv:string list ->
+  env:string array ->
+  cwd:string option ->
+  run_outcome
+
+type pipeline_stage = {
+  argv : string list;
+  env : string array;
+  cwd : string option;
+}
+
+type pipeline_runner =
+  on_stdout_chunk:(string -> unit) option ->
+  on_stderr_chunk:(string -> unit) option ->
+  stages:pipeline_stage list ->
+  run_outcome
+
+(* A standalone copy of the keeper-side endpoint identity, NOT
+   [Exec_ssh_endpoint.t]: [lib/exec] cannot depend on [lib/runtime], so the
+   keeper layer converts its config record into this one at target
+   construction.  [max_concurrent_sessions] and [capabilities] are consumed
+   by the keeper-side runner/preflight, not by the dispatch path, so they
+   stay out of this record. *)
+type ssh_endpoint = {
+  name : string;
+  host : string;
+  user : string;
+  port : int;
+  identity_file : string;
+  known_hosts_file : string;
+  remote_root : string;
+  connect_timeout_sec : int;
+  env_allowlist : string list;
+  allowed_paths : string list;
+  (* Extra endpoint-side roots an Execute command may name beyond the
+     keeper workdir and /tmp; absolute and normalized by the config parser,
+     compared lexically by the path check. *)
+}
+
+type t =
+  | Host
+  | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
+  | Micro_vm of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
+  | Ssh of { endpoint : ssh_endpoint; runner : runner; pipeline_runner : pipeline_runner option }
+  | Delegated of { caller : runner }
+
+let host () : t = Host
+
+let docker ~image ~runner ?pipeline_runner () : t = Docker { image; runner; pipeline_runner }
+
+let micro_vm ~image ~runner ?pipeline_runner () : t =
+  Micro_vm { image; runner; pipeline_runner }
+
+let ssh ~endpoint ~runner ?pipeline_runner () : t =
+  Ssh { endpoint; runner; pipeline_runner }
+
+let delegated ~caller () : t = Delegated { caller }

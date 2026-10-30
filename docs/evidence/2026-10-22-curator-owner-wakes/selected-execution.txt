@@ -1,0 +1,36 @@
+Actual selected run 39674624863
+Exact source af9e1eeefe9b8b17fe82c643e9344aa3df87416a
+test suite	Test	2026-10-21T20:57:42.3850966Z [targeted] EIO_BACKEND=posix timeout=600s per suite
+test suite	Test	2026-10-21T20:57:42.9852819Z [targeted] dune build test/test_workspace_curator_addon_commit.exe test/test_workspace_curator_addon_contract.exe test/test_workspace_memory_curator_lane.exe test/test_workspace_memory_briefing.exe test/test_lane_addon_request_progress.exe test/test_lane_addon_request_discovery.exe test/test_lane_addon_host_cycle.exe test/test_lane_addon_exact_runner.exe addons/workspace-curator/Dockerfile addons/workspace-curator/README.md addons/workspace-curator/lane.toml addons/workspace-curator/schemas/briefing.json addons/workspace-curator/schemas/classification.json addons/workspace-curator/server.py addons/protocol.py addons/exact_worker.py config/prompts/workspace_memory_curator.md config/prompts/workspace_memory_briefing.md config/prompts/keeper.md config/prompts/workspace_memory_curator.md config/prompts/workspace_memory_briefing.md
+test suite	Test	2026-10-21T21:01:18.8500323Z [targeted] test/test_workspace_curator_addon_commit: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-21T21:01:18.8529128Z [targeted] test/test_workspace_curator_addon_commit: start 2026-10-21T21:01:18Z
+test suite	Test	2026-10-21T21:01:19.2918521Z Test Successful in 0.366s. 15 tests run.
+test suite	Test	2026-10-21T21:01:19.2994417Z [targeted] test/test_workspace_curator_addon_commit: OK in 1s
+test suite	Test	2026-10-21T21:01:19.4002318Z [targeted] test/test_workspace_curator_addon_contract: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-21T21:01:19.4033127Z [targeted] test/test_workspace_curator_addon_contract: start 2026-10-21T21:01:19Z
+test suite	Test	2026-10-21T21:01:20.8745645Z Test Successful in 1.398s. 5 tests run.
+test suite	Test	2026-10-21T21:01:20.8820482Z [targeted] test/test_workspace_curator_addon_contract: OK in 1s
+test suite	Test	2026-10-21T21:01:20.9820153Z [targeted] test/test_workspace_memory_curator_lane: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-21T21:01:20.9847875Z [targeted] test/test_workspace_memory_curator_lane: start 2026-10-21T21:01:20Z
+test suite	Test	2026-10-21T21:01:21.9282023Z Test Successful in 0.886s. 34 tests run.
+test suite	Test	2026-10-21T21:01:21.9367894Z [targeted] test/test_workspace_memory_curator_lane: OK in 1s
+test suite	Test	2026-10-21T21:01:22.0378009Z [targeted] test/test_workspace_memory_briefing: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-21T21:01:22.0406499Z [targeted] test/test_workspace_memory_briefing: start 2026-10-21T21:01:22Z
+test suite	Test	2026-10-21T21:01:22.0725826Z Test Successful in 0.025s. 9 tests run.
+test suite	Test	2026-10-21T21:01:22.0762050Z [targeted] test/test_workspace_memory_briefing: OK in 0s
+test suite	Test	2026-10-21T21:01:22.1761536Z [targeted] test/test_lane_addon_request_progress: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-21T21:01:22.1790147Z [targeted] test/test_lane_addon_request_progress: start 2026-10-21T21:01:22Z
+test suite	Test	2026-10-21T21:01:22.2748154Z Test Successful in 0.084s. 7 tests run.
+test suite	Test	2026-10-21T21:01:22.2796166Z [targeted] test/test_lane_addon_request_progress: OK in 0s
+test suite	Test	2026-10-21T21:01:22.3790395Z [targeted] test/test_lane_addon_request_discovery: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-21T21:01:22.3818846Z [targeted] test/test_lane_addon_request_discovery: start 2026-10-21T21:01:22Z
+test suite	Test	2026-10-21T21:01:22.4431029Z Test Successful in 0.050s. 7 tests run.
+test suite	Test	2026-10-21T21:01:22.4479754Z [targeted] test/test_lane_addon_request_discovery: OK in 0s
+test suite	Test	2026-10-21T21:01:22.5462038Z [targeted] test/test_lane_addon_host_cycle: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-21T21:01:22.5490135Z [targeted] test/test_lane_addon_host_cycle: start 2026-10-21T21:01:22Z
+test suite	Test	2026-10-21T21:01:24.3598757Z Test Successful in 1.755s. 52 tests run.
+test suite	Test	2026-10-21T21:01:24.3678001Z [targeted] test/test_lane_addon_host_cycle: OK in 2s
+test suite	Test	2026-10-21T21:01:24.4695944Z [targeted] test/test_lane_addon_exact_runner: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+test suite	Test	2026-10-21T21:01:24.4724105Z [targeted] test/test_lane_addon_exact_runner: start 2026-10-21T21:01:24Z
+test suite	Test	2026-10-21T21:01:24.6937296Z Test Successful in 0.160s. 18 tests run.
+test suite	Test	2026-10-21T21:01:24.7009345Z [targeted] test/test_lane_addon_exact_runner: OK in 0s

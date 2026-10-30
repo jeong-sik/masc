@@ -1,0 +1,56 @@
+{
+  "result": "passed",
+  "server_source": "df69a3d94492d5618976b7ad43f8a5eb34d795a3",
+  "native_host_sha256": "466c780311756c9718831fa2089aad7eb6194236f18878508c142bea9858f948",
+  "reads": [
+    {
+      "operation": "text",
+      "elapsed_ms": 24.2
+    },
+    {
+      "operation": "PNG",
+      "elapsed_ms": 20.7,
+      "bytes": 40883,
+      "sha256": "921314083f669e778c697d74e88593d3306e37271ac30e4742153b734c3deb85"
+    }
+  ],
+  "writes": [
+    {
+      "action": "fill",
+      "elapsed_ms": 8.6
+    },
+    {
+      "action": "click",
+      "elapsed_ms": 6.6
+    },
+    {
+      "action": "scroll",
+      "elapsed_ms": 6.2
+    }
+  ],
+  "zen_version": "1.22b",
+  "extension_original_sha256": "7e42258294bfa4ddc09be18c7fb2cd60663ddbeb142f958dd0b646fd847fb46a",
+  "browser_info": {
+    "name": "Firefox",
+    "vendor": "Mozilla",
+    "version": "155.0.1",
+    "buildID": "20260904060728",
+    "zen": {
+      "version": "1.22b"
+    }
+  },
+  "observed": {
+    "clicked": true,
+    "input_event_value": "Typed through OCaml",
+    "scroll_y": 640
+  },
+  "tab_id": 1,
+  "profile": "disposable",
+  "keeper_model_turn_measured": false,
+  "server_sha256": "f6f5c3e4cae240752b3c905a3df8527304bde2afb48c9aad5281cb5274cbccca",
+  "ci_build_run": "https://github.com/jeong-sik/masc/actions/runs/34113415299",
+  "artifact_id": 10016029087,
+  "native_clients_connected": 1,
+  "connection_routing_revision_measured": false,
+  "screenshot_path": "zen-via-ocaml.png"
+}

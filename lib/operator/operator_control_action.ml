@@ -1,0 +1,238 @@
+open Tool_args
+include Operator_control_snapshot
+type 'a context = 'a Tool_operator.context
+
+open Result.Syntax
+
+let normalize_judgment_surface value =
+  match
+    Operator_judgment.surface_of_string (String.trim value |> String.lowercase_ascii)
+  with
+  | Some surface -> Ok surface
+  | None ->
+    Error
+      ("surface must be one of "
+       ^ String.concat ", "
+           (List.map Operator_judgment.surface_to_string Operator_judgment.all_of_surface))
+
+let normalize_judgment_target_type value =
+  let normalized = String.trim value |> String.lowercase_ascii in
+  match Operator_judgment.target_type_of_string normalized with
+  | Some target_type ->
+      Ok (Operator_judgment.target_type_to_string target_type, target_type)
+  | None -> Error Operator_action_constants.workspace_target_type_error
+
+(* Each surface answers for its own freshness default; a new surface stops
+   compiling here instead of falling into a shared default. *)
+let default_fresh_ttl_sec = function
+  | Operator_judgment.Command_namespace -> 60
+  | Operator_judgment.Intervene -> 300
+
+let judgment_write_json (ctx : 'a context) args =
+  let* surface = normalize_judgment_surface (get_string args "surface" "") in
+  let* _, judgment_target_type =
+    normalize_judgment_target_type (get_string args "target_type" "")
+  in
+  let target_id = get_string_opt args "target_id" in
+  let summary = get_string args "summary" "" |> String.trim in
+  if summary = "" then Error "summary is required"
+  else
+    let now_unix = Unix.gettimeofday () in
+    let generated_at = Masc_domain.iso8601_of_unix_seconds now_unix in
+    let* fresh_ttl_sec =
+      match get_int_opt args "fresh_ttl_sec" with
+      | None -> Ok (default_fresh_ttl_sec surface)
+      | Some ttl when ttl >= 1 -> Ok ttl
+      | Some _ -> Error "fresh_ttl_sec must be at least 1"
+    in
+    let fresh_until_unix = now_unix +. float_of_int fresh_ttl_sec in
+    let fresh_until = Masc_domain.iso8601_of_unix_seconds fresh_until_unix in
+    (* No default. An omitted [confidence] used to become 0.5, which put "the
+       judge did not say" and "the judge is half sure" on one number in the
+       operator digest. The schema declares the field required with bounds; a
+       caller that omits it or sends something else is told which field. *)
+    let* confidence =
+      match Json_util.assoc_member_opt "confidence" args with
+      | Some (`Float value) -> Ok value
+      | Some (`Int value) -> Ok (float_of_int value)
+      | Some _ -> Error "confidence must be a number between 0.0 and 1.0"
+      | None -> Error "confidence is required"
+    in
+    let* confidence =
+      Option.to_result
+        ~none:"confidence must be a number between 0.0 and 1.0"
+        (Operator_judgment.Confidence.of_float confidence)
+    in
+    (* The writer is the caller's authenticated name, never a body field:
+       a body field would let any caller record a judgment as another
+       keeper. Same rule as [resolved_actor] for staged actions. *)
+    let keeper_name = normalized_actor ~context_actor:ctx.agent_name None in
+    let evidence_refs = Json_util.get_string_list args "evidence_refs"
+    in
+    let recommended_action = Json_util.get_object args "recommended_action" in
+    let judgment =
+      Operator_judgment.record ctx.config ~surface
+        ~target_type:judgment_target_type ~target_id ~summary ~confidence
+        ?model_name:(get_string_opt args "model_name")
+        ?runtime_name:(get_string_opt args "runtime_name")
+        ?recommended_action ~evidence_refs
+        ~fallback_used:(get_bool args "fallback_used" false)
+        ~disagreement_with_truth:
+          (get_bool args "disagreement_with_truth" false)
+        ~generated_at ~generated_at_unix:now_unix ~fresh_until ~fresh_until_unix
+        ~keeper_name ()
+    in
+    Ok
+      (Tool_args.ok_assoc
+         [ ("judgment", Operator_judgment.to_yojson judgment) ])
+
+let judgment_latest_json (_ctx : 'a context) args =
+  let* surface = normalize_judgment_surface (get_string args "surface" "") in
+  let* _, judgment_target_type =
+    normalize_judgment_target_type (get_string args "target_type" "")
+  in
+  let target_id = get_string_opt args "target_id" in
+  let require_fresh = get_bool args "require_fresh" true in
+  let judgment =
+    match
+      Operator_judgment.latest_active _ctx.config ~surface
+        ~target_type:judgment_target_type ~target_id
+    with
+    | Some value when (not require_fresh) || Operator_judgment.is_fresh value ->
+        Some value
+    | _ -> None
+  in
+  Ok
+    (Tool_args.ok_assoc
+       [
+         ( "judgment",
+           match judgment with
+           | Some value -> Operator_judgment.to_yojson value
+           | None -> `Null );
+       ])
+
+(* [action] is the parsed catalog member, so executing a request never asks
+   whether its action exists. The target type is not a field: the catalog
+   decides it ({!Operator_action_catalog.target_type}), and a request that
+   names another one is refused in [action_request_of_args]. A staged request
+   goes back to strings in the pending-confirm store and is read again by
+   [action_request_of_pending_confirm]. *)
+type action_request = {
+  actor : string;
+  action : Operator_action_catalog.t;
+  target_id : string option;
+  payload : Yojson.Safe.t;
+}
+
+let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
+  let max_attempts = 10 in
+  let rec loop attempts =
+    if attempts >= max_attempts then
+      Error (Printf.sprintf
+        "failed to generate unique confirm token after %d attempts \
+         (token space may be exhausted; %d pending confirms)"
+        max_attempts
+        (List.length (raw_pending_confirms config)))
+    else
+      let token = "opc_" ^ String.sub (Auth.generate_token ()) 0 32 in
+      let exists =
+        raw_pending_confirms config
+        |> List.exists (fun entry -> String.equal entry.confirm_token token)
+      in
+      if exists then begin
+        (* Exponential backoff: 1ms, 2ms, 4ms, ... up to ~512ms *)
+        let backoff_s = float_of_int (1000 * (1 lsl (min attempts 9))) /. 1_000_000.0 in
+        Eio.Time.sleep clock backoff_s;
+        loop (attempts + 1)
+      end else Ok token
+  in
+  loop 0
+
+(* The actor is the caller's identity, never an [actor] field in its body: a
+   confirm compares it with the actor that staged the action, and a body
+   field would let any caller name the stager. HTTP passes the token-bound
+   actor as [actor_hint]. On MCP [ctx.agent_name] is the session's name,
+   which a per-agent credential binds; confirming also takes CanAdmin
+   (Tool_catalog), the permission staging took. *)
+let resolved_actor ?actor_hint (ctx : 'a context) =
+  normalized_actor ~context_actor:ctx.agent_name actor_hint
+
+let parse_action_type raw =
+  let normalized = String.trim raw |> String.lowercase_ascii in
+  match Operator_action_catalog.of_string normalized with
+  | Some action -> Ok action
+  | None when String.equal normalized "" -> Error "action_type is required"
+  | None -> Error (Printf.sprintf "unsupported action_type: %s" normalized)
+
+(* A request may leave [target_type] out, or repeat the one its action
+   addresses. *)
+let check_request_target_type action raw =
+  let normalized = String.trim raw |> String.lowercase_ascii in
+  if String.equal normalized ""
+  then Ok ()
+  else
+    match Operator_action_constants.target_type_of_string normalized with
+    | None -> Error Operator_action_constants.invalid_target_type_message
+    | Some named when named = Operator_action_catalog.target_type action -> Ok ()
+    | Some _ ->
+      Error
+        (Printf.sprintf
+           "invalid target_type for %s (expected %s)"
+           (Operator_action_catalog.to_string action)
+           (Operator_action_catalog.target_type_string action))
+
+let action_request_of_args ?actor_hint (ctx : 'a context) args :
+    (action_request, string) result =
+  let* action = parse_action_type (get_string args "action_type" "") in
+  let* () = check_request_target_type action (get_string args "target_type" "") in
+  Ok
+    {
+      actor = resolved_actor ?actor_hint ctx;
+      action;
+      target_id = get_string_opt args "target_id";
+      payload = get_payload args;
+    }
+
+(* A stored entry spells its action as a string: its record is declared in
+   [Workspace_hooks], below this library. Reading the store has already
+   refused an entry whose action is not in the catalog, so the error here
+   restates the store's contract; it is not a case this module handles. *)
+let action_request_of_pending_confirm (entry : pending_confirm) :
+    (action_request, string) result =
+  match Operator_action_catalog.of_string entry.action_type with
+  | Some action ->
+    Ok
+      {
+        actor = entry.actor;
+        action;
+        target_id = entry.target_id;
+        payload = entry.payload;
+      }
+  | None -> Error (Printf.sprintf "unsupported action_type: %s" entry.action_type)
+
+let preview_of_action (request : action_request) =
+  let base =
+    [
+      ("actor", `String request.actor);
+      ("action_type", `String (Operator_action_catalog.to_string request.action));
+      ( "target_type",
+        `String (Operator_action_catalog.target_type_string request.action) );
+      ("target_id", Json_util.string_opt_to_json request.target_id);
+    ]
+  in
+  let payload_fields =
+    match request.payload with
+    | `Assoc fields -> fields
+    | _ -> []
+  in
+  `Assoc (base @ [ ("payload", `Assoc payload_fields) ])
+
+let require_target_id request =
+  match request.target_id with
+  | Some target_id -> Ok target_id
+  | None -> Error "target_id is required"
+
+let require_payload_field payload key error_message =
+  match get_string_opt payload key with
+  | Some value -> Ok value
+  | None -> Error error_message

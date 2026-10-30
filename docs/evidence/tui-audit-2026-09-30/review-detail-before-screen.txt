@@ -1,0 +1,18 @@
+ Dashboard  ▸Work·1  Keepers  Usage  Board  Workspace  System
+
+   MASC Work   ▸ details  task-tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt…  
+ ────────────────────────────────────────────────────────────────────────────────────────────────── 
+    VERIFICATION REQUEST                                                                            
+    Request         request-rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr…  
+    Task            task-tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt…  
+    Title           TITLEHEAD `literal` **/*.ml 한글 task evidence 한글 task evidence 한글 task e…  
+    Submitted by    agent-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…  
+    Created         2026-08-25 14:00:00                                                             
+                                                                                                    
+                                                                                                    
+    HOW TO READ THIS                                                                                
+      Required artifacts say what must exist. Submitted evidence says what the verifier can         
+    a twice: approve; x: reject with reason                                                         
+
+  j/k:move  v:next Work tab  Left / Esc:back  a / x:approve / reject  q:quit  1-10/32  …?
+ › to alpha   (i to write)                                                                          

@@ -1,0 +1,592 @@
+(* How one conversation's rows become turns, and what a turn's rows look like
+   once it is assembled.
+
+   These are the rules the pane draws by: a turn appears where its first row
+   appeared, its rows read input then progress then tools then output, a user
+   line the transcript already holds does not appear twice, and a turn stops
+   claiming a number when its rows disagree about which turn it was. They were
+   only checked through the surfaces that draw them, so the assembly could be
+   rewritten without anything saying it had changed. *)
+
+module Tui_types = Masc_tui_types
+
+let row ?(keeper = "alpha") ?(request_id = "") ?turn_sequence
+    ?(operation_seq = 0) ~role ~phase ~text at : Tui_types.msg_entry =
+  { Tui_types.me_keeper_name = keeper
+  ; me_role = role
+  ; me_identity = Tui_types.Persisted_row (Printf.sprintf "%s-%s-%.0f" request_id text at)
+  ; me_turn_phase = phase
+  ; me_turn_sequence = turn_sequence
+  ; me_operation_seq = operation_seq
+  ; me_text = text
+  ; me_images = []
+  ; me_media = []
+  ; me_memory_summary = None
+  ; me_journal = []
+  ; me_memory_pass = Masc_tui_message_layout.No_pass
+  ; me_gate = None
+  ; me_submitted_at = None
+  ; me_tool_block = None
+  ; me_skill_block = []
+  ; me_timestamp = ""
+  ; me_request_id = request_id
+  ; me_execution_source = Some (Masc_tui_keeper_chat_log.Operation request_id)
+  ; me_at = at
+  }
+;;
+
+let user ?turn_sequence ?operation_seq ~request_id text at =
+  row ?turn_sequence ?operation_seq ~request_id
+    ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
+    ~phase:Tui_types.Turn_input ~text at
+;;
+
+let keeper ?turn_sequence ?operation_seq ~request_id text at =
+  row ?turn_sequence ?operation_seq ~request_id ~role:Tui_types.Message_keeper
+    ~phase:Tui_types.Turn_output ~text at
+;;
+
+let tool ?operation_seq ~request_id text at =
+  row ?operation_seq ~request_id ~role:Tui_types.Message_tool
+    ~phase:Tui_types.Turn_tool ~text at
+;;
+
+let memory text at =
+  row ~role:Tui_types.Message_memory ~phase:Tui_types.Turn_progress ~text at
+;;
+
+let unowned text at =
+  row ~role:Tui_types.Message_status ~phase:Tui_types.Turn_progress ~text at
+;;
+
+let timeline rows =
+  Tui_types.chat_timeline ~loaded:rows ~session:[] ~queued_request_ids:[]
+;;
+
+let items rows = (timeline rows).Tui_types.ctl_items
+
+let turn_texts item =
+  match item with
+  | Tui_types.Chat_turn turn ->
+      List.map (fun (r : Tui_types.msg_entry) -> r.me_text) turn.ct_rows
+  | Tui_types.Chat_unowned r | Tui_types.Chat_memory r -> [ r.me_text ]
+;;
+
+let item_kinds rows =
+  items rows
+  |> List.map (function
+       | Tui_types.Chat_turn turn -> "turn:" ^ turn.ct_request_id
+       | Tui_types.Chat_unowned r -> "unowned:" ^ r.me_text
+       | Tui_types.Chat_memory r -> "memory:" ^ r.me_text)
+;;
+
+let sole_turn rows =
+  match items rows with
+  | [ Tui_types.Chat_turn turn ] -> turn
+  | other -> Alcotest.failf "expected one turn, got %d items" (List.length other)
+;;
+
+let test_a_turn_sits_where_its_first_row_did () =
+  (* The second row of request a arrives after b has started; a stays first. *)
+  let rows =
+    [ user ~request_id:"a" "ask a" 1.0
+    ; user ~request_id:"b" "ask b" 2.0
+    ; keeper ~request_id:"a" "answer a" 3.0
+    ]
+  in
+  Alcotest.(check (list string))
+    "order of first appearance"
+    [ "turn:a"; "turn:b" ]
+    (item_kinds rows);
+  Alcotest.(check (list string))
+    "and the late row joined its own turn"
+    [ "ask a"; "answer a" ]
+    (turn_texts (List.hd (items rows)))
+;;
+
+let test_rows_read_input_progress_tools_output () =
+  let rows =
+    [ keeper ~request_id:"a" ~operation_seq:4 "answer" 4.0
+    ; tool ~request_id:"a" ~operation_seq:3 "tool call" 3.0
+    ; user ~request_id:"a" ~operation_seq:1 "ask" 1.0
+    ]
+  in
+  Alcotest.(check (list string))
+    "phases order the turn, whatever order the rows arrived in"
+    [ "ask"; "tool call"; "answer" ]
+    (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) (sole_turn rows).ct_rows)
+;;
+
+let test_rows_of_one_phase_keep_their_sequence () =
+  let rows =
+    [ user ~request_id:"a" "ask" 1.0
+    ; tool ~request_id:"a" ~operation_seq:9 "second call" 2.0
+    ; tool ~request_id:"a" ~operation_seq:2 "first call" 3.0
+    ]
+  in
+  Alcotest.(check (list string))
+    "within a phase the operation sequence decides"
+    [ "ask"; "first call"; "second call" ]
+    (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) (sole_turn rows).ct_rows)
+;;
+
+let test_the_same_user_line_appears_once () =
+  let persisted = user ~request_id:"a" "server input" 2. in
+  let session = {(user ~request_id:"a" "local input" 1.) with
+    me_identity=Tui_types.Session_row {request_id="a";turn_phase=Turn_input;operation_seq=0}} in
+  let result = Tui_types.chat_timeline ~loaded:[persisted;keeper ~request_id:"a" "answer" 3.]
+      ~session:[session] ~queued_request_ids:[] in
+  Alcotest.(check (list string)) "exact input slot uses persisted authority, independently of text"
+    ["server input";"answer"] (List.concat_map turn_texts result.ctl_items)
+;;
+
+let test_identical_user_text_keeps_distinct_origins () =
+  let first = user ~request_id:"a" ~operation_seq:0 "same input" 1. in
+  let different_id = {(user ~request_id:"a" ~operation_seq:0 "same input" 2.) with
+    me_identity=Tui_types.Persisted_row "different-row"} in
+  let next_position = user ~request_id:"a" ~operation_seq:1 "same input" 3. in
+  let turn = sole_turn [first; different_id; next_position] in
+  Alcotest.(check int) "same words do not join distinct persisted origins" 3 (List.length turn.ct_rows);
+  Alcotest.(check int) "replayed stable identity appears once" 1
+    (List.length (sole_turn [first;first]).ct_rows);
+  let session position keeper = {(user ~request_id:"a" ~operation_seq:position "same input" 4.) with
+    me_keeper_name=keeper;
+    me_identity=Tui_types.Session_row {request_id="a";turn_phase=Turn_input;operation_seq=position}} in
+  let result = Tui_types.chat_timeline ~loaded:[first] ~session:[session 1 "alpha"; session 0 "beta"]
+      ~queued_request_ids:[] in
+  Alcotest.(check int) "different input positions and Keepers do not alias" 3
+    (List.length (List.concat_map turn_texts result.ctl_items))
+;;
+
+let test_legacy_page_ordinals_do_not_identify_user_rows () =
+  let legacy text at = {(user ~request_id:"a" text at) with
+    me_identity=Tui_types.Persisted_legacy_row {request_id="a";operation_seq=0}} in
+  List.iter (fun texts ->
+    let rows = List.mapi (fun index text -> legacy text (float_of_int index)) texts in
+    Alcotest.(check (list string)) "separate pages with the same local ordinal preserve all inputs"
+      texts (List.map (fun (row:Tui_types.msg_entry) -> row.me_text) (sole_turn rows).ct_rows))
+    [["first page";"second page"];["same words";"same words"]];
+  let session = {(user ~request_id:"a" "local input" 3.) with
+    me_identity=Tui_types.Session_row {request_id="a";turn_phase=Turn_input;operation_seq=0}} in
+  let result = Tui_types.chat_timeline ~loaded:[legacy "first page" 1.]
+      ~session:[session] ~queued_request_ids:[] in
+  Alcotest.(check int) "a page-local ordinal cannot suppress a local input" 2
+    (List.length (List.concat_map turn_texts result.ctl_items))
+;;
+
+let test_two_tool_rows_with_one_text_are_two_calls () =
+  let rows =
+    [ user ~request_id:"a" "ask" 1.0
+    ; tool ~request_id:"a" ~operation_seq:1 "read file" 2.0
+    ; tool ~request_id:"a" ~operation_seq:2 "read file" 3.0
+    ]
+  in
+  Alcotest.(check int)
+    "only user rows fold"
+    3
+    (List.length (sole_turn rows).ct_rows)
+;;
+
+let test_a_turn_stops_claiming_a_number_when_its_rows_disagree () =
+  let agreed =
+    [ user ~request_id:"a" ~turn_sequence:7 "ask" 1.0
+    ; keeper ~request_id:"a" "answer" 2.0
+    ]
+  in
+  Alcotest.(check (option int))
+    "a row that knows nothing does not erase the number"
+    (Some 7)
+    (sole_turn agreed).ct_turn_sequence;
+  let disagreed =
+    [ user ~request_id:"a" ~turn_sequence:7 "ask" 1.0
+    ; keeper ~request_id:"a" ~turn_sequence:8 "answer" 2.0
+    ]
+  in
+  Alcotest.(check (option int))
+    "two numbers are no number"
+    None
+    (sole_turn disagreed).ct_turn_sequence
+;;
+
+let test_turn_sequence_conflict_cannot_be_forgotten () =
+  List.iter (fun sequences ->
+    let rows = List.mapi (fun position turn_sequence ->
+      keeper ?turn_sequence ~operation_seq:position ~request_id:"a" "answer" (float_of_int position)) sequences in
+    Alcotest.(check (option int)) "later repetition cannot erase an earlier disagreement"
+      None (sole_turn rows).ct_turn_sequence)
+    [[Some 7;Some 8;Some 7]; [Some 7;Some 8;Some 8];
+     [Some 7;Some 8;None;Some 7]; [None;Some 7;Some 8;Some 7]]
+;;
+
+let test_a_folded_row_still_carries_its_number () =
+  let original = user ~request_id:"a" "ask" 1. in
+  let repeated = {original with me_turn_sequence=Some 4} in
+  let turn = sole_turn [original;repeated] in
+  Alcotest.(check int) "one stable identity" 1 (List.length turn.ct_rows);
+  Alcotest.(check (option int)) "duplicate retains its typed turn number"
+    (Some 4) turn.ct_turn_sequence
+;;
+
+let test_journal_and_unowned_lines_keep_their_places () =
+  let rows =
+    [ user ~request_id:"a" "ask" 1.0
+    ; memory "journal" 2.0
+    ; unowned "system said" 3.0
+    ; keeper ~request_id:"a" "answer" 4.0
+    ; memory "journal" 5.0
+    ]
+  in
+  Alcotest.(check (list string))
+    "each journal line is its own slot, and none joins a turn"
+    [ "turn:a"; "memory:journal"; "unowned:system said"; "memory:journal" ]
+    (item_kinds rows)
+;;
+
+let test_queued_requests_are_not_in_the_transcript () =
+  let session = [ user ~request_id:"waiting" "queued line" 9.0 ] in
+  let timeline =
+    Tui_types.chat_timeline
+      ~loaded:[ user ~request_id:"a" "ask" 1.0 ]
+      ~session ~queued_request_ids:[ "waiting" ]
+  in
+  Alcotest.(check int)
+    "a line still waiting is not a row"
+    1
+    (List.length timeline.Tui_types.ctl_items)
+;;
+
+(* Where a turn begins and ends, for a pane drawing its boundary.
+
+   Nine kinds of row share one clock here, and two more -- another agent's
+   broadcast and a memory commit -- belong to no turn at all. Flat, they are in
+   the right order and in no order that says what produced what. *)
+
+let edge_name = function
+  | Tui_types.Turn_opens -> "opens"
+  | Tui_types.Turn_continues -> "continues"
+  | Tui_types.Turn_closes -> "closes"
+  | Tui_types.Turn_alone -> "alone"
+  | Tui_types.Turn_outside -> "outside"
+;;
+
+let edges rows =
+  Tui_types.mark_turn_edges rows |> List.map (fun (_, edge) -> edge_name edge)
+;;
+
+let check_edges label expected rows =
+  Alcotest.(check (list string)) label expected (edges rows)
+;;
+
+let test_a_turn_opens_once_and_closes_once () =
+  check_edges "three rows of one request"
+    [ "opens"; "continues"; "closes" ]
+    [ row ~request_id:"r1" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
+        ~phase:Tui_types.Turn_input ~text:"go" 1.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_tool ~phase:Tui_types.Turn_tool
+        ~text:"read" 2.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"done" 3.
+    ]
+;;
+
+let test_a_turn_of_one_row_opens_and_closes_on_it () =
+  check_edges "a lone answer" [ "alone" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"done" 1.
+    ]
+;;
+
+(* A broadcast has no request. Drawn inside the boundary it would say the
+   keeper read it and answered; it belongs outside. *)
+let test_a_broadcast_belongs_to_no_turn () =
+  check_edges "a broadcast between two turns"
+    [ "alone"; "outside"; "alone" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"first" 1.
+    ; row
+        ~role:
+          (Tui_types.Message_user
+             (Tui_types.Sent_by_other { speaker = "alder"; surface = None }))
+        ~phase:Tui_types.Turn_input ~text:"main is red" 2.
+    ; row ~request_id:"r2" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"second" 3.
+    ]
+;;
+
+(* A memory commit records when it was written, not which turn asked, so it
+   has no turn to sit inside either. *)
+let test_a_journal_commit_belongs_to_no_turn () =
+  check_edges "a commit beside a turn" [ "opens"; "outside"; "closes" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"answer" 1.
+    ; row ~role:Tui_types.Message_memory ~phase:Tui_types.Turn_progress
+        ~text:"r4400 committed" 2.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"more" 3.
+    ]
+;;
+
+(* The case neighbour comparison gets wrong: a broadcast arriving mid-turn
+   would close the turn and reopen it, drawing two turns where the keeper took
+   one. The edges are the request's first and last row, not the gaps. *)
+let test_an_interrupted_turn_still_opens_once () =
+  check_edges "a broadcast inside a turn"
+    [ "opens"; "outside"; "continues"; "closes" ]
+    [ row ~request_id:"r1" ~role:(Tui_types.Message_user (Tui_types.Sent_by_operator { surface = None }))
+        ~phase:Tui_types.Turn_input ~text:"go" 1.
+    ; row
+        ~role:
+          (Tui_types.Message_user
+             (Tui_types.Sent_by_other { speaker = "alder"; surface = None }))
+        ~phase:Tui_types.Turn_input ~text:"main is red" 2.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_tool ~phase:Tui_types.Turn_tool
+        ~text:"read" 3.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"done" 4.
+    ]
+;;
+
+(* One turn's rows split by another turn's row. The pair is no longer a run,
+   so it draws as two lone rows -- not as a bracket reaching over r2. *)
+let test_a_turn_split_by_another_does_not_reach_over_it () =
+  check_edges "r1 r1 r2 r1"
+    [ "opens"; "closes"; "alone"; "alone" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"a" 1.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_tool ~phase:Tui_types.Turn_tool
+        ~text:"b" 2.
+    ; row ~request_id:"r2" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"c" 3.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"d" 4.
+    ]
+;;
+
+(* The same turn arriving twice with an outside row between is still one run:
+   sidings are transparent, so the bracket does not break on a journal commit
+   the way it breaks on another turn. Read together with the case above, this
+   is the whole rule -- what breaks a run is another turn, nothing else. *)
+let test_only_another_turn_breaks_a_run () =
+  check_edges "r1, journal, r1"
+    [ "opens"; "outside"; "closes" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"a" 1.
+    ; row ~role:Tui_types.Message_memory ~phase:Tui_types.Turn_progress
+        ~text:"r4400 committed" 2.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"b" 3.
+    ]
+;;
+
+(* Two turns interleaved -- parallel lanes do this. They used to keep one
+   boundary each, which put two brackets in one column: on a live pane that
+   drew three openings before any close, and one turn's bracket ran past a
+   date divider with three other turns inside it. A bracket claims what is
+   between its corners, and a row between r1's corners here is r2's.
+
+   So each row stands alone. Less is said, and what is said is true: these
+   rows are not adjacent, and nothing in one column can group them. *)
+let test_interleaved_turns_do_not_bracket_each_other () =
+  check_edges "r1 and r2 alternating"
+    [ "alone"; "alone"; "alone"; "alone" ]
+    [ row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"a" 1.
+    ; row ~request_id:"r2" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"b" 2.
+    ; row ~request_id:"r1" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"c" 3.
+    ; row ~request_id:"r2" ~role:Tui_types.Message_keeper ~phase:Tui_types.Turn_output
+        ~text:"d" 4.
+    ]
+;;
+
+(* A turn a settled log holds has one source. The rows the log draws itself
+   leave; the rows it draws nothing for stay, whatever request they belong
+   to. With nothing held, the rows are the rows. *)
+let test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw () =
+  let rows =
+    [ user ~request_id:"held" "asked" 1.
+    ; row ~request_id:"held" ~role:Tui_types.Message_thinking
+        ~phase:Tui_types.Turn_progress ~text:"thought" 2.
+    ; tool ~request_id:"held" "read_file" 3.
+    ; row ~request_id:"held"
+        ~role:(Tui_types.Message_skill Masc_tui_keeper_chat_transcript.Skill_used)
+        ~phase:Tui_types.Turn_progress ~text:"skill" 4.
+    ; row ~request_id:"held" ~role:Tui_types.Message_status
+        ~phase:Tui_types.Turn_progress ~text:"gate approved" 5.
+    ; keeper ~request_id:"held" "answered" 6.
+    ; row ~request_id:"held" ~role:Tui_types.Message_autonomous
+        ~phase:Tui_types.Turn_output ~text:"auto" 7.
+    ; row ~request_id:"held" ~role:Tui_types.Message_error
+        ~phase:Tui_types.Turn_output ~text:"failed" 8.
+    ; row ~request_id:"held" ~role:Tui_types.Message_local
+        ~phase:Tui_types.Turn_output ~text:"/help" 9.
+    ; keeper ~request_id:"free" "another turn" 10.
+    ; memory "journal" 11.
+    ]
+  in
+  let held =
+    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held"; ht_diagrams=[]; ht_generated=[] } ]
+  in
+  let retained = Tui_types.rows_the_logs_do_not_draw ~held rows in
+  let retained_role role = List.exists (fun (row : Tui_types.msg_entry) ->
+    row.me_execution_source=Some (Masc_tui_keeper_chat_log.Operation "held")
+    && row.me_role=role) retained in
+  Alcotest.(check bool) "uncovered durable reasoning survives" true
+    (retained_role Tui_types.Message_thinking);
+  Alcotest.(check bool) "uncovered durable tools survive" true
+    (retained_role Tui_types.Message_tool);
+  Alcotest.(check bool) "held speech belongs to its source log" false
+    (retained_role Tui_types.Message_keeper);
+  Alcotest.(check bool) "nothing held: the same list" true
+    (rows == Tui_types.rows_the_logs_do_not_draw ~held:[] rows)
+
+;;
+
+let test_an_empty_conversation_has_no_edges () =
+  check_edges "nothing to draw" [] []
+;;
+
+let test_source_scoped_row_check_matches_full_held_scan () =
+  let autonomous_source =
+    Masc_tui_keeper_chat_log.Autonomous_turn
+      (Ids.Turn_ref.make ~trace_id:"trace-auto-1" ~absolute_turn:2)
+  in
+  let with_source source (entry : Tui_types.msg_entry) =
+    { entry with me_execution_source = source }
+  in
+  let rows =
+    [ user ~request_id:"held-a" "asked a" 1.
+    ; keeper ~request_id:"held-a" "answered a" 2.
+    ; tool ~request_id:"held-a" "read_file" 3.
+    ; row ~request_id:"held-b" ~role:Tui_types.Message_thinking
+        ~phase:Tui_types.Turn_progress ~text:"thought b" 4.
+    ; row ~request_id:"held-b"
+        ~role:(Tui_types.Message_skill Masc_tui_keeper_chat_transcript.Skill_used)
+        ~phase:Tui_types.Turn_progress ~text:"skill b" 5.
+    ; keeper ~request_id:"held-b" "answered b" 6.
+    ; with_source (Some autonomous_source)
+        (row ~request_id:"auto-1" ~role:Tui_types.Message_autonomous
+           ~phase:Tui_types.Turn_output ~text:"autonomous speech" 7.)
+    ; with_source (Some autonomous_source)
+        (tool ~request_id:"auto-1" "autonomous tool" 8.)
+    ; keeper ~request_id:"unheld" "unheld speech" 9.
+    ; with_source None (memory "journal row without source" 10.)
+    ; with_source None (unowned "status without source" 11.)
+    ]
+  in
+  let held =
+    [ { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-a"; ht_diagrams=[]; ht_generated=[] }
+    ; { Tui_types.ht_source = autonomous_source; ht_diagrams=[]; ht_generated=[] }
+    ; { Tui_types.ht_source = Masc_tui_keeper_chat_log.Operation "held-b"; ht_diagrams=[]; ht_generated=[] }
+    ]
+  in
+  let full_scan =
+    List.filter_map
+      (fun (entry : Tui_types.msg_entry) ->
+        if List.exists (fun turn -> Tui_types.log_draws_row turn entry) held
+        then fst (Tui_types.media_remainder_with_coverage ~diagrams:[] ~generated:[] entry)
+        else Some entry)
+      rows
+  in
+  let scoped = Tui_types.rows_the_logs_do_not_draw ~held rows in
+  Alcotest.(check (list string))
+    "source-scoped row check retains the exact same rows as a full held scan"
+    (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) full_scan)
+    (List.map (fun (r : Tui_types.msg_entry) -> r.me_text) scoped)
+;;
+
+let test_generated_media_partial_and_failure_coverage () =
+  let module E = Masc.Keeper_chat_events in
+  let source = Masc_tui_keeper_chat_log.Operation "original" in
+  let media : E.generated_media = {index=0;media_type="image/png";
+    source_type=Agent_core.Types.Base64_kind;media_ref="/api/v1/media/one";
+    response={response_generation=4;response_scope=0}} in
+  let second = {media with index=1} in
+  let block = Masc_tui_chat_media.of_generated media in
+  let project rows = Tui_types.generated_media_uncovered_by_rows
+    ~keeper_name:"alpha" ~source ~generated:[media;second] rows in
+  List.iter (fun role ->
+    let output = row ~request_id:"original" ~role ~phase:Tui_types.Turn_output
+      ~text:"Original failure or reply text" 1. in
+    let output = {output with me_media=[block]} in
+    Alcotest.(check bool) "one durable occurrence covers one live block" true
+      (project [output]=[second]);
+    Alcotest.(check bool) "other execution cannot cover this output" true
+      (project [{output with me_execution_source=Some (Masc_tui_keeper_chat_log.Operation "other")}]=[media;second]);
+    Alcotest.(check bool) "another keeper cannot lend output authority" true
+      (project [{output with me_keeper_name="other"}]=[media;second]);
+    Alcotest.(check bool) "unobserved source cannot lend output authority" true
+      (project [{output with me_execution_source=None}]=[media;second]);
+    Alcotest.(check bool) "two durable occurrences cover both blocks" true
+      (project [{output with me_media=[block;block]}]=[]);
+    Alcotest.(check bool) "withdrawn history restores live authority" true
+      (project []=[media;second]);
+    Alcotest.(check bool) "a failure placeholder is not persisted media" true
+      (project [{output with me_media=[Masc_tui_chat_media.Image {src="";cap=Some "unavailable"}]}]=[media;second]);
+    Alcotest.(check string) "failure and reply prose remain original"
+      "Original failure or reply text" output.me_text)
+    [Tui_types.Message_error;Message_status;Message_keeper;Message_autonomous];
+  let input = user ~request_id:"original" "input" 1. in
+  Alcotest.(check bool) "operator input is not generated-output authority" true
+    (project [{input with me_media=[block]}]=[media;second]);
+  let tool = tool ~request_id:"original" "result" 1. in
+  Alcotest.(check bool) "tool output is not provider generated-output authority" true
+    (project [{tool with me_media=[block]}]=[media;second])
+;;
+
+let () =
+  Alcotest.run
+    "tui chat timeline assembly"
+    [ ( "assembly",
+        [ Alcotest.test_case "a turn sits where its first row did" `Quick
+            test_a_turn_sits_where_its_first_row_did;
+          Alcotest.test_case "rows read input, progress, tools, output" `Quick
+            test_rows_read_input_progress_tools_output;
+          Alcotest.test_case "rows of one phase keep their sequence" `Quick
+            test_rows_of_one_phase_keep_their_sequence;
+          Alcotest.test_case "the same user line appears once" `Quick
+            test_the_same_user_line_appears_once;
+          Alcotest.test_case "identical input bytes keep distinct origins" `Quick
+            test_identical_user_text_keeps_distinct_origins;
+          Alcotest.test_case "legacy page positions do not identify inputs" `Quick
+            test_legacy_page_ordinals_do_not_identify_user_rows;
+          Alcotest.test_case "two tool rows with one text are two calls" `Quick
+            test_two_tool_rows_with_one_text_are_two_calls;
+          Alcotest.test_case "a turn stops claiming a number when its rows disagree"
+            `Quick test_a_turn_stops_claiming_a_number_when_its_rows_disagree;
+          Alcotest.test_case "sequence conflict remains observed" `Quick
+            test_turn_sequence_conflict_cannot_be_forgotten;
+          Alcotest.test_case "a folded row still carries its number" `Quick
+            test_a_folded_row_still_carries_its_number;
+          Alcotest.test_case "journal and unowned lines keep their places" `Quick
+            test_journal_and_unowned_lines_keep_their_places;
+          Alcotest.test_case "queued requests are not in the transcript" `Quick
+            test_queued_requests_are_not_in_the_transcript;
+          Alcotest.test_case "a turn opens once and closes once" `Quick
+            test_a_turn_opens_once_and_closes_once;
+          Alcotest.test_case "a turn of one row opens and closes on it" `Quick
+            test_a_turn_of_one_row_opens_and_closes_on_it;
+          Alcotest.test_case "a broadcast belongs to no turn" `Quick
+            test_a_broadcast_belongs_to_no_turn;
+          Alcotest.test_case "a journal commit belongs to no turn" `Quick
+            test_a_journal_commit_belongs_to_no_turn;
+          Alcotest.test_case "an interrupted turn still opens once" `Quick
+            test_an_interrupted_turn_still_opens_once;
+          Alcotest.test_case "interleaved turns do not bracket each other" `Quick
+            test_interleaved_turns_do_not_bracket_each_other;
+          Alcotest.test_case "a turn split by another does not reach over it" `Quick
+            test_a_turn_split_by_another_does_not_reach_over_it;
+          Alcotest.test_case "only another turn breaks a run" `Quick
+            test_only_another_turn_breaks_a_run;
+          Alcotest.test_case "a held turn keeps only the rows the log does not draw" `Quick
+            test_a_held_turn_keeps_only_the_rows_the_log_does_not_draw;
+          Alcotest.test_case "generated media partial and failure ownership" `Quick
+            test_generated_media_partial_and_failure_coverage;
+          Alcotest.test_case "source-scoped row check matches full held scan" `Quick
+            test_source_scoped_row_check_matches_full_held_scan;
+          Alcotest.test_case "an empty conversation has no edges" `Quick
+            test_an_empty_conversation_has_no_edges
+        ] )
+    ]
+;;

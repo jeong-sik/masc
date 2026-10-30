@@ -1,0 +1,233 @@
+/* ════════════════════════════════════════════════════════════════
+   KEEPER ASKS — 키퍼가 사람에게 물어본 질문
+
+   Deliberately not styled as the approvals queue. Nothing is held waiting on
+   a question: the Keeper that asked kept working, so these are decisions to
+   make rather than calls that are blocked. Cards read at rest and expand only
+   when someone chooses to answer one.
+
+   Loaded by the *-v2.css glob in main.ts. Every value here is a token; a raw
+   colour would drift from the skin the moment the palette moves.
+   ════════════════════════════════════════════════════════════════ */
+
+.ka-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ka-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ka-head h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-14);
+  color: var(--text-bright);
+  margin: 0;
+}
+
+.ka-refresh,
+.ka-open,
+.ka-cancel {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-12);
+  padding: 4px 10px;
+  min-height: var(--mobile-touch-target-min);
+  cursor: pointer;
+}
+
+.ka-refresh:hover,
+.ka-open:hover,
+.ka-cancel:hover {
+  color: var(--text-primary);
+  border-color: var(--border-main);
+}
+
+.ka-empty,
+.ka-summary,
+.ka-context {
+  color: var(--text-dim);
+  font-size: var(--fs-12);
+  margin: 0;
+}
+
+/* Why the Keeper is asking. Drawn on the card at rest, not behind the expand:
+   it is what separates a decision that matters from one that does not. */
+.ka-context {
+  border-left: 2px solid var(--volt-dim);
+  padding-left: 8px;
+}
+
+.ka-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ka-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ka-card.is-open {
+  border-color: var(--volt-strong);
+  box-shadow: var(--shadow-1);
+}
+
+.ka-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ka-keeper {
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  color: var(--accent-fg);
+}
+
+.ka-asked {
+  font-size: var(--fs-11);
+  color: var(--text-dim);
+}
+
+.ka-questions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ka-prompt {
+  font-size: var(--fs-13);
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+
+.ka-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ka-choice,
+.ka-skip {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: var(--fs-12);
+  padding: 6px 8px;
+  min-height: var(--mobile-touch-target-min);
+  cursor: pointer;
+}
+
+.ka-choice:hover,
+.ka-skip:hover {
+  background: var(--volt-wash);
+  color: var(--text-primary);
+}
+
+.ka-choice.is-picked,
+.ka-skip.is-picked {
+  border-color: var(--volt-strong);
+  color: var(--text-bright);
+}
+
+/* The mark says single vs multi before the label is read: round where one
+   answer fits, square where several do. */
+.ka-choice-mark {
+  font-family: var(--font-mono);
+  color: var(--accent-fg);
+}
+
+.ka-choice-desc {
+  color: var(--text-dim);
+  font-size: var(--fs-11);
+}
+
+.ka-freetext {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.ka-freetext-hint {
+  font-size: var(--fs-11);
+  color: var(--text-dim);
+}
+
+.ka-freetext textarea {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: var(--fs-12);
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.ka-question-actions,
+.ka-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ka-submit {
+  background: var(--volt-strong);
+  border: none;
+  border-radius: var(--radius-pill);
+  color: var(--accent-fg);
+  font-size: var(--fs-12);
+  padding: 6px 14px;
+  min-height: var(--mobile-touch-target-min);
+  cursor: pointer;
+}
+
+.ka-submit:disabled {
+  background: var(--bg-sunken);
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
+.ka-missing {
+  font-size: var(--fs-11);
+  color: var(--status-warn);
+}
+
+.ka-error {
+  font-size: var(--fs-12);
+  color: var(--status-bad);
+  margin: 0;
+}
+
+/* Losing the race is a normal outcome for two operators on one question, so
+   it reads as news rather than as a fault. */
+.ka-conflict {
+  font-size: var(--fs-12);
+  color: var(--status-warn);
+  margin: 0;
+}

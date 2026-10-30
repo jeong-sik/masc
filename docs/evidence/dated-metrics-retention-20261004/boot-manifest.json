@@ -1,0 +1,17 @@
+{
+  "scope": "native real boot loader and registry, full dated metric storage owner and Dated_jsonl with cached lower dependencies; temporary filesystem only; no full server or Keeper factory execution",
+  "source_sha256": {
+    "lib/config/env_config_keeper_supervisor.mli": "4415222e30b956ac3c9fba8780edf69132286f5984fe480f1a8dd001f2e58e67",
+    "lib/config/env_config_keeper_supervisor.ml": "6d23921b11685737fd5c6041796be69d68fe74048ac299875beb656be6e4bec0",
+    "lib/config/env_config_keeper.mli": "4a257a8eec52348f0bbc194e6343e01b2f597308f431bdee10b135615bd2e20a",
+    "lib/config/env_config_keeper.ml": "c3a544ab640fec6fbd285e6990bb86d3c3eeb50e3a76ba1de41c84b47f0cee40",
+    "lib/config/keeper_runtime_setting_registry.mli": "89bde3778f692bb6525d53d3c2e56ec595218ee7494dd7678e2d48f4a762807b",
+    "lib/config/keeper_runtime_setting_registry.ml": "2b4332836fb71cf9c40b906d10eb29fa777efa886a5b66b5de09898e161a8623",
+    "lib/keeper_runtime/keeper_runtime_config.mli": "52ece5895fe6866c1948d76219db31e45ccd2b3c94a6c0e358a9bdcaad0fc587",
+    "lib/keeper_runtime/keeper_runtime_config.ml": "4e3e7cfc36509ed536979eb80071d3344cdcce2e1a9d08a1c9e22fa72807b36a",
+    "lib/dated_jsonl/dated_jsonl.ml": "c74ec71ebb473a2ef7addd6227605bd655069d0ea27aa8a40ab941f17fcec237",
+    "lib/dated_jsonl/dated_jsonl.mli": "80f3046cc5a8d3f304471b51775cae6170ad40c36a2413e5d597075be469fb66",
+    "lib/keeper/keeper_metrics_storage.ml": "a665d92b25437e1b159ce37da8f0cd0a28fd94af4b7212f9085a74f053fdb730",
+    "lib/keeper/keeper_metrics_storage.mli": "0a6a9c49b5061595c0d47d0c2ebf37f7f4a9f9e6b75bc42e7dea49b415459c6b"
+  }
+}

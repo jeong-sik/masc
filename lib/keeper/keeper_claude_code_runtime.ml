@@ -1,0 +1,1749 @@
+open Result.Syntax
+
+let config_error = Keeper_official_client_host.config_error
+let internal_error = Keeper_official_client_host.internal_error
+
+module Host = Keeper_official_client_host
+module Session_store = Keeper_official_client_session_store
+
+type attempt_outcome =
+  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
+  ; settled_session : Keeper_official_client_session_store.t option
+  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
+  ; effect_disposition : Keeper_provider_attempt_effect.t
+  }
+
+let runtime_label = "Claude Code"
+
+let host_stop_turn_identity ~session_id ~turn_count =
+  Printf.sprintf "%s:host-stop:%d" session_id turn_count
+;;
+
+let bounded_probe_config ~fallback_timeout_s
+  (config : Runtime_claude_code.config)
+  =
+  match config.timeout_s with
+  | Some _ -> config
+  | None -> { config with timeout_s = Some fallback_timeout_s }
+;;
+
+let project_messages messages =
+  let rec loop system history = function
+    | [] -> Ok (List.rev system, List.rev history)
+    | (message : Agent_core.Types.message) :: rest ->
+      (match message.role with
+       | Agent_core.Types.System ->
+         loop (Host.encode_history_message message :: system) history rest
+       | Agent_core.Types.User | Agent_core.Types.Assistant | Agent_core.Types.Tool ->
+         loop
+           system
+           (Keeper_official_client_context_codec.to_json message :: history)
+           rest)
+  in
+  loop [] [] messages
+;;
+
+let initial_turn_prompt ~history ~goal =
+  match history with
+  | [] -> goal
+  | _ :: _ ->
+    `Assoc
+      [ "schema", `String "masc.claude-code.initial-turn.v1"
+      ; ( "history"
+        , `List history )
+      ; "current_goal", `String goal
+      ]
+    |> Yojson.Safe.to_string
+;;
+
+let unbounded_model_input_capacity_bytes = max_int
+
+let measure_model_input_message_bytes message =
+  String.length (Host.encode_history_message message)
+;;
+
+(* Keep the durable conversation intact and narrow only the provider-bound
+   start seed. The seed starts unbounded and narrows after Claude has explicitly
+   rejected the prior view as too large. The next structural boundary is computed before source projections append
+   synthetic evidence, matching the Codex official-client path. *)
+(* The cut is the same one [Keeper_turn_driver_try_provider] makes on the
+   Agent Core path, and that path reports it: [project_with_drop] returns how
+   much of the history survived, [observe] pairs it with what was offered, and
+   the turn record carries the pair. Here the same call went through [project],
+   which keeps the messages and drops the counts, so every official-client turn
+   wrote a record with no window reading and no input composition -- which is
+   what [/context] reads. Same measurement, reported instead of discarded. *)
+let model_input_projection_for_capacity ~input_source
+    ?argument_projection
+    ~capacity_bytes
+    ~observed_next_shrink_capacity_bytes
+    ~observed_floor_capacity_bytes
+    ?on_model_input_window_observation
+    ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
+    ~turn_start
+    ~keeper_name
+    ~runtime_id
+    source_projection
+    messages =
+  let* frozen = match input_source with
+    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
+    | Keeper_request_source.Keeper_history _ -> Host.read_librarian_front librarian_front messages in
+  let* windowed =
+    Host.start_range_projection
+      ~input_source
+      ?argument_projection
+      ~measure_message_bytes:measure_model_input_message_bytes
+      ~capacity_bytes
+      ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
+      ~reserved_bytes:0
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ~librarian_front:(fun _ -> Ok frozen)
+      ?on_carried_front
+      ~turn_start
+      ~keeper_name
+      ~runtime_id
+      messages
+  in
+  let () =
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      let full_bytes =
+        List.fold_left
+          (fun total message ->
+             total + measure_model_input_message_bytes message)
+          0
+          windowed
+      in
+      let target_capacity_bytes =
+        if capacity_bytes = unbounded_model_input_capacity_bytes
+        then
+          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+            ~capacity:full_bytes
+        else
+          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+            ~capacity:capacity_bytes
+      in
+      observed_next_shrink_capacity_bytes :=
+        Runtime_model_input_tail_window.next_shrink_capacity_bytes
+          ~allow_empty_history:true
+          ~measure_message_bytes:measure_model_input_message_bytes
+          ~target_capacity_bytes
+          windowed;
+      observed_floor_capacity_bytes :=
+        Runtime_model_input_tail_window.minimum_capacity_bytes
+          ~measure_message_bytes:measure_model_input_message_bytes
+          windowed)
+  in
+  Host.project_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection windowed
+;;
+
+(* Keep the account scope selected at turn start. Config may be reloaded while
+   the CLI runs; a late report still belongs to the home that produced it. *)
+let record_usage_windows ~quota_scope report =
+  Runtime_provider_usage_window.record
+    ~scope:quota_scope ~observed_at:(Time_compat.now ()) report
+;;
+
+(* The CLI frame carries Anthropic exclusive counts; the shared constructor
+   produces the canonical inclusive api_usage without changing its scope. *)
+let api_usage_of_turn_usage (usage : Runtime_claude_code.turn_usage) =
+  Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
+    ~input_tokens:usage.input_tokens
+    ~output_tokens:usage.output_tokens
+    ~cache_creation_input_tokens:usage.cache_creation_input_tokens
+    ~cache_read_input_tokens:usage.cache_read_input_tokens
+;;
+
+(* Always installed so usage-window and turn usage reports are recorded. A
+   turn nobody streams, traces or observes gets only those; its other events
+   are ignored as before. *)
+let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?receipts ~keeper_name ~quota_scope ~raw_trace_run ~turn_count
+    ~on_native_action ~on_usage_report ~position ~on_compacted on_event =
+  (* The result frame's uuid is the response identity the completion hook
+     also writes for a Claude Code turn; the session is the conversation. *)
+  let report_usage ~session_id ~turn_id ~model usage =
+    Option.iter
+      (fun report ->
+         report
+           { Keeper_client_usage_report.official_turn = turn_count
+           ; response_id = turn_id
+           ; model
+           ; conversation_id = session_id
+           ; position
+           ; usage_scope = Runtime_usage_scope.Turn_total
+           ; count = Keeper_client_usage_report.Running_count (api_usage_of_turn_usage usage)
+           ; vendor_total_tokens = None
+           })
+      on_usage_report
+  in
+  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress, on_native_task_observation, on_child_content_observation, on_provider_retry with
+  | None, None, None, None, None, None, None, None, None ->
+    Some
+      (function
+        | Runtime_claude_code.Usage_windows_reported report ->
+          record_usage_windows ~quota_scope report
+        | Runtime_claude_code.Conversation_compacted -> on_compacted ()
+        | Runtime_claude_code.Provider_retry_observed _ -> ()
+        | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
+          report_usage ~session_id ~turn_id ~model usage
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
+        | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Turn_finished _ -> ())
+  | _ ->
+    let emit event = Option.iter (fun callback -> callback event) on_event in
+    let next_tool_index = ref 1 in
+    let content_indexes = Hashtbl.create 8 in
+    let closed_content = Hashtbl.create 8 in
+    let first_text = ref true in
+    let last_text_index = ref None in
+    let fresh_text_index () =
+      if !first_text then (first_text := false; 0)
+      else let index = !next_tool_index in incr next_tool_index; index
+    in
+    let content_index block channel =
+      match Hashtbl.find_opt content_indexes (block, channel) with
+      | Some index -> index
+      | None ->
+          let index = match channel with
+            | Runtime_claude_code.Text_content -> fresh_text_index ()
+            | Thinking_content ->
+                let index = !next_tool_index in incr next_tool_index; index in
+          Hashtbl.add content_indexes (block, channel) index;
+          index
+    in
+    let stop_content index =
+      if not (Hashtbl.mem closed_content index) then begin
+        Hashtbl.add closed_content index ();
+        emit (Agent_core.Types.ContentBlockStop {index})
+      end
+    in
+    let tool_indexes = Hashtbl.create 8 in
+    let native_tool_indexes = Hashtbl.create 8 in
+    (* Each [message.id] is one model response; the text blocks it carries are
+       one assistant message, and the next response's text is the next. *)
+    let text_stream = Keeper_official_client_text_stream.create ~equal:String.equal () in
+    let emit_text ~index text =
+      emit (Agent_core.Types.ContentBlockDelta
+        { index; delta = Agent_core.Types.TextDelta text })
+    in
+    Some
+      (function
+        | Runtime_claude_code.Turn_started { turn_id; model } ->
+          emit (Agent_core.Types.MessageStart { id = turn_id; model; usage = None })
+        | Runtime_claude_code.Text_delta { message_id; block; text } ->
+          let index = content_index block Runtime_claude_code.Text_content in
+          last_text_index := Some index;
+          emit_text ~index
+            (Keeper_official_client_text_stream.forward text_stream ~message:message_id text)
+        | Runtime_claude_code.Thinking_delta { block; text; _ } ->
+          let index = content_index block Runtime_claude_code.Thinking_content in
+          emit (Agent_core.Types.ContentBlockDelta
+            { index; delta = Agent_core.Types.ThinkingDelta text })
+        | Runtime_claude_code.Child_content_observed content ->
+          (* Child content never enters root SSE, content indexes or usage. *)
+          Option.iter (fun observe -> observe content) on_child_content_observation
+        | Runtime_claude_code.Content_block_stopped {block; channel} ->
+          Option.iter stop_content (Hashtbl.find_opt content_indexes (block, channel))
+        | Runtime_claude_code.Dynamic_tool_started
+            { call_id; tool_name; arguments } ->
+          Keeper_official_client_text_stream.tool_row text_stream;
+          let index = !next_tool_index in
+          incr next_tool_index;
+          Option.iter
+            (fun receipts ->
+               Keeper_official_client_tool_receipts.start receipts ~call_id ~block_index:index)
+            receipts;
+          Hashtbl.replace tool_indexes call_id index;
+          emit
+            (Agent_core.Types.ContentBlockStart
+               { index
+               ; content_type = "tool_use"
+               ; tool_id = Some call_id
+               ; tool_name = Some tool_name
+               });
+          emit
+            (Agent_core.Types.ContentBlockDelta
+               { index
+               ; delta =
+                   Agent_core.Types.InputJsonSnapshot
+                     (Yojson.Safe.to_string arguments)
+               })
+        | Runtime_claude_code.Dynamic_tool_finished { call_id } ->
+          Option.iter
+            (fun receipts -> Keeper_official_client_tool_receipts.finish receipts ~call_id)
+            receipts;
+          Option.iter
+            (fun index ->
+               Hashtbl.remove tool_indexes call_id;
+               emit (Agent_core.Types.ContentBlockStop { index }))
+            (Hashtbl.find_opt tool_indexes call_id)
+        | Runtime_claude_code.Native_tool_started observation ->
+          Option.iter
+            (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
+            on_native_action;
+          Host.record_raw_native_tool
+            ~keeper_name
+            ~raw_trace_run
+            ~phase:`Started
+            observation;
+          let index =
+            match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
+            | Some index -> index
+            | None ->
+                let index = !next_tool_index in
+                incr next_tool_index;
+                Option.iter
+                  (fun identity -> Hashtbl.add native_tool_indexes identity index)
+                  observation.identity;
+                index
+          in
+          emit
+            (Agent_core.Types.ContentBlockStart
+               { index
+               ; content_type = Runtime_native_tools.stream_content_type
+               ; tool_id = Runtime_native_tools.call_id observation
+               ; tool_name = observation.tool_name
+               })
+        | Runtime_claude_code.Native_task_observed observation ->
+          Option.iter (fun observe -> observe observation) on_native_task_observation
+        | Runtime_claude_code.Native_tool_progress {identity; progress} ->
+          Option.iter (fun index ->
+            Option.iter (fun observe -> observe ~block_index:index
+              ~tool_call_id:(match identity with Runtime_native_tools.Call_id id -> Some id
+                | Provider_step _ -> None) progress) on_native_tool_progress)
+            (Hashtbl.find_opt native_tool_indexes identity)
+        | Runtime_claude_code.Native_tool_finished {observation; completion} ->
+          Host.record_raw_native_tool
+            ~keeper_name
+            ~raw_trace_run
+            ~phase:`Finished
+            observation;
+          Option.iter
+            (fun identity ->
+               Option.iter
+                 (fun index ->
+                    Option.iter (fun finish -> finish ~block_index:index
+                      ~tool_call_id:(Runtime_native_tools.call_id observation) completion)
+                      on_native_tool_completion;
+                    Hashtbl.remove native_tool_indexes identity;
+                    emit (Agent_core.Types.ContentBlockStop { index }))
+                 (Hashtbl.find_opt native_tool_indexes identity))
+            observation.identity
+        | Runtime_claude_code.Usage_windows_reported report ->
+          record_usage_windows ~quota_scope report
+        | Runtime_claude_code.Conversation_compacted -> on_compacted ()
+        | Runtime_claude_code.Provider_retry_observed retry ->
+          Option.iter (fun observe -> observe retry) on_provider_retry
+        | Runtime_claude_code.Usage_reported { session_id; turn_id; model; usage } ->
+          report_usage ~session_id ~turn_id ~model usage
+        | Runtime_claude_code.Turn_finished { text } ->
+          Option.iter (fun remainder ->
+            let index = match !last_text_index with
+              | Some index when not (Hashtbl.mem closed_content index) -> index
+              | Some _ | None -> fresh_text_index () in
+            emit_text ~index remainder;
+            stop_content index)
+            (Keeper_official_client_text_stream.remainder text_stream ~final_text:text);
+          emit
+            (Agent_core.Types.MessageDelta
+               { stop_reason = Some Agent_core.Types.EndTurn; usage = None });
+          emit Agent_core.Types.MessageStop)
+;;
+
+let retry_after_of_rate_limit = function
+  | None -> None
+  | Some ({ resets_at = None; _ } : Runtime_claude_code.rate_limit) -> None
+  | Some { resets_at = Some timestamp; _ } ->
+    Some (Float.max 0.0 (Float.of_int timestamp -. Time_compat.now ()))
+;;
+
+(* Where an unexpected exception left the Claude Code runtime; the internal
+   error names it so an operator can tell it from the Agent Core runner. *)
+let runtime_boundary_site = "claude_code.runtime_boundary"
+
+let claude_error_to_core_error = function
+  | Runtime_claude_code.Invalid_config detail ->
+    config_error ~field:"claude_code" detail
+  | Runtime_claude_code.Subscription_required detail ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError { provider = "claude_code"; detail })
+  | Runtime_claude_code.Quota_blocked ({ rate_limit; _ } as blocked) ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.HardQuota
+         { provider = "claude_code"
+         ; retry_after = retry_after_of_rate_limit rate_limit
+         ; detail = Runtime_claude_code.error_to_string (Quota_blocked blocked)
+         })
+  (* The CLI reports these denials in a terminal result, even when its
+     process subtype is [success]. Preserve the provider's HTTP distinction:
+     the existing account-access route asks for operator action after the
+     declared candidates are exhausted; a generic provider failure does not.
+     Activity still controls the separate effect fence at the caller. *)
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = Some 401; detail; _ } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthError { provider = "claude_code"; detail })
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = Some 403; detail; _ } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthorizationError { provider = "claude_code"; detail })
+  | Runtime_claude_code.Turn_failed detail
+  | Runtime_claude_code.Turn_failed_with_observation { detail; _ } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "claude_code"; error_type = Some "turn_failed"; detail })
+  | Runtime_claude_code.Timeout seconds ->
+    Agent_core.Error.Api
+      (Agent_core.Retry.Timeout
+         { message = Printf.sprintf "Claude Code turn timed out after %.3fs" seconds
+         ; phase = None
+         })
+  | Runtime_claude_code.Spawn_failed detail ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "claude_code"; detail })
+  (* RFC-0454 P2, the twin of the Codex runtime's closed connection: the
+     client exited or its stdout reached EOF. Rotation is unchanged —
+     [Keeper_runtime_attempt.core_error_to_runtime_outcome] rebuilds the
+     [ProviderUnavailable] this used to be. *)
+  | Runtime_claude_code.Process_exited { detail; turn_admitted } ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_connection_closed
+         { runtime_id = "claude_code"; detail; turn_accepted = turn_admitted })
+  (* A host-side failure, not the client's reply. As Protocol_error it would
+     be filed as a provider parse error although nothing was misread
+     (#39768). The lane walk stops on either, so only the label differs. *)
+  | Runtime_claude_code.Unhandled_exception exn_repr ->
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Internal_unhandled_exception
+         { site = runtime_boundary_site; exn_repr; transport_error_kind = None })
+  | Runtime_claude_code.Turn_transport_interrupted _ as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "claude_code"
+         ; detail = Runtime_claude_code.error_to_string error
+         })
+  | Runtime_claude_code.Context_window_exceeded
+      { message; tool_effect_attempted = false; response_emitted = false } ->
+    Agent_core.Error.Api
+      (Llm_provider.Retry.ContextOverflow { message; limit = None })
+  | Runtime_claude_code.Context_window_exceeded _ as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "claude_code"
+         ; error_type = Some "context_window_exceeded_after_observed_activity"
+         ; detail = Runtime_claude_code.error_to_string error
+         })
+  | Runtime_claude_code.Protocol_error { stage; detail } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ParseError
+         { detail = Printf.sprintf "%s: %s" stage detail })
+  | Runtime_claude_code.Unsupported_control_request subtype ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.UnknownVariant
+         { type_name = "claude_code.control_request"; value = subtype })
+  | Runtime_claude_code.Stopped_by_host _ ->
+    Agent_core.Error.Internal
+      "Claude Code host stop escaped the typed checkpoint boundary"
+;;
+
+let recovery_failure_of_client_error = function
+  | Runtime_claude_code.Spawn_failed _ -> Session_store.Transient_spawn_failed
+  | Runtime_claude_code.Process_exited _ | Runtime_claude_code.Timeout _ ->
+    Session_store.Transport_interrupted
+  | Runtime_claude_code.Turn_transport_interrupted _ ->
+    Session_store.Transport_interrupted
+  | Runtime_claude_code.Invalid_config _
+  | Runtime_claude_code.Protocol_error _
+  | Runtime_claude_code.Unsupported_control_request _ ->
+    Session_store.Protocol_failed
+  (* No recovery kind names a host exception. Its disposition is the one
+     Protocol_failed carries -- Ambiguous: what the client did is unknown --
+     and the record's detail names the exception. *)
+  | Runtime_claude_code.Unhandled_exception _ -> Session_store.Protocol_failed
+  | Runtime_claude_code.Subscription_required _
+  | Runtime_claude_code.Turn_failed _
+  | Runtime_claude_code.Turn_failed_with_observation _
+  | Runtime_claude_code.Quota_blocked _ ->
+    Session_store.Provider_rejected
+  | Runtime_claude_code.Context_window_exceeded
+      { tool_effect_attempted; response_emitted; _ } ->
+    (* Same activity axis as [context_overflow_retry_safe] above: an
+       observation-free overflow exhausted the in-run shrink floor; observed
+       response/tool activity instead fenced the retry. Both retain recovery
+       on the same identity, but only the former establishes floor rejection
+       (RFC claude-code-context-overflow-bounded-restart §6). *)
+    Session_store.Input_rejected
+      (if tool_effect_attempted || response_emitted
+       then Session_store.Effect_fenced
+       else Session_store.Bootstrap_floor_exceeded)
+  | Runtime_claude_code.Stopped_by_host _ -> Session_store.Protocol_failed
+;;
+
+(* A Gate continuation may only resume the session it was captured in. When
+   that session refuses the resume as a context overflow, the vendor's own
+   conversation is full: the resume prompt is the same at every masc capacity,
+   and no fresh start may carry the continuation. That is not an input
+   rejection an operator can retry -- [Retry_previous] would send into the same
+   full session -- so it is recorded [Vendor_session_full]: the continuation
+   ends for good ({!Keeper_direct_gate_continuation.session_full} reads it) and
+   the next ordinary turn supersedes it with a fresh session. Whether a
+   response or tool effect was observed first is kept in the record. *)
+let recovery_failure_of_attempt ~session_mode ~gate_continuation error =
+  match session_mode, gate_continuation, error with
+  | ( Runtime_claude_code.Resume _
+    , true
+    , Runtime_claude_code.Context_window_exceeded
+        { tool_effect_attempted; response_emitted; _ } ) ->
+    Session_store.Vendor_session_full
+      (if tool_effect_attempted || response_emitted
+       then Session_store.Activity_observed
+       else Session_store.No_activity_observed)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Invalid_config _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Spawn_failed _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Protocol_error _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Subscription_required _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Unsupported_control_request _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Turn_transport_interrupted _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Context_window_exceeded _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Turn_failed _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Turn_failed_with_observation _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Stopped_by_host _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Quota_blocked _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Process_exited _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Unhandled_exception _)
+  | ((Runtime_claude_code.Start | Runtime_claude_code.Resume _), (true | false), Runtime_claude_code.Timeout _) ->
+    recovery_failure_of_client_error error
+;;
+
+(* Same inclusive convention as [api_usage_of_turn_usage], for the input side
+   of the newest request only: the context it occupied. *)
+let request_context_of_request_input (input : Runtime_claude_code.request_input)
+  : Runtime_observation.request_context
+  =
+  { input_tokens =
+      input.input_tokens + input.cache_creation_input_tokens + input.cache_read_input_tokens
+  ; cache =
+      Some
+        { Runtime_observation.cache_creation_input_tokens =
+            input.cache_creation_input_tokens
+        ; cache_read_input_tokens = input.cache_read_input_tokens
+        }
+  ; output_tokens = None (* an assistant frame's output is a streaming snapshot *)
+  }
+;;
+
+module For_testing = struct
+  let claude_error_to_core_error = claude_error_to_core_error
+
+  let observe_stream_native_action ~turn_count ~observe event =
+    match
+      claude_stream_callback
+        ~keeper_name:"test"
+        ~quota_scope:(Runtime_quota_window.scope_of_claude_code_home None)
+        ~raw_trace_run:None
+        ~turn_count
+        ~on_native_action:(Some observe)
+        ~on_usage_report:None
+        ~position:Keeper_usage_resolution.Fresh
+        ~on_compacted:(fun () -> ())
+        None
+    with
+    | Some callback -> callback event
+    | None -> invalid_arg "native observer did not install Claude stream callback"
+  ;;
+  let bounded_probe_config = bounded_probe_config
+  let host_stop_turn_identity = host_stop_turn_identity
+  let recovery_failure_of_client_error = recovery_failure_of_client_error
+  let recovery_failure_of_attempt = recovery_failure_of_attempt
+
+  let start_seed_projection ~input_source ~capacity_bytes ?carried_front_seed ?librarian_front ?on_carried_front
+        ~turn_start ?on_model_input_window_observation ~keeper_name ~runtime_id messages
+    =
+    model_input_projection_for_capacity ~input_source
+      ~capacity_bytes
+      ~observed_next_shrink_capacity_bytes:(ref None)
+      ~observed_floor_capacity_bytes:(ref None)
+      ?on_model_input_window_observation
+      ?carried_front_seed
+      ?librarian_front
+      ?on_carried_front
+      ~turn_start
+      ~keeper_name
+      ~runtime_id
+      None
+      messages
+  ;;
+
+  let unbounded_capacity_bytes = unbounded_model_input_capacity_bytes
+end
+
+(* RFC claude-code-context-overflow-bounded-restart §6.3: the same-run shrink
+   retry is the one re-entry an input rejection admits. [on_shrink_retry]
+   fires only after the sequence verified every authority condition — a typed
+   observation-free overflow (the only shape mapped to [Api ContextOverflow]
+   in [claude_error_to_core_error]) and a strictly smaller next capacity — so
+   consuming the just-written [Input_rejected] recovery with
+   an explicit recovery resolution cannot bypass the fence: a
+   next-cycle replay never passes through that callback, and [Effect_fenced]
+   recoveries are never resolved here because an effect-observed overflow is
+   never retry-safe. A failed resolution is not retried here; the next
+   attempt's claim surfaces the refusal instead. *)
+(* The retry is always a fresh start. A resume sends the vendor session the
+   same prompt at every capacity, so only a start carries the shrunk range;
+   an attempt bound to its previous session (a Gate continuation) is never
+   authorized to shrink-retry, see [context_overflow_retry_safe]. *)
+let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ()
+  =
+  match Session_store.load ~base_path ~keeper_name with
+  | Error _ -> ()
+  | Ok
+      ( Some
+          ({ Session_store.phase = Recovery_required
+                           { failure = Input_rejected Bootstrap_floor_exceeded
+                           ; recovery_id
+                           ; _
+                           }
+             ; runtime_id = stored_runtime_id
+             ; _
+             } as expected ) )
+    when String.equal stored_runtime_id runtime_id ->
+    (match
+       Session_store.resolve_recovery
+         ~base_path
+         ~keeper_name
+         ~expected
+         ~recovery_id
+         ~resolution:Session_store.Restart_fresh
+         ~resolved_by:"context-overflow-shrink-retry"
+         ~resolved_at:(Time_compat.now ())
+     with
+     | Ok _ -> ()
+     | Error _ -> ())
+  | Ok None
+  | Ok
+      (Some
+        { Session_store.phase =
+            ( Ready | Start _ | Active _ | Turn_inflight _ | Settled _ )
+        ; _
+        })
+  | Ok
+      (Some
+        { Session_store.phase =
+            Recovery_required
+              { failure =
+                  ( Pre_dispatch_failed
+                  | Transient_spawn_failed
+                  | Owner_stopped_turn
+                  | Retryable_turn_failed
+                  | Transport_interrupted
+                  | Protocol_failed
+                  | Provider_rejected
+                  | Input_rejected (Bootstrap_floor_exceeded | Effect_fenced)
+                  | Host_hook_failed
+                  | State_persistence_failed
+                  | Process_restarted
+                  | Vendor_session_full _ )
+              ; _
+              }
+        ; _
+        }) -> ()
+;;
+
+(* The client reaches MASC tools through this handler, so entering it is the
+   observed fact that an effect was attempted. Record it before the call: the
+   handler may commit and then raise or be cancelled, and observing only its
+   return would reopen a duplicate-effect window. *)
+let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
+  { tool with
+    Host.call =
+      (fun ~call_id input ->
+        Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted;
+        tool.call ~call_id input)
+  }
+;;
+
+let note_transport_uncertainty effect_disposition =
+  Atomic.compare_and_set
+    effect_disposition
+    Keeper_provider_attempt_effect.No_effect_observed
+    Keeper_provider_attempt_effect.Observation_unavailable
+  |> ignore
+;;
+
+let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~quota_scope ~keeper_name
+    ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+    ~tools ~loading_plan ~initial_messages ~model_input_projection_for
+    ~on_transmitted_model_input ~hooks ~context_injector
+    ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
+    ~context_overflow_retry_safe
+    ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
+    ~on_provider_retry ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.claude_code) =
+  on_results_ready None;
+  context_overflow_retry_safe := false;
+  match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
+  | None, _ ->
+    Error
+      (config_error
+         ~field:"eio_env"
+         "Claude Code runtime requires the initialized Eio standard environment")
+  | _, None ->
+    Error
+      (config_error
+         ~field:"eio_clock"
+         "Claude Code runtime requires the initialized Eio clock")
+  | Some env, Some clock ->
+    let hooks =
+      match hooks with
+      | Some hooks -> hooks
+      | None -> Agent_core.Hooks.empty
+    in
+    let receipts =
+      Option.map
+        (fun notify ->
+           Keeper_official_client_tool_receipts.create
+             ~delivery:Keeper_official_client_tool_receipts.Immediate
+             ~notify)
+        on_tool_execution
+    in
+    let hooks =
+      match receipts with
+      | Some receipts -> Keeper_official_client_tool_receipts.hooks receipts hooks
+      | None -> hooks
+    in
+    let owner_epoch = Session_store.process_epoch () in
+    let* stored_session =
+      match Session_store.load ~base_path ~keeper_name with
+      | Ok session -> Ok session
+      | Error detail ->
+        Error (internal_error ("Claude Code session binding load failed: " ^ Session_store.read_error_to_string detail))
+    in
+    let* stored_session =
+      match stored_session with
+      | Some ({ phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
+        (match
+           Session_store.reconcile_process_restart
+             ~base_path
+             ~keeper_name
+             ~expected
+             ~current_owner_epoch:owner_epoch
+             ~required_at:(Time_compat.now ())
+         with
+         | Ok reconciled -> Ok (Some reconciled)
+         | Error detail ->
+           Error (config_error ~field:"official_client_session.phase" detail))
+      | None | Some { phase = (Ready | Recovery_required _ | Settled _); _ } ->
+        Ok stored_session
+    in
+    let* claim_plan =
+      match
+        Session_store.plan_claim
+          ~expected:stored_session
+          ~client_kind:Claude_code
+          ~runtime_id
+      with
+      | Ok plan -> Ok plan
+      | Error error -> Error (Session_store.core_error_of_claim_error error)
+    in
+    let* native_posture =
+      Host.resolve_native_posture
+        ~posture_source:
+          (Runtime_native_tools.posture_source_of_required required_native_posture)
+        ~base_path
+        ~keeper_name
+        ~client_label:"Claude Code"
+        ~default:Runtime_native_tools.claude_code_default
+        ~none_supported:(Runtime_execution.supports_native_none (Claude_code config))
+    in
+    (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
+    let tool_surface_sha256 =
+      Session_store.tool_surface_sha256
+        ?account_home:(Runtime_claude_code.effective_account_home config.account_home)
+        ~native_posture tools
+    in
+    let* () = match official_client_continuation with
+      | None -> Ok ()
+      | Some checkpoint ->
+        Keeper_official_client_session_store.validate_continuation ~checkpoint
+          ~expected:stored_session ~client_kind:Claude_code ~runtime_id ~tool_surface_sha256
+        |> Result.map_error (config_error ~field:"official_client_session.gate_continuation") in
+    let claim_plan =
+      Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
+    in
+    let session_mode =
+      match claim_plan.previous_settlement with
+      | None -> Runtime_claude_code.Start
+      | Some { session_id; _ } -> Runtime_claude_code.Resume { session_id }
+    in
+    let turn_count = claim_plan.turn_count in
+    let* historical_task_message = match official_task_reference with
+      | None -> Ok None
+      | Some reference -> Keeper_official_task_reference.message
+          ~current:official_client_continuation reference
+        |> Result.map Option.some
+        |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+    let initial_messages = Option.to_list historical_task_message @ initial_messages in
+    let* prepared =
+      Host.prepare_turn
+        ~composed_context
+        ~configured_reasoning_effort:
+          (Runtime_inference.resolve_reasoning_effort ~runtime_id)
+        ~runtime_label
+        ~keeper_name
+        ~turn_count
+        ~system_prompt
+        ~tools
+        ~initial_messages
+        ~model_input_projection:(model_input_projection_for
+          ~history_prefix:(Option.to_list historical_task_message) session_mode)
+        ~hooks:(Some hooks)
+    in
+    let* () = Keeper_official_task_reference.require_preserved
+      ~reference:historical_task_message prepared.messages
+      |> Result.map_error (config_error ~field:"official_client_session.task_reference") in
+    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+      |> Result.map_error internal_error in
+    let prepared = {prepared with Host.messages = prepared.messages
+      @ Option.to_list (Keeper_client_tool_outbox.context_message tool_outbox)} in
+    let* system_messages, history = project_messages prepared.messages in
+    let* goal, images =
+      match goal_blocks with
+      | None -> Ok (goal, [])
+      | Some blocks ->
+        let* text, images =
+          Host.text_and_images_of_blocks
+            ~media_store ~runtime_label ~field:"goal_blocks" blocks
+        in
+        Ok
+          ( text
+          , List.map
+              (fun (image : Host.image_block) ->
+                { Runtime_claude_code.media_type = image.Host.media_type
+                ; base64_data = image.Host.base64_data
+                })
+              images )
+    in
+    let snapshot_messages =
+      List.filter (fun message -> not (Host.is_composed_system_context message))
+        prepared.messages in
+    (* Claude Code resumes with the system prompt it recorded at the session's
+       first launch ([--system-prompt-snapshot on], pinned by
+       [Runtime_claude_code.command]): every later
+       request and resume sends that record as-is until the conversation is
+       compacted, whatever [--system-prompt-file] holds. What changes per turn
+       or per operation -- the context carrier's blocks, the Librarian working
+       state and the historical task reference ({!Host.is_carried_on_resume})
+       -- is therefore sent in front of the resume prompt, and the canonical
+       conversation, which the vendor session already holds, is not sent. The
+       session also keeps every resume prompt as history, so a carried context
+       goes out only when the session does not already hold it as sent
+       ({!Host.resume_prompt}). What it holds is read from the frontier the
+       resumed settlement acknowledged; a start holds everything it composed.
+       The frontier and the input report say so. *)
+    let composed_context = prepared.composed_context in
+    let prompt, held_context =
+      match session_mode with
+      | Runtime_claude_code.Start ->
+        ( Host.start_prompt prepared (initial_turn_prompt ~history ~goal)
+          |> Keeper_context_submission_link.text
+        , Host.start_held_context ?composed_context prepared.messages )
+      | Runtime_claude_code.Resume _ ->
+        let delivery =
+          Host.resume_prompt
+            ~goal
+            ~held:(Session_store.held_context_for_resume claim_plan ~expected:stored_session)
+            ?composed_context
+            prepared.messages
+        in
+        delivery.prompt, delivery.held_context
+    in
+    let context_frontier : Session_store.context_frontier =
+      {message_count=List.length snapshot_messages;
+       delivery=(match session_mode with
+         | Start -> Prepared_start_context
+         | Resume _ -> Held_by_vendor_session);
+       acknowledged_turn=None; held_context} in
+    let report_transmitted_input () =
+      on_transmitted_model_input
+        (match session_mode with
+         | Runtime_claude_code.Start -> Host.Whole_input_transmitted prepared.messages
+         | Runtime_claude_code.Resume _ -> Host.Held_by_client_session)
+    in
+    (* A resume file only takes effect once the conversation is compacted and
+       the client records a new prompt. It keeps out what the resume prompt
+       carries, so that record never holds a stale copy of it. *)
+    let system_file_messages =
+      match session_mode with
+      | Runtime_claude_code.Start -> system_messages
+      | Runtime_claude_code.Resume _ ->
+        prepared.messages
+        |> List.filter_map (fun (message : Agent_core.Types.message) ->
+          match message.role with
+          | Agent_core.Types.System when not (Host.is_carried_on_resume message) ->
+            Some (Host.encode_history_message message)
+          | Agent_core.Types.System
+          | Agent_core.Types.User
+          | Agent_core.Types.Assistant
+          | Agent_core.Types.Tool -> None)
+    in
+    (* [None] means "masc named no system prompt, take the client's built-in
+       one" since #33072 stopped passing [--system-prompt ""]. The probe and
+       fusion callers build [None] directly and do not pass through this
+       path. This composition always carries [prepared.system_prompt], which
+       [Host.prepare_turn] refused when blank, so the joined text is never
+       empty (#33165). *)
+    let system_prompt =
+      Some
+        ((prepared.system_prompt :: system_file_messages)
+         |> List.filter (fun text -> String.trim text <> "")
+         |> String.concat "\n\n"
+         |> String.trim)
+    in
+    let client_config : Runtime_claude_code.config =
+      { cli_path = config.cli_path
+      ; account_home = config.account_home
+      ; cwd = base_path
+      ; model = config.model
+      ; native = native_posture
+      ; system_prompt
+      ; admission_timeout_s = config.timeout_s
+      ; timeout_s = Runtime_inference.resolve_turn_timeout_s_or ~runtime_id ~default:config.timeout_s
+        (* A keeper turn is a conversation, not a schema contract: nothing
+           downstream parses its text against a domain schema. *)
+      ; output_schema = None
+      }
+    in
+    let terminal_error = ref None in
+    let* (host_dynamic_tools, _) =
+      Host.dynamic_tools
+        ~result_scope:None
+        ~content_transport:Runtime_official_client_tool.Mcp
+        ~accepts_image_input
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
+        ~runtime_label
+        ~keeper_name
+        ~turn_count
+        ~tools:prepared.tools
+        ~loading_plan
+        ~hooks
+        ~event_bus
+        ~context_injector
+        ~context
+        ~terminal_effect_state
+        ~terminal_error
+        ~pre_tool_rejects
+        ~raw_trace_run:None
+        ?on_tool_boundary:on_official_client_tool_boundary
+        ~on_result_handoff:on_official_client_result_handoff
+        ()
+    in
+    let dynamic_tools =
+      List.map (recording_effect_attempt ~effect_disposition) host_dynamic_tools
+    in
+    let* () =
+      match
+        Runtime_claude_code.validate_turn
+          ~dynamic_tools
+          ~session_mode
+          client_config
+          ~prompt
+          ~images
+      with
+      | Ok () -> Ok ()
+      | Error error -> Error (claude_error_to_core_error error)
+    in
+    let process_mgr = (Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds) in
+    let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
+    let probe_config =
+      bounded_probe_config ~fallback_timeout_s:config.timeout_s client_config
+    in
+    let* admitted_subscription =
+      match
+        Runtime_claude_code.probe_subscription
+          ~mgr:process_mgr
+          ~clock
+          ~cwd:process_cwd
+          probe_config
+      with
+      | Ok subscription -> Ok subscription
+      | Error error -> Error (claude_error_to_core_error error)
+    in
+    (* Snap the operator-declared effort so a value this lane cannot send does
+       not fail the turn — the same posture as the Codex lane's catalog clamp,
+       so which lane a keeper runs on no longer decides whether a config value
+       is survivable. Two layers because they answer different owners: the
+       catalog clamp obeys the model row (no-op today for anthropic rows,
+       whose accepted set the capability layer withholds), and
+       [cli_admitted_reasoning_effort] obeys the CLI's own vocabulary
+       ([minimal] -> [low], [ultra] -> [max]). The same value feeds the raw_trace start record
+       and the command line so observation matches the wire. *)
+    let effective_reasoning_effort =
+      Host.effective_reasoning_effort
+        ~runtime_label
+        ~keeper_name
+        ~runtime_id
+        ~model_id:config.model
+        ~requested:prepared.reasoning_effort
+      |> Option.map Runtime_claude_code.cli_admitted_reasoning_effort
+    in
+    (match prepared.reasoning_effort, effective_reasoning_effort with
+     | Some asked, Some snapped
+       when Llm_provider.Reasoning_effort.compare asked snapped <> 0 ->
+       Log.Keeper.info
+         ~keeper_name
+         "%s reasoning effort snapped to the CLI vocabulary: model=%s asked=%s effective=%s"
+         runtime_label
+         (Option.value config.model ~default:runtime_id)
+         (Llm_provider.Reasoning_effort.to_string asked)
+         (Llm_provider.Reasoning_effort.to_string snapped)
+     | _ -> ());
+    let raw_trace_run =
+      Host.start_raw_trace
+        ~keeper_name
+        ~raw_trace
+        ~prompt
+        ?model:config.model
+        ?reasoning_effort:
+          (Option.map
+             Llm_provider.Reasoning_effort.to_string
+             effective_reasoning_effort)
+        ()
+    in
+    let* (host_dynamic_tools, result_producer) =
+      Host.dynamic_tools
+        ~result_scope:(Some result_scope)
+        ~base_path
+        ~content_transport:Runtime_official_client_tool.Mcp
+        ~accepts_image_input
+        (* These lanes drive a provider CLI that has no place to show an
+           operator prompt mid-turn, so a decision asking for one is rejected
+           rather than admitted. *)
+        ~tool_approval:None
+        ~runtime_label
+        ~keeper_name
+        ~turn_count
+        ~tools:prepared.tools
+        ~loading_plan
+        ~hooks
+        ~event_bus
+        ~context_injector
+        ~context
+        ~terminal_effect_state
+        ~terminal_error
+        ~pre_tool_rejects
+        ~raw_trace_run
+        ?on_tool_boundary:on_official_client_tool_boundary
+        ~on_result_handoff:on_official_client_result_handoff
+        ()
+    in
+    let produced_results = ref None in
+    let close_delivery_frontier () =
+      if Option.is_none !produced_results then
+        produced_results := Option.map Keeper_client_tool_outbox.close_delivery_frontier result_producer
+    in
+    let natural_completion = ref false in
+    let dynamic_tools =
+      List.map (recording_effect_attempt ~effect_disposition) host_dynamic_tools
+    in
+    let* claimed_session =
+      match
+        Session_store.claim_with_context_frontier
+          ~context_frontier:(Some context_frontier)
+          ~base_path
+          ~keeper_name
+          ~expected:stored_session
+          ~client_kind:Claude_code
+          ~owner_epoch
+          ~runtime_id
+          ~tool_surface_sha256
+          ~updated_at:(Time_compat.now ())
+      with
+      | Ok session -> Ok session
+      | Error detail ->
+        let error = internal_error ("Claude Code session claim failed: " ^ detail) in
+        Host.finish_raw_error ~keeper_name raw_trace_run error;
+        Error error
+    in
+    let session_state = ref claimed_session in
+    (* Set when the client reports it compacted the conversation this turn. *)
+    let compacted = ref false in
+    (* A compacted conversation holds a summary, not the copies it was sent,
+       so the settlement records that it holds none and the next resume sends
+       every carried context again. *)
+    let settle_session ~session_id ~turn_id =
+      if !compacted
+      then
+        Session_store.settle_holding
+          ~held_context:[]
+          ~base_path
+          ~keeper_name
+          ~expected:!session_state
+          ~session_id
+          ~turn_id
+          ~updated_at:(Time_compat.now ())
+      else
+        Session_store.settle
+          ~base_path
+          ~keeper_name
+          ~expected:!session_state
+          ~session_id
+          ~turn_id
+          ~updated_at:(Time_compat.now ())
+    in
+    let recovery_failure = ref Session_store.Transport_interrupted in
+    let state_persistence_failed = ref false in
+    let update_session label transition =
+      match transition !session_state with
+      | Ok next ->
+        session_state := next;
+        Ok ()
+      | Error detail ->
+        state_persistence_failed := true;
+        recovery_failure := Session_store.State_persistence_failed;
+        Error (Printf.sprintf "Claude Code session %s failed: %s" label detail)
+    in
+    let require_recovery detail =
+      match !session_state with
+      | { Session_store.phase = (Ready | Settled _ | Recovery_required _); _ } ->
+        Ok ()
+      | ({ Session_store.phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
+        (match
+           Session_store.require_recovery
+             ~base_path
+             ~keeper_name
+             ~expected
+             ~failure:!recovery_failure
+             ~detail
+             ~required_at:(Time_compat.now ())
+         with
+         | Ok recovery ->
+           session_state := recovery;
+           Ok ()
+         | Error detail -> Error detail)
+    in
+    let settle_failed_claim detail =
+      match Session_store.failure_disposition !recovery_failure with
+      | Transient ->
+        (match !session_state with
+         | { phase = (Ready | Settled _ | Recovery_required _); _ } -> Ok ()
+         | ({ phase = (Start _ | Active _ | Turn_inflight _); _ } as expected) ->
+           (match
+              Session_store.release_transient
+                ~base_path
+                ~keeper_name
+                ~expected
+                ~failure:!recovery_failure
+                ~released_at:(Time_compat.now ())
+            with
+            | Ok released ->
+              session_state := released;
+              Ok ()
+            | Error detail -> Error detail))
+      | Ambiguous | Fatal -> require_recovery detail
+    in
+    (* Same gap #28101 closed for Codex, on the other official-client path. A
+       claude_code turn resumes a server-side session, so the accumulated
+       conversation is not held here and cannot be measured from this process.
+       What this process does send every turn - the prompt, the system prompt
+       and the tool declarations - is measurable, and a live refusal says that
+       part alone is the problem: a live Keeper was told the request is ~2,226,104
+       tokens against a 1,000,000 limit while "this conversation is only
+       ~1,094,432 tokens - the rest is system prompt, tool definitions, and
+       attachment content" (#27427). Recording the half this process controls
+       is what lets that sentence be checked against a number rather than
+       believed. Sizes are bytes this process holds, not provider tokens. *)
+    Log.Keeper.info
+      ~keeper_name
+      "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d \
+       tools=%d tool_surface_bytes=%d"
+      runtime_label
+      (match session_mode with
+       | Runtime_claude_code.Start -> "start"
+       | Runtime_claude_code.Resume _ -> "resume")
+      (String.length prompt)
+      (Option.fold ~none:0 ~some:String.length client_config.Runtime_claude_code.system_prompt)
+      (List.length dynamic_tools)
+      (Runtime_claude_code.dynamic_tool_bytes dynamic_tools);
+    let started_at = Time_compat.now () in
+    let settle_host_stop ~latest_request_input stop =
+      match (!session_state).Session_store.phase with
+      | Turn_inflight { session_id; turn_id; _ } ->
+        let turn_id =
+          Option.value
+            turn_id
+            ~default:(host_stop_turn_identity ~session_id ~turn_count)
+        in
+        let* () =
+          match turn_id, (!session_state).phase with
+          | turn_id, Turn_inflight { turn_id = None; _ } ->
+            update_session "host-stop turn identity transition" (fun expected ->
+              Session_store.mark_turn_started
+                ~base_path
+                ~keeper_name
+                ~expected
+                ~session_id
+                ~turn_id
+                ~turn_count
+                ~updated_at:(Time_compat.now ()))
+            |> Result.map_error internal_error
+          | _, Turn_inflight { turn_id = Some _; _ } -> Ok ()
+          (* The phase carries six constructors and the entry guard admits
+             three, so this arm is reachable by [Start] and [Active] as well as
+             by anything a concurrent transition leaves behind. It was
+             [assert false]: a claim of unreachability the compiler cannot
+             check, in a chain that already returns [Error]. Returning one
+             loses nothing the assert provided and does not take the process
+             with it -- masc#28983's shape, where a wildcard promise became an
+             Assert_failure at run time. *)
+          | ( _
+            , (( Session_store.Ready
+               | Session_store.Start _
+               | Session_store.Active _
+               | Session_store.Recovery_required _
+               | Session_store.Settled _ ) as other) ) ->
+            let phase_name =
+              match other with
+              | Session_store.Ready -> "Ready"
+              | Session_store.Start _ -> "Start"
+              | Session_store.Active _ -> "Active"
+              | Session_store.Turn_inflight _ -> "Turn_inflight"
+              | Session_store.Recovery_required _ -> "Recovery_required"
+              | Session_store.Settled _ -> "Settled"
+            in
+            Error
+              (internal_error
+                 (Printf.sprintf
+                    "host-stop turn identity: expected Turn_inflight, phase is %s"
+                    phase_name))
+        in
+        let projected =
+          Host.host_stop_result
+            ~runtime_id
+            ~model:(Option.value config.model ~default:runtime_id)
+            ~session_id
+            ~turn_id
+            ~provider_turn_ordinal:turn_count
+            ~turns_used:turn_count
+            ~latency_ms:
+              (Some (Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)))
+            ~request_context:
+              (Option.map request_context_of_request_input latest_request_input)
+            stop
+        in
+        let* () =
+          match projected with
+          | Error _ -> Ok ()
+          | Ok result ->
+            Host.invoke_turn_completion_hooks
+              ~runtime_label
+              ~keeper_name
+              ~turn_count
+              ~hooks
+              result.response
+        in
+        recovery_failure := Session_store.State_persistence_failed;
+        (match settle_session ~session_id ~turn_id with
+         | Error detail ->
+           Error
+             (internal_error
+                ("Claude Code host-stop settlement failed: " ^ detail))
+         | Ok settled ->
+           session_state := settled;
+           on_session_settled settled;
+           projected)
+      | Ready | Start _ | Active _ | Recovery_required _ | Settled _ ->
+        Error
+          (internal_error
+             "Claude Code host stop arrived without an acknowledged provider turn")
+    in
+    let settle_cancellation exn =
+      let backtrace = Printexc.get_raw_backtrace () in
+      recovery_failure
+        := (if Keeper_owner_signals.is_owner_cancel_reason exn then
+              Session_store.Owner_stopped_turn
+            else Session_store.Transport_interrupted);
+      let detail = "Claude Code turn cancelled: " ^ Printexc.to_string exn in
+      (match Eio.Cancel.protect (fun () -> settle_failed_claim detail) with
+       | Ok () -> ()
+       | Error recovery_detail ->
+         Log.Keeper.error
+           ~keeper_name
+           "Claude Code cancellation recovery persistence failed: %s"
+           recovery_detail);
+      Eio.Cancel.protect (fun () ->
+        Host.finish_raw_error ~keeper_name raw_trace_run (internal_error detail));
+      Printexc.raise_with_backtrace exn backtrace
+    in
+    let turn_result =
+      (* This scope owns one actual CLI invocation, not the routed candidate or
+         its capacity retries. Input observations precede native registration. *)
+      let task_binding = match on_native_task_observation, on_child_content_observation with
+        | None, None -> None
+        | Some _, _ | _, Some _ -> Some (Keeper_claude_task_binding.create ()) in
+      let on_input_observation
+          (observation : Runtime_claude_input_attribution.observation) =
+        (* An interrupted user-message write has unknown delivery even when
+           its timeout escapes before [on_prompt_sent]. This safety evidence
+           is needed even when no native task/child observer is installed. *)
+        (match observation.phase with
+         | Runtime_claude_input_attribution.Write_unknown ->
+           note_transport_uncertainty effect_disposition
+         | Runtime_claude_input_attribution.Prepared
+         | Runtime_claude_input_attribution.Written
+         | Runtime_claude_input_attribution.Consumed
+         | Runtime_claude_input_attribution.Settled _ -> ());
+        Option.iter
+          (fun binding -> Keeper_claude_task_binding.observe_input binding observation)
+          task_binding
+      in
+      let on_bound_task = match task_binding, on_native_task_observation with
+        | Some binding, Some observe -> Some (fun observation ->
+            match Keeper_claude_task_binding.bind_task binding observation with
+            | Ok bound -> observe bound
+            | Error reason -> Log.Runtime_agent.debug
+                "Claude native task input binding unavailable: %s"
+                (Keeper_claude_task_binding.rejection_to_string reason))
+        | None, _ | _, None -> None in
+      let on_bound_child = match task_binding, on_child_content_observation with
+        | Some binding, Some observe -> Some (fun content ->
+            observe (Keeper_claude_task_binding.observe_child binding content))
+        | None, _ | _, None -> None in
+      let on_stream_event =
+        claude_stream_callback ?receipts ?on_native_tool_progress ?on_native_tool_completion ?on_provider_retry
+          ?on_native_task_observation:on_bound_task
+          ?on_child_content_observation:on_bound_child
+          ~keeper_name ~quota_scope ~raw_trace_run ~turn_count ~on_native_action
+          ~on_usage_report
+          ~position:
+            (match session_mode with
+             | Runtime_claude_code.Start -> Keeper_usage_resolution.Fresh
+             | Runtime_claude_code.Resume _ -> Keeper_usage_resolution.Resumed)
+          ~on_compacted:(fun () -> compacted := true)
+          on_event
+      in
+      try
+        let client_result =
+           Runtime_claude_code.run_turn
+             ~mgr:process_mgr
+             ~clock
+             ~cwd:process_cwd
+             ~dynamic_tools
+             ?reasoning_effort:effective_reasoning_effort
+             ~session_mode
+             ~admitted_subscription
+             ~on_session_ready:(fun ~session_id ->
+               update_session "active transition" (fun expected ->
+                 Session_store.mark_active
+                   ~base_path
+                   ~keeper_name
+                   ~expected
+                   ~session_id
+                   ~updated_at:(Time_compat.now ())))
+             ~on_prompt_sent:(fun () ->
+               note_transport_uncertainty effect_disposition;
+               report_transmitted_input ())
+             ~on_context_submission:(fun submission ->
+               Host.record_context_submission ~keeper_name ~raw_trace_run
+                 ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
+                 ~submission:(Runtime_claude_code.context_submission_to_json submission) ())
+             ~on_turn_starting:(fun ~session_id ->
+               update_session "turn-starting transition" (fun expected ->
+                 Session_store.mark_turn_starting
+                   ~base_path
+                   ~keeper_name
+                   ~expected
+                   ~session_id
+                   ~updated_at:(Time_compat.now ())))
+             ~on_turn_started:(fun ~session_id ~turn_id ->
+               update_session "turn-started transition" (fun expected ->
+                 Session_store.mark_turn_started
+                   ~base_path
+                   ~keeper_name
+                   ~expected
+                   ~session_id
+                   ~turn_id
+                   ~turn_count
+                   ~updated_at:(Time_compat.now ())))
+             ~on_terminal_received:close_delivery_frontier
+             ?on_stream_event ~on_input_observation
+             client_config
+             ~prompt
+             ~images
+        in
+        (match client_result with
+         | Error (Runtime_claude_code.Stopped_by_host { stop; latest_request_input }) ->
+           recovery_failure := Session_store.Host_hook_failed;
+           (match stop, !terminal_error with
+            | Host.Terminal_tool_boundary _, _
+          when Option.is_some on_official_client_tool_boundary ->
+              settle_host_stop ~latest_request_input stop
+            | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+              , Some detail ) -> Error (internal_error detail)
+            | ( (Host.Repeated_tool_call _ | Host.Terminal_tool_boundary _)
+              , None ) -> settle_host_stop ~latest_request_input stop)
+         | Error
+             (( Runtime_claude_code.Invalid_config _
+              | Runtime_claude_code.Spawn_failed _
+              | Runtime_claude_code.Protocol_error _
+              | Runtime_claude_code.Subscription_required _
+              | Runtime_claude_code.Unsupported_control_request _
+              | Runtime_claude_code.Turn_transport_interrupted _
+              | Runtime_claude_code.Context_window_exceeded _
+              | Runtime_claude_code.Turn_failed _
+              | Runtime_claude_code.Turn_failed_with_observation _
+              | Runtime_claude_code.Quota_blocked _
+              | Runtime_claude_code.Process_exited _
+              | Runtime_claude_code.Unhandled_exception _
+              | Runtime_claude_code.Timeout _ ) as error) ->
+           (* A resumed session is refused on the vendor's own conversation,
+              which a smaller masc range does not change: the resume prompt is
+              the same at every capacity. The retry is therefore a fresh start
+              carrying the shrunk range, which a Gate continuation forbids --
+              it must stay in its original session -- so that turn ends on the
+              typed overflow instead of respawning the same refused input. *)
+           context_overflow_retry_safe :=
+             (match session_mode, official_client_continuation, error with
+              | Runtime_claude_code.Resume _, Some _, _ -> false
+              | ( (Runtime_claude_code.Start | Runtime_claude_code.Resume _)
+                , (Some _ | None)
+                , Runtime_claude_code.Context_window_exceeded
+                    { tool_effect_attempted = false; response_emitted = false; _ } ) ->
+                true
+              | (Runtime_claude_code.Start, (Some _ | None), Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_})
+              | (Runtime_claude_code.Start, (Some _ | None), Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_})
+              | (Runtime_claude_code.Start, (Some _ | None), (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_failed _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _)))))))))))))
+              | (Runtime_claude_code.Resume _, None, Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_})
+              | (Runtime_claude_code.Resume _, None, Runtime_claude_code.Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_})
+              | (Runtime_claude_code.Resume _, None, (Runtime_claude_code.Invalid_config _ | (Runtime_claude_code.Spawn_failed _ | (Runtime_claude_code.Protocol_error _ | (Runtime_claude_code.Subscription_required _ | (Runtime_claude_code.Unsupported_control_request _ | (Runtime_claude_code.Turn_transport_interrupted _ | (Runtime_claude_code.Turn_failed _ | (Runtime_claude_code.Turn_failed_with_observation _ | (Runtime_claude_code.Stopped_by_host _ | (Runtime_claude_code.Quota_blocked _ | (Runtime_claude_code.Process_exited _ | (Runtime_claude_code.Unhandled_exception _ | Runtime_claude_code.Timeout _))))))))))))) -> false);
+           (* A provider can reject after the prompt was sent but before any
+              response or MCP tool effect. Preserve the typed no-effect fact so
+              failover is allowed for that narrow case.
+              An overflow with no activity is the same fact: when the halving
+              walk finds no view that fits, the lane moves to its next runtime
+              instead of fencing the turn as if the client might have acted.
+              An incomplete user-message write or post-admission exit marks
+              transport uncertainty without downgrading an observed effect. *)
+           (match error with
+            | Runtime_claude_code.Turn_failed_with_observation
+                { tool_effect_attempted = false; response_emitted = false; _ }
+            | Runtime_claude_code.Quota_blocked
+                { tool_effect_attempted = false; response_emitted = false; _ }
+            | Runtime_claude_code.Context_window_exceeded
+                { tool_effect_attempted = false; response_emitted = false; _ } ->
+              Atomic.set
+                effect_disposition
+                Keeper_provider_attempt_effect.No_effect_observed
+            | Runtime_claude_code.Turn_transport_interrupted _
+            | Runtime_claude_code.Process_exited { turn_admitted = true; _ } ->
+              note_transport_uncertainty effect_disposition
+            | Runtime_claude_code.Turn_failed_with_observation _
+            | Runtime_claude_code.Quota_blocked _
+            | Runtime_claude_code.Context_window_exceeded _
+            | Runtime_claude_code.Process_exited { turn_admitted = false; _ }
+            | Runtime_claude_code.Invalid_config _
+            | Runtime_claude_code.Spawn_failed _
+            | Runtime_claude_code.Protocol_error _
+            | Runtime_claude_code.Subscription_required _
+            | Runtime_claude_code.Unsupported_control_request _
+            | Runtime_claude_code.Turn_failed _
+            | Runtime_claude_code.Stopped_by_host _
+            | Runtime_claude_code.Unhandled_exception _
+            | Runtime_claude_code.Timeout _ -> ());
+           if not !state_persistence_failed
+           then
+             recovery_failure :=
+               recovery_failure_of_attempt
+                 ~session_mode
+                 ~gate_continuation:(Option.is_some official_client_continuation)
+                 error;
+           Error (claude_error_to_core_error error)
+         | Ok turn ->
+           natural_completion := true;
+           recovery_failure := Session_store.Protocol_failed;
+           let expected_resumed =
+             match session_mode with
+             | Runtime_claude_code.Start -> false
+             | Runtime_claude_code.Resume _ -> true
+           in
+           let* () =
+             if Bool.equal expected_resumed turn.resumed
+             then Ok ()
+             else
+               Error
+                 (internal_error
+                    "Claude Code reported a session mode different from the durable claim plan")
+           in
+           recovery_failure := Session_store.Host_hook_failed;
+           let* () =
+             match !terminal_error with
+             | None -> Ok ()
+             | Some detail -> Error (internal_error detail)
+           in
+           let latency_ms =
+             Int.of_float ((Time_compat.now () -. started_at) *. 1000.0)
+           in
+           (* The response usage is what the turn spent, from the result
+              frame; the newest request's input rides apart as the context it
+              occupied. *)
+           let usage, usage_scope =
+             match turn.usage.turn_total with
+             | Some total ->
+               Some (api_usage_of_turn_usage total), Runtime_usage_scope.Turn_total
+             | None -> None, Runtime_usage_scope.Usage_scope_unavailable
+           in
+           let request_context =
+             Option.map request_context_of_request_input turn.usage.latest_request_input
+           in
+           let response =
+             { Agent_core.Types.id = turn.turn_id
+             ; model = turn.model
+             ; stop_reason = EndTurn
+             ; content = [ Text turn.text ]
+             ; usage
+             ; telemetry =
+                 Some
+                   { Agent_core.Types.default_inference_telemetry with
+                     request_latency_ms = Some latency_ms
+                   ; canonical_model_id = Some turn.model
+                   }
+             }
+           in
+           let* () =
+             Host.invoke_turn_completion_hooks
+               ~runtime_label
+               ~keeper_name
+               ~turn_count
+               ~hooks
+               response
+           in
+           recovery_failure := Session_store.State_persistence_failed;
+           let* () =
+             match settle_session ~session_id:turn.session_id ~turn_id:turn.turn_id with
+             | Ok settled ->
+               session_state := settled;
+           on_session_settled settled;
+               Ok ()
+             | Error detail ->
+               Error
+                 (internal_error
+                    ("Claude Code session settlement failed: " ^ detail))
+           in
+           let capture, _metrics =
+             Runtime_observation.runtime_metrics_for_candidates ~runtime_id ~keeper_name ()
+           in
+           Runtime_observation.record_attempt_terminal
+             capture
+             ~model_id:turn.model
+             ~latency_ms:(Some latency_ms)
+             ~error:None;
+           let runtime_observation =
+             Runtime_observation.runtime_observation_with_metrics
+               ~selected_model:(Some turn.model)
+               ~capture
+               ~attempt_details_source:"claude_code"
+               ~agent_core_internal_runtime_allowed:false
+               ~usage_scope
+               ?request_context
+               ()
+           in
+           Ok
+             { Runtime_agent.response
+             ; checkpoint = None
+             ; session_id = turn.session_id
+             ; session_resumed = None
+             ; turns = turn_count
+             ; trace_ref = None
+             ; run_validation = None
+             ; runtime_observation = Some runtime_observation
+             ; cooperative_boundary = None
+             ; stop_reason = Completed { provider_turn_ordinal = turn_count }
+             })
+      with
+      (* A stop the owner raised is not an ambiguity: it knows the turn did
+         not finish and why. Only an unexplained cancellation needs an
+         operator to adjudicate what the transport left behind (#28012). *)
+      | Eio.Cancel.Cancelled _ as exn -> settle_cancellation exn
+      | exn when Keeper_owner_signals.is_owner_cancel_reason exn ->
+        settle_cancellation exn
+    in
+    let turn_result =
+      let* result = turn_result in
+      let produced = match !natural_completion with
+        | true -> Option.to_list !produced_results
+        | false -> [] in
+      on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption (tool_outbox :: produced)));
+      Ok result
+    in
+    let turn_result =
+      match turn_result with
+      | Ok result -> Ok (Host.finish_raw_success ~keeper_name raw_trace_run result)
+      | Error error ->
+        Host.finish_raw_error ~keeper_name raw_trace_run error;
+        Error error
+    in
+    (match turn_result with
+     | Ok _ -> turn_result
+     | Error original_error ->
+       let original_detail = Agent_core.Error.to_string original_error in
+       (match Eio.Cancel.protect (fun () -> settle_failed_claim original_detail) with
+        | Ok () -> turn_result
+        | Error recovery_detail ->
+          Error
+            (internal_error
+               (Printf.sprintf
+                  "Claude Code turn failed and recovery state persistence also failed: original=%s recovery=%s"
+                  original_detail
+                  recovery_detail))))
+;;
+
+let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+    ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
+    ~on_transmitted_model_input ~hooks ~context_injector
+    ~context
+    ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
+    ?on_model_input_window_observation
+    ?carried_front_seed
+    ?librarian_front
+    ?on_carried_front
+    ~turn_start
+    ?on_official_client_tool_boundary
+    ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_tool_progress ?on_provider_retry ?on_native_tool_completion ?on_child_content_observation ?on_native_task_observation
+    ?on_native_action
+    ?on_usage_report
+    ?on_tool_execution
+    ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.claude_code) () =
+  let quota_scope =
+    Runtime_quota_window.scope_of_claude_code_home
+      (Runtime_claude_code.effective_account_home config.account_home)
+  in
+  let settled_session = Atomic.make None in
+  let pending_result_receipts = Atomic.make None in
+  let on_results_ready value = Atomic.set pending_result_receipts value in
+  let on_session_settled value = Atomic.set settled_session (Some value) in
+  let effect_disposition =
+    Atomic.make Keeper_provider_attempt_effect.No_effect_observed
+  in
+  let observed_next_shrink_capacity_bytes = ref None in
+  let observed_floor_capacity_bytes = ref None in
+  let context_overflow_retry_safe = ref false in
+  let result =
+    Eio.Switch.run (fun result_scope ->
+    Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+      Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
+        ?on_memory_capacity_refusal
+        ~on_memory_retry:(fun () ->
+          resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
+        (* The provider's typed overflow narrows the initially unbounded turn. *)
+        ~starting_capacity:unbounded_model_input_capacity_bytes
+        ~same_run_retry_authorized:(fun () ->
+          match input_source with
+          | Keeper_request_source.Completion_review -> false
+          | Keeper_request_source.Keeper_history _ -> !context_overflow_retry_safe)
+        ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
+          Option.value
+            !observed_next_shrink_capacity_bytes
+            ~default:capacity)
+        ~final_shrink_capacity:(fun ~capacity:_ ->
+          !observed_floor_capacity_bytes)
+        (* This runtime shrinks to the size the provider itself named
+           ([observed_next_shrink_capacity_bytes]), not to a fraction of a
+           declared request-body cap, and it charges no MASC-side reserve
+           against that size. There is no local account that could rule the
+           next size out, so the provider's own target stands. *)
+        ~shrink_admits_history:(fun ~capacity:_ -> true)
+        ~on_shrink_retry:
+          (fun ~shrink_attempt ~previous_capacity:previous_capacity_bytes ~capacity:capacity_bytes ->
+            resolve_input_rejected_for_shrink_retry
+              ~base_path
+              ~keeper_name
+              ~runtime_id
+              ();
+            Log.Keeper.warn
+              ~keeper_name
+              "Claude typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
+              shrink_attempt
+              previous_capacity_bytes
+              capacity_bytes)
+        ~attempt:(fun ~capacity:capacity_bytes ->
+          run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
+          ~required_native_posture
+            ~runtime_id
+            ~quota_scope
+            ~keeper_name
+    ~pre_tool_rejects
+            ~base_path
+            ~goal
+            ~goal_blocks
+            ~system_prompt
+            ~tools
+            ~loading_plan
+            ~initial_messages
+            (* A resume still projects: the Librarian working state it
+               carries in front of the prompt is placed by this projection.
+               It reports no window and no carried front, though -- the range
+               it measures is not what a resume sends. *)
+            ~model_input_projection_for:(fun ~history_prefix session_mode ->
+              let observed callback =
+                match session_mode with
+                | Runtime_claude_code.Start -> callback
+                | Runtime_claude_code.Resume _ -> None
+              in
+              Some
+                (fun ~tools ->
+                  let argument_projection = match session_mode with
+                    | Runtime_claude_code.Start ->
+                      Option.bind argument_source (fun source ->
+                        Host.argument_projection source ~tools ~history_prefix)
+                    | Runtime_claude_code.Resume _ -> None in
+                  model_input_projection_for_capacity ~input_source
+                   ?argument_projection
+                   ~capacity_bytes
+                   ~observed_next_shrink_capacity_bytes
+                   ~observed_floor_capacity_bytes
+                   ?on_model_input_window_observation:
+                     (observed on_model_input_window_observation)
+                   ?carried_front_seed
+                   ?librarian_front
+                   ?on_carried_front:(observed on_carried_front)
+                   ~turn_start
+                   ~keeper_name
+                   ~runtime_id
+                   model_input_projection))
+            (* Reported inside the attempt rather than from the projection.
+               The projection cannot see [session_mode], and on this lane that
+               is the whole question: it runs on every turn, but only a [Start]
+               puts its result on the wire. A lane that reports nothing wrote
+               every Claude Code turn's input attribution as zero
+               (masc#32995); a lane that reports the projection on a resume
+               attributes history the client already holds. *)
+            ~on_transmitted_model_input
+            ~hooks
+          ~context_injector
+          ~context
+          ~terminal_effect_state
+          ~event_bus
+            ~raw_trace
+            ~on_event
+            ~effect_disposition
+            ~context_overflow_retry_safe
+        ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
+            ~on_usage_report
+            ~on_provider_retry
+            ~on_tool_execution
+            ~config)
+        ()))
+  in
+  { result
+  ; settled_session = Atomic.get settled_session
+  ; pending_result_receipts = (match result with
+      | Ok _ -> Atomic.get pending_result_receipts
+      | Error _ -> None)
+  ; effect_disposition = Atomic.get effect_disposition
+  }
+;;

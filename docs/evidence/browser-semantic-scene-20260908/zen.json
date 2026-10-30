@@ -1,0 +1,27 @@
+{
+  "checks": [
+    "scene does not mutate page DOM/CSS",
+    "Unicode survives as real text",
+    "hidden text and password value absent",
+    "visibility override preserves visible descendant",
+    "raster fallback includes zero-font-size canvas",
+    "stable identity between reads",
+    "reordering does not retarget click",
+    "reference fill preserves exact Unicode and final LF",
+    "replaced node fails rather than clicking replacement",
+    "replacement gets a new reference",
+    "same-URL reload rejects old document",
+    "same-URL reload gets new document ID"
+  ],
+  "scene_elapsed_ms": 14.23470804002136,
+  "scene_json_utf8_bytes": 2618,
+  "png_bytes": 38876,
+  "png_sha256": "3c71a224c90d7ba7e73f949a851cd4aa9ce4b7037a421db9a6bce0966d710338",
+  "scene_runtime_sha256": "a7bba147d180a4ff04ef1f27a6c7507d7f3ea72878b765dc5202c98ab59f59bd",
+  "scope": "real Gecko executes shared scripts; OCaml HTTP/TUI binary not measured by this probe",
+  "browser": {
+    "browserName": "firefox",
+    "browserVersion": "1.22b",
+    "platformName": "mac"
+  }
+}

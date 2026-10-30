@@ -1,0 +1,10 @@
+{
+  "kind": "simulate crash after task-space creation before receipt/binding commit",
+  "original_space_id": 3,
+  "retained_intent": {
+    "name": "MASC ego add-on proof 20261020",
+    "epoch": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+    "owner_identity": "0b5269c5-7af8-461b-831a-3171a4e5df26",
+    "native_name": "MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]"
+  }
+}

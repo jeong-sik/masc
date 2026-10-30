@@ -1,0 +1,252 @@
+# masc fleet-health alert rules (Grafana unified alerting, provisioned).
+#
+# Context: the legacy alert files (auth-credential / goal-loop-observe /
+# keeper-turn-fsm alerts.yml + slo.yml) were deleted with the retired
+# scrape backend in #20212 (RFC-0217) and never replaced. These rules
+# restore alerting on the OTel pipeline, scoped to the June-2026 freeze
+# incident signals (#20676 #20677 #20682 #20684).
+#
+# No contact point is provisioned: rules surface in the Grafana alert UI
+# (single-operator deployment); routing can be added later without
+# touching the rules.
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: masc-fleet-health
+    folder: MASC
+    interval: 1m
+    rules:
+      - uid: masc-eio-loop-lag
+        title: Eio main domain blocked (loop lag)
+        condition: C
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: >-
+            masc_eio_loop_lag_seconds sustained above 5s — the single Eio
+            domain is blocked; every keeper fiber is stalled with it
+            (fleet-freeze class: #20677 / #20684).
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: P4169E866C3094E38
+            model:
+              expr: max_over_time(masc_eio_loop_lag_seconds[1m])
+              refId: A
+              intervalMs: 60000
+              maxDataPoints: 300
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [5] }
+
+      - uid: masc-fleet-heartbeat-stall
+        title: Fleet heartbeat stall
+        condition: C
+        for: 5m
+        noDataState: Alerting
+        execErrState: Error
+        labels: { severity: critical }
+        annotations:
+          summary: >-
+            No keeper heartbeat successes across the fleet in 10 minutes.
+            NoData also alerts: a dead exporter and a frozen fleet look
+            identical from outside.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: P4169E866C3094E38
+            model:
+              expr: sum(increase(masc_keeper_heartbeat_successes_total[10m]))
+              refId: A
+              intervalMs: 60000
+              maxDataPoints: 300
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: lt, params: [1] }
+
+      - uid: masc-console-writer-blocked
+        title: Console writer blocked (queue filling)
+        condition: C
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: >-
+            masc_console_sink_queue_depth above half capacity — the console
+            fd is blocked (pty scrollback / copy-mode, #20684). Mirror
+            lines will drop at 8192; the file sink stays lossless.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 300, to: 0 }
+            datasourceUid: P4169E866C3094E38
+            model:
+              expr: masc_console_sink_queue_depth
+              refId: A
+              intervalMs: 60000
+              maxDataPoints: 300
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [4096] }
+
+      - uid: masc-store-growth
+        title: Telemetry store oversized
+        condition: C
+        for: 30m
+        noDataState: NoData
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: >-
+            A masc-root telemetry store exceeds 2 GiB. Reader cost scales
+            with store size (2026-06-09 freeze precursor; #20682) — prune
+            or rotate before the readers starve the domain again.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: P4169E866C3094E38
+            model:
+              expr: max(masc_store_bytes)
+              refId: A
+              intervalMs: 60000
+              maxDataPoints: 300
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [2147483648] }
+
+      - uid: masc-attempt-watchdog-fired
+        title: Attempt watchdog fired
+        condition: C
+        for: 0m
+        noDataState: NoData
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: >-
+            The 1800s safety-cap watchdog killed a stuck keeper attempt in
+            the last hour (masc_keeper_attempt_watchdog_fired_total).
+            Inspect the keeper's trace for a silent provider stream.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 3600, to: 0 }
+            datasourceUid: P4169E866C3094E38
+            model:
+              expr: sum(increase(masc_keeper_attempt_watchdog_fired_total[1h]))
+              refId: A
+              intervalMs: 60000
+              maxDataPoints: 300
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+
+      - uid: masc-discord-heartbeat-ack-timeout
+        title: Discord heartbeat ACK timeouts
+        condition: C
+        for: 0m
+        noDataState: NoData
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: >-
+            Discord gateway missed heartbeat ACKs in the last 10 minutes.
+            This is the direct reconnect root cause added after the Discord
+            disconnect fixes; inspect gateway logs before treating reconnects
+            as generic network noise.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: P4169E866C3094E38
+            model:
+              expr: sum(increase(masc_discord_gateway_ack_timeouts_total[10m]))
+              refId: A
+              intervalMs: 60000
+              maxDataPoints: 300
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [0] }
+
+      - uid: masc-chat-transport-failure
+        title: Keeper chat transport failures
+        condition: C
+        for: 0m
+        noDataState: NoData
+        execErrState: Error
+        labels: { severity: warning }
+        annotations:
+          summary: >-
+            Keeper chat transport failures were persisted in the last
+            10 minutes. These rows render to the operator but do not clear
+            the pending user message, so non-zero values explain
+            dropped-looking conversations that should retry on the next turn.
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: P4169E866C3094E38
+            model:
+              expr: sum(increase(masc_keeper_chat_transport_failures_total[10m]))
+              refId: A
+              intervalMs: 60000
+              maxDataPoints: 300
+          - refId: B
+            datasourceUid: __expr__
+            model: { type: reduce, expression: A, reducer: last, refId: B }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              refId: C
+              conditions:
+                - evaluator: { type: gt, params: [0] }

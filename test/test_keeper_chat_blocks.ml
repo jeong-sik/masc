@@ -1,0 +1,884 @@
+module B = Masc.Keeper_chat_blocks
+
+let yojson_testable =
+  Alcotest.testable
+    (fun fmt json -> Format.fprintf fmt "%s" (Yojson.Safe.to_string json))
+    ( = )
+
+let dropped_reason_testable =
+  Alcotest.testable
+    (fun fmt reason -> Format.pp_print_string fmt (B.dropped_http_url_reason_to_string reason))
+    ( = )
+
+let blocks_to_json_list blocks =
+  match B.blocks_to_yojson blocks with
+  | `List items -> items
+  | _ -> []
+
+let test_plain_text_becomes_escaped_text_block () =
+  let blocks = B.parse_text_to_blocks "hello <world>" in
+  Alcotest.(check int) "one block" 1 (List.length blocks);
+  Alcotest.(check (list yojson_testable))
+    "escaped html"
+    [ `Assoc [ ("t", `String "p"); ("html", `String "hello &lt;world&gt;") ] ]
+    (blocks_to_json_list blocks)
+
+let test_markdown_image_and_surrounding_text () =
+  let blocks = B.parse_text_to_blocks "before ![alt text](https://example.com/a.png) after" in
+  Alcotest.(check (list yojson_testable))
+    "image with surrounding text"
+    [
+      `Assoc [ ("t", `String "p"); ("html", `String "before ") ];
+      `Assoc
+        [
+          ("t", `String "image");
+          ("src", `String "https://example.com/a.png");
+          ("cap", `String "alt text");
+        ];
+      `Assoc [ ("t", `String "p"); ("html", `String " after") ];
+    ]
+    (blocks_to_json_list blocks)
+
+let test_bare_image_url_on_own_line () =
+  let blocks = B.parse_text_to_blocks "https://example.com/screen.webp" in
+  Alcotest.(check (list yojson_testable))
+    "image block"
+    [ `Assoc [ ("t", `String "image"); ("src", `String "https://example.com/screen.webp") ] ]
+    (blocks_to_json_list blocks)
+
+let test_standalone_non_image_url_becomes_link () =
+  let blocks = B.parse_text_to_blocks "https://example.com/post" in
+  Alcotest.(check (list yojson_testable))
+    "link block"
+    [
+      `Assoc
+        [
+          ("t", `String "link");
+          ("url", `String "https://example.com/post");
+          ("title", `String "example.com");
+          ("meta", `String "example.com");
+        ];
+    ]
+    (blocks_to_json_list blocks)
+
+let test_inline_url_stays_in_text () =
+  let blocks = B.parse_text_to_blocks "See https://example.com for more." in
+  Alcotest.(check (list yojson_testable))
+    "text block keeps inline url"
+    [ `Assoc [ ("t", `String "p"); ("html", `String "See https://example.com for more.") ] ]
+    (blocks_to_json_list blocks)
+
+let test_code_fence_becomes_code_block () =
+  let blocks = B.parse_text_to_blocks "before\n```OCaml\nlet x = 1 < 2\n```\nafter" in
+  Alcotest.(check (list yojson_testable))
+    "code block with surrounding text"
+    [
+      `Assoc [ ("t", `String "p"); ("html", `String "before") ];
+      `Assoc
+        [
+          ("t", `String "code");
+          ("html", `String "let x = 1 &lt; 2");
+          ("cap", `String "ocaml");
+          ("source", `String "let x = 1 < 2");
+        ];
+      `Assoc [ ("t", `String "p"); ("html", `String "after") ];
+    ]
+    (blocks_to_json_list blocks)
+
+let test_code_fence_preserves_markdown_image_literal () =
+  let blocks =
+    B.parse_text_to_blocks "```md\n![alt](https://example.com/a.png)\n```"
+  in
+  Alcotest.(check (list yojson_testable))
+    "image syntax inside code stays code"
+    [
+      `Assoc
+        [
+          ("t", `String "code");
+          ("html", `String "![alt](https://example.com/a.png)");
+          ("cap", `String "md");
+          ("source", `String "![alt](https://example.com/a.png)");
+        ];
+    ]
+    (blocks_to_json_list blocks)
+
+let test_mermaid_fence_becomes_mermaid_block () =
+  let blocks = B.parse_text_to_blocks "```mermaid\ngraph TD\nA-->B\n```" in
+  Alcotest.(check (list yojson_testable))
+    "mermaid block"
+    [
+      `Assoc
+        [
+          ("t", `String "mermaid");
+          ("source", `String "graph TD\nA-->B");
+        ];
+    ]
+    (blocks_to_json_list blocks)
+
+let test_multiple_images_and_text_lines () =
+  let blocks = B.parse_text_to_blocks "intro\n![a](https://x.com/1.jpg)\nhttps://x.com/2.gif\noutro" in
+  Alcotest.(check (list yojson_testable))
+    "mixed blocks in order"
+    [
+      `Assoc [ ("t", `String "p"); ("html", `String "intro") ];
+      `Assoc [ ("t", `String "image"); ("src", `String "https://x.com/1.jpg"); ("cap", `String "a") ];
+      `Assoc [ ("t", `String "image"); ("src", `String "https://x.com/2.gif") ];
+      `Assoc [ ("t", `String "p"); ("html", `String "outro") ];
+    ]
+    (blocks_to_json_list blocks)
+
+let test_empty_lines_ignored () =
+  let blocks = B.parse_text_to_blocks "line1\n\nline2" in
+  Alcotest.(check int) "two blocks" 2 (List.length blocks);
+  Alcotest.(check (list string)) "text order"
+    [ "line1"; "line2" ]
+    (List.map
+       (fun block ->
+          match B.block_to_yojson block with
+          | `Assoc fields -> (
+              match List.assoc_opt "html" fields with
+              | Some (`String s) -> s
+              | _ -> "")
+          | _ -> "")
+       blocks)
+
+let test_link_without_www () =
+  let blocks = B.parse_text_to_blocks "https://www.example.com/post" in
+  Alcotest.(check (list yojson_testable))
+    "www stripped"
+    [
+      `Assoc
+        [
+          ("t", `String "link");
+          ("url", `String "https://www.example.com/post");
+          ("title", `String "example.com");
+          ("meta", `String "example.com");
+        ];
+    ]
+    (blocks_to_json_list blocks)
+
+let test_blocks_of_yojson_roundtrip () =
+  let original = B.parse_text_to_blocks "text\n![a](https://x.com/a.png)\nhttps://x.com/post" in
+  let json = B.blocks_to_yojson original in
+  match B.blocks_of_yojson json with
+  | Some parsed ->
+    Alcotest.(check int) "roundtrip length" (List.length original) (List.length parsed);
+    Alcotest.(check (list yojson_testable))
+      "roundtrip json"
+      (blocks_to_json_list original)
+      (blocks_to_json_list parsed)
+  | None -> Alcotest.fail "blocks_of_yojson rejected valid blocks"
+
+let test_code_block_roundtrip () =
+  let original =
+    [ B.Code { cap = Some "sh"; html = "echo &lt;ok&gt;"; source = Some "echo <ok>" } ]
+  in
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some parsed ->
+    Alcotest.(check (list yojson_testable))
+      "code roundtrip json"
+      (blocks_to_json_list original)
+    (blocks_to_json_list parsed)
+  | None -> Alcotest.fail "blocks_of_yojson rejected valid code block"
+
+let test_dashboard_rich_blocks_roundtrip () =
+  let original =
+    [
+      B.Heading { html = "Plan" };
+      B.Unordered_list { items = [ "one"; "two" ] };
+      B.Callout { severity = Some "warn"; html = "check this" };
+      B.Table
+        {
+          head =
+            [
+              B.Cell_text "name";
+              B.Cell_value { v = "count"; num = Some true; muted = None };
+            ];
+          rows = [ [ B.Cell_text "alpha"; B.Cell_text "2" ] ];
+        };
+      B.Mermaid { source = "graph TD\nA-->B"; caption = Some "flow" };
+      B.Svg { svg = "<svg></svg>"; cap = Some "mark" };
+      B.Voice
+        {
+          secs = Some 3.5;
+          wave = Some [ 0.1; 0.8 ];
+          via = Some "tts";
+          size = Some "24 KB";
+          transcript = Some "hello";
+          src = Some "https://example.com/a.mp3";
+        };
+      B.Attach
+        {
+          name = "clip.mp4";
+          dims = Some "1920x1080";
+          src = Some "https://example.com/clip.mp4";
+          svg = None;
+          ph = None;
+          via = Some "gate";
+          size = Some "8 MB";
+          data = None;
+          mime_type = Some "video/mp4";
+          size_bytes = Some 42;
+          kind = Some "video";
+        };
+      B.Trace
+        {
+          omitted = 0;
+          trace =
+            [
+              B.Trace_think
+                {
+                  text = "checking";
+                  content_withheld = false;
+                  ts = Some "2026-07-01T00:00:00Z";
+                  agent_core_block_index = Some 0;
+                };
+              B.Trace_tool
+                {
+                  name = "keeper_tasks_list";
+                  tool_call_id = Some "provider-1";
+                  execution_id =
+                    Some (Ids.Execution_id.of_string "exec-1");
+                  status = Some B.Trace_tool_ok;
+                  dur = Some "2ms";
+                  args = Some (`Assoc [ ("limit", `Int 5) ]);
+                  result = Some (`Assoc [ ("ok", `Bool true) ]);
+                  ts = Some "2026-07-01T00:00:01Z";
+                  agent_core_block_index = Some 1;
+                };
+              B.Trace_reason
+                {
+                  text = "done";
+                  detail = Some "visible";
+                  ts = Some "2026-07-01T00:00:02Z";
+                };
+            ];
+        };
+    ]
+  in
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some parsed ->
+    Alcotest.(check (list yojson_testable))
+      "dashboard rich block json"
+      (blocks_to_json_list original)
+      (blocks_to_json_list parsed)
+  | None -> Alcotest.fail "blocks_of_yojson rejected valid dashboard rich blocks"
+
+let test_trace_decoder_accepts_dashboard_fallbacks () =
+  let json =
+    `List
+      [ `Assoc
+          [ ("t", `String "trace")
+          ; ( "trace"
+            , `List
+                [ `Assoc
+                    [ ("kind", `String "think")
+                    ; ("text", `String "thinking")
+                    ; ("agent_coreBlockIndex", `Int 7)
+                    ]
+                ; `Assoc
+                    [ ("kind", `String "tool")
+                    ; ("name", `String "keeper_tasks_list")
+                    ; ("status", `String "paused")
+                    ; ("agent_coreBlockIndex", `Int 8)
+                    ]
+                ] )
+          ]
+      ]
+  in
+  match B.blocks_of_yojson json with
+  | Some
+      [ B.Trace
+          { omitted = 0
+          ; trace =
+              [ B.Trace_think { agent_core_block_index = Some 7; _ }
+              ; B.Trace_tool { status = None; agent_core_block_index = Some 8; _ }
+              ]
+          }
+      ] -> ()
+  | Some _ -> Alcotest.fail "unexpected trace block shape"
+  | None -> Alcotest.fail "trace decoder rejected dashboard-compatible fields"
+
+let test_non_http_markdown_image_becomes_text () =
+  let blocks = B.parse_text_to_blocks "before ![alt](ftp://example.com/a.png) after" in
+  Alcotest.(check (list yojson_testable))
+    "non-http markdown image falls back to escaped text fragments"
+    [
+      `Assoc [ ("t", `String "p"); ("html", `String "before ") ];
+      `Assoc [ ("t", `String "p"); ("html", `String "![alt](ftp://example.com/a.png)") ];
+      `Assoc [ ("t", `String "p"); ("html", `String " after") ];
+    ]
+    (blocks_to_json_list blocks)
+
+let test_non_http_bare_url_becomes_text () =
+  let blocks = B.parse_text_to_blocks "ftp://example.com/a.png" in
+  Alcotest.(check (list yojson_testable))
+    "non-http bare url falls back to escaped text"
+    [ `Assoc [ ("t", `String "p"); ("html", `String "ftp://example.com/a.png") ] ]
+    (blocks_to_json_list blocks)
+
+let test_case_insensitive_standalone_url () =
+  let blocks = B.parse_text_to_blocks "HTTPS://EXAMPLE.COM/IMG.PNG" in
+  Alcotest.(check (list yojson_testable))
+    "uppercase scheme and extension are accepted"
+    [ `Assoc [ ("t", `String "image"); ("src", `String "HTTPS://EXAMPLE.COM/IMG.PNG") ] ]
+    (blocks_to_json_list blocks)
+
+let test_query_string_stripped_for_extension_check () =
+  let blocks = B.parse_text_to_blocks "https://example.com/a.png?w=100" in
+  Alcotest.(check (list yojson_testable))
+    "query string does not prevent image detection"
+    [ `Assoc [ ("t", `String "image"); ("src", `String "https://example.com/a.png?w=100") ] ]
+    (blocks_to_json_list blocks)
+
+let test_redacted_http_url_opt_reports_drop_reason () =
+  let drops = ref [] in
+  let on_drop reason = drops := reason :: !drops in
+  Alcotest.(check (option string))
+    "http accepted"
+    (Some "https://example.com/a.png")
+    (B.redacted_http_url_opt ~on_drop "https://example.com/a.png");
+  Alcotest.(check (list dropped_reason_testable)) "no drop" [] !drops;
+  Alcotest.(check (option string))
+    "ftp dropped"
+    None
+    (B.redacted_http_url_opt ~on_drop "ftp://example.com/a.png");
+  Alcotest.(check (list dropped_reason_testable))
+    "unsupported scheme recorded"
+    [ B.Unsupported_scheme "ftp" ]
+    !drops;
+  drops := [];
+  Alcotest.(check (option string))
+    "missing scheme dropped"
+    None
+    (B.redacted_http_url_opt ~on_drop "example.com/a.png");
+  Alcotest.(check (list dropped_reason_testable))
+    "missing scheme recorded"
+    [ B.Missing_scheme ]
+    !drops
+
+(* RFC-0371 B2 regression: the try/with wrappers around the Uri helpers were
+   removed because Uri.of_string is total. These pin that garbage input still
+   flows through the option-based checks as ordinary values — no exception
+   escapes, nothing is silently classified as valid. *)
+let test_url_helpers_are_total_on_garbage () =
+  let garbage = "\x00 not a uri \xff%%%" in
+  let drops = ref [] in
+  let on_drop reason = drops := reason :: !drops in
+  Alcotest.(check (option string))
+    "garbage url is dropped, not raised"
+    None
+    (B.redacted_http_url_opt ~on_drop garbage);
+  Alcotest.(check (list dropped_reason_testable))
+    "garbage drops as missing scheme"
+    [ B.Missing_scheme ]
+    !drops
+
+let test_blocks_of_yojson_rejects_malformed () =
+  Alcotest.(check bool) "not a list" true (B.blocks_of_yojson (`String "x") = None);
+  Alcotest.(check bool) "empty list" true (B.blocks_of_yojson (`List []) = None);
+  Alcotest.(check bool) "unknown tag"
+    true
+    (B.blocks_of_yojson (`List [ `Assoc [ ("t", `String "unknown") ] ]) = None)
+
+(* RFC-0252: the fusion block wire shape is the contract the dashboard zod
+   schema mirrors (t=fusion, snake_case ids). Pin it so a drift breaks here. *)
+let test_fusion_block_roundtrip () =
+  let original = [ B.Fusion { board_post_id = "p-abc123"; run_id = "fus-2583b65c" } ] in
+  Alcotest.(check (list yojson_testable))
+    "fusion block json shape"
+    [
+      `Assoc
+        [
+          ("t", `String "fusion");
+          ("board_post_id", `String "p-abc123");
+          ("run_id", `String "fus-2583b65c");
+        ];
+    ]
+    (blocks_to_json_list original);
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some parsed ->
+    Alcotest.(check (list yojson_testable))
+      "fusion roundtrip json"
+      (blocks_to_json_list original)
+      (blocks_to_json_list parsed)
+  | None -> Alcotest.fail "blocks_of_yojson rejected valid fusion block"
+
+let test_fusion_block_requires_board_post_id () =
+  Alcotest.(check bool) "missing board_post_id rejected"
+    true
+    (B.blocks_of_yojson (`List [ `Assoc [ ("t", `String "fusion"); ("run_id", `String "fus-1") ] ])
+     = None)
+
+let test_fusion_block_tolerates_missing_run_id () =
+  (* run_id is a display convenience; board_post_id alone is a valid card. *)
+  match B.blocks_of_yojson (`List [ `Assoc [ ("t", `String "fusion"); ("board_post_id", `String "p-1") ] ]) with
+  | Some [ B.Fusion { board_post_id = "p-1"; run_id = "" } ] -> ()
+  | _ -> Alcotest.fail "fusion block with board_post_id only should decode with empty run_id"
+
+let test_status_block_roundtrip () =
+  let original = [ B.Status { kind = B.Awaiting_gate_approval } ] in
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some [ B.Status { kind = B.Awaiting_gate_approval } ] -> ()
+  | Some _ -> Alcotest.fail "status block changed shape across round-trip"
+  | None -> Alcotest.fail "blocks_of_yojson rejected valid status block"
+
+let test_continuation_status_block_roundtrip () =
+  let original = [ B.Status { kind = B.Continuation_checkpoint } ] in
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some [ B.Status { kind = B.Continuation_checkpoint } ] -> ()
+  | Some _ ->
+    Alcotest.fail "continuation status block changed shape across round-trip"
+  | None ->
+    Alcotest.fail "blocks_of_yojson rejected valid continuation status block"
+
+let test_continuation_status_connector_text () =
+  Alcotest.(check string)
+    "continuation status connector text"
+    "작업이 체크포인트에 저장되었습니다. 다음 주기에 이어서 처리합니다."
+    (B.status_kind_connector_text B.Continuation_checkpoint)
+
+(* RFC-0302: the thinking block wire shape is the contract the dashboard
+   schema mirrors (t=thinking, content required, redacted omitted when
+   false). Pin it so a drift breaks here. *)
+let test_thinking_block_roundtrip () =
+  let original = [ B.Thinking { content = "considering options"; redacted = false } ] in
+  Alcotest.(check (list yojson_testable))
+    "thinking block json shape (redacted false omitted)"
+    [ `Assoc [ ("t", `String "thinking"); ("content", `String "considering options") ] ]
+    (blocks_to_json_list original);
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some parsed ->
+    Alcotest.(check (list yojson_testable))
+      "thinking roundtrip json"
+      (blocks_to_json_list original)
+      (blocks_to_json_list parsed)
+  | None -> Alcotest.fail "blocks_of_yojson rejected valid thinking block"
+
+let test_redacted_thinking_block_roundtrip () =
+  (* Signature-only RedactedThinking: content is an empty string and redacted is emitted
+     so the dashboard renders a placeholder rather than an empty card. *)
+  let original = [ B.Thinking { content = ""; redacted = true } ] in
+  Alcotest.(check (list yojson_testable))
+    "redacted thinking block json shape"
+    [ `Assoc
+        [ ("t", `String "thinking"); ("content", `String ""); ("redacted", `Bool true) ]
+    ]
+    (blocks_to_json_list original);
+  (match B.blocks_of_yojson (B.blocks_to_yojson original) with
+   | Some [ B.Thinking { content = ""; redacted = true } ] -> ()
+   | _ -> Alcotest.fail "redacted thinking block should roundtrip with redacted=true")
+
+let test_redacted_thinking_block_encoder_scrubs_smuggled_content () =
+  (* A caller-side bug could build [Thinking { content = <real text>; redacted
+     = true }]. The encoder must never emit that content on the wire just
+     because the in-memory record carries it - [redacted] is a promise that
+     no reasoning text crosses this boundary. *)
+  let original = [ B.Thinking { content = "leaked reasoning"; redacted = true } ] in
+  Alcotest.(check (list yojson_testable))
+    "redacted thinking with smuggled content is scrubbed to empty on encode"
+    [ `Assoc
+        [ ("t", `String "thinking"); ("content", `String ""); ("redacted", `Bool true) ]
+    ]
+    (blocks_to_json_list original)
+
+let test_redacted_thinking_block_decoder_scrubs_smuggled_content () =
+  (* A legacy writer, hand-crafted payload, or replayed record could carry
+     [redacted=true] alongside non-empty content. The decoded in-memory value
+     must never expose that text just because the JSON did. *)
+  match
+    B.blocks_of_yojson
+      (`List
+         [ `Assoc
+             [ ("t", `String "thinking")
+             ; ("content", `String "leaked reasoning")
+             ; ("redacted", `Bool true)
+             ]
+         ])
+  with
+  | Some [ B.Thinking { content = ""; redacted = true } ] -> ()
+  | _ ->
+    Alcotest.fail "decoder must scrub non-empty content when redacted=true, not preserve it"
+
+let test_thinking_block_requires_content () =
+  Alcotest.(check bool) "missing content rejected"
+    true
+    (B.blocks_of_yojson
+       (`List [ `Assoc [ ("t", `String "thinking"); ("redacted", `Bool true) ] ])
+     = None)
+
+let withheld_think_trace steps = [ B.Trace { trace = steps; omitted = 0 } ]
+
+let test_withheld_think_step_roundtrip () =
+  (* The public autonomous projection admits the step and its timestamp with no
+     reasoning text (RFC-0358 §2). The flag is what states that, so it has to
+     survive the wire in both directions. *)
+  let original =
+    withheld_think_trace
+      [ B.Trace_think
+          { text = ""
+          ; content_withheld = true
+          ; ts = Some "2026-08-04T00:00:00Z"
+          ; agent_core_block_index = None
+          }
+      ]
+  in
+  Alcotest.(check (list yojson_testable))
+    "withheld think step json shape"
+    [ `Assoc
+        [ ("t", `String "trace")
+        ; ( "trace"
+          , `List
+              [ `Assoc
+                  [ ("kind", `String "think")
+                  ; ("text", `String "")
+                  ; ("content_withheld", `Bool true)
+                  ; ("ts", `String "2026-08-04T00:00:00Z")
+                  ]
+              ] )
+        ]
+    ]
+    (blocks_to_json_list original);
+  match B.blocks_of_yojson (`List (blocks_to_json_list original)) with
+  | Some [ B.Trace { trace = [ B.Trace_think { text = ""; content_withheld = true; _ } ] } ]
+    -> ()
+  | _ -> Alcotest.fail "withheld think step should roundtrip with content_withheld=true"
+
+let test_withheld_think_step_encoder_scrubs_smuggled_text () =
+  (* Mirrors the [Thinking { redacted }] guarantee: a caller that builds the
+     flag alongside real reasoning must not be able to ship it. *)
+  let original =
+    withheld_think_trace
+      [ B.Trace_think
+          { text = "leaked reasoning"
+          ; content_withheld = true
+          ; ts = None
+          ; agent_core_block_index = None
+          }
+      ]
+  in
+  Alcotest.(check (list yojson_testable))
+    "withheld think step with smuggled text is scrubbed on encode"
+    [ `Assoc
+        [ ("t", `String "trace")
+        ; ( "trace"
+          , `List
+              [ `Assoc
+                  [ ("kind", `String "think")
+                  ; ("text", `String "")
+                  ; ("content_withheld", `Bool true)
+                  ]
+              ] )
+        ]
+    ]
+    (blocks_to_json_list original)
+
+let test_withheld_think_step_decoder_scrubs_smuggled_text () =
+  match
+    B.blocks_of_yojson
+      (`List
+         [ `Assoc
+             [ ("t", `String "trace")
+             ; ( "trace"
+               , `List
+                   [ `Assoc
+                       [ ("kind", `String "think")
+                       ; ("text", `String "leaked reasoning")
+                       ; ("content_withheld", `Bool true)
+                       ]
+                   ] )
+             ]
+         ])
+  with
+  | Some [ B.Trace { trace = [ B.Trace_think { text = ""; content_withheld = true; _ } ] } ]
+    -> ()
+  | _ ->
+    Alcotest.fail
+      "decoder must scrub think text when content_withheld=true, not preserve it"
+
+let test_withheld_think_step_still_requires_text_field () =
+  (* Omitting "text" stays a decode failure. Otherwise a truncated or malformed
+     payload would be read as a legitimate withheld step. *)
+  Alcotest.(check bool) "think step without text rejected even when withheld"
+    true
+    (B.blocks_of_yojson
+       (`List
+          [ `Assoc
+              [ ("t", `String "trace")
+              ; ( "trace"
+                , `List
+                    [ `Assoc
+                        [ ("kind", `String "think")
+                        ; ("content_withheld", `Bool true)
+                        ]
+                    ] )
+              ]
+          ])
+     = None)
+
+(* A trace block that was abridged has to say so. A shorter [trace] with no
+   count reads as a shorter turn, which is a different fact from a turn whose
+   trace did not fit this surface. Zero stays off the wire so an ordinary
+   turn's shape is unchanged. *)
+let test_omitted_step_count_survives_the_wire () =
+  let step =
+    B.Trace_think
+      { text = "checking"
+      ; content_withheld = false
+      ; ts = Some "2026-07-01T00:00:00Z"
+      ; agent_core_block_index = None
+      }
+  in
+  let json_of omitted =
+    B.blocks_to_yojson [ B.Trace { trace = [ step ]; omitted } ]
+  in
+  let has_omitted json =
+    match json with
+    | `List [ `Assoc fields ] -> List.assoc_opt "omitted" fields
+    | _ -> None
+  in
+  Alcotest.(check bool)
+    "a whole trace does not carry the field"
+    true
+    (Option.is_none (has_omitted (json_of 0)));
+  Alcotest.(check (option int))
+    "an abridged trace reports how many steps it dropped"
+    (Some 16682)
+    (match has_omitted (json_of 16682) with
+     | Some (`Int n) -> Some n
+     | _ -> None);
+  match B.blocks_of_yojson (json_of 16682) with
+  | Some [ B.Trace { omitted; _ } ] ->
+    Alcotest.(check int) "round trip keeps the count" 16682 omitted
+  | _ -> Alcotest.fail "abridged trace block did not round trip"
+;;
+
+(* Official-client runtimes carry whole turns as envelope JSON in the
+   content field. The chat must project those content_blocks — a verbatim
+   render drowned the pane in one giant JSON line — and an unknown schema
+   must fold to a marker, so the next runtime switch shows a placeholder
+   instead of another dump. *)
+let official =
+  {|{"schema":"masc.official-client-context-message.v3","message":{"role":"assistant","content_blocks":[
+    {"type":"thinking","thinking":"계획을 세웠다"},
+    {"type":"text","text":"화면을 확인했습니다"},
+    {"type":"tool_use","id":"call_1","name":"masc_msx_step","input":{"frames":60}},
+    {"type":"tool_result","tool_use_id":"call_1","content":"ok","is_error":false}
+  ]}}|}
+;;
+
+let test_official_client_envelope_projects_blocks () =
+  let blocks = B.parse_text_to_blocks official in
+  let kinds = List.map (function
+    | B.Text _ -> "text" | B.Thinking _ -> "thinking" | _ -> "other") blocks in
+  Alcotest.(check (list string)) "blocks project, not raw JSON"
+    [ "thinking"; "text"; "text"; "text" ] kinds;
+  (match blocks with
+   | _ :: Text t :: _ ->
+     Alcotest.(check string) "the prose reads as text" "화면을 확인했습니다" t.html
+   | _ -> Alcotest.fail "text block missing");
+  (match List.filter (fun b -> match b with B.Text _ -> true | _ -> false) blocks with
+   | _ :: Text tool_line :: _ ->
+     Alcotest.(check string) "a tool call names its tool"
+       "[masc_msx_step 도구 호출]" tool_line.html
+   | _ -> Alcotest.fail "tool line missing")
+
+let test_unknown_envelope_schema_folds_to_a_marker () =
+  let raw =
+    {|{"schema":"masc.some-future-runtime.v9","message":{"content_blocks":[{"type":"x"}]}}|}
+  in
+  let blocks = B.parse_text_to_blocks raw in
+  (match blocks with
+   | [ B.Text t ] ->
+     Alcotest.(check string) "one marker line, no dump"
+       "[외부 런타임 메시지 형식: masc.some-future-runtime.v9]" t.html
+   | _ ->
+     Alcotest.(check int) "exactly one marker block" 1 (List.length blocks))
+
+(* An empty projection must not hand the raw JSON back to the plain-text
+   path: broadcast omits empty blocks and the dashboard's live stream would
+   re-parse the envelope locally. *)
+let test_empty_envelope_projection_still_marks () =
+  let raw =
+    {|{"schema":"masc.official-client-context-message.v3","message":{"role":"assistant","content_blocks":[]}}|}
+  in
+  let blocks = B.parse_text_to_blocks raw in
+  (match blocks with
+   | [ B.Text t ] ->
+     Alcotest.(check string) "one marker, never the raw envelope"
+       "[빈 official-client 메시지]" t.html
+   | _ -> Alcotest.fail "expected exactly the empty-projection marker")
+
+let test_malformed_known_envelope_folds () =
+  let raw = {|{"schema":"masc.official-client-context-message.v3","message":"not-an-assoc"}|} in
+  let blocks = B.parse_text_to_blocks raw in
+  (match blocks with
+   | [ B.Text t ] ->
+     Alcotest.(check string) "shape variants fold, not dump"
+       "[형식이 다른 official-client 메시지]" t.html
+   | _ -> Alcotest.fail "expected exactly the variant marker")
+
+let test_redacted_thinking_maps_to_the_redacted_block () =
+  let raw =
+    {|{"schema":"masc.official-client-context-message.v3","message":{"content_blocks":[
+    {"type":"redacted_thinking","data":"opaque"}
+  ]}}|}
+  in
+  let blocks = B.parse_text_to_blocks raw in
+  (match blocks with
+   | [ B.Thinking th ] ->
+     Alcotest.(check bool) "redacted flag set" true th.redacted;
+     Alcotest.(check string) "no content exposed" "" th.content
+   | _ -> Alcotest.fail "expected one redacted thinking block")
+
+let test_reasoning_visibility_requires_unique_boolean () =
+  let malformed =
+    [ [`String "true"]; [`Null]; [`Int 1]; [`Float 1.]; [`List []]; [`Assoc []]
+    ; [`Bool false; `Bool true]; [`Bool true; `Bool false]; [`Bool false; `Bool false]
+    ]
+  in
+  List.iter (fun values ->
+    let trace = `Assoc ["t", `String "trace"; "trace", `List [
+      `Assoc (("kind", `String "think") :: ("text", `String "private") ::
+        List.map (fun value -> "content_withheld", value) values)]] in
+    let thinking = `Assoc (("t", `String "thinking") :: ("content", `String "private") ::
+      List.map (fun value -> "redacted", value) values) in
+    List.iter (fun block ->
+      Alcotest.(check bool) "invalid visibility does not authorize reasoning exposure" true
+        (B.blocks_of_yojson (`List [block]) = None)) [trace; thinking]) malformed
+
+(* The malformed-flag rejection is all-or-nothing per block ([list_all_map]):
+   one bad [think] flag drops the whole trace block, including its unrelated
+   tool steps, rather than keeping the block minus the bad step. This is the
+   documented fail-closed scope in keeper_chat_blocks.mli. *)
+let test_malformed_think_flag_rejects_whole_trace_block () =
+  let ok_tool = `Assoc ["kind", `String "tool"; "name", `String "read_file"] in
+  let withheld_think flag =
+    `Assoc
+      [ ("kind", `String "think")
+      ; ("text", `String "private")
+      ; ("content_withheld", flag) ]
+  in
+  let trace_block steps = `Assoc ["t", `String "trace"; "trace", `List steps] in
+  let good_block = `Assoc ["t", `String "p"; "html", `String "hello"] in
+  let witness =
+    match
+      B.blocks_of_yojson (`List [trace_block [ok_tool]; good_block])
+    with
+    | Some [ B.Trace _; B.Text _ ] -> ()
+    | _ -> Alcotest.fail "baseline trace with a tool step must decode"
+  in
+  let stripped =
+    B.blocks_of_yojson
+      (`List
+        [ trace_block [withheld_think (`String "true"); ok_tool]
+        ; good_block ])
+  in
+  (match stripped with
+   | Some [ B.Trace _; _ ] | Some [ _; B.Trace _ ] ->
+     Alcotest.fail "malformed flag must not leave a surviving trace block"
+   | Some blocks -> Alcotest.(check int) "only the trace block is dropped" 1
+       (List.length blocks)
+   | None -> Alcotest.fail "unrelated blocks must survive");
+  witness
+
+let () =
+  Alcotest.run "keeper_chat_blocks"
+    [
+      ( "parse",
+        [
+          Alcotest.test_case "plain text becomes escaped text block" `Quick
+            test_plain_text_becomes_escaped_text_block;
+          Alcotest.test_case "official-client envelope projects blocks" `Quick
+            test_official_client_envelope_projects_blocks;
+          Alcotest.test_case "unknown envelope schema folds to a marker" `Quick
+            test_unknown_envelope_schema_folds_to_a_marker;
+          Alcotest.test_case "empty envelope projection still marks" `Quick
+            test_empty_envelope_projection_still_marks;
+          Alcotest.test_case "malformed known envelope folds" `Quick
+            test_malformed_known_envelope_folds;
+          Alcotest.test_case "redacted thinking maps to redacted block" `Quick
+            test_redacted_thinking_maps_to_the_redacted_block;
+          Alcotest.test_case "markdown image and surrounding text" `Quick
+            test_markdown_image_and_surrounding_text;
+          Alcotest.test_case "bare image url on own line" `Quick
+            test_bare_image_url_on_own_line;
+          Alcotest.test_case "standalone non-image url becomes link" `Quick
+            test_standalone_non_image_url_becomes_link;
+          Alcotest.test_case "inline url stays in text" `Quick
+            test_inline_url_stays_in_text;
+          Alcotest.test_case "code fence becomes code block" `Quick
+            test_code_fence_becomes_code_block;
+          Alcotest.test_case "code fence preserves markdown image literal" `Quick
+            test_code_fence_preserves_markdown_image_literal;
+          Alcotest.test_case "mermaid fence becomes mermaid block" `Quick
+            test_mermaid_fence_becomes_mermaid_block;
+          Alcotest.test_case "multiple images and text lines" `Quick
+            test_multiple_images_and_text_lines;
+          Alcotest.test_case "empty lines ignored" `Quick
+            test_empty_lines_ignored;
+          Alcotest.test_case "www stripped from hostname" `Quick
+            test_link_without_www;
+          Alcotest.test_case "non-http markdown image becomes text" `Quick
+            test_non_http_markdown_image_becomes_text;
+          Alcotest.test_case "non-http bare url becomes text" `Quick
+            test_non_http_bare_url_becomes_text;
+          Alcotest.test_case "case-insensitive standalone url" `Quick
+            test_case_insensitive_standalone_url;
+          Alcotest.test_case "query string stripped for extension check" `Quick
+            test_query_string_stripped_for_extension_check;
+          Alcotest.test_case "redacted_http_url_opt reports drop reason" `Quick
+            test_redacted_http_url_opt_reports_drop_reason;
+          Alcotest.test_case "url helpers are total on garbage input" `Quick
+            test_url_helpers_are_total_on_garbage;
+        ] );
+      ( "serialization",
+        [
+          Alcotest.test_case "blocks roundtrip through yojson" `Quick
+            test_blocks_of_yojson_roundtrip;
+          Alcotest.test_case "code block roundtrip" `Quick
+            test_code_block_roundtrip;
+           Alcotest.test_case "dashboard rich blocks roundtrip" `Quick
+             test_dashboard_rich_blocks_roundtrip;
+           Alcotest.test_case "trace decoder accepts dashboard fallbacks" `Quick
+             test_trace_decoder_accepts_dashboard_fallbacks;
+           Alcotest.test_case "blocks_of_yojson rejects malformed" `Quick
+             test_blocks_of_yojson_rejects_malformed;
+          Alcotest.test_case "fusion block roundtrip" `Quick
+            test_fusion_block_roundtrip;
+          Alcotest.test_case "fusion block requires board_post_id" `Quick
+            test_fusion_block_requires_board_post_id;
+          Alcotest.test_case "fusion block tolerates missing run_id" `Quick
+            test_fusion_block_tolerates_missing_run_id;
+          Alcotest.test_case "status block roundtrip" `Quick
+            test_status_block_roundtrip;
+          Alcotest.test_case "continuation status block roundtrip" `Quick
+            test_continuation_status_block_roundtrip;
+          Alcotest.test_case "continuation status connector text" `Quick
+            test_continuation_status_connector_text;
+          Alcotest.test_case "thinking block roundtrip" `Quick
+            test_thinking_block_roundtrip;
+          Alcotest.test_case "reasoning visibility requires unique boolean" `Quick
+            test_reasoning_visibility_requires_unique_boolean;
+          Alcotest.test_case "malformed think flag rejects whole trace block" `Quick
+            test_malformed_think_flag_rejects_whole_trace_block;
+          Alcotest.test_case "redacted thinking block roundtrip" `Quick
+            test_redacted_thinking_block_roundtrip;
+          Alcotest.test_case "redacted thinking encoder scrubs smuggled content" `Quick
+            test_redacted_thinking_block_encoder_scrubs_smuggled_content;
+          Alcotest.test_case "redacted thinking decoder scrubs smuggled content" `Quick
+            test_redacted_thinking_block_decoder_scrubs_smuggled_content;
+          Alcotest.test_case "thinking block requires content" `Quick
+            test_thinking_block_requires_content;
+          Alcotest.test_case "withheld think step roundtrip" `Quick
+            test_withheld_think_step_roundtrip;
+          Alcotest.test_case "withheld think encoder scrubs smuggled text" `Quick
+            test_withheld_think_step_encoder_scrubs_smuggled_text;
+          Alcotest.test_case "withheld think decoder scrubs smuggled text" `Quick
+            test_withheld_think_step_decoder_scrubs_smuggled_text;
+          Alcotest.test_case "abridged trace reports its omitted step count" `Quick
+            test_omitted_step_count_survives_the_wire;
+          Alcotest.test_case "withheld think step still requires text field" `Quick
+            test_withheld_think_step_still_requires_text_field;
+        ] );
+    ]

@@ -1,0 +1,901 @@
+(* keeper_run_tools_setup — extracted from keeper_run_tools.ml.
+   Contains the full implementation of prepare_agent_setup. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_agent_tool_surface
+open Keeper_agent_result
+open Keeper_agent_error
+open Keeper_agent_prompt_metrics
+
+(* config/prompts/judge.md, slot effect hands the judge this bundle as its
+   entire visible evidence, and [keeper_gate_causal_context.mli] declares that
+   evidence to be turn-local. The capture did not match. Measured on live
+   pending approvals 2026-07-28: [history_messages] was 1,278,158 B of a
+   1,300,053 B bundle (98%), and 88.7% of that was three read-only polls
+   replayed in full - masc_status x308, masc_board_list x200,
+   keeper_tasks_list x380. Every request raised inside a turn therefore
+   exceeded the judge model's prompt limit and was quarantined (#26081).
+
+   Recent lead-up is real evidence, so the newest messages are kept within a
+   declared budget rather than dropped wholesale. The budget is set against
+   measured behaviour of the judge slot (glm-coding.glm-5-turbo): a 400 KB
+   prompt was accepted, an 800 KB prompt was refused with
+   {"code":"1261","message":"Prompt exceeds max length"}, and 300 KB of
+   poorly-tokenising content was refused. 64 KB of history on top of the
+   ~41 KB remainder of the bundle stays well below the nearest refusal.
+
+   2026-08-09: that "~41 KB remainder" was [completed_tool_calls], which this
+   fix never bounded, and it grew to 791,432 B of an 860,589 B bundle. The
+   judge slot refused it with the same code 1261 quoted above and 45 of 52
+   hitl_auto_judge runs failed. The budget now lives in
+   [Keeper_gate_causal_context] and both axes read it, so the premise this
+   comment rests on cannot decay on one axis while the other holds. *)
+let gate_history_budget_bytes = Keeper_gate_causal_context.evidence_budget_bytes
+
+let record_lane_attempt_index receipt_lane_attempt_index_ref lane_attempt_index =
+  receipt_lane_attempt_index_ref :=
+    max !receipt_lane_attempt_index_ref lane_attempt_index
+;;
+
+let tool_use_ids_of_message (message : Agent_core.Types.message) =
+  List.filter_map
+    (fun (block : Agent_core.Types.content_block) ->
+       match block with
+       | Agent_core.Types.ToolUse { id; _ } -> Some id
+       | Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+       | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolResult _
+       | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
+    message.content
+;;
+
+let tool_result_ids_of_message (message : Agent_core.Types.message) =
+  List.filter_map
+    (fun (block : Agent_core.Types.content_block) ->
+       match block with
+       | Agent_core.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+       | Agent_core.Types.Text _ | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
+       | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _ | Agent_core.Types.Image _
+       | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
+    message.content
+;;
+
+(* Encodes one message the way the judge will see it and reports its size. *)
+let measure_gate_history_message (message : Agent_core.Types.message) =
+  let json = Keeper_context_core.message_to_json message in
+  json, String.length (Yojson.Safe.to_string json)
+;;
+
+(* Returns the newest messages that fit the budget, plus how many were left
+   out. The count is carried into the bundle: a judge that cannot tell it was
+   handed a partial view weighs partial evidence as if it were complete, and
+   the prompt already asks it to name absent context in its rationale.
+
+   The walk starts at the newest message and encodes one message at a time
+   until the first that does not fit, so the work is the window's size, not
+   the history's. Before this the whole history was encoded first and then
+   cut: tens of thousands of messages per gate decision on a live keeper,
+   all on the main domain (RFC main-domain-scheduler-latency section 8.7). *)
+let gate_history_slice_measured ~measure (messages : Agent_core.Types.message list) =
+  let rec newest_within budget kept = function
+    | [] -> kept
+    | message :: older ->
+      let json, size = measure message in
+      if size > budget then kept else newest_within (budget - size) ((message, json) :: kept) older
+  in
+  let kept = newest_within gate_history_budget_bytes [] (List.rev messages) in
+  (* A tool result whose call fell outside the window reads as evidence of
+     something the judge never sees happen. Drop those rather than present a
+     dangling half of a pair. *)
+  let visible_calls = List.concat_map (fun (message, _) -> tool_use_ids_of_message message) kept in
+  let kept =
+    List.filter
+      (fun (message, _) ->
+         tool_result_ids_of_message message
+         |> List.for_all (fun id -> List.mem id visible_calls))
+      kept
+  in
+  List.map snd kept, List.length messages - List.length kept
+;;
+
+let gate_history_slice messages =
+  gate_history_slice_measured ~measure:measure_gate_history_message messages
+;;
+
+let gate_causal_initial
+      ~gate_history
+      ~gate_history_omitted
+      ~user_message
+      ~dynamic_context
+  =
+  `Assoc
+    [ "history_messages", `List gate_history
+    ; "history_messages_omitted", `Int gate_history_omitted
+    ; "user_message", `String user_message
+    ; "dynamic_context", `String dynamic_context
+    ]
+;;
+
+(* This part is common to the official-client and Agent Core surfaces of one
+   frozen turn. Names do not require schema/description materialization. *)
+let base_model_tool_names
+      ?(transient_drafts = true)
+      ~skill_catalog
+      ~model_visible_descriptors
+      ()
+  =
+  let descriptor_names =
+    List.concat_map Keeper_tool_descriptor.keeper_model_names model_visible_descriptors in
+  let composition_names =
+    Keeper_skill_catalog.composition_entries skill_catalog
+    |> List.map (fun entry -> entry, ())
+    |> fun skill_compositions ->
+    Keeper_tool_composition_surface.schema_tool_name_rows
+      ~include_drafts:transient_drafts ~skill_compositions ()
+    |> List.map snd in
+  let instruction_names =
+    if Keeper_skill_catalog.instruction_entries skill_catalog <> []
+    then [Keeper_tool_composition_catalog.skill_tool_name]
+    else [] in
+  descriptor_names @ composition_names @ instruction_names
+;;
+
+let project_model_tool_names ?(deferred_names = []) ~base_names ~identity_names () =
+  (* Deferred builtins are judged against the actual assembled surface: a
+     schema carried by conversation history is present even when its original
+     declaration permits deferral. Attached tools belong to their own axis;
+     the builtin deferral list must not remove those names. *)
+  let is_deferred name = List.exists (String.equal name) deferred_names in
+  List.sort_uniq String.compare
+    (List.filter (fun name -> not (is_deferred name)) base_names @ identity_names)
+;;
+
+let expected_model_tool_names
+      ?(deferred_names = [])
+      ?(transient_drafts = true)
+      ~skill_catalog
+      ~identity_names
+      ~model_visible_descriptors
+      ()
+  =
+  let base_names = base_model_tool_names ~transient_drafts
+      ~skill_catalog ~model_visible_descriptors () in
+  project_model_tool_names ~deferred_names ~base_names ~identity_names ()
+;;
+
+(* One question, asked from both sides: of the names this surface was built to
+   treat specially, which ones did the turn actually place?
+
+   Both callers face the same trap. The Agent Core lane always carries the
+   attached-tool listing and may also carry attached schemas its conversation
+   used on an earlier turn; and a built-in that declares [defer_loading = true]
+   is placed with its schema again once this conversation has run it. So
+   neither "attached" nor "declared deferrable" predicts presence, and a check
+   built on the declaration expects a tool that is legitimately there.
+
+   Reading the declaration instead of the surface cost 60
+   [keeper_model_tool_projection_mismatch] errors in an hour on 2026-08-31, all
+   on [keeper_ide_annotate]: declared deferrable, called once the day before,
+   and carried ever since.
+
+   An unknown actual name stays outside either answer, so the projection check
+   still reports it. *)
+let partition_by_presence ~names ~actual_names =
+  List.partition (fun name -> List.mem name actual_names) names
+;;
+
+(* Present: the listing plus whatever attached schemas were carried in. The
+   listing is expected even when it is accidentally absent from the actual
+   surface, which is the one thing the check must still catch.
+
+   [listed] is whether the turn placed a listing at all, reported by the bundle
+   that placed it. It is not the same question as "is anything attached": since
+   built-ins declare their own loading, a Keeper with no attached service still
+   gets a listing when one of its built-ins declares [defer_loading = true].
+   Deriving it from [attached_names] left code-reviewer -- no attachment, one
+   declared built-in -- reporting keeper_tool_search as a tool the projection
+   did not expect.
+
+   Deriving it from the actual surface instead would be worse than either: the
+   check would expect the listing exactly when the listing is there, which is
+   the same as not checking. A listing that went missing is the one thing this
+   must still catch. *)
+let agent_core_identity_names ~listed ~attached_names ~actual_names =
+  if not listed
+  then []
+  else (
+    let present, (_ : string list) =
+      partition_by_presence ~names:attached_names ~actual_names
+    in
+    Keeper_identity_tool_search.tool_name :: present |> List.sort_uniq String.compare)
+;;
+
+(* Absent: the declared built-ins this surface really did leave out. *)
+let deferred_names_absent_from ~declared_names ~actual_names =
+  let (_ : string list), absent =
+    partition_by_presence ~names:declared_names ~actual_names
+  in
+  absent
+;;
+
+let prepare_agent_setup
+      ?preview
+      ?observation_token
+      ?(answer_source_ids = [])
+      ~(config : Workspace.config)
+      ~workspace_root
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
+      ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
+      ~(ctx_work : working_context)
+      ~(session : Keeper_types.session_context)
+      ~(base_system_prompt : string)
+      ~(turn_system_prompt : string)
+      ~(user_message : string)
+      ~(dynamic_context : string)
+      ~(history_messages : Agent_core.Types.message list)
+      ~(shared_context : Agent_core.Context.t)
+      ~(context_injector : Agent_core.Hooks.context_injector)
+      ~(start_turn_count : int)
+      ~(keeper_turn_id : int)
+      ~(approval_admission : Keeper_approval_origin.admission)
+      ~(turn_kind : Turn_record.turn_kind)
+      ~(runtime_id : string)
+      ~(config_root : string)
+      ~(runtime_config_path : string option)
+      ~(skill_snapshot : Skill_catalog_snapshot.t)
+      ~(skill_names : string list option)
+      ~(task_skill_selection :
+          (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result)
+      ~(trajectory_acc : Trajectory.accumulator option)
+      ?dynamic_context_for_tools
+      ?repetition_execution
+      ?runtime_manifest_context
+      ?runtime_manifest_append
+      ?continuation_channel
+      ?on_tool_stream_observation
+      ?on_tool_result_ready
+      ?(tool_result_commit_policy = Keeper_hooks_agent_core.Require_commit)
+      ?hitl_resolution
+      ?on_gate_deferred
+      ?composition_plan_index
+      ()
+  : (Keeper_run_tools_hooks.agent_setup, Agent_core.Error.t) result
+  =
+  let open Result.Syntax in
+  let runtime_id_string = runtime_id in
+  let active_checkpoint_owner = ref None in
+  let active_tool_result_inline_ceiling_bytes = ref Common.max_tool_result_wire_bytes in
+  let active_runtime_id = Atomic.make None in
+  let receipt_lane_attempt_index_ref : int ref = ref 0 in
+  let tool_result_commit_required () =
+    match tool_result_commit_policy, on_tool_result_ready, !active_checkpoint_owner with
+    | Keeper_hooks_agent_core.Observe_commit, _, _ -> false
+    | Require_commit, None, _ -> false
+    | Require_commit, Some _, Some Runtime_execution.Official_client -> false
+    | Require_commit, Some _, (Some Runtime_execution.Masc_agent_core | None) -> true
+  in
+  let on_runtime_attempt
+        (attempt : Keeper_turn_driver.runtime_attempt)
+    =
+    active_checkpoint_owner := Some attempt.checkpoint_owner;
+    active_tool_result_inline_ceiling_bytes := attempt.tool_result_inline_ceiling_bytes;
+    Atomic.set active_runtime_id (Some attempt.runtime_id);
+    record_lane_attempt_index
+      receipt_lane_attempt_index_ref
+      attempt.lane_attempt_index;
+    Option.iter
+      (fun observe ->
+         observe
+           (Keeper_hooks_agent_core.Runtime_attempt_started
+              { runtime_id = attempt.runtime_id
+              ; lane_attempt_index = attempt.lane_attempt_index
+              ; checkpoint_owner = attempt.checkpoint_owner
+              }))
+      on_tool_stream_observation
+  in
+  let on_tool_result_ready =
+    Option.map
+      (fun notify ~tool_call_id ~turn ~planned_index ~execution_id ->
+         match !active_checkpoint_owner with
+         | Some Runtime_execution.Masc_agent_core ->
+           notify ~tool_call_id ~turn ~planned_index ~execution_id
+         | Some Runtime_execution.Official_client ->
+           (* Official clients execute dynamic tools without an Agent Core
+              pre-admission source sidecar. This callback cannot join them.
+              Each official client emits its producer-bound
+              Official_tool_result through Keeper_official_client_tool_receipts.
+              The owner comes from the exact resolved candidate attempt,
+              including heterogeneous lane fallbacks. *)
+           ()
+         | None ->
+           failwith
+             "tool result arrived before the resolved runtime attempt owner was observed")
+      on_tool_result_ready
+  in
+  let* task_skill_selection =
+    Result.map_error Keeper_task_skill_turn.core_error task_skill_selection
+  in
+  let ctx_snapshot = ctx_work in
+  let gate_history, gate_history_omitted = gate_history_slice history_messages in
+  let skill_turn_ref = Ids.Turn_ref.make
+    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+    ~absolute_turn:keeper_turn_id in
+  let* approval_origin =
+    Keeper_approval_origin.from_admission approval_admission ~turn_ref:skill_turn_ref
+    |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)
+  in
+  let gate_context =
+    Keeper_gate_causal_context.create
+      ~origin:approval_origin
+      ~turn_id:(Some keeper_turn_id)
+      ~initial:
+        (gate_causal_initial
+           ~gate_history
+           ~gate_history_omitted
+           ~user_message
+           ~dynamic_context)
+  in
+  let agent_name = meta.name in
+  let* tool_descriptors = match Keeper_task_skill_turn.descriptors task_skill_selection with
+    | Some descriptors -> Ok descriptors
+    | None ->
+        let snapshot = Keeper_lane_addon_runtime.snapshot ~config ~keeper_name:meta.name in
+        Ok (Keeper_tool_descriptor.all_descriptors ()
+          @ List.map Keeper_lane_addon_descriptor.create snapshot.exports) in
+  let* (task_skill_selection, preparation) =
+    Keeper_skill_preparation_runtime_observation.with_turn_result
+      ?preview
+      ~config ~keeper_name:meta.name
+      ~turn_ref:(Ids.Turn_ref.make
+        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+        ~absolute_turn:keeper_turn_id)
+      ~phase:Keeper_skill_preparation_runtime_observation.Executable_setup (fun () ->
+    Keeper_task_skill_turn.bind_surface
+      ~descriptors:tool_descriptors ~snapshot:skill_snapshot task_skill_selection
+      |> Result.map_error Keeper_task_skill_turn.core_error)
+  in
+  let snapshot_rev =
+    Skill_catalog_snapshot.snapshot_revision_to_string
+      (Skill_catalog_snapshot.snapshot_revision skill_snapshot)
+  in
+  List.iter
+    (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+       Log.Keeper.warn
+         "Skill projection diagnostic for keeper=%s snapshot_revision=%s identity=%s error=%s"
+         meta.name
+         snapshot_rev
+         (Yojson.Safe.to_string
+            (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity))
+         (Keeper_skill_catalog.error_to_string diagnostic.error))
+    preparation.diagnostics;
+  List.iter
+    (fun (selected : Keeper_task_skill_turn.selected) ->
+       Option.iter
+         (fun diagnostic ->
+            Log.Keeper.warn
+              "Task Skill frozen as instruction for keeper=%s snapshot_revision=%s reference=%s error=%s"
+              meta.name
+              snapshot_rev
+              (Skill_reference.to_yojson selected.reference |> Yojson.Safe.to_string)
+              (Keeper_skill_catalog.error_to_string diagnostic))
+         selected.diagnostic)
+    task_skill_selection.selected;
+  List.iter
+    (fun (row : Keeper_task_skill_turn.unprojectable) ->
+       Log.Keeper.warn
+         "Task Skill unavailable this turn for keeper=%s snapshot_revision=%s reference=%s task_ids=%s reason=%s error=%s"
+         meta.name
+         snapshot_rev
+         (Skill_reference.to_yojson row.reference |> Yojson.Safe.to_string)
+         (String.concat "," row.task_ids)
+         (Keeper_task_skill_turn.unavailable_reason_code row.reason)
+         (Keeper_task_skill_turn.unavailable_reason_to_string row.reason))
+    task_skill_selection.unprojectable;
+  let capability_surface =
+    Keeper_capability_surface.create_with_descriptors
+      ~tool_descriptors
+      ~tool_deny:profile_defaults.Keeper_types_profile.tool_deny
+      ~sandbox_profile:meta.sandbox_profile
+      ~skill_names
+      ~global_skill_catalog:preparation.catalog
+      ~skill_inventory:preparation.inventory
+      ~task_skills:(Keeper_task_skill_turn.skills task_skill_selection)
+  in
+  (* A deny entry that names nothing is refused where the profile is loaded
+     ([Keeper_types_profile.unknown_deny_tools], kind [Unknown_deny_tool]), so
+     a profile that reaches setup cannot carry one. This is an assertion on
+     that contract, not a second classifier: it used to be a WARN row while
+     the surface silently denied nothing (audit F087). *)
+  let* () =
+    match
+      Keeper_types_profile.unknown_deny_tools
+        profile_defaults.Keeper_types_profile.tool_deny
+    with
+    | [] -> Ok ()
+    | unknown ->
+      Error
+        (Agent_core.Error.Internal
+           (Printf.sprintf
+              "keeper %s reached turn setup with keeper.tools.deny entries the \
+               profile load must have refused: %s"
+              meta.name
+              (String.concat ", " unknown)))
+  in
+  let turn_skill_projection =
+    Keeper_capability_surface.skill_projection capability_surface
+  in
+  let skill_catalog = Keeper_capability_surface.skill_catalog capability_surface in
+  List.iter
+    (fun unavailable ->
+       Log.Keeper.warn
+         "Task Skill unavailable for keeper=%s snapshot_revision=%s error=%s"
+         meta.name
+         snapshot_rev
+         (Keeper_skill_catalog.turn_unavailable_to_string unavailable))
+    turn_skill_projection.unavailable;
+  let executable_task_skill_selection =
+    Keeper_task_skill_turn.executable_selection
+      ~projection:turn_skill_projection
+      task_skill_selection
+  in
+  let composition_result_delivery = Keeper_composition_result_delivery.create
+    ~base_path:config.base_path ~physical_turn_ref:skill_turn_ref in
+  let* skill_activation_context =
+    Keeper_skill_activation_recorder.make
+      ~trace_id:meta.runtime.trace_id
+      ~runtime_id:(fun () -> Atomic.get active_runtime_id)
+      ~turn_ref:skill_turn_ref
+      ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision skill_snapshot)
+      ~task_selection:executable_task_skill_selection
+    |> Result.map_error (fun error ->
+         Agent_core.Error.Internal
+           (Keeper_skill_activation_recorder.error_to_string error))
+  in
+  let* load_receipts =
+    Keeper_tool_load_receipts.restore
+      ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
+      ~target:shared_context
+    |> Result.map_error (fun error ->
+         Agent_core.Error.Internal (Keeper_tool_load_receipts.error_to_string error))
+  in
+  (* Scope identity remains authoritative across provider attempts. Retired
+     comparison coordinates and ledger frontiers are not setup prerequisites. *)
+  let* () =
+    match repetition_execution with
+    | None -> Ok ()
+    | Some execution ->
+      Keeper_repetition_scope.Execution.prepare execution
+        ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
+        ~target:shared_context
+      |> Result.map (fun _prior_observations -> ())
+      |> Result.map_error (fun error ->
+           Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
+  in
+  let acc =
+    Keeper_run_tools_hook_accumulator.create ~meta
+      ~tool_surface:
+        { turn_lane = Keeper_agent_tool_surface.Lane_text_only
+        ; config_root
+        ; runtime_config_path
+        }
+  in
+  (* The agent this turn will run, made here because the tools are made here
+     and one of them widens the callable set while the turn is running. It is
+     the AGENT_CORE call site that fills it, at agent creation. *)
+  let agent_cell : Agent_core.Agent.t option ref = ref None in
+  (* What this Keeper is attached to. A disk read of what was written down
+     when it attached, not a call to the provider: a turn that had to reach
+     Atlassian before it could start would fail whenever Atlassian was slow,
+     for a question whose answer changes about never. *)
+  let identity_offering =
+    Keeper_identity_tools.for_turn
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.name
+  in
+  List.iter
+    (fun (name, problem) ->
+      Log.Keeper.emit
+        Log.Warn
+        ~keeper_name:meta.name
+        ~category:Log.Tool
+        ~details:
+          (`Assoc
+             [ "error_kind", `String "keeper_identity_tool_unusable"
+             ; "tool", `String name
+             ; "problem", `String problem
+             ])
+        "An attached service names a tool this turn cannot offer")
+    identity_offering.Keeper_identity_tools.unusable;
+  (* RFC-0403: the profile's own selection over what the services offered.
+     Absent selection keeps the whole offering, so a keeper that declares
+     nothing sends the same bytes it sent before this existed. *)
+  let identity_allow =
+    Keeper_identity_tool_allow.apply
+      ~allow:profile_defaults.Keeper_types_profile.attached_tool_allow
+      identity_offering.Keeper_identity_tools.offered
+  in
+  List.iter
+    (fun name ->
+      Log.Keeper.emit
+        Log.Warn
+        ~keeper_name:meta.name
+        ~category:Log.Tool
+        ~details:
+          (`Assoc
+             [ "error_kind", `String "keeper_attached_tool_allow_unnamed"
+             ; "tool", `String name
+             ])
+        "The profile allows an attached tool no attached service offers")
+    identity_allow.Keeper_identity_tool_allow.unnamed;
+  let turn_model_visible_descriptors =
+    Keeper_capability_surface.descriptors capability_surface
+  in
+  let
+    { Keeper_tools_agent_core.tools = keeper_tools
+    ; agent_core_tools = keeper_agent_core_tools
+    ; on_demand_tool_names
+    ; result_bounds
+    ; listing = keeper_listing
+    ; cleanup = keeper_tools_cleanup
+    ; terminal_effect_state
+    ; gate_replay_delivery
+    ; turn_sandbox_factory
+    }
+    =
+    Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot
+      ~capability_surface
+      ?continuation_channel
+      ~gate_context
+      ?hitl_resolution
+      ?on_gate_deferred
+      ~identity_surface:
+        { Keeper_tools_agent_core.offered =
+            identity_allow.Keeper_identity_tool_allow.kept
+        ; agent_cell
+        ; history = history_messages
+        ; load_receipts
+        ; keeper_turn_id
+        }
+      ?composition_plan_index
+      ~skill_activation_context
+      ~composition_result_delivery
+      ~turn_ctx_cell
+      ~checkpoint_owner:(fun () -> !active_checkpoint_owner)
+      ~tool_result_inline_ceiling_bytes:(fun () -> !active_tool_result_inline_ceiling_bytes)
+      ()
+  in
+  let replay_delivery =
+    Option.map
+      (fun { Keeper_tools_agent_core.approval_id; outcome } ->
+         approval_id, outcome)
+      gate_replay_delivery
+  in
+  let* () =
+    match replay_delivery with
+    | Some
+        ( approval_id
+        , Keeper_gate_replay.Repair_required
+            { operation; stage; detail } ) ->
+      (try keeper_tools_cleanup () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.error
+           "keeper tool cleanup after Gate replay repair failure raised: %s"
+           (Printexc.to_string exn));
+      Error
+        (Keeper_internal_error.core_error_of_masc_internal_error
+           (Keeper_internal_error.Gate_replay_repair_required
+              { approval_id
+              ; operation
+              ; stage =
+                  (match stage with
+                   | Keeper_gate_replay.Resolution_lookup ->
+                     Keeper_internal_error.Replay_resolution_lookup
+                   | Keeper_gate_replay.Request_decode ->
+                     Keeper_internal_error.Replay_request_decode
+                   | Keeper_gate_replay.Evidence_storage ->
+                     Keeper_internal_error.Replay_evidence_storage
+                   | Keeper_gate_replay.Evidence_retrieval ->
+                     Keeper_internal_error.Replay_evidence_retrieval
+                   | Keeper_gate_replay.Replay_journal ->
+                     Keeper_internal_error.Replay_journal
+                   | Keeper_gate_replay.Stale_grant_retirement ->
+                     Keeper_internal_error.Replay_stale_grant_retirement
+                   | Keeper_gate_replay.Invalid_resolution_state ->
+                     Keeper_internal_error.Replay_invalid_resolution_state)
+              ; detail
+              }))
+    | Some
+        ( _
+        , ( Keeper_gate_replay.Not_applicable
+          | Keeper_gate_replay.Applied _
+          | Keeper_gate_replay.Applied_with_warning _
+          | Keeper_gate_replay.Failed _
+          | Keeper_gate_replay.Indeterminate _
+          | Keeper_gate_replay.Resolution_absent _ ) )
+    | None ->
+      Ok ()
+  in
+  (* A paste the TUI staged into this keeper's host bookkeeping bundle is
+     readable to an endpoint-owned keeper only once it sits on the endpoint;
+     the keeper-facing message already names the bare file. The turn owns the
+     endpoint -- its factory is the one allowed to start a stopped guest --
+     so delivery runs here, ahead of prompt assembly, so the first Read of
+     the turn finds the file. Shared-mount keepers read the staged file
+     directly and this is a no-op for them. *)
+  let retained_pastes =
+    Keeper_paste_delivery.deliver_for_turn ~config ~meta ~turn_sandbox_factory
+  in
+  (* For every retained paste the pointer in the message ("It is in your
+     working directory") is false. The TUI's own contract for a paste it
+     cannot place is to send the text itself, so the correction does exactly
+     that: it says the file is not there and carries the text, riding the
+     turn message the transcript persists -- visible to keeper and operator
+     alike. *)
+  let user_message =
+    match Keeper_paste_delivery.inlined_correction retained_pastes with
+    | None -> user_message
+    | Some correction -> user_message ^ "\n\n" ^ correction
+  in
+  let model_message =
+    Keeper_gate_replay.compose_model_message
+      ~base_path:config.base_path
+      ~user_message
+      ~hitl_resolution
+      ~replay_delivery
+  in
+  let user_message = model_message.Keeper_gate_replay.text in
+  let prompt_metrics =
+    Keeper_agent_prompt_metrics.build_prompt_metrics
+      ~system_prompt:turn_system_prompt
+      ~dynamic_context
+      ~user_message
+  in
+  let tools = keeper_tools in
+  let agent_core_tools = keeper_agent_core_tools in
+  let registered_descriptors = Keeper_tool_descriptor.all_descriptors () in
+  let globally_model_visible_descriptors =
+    Keeper_tool_descriptor.model_visible_descriptors ()
+  in
+  let transport_alias_count =
+    List.fold_left
+      (fun count (descriptor : Keeper_tool_descriptor.t) ->
+         match
+           Keeper_tool_descriptor.model_schema_errors descriptor
+         , descriptor.keeper_model_projection
+         with
+         | [], Keeper_tool_descriptor.Transport_alias _ -> count + 1
+         | _ :: _, _
+         | [],
+           ( Keeper_tool_descriptor.Preferred_public_name
+           | Keeper_tool_descriptor.Internal_name
+           | Keeper_tool_descriptor.Operator_only ) -> count)
+      0
+      registered_descriptors
+  in
+  let operator_only_count =
+    List.fold_left
+      (fun count (descriptor : Keeper_tool_descriptor.t) ->
+         match
+           Keeper_tool_descriptor.model_schema_errors descriptor
+         , descriptor.keeper_model_projection
+         with
+         | [], Keeper_tool_descriptor.Operator_only -> count + 1
+         | ([], (Keeper_tool_descriptor.Preferred_public_name
+                | Keeper_tool_descriptor.Internal_name
+                | Keeper_tool_descriptor.Transport_alias _))
+         | (_ :: _, _) -> count)
+      0
+      registered_descriptors
+  in
+  let invalid_schema_count =
+    List.fold_left
+      (fun count (descriptor : Keeper_tool_descriptor.t) ->
+         match Keeper_tool_descriptor.model_schema_errors descriptor with
+         | [] -> count
+         | _ :: _ -> count + 1)
+      0
+      registered_descriptors
+  in
+  let unexplained_exclusion_count =
+    List.length registered_descriptors
+    - List.length globally_model_visible_descriptors
+    - transport_alias_count
+    - operator_only_count
+    - invalid_schema_count
+  in
+  let all_tool_names =
+    List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
+  in
+  (* The selection, not the offering (RFC-0403). This names what the bundle
+     is expected to carry, and the bundle is built from the kept list:
+     checking against the whole offering would report every tool the profile
+     deliberately left out as a projection defect. *)
+  let attached_names =
+    List.map
+      (fun (offered : Keeper_identity_tools.offered_tool) ->
+         offered.Keeper_identity_tools.schema.name)
+      identity_allow.Keeper_identity_tool_allow.kept
+  in
+  (* Two surfaces now, and each is checked against the names it carries. One
+     check over one of them would leave the other free to drift: they differ
+     only in how the attached tools appear, which is exactly the part being
+     changed. *)
+  let expected_base_names =
+    base_model_tool_names ~skill_catalog
+      ~model_visible_descriptors:turn_model_visible_descriptors () in
+  let check_projection ?deferred_names ~surface ~identity_names tools =
+    let actual = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools in
+    let expected =
+      project_model_tool_names ?deferred_names
+        ~base_names:expected_base_names ~identity_names ()
+    in
+    let deduped = List.sort_uniq String.compare actual in
+    if not (expected = deduped && List.length deduped = List.length actual)
+    then
+      Log.Keeper.emit
+        Log.Error
+        ~keeper_name:meta.name
+        ~category:Log.Tool
+        ~details:
+          (`Assoc
+             [ "error_kind", `String "keeper_model_tool_projection_mismatch"
+             ; "surface", `String surface
+             ; "expected_names", Json_util.json_string_list expected
+             ; "actual_names", Json_util.json_string_list actual
+             ])
+        "Keeper model tool bundle differs from the descriptor projection"
+  in
+  check_projection ~surface:"tools" ~identity_names:attached_names keeper_tools;
+  let agent_core_actual_names =
+    List.map
+      (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+      keeper_agent_core_tools
+  in
+  check_projection
+    ~surface:"agent_core_tools"
+    ~deferred_names:
+      (match keeper_listing with
+       | Keeper_tools_agent_core.No_listing -> []
+       | Keeper_tools_agent_core.Listing { deferred_builtin_names } ->
+         deferred_names_absent_from
+           ~declared_names:deferred_builtin_names
+           ~actual_names:
+             (List.map
+                (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+                keeper_agent_core_tools))
+    ~identity_names:
+      (agent_core_identity_names
+         ~listed:
+           (match keeper_listing with
+            | Keeper_tools_agent_core.No_listing -> false
+            | Keeper_tools_agent_core.Listing _ -> true)
+         ~attached_names
+         ~actual_names:agent_core_actual_names)
+    keeper_agent_core_tools;
+  Log.Keeper.routine
+    "keeper:%s tool visibility: registered=%d visible=%d transport_alias=%d \
+     operator_only=%d invalid_schema=%d unexplained=%d"
+    meta.name
+    (List.length registered_descriptors)
+    (List.length all_tool_names)
+    transport_alias_count
+    operator_only_count
+    invalid_schema_count
+    unexplained_exclusion_count;
+  let record_tool_assignment ~turn ~tool_list ~lane =
+    let (_assignment_id : Tool_assignment_telemetry.assignment_id) =
+      Tool_assignment_telemetry.emit_assigned
+        ~agent_id:meta.name
+        ~profile:"keeper"
+        ~tool_list
+        ~reason:
+          (Printf.sprintf
+             "keeper before_turn tool surface turn=%d lane=%s"
+             turn
+             (Keeper_agent_tool_surface.turn_lane_to_string lane))
+        ()
+    in
+    ()
+  in
+  let receipt_agent_core_turn_count_ref : int option ref = ref None in
+  let receipt_model_used_ref : string option ref = ref None in
+  let receipt_stop_reason_ref : Runtime_agent.stop_reason option ref =
+    ref None
+  in
+  let receipt_runtime_observation_ref
+    : Runtime_observation.runtime_observation option ref
+    =
+    ref None
+  in
+  let receipt_response_text_present_ref = ref false in
+  let compute_tool_surface
+        ~turn:_
+        ~current_tool_choice
+        ()
+    : string list * turn_lane
+    =
+    (* What is actually on the wire this round, not what was on it when the
+       tools were built. The attached-service listing widens the callable set
+       mid-turn, so from the round after a load the built list is short by
+       exactly the tools the model just asked for -- and this is the record an
+       operator reads to find out what the model was offered. Official-client
+       attempts use their complete built set even if a prior Agent Core
+       attempt left its agent in the shared cell. *)
+    let schema_filter =
+      (Keeper_agent_tool_surface.for_attempt
+         ~checkpoint_owner:!active_checkpoint_owner ~agent_cell ~built:keeper_tools).tools
+      |> List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) in
+    let lane : Keeper_agent_tool_surface.turn_lane =
+      if schema_filter <> []
+      then Lane_tool_optional
+      else (
+        match current_tool_choice with
+        | Some Agent_core.Types.None_ -> Lane_tool_disabled
+        | Some (Agent_core.Types.Auto | (Agent_core.Types.Any | Agent_core.Types.Tool _)) | None -> Lane_text_only)
+    in
+    (schema_filter, lane)
+  in
+
+  let ctx : Keeper_run_tools_hooks.ctx =
+    { workspace_root
+    ; identity_tool_index = Keeper_identity_tool_index.of_tools
+        identity_allow.Keeper_identity_tool_allow.kept
+    ; acc
+    ; agent_cell
+    ; agent_name
+    ; all_tool_names
+    ; deferred_tool_names =
+        (match keeper_listing with
+         | Keeper_tools_agent_core.No_listing -> []
+         | Keeper_tools_agent_core.Listing { deferred_builtin_names } ->
+           deferred_builtin_names)
+    ; compute_tool_surface
+    ; record_tool_assignment
+    ; config
+    ; keeper_tools_cleanup
+    ; terminal_effect_state
+    ; keeper_turn_id
+    ; turn_kind
+    ; meta
+    ; profile_defaults
+    ; turn_ctx_cell
+    ; answer_source_ids
+    ; receipt_agent_core_turn_count_ref
+    ; receipt_model_used_ref
+    ; receipt_stop_reason_ref
+    ; receipt_runtime_observation_ref
+    ; receipt_lane_attempt_index_ref
+    ; receipt_response_text_present_ref
+    ; on_runtime_attempt
+    ; tool_result_commit_required
+    ; on_tool_stream_observation
+    ; skill_activation_context
+    ; composition_result_delivery
+    ; on_tool_result_ready
+    ; tools
+    ; agent_core_tools
+    ; on_demand_tool_names
+    ; result_bounds
+    }
+  in
+  Keeper_run_tools_hooks.assemble_hooks
+    ?preview
+    ?observation_token
+    ?dynamic_context_for_tools
+    ?repetition_execution
+    ~ctx ~session ~turn_system_prompt ~model_message ~dynamic_context
+    ~history_messages ~prompt_metrics ~shared_context
+    ~start_turn_count
+    ~runtime_id_string
+    ~config_root ~runtime_config_path
+    ~trajectory_acc
+    ~skill_projection_diagnostics:preparation.diagnostics
+    ?runtime_manifest_context ?runtime_manifest_append ()

@@ -1,0 +1,232 @@
+# captured 2026-10-29T05:01:05Z at 3e41385b549 (spec is uncommitted at capture)
+# java -cp tla2tools-1.8.0.jar tlc2.TLC -workers 1 -noGenerateSpecTE -config KeeperBacklogPreemption-buggy-receipt.cfg KeeperBacklogPreemption.tla
+(Use the -nowarning option to disable this warning.)
+Error: Invariant TurnsFollowOutsideCauses is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = FALSE
+/\ chat_queued = TRUE
+/\ lane = "none"
+/\ chat_left = 3
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 0
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 2: <StartDirect line 146, col 5 to line 156, col 74 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 3
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 3: <DirectCall line 174, col 5 to line 181, col 61 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 2
+/\ addressed_total = 0
+/\ rows_total = 0
+/\ receipt_row = FALSE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = TRUE
+
+State 4: <PulseRow line 133, col 5 to line 141, col 64 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 2
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = TRUE
+
+State 5: <DirectContinue line 185, col 5 to line 191, col 78 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 2
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 6: <DirectCall line 174, col 5 to line 181, col 61 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 1
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = TRUE
+
+State 7: <DirectContinue line 185, col 5 to line 191, col 78 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 1
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 8: <DirectCall line 174, col 5 to line 181, col 61 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 0
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = TRUE
+
+State 9: <DirectContinue line 185, col 5 to line 191, col 78 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "direct"
+/\ chat_left = 0
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 10: <DirectComplete line 208, col 5 to line 215, col 36 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = TRUE
+/\ chat_queued = FALSE
+/\ lane = "none"
+/\ chat_left = 0
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 1
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 11: <StartSched line 161, col 5 to line 171, col 33 of module KeeperBacklogPreemption>
+/\ sched_left = 3
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = FALSE
+/\ chat_queued = FALSE
+/\ lane = "sched"
+/\ chat_left = 0
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 2
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 12: <SchedCall line 218, col 5 to line 225, col 61 of module KeeperBacklogPreemption>
+/\ sched_left = 2
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = FALSE
+/\ chat_queued = FALSE
+/\ lane = "sched"
+/\ chat_left = 0
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 2
+/\ successor = FALSE
+/\ at_boundary = TRUE
+
+State 13: <YieldToReceiptRow line 303, col 5 to line 311, col 61 of module KeeperBacklogPreemption>
+/\ sched_left = 2
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = FALSE
+/\ chat_queued = FALSE
+/\ lane = "none"
+/\ chat_left = 0
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 2
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+State 14: <StartSched line 161, col 5 to line 171, col 33 of module KeeperBacklogPreemption>
+/\ sched_left = 2
+/\ sched_pending = TRUE
+/\ later_chat = FALSE
+/\ successor_total = 0
+/\ reserved = FALSE
+/\ chat_queued = FALSE
+/\ lane = "sched"
+/\ chat_left = 0
+/\ addressed_total = 0
+/\ rows_total = 1
+/\ receipt_row = TRUE
+/\ turns_started = 3
+/\ successor = FALSE
+/\ at_boundary = FALSE
+
+306 states generated, 183 distinct states found, 32 states left on queue.
+The depth of the complete state graph search is 14.
+Finished in 00s at (2026-10-29 14:01:05)

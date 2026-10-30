@@ -1,0 +1,132 @@
+{
+  "scope": "actual pure canonical assembler/projection outputs; vendor retained-System policy is separately traced source, not executed",
+  "before_head": "e9f72f1c985761e032e0fef878ce1dc6d0111ad2",
+  "after_head": "8266d74301eba653741fe4b0c1fafd7cbe7081f5",
+  "before_probe": "/tmp/masc-independent-authority-review-20261025/extra-official/official-resume-check.json",
+  "before_probe_sha256": "47f70a082f9dfbb798dddec67bb527a9dff26a917b54be4ab57b8cc6901a32d5",
+  "before": {
+    "diagnostic": "Official Start authority then no current event",
+    "start_system": "BASE\n\nGOAL 현재 criterion\n\nApproved task-first vrf-first operator-첫번째",
+    "next_system": "BASE",
+    "next_resume_prompt": "NEXT OWNER",
+    "scope": "Actual source produces no authority-clearing observation; remote first-System retention is adapter policy source, not executed here"
+  },
+  "after": {
+    "canonical_issued_system": "BASE\n\nGOAL 현재 criterion\n\nApproved task-first vrf-first operator-첫번째",
+    "submitted_start_system": "BASE\n\nGOAL 현재 criterion",
+    "submitted_start_user": "USER:\n{\"schema\":\"masc.official-client-context-message.v2\",\"message\":{\"role\":\"user\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"Approved task-first vrf-first operator-첫번째\"}],\"name\":null,\"tool_call_id\":null,\"metadata\":{}}}\n\nFIRST OWNER",
+    "submitted_same_event_resume": "USER:\n{\"schema\":\"masc.official-client-context-message.v2\",\"message\":{\"role\":\"user\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"Approved task-first vrf-first operator-첫번째\"}],\"name\":null,\"tool_call_id\":null,\"metadata\":{}}}\n\nOWNER",
+    "submitted_next_absent_resume": "NEXT OWNER",
+    "submitted_changed_event_start": "USER:\n{\"schema\":\"masc.official-client-context-message.v2\",\"message\":{\"role\":\"user\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"Rejected task-other vrf-new operator-second\"}],\"name\":null,\"tool_call_id\":null,\"metadata\":{}}}\n\nNEXT OWNER",
+    "start_source_binding": {
+      "schema": "masc.client-assembly-slot-binding.v1",
+      "status": "matched_completed_slot",
+      "scope": "issuer_carrier_only_not_tool_history_or_remote_retention",
+      "slot": "whole_write",
+      "index": null,
+      "matched_slot": {
+        "bytes": 236,
+        "sha256": "3d83eecd12aae7e5a4956986d40397f74edca65e11740172c80bbe15a322fe98",
+        "offset": 0
+      },
+      "expected_slot_sha256": "3d83eecd12aae7e5a4956986d40397f74edca65e11740172c80bbe15a322fe98",
+      "issuer_attribution": {
+        "status": "verified",
+        "verified_carrier_count": 1,
+        "unavailable": [],
+        "scope": "source_acquisition_and_local_filter_not_transport_or_remote_retention"
+      },
+      "occurrences": [
+        {
+          "attributed_occurrence_index": 0,
+          "encoded_message_offset_in_decoded_slot": 6,
+          "encoded_message_bytes": 217,
+          "encoded_message_sha256": "c58b5e3497fb2618d3da06086f9de394f8744494e94cda8e5202d57c1784758c",
+          "source": {
+            "assembly": {
+              "schema": "masc.logical-context-partition.v2",
+              "scope": "assembled_raw_utf8_before_message_or_ipc_encoding",
+              "bytes": 77,
+              "sha256": "656695b5bcd093c2e36424082542375d99909f81fbdc8bec5c9b7ee3012da2f5",
+              "spans": [
+                {
+                  "source": {
+                    "kind": "unattributed",
+                    "reason": "existing_prefix"
+                  },
+                  "offset": 0,
+                  "bytes": 4,
+                  "sha256": "cbf36a964ba8c0894fcc9ec491b4d1dd94d221a7dc88308e9c6b892445a8574b",
+                  "subpartition": {
+                    "status": "not_applicable"
+                  }
+                },
+                {
+                  "source": {
+                    "kind": "unattributed",
+                    "reason": "separator"
+                  },
+                  "offset": 4,
+                  "bytes": 2,
+                  "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+                  "subpartition": {
+                    "status": "not_applicable"
+                  }
+                },
+                {
+                  "source": {
+                    "kind": "block",
+                    "block": "active_goals"
+                  },
+                  "offset": 6,
+                  "bytes": 21,
+                  "sha256": "9a92b0d82cefed7f0670aa68aae57a67777af8b346da8f2756b485c59d414f1f",
+                  "subpartition": {
+                    "status": "not_applicable"
+                  }
+                },
+                {
+                  "source": {
+                    "kind": "unattributed",
+                    "reason": "separator"
+                  },
+                  "offset": 27,
+                  "bytes": 2,
+                  "sha256": "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
+                  "subpartition": {
+                    "status": "not_applicable"
+                  }
+                },
+                {
+                  "source": {
+                    "kind": "block",
+                    "block": "completion_authority"
+                  },
+                  "offset": 29,
+                  "bytes": 48,
+                  "sha256": "7ae1b22b369cd4082932dedcdd96de27a0e57e415be33de11fed202be36014a0",
+                  "subpartition": {
+                    "status": "not_applicable"
+                  }
+                }
+              ]
+            },
+            "source_carrier": "system_prompt",
+            "source_scope": "canonical_issued_system_prompt",
+            "source_span_indices": [
+              4
+            ],
+            "rendered_text_bytes": 48,
+            "rendered_text_sha256": "7ae1b22b369cd4082932dedcdd96de27a0e57e415be33de11fed202be36014a0",
+            "rendering": "system_observation_to_official_start_user",
+            "target_carrier": "official_start_user_prompt",
+            "codec_schema": "masc.official-client-context-message.v2",
+            "codec_text_path": "/message/content_blocks/0/text"
+          }
+        }
+      ],
+      "omission_scope": "local_resume_filter_decision_not_remote_retention",
+      "omitted_held": []
+    }
+  }
+}

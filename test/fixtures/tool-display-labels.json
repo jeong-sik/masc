@@ -1,0 +1,10 @@
+[
+  { "name": "keeper_task_done", "label": "KeeperTaskDone" },
+  { "name": "masc_board_post", "label": "MascBoardPost" },
+  { "name": "keeper_memory_search", "label": "KeeperMemorySearch" },
+  { "name": "WebFetch", "label": "WebFetch" },
+  { "name": "browser-lanes", "label": "browser-lanes" },
+  { "name": "msx-play", "label": "msx-play" },
+  { "name": "shell", "label": "Shell" },
+  { "name": "über_agent", "label": "überAgent" }
+]

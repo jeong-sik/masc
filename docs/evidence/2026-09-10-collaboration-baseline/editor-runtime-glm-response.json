@@ -1,0 +1,48 @@
+{
+  "jsonrpc": "2.0",
+  "id": 28,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.35.3"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"error\":\"keeper_turn_in_flight\",\"keeper\":\"exhibit-editor\",\"block\":{\"kind\":\"turn_busy\",\"holder\":{\"lane\":\"autonomous\",\"started_at\":1789045473.029103}},\"message\":\"keeper metadata was updated but the keepalive lane was not restarted: a turn holds this keeper's slot. A keeper's own turn always holds the slot, so masc_keeper_up cannot restart its caller from inside that turn. Retry masc_keeper_up when the keeper is idle to restart the lane.\"}",
+          "status": "error",
+          "tool": "masc_keeper_up"
+        },
+        "trace_id": "28",
+        "agent_id": "admin",
+        "tool": "masc_keeper_up",
+        "duration_ms": 2663,
+        "attempts": 1,
+        "timestamp": "2026-09-10T13:08:44Z",
+        "failure_class": "workflow_rejection"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":\"keeper_turn_in_flight\",\"keeper\":\"exhibit-editor\",\"block\":{\"kind\":\"turn_busy\",\"holder\":{\"lane\":\"autonomous\",\"started_at\":1789045473.029103}},\"message\":\"keeper metadata was updated but the keepalive lane was not restarted: a turn holds this keeper's slot. A keeper's own turn always holds the slot, so masc_keeper_up cannot restart its caller from inside that turn. Retry masc_keeper_up when the keeper is idle to restart the lane.\"}"
+      }
+    ],
+    "isError": true,
+    "structuredContent": {
+      "error": "keeper_turn_in_flight",
+      "keeper": "exhibit-editor",
+      "block": {
+        "kind": "turn_busy",
+        "holder": {
+          "lane": "autonomous",
+          "started_at": 1789045473.029103
+        }
+      },
+      "message": "keeper metadata was updated but the keepalive lane was not restarted: a turn holds this keeper's slot. A keeper's own turn always holds the slot, so masc_keeper_up cannot restart its caller from inside that turn. Retry masc_keeper_up when the keeper is idle to restart the lane."
+    }
+  }
+}

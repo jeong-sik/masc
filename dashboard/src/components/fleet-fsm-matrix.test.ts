@@ -1,0 +1,943 @@
+import { html } from 'htm/preact'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+
+const { fetchKeepersCompositeMock, dispatchOperatorActionMock, showToastMock } = vi.hoisted(() => ({
+  fetchKeepersCompositeMock: vi.fn(),
+  dispatchOperatorActionMock: vi.fn(),
+  showToastMock: vi.fn(),
+}))
+
+vi.mock('../api/keeper', () => ({
+  fetchKeepersComposite: fetchKeepersCompositeMock,
+}))
+
+vi.mock('../operator-store', () => ({
+  dispatchOperatorAction: dispatchOperatorActionMock,
+}))
+
+vi.mock('./common/toast', () => ({
+  showToast: showToastMock,
+}))
+
+import {
+  buildRuntimeAssistPrompt,
+  chipClassFor,
+  filterKeeperSnapshots,
+  fleetCellPresentation,
+  FLEET_HISTORY_LEN,
+  inferKeeperNameFrom,
+  latestRuntimeActivityEpoch,
+  pushObservation,
+  runtimeAttentionForSnapshot,
+  sparkClassFor,
+  tallyInvariantViolations,
+  tallyRuntimeAttention,
+  type KeeperFleetHistory,
+  FleetFsmMatrix,
+} from './fleet-fsm-matrix'
+import { fleetCompositeSnapshot } from '../composite-signals'
+import type {
+  FleetCompositeSnapshot,
+  KeeperCompositeExecution,
+  KeeperCompositeSnapshot,
+  KeeperRuntimeAttention,
+} from '../api/keeper'
+
+function snapshot(
+  overrides: Partial<KeeperCompositeSnapshot> & {
+    name?: string
+    allHold?: boolean
+    violate?: Partial<KeeperCompositeSnapshot['invariants']>
+  } = {},
+): KeeperCompositeSnapshot {
+  const name = overrides.name ?? 'alpha'
+  const allHold = overrides.allHold ?? true
+  const base: KeeperCompositeSnapshot = {
+    keeper: name,
+    correlation_id: `keeper:${name}:42`,
+    run_id: `r-0-${name}`,
+    ts: 1_713_000_000,
+    phase: 'Running',
+    turn_phase: 'idle',
+    decision: { stage: 'undecided' },
+    runtime: { state: 'idle' },
+    measurement: { captured: true },
+    invariants: {
+      event_priority_monotone: allHold,
+      phase_derivation_agreement: allHold,
+      ...overrides.violate,
+    },
+    fsm_guard_violations: 0,
+    fsm_guard_violation_breakdown: [],
+    is_live: false,
+    last_outcome: null,
+    runtime_attention: attention(),
+    recommended_actions: [],
+  }
+  return { ...base, ...overrides }
+}
+
+function attention(
+  overrides: Partial<KeeperRuntimeAttention> = {},
+): KeeperRuntimeAttention {
+  return {
+    state: 'ok',
+    needs_attention: false,
+    blocked: false,
+    fiber_stop_requested: false,
+    reason: null,
+    raw_phase: 'Running',
+    is_live: false,
+    source: 'composite_snapshot',
+    ...overrides,
+  }
+}
+
+function blockedAttention(): KeeperRuntimeAttention {
+  return attention({
+    state: 'blocked',
+    needs_attention: true,
+    blocked: true,
+    reason: 'provider_runtime_error',
+    source: 'execution_receipt',
+  })
+}
+
+function execution(
+  overrides: Partial<KeeperCompositeExecution> = {},
+): KeeperCompositeExecution {
+  return {
+    latest_receipt_present: true,
+    runtime_lane_observation: { state: 'unreadable', turn: null, evidence: null, error: 'trace_id' },
+    recorded_at: '2026-04-25T07:30:00Z',
+    outcome: 'receipt_done',
+    terminal_reason_code: 'success',
+    operator_disposition: 'pass',
+    operator_disposition_reason: 'healthy',
+    model_used: 'auto',
+    stop_reason: 'completed',
+    duration_ms: 12_000,
+    error: null,
+    runtime: null,
+    claim_attempt: {
+      present: false,
+      source: 'keeper_task_claim_tool_call',
+      status: 'not_observed',
+      result: null,
+      claimed_task_id: null,
+      claimed_goal_id: null,
+    },
+    ...overrides,
+  }
+}
+
+function fleetSnapshot(
+  snapshots: KeeperCompositeSnapshot[] = [snapshot()],
+): FleetCompositeSnapshot {
+  return {
+    generated_at: 1_713_000_000,
+    count: snapshots.length,
+    snapshots,
+  }
+}
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+  fetchKeepersCompositeMock.mockReset()
+  dispatchOperatorActionMock.mockReset()
+  showToastMock.mockReset()
+  fleetCompositeSnapshot.value = null
+})
+
+describe('chipClassFor', () => {
+  it('maps known states to the right semantic tone', () => {
+    // After the design-system migration the chip strings use semantic
+    // tokens (`--ok`, `--bad-light`, `--warn`, `--accent`) rather than
+    // raw Tailwind color names.
+    expect(chipClassFor('Running')).toContain('var(--ok')
+    expect(chipClassFor('Failing')).toContain('var(--bad-light')
+    expect(chipClassFor('Draining')).toContain('var(--accent')
+    expect(chipClassFor('exhausted')).toContain('var(--bad-light')
+  })
+
+  it('falls back to the default chip for unknown states', () => {
+    const cls = chipClassFor('unknown_state_variant')
+    expect(cls).toContain('bg-[var(--color-bg-elevated)]')
+  })
+})
+
+describe('inferKeeperNameFrom', () => {
+  it('uses the explicit keeper identity when present', () => {
+    const snap = snapshot({
+      keeper: 'analyst',
+      correlation_id: 'agent:analyst-session:42',
+    })
+    expect(inferKeeperNameFrom(snap)).toBe('analyst')
+  })
+
+  it('extracts the keeper name from a canonical correlation_id for old payloads', () => {
+    const snap = snapshot({ name: 'gen12-payroll' })
+    delete snap.keeper
+    expect(inferKeeperNameFrom(snap)).toBe('gen12-payroll')
+  })
+
+  it('falls back to the correlation_id verbatim on non-canonical ids', () => {
+    const snap = snapshot({ correlation_id: 'not-a-keeper-id' })
+    delete snap.keeper
+    expect(inferKeeperNameFrom(snap)).toBe('not-a-keeper-id')
+  })
+})
+
+describe('tallyInvariantViolations', () => {
+  it('returns all zeros when every keeper satisfies every invariant', () => {
+    const s = [snapshot({ name: 'a' }), snapshot({ name: 'b' })]
+    expect(tallyInvariantViolations(s)).toEqual({
+      event_priority_monotone: 0,
+      phase_derivation_agreement: 0,
+    })
+  })
+
+  it('counts one per keeper per violated invariant', () => {
+    const s = [
+      snapshot({ name: 'c', violate: { event_priority_monotone: false } }),
+      snapshot({ name: 'd', allHold: false }),
+    ]
+    const t = tallyInvariantViolations(s)
+    expect(t.event_priority_monotone).toBe(2)
+    expect(t.phase_derivation_agreement).toBe(1)
+  })
+
+  it('treats an empty fleet as clean', () => {
+    expect(tallyInvariantViolations([])).toEqual({
+      event_priority_monotone: 0,
+      phase_derivation_agreement: 0,
+    })
+  })
+})
+
+describe('runtimeAttentionForSnapshot', () => {
+  const generatedAt = Date.parse('2026-04-25T07:40:00Z') / 1000
+
+  it('shows the receipt as evidence under a backend blocked judgment', () => {
+    const snap = snapshot({
+      is_live: false,
+      execution: execution({
+        outcome: 'receipt_failed',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'retry_later',
+        operator_disposition_reason: 'provider_runtime_error',
+        error: {
+          kind: 'api',
+          message_preview: 'Timeout after 1170s',
+          message_truncated: false,
+        },
+      }),
+      runtime_attention: blockedAttention(),
+    })
+
+    const result = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(result.level).toBe('blocked')
+    expect(result.label).toBe('정체')
+    expect(result.title).toContain('is_live=false')
+    expect(result.title).toContain('operator=retry_later')
+    expect(result.title).toContain('reason=provider_runtime_error')
+    expect(result.title).toContain('latest activity 10m ago')
+  })
+
+  it('draws the backend blocked judgment even when the receipt looks healthy', () => {
+    const snap = snapshot({
+      is_live: false,
+      execution: execution({
+        outcome: 'receipt_done',
+        terminal_reason_code: 'success',
+        operator_disposition: 'pass',
+        operator_disposition_reason: 'healthy',
+      }),
+      runtime_attention: blockedAttention(),
+    })
+
+    const result = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(result.level).toBe('blocked')
+    expect(result.cause).toContain('execution_receipt')
+    expect(result.cause).toContain('provider_runtime_error')
+    expect(result.reason).toContain('backend runtime_attention')
+  })
+
+  it('keeps a backend-ok keeper ok whatever its latest receipt says', () => {
+    const snap = snapshot({
+      is_live: true,
+      execution: execution({
+        outcome: 'receipt_failed',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'retry_later',
+        operator_disposition_reason: 'provider_runtime_error',
+      }),
+      runtime_attention: attention({ is_live: true }),
+    })
+
+    const result = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(result.level).toBe('ok')
+    expect(result.label).toBe('live')
+    expect(result.nextStep).toBe('조치 불필요')
+    expect(result.title).toContain('terminal=api_error')
+  })
+
+  it('maps backend stop-requested attention to shutdown follow-up', () => {
+    const snap = snapshot({
+      is_live: true,
+      runtime_attention: {
+        state: 'stop_requested',
+        needs_attention: true,
+        blocked: false,
+        fiber_stop_requested: true,
+        reason: 'fiber stop requested',
+        raw_phase: 'Running',
+        is_live: true,
+        source: 'composite_snapshot',
+      },
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('blocked')
+    expect(attention.label).toBe('정지 요청')
+    expect(attention.reason).toContain('backend runtime_attention')
+    expect(attention.reason).toContain('stop_requested')
+    expect(attention.cause).toContain('fiber stop requested')
+    expect(attention.nextStep).toContain('shutdown 완료')
+  })
+
+  it('shows a backend-ok non-live keeper as waiting', () => {
+    const snap = snapshot({
+      is_live: false,
+      phase: 'Running',
+      execution: execution({
+        recorded_at: '2026-04-25T07:38:30Z',
+      }),
+      runtime_attention: {
+        state: 'ok',
+        needs_attention: false,
+        blocked: false,
+        fiber_stop_requested: false,
+        reason: null,
+        raw_phase: 'Running',
+        is_live: false,
+        source: 'composite_snapshot',
+      },
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(snap.phase).toBe('Running')
+    expect(attention.level).toBe('ok')
+    expect(attention.label).toBe('대기')
+    expect(attention.cause).toContain('live turn 없음')
+  })
+
+  it('does not revive a previous terminal receipt while a live turn is running', () => {
+    const snap = snapshot({
+      is_live: true,
+      turn_phase: 'executing',
+      decision: { stage: 'tool_policy_selected' },
+      runtime: { state: 'executing' },
+      live_turn: {
+        turn_id: 42,
+        started_at: generatedAt - 30,
+        last_progress_at: generatedAt - 5,
+        last_progress_kind: 'provider_attempt_started',
+      },
+      execution: execution({
+        recorded_at: '2026-04-25T07:30:00Z',
+        outcome: 'receipt_failed',
+        terminal_reason_code: 'runtime_exhausted',
+        operator_disposition: 'fail_open_next_runtime',
+        operator_disposition_reason: 'runtime_exhausted',
+        error: {
+          kind: 'internal',
+          message_preview: 'runtime exhausted',
+          message_truncated: false,
+        },
+      }),
+      runtime_attention: {
+        state: 'ok',
+        needs_attention: false,
+        blocked: false,
+        fiber_stop_requested: false,
+        reason: null,
+        raw_phase: 'running',
+        is_live: true,
+        source: 'live_turn',
+        execution_current: false,
+        stale_execution_receipt: true,
+        live_turn_started_at: generatedAt - 30,
+        live_turn_last_progress_at: generatedAt - 5,
+      },
+    })
+
+    expect(latestRuntimeActivityEpoch(snap)).toBe(generatedAt - 5)
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('ok')
+    expect(attention.label).toBe('live')
+    expect(attention.cause).toContain('live turn 관측 중')
+    expect(attention.title).toContain('receipt=previous_turn')
+    expect(attention.title).toContain('previous_terminal=runtime_exhausted')
+  })
+
+  it('keeps raw lifecycle separate by drawing backend stale liveness without changing phase', () => {
+    const snap = snapshot({
+      is_live: false,
+      phase: 'Running',
+      runtime_attention: attention({
+        state: 'stale',
+        needs_attention: true,
+        reason: 'not_live',
+      }),
+    })
+
+    const result = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(snap.phase).toBe('Running')
+    expect(result.level).toBe('stale')
+    expect(result.reason).toContain('not_live')
+    expect(result.title).toContain('is_live=false')
+  })
+
+  it('draws backend idle_stale as a live keeper that stopped turning', () => {
+    const snap = snapshot({
+      is_live: true,
+      execution: execution({
+        recorded_at: '2026-04-25T07:20:00Z',
+      }),
+      runtime_attention: attention({
+        state: 'idle_stale',
+        needs_attention: true,
+        is_live: true,
+        reason: 'idle_composite',
+      }),
+    })
+
+    const result = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(result.level).toBe('idle')
+    expect(result.label).toBe('무전환')
+    expect(result.reason).toContain('idle_composite')
+  })
+
+  it('draws the offline fallback states as paused or not running, not as live', () => {
+    const paused = snapshot({
+      phase: 'paused',
+      runtime_attention: attention({
+        state: 'paused',
+        needs_attention: true,
+        reason: 'paused_without_registry_entry',
+        source: 'offline_composite_fallback',
+      }),
+    })
+    const offline = snapshot({
+      phase: 'offline',
+      runtime_attention: attention({
+        state: 'offline',
+        needs_attention: true,
+        reason: 'registry_absent',
+        source: 'offline_composite_fallback',
+      }),
+    })
+
+    const pausedAttention = runtimeAttentionForSnapshot(paused, generatedAt)
+    expect(pausedAttention.level).toBe('paused')
+    expect(pausedAttention.label).toBe('일시정지')
+    expect(pausedAttention.cause).toContain('paused_without_registry_entry')
+
+    const offlineAttention = runtimeAttentionForSnapshot(offline, generatedAt)
+    expect(offlineAttention.level).toBe('offline')
+    expect(offlineAttention.label).toBe('미실행')
+    expect(offlineAttention.cause).toContain('registry_absent')
+  })
+
+  it('counts live, blocked, stale, and idle runtime truth separately', () => {
+    const live = snapshot({
+      name: 'live',
+      is_live: true,
+      turn_phase: 'executing',
+      execution: execution(),
+      runtime_attention: attention({ is_live: true }),
+    })
+    const blocked = snapshot({
+      name: 'blocked',
+      is_live: false,
+      execution: execution({
+        outcome: 'receipt_failed',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'retry_later',
+      }),
+      runtime_attention: blockedAttention(),
+    })
+    const stale = snapshot({
+      name: 'stale',
+      is_live: false,
+      runtime_attention: attention({ state: 'stale', needs_attention: true, reason: 'not_live' }),
+    })
+    const idle = snapshot({
+      name: 'idle',
+      is_live: true,
+      execution: execution({ recorded_at: '2026-04-25T07:20:00Z' }),
+      runtime_attention: attention({
+        state: 'idle_stale',
+        needs_attention: true,
+        is_live: true,
+        reason: 'idle_composite',
+      }),
+    })
+
+    expect(tallyRuntimeAttention([live, blocked, stale, idle], generatedAt)).toEqual({
+      live: 2,
+      blocked: 1,
+      stale: 1,
+      idle: 1,
+      total: 4,
+    })
+  })
+
+  it('uses the newest receipt or last outcome timestamp as activity evidence', () => {
+    const snap = snapshot({
+      last_outcome: {
+        turn_id: 7,
+        ended_at: generatedAt - 300,
+        decision_stage: 'guard_ok',
+        runtime_state: 'done',
+        selected_model: 'custom:mock',
+      },
+      execution: execution({
+        recorded_at: '2026-04-25T07:20:00Z',
+      }),
+    })
+
+    expect(latestRuntimeActivityEpoch(snap)).toBe(generatedAt - 300)
+  })
+})
+
+describe('fleetCellPresentation', () => {
+  const generatedAt = Date.parse('2026-04-25T07:40:00Z') / 1000
+
+  it('overlays runtime blocker truth on the KSM chip without rewriting raw phase', () => {
+    const snap = snapshot({
+      phase: 'Running',
+      is_live: false,
+      execution: execution({
+        outcome: 'receipt_failed',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'retry_later',
+        operator_disposition_reason: 'provider_runtime_error',
+      }),
+      runtime_attention: blockedAttention(),
+    })
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    const cell = fleetCellPresentation('phase', snap.phase, attention)
+
+    expect(snap.phase).toBe('Running')
+    expect(cell.runtimePhaseConflict).toBe(true)
+    expect(cell.label).toBe('실행 중 · 정체')
+    expect(cell.className).toContain('var(--bad-light)')
+    expect(cell.title).toContain('KSM Running')
+    expect(cell.title).toContain('runtime 정체')
+    expect(cell.title).toContain('execution_receipt: blocked · provider_runtime_error')
+  })
+
+  it('keeps non-KSM lanes tied to their raw FSM state', () => {
+    const snap = snapshot({
+      is_live: false,
+      execution: execution(),
+    })
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    const cell = fleetCellPresentation('turn', snap.turn_phase, attention)
+
+    expect(cell.runtimePhaseConflict).toBe(false)
+    expect(cell.label).toBe('대기')
+    expect(cell.className).toContain('var(--color-bg-elevated)')
+  })
+})
+
+describe('buildRuntimeAssistPrompt', () => {
+  const generatedAt = Date.parse('2026-04-25T07:40:00Z') / 1000
+
+  it('carries cause, evidence, and supervised resolve instructions into the keeper prompt', () => {
+    const snap = snapshot({
+      name: 'blocked',
+      phase: 'Running',
+      is_live: false,
+      execution: execution({
+        outcome: 'receipt_failed',
+        terminal_reason_code: 'api_error',
+        operator_disposition: 'retry_later',
+        operator_disposition_reason: 'provider_runtime_error',
+      }),
+      runtime_attention: blockedAttention(),
+    })
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    const prompt = buildRuntimeAssistPrompt('blocked', snap, attention)
+
+    expect(prompt).toContain('감독형 런타임 진단 요청: blocked')
+    expect(prompt).toContain('cause=')
+    expect(prompt).toContain('cause=execution_receipt: blocked · provider_runtime_error')
+    expect(prompt).toContain('evidence=')
+    expect(prompt).toContain('"terminal_reason_code":"api_error"')
+    expect(prompt).toContain('"operator_disposition":"retry_later"')
+    expect(prompt).toContain('KSM=Running')
+    expect(prompt).toContain('resolve 후보')
+    expect(prompt).toContain('keeper_probe')
+    expect(prompt).toContain('keeper_recover')
+  })
+})
+
+describe('sparkClassFor', () => {
+  it('extracts a single bg-* utility from the full chip class', () => {
+    // Bracketed Tailwind arbitrary values that wrap CSS vars cannot
+    // live inside a JS regex literal because `[...]` starts a
+    // character class; use startsWith on the extracted prefix.
+    expect(sparkClassFor('Running').startsWith('bg-[var(--ok-10)]')).toBe(true)
+    expect(sparkClassFor('Failing').startsWith('bg-[var(--bad-10)]')).toBe(true)
+  })
+
+  it('falls back to the muted white token on unknown states', () => {
+    // DEFAULT_CHIP carries `bg-[var(--color-bg-elevated)]`; sparkClassFor preserves it.
+    expect(sparkClassFor('__not_a_state__').startsWith('bg-[var(--color-bg-elevated)]')).toBe(true)
+  })
+})
+
+describe('pushObservation', () => {
+  it('seeds a new keeper with one observation per axis', () => {
+    const next = pushObservation({}, [snapshot({ name: 'alpha' })])
+    const alpha = next.alpha!
+    expect(alpha.phase).toEqual(['Running'])
+    expect(alpha.turn).toEqual(['idle'])
+    expect(alpha.decision).toEqual(['undecided'])
+    expect(alpha.runtime).toEqual(['idle'])
+  })
+
+  it('appends new observations while preserving prior ones', () => {
+    const t1 = pushObservation({}, [snapshot({ name: 'alpha', phase: 'Running' })])
+    const t2 = pushObservation(t1, [snapshot({ name: 'alpha', phase: 'Failing' })])
+    expect(t2.alpha!.phase).toEqual(['Running', 'Failing'])
+  })
+
+  it('caps each axis series at the history window', () => {
+    let h: KeeperFleetHistory = {}
+    for (let i = 0; i < FLEET_HISTORY_LEN + 7; i++) {
+      h = pushObservation(h, [snapshot({ name: 'a' })], FLEET_HISTORY_LEN)
+    }
+    expect(h.a!.phase.length).toBe(FLEET_HISTORY_LEN)
+  })
+
+  it('drops keepers that disappear from the latest snapshot', () => {
+    const t1 = pushObservation({}, [
+      snapshot({ name: 'alpha' }),
+      snapshot({ name: 'beta' }),
+    ])
+    expect(Object.keys(t1).sort()).toEqual(['alpha', 'beta'])
+    const t2 = pushObservation(t1, [snapshot({ name: 'alpha' })])
+    expect(Object.keys(t2)).toEqual(['alpha'])
+  })
+
+  it('returns a fresh top-level object for identity-based re-renders', () => {
+    const prior = {}
+    const next = pushObservation(prior, [snapshot({ name: 'alpha' })])
+    expect(next).not.toBe(prior)
+  })
+
+})
+
+describe('filterKeeperSnapshots', () => {
+  const alpha = snapshot({ name: 'gen12-alpha' })
+  const beta = snapshot({
+    name: 'gen14-beta',
+    phase: 'Draining',
+    runtime: { state: 'executing' },
+  })
+  const gamma = snapshot({
+    name: 'gen12-gamma',
+    turn_phase: 'prompting',
+  })
+  const rows: readonly KeeperCompositeSnapshot[] = [alpha, beta, gamma]
+
+  it('returns the input reference unchanged on an empty query', () => {
+    expect(filterKeeperSnapshots(rows, '')).toBe(rows)
+  })
+
+  it('returns the input reference unchanged on a whitespace-only query', () => {
+    expect(filterKeeperSnapshots(rows, '   ')).toBe(rows)
+  })
+
+  it('matches keeper name substring case-insensitively', () => {
+    const out = filterKeeperSnapshots(rows, 'GEN12')
+    expect(out.map(inferKeeperNameFrom)).toEqual(['gen12-alpha', 'gen12-gamma'])
+  })
+
+  it('matches phase (KSM) axis value', () => {
+    const out = filterKeeperSnapshots(rows, 'draining')
+    expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
+  })
+
+  it('matches runtime (KCL) axis value', () => {
+    const out = filterKeeperSnapshots(rows, 'executing')
+    expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
+  })
+
+  it('matches turn (KTC) axis value', () => {
+    const out = filterKeeperSnapshots(rows, 'prompting')
+    expect(out.map(inferKeeperNameFrom)).toEqual(['gen12-gamma'])
+  })
+
+  it('returns an empty array when nothing matches', () => {
+    expect(filterKeeperSnapshots(rows, 'nothing-here')).toEqual([])
+  })
+
+  it('does not mutate the input array', () => {
+    const input: KeeperCompositeSnapshot[] = [alpha, beta, gamma]
+    const before = input.slice()
+    filterKeeperSnapshots(input, 'gen12')
+    expect(input).toEqual(before)
+    expect(input.length).toBe(3)
+  })
+
+  it('trims the query before matching', () => {
+    const out = filterKeeperSnapshots(rows, '  gen14-beta  ')
+    expect(out.map(inferKeeperNameFrom)).toEqual(['gen14-beta'])
+  })
+
+  it('returns a new array (not input ref) when filtering actually runs', () => {
+    const out = filterKeeperSnapshots(rows, 'gen12')
+    expect(out).not.toBe(rows)
+    expect(out.length).toBe(2)
+  })
+})
+
+describe('FleetFsmMatrix streaming fallback', () => {
+  it('uses an existing streamed snapshot without starting fallback polling', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-25T00:00:00Z'))
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([snapshot({ name: 'fallback' })]),
+    )
+    fleetCompositeSnapshot.value = fleetSnapshot([snapshot({ name: 'streamed' })])
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+    await act(async () => {})
+
+    expect(screen.getByText('streamed')).toBeTruthy()
+    expect(fetchKeepersCompositeMock).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+
+    expect(fetchKeepersCompositeMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to fetching immediately when no streamed snapshot exists', async () => {
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([snapshot({ name: 'fallback' })]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    expect(await screen.findByText('fallback')).toBeTruthy()
+    expect(fetchKeepersCompositeMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders KSM runtime conflict directly in the lifecycle cell', async () => {
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([
+        snapshot({
+          name: 'blocked',
+          phase: 'Running',
+          is_live: false,
+          execution: execution({
+            outcome: 'receipt_failed',
+            terminal_reason_code: 'api_error',
+            operator_disposition: 'retry_later',
+          }),
+          runtime_attention: blockedAttention(),
+        }),
+      ]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    const cell = await screen.findByText('실행 중 · 정체')
+    expect(cell.getAttribute('data-axis')).toBe('phase')
+    expect(cell.getAttribute('data-runtime-phase-conflict')).toBe('true')
+  })
+
+  it('adds the top FSM guard violation source to the strip tooltip', async () => {
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([
+        snapshot({
+          name: 'guarded',
+          fsm_guard_violations: 3,
+          fsm_guard_violation_breakdown: [
+            { action: 'turn_phase_transition', stage: 'guard', count: 2 },
+            { action: 'completion_contract', stage: 'finalize', count: 1 },
+          ],
+        }),
+      ]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    const chip = await screen.findByTestId('fsm-guard-violation-chip')
+    expect(chip.title).toContain('turn_phase_transition/guard: 2')
+  })
+
+  it('requests supervised AI diagnosis with the row cause and evidence', async () => {
+    const onRequestRuntimeAssist = vi.fn()
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([
+        snapshot({
+          name: 'blocked',
+          phase: 'Running',
+          is_live: false,
+          execution: execution({
+            outcome: 'receipt_failed',
+            terminal_reason_code: 'api_error',
+            operator_disposition: 'retry_later',
+            operator_disposition_reason: 'provider_runtime_error',
+          }),
+          runtime_attention: blockedAttention(),
+        }),
+      ]),
+    )
+
+    render(html`
+      <${FleetFsmMatrix}
+        pollIntervalMs=${1000}
+        onRequestRuntimeAssist=${onRequestRuntimeAssist}
+      />
+    `)
+
+    const button = await screen.findByRole('button', { name: '감독형 진단 요청' })
+    await act(async () => {
+      fireEvent.click(button)
+    })
+
+    expect(onRequestRuntimeAssist).toHaveBeenCalledTimes(1)
+    expect(onRequestRuntimeAssist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        keeperName: 'blocked',
+        attention: expect.objectContaining({
+          level: 'blocked',
+          cause: expect.stringContaining('provider_runtime_error'),
+        }),
+        message: expect.stringContaining('resolve 후보'),
+      }),
+    )
+  })
+
+  it('runs backend-recommended probe actions through the operator action path', async () => {
+    dispatchOperatorActionMock.mockResolvedValue({
+      status: 'ok',
+      confirm_required: false,
+    })
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([
+        snapshot({
+          name: 'blocked',
+          phase: 'Running',
+          is_live: false,
+          execution: execution({
+            outcome: 'receipt_failed',
+            terminal_reason_code: 'api_error',
+            operator_disposition: 'retry_later',
+            operator_disposition_reason: 'provider_runtime_error',
+          }),
+          runtime_attention: blockedAttention(),
+          recommended_actions: [
+            {
+              action_type: 'keeper_probe',
+              target_type: 'keeper',
+              target_id: 'blocked',
+              severity: 'warn',
+              reason: 'Inspect provider runtime failure: provider_runtime_error',
+              confirm_required: false,
+              suggested_payload: {
+                source: 'fleet_fsm',
+                keeper: 'blocked',
+              },
+            },
+          ],
+        }),
+      ]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    const button = await screen.findByRole('button', { name: 'Inspect provider runtime failure: provider_runtime_error' })
+    await act(async () => {
+      fireEvent.click(button)
+    })
+
+    await waitFor(() => {
+      expect(dispatchOperatorActionMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action_type: 'keeper_probe',
+          target_type: 'keeper',
+          target_id: 'blocked',
+          payload: expect.objectContaining({
+            source: 'fleet_fsm',
+            keeper: 'blocked',
+          }),
+        }),
+      )
+    })
+    expect(fetchKeepersCompositeMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('surfaces recover as a supervised preview instead of auto-confirming it', async () => {
+    dispatchOperatorActionMock.mockResolvedValue({
+      status: 'ok',
+      confirm_required: true,
+      confirm_token: 'confirm-1',
+    })
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([
+        snapshot({
+          name: 'blocked',
+          phase: 'Running',
+          is_live: false,
+          execution: execution({
+            outcome: 'receipt_failed',
+            terminal_reason_code: 'api_error',
+            operator_disposition: 'unknown',
+          }),
+          runtime_attention: blockedAttention(),
+          recommended_actions: [
+            {
+              action_type: 'keeper_recover',
+              target_type: 'keeper',
+              target_id: 'blocked',
+              severity: 'bad',
+              reason: 'Controlled keeper recovery for runtime stall: api_error',
+              confirm_required: true,
+              suggested_payload: {
+                source: 'fleet_fsm',
+                keeper: 'blocked',
+              },
+            },
+          ],
+        }),
+      ]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    const button = await screen.findByRole('button', { name: 'Controlled keeper recovery for runtime stall: api_error' })
+    await act(async () => {
+      fireEvent.click(button)
+    })
+
+    await waitFor(() => {
+      expect(dispatchOperatorActionMock).toHaveBeenCalledTimes(1)
+    })
+    expect(showToastMock).toHaveBeenCalledWith(
+      expect.stringContaining('승인 대기 중'),
+      'success',
+    )
+  })
+})

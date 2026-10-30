@@ -1,0 +1,16 @@
+{
+  "report_regressions_passed": 13,
+  "model_split": {
+    "baseline_pooled_pass_at_k": 0.5,
+    "candidate_model_a": 1,
+    "candidate_model_b": 0
+  },
+  "partial_cost": {
+    "baseline_partial_total": 1.0,
+    "candidate_total": null,
+    "candidate_observed": 1,
+    "candidate_unreported": 1
+  },
+  "failed_spend_included": 3.0,
+  "experiment_memory_cohorts": 3
+}

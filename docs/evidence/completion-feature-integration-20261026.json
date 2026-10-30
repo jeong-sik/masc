@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "issue": 46089,
+  "task": "task-2704",
+  "code_pr": 46096,
+  "original_goal": {
+    "attachment_sha256": "4b219e97e0b2df206b2d12cfae39316d01e9d6e709f300757237b0eb0a4ab619",
+    "scope": "Four research strands mapped to feature plans and work records; one demonstrated failure repaired, reverified and delivered as the selected first implementation."
+  },
+  "original_stack": {
+    "number": 45953,
+    "prs": [
+      45951,
+      45952,
+      45963,
+      45964,
+      45976,
+      45977,
+      45986
+    ],
+    "state": "merged",
+    "merged_at_utc": [
+      "2026-10-26T07:35:15Z",
+      "2026-10-26T07:35:22Z"
+    ],
+    "top_head": "5f83b5bbe9f4ef75d52406a16bf7bb77f83ac260",
+    "top_merge_commit": "02438c016a98419686e31d84beb83265d2cda685"
+  },
+  "baseline": {
+    "workflow": "Test",
+    "run_id": 40298386159,
+    "job_id": 121489955600,
+    "head": "8e2abe4fa6684462abbea32758e936075c63de9f",
+    "ref": "main",
+    "event": "workflow_dispatch",
+    "run_attempt": 1,
+    "conclusion": "failure",
+    "phase": "compilation_before_selected_suite_execution",
+    "suite": "test_goal_verification_agent,test_goal_verifier_worker",
+    "minimal": true,
+    "log_excerpt": "2026-10-26T09:18:58.5120129Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite\n2026-10-26T09:18:58.5563780Z [targeted] dune build test/test_goal_verification_agent.exe test/test_goal_verifier_worker.exe test/fixtures/verifier-image-lookup.png\n2026-10-26T09:21:28.8519617Z File \"test/test_goal_verification_agent.ml\", line 1703, characters 9-85:\n2026-10-26T09:21:28.8520178Z 1703 |       Ok {AR.selected_runtime_id=evaluator_runtime; verdict=Some (AR.Approve reason)} in\n2026-10-26T09:21:28.8520966Z Error: Some record fields are undefined: evaluator_execution\n2026-10-26T09:21:32.0379990Z ##[error]Process completed with exit code 1.",
+    "status": "completed"
+  },
+  "candidate": {
+    "workflow": "Test",
+    "run_id": 40299208576,
+    "head": "604a099602d1a7ca50fb468211a9d1e6641cf3e6",
+    "base": "8e2abe4fa6684462abbea32758e936075c63de9f",
+    "ref": "fix/goal-evaluator-execution-fixture-20261026",
+    "suite": "test_goal_verification_agent,test_goal_verifier_worker",
+    "minimal": true,
+    "result_observation": "Completed workflow metadata and decoded job log read",
+    "status": "completed",
+    "conclusion": "success",
+    "event": "workflow_dispatch",
+    "run_attempt": 1,
+    "job_id": 121492669699,
+    "results": [
+      {
+        "suite": "test_goal_verification_agent",
+        "passed": 42,
+        "failed": 0,
+        "total": 42
+      },
+      {
+        "suite": "test_goal_verifier_worker",
+        "passed": 21,
+        "failed": 0,
+        "total": 21
+      }
+    ],
+    "log_excerpt": "2026-10-26T09:25:21.2512976Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite\n2026-10-26T09:25:21.2885832Z [targeted] dune build test/test_goal_verification_agent.exe test/test_goal_verifier_worker.exe test/fixtures/verifier-image-lookup.png\n2026-10-26T09:27:37.9835495Z [targeted] test/test_goal_verification_agent: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false\n2026-10-26T09:27:37.9854282Z [targeted] test/test_goal_verification_agent: start 2026-10-26T09:27:37Z\n2026-10-26T09:28:53.0564506Z Test Successful in 75.011s. 42 tests run.\n2026-10-26T09:28:53.0634387Z [targeted] test/test_goal_verification_agent: OK in 76s\n2026-10-26T09:28:53.0950559Z [targeted] test/test_goal_verifier_worker: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false\n2026-10-26T09:28:53.0968495Z [targeted] test/test_goal_verifier_worker: start 2026-10-26T09:28:53Z\n2026-10-26T09:28:54.5658652Z Test Successful in 1.420s. 21 tests run.\n2026-10-26T09:28:54.5717566Z [targeted] test/test_goal_verifier_worker: OK in 1s"
+  },
+  "source_review": {
+    "verdict": "PASS",
+    "by": "completion_stack_audit",
+    "head": "604a099602d1a7ca50fb468211a9d1e6641cf3e6",
+    "base": "8e2abe4fa6684462abbea32758e936075c63de9f",
+    "canonical_diff": "61a0cba1c2c4c3167a7a264a39b06f808fccbe91726a837217d9da9394fd043a",
+    "scope": "complete two-file diff; fixture None preserves unknown execution identity and all existing assertions"
+  },
+  "limits": [
+    "No local Dune build or typecheck was performed; parser-only and whitespace checks passed.",
+    "Earlier 20,440 and62 case runs retain their own source identities.",
+    "Controlled fault injection and scripted reviewers are not real-model completion-rate evidence.",
+    "Source-established missing-root/orphan and phase-moved own-body guards are not relabeled as new fault-injection executions.",
+    "Full regression, installed UI, production crash, deployment and all four follow-up feature implementations are outside the selected delivery."
+  ],
+  "selected_source_sha256": {
+    "lib/task/anti_rationalization.ml": "8c17413e6d952ec176bcd4f3c998fa6d02396a0e9ffdd0265be8f4ff8aa14dd9",
+    "lib/task/anti_rationalization.mli": "ede3a2fd9ac9faf7f0b0d6be956b347d5f7b8e4b440a35d69cd04f2fe0866631",
+    "lib/goal_verification_agent.ml": "b85124187a86e3bfe41efe399d392091725f41a005c3b87ce720ebbe4454391c",
+    "lib/keeper/goal_verifier_worker.ml": "ceecb0bd5d9bd4caf1fa1d64b4168af51e1c1da8d6d1405f0f23033811d82349",
+    "test/test_goal_verification_agent.ml": "b83c370ad9a904eb0cd04002d6c9781a8a2b275563823015e227aa09c676ff1e",
+    "test/test_goal_verifier_worker.ml": "ebd445ac9ec1b11679c6acef84af80b24ddd26867c8b4f172b80eb9be44b7a2b",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    ".github/workflows/test.yml": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191"
+  }
+}

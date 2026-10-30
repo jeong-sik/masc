@@ -1,0 +1,52 @@
+{
+  "recorded_at": "2026-10-25T12:44:27.147666+00:00",
+  "refs": {
+    "before": "6505bd4fedb7e78121fda9a2195ced0a03f2c629",
+    "after": "ed1f4b12ea1ceff9d644b8aee8991aa307072934"
+  },
+  "ocaml_version": "5.5.1",
+  "extractor_sha256": "bd8e04da8847046caab6e4d9d5ee52397b258d2665f532a720f987611634c39a",
+  "runner_sha256": "11ec7f2e7bd375577782a19a140dbc2a54861f98a221ebbe91e377ac11f63fa4",
+  "checks": {
+    "before": {
+      "source_path": "bin/masc_tui_types.ml",
+      "source_sha256": "6a9b3b4bbfe1cbd0b95f60bf3813151243c3ffdb38d09f12e736b8408f5e7ab0",
+      "scope_sha256": "9785272b24cb914d25a36334d857b33338f71df7ae762d55d07bd9c2facf05a4",
+      "command": [
+        "ocamlc",
+        "-w",
+        "+4+8",
+        "-warn-error",
+        "+4+8",
+        "-stop-after",
+        "typing",
+        "before_scope.ml"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": "File \"before_scope.ml\", lines 48-61, characters 65-86:\n48 | .................................................................match \n49 |                                                                    state.view\n50 |                                                                  with\n51 |                                                                  | Keepers\n52 |                                                                     (Keeper_message)\n...\n58 |                                                                  | _ ->\n59 |                                                                     keeper_detail_target_matches\n60 |                                                                     state\n61 |                                                                     request.drr_keeper\nError (warning 4 [fragile-match]): this pattern-matching is fragile.\n  It will remain exhaustive when constructors are added to type surface.\n\nFile \"before_scope.ml\", lines 48-61, characters 65-86:\n48 | .................................................................match \n49 |                                                                    state.view\n50 |                                                                  with\n51 |                                                                  | Keepers\n52 |                                                                     (Keeper_message)\n...\n58 |                                                                  | _ ->\n59 |                                                                     keeper_detail_target_matches\n60 |                                                                     state\n61 |                                                                     request.drr_keeper\nError (warning 4 [fragile-match]): this pattern-matching is fragile.\n  It will remain exhaustive when constructors are added to type keeper_mode.\n"
+    },
+    "after": {
+      "source_path": "bin/masc_tui_types.ml",
+      "source_sha256": "4eb170fc52302dcd76cc82f046aa28092c94b5e17a92bbfaf6f5cf88ed3c7159",
+      "scope_sha256": "66846bb36577a49658cbb1d86e7032c6d263fcf0e045ed7112aa9936420b77af",
+      "command": [
+        "ocamlc",
+        "-w",
+        "+4+8",
+        "-warn-error",
+        "+4+8",
+        "-stop-after",
+        "typing",
+        "after_scope.ml"
+      ],
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  },
+  "reported_failure_reproduced": true,
+  "fixed_fragment_types": true,
+  "scope": "Actual keeper_mode/surface declarations, view_is_chat binding and schedule target expression; two minimal record shapes supply field types and the selected-Keeper predicate is a function parameter. Only this fragment is typechecked. No full TUI module/build, state-transition test, Dune, CI or UI execution.",
+  "verdict": "PASS"
+}

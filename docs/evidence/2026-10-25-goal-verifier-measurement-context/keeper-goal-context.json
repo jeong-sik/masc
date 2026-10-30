@@ -1,0 +1,90 @@
+{
+  "schema": "masc.goal-verifier-measurement.public-projection.v1",
+  "source_hash": [
+    {
+      "source_label": "live_alignment/capture-masc-productor-owner-goal-projection.json",
+      "sha256": "35292f7525d92be1e82f4e0772dd8f2ce137a43b841923dd5e0e1ca377f47d1b"
+    },
+    {
+      "source_label": "live_alignment/capture-masc-pro-builder-goal-projection.json",
+      "sha256": "4215a201bcdf5f227896650ca0e83d43aad739cc5999ce09ba2213aaac7c4683"
+    },
+    {
+      "source_label": "live_alignment/capture-ocaml-agent-ic-goal-projection.json",
+      "sha256": "cfc241b29957505f3d4ac941fafbcb8b62219f0e8f726ffaea3003adea95ab58"
+    },
+    {
+      "source_label": "live_alignment/goal-list-085924.json",
+      "sha256": "b14398a1237dbf835d4b02b437dd569354e276f9a7519a757a776f2ecc969b05"
+    }
+  ],
+  "publication_scope": {
+    "included": [
+      "three historical extra-context capture identities",
+      "exact main Goal row only",
+      "comparison with reported API measurement identity"
+    ],
+    "excluded": [
+      "other sixteen Goal rows",
+      "complete dynamic or base System context",
+      "Keeper instructions",
+      "Board and memory context",
+      "model output"
+    ],
+    "limits": [
+      "An assembled extra-context capture is not proof of full System, offered tools, provider receipt or actual model selection.",
+      "The target text includes11/11; the absent item is the reported measurement record/value, not every11/11 string."
+    ]
+  },
+  "goal_id": "goal-outcome-driven-work-20261024",
+  "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+  "api_observed_at": "2026-10-25T08:59:24Z",
+  "capture_count": 3,
+  "captures": [
+    {
+      "keeper": "masc-productor-owner",
+      "captured_at": "2026-10-25T09:02:54.737034+00:00",
+      "trace_id": "trace-1791467603506-00000",
+      "absolute_turn": 1569,
+      "captured_source_sha256": "fd9da5ebb6128090f74fe598b3052181d07f0a64ef69ca62f234843d6705e01d",
+      "main_goal_id": "goal-outcome-driven-work-20261024",
+      "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+      "main_goal_excerpt": "- goal-outcome-driven-work-20261024 — Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다\nSuccess criterion (stored values; null means unspecified): {\"revision\":\"306708facbfb9379a9e51b8f7c815678\",\"title\":\"Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다\",\"metric\":\"MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.\",\"target_value\":\"G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.\"}",
+      "main_goal_excerpt_bytes": 1136,
+      "main_goal_excerpt_sha256": "71280ae7b3a11ed705422eae38b35c3330aea80a3da1afe2290024da3ca19918",
+      "api_measurement_id": "ff5d3c4d17dd26b6393a97b4d942e201",
+      "api_measurement_id_present_in_excerpt": false,
+      "api_observed_value_present_in_excerpt": false
+    },
+    {
+      "keeper": "masc-pro-builder",
+      "captured_at": "2026-10-25T09:02:56.452618+00:00",
+      "trace_id": "trace-1789778343817-00000",
+      "absolute_turn": 3996,
+      "captured_source_sha256": "45ff7d6a1d83b30c91d98223dd9f7cde29ba0c2e273a8eec61a24cdcfd217684",
+      "main_goal_id": "goal-outcome-driven-work-20261024",
+      "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+      "main_goal_excerpt": "- goal-outcome-driven-work-20261024 — Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다\nSuccess criterion (stored values; null means unspecified): {\"revision\":\"306708facbfb9379a9e51b8f7c815678\",\"title\":\"Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다\",\"metric\":\"MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.\",\"target_value\":\"G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.\"}",
+      "main_goal_excerpt_bytes": 1136,
+      "main_goal_excerpt_sha256": "71280ae7b3a11ed705422eae38b35c3330aea80a3da1afe2290024da3ca19918",
+      "api_measurement_id": "ff5d3c4d17dd26b6393a97b4d942e201",
+      "api_measurement_id_present_in_excerpt": false,
+      "api_observed_value_present_in_excerpt": false
+    },
+    {
+      "keeper": "ocaml-agent-ic",
+      "captured_at": "2026-10-25T09:03:01.908397+00:00",
+      "trace_id": "trace-1789802729372-00000",
+      "absolute_turn": 7198,
+      "captured_source_sha256": "a1c70b7c9462fa05524a7d6216d33b4cc520c135322bfffec78660b664a48956",
+      "main_goal_id": "goal-outcome-driven-work-20261024",
+      "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+      "main_goal_excerpt": "- goal-outcome-driven-work-20261024 — Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다\nSuccess criterion (stored values; null means unspecified): {\"revision\":\"306708facbfb9379a9e51b8f7c815678\",\"title\":\"Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다\",\"metric\":\"MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.\",\"target_value\":\"G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.\"}",
+      "main_goal_excerpt_bytes": 1136,
+      "main_goal_excerpt_sha256": "71280ae7b3a11ed705422eae38b35c3330aea80a3da1afe2290024da3ca19918",
+      "api_measurement_id": "ff5d3c4d17dd26b6393a97b4d942e201",
+      "api_measurement_id_present_in_excerpt": false,
+      "api_observed_value_present_in_excerpt": false
+    }
+  ]
+}

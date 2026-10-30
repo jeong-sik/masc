@@ -1,0 +1,76 @@
+[
+  {
+    "seq": 0,
+    "ts": 1792864933.352882,
+    "utc": "2026-10-24T18:02:13.352882+00:00",
+    "event": {
+      "type": "run_started",
+      "run_id": "keeper-operation-run-kmsg-12a71072e1802b4f3da8223986bbfefd"
+    }
+  },
+  {
+    "seq": 8328,
+    "ts": 1792865175.391632,
+    "utc": "2026-10-24T18:06:15.391632+00:00",
+    "event": {
+      "type": "reply_details",
+      "turn_outcome": "continuation_checkpoint",
+      "turn_ref": "trace-1792864933263-00000#1"
+    }
+  },
+  {
+    "seq": 8329,
+    "ts": 1792865175.42205,
+    "utc": "2026-10-24T18:06:15.422050+00:00",
+    "event": {
+      "type": "status_block",
+      "kind": "continuation_checkpoint"
+    }
+  },
+  {
+    "seq": 8330,
+    "ts": 1792865175.451694,
+    "utc": "2026-10-24T18:06:15.451694+00:00",
+    "event": {
+      "type": "continuation_checkpoint",
+      "request_id": "kmsg-12a71072e1802b4f3da8223986bbfefd"
+    }
+  },
+  {
+    "seq": 8332,
+    "ts": 1792865175.76669,
+    "utc": "2026-10-24T18:06:15.766690+00:00",
+    "event": {
+      "type": "run_finished",
+      "run_id": "keeper-operation-run-kmsg-12a71072e1802b4f3da8223986bbfefd"
+    }
+  },
+  {
+    "seq": 8333,
+    "ts": 1792865558.545439,
+    "utc": "2026-10-24T18:12:38.545439+00:00",
+    "event": {
+      "type": "run_started",
+      "run_id": "keeper-operation-run-kmsg-12a71072e1802b4f3da8223986bbfefd"
+    }
+  },
+  {
+    "seq": 10853,
+    "ts": 1792865657.849807,
+    "utc": "2026-10-24T18:14:17.849807+00:00",
+    "event": {
+      "type": "reply_details",
+      "turn_outcome": "visible_reply",
+      "turn_ref": "trace-1792864933263-00000#3"
+    }
+  },
+  {
+    "seq": 10855,
+    "ts": 1792865657.852579,
+    "utc": "2026-10-24T18:14:17.852579+00:00",
+    "event": {
+      "type": "run_finished",
+      "run_id": "keeper-operation-run-kmsg-12a71072e1802b4f3da8223986bbfefd"
+    }
+  }
+]

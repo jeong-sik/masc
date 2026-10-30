@@ -1,0 +1,51 @@
+Testing `browser surface'.
+This run has ID `Z1CAG1TJ'.
+
+> [FAIL]        behavior          0   compound read retains its original admi...
+  [SKIP]        behavior          1   input correction resumes on the same co...
+  [SKIP]        behavior          2   scoped scene acknowledgement.
+  [SKIP]        behavior          3   read any website by active or explicit ...
+  [SKIP]        behavior          4   empty browser has no page.
+  [SKIP]        behavior          5   no active tab is not guessed.
+  [SKIP]        behavior          6   scene node requires sourceContext.
+  [SKIP]        behavior          7   invalid input is refused.
+  [SKIP]        behavior          8   backend failure is visible.
+  [SKIP]        behavior          9   an absent lane names its own setup.
+  [SKIP]        behavior         10   capture target and image identity.
+  [SKIP]        behavior         11   Keeper discovers ambiguous clients with...
+  [SKIP]        behavior         12   off precedes live client guidance.
+  [SKIP]        behavior         13   Keeper hears why no browser is connected.
+  [SKIP]        behavior         14   live read pins client across both hops.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        behavior          0   compound read retains its original a...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT browser.automation is off; enable it before issuing new browser work
+FAIL browser.automation is off; enable it before issuing new browser work
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_browser_surface.test_compound_read_keeps_admission.(fun) in file "test/test_browser_surface.ml", line 555, characters 90-128
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/test/_build/_tests/browser surface/behavior.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/test/_build/_tests/browser surface'.
+1 failure! in 0.001s. 1 test run.

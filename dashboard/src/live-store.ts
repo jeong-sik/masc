@@ -1,0 +1,108 @@
+// Live Monitor tab — derived signals
+
+import { signal, computed, type ReadonlySignal } from '@preact/signals'
+import type { JournalEntry } from './types'
+import { keepers } from './store'
+import type { PipelineStage } from './types/core'
+import type { AuditEntry } from './api/dashboard'
+import type { StatusChipTone } from './components/common/status-chip'
+
+export type PulseState = 'working' | 'idle'
+
+export interface KeeperPressure {
+  name: string
+  ratio: number | null
+  stage: PipelineStage
+}
+
+export interface KeeperHealthSummary {
+  activeCount: number
+  totalCount: number
+  pressures: KeeperPressure[]
+}
+
+export const keeperHealthSummary: ReadonlySignal<KeeperHealthSummary> = computed(() => {
+  const all = keepers.value
+  const active = all.filter(k => k.keepalive_running === true)
+
+  const pressures: KeeperPressure[] = active.map(k => {
+    const ratio = k.context_ratio ?? null
+    // No `as PipelineStage` cast: `k.pipeline_stage` is `PipelineStage | undefined`
+    // post-normalize (toPipelineStage at keeper-store-normalize.ts), so the
+    // `?? 'unknown'` (PipelineStage member) is already correctly typed.
+    return { name: k.name, ratio, stage: k.pipeline_stage ?? 'unknown' }
+  }).sort((a, b) => {
+    if (a.ratio == null) return b.ratio == null ? 0 : 1
+    if (b.ratio == null) return -1
+    return b.ratio - a.ratio
+  })
+
+  return {
+    activeCount: active.length,
+    totalCount: all.length,
+    pressures,
+  }
+})
+
+// --- Event type color mapping ---
+
+export function eventKindColor(entry: JournalEntry): string {
+  if (entry.kind === 'board') return 'live-event-broadcast'
+  if (entry.kind === 'tasks') return 'live-event-task'
+  if (entry.kind === 'keepers') return 'live-event-keeper'
+  return 'live-event-system'
+}
+
+type LiveEventKindTone = Extract<StatusChipTone, 'ok' | 'warn' | 'bad' | 'info' | 'neutral'>
+
+export function eventKindTone(entry: JournalEntry): LiveEventKindTone {
+  const type = entry.eventType
+  if (type === 'broadcast') return 'info'
+  if (type === 'board_post') return 'info'
+  if (type === 'board_comment') return 'info'
+  if (type === 'board_delete') return 'bad'
+  if (type === 'keeper_heartbeat') return 'ok'
+  if (type === 'keeper_phase_changed') return 'info'
+  if (entry.kind === 'board') return 'info'
+  if (entry.kind === 'tasks') return 'ok'
+  if (entry.kind === 'keepers') return 'info'
+  return 'neutral'
+}
+
+/**
+ * Live-journal event kind 짧은 라벨. JournalEntry 의 eventType + kind
+ * 조합을 보고 단일 식별자로 압축한다 (예: `'keeper_heartbeat'` → `'heartbeat'`).
+ *
+ * Renamed from `eventKindLabel` to `journalEventKindLabel` on 2026-05-27
+ * so the live-journal variant carries its domain at the call site.
+ */
+export function journalEventKindLabel(entry: JournalEntry): string {
+  const type = entry.eventType
+  if (type === 'broadcast') return 'broadcast'
+  if (type === 'board_post') return 'post'
+  if (type === 'board_comment') return 'comment'
+  if (type === 'board_delete') return 'deleted'
+  if (type === 'keeper_heartbeat') return 'heartbeat'
+  if (type === 'keeper_phase_changed') return 'phase'
+  if (entry.kind === 'board') return 'board'
+  if (entry.kind === 'tasks') return 'task'
+  if (entry.kind === 'keepers') return 'keeper'
+  return 'system'
+}
+
+// --- Global audit ledger (O2 Phase 2) ---
+
+const AUDIT_MAX_ENTRIES = 500
+
+/** Append-only ring buffer of live audit entries pushed via SSE. */
+export const auditEntries = signal<AuditEntry[]>([])
+
+/** Append a single audit entry from an SSE event.  Trims to the
+ *  most recent AUDIT_MAX_ENTRIES to keep memory bounded. */
+export function appendAuditEntry(entry: AuditEntry): void {
+  const next = [...auditEntries.value, entry]
+  auditEntries.value =
+    next.length > AUDIT_MAX_ENTRIES
+      ? next.slice(next.length - AUDIT_MAX_ENTRIES)
+      : next
+}

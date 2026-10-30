@@ -1,0 +1,102 @@
+type outcome_kind =
+    Keeper_execution_receipt_outcome_kind.outcome_kind
+val outcome_kind_to_string :
+  Keeper_execution_receipt_outcome_kind.outcome_kind -> string
+val outcome_kind_to_tla_receipt :
+  Keeper_execution_receipt_outcome_kind.outcome_kind -> string
+type error_kind = Error_kind of string
+val error_kind_of_string : string -> error_kind
+val error_kind_to_string : error_kind -> string
+type receipt_authority_violation = { outcome : string; turn_state : string; }
+val assert_receipt_authoritative :
+  outcome:[< `Cancelled | `Error | `Ok | `Skipped ] ->
+  turn_state:string -> (unit, receipt_authority_violation) result
+type tool_surface = {
+  turn_lane : Keeper_agent_tool_surface.turn_lane;
+}
+type runtime_outcome =
+    Runtime_passed_to_next_model
+  | Runtime_completed
+  | Runtime_failed
+  | Runtime_not_observed
+  | Runtime_not_dispatched
+val runtime_outcome_to_string : runtime_outcome -> string
+type completion_contract_result =
+    Completion_observation_unknown
+  | Completion_not_dispatched
+  | Completion_no_visible_output
+  | Completion_response_observed
+  | Completion_tool_execution_observed
+val completion_contract_result_to_string : completion_contract_result -> string
+type t = {
+  keeper_name : string;
+  trace_id : string;
+  turn_count : int option;
+      (** Absolute Keeper turn identity, shared with runtime manifest rows. *)
+  agent_core_turn_count : int option;
+      (** Internal agent loop iterations within this Keeper turn. *)
+  current_task_id : string option;
+  outcome : outcome_kind;
+  terminal_reason_code : string;
+  response_text_present : bool;
+  completion_contract_result : completion_contract_result;
+  actionable_signal : Keeper_contract_classifier.actionable_signal option;
+    (** World-observation signal captured at turn time. It is independent of
+        completion evidence and does not authorize or block the turn. *)
+  tool_surface : tool_surface;
+  sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile;
+  sandbox_root : string option;
+  network_mode : Keeper_types_profile_sandbox.network_mode;
+  runtime_id : string;
+  runtime_selected_model : string option;
+  runtime_attempt_count : int;
+      (** Calls the selected runtime made. Scoped to one runtime_id, so a
+          failover's earlier candidates are not in here. *)
+  runtime_lane_attempt_count : int;
+      (** Lane candidates this turn routed to, the winner included.
+
+          A separate count because [runtime_attempt_count] cannot carry it:
+          that one belongs to the runtime that won, and on a failover the
+          receipt showed 1 beside [runtime_fallback_applied = true] while the
+          manifest recorded two routings. 1 when nothing failed over. *)
+  runtime_lane_evidence : Keeper_runtime_walk_evidence.t option;
+      (** Ordered candidate failures and actual terminal origin observed by
+          AgentRun. [None] means not captured, never an observed empty walk. *)
+  runtime_fallback_applied : bool;
+  runtime_outcome : runtime_outcome;
+  agent_core_internal_runtime_allowed : bool;
+  degraded_retry_applied : Keeper_error_classify.degraded_retry option;
+      (** The lane an earlier turn deferred to and that this turn dispatched
+          on. Empty when no lane was deferred, when this turn started
+          somewhere else, or when it never reached a provider. *)
+  degraded_retry_deferred : Keeper_error_classify.degraded_retry option;
+      (** The lane this turn leaves for a later turn. Independent of the
+          field above: a turn can take up a deferred lane, fail there, and
+          defer again, and both facts belong on its receipt. *)
+  stop_reason : Runtime_agent.stop_reason option;
+  error_kind : error_kind option;
+  error_message : string option;
+  started_at : string;
+  ended_at : string;
+  extra_system_context_digest : string option;
+  extra_system_context_injected_size : int option;
+  extra_system_context_computed_size : int option;
+}
+val stop_reason_to_string : Runtime_agent.stop_reason -> string
+
+(** Shared operator projection of the typed runtime stop. Only [InputRequired]
+    requests human input; yields are continuation checkpoints. *)
+val disposition_of_stop_reason : Runtime_agent.stop_reason -> Keeper_turn_disposition.t
+
+(** Canonical terminal-reason wire projection. The independent [stop_reason]
+    field preserves the precise yield cause and counts. *)
+val receipt_terminal_reason_code_of_stop_reason : Runtime_agent.stop_reason -> string
+val sandbox_kind_of_meta :
+  Keeper_meta_contract.keeper_meta -> Keeper_types_profile_sandbox.sandbox_profile
+val list_json : 'a list -> [> `List of [> `String of 'a ] list ]
+val string_opt_json : 'a option -> [> `Null | `String of 'a ]
+
+(** One object per deferred lane -- [{"runtime": _, "reason": _}] -- so a
+    reader cannot take a runtime without the reason it was deferred for. *)
+val degraded_retry_json :
+  Keeper_error_classify.degraded_retry option -> Yojson.Safe.t

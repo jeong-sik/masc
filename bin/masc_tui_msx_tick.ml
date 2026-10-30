@@ -1,0 +1,230 @@
+type reference = { revision : string; width : int; height : int }
+type pixels = { reference : reference; rgb : string }
+type scope = { host : string; port : int; headers : (string * string) list }
+type refusal = Off | Activity_unobserved | Workspace_changed
+type activity = Enabled | Refused of refusal
+type response = Advanced of Masc_tui_types.msx_frame option * Masc_tui_machine_live.mark option
+  | Not_started of refusal
+  | Worker_unavailable of string option
+type poll_policy = Advancing | Observing of refusal | Outcome_unknown
+(* A worker the server could not reach was never sent the tick, so asking again
+   at the next poll is safe and the retained screen stays. Only a lost answer
+   after dispatch leaves the outcome unknown. *)
+let policy_after_tick = function
+  | Ok (Advanced _) -> Advancing
+  | Ok (Not_started refusal) -> Observing refusal
+  | Ok (Worker_unavailable _) -> Advancing
+  | Error _ -> Outcome_unknown
+let worker_unavailable_notice = function
+  | Some detail -> "MSX worker unavailable; trying again at the next refresh: " ^ detail
+  | None -> "MSX worker unavailable; trying again at the next refresh."
+(* The notice a tick leaves while no worker answers is stale once a tick
+   advances. It is told from every other notice by identity: [worker_down_notice]
+   is the very value the tick wrote, so a notice that something else wrote
+   since, even with the same words, is kept. *)
+let notice_after_advance ~notice ~worker_down_notice =
+  match worker_down_notice with
+  | Some _ when notice == worker_down_notice -> None
+  | Some _ | None -> notice
+let policy_after_activity policy result = match policy,result with
+  | Observing Workspace_changed, _ -> policy
+  | Observing (Off | Activity_unobserved), Ok Enabled -> Advancing
+  | Observing _, Ok (Refused refusal) -> Observing refusal
+  | Observing _, Error _ | Advancing, _ | Outcome_unknown, _ -> policy
+let refusal_notice = function
+  | Off -> "MSX is off; watching the retained screen until activity is enabled."
+  | Activity_unobserved -> "MSX activity is unavailable; watching the retained screen until configuration is observed."
+  | Workspace_changed -> "MSX workspace changed; the write was refused and the retained screen is unchanged."
+let decode_activity = function
+  | `Assoc fields ->
+      (match List.sort (fun (a,_) (b,_) -> String.compare a b) fields with
+       | ["activity",activity;"schema",`String "masc.msx-activity/v1"] ->
+           (match activity with
+            | `String "on" -> Ok Enabled
+            | `String "off" -> Ok (Refused Off)
+            | `String "unobserved" -> Ok (Refused Activity_unobserved)
+            | _ -> Error "MSX activity: invalid activity")
+       | _ -> Error "MSX activity: invalid observation")
+  | _ -> Error "MSX activity: invalid observation"
+
+let same_scope a b =
+  String.equal a.host b.host && Int.equal a.port b.port && a.headers = b.headers
+
+type t = {
+  mutex : Mutex.t;
+  mutable scope : scope option;
+  mutable pixels : pixels option;
+  mutable request_token : unit ref;
+}
+
+let create () =
+  { mutex = Mutex.create (); scope = None; pixels = None; request_token = ref () }
+
+let frame_with_rgb ?rgb json : Masc_tui_types.msx_frame option =
+  let open Yojson.Safe.Util in
+  try match member "loaded" json with
+  | `Bool true ->
+      let frame =
+        { Masc_tui_types.msx_number = member "number" json |> to_int
+        ; msx_width = member "width" json |> to_int
+        ; msx_height = member "height" json |> to_int
+        ; msx_rgb = (match rgb with Some bytes -> bytes | None ->
+            member "rgb_base64" json |> to_string |> Base64.decode_exn)
+        ; msx_meta = Some
+            { Masc_tui_types.msx_mode = member "mode" json |> to_string
+            ; msx_cartridge = member "cartridge" json |> to_string_option
+            ; msx_disk = member "disk" json |> to_string_option
+            ; msx_players =
+                (match member "players" json with
+                 | `List items -> List.filter_map
+                     (fun it -> match member "who" it with `String w -> Some w | _ -> None) items
+                 | _ -> [])
+            }
+        } in
+      if frame.msx_width > 0 && frame.msx_height > 0
+         && frame.msx_width <= max_int / 3 / frame.msx_height
+         && String.length frame.msx_rgb = frame.msx_width * frame.msx_height * 3
+      then Some frame else None
+  | _ -> None
+  with Yojson.Safe.Util.Type_error _ | Invalid_argument _ -> None
+
+let frame_of_json json = frame_with_rgb json
+
+let reference_json reference =
+  `Assoc ["revision", `String reference.revision; "width", `Int reference.width;
+          "height", `Int reference.height]
+
+let decode_reference fields =
+  match List.assoc_opt "revision" fields, List.assoc_opt "width" fields,
+        List.assoc_opt "height" fields with
+  | Some (`String revision), Some (`Int width), Some (`Int height)
+    when String.length revision = 64 && width > 0 && height > 0
+         && width <= max_int / 3 / height
+         && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) revision ->
+      Ok { revision; width; height }
+  | _ -> Error "MSX tick: invalid pixel reference"
+
+let decode_mark fields =
+  match List.assoc_opt "change_count" fields, List.assoc_opt "incarnation" fields with
+  | Some (`Int count), Some (`String incarnation) when count >= 0 && incarnation <> "" ->
+      Ok { Masc_tui_machine_live.count = count; incarnation }
+  | _ -> Error "MSX tick: invalid change mark"
+
+let decode_frame previous json =
+  let open Result.Syntax in
+  match json with
+  | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names <> List.length (List.sort_uniq String.compare names)
+      then Error "MSX tick: duplicate frame fields"
+      else (match List.assoc_opt "loaded" fields, List.assoc_opt "pixels" fields with
+       | Some (`Bool false), _ -> Ok (None, None, None)
+       | Some (`Bool true), Some (`Assoc pixel_fields) ->
+           let* mark = decode_mark fields in
+           let names = List.map fst pixel_fields in
+           let* () = if List.length names <> List.length (List.sort_uniq String.compare names)
+             then Error "MSX tick: duplicate pixel fields" else Ok () in
+           let* reference = decode_reference pixel_fields in
+           let* pixels =
+             match List.assoc_opt "kind" pixel_fields, List.assoc_opt "rgb_base64" pixel_fields with
+             | Some (`String "inline"), Some (`String encoded) ->
+                 (match Base64.decode encoded with
+                  | Ok rgb when String.length rgb = reference.width * reference.height * 3 ->
+                      Ok { reference; rgb }
+                  | Ok _ | Error _ -> Error "MSX tick: invalid inline pixels")
+             | Some (`String "retained"), None ->
+                 (match previous with
+                  | Some pixels when pixels.reference = reference -> Ok pixels
+                  | Some _ | None -> Error "MSX tick: pixels were not retained for this request")
+             | _ -> Error "MSX tick: invalid pixel representation" in
+           (match frame_with_rgb ~rgb:pixels.rgb json with
+            | Some frame when frame.msx_width = reference.width && frame.msx_height = reference.height ->
+                Ok (Some frame, Some pixels, Some mark)
+            | Some _ | None -> Error "MSX tick: invalid frame metadata")
+       | Some (`Bool true), None ->
+           let* mark = decode_mark fields in
+           (* A complete frame is also a valid answer to a retention hint. *)
+           (match frame_of_json json with
+            | Some frame -> Ok (Some frame, None, Some mark)
+            | None -> Error "MSX tick: invalid full frame")
+       | _ -> Error "MSX tick: invalid frame response")
+  | _ -> Error "MSX tick: expected an object"
+
+(* A 409 is a refusal before execution. The server encodes it with
+   [Msx_wire]; this reads it with the same codec, so a field the server adds
+   beside [ok], [code] and [message] cannot turn a known refusal into an
+   unknown outcome. A code that is not an activity or workspace refusal on a
+   409 stays unconfirmed. *)
+let decode_refusal previous json =
+  match Msx_wire.decode json with
+  | Ok { code = Some Msx_wire.Activity_disabled; _ } -> Ok (Not_started Off, previous)
+  | Ok { code = Some Msx_wire.Activity_unobserved; _ } ->
+      Ok (Not_started Activity_unobserved, previous)
+  | Ok { code = Some Msx_wire.Workspace_precondition_failed; _ } ->
+      Ok (Not_started Workspace_changed, previous)
+  | Ok { code = Some (Msx_wire.Worker_unavailable | Msx_wire.Outcome_unknown); _ }
+  | Ok { code = None; _ } | Error _ -> Error "MSX tick: unknown refusal"
+
+(* A 503 names which of two different things happened. [worker_unavailable]:
+   the server had no worker to send the tick to, so nothing ran.
+   [outcome_unknown]: the tick was sent and its answer was lost, so it may have
+   run. Any other 503 body, such as a proxy's, proves neither. *)
+let decode_unavailable previous json =
+  match Msx_wire.decode json with
+  | Ok { code = Some Msx_wire.Worker_unavailable; message } ->
+      Ok (Worker_unavailable message, previous)
+  | Ok { code = Some Msx_wire.Outcome_unknown; message } ->
+      Error ("MSX tick: outcome unknown" ^ (match message with Some m -> ": " ^ m | None -> ""))
+  | Ok { code = Some (Msx_wire.Activity_disabled | Msx_wire.Activity_unobserved
+                     | Msx_wire.Workspace_precondition_failed); _ }
+  | Ok { code = None; _ } | Error _ -> Error "MSX tick: unexpected 503 answer"
+
+(* A refused MSX answer as the one sentence a person reads. The routes refuse
+   in [Msx_wire]'s body, so the terminal reads that body with the same codec
+   and branches on the code, not on the words. The code names what the
+   operator may do next; the server's message, when it sent one, says why.
+   A body that is not an MSX refusal gives [None], and the caller keeps its
+   own wording for it. *)
+let refusal_lead = function
+  | Msx_wire.Activity_disabled -> "MSX is off"
+  | Msx_wire.Activity_unobserved -> "MSX activity is not available"
+  | Msx_wire.Workspace_precondition_failed -> "the server is another workspace"
+  | Msx_wire.Worker_unavailable -> "the MSX worker is not running, nothing was sent"
+  | Msx_wire.Outcome_unknown -> "the MSX worker's answer was lost, so the call may have run"
+
+let refusal_sentence body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error _ -> None
+  | json ->
+      (match Msx_wire.decode json with
+       | Error _ -> None
+       | Ok { code; message } ->
+           (match Option.map refusal_lead code, message with
+            | Some lead, Some message -> Some (lead ^ ": " ^ message)
+            | Some lead, None -> Some lead
+            | None, Some message -> Some message
+            | None, None -> None))
+
+let decode previous (status,json) =
+  match status with
+  | 409 -> decode_refusal previous json
+  | 503 -> decode_unavailable previous json
+  | 200 -> Result.map (fun (frame,pixels,mark) -> Advanced (frame,mark),pixels) (decode_frame previous json)
+  | _ -> Error "MSX tick: unexpected response status"
+
+let fetch ?(body_fields = []) t ~host ~port ~headers ~request =
+  let scope = { host; port; headers } and token = ref () in
+  let previous = Mutex.protect t.mutex (fun () ->
+    if not (Option.fold ~none:false ~some:(same_scope scope) t.scope) then
+      t.pixels <- None;
+    t.scope <- Some scope;
+    t.request_token <- token;
+    t.pixels) in
+  let body = Yojson.Safe.to_string (`Assoc
+    (body_fields @ ["pixel_response", `String "retained"] @
+     match previous with None -> [] | Some pixels -> ["known_pixels", reference_json pixels.reference])) in
+  let result = Result.bind (request ~body) (decode previous) in
+  Mutex.protect t.mutex (fun () ->
+    if t.request_token == token then
+      t.pixels <- (match result with Ok (_, pixels) -> pixels | Error _ -> None));
+  Result.map fst result

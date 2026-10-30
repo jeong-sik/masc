@@ -1,0 +1,2060 @@
+(** Operator features use the same TOML owner as Dashboard/Keeper. This test
+    exercises files and returned wire data; workers are not launched here. *)
+open Alcotest
+module UI = Masc_tui_lane_addons
+module Draft = Masc_tui_lane_declaration
+module Owner = Masc.Lane_addon_declaration
+let ok = function Ok value -> value | Error message -> fail message
+(* The overview draws a standing mark between the cursor column and the
+   entry. The checks below read the entry text, so they drop the mark. *)
+let entry_lines lines = List.map (fun line ->
+  let plain = Masc_tui_theme.strip_sgr line in
+  List.fold_left (fun plain (cursor, standing) ->
+    let prefix = cursor ^ Masc_tui_lane_standing.mark standing ^ " " in
+    if String.starts_with ~prefix plain
+    then cursor ^ String.sub plain (String.length prefix) (String.length plain - String.length prefix)
+    else plain) plain
+    (List.concat_map (fun cursor -> List.map (fun standing -> cursor, standing)
+      Masc_tui_lane_standing.all) ["> "; "  "])) lines
+let read_ok = function Ok value -> value | Error _ -> fail "request scope was refused"
+let owner_ok = function Ok value -> value | Error error -> fail error.Owner.message
+let write path text = Out_channel.with_open_bin path (fun channel -> output_string channel text)
+let manifest = {|id="operator-test"
+revision="1"
+title="Operator fixture"
+contributions=["observe"]
+image="fixture/image"
+command=["fixture"]
+[resources]
+cpus=0.5
+memory_bytes=67108864
+pids=16
+max_reply_bytes=4096
+|}
+let source = "id=\"observer\"\nrun_id=\"world\"\nmanifest_path=\"../lane.toml\"\n[binding]\nsources=[]\n"
+let with_directory f =
+  let root = Filename.temp_dir "tui-lane-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+    let directory = Filename.concat root "declarations" in
+    Unix.mkdir directory 0o700;
+    write (Filename.concat root "lane.toml") manifest;
+    f directory)
+let save directory session =
+  let request = Owner.write_request (Draft.write_json session) |> owner_ok in
+  let status, json = match Owner.write ~directory request with
+    | Ok receipt -> 200,Owner.receipt_to_json receipt
+    | Error error -> (match error.code with Owner.Revision_conflict -> 409 | _ -> 400),Owner.error_to_json error in
+  Draft.decode_response (Draft.Save session) ~status ~body:(Yojson.Safe.to_string json) |> ok
+let read directory session =
+  let path = Filename.concat directory session.Draft.file_name in
+  let document = Owner.read ~directory ~source_path:path |> owner_ok in
+  Draft.decode_response (Draft.Read path) ~status:200
+    ~body:(Yojson.Safe.to_string (Owner.document_to_json document)) |> ok
+
+let create_and_conflict_repair () = with_directory (fun directory ->
+  ignore (Draft.create ".toml" |> ok);
+  check bool "enumerated suffix-only declaration is selectable" true
+    (Draft.editable_source_path ~directory (Filename.concat directory ".toml"));
+  let session = { (Draft.create "observer.toml" |> ok) with text=source } in
+  let created = save directory session in
+  let session = Draft.after_response session created in
+  check string "TOML creates the actual owner file" source
+    (In_channel.with_open_bin (Filename.concat directory "observer.toml") In_channel.input_all);
+  check bool "successful create becomes an editable document" true (Option.is_some session.base);
+  let external_text = "# Keeper edited the same file\n" ^ source in
+  write (Filename.concat directory "observer.toml") external_text;
+  let session = {session with text="# operator draft\n" ^ source} in
+  let rejected = save directory session in
+  check bool "stale save is a conflict" true
+    (match rejected with Draft.Rejected {code=Draft.Revision_conflict;_} -> true | _ -> false);
+  let session = Draft.after_response session rejected in
+  check string "conflict preserves operator text" ("# operator draft\n" ^ source) session.text;
+  check bool "current file is reviewable before replacement" true
+    (List.mem "# Keeper edited the same file" (Draft.summary session));
+  let session = Draft.use_current_revision session |> ok in
+  let saved = save directory session in
+  check bool "explicit current revision permits saving" true
+    (match saved with Draft.Written {state=Draft.Saved;_} -> true | _ -> false);
+  let session = Draft.after_response session saved in
+  let current = read directory session in
+  check bool "all consumers read the exact new bytes" true
+    (match current with Draft.Read_document d -> d.source_text=session.text | _ -> false))
+
+let malformed_file_stays_editable () = with_directory (fun directory ->
+  let path = Filename.concat directory "broken.toml" in
+  write path "id = [";
+  let fresh = Draft.create "broken.toml" |> ok in
+  let document = match read directory fresh with Draft.Read_document d -> d | _ -> fail "read did not return raw TOML" in
+  check bool "invalid file is not replaced by a fabricated valid default" false document.valid;
+  let session = {(Draft.from_document document) with text=source} in
+  let invalid = {session with text="id = ["} in
+  let response = save directory invalid in
+  let retained = Draft.after_response invalid response in
+  check string "rejected edit is preserved" "id = [" retained.text;
+  check bool "repair uses the raw existing revision" true
+    (match save directory session with Draft.Written _ -> true | _ -> false))
+
+let file_identity_and_draft_sessions () = with_directory (fun directory ->
+  let session = { (Draft.create "observer.toml" |> ok) with text=source } in
+  let saved = save directory session in
+  let first = Draft.after_response session saved in
+  let second = { (Draft.create "statistics.toml" |> ok) with text="# unfinished statistics" } in
+  let view = UI.put_document (UI.put_document UI.initial first) second in
+  let view = UI.put_document view first in
+  check int "switching documents retains both drafts" 2 (List.length view.documents);
+  check string "unsubmitted second draft retained" second.text
+    (List.find (fun (s : Draft.session) -> s.file_name=second.file_name) view.documents).text;
+  let document = Owner.read ~directory ~source_path:(Filename.concat directory first.file_name) |> owner_ok in
+  check bool "another source path cannot replace requested file" true
+    (Result.is_error (Draft.decode_response (Draft.Read (Filename.concat directory "other.toml")) ~status:200
+      ~body:(Yojson.Safe.to_string (Owner.document_to_json document))));
+  List.iter (fun name -> check bool "only one TOML filename" true (Result.is_error (Draft.create name)))
+    ["../outside.toml";"nested/file.toml";"file.json"];
+  check bool "suffix-only filename follows the declaration loader" true (Result.is_ok (Draft.create ".toml")))
+
+(* A live installation's last host request cycle, from the host's own
+   not-final encoder; one unreadable value is that field's failure alone. *)
+let installation_inspect ?(host_requests = `Null) ~runtime () =
+  let instance = `Assoc ([
+    "instance_id", `String "quiz-1"; "run_id", `String "quiz"; "addon_id", `String "operator-quiz";
+    "title", `String "Operator quiz"; "revision", `String "0.1.0"; "phase", `Assoc ["kind", `String "attached"];
+    "runtime_presence", `String runtime; "observation_seq", `Int 1; "rows_count", `Int 0;
+    "incarnation", `String "quiz-1"; "action_schema", `Null;
+    "configuration", `Assoc ["id", `String "operator-quiz"; "source_path", `String "/c/operator-quiz.toml";
+                              "revision", `String "r1"];
+    "binding", `Assoc ["sources", `List []];
+    "package", `Assoc ["outputs", `Assoc ["quiz", `Assoc ["lanes", `List [`String "quiz/sessions"]]];
+                       "skills_directory", `Null]]
+    @ (if host_requests = `Null then [] else ["host_requests", host_requests])) in
+  `Assoc ["instances", `List [instance]; "rows", `List []; "coverage", `List [];
+          "configuration", `Assoc ["directory", `String "/c"; "complete", `Bool true; "declarations", `List [];
+                                   "issues", `List []]]
+
+let host_request_cycle_decodes_and_fails_alone () =
+  let module E = Masc.Lane_addon_exact in
+  let cycle reason = `Assoc ["cycles", `Int 3;
+    "waiting", `List [`Assoc ["request_id", `String "s-1-author-0"; "reason", reason];
+                      `Assoc ["request_id", `String "s-1-ask"; "reason", `Assoc ["reason", `String "awaiting_operator"]]];
+    "issue", `Assoc ["kind", `String "relisted_delivered_request"; "request_id", `String "s-1-read-2"]] in
+  let unconfigured = E.not_final_to_json (E.Lane_unavailable E.Lane_unconfigured) in
+  (match UI.decode (installation_inspect ~host_requests:(cycle unconfigured) ~runtime:"live" ()) with
+   | Ok { instances = [ { host_requests = Some (Ok hr); _ } ]; _ } ->
+       check int "passes of the last cycle" 3 hr.hr_cycles;
+       check bool "each waiting request keeps its typed reason" true
+         (hr.hr_waiting = ["s-1-author-0", UI.Host_wait_exact (E.Lane_unavailable E.Lane_unconfigured);
+                           "s-1-ask", UI.Host_wait_operator]);
+       check bool "the issue that stopped the cycle is typed" true
+         (hr.hr_issue = Some (UI.Host_relisted_delivered_request "s-1-read-2"))
+   | Ok _ -> fail "expected one instance with a readable cycle"
+   | Error detail -> fail detail);
+  (match UI.decode (installation_inspect ~host_requests:(cycle (`Assoc ["reason", `String "vibes"])) ~runtime:"live" ()) with
+   | Ok { instances = [ { host_requests = Some (Error _); title; _ } ]; _ } ->
+       check string "the rest of the instance still reads" "Operator quiz" title
+   | Ok _ -> fail "an unknown reason must make the cycle unreadable"
+   | Error detail -> fail ("an unknown reason broke the whole inspect: " ^ detail));
+  List.iter (fun reason ->
+    check bool "every not-final reason reads back as written" true
+      (E.not_final_of_json (E.not_final_to_json reason) = Ok reason))
+    [ E.Lane_unavailable E.Lane_unconfigured; E.Lane_unavailable E.Lane_off; E.Lane_unavailable E.No_admitted_slots;
+      E.Lane_unavailable (E.Lane_registry_unavailable { detail = "d" });
+      E.Provider_refused (E.Provider_unavailable { detail = "d" });
+      E.Provider_refused (E.Provider_auth_refused { detail = "d" });
+      E.Provider_refused (E.Provider_configuration_refused { detail = "d" }); E.Attempt_in_progress ]
+
+(* Every issue the host writes reads back as its own kind, a blank detail
+   included: the detail is the failure's text, not a name. *)
+let every_host_issue_reads_back () =
+  let module R = Masc.Lane_addon_runtime in
+  List.iter (fun (issue, expected) ->
+    let cycle = `Assoc ["cycles", `Int 1; "waiting", `List []; "issue", R.host_issue_to_json issue] in
+    match UI.decode (installation_inspect ~host_requests:cycle ~runtime:"live" ()) with
+    | Ok { instances = [ { host_requests = Some (Ok hr); _ } ]; _ } ->
+        check bool "the issue reads back as written" true (hr.hr_issue = Some expected)
+    | Ok _ -> fail "the issue made the cycle unreadable"
+    | Error detail -> fail detail)
+    [ R.Listing_failed "", UI.Host_listing_failed "";
+      R.Listing_refused "refused", UI.Host_listing_refused "refused";
+      R.Relisted_delivered_request "s-1-read-2", UI.Host_relisted_delivered_request "s-1-read-2";
+      R.Result_delivery_failed { request_id = "r"; detail = "" },
+      UI.Host_result_delivery_failed { request_id = "r"; detail = "" };
+      R.Exact_record_failed { request_id = "r"; detail = "disk" },
+      UI.Host_exact_record_failed { request_id = "r"; detail = "disk" };
+      R.Ask_record_failed { request_id = "r"; detail = "disk" },
+      UI.Host_ask_record_failed { request_id = "r"; detail = "disk" };
+      R.No_exact_runner, UI.Host_no_exact_runner;
+      R.No_web_search_runner, UI.Host_no_web_search_runner ]
+
+(* The jump reads the inventory fresh and lands on the live worker; a
+   retained run is not where the reveal appears. *)
+let answered_installation_opens_its_results () =
+  let snapshot runtime = match UI.decode (installation_inspect ~runtime ()) with
+    | Ok snapshot -> snapshot | Error detail -> fail detail in
+  let jump = UI.Read_installation_results "operator-quiz" in
+  let retained = UI.installation_results {UI.initial with snapshot = Some (snapshot "retained")}
+      ~installation_id:"operator-quiz" in
+  check bool "without a live worker the overview stays and says why" true
+    (retained.screen = UI.Overview && Option.is_some retained.error);
+  let opened = UI.installation_results {UI.initial with snapshot = Some (snapshot "live")}
+      ~installation_id:"operator-quiz" in
+  check bool "the live worker's Results open" true
+    (opened.screen = UI.Detail ("quiz-1", "quiz-1") && opened.focus = UI.Timeline);
+  check bool "the jump applies while the overview it opened is shown" true
+    (UI.read_still_wanted UI.initial ~showing:true jump);
+  check bool "not once the operator left Add-ons" false (UI.read_still_wanted UI.initial ~showing:false jump);
+  check bool "nor once they opened an instance" false (UI.read_still_wanted opened ~showing:true jump)
+
+let configuration_and_ports () =
+  let json = Yojson.Safe.from_string {|{
+    "instances":[{"instance_id":"actual-1","run_id":"world","addon_id":"custom","title":"Custom layer",
+      "revision":"package-1","phase":{"kind":"attached"},"observation_seq":2,"rows_count":0,
+      "incarnation":"actual-1","action_schema":null,
+      "configuration":{"id":"custom","source_path":"/config/lane-addons/custom.toml","revision":"applied"},
+      "binding":{"sources":[{"kind":"lane_output","id":"input","installation_id":"upstream","output_id":"frames"}]},
+      "package":{"outputs":{"metrics":{"lanes":["speed"]},"all":{"all_lanes":true}},"skills_directory":"skills"}}],
+    "configuration":{"directory":"/config/lane-addons","complete":false,
+      "declarations":[{"id":"custom","source_path":"/config/lane-addons/custom.toml",
+        "enabled":true,"source_revision":"source-1","application":{"kind":"starting"},"desired_revision":"desired","applied_revision":"applied","instance_id":"actual-1"}],
+      "issues":[{"id":null,"source_path":"/config/lane-addons/broken.toml","message":"invalid TOML"},
+        {"id":null,"source_path":"/config/lane-addons","message":"inventory unavailable"},
+        {"id":null,"source_path":"/config/lane-addons/nested/a.toml","message":"nested file"},
+        {"id":null,"source_path":"/config/sibling/a.toml","message":"other directory"}]},
+    "rows":[],"coverage":[]
+  }|} in
+  let snapshot = UI.decode json |> ok in
+  check (option string) "decode retains the worker's applied configuration owner" (Some "custom")
+    (List.hd snapshot.instances).installation_id;
+  let overview = {UI.initial with snapshot=Some snapshot} in
+  let worker = List.hd snapshot.instances in
+  check bool "known revision mismatch blocks removal before dispatch" true
+    (Option.is_some (UI.removal_block_reason overview worker));
+  let current = {snapshot with configuration=Option.map (fun (c:UI.configuration) ->
+    {c with complete=true; declarations=List.map (fun (d:UI.declaration) -> {d with desired=d.applied}) c.declarations}) snapshot.configuration} in
+  check (option string) "matching current owner may be removed" None
+    (UI.removal_block_reason {overview with snapshot=Some current} worker);
+  check bool "unknown configured inventory blocks removal" true
+    (Option.is_some (UI.removal_block_reason {overview with snapshot=Some {snapshot with configuration=None}} worker));
+  let config = Option.get current.configuration in
+  let owned = List.hd config.declarations in
+  let removal declarations complete = UI.removal_block_reason
+    {overview with snapshot=Some {current with configuration=Some {config with declarations;complete}}} worker in
+  check bool "partial inventory blocks matching revision" true
+    (Option.is_some (removal [owned] false));
+  check bool "duplicate owner ID blocks removal even at another path" true
+    (Option.is_some (removal [owned;{owned with source_path="/config/lane-addons/duplicate.toml";instance_id=None}] true));
+  check bool "same ID issue elsewhere blocks removal" true
+    (Option.is_some (removal [owned;{owned with source_path="/config/lane-addons/duplicate.toml";
+      desired=None;applied=None;instance_id=None;issues=["duplicate"];ui_category=None;origin=UI.Issue_only;application=None}] true));
+  check bool "invalid owned file with no recoverable ID blocks removal" true
+    (Option.is_some (removal [{owned with installation_id=None;desired=None;applied=None;
+      instance_id=None;issues=["invalid TOML"];enabled=None;ui_category=None;origin=UI.Issue_only;application=None}] true));
+  check (option string) "missing owned file permits retained worker cleanup" None (removal [] true);
+  check (option string) "unrelated invalid declaration does not block cleanup" None
+    (removal [{UI.installation_id=None;source_path="/config/lane-addons/unrelated.toml";
+      desired=None;applied=None;instance_id=None;issues=["invalid TOML"];enabled=None;ui_category=None;origin=UI.Issue_only;application=None}] true);
+  check (option string) "manual cleanup remains available" None
+    (UI.removal_block_reason overview {worker with installation_id=None;source_path=None});
+
+  let empty = {snapshot with instances=[];
+    configuration=Some {directory="/config/lane-addons";complete=true;declarations=[]}} in
+  let first = {snapshot with instances=[];
+    configuration=Some {directory="/config/lane-addons";complete=true;
+      declarations=[List.hd (Option.get snapshot.configuration).declarations]}} in
+  let first = UI.reconcile_snapshot {overview with snapshot=Some empty} first in
+  check int "first saved TOML becomes the selected list row" 0 first.instance_cursor;
+  check int "Enter opens the first saved TOML" 0
+    (UI.open_selected_instance first).configuration_cursor;
+  let overview_lines = UI.lines ~width:120 overview in
+  check int "overview offers the worker and four configuration issues" 5
+    (UI.overview_count snapshot);
+  check bool "issue-only rows do not become declared installations" true
+    (List.mem "Plugins · 1 declared · 4 config issues · inventory partial · 1 active · 0 failed workers" overview_lines);
+  let issue = UI.open_selected_instance {overview with instance_cursor=1} in
+  check bool "Enter opens the exact broken installation" true
+    (issue.focus=UI.Configurations && issue.presentation=UI.Technical
+     && issue.configuration_cursor=1);
+  let raw_issue = UI.lines ~width:120
+    {overview with instance_cursor=1; focus=UI.Instances; presentation=UI.Technical} |> entry_lines in
+  check bool "raw detail follows the selected unresolved installation" true
+    (List.exists
+      (String.starts_with ~prefix:"> unresolved installation · /config/lane-addons/broken.toml")
+      raw_issue
+     && not (List.exists (fun line -> String.ends_with ~suffix:"custom.toml" line)
+       raw_issue));
+  check bool "Installation detail retains the selected source and a return path" true
+    (List.exists (String.starts_with ~prefix:"Installation details · broken.toml")
+       (UI.lines ~width:120 issue)
+     && List.exists (String.starts_with ~prefix:"?:help  Esc:back  E:edit TOML")
+       [UI.overview_hints issue]);
+  check bool "Installation detail does not offer refresh during an in-flight read" true
+    (let lines = UI.lines ~width:120 {issue with loading=true} in
+     List.exists (String.starts_with ~prefix:"Esc:back  E:edit TOML  Reading") lines
+     && not (List.exists (fun line -> List.mem "r:refresh" (String.split_on_char ' ' line)) lines));
+  let directory_issue = UI.open_selected_instance {overview with instance_cursor=2} in
+  check bool "directory issue detail does not advertise TOML editing" true
+    (not (List.exists (fun line -> List.mem "E:edit" (String.split_on_char ' ' line))
+      (UI.lines ~width:120 directory_issue)));
+  check bool "failed refresh labels retained Add-on counts stale" true
+    (List.exists (String.ends_with ~suffix:" · STALE")
+      (UI.lines ~width:120 {overview with snapshot_read_error=Some "read failed"}));
+  check bool "a configuration issue has no worker action" true
+    (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" issue));
+  let refreshed = UI.reconcile_snapshot {overview with instance_cursor=1} snapshot in
+  check int "refresh keeps a selected issue row" 1 refreshed.instance_cursor;
+  let view = {UI.initial with presentation=UI.Technical;focus=UI.Configurations;snapshot=Some snapshot;configuration_cursor=1} in
+  check int "partial inventory cannot fabricate subscription choices" 0
+    (List.length (UI.subscription_targets view));
+  let complete_config = {(Option.get snapshot.configuration) with complete=true} in
+  let off_config = {complete_config with declarations=List.map (fun (d:UI.declaration) ->
+    if d.instance_id=Some "actual-1" then {d with enabled=Some false} else d)
+      complete_config.declarations} in
+  let off_snapshot = {snapshot with configuration=Some off_config} in
+  check bool "desired off is visible while the same worker is still attached" true
+    (UI.lines ~width:160 {overview with snapshot=Some off_snapshot} |> entry_lines
+     |> List.exists (String.starts_with ~prefix:"> custom · Custom layer · off requested · attached"));
+  let complete = {snapshot with configuration=Some complete_config} in
+  let choices = UI.subscription_targets {view with snapshot=Some complete} in
+  check int "declared instance supplies its two actual named outputs" 2 (List.length choices);
+  List.iter (fun (target:Masc_tui_lane_subscriptions.target) ->
+    check string "subscription uses declared installation identity" "custom" target.installation_id;
+    check string "subscription uses actual observed run" "world" target.run_id;
+    check string "subscription remembers observed worker" "actual-1" target.instance_id) choices;
+  let manual = {complete with instances=List.map (fun (instance:UI.instance) ->
+    {instance with source_path=None}) complete.instances} in
+  check int "manual instances cannot masquerade as declared producers" 0
+    (List.length (UI.subscription_targets {view with snapshot=Some manual}));
+  check string "invalid declaration has its own selectable source" "/config/lane-addons/broken.toml"
+    (Option.get (UI.selected_declaration view)).source_path;
+  check (option string) "malformed file stays repairable" (Some "/config/lane-addons/broken.toml")
+    (UI.selected_source_path view);
+  List.iter (fun configuration_cursor ->
+    check (option string) "directory/nested/sibling issues cannot become edit targets" None
+      (UI.selected_source_path {view with configuration_cursor})) [2;3;4];
+  check (option string) "current instance can edit its declaration" (Some "/config/lane-addons/custom.toml")
+    (UI.selected_source_path {view with focus=UI.Instances});
+  let past = {snapshot with instances=List.map (fun (i : UI.instance) -> {i with id="past-worker"}) snapshot.instances} in
+  check int "unapplied parsed TOML remains selectable" 6 (UI.overview_count past);
+  let selected_unapplied = {overview with snapshot=Some past;instance_cursor=1} in
+  let unapplied = UI.open_selected_instance selected_unapplied in
+  check int "Enter opens the saved declaration without a worker" 0 unapplied.configuration_cursor;
+  check (option string) "E can edit the saved declaration from its list row"
+    (Some "/config/lane-addons/custom.toml")
+    (UI.selected_source_path selected_unapplied);
+  check bool "saved declaration is shown without claiming an active worker" true
+    (List.exists (String.starts_with ~prefix:"  custom · no current worker · custom.toml")
+       (UI.lines ~width:120 {overview with snapshot=Some past} |> entry_lines));
+  let wrong_source = {snapshot with instances=List.map (fun (i : UI.instance) ->
+    {i with source_path=Some "/config/lane-addons/elsewhere.toml"}) snapshot.instances} in
+  check int "matching worker ID at another source cannot hide a declaration" 6
+    (UI.overview_count wrong_source);
+  check (option string) "retained historical source does not authorize a new owner edit" None
+    (UI.selected_source_path {view with focus=UI.Instances;snapshot=Some past});
+  let lines = UI.lines ~width:100 view |> entry_lines in
+  check bool "unknown parse identity remains unknown" true
+    (List.exists (String.starts_with ~prefix:"> unresolved installation") lines);
+  let worker_detail = UI.open_selected_instance {view with focus=UI.Instances;instance_cursor=0} in
+  let worker_lines = UI.lines ~width:100
+    {worker_detail with focus=UI.Instances;presentation=UI.Technical} in
+  check bool "named output is projected without domain branch" true (List.mem "   output metrics → speed" worker_lines);
+  check bool "package Skill directory is visible" true (List.mem "   Skills skills" worker_lines);
+  let slice = UI.decode_slice ~snapshot (Yojson.Safe.from_string {|{"rows":[],"coverage":[],"complete":false}|}) |> ok in
+  check bool "slice keeps TOML inventory" true (slice.configuration=snapshot.configuration);
+  check (option bool) "partial slice stays partial" (Some false) slice.complete
+
+let action_identity_and_uncertainty () =
+  let module Action = Masc.Lane_addon_action in
+  let parsed = UI.parse_request {|act {"instance_id":"worker-1","expected_incarnation":"worker-1","request_id":"request-1","action":{"value":1}}|} |> ok in
+  let request = match parsed with UI.Act request -> request | _ -> fail "not an action" in
+  let input = Action.arguments ~instance_id:request.instance_id ~request_id:request.request_id ~action:request.action
+    |> Action.canonical |> ok in
+  let receipt : Action.receipt = {instance_id=request.instance_id;incarnation=request.incarnation;
+    request_id=request.request_id;requester="operator";executor=None;input_sha256=Action.input_digest input;
+    action=request.action;state=Action.Outcome_unknown;result=None;detail=Some "worker disconnected after dispatch"} in
+  let received = UI.action_receipt request (Action.to_json receipt) |> ok in
+  let lines = UI.lines ~width:100 {UI.initial with presentation=UI.Technical;last_action=Some request;action_receipt=Some received} in
+  check bool "unknown outcome is never displayed as a confirmed effect" true (List.mem "  state outcome_unknown" lines);
+  check bool "missing executor stays unknown" true (List.mem "  requester operator · executor unknown" lines);
+  check bool "different request cannot satisfy status read" true
+    (Result.is_error (UI.action_receipt {request with request_id="request-2"} (Action.to_json receipt)));
+  check bool "duplicate identity in command is rejected" true
+    (Result.is_error (UI.parse_request {|act {"instance_id":"a","instance_id":"b","expected_incarnation":"a","request_id":"r","action":{}}|}))
+
+let metric_fields_and_receipts_remain_readable () =
+  let module Row = Masc.Lane_addon_types in
+  let digest = String.make 192 'a' in
+  let note = String.concat "" (List.init 48 (fun _ -> "지표")) in
+  let row : Row.row = {
+    id="metric/2/statistics";lane_id="metric/statistics";kind=Row.Value;
+    title="Supplied \027[31m row statistics";observed_at=1.;subject_id="guest";
+    clock=None;actor=None;
+    fields=["source_id",`String digest;"incarnation",`String digest;
+      "observed_row_count",`Int 1;"input_complete",`Bool true;
+      "note",`String note];
+    evidence=[{uri="lane-evidence:" ^ digest;sha256=Some digest}];related_ids=[] } in
+  let snapshot : UI.snapshot = {instances=[];configuration=None;
+    output={rows=[row];coverage=[]};complete=Some true} in
+  let view = {UI.initial with presentation=UI.Technical;focus=UI.Timeline;snapshot=Some snapshot;
+    receipt=Some (`Assoc ["uri",`String digest;"result",`String "last receipt value"])} in
+  List.iter (fun width ->
+    let lines = UI.lines ~width view in
+    check bool "every printable row fits the actual terminal width" true
+      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width) lines);
+    check bool "external terminal controls are escaped before measuring" true
+      (List.for_all (fun line -> not (String.contains line '\027')) lines);
+    let visible = String.concat "" lines in
+    let contains text =
+      let n = String.length text in
+      let rec at i = i+n <= String.length visible
+        && (String.sub visible i n=text || at (i+1)) in
+      at 0 in
+    List.iter (fun text -> check bool "scrollable rows retain complete field and receipt text" true (contains text))
+      ["\"observed_row_count\": 1";digest;note;"lane-evidence:" ^ digest;"last receipt value"])
+    [40;80;200]
+
+let guided_actions () =
+  let schema = Yojson.Safe.from_string {|{
+    "type":"object","required":["context","request_id","action"],"additionalProperties":false,
+    "properties":{
+      "context":{"type":"object","required":["instance_id","incarnation"],"additionalProperties":false,
+        "properties":{"instance_id":{"type":"string"},"incarnation":{"type":"string"}}},
+      "request_id":{"type":"string","minLength":36},
+      "action":{"type":"object","required":["operation"],"additionalProperties":false,
+        "properties":{"operation":{"type":"string","enum":["capture","inspect"]}}}
+    }}|} in
+  let instance : UI.instance = {id="worker";incarnation="worker";run_id="run";
+    addon_id="arbitrary-package";title="Useful observer";revision="1";phase=UI.Row.Attached;
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc [];outputs=[];
+    skills_directory=None;ui_category=None;action_schema=Some schema; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
+    host_requests=None} in
+  let snapshot : UI.snapshot = {instances=[instance];configuration=None;
+    output={rows=[];coverage=[]};complete=Some true} in
+  let view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with focus=UI.Instances; snapshot=Some snapshot} |> ok in
+  let first = UI.submit_action view |> ok in
+  List.iter (fun runtime_presence ->
+    let retained = {instance with runtime_presence} in
+    let retained_snapshot = {snapshot with instances=[retained]} in
+    check bool "retained or unknown worker cannot execute a fresh observation" false (UI.can_observe retained);
+    check bool "retired worker cannot open a new action" true
+      (Result.is_error (UI.open_actions ~request_id:first.request_id
+        {UI.initial with focus=UI.Instances;snapshot=Some retained_snapshot}));
+    check bool "open action cannot outlive its live worker" true
+      (Result.is_error (UI.submit_action {view with snapshot=Some retained_snapshot})))
+    [UI.Retained_binding;UI.Presence_unknown];
+  check string "current worker supplies identity" "worker" first.instance_id;
+  check bool "arbitrary schema field and value are used" true
+    (first.action=`Assoc ["operation",`String "capture"]);
+  let second = UI.submit_action (UI.move_action view 1) |> ok in
+  check bool "choosing a different action uses its payload" true
+    (second.action=`Assoc ["operation",`String "inspect"]);
+  let replaced = {snapshot with instances=[{instance with id="replacement";incarnation="replacement"}]} in
+  check bool "replacement cannot inherit open menu authority" true
+    (Result.is_error (UI.submit_action {view with snapshot=Some replaced}));
+  check bool "observation-only package has no invented action" true
+    (Result.is_error (UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000001" {UI.initial with focus=UI.Instances; snapshot=Some
+      {snapshot with instances=[{instance with action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty;host_requests=None}]}}));
+  let technical = UI.open_actions ~request_id:first.request_id
+    {UI.initial with focus=UI.Instances; presentation=UI.Technical;snapshot=Some snapshot} |> ok in
+  check bool "opening actions exposes the choice even from technical mode" true (technical.presentation=UI.Summary);
+  List.iter (fun width -> check int "refresh does not move compact content"
+    (List.length (UI.lines ~width {UI.initial with focus=UI.Instances; snapshot=Some snapshot}))
+    (List.length (UI.lines ~width {UI.initial with focus=UI.Instances; loading=true;snapshot=Some snapshot}))) [10;40;100];
+  let with_document = {technical with document_key=Some "draft.toml"} in
+  check bool "menu remains visible over an open document" true
+    (List.mem "operation: \"capture\"" (UI.lines ~width:100 with_document));
+  let moved = UI.move_action {view with scroll=100} 1 in
+  check int "next choice is brought back into view" 0 moved.scroll;
+  let replace key value = function
+    | `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
+    | _ -> fail "object fixture expected" in
+  let property_fields = match schema with `Assoc fields -> List.assoc "properties" fields | _ -> fail "schema" in
+  let reverse_action = Yojson.Safe.from_string {|{"type":"object","required":["z","a"],
+    "additionalProperties":false,"properties":{"z":{"type":"string","const":"last"},"a":{"type":"string","const":"first"}}}|} in
+  let reverse_schema = replace "properties" (replace "action" reverse_action property_fields) schema in
+  let reverse_view = UI.open_actions ~request_id:first.request_id {UI.initial with focus=UI.Instances;
+    snapshot=Some {snapshot with instances=[{instance with action_schema=Some reverse_schema}]}} |> ok in
+  let request = UI.submit_action reverse_view |> ok in
+  check bool "request is canonical before receipt comparison" true
+    (request.action=`Assoc ["a",`String "first";"z",`String "last"]);
+  let input = UI.Action.arguments ~instance_id:request.instance_id ~request_id:request.request_id
+    ~action:request.action |> UI.Action.canonical |> ok in
+  let receipt : UI.Action.receipt = {instance_id=request.instance_id;incarnation=request.incarnation;
+    request_id=request.request_id;requester="operator";executor=Some (Masc.Lane_addon_lifecycle.Container_resource "worker");
+    input_sha256=UI.Action.input_digest input;action=request.action;state=UI.Action.Confirmed;
+    result=Some (`Assoc []);detail=None} in
+  ignore (UI.action_receipt request (UI.Action.to_json receipt) |> ok);
+  let compact = UI.lines ~width:100 {UI.initial with focus=UI.Instances; snapshot=Some snapshot} |> entry_lines in
+  check bool "first screen names installed package" true
+    (List.exists (fun line -> String.starts_with ~prefix:"> Useful observer" line) compact);
+  let failed = {instance with title="MSX";phase=UI.Row.Failed (String.make 120 'x');
+    action_schema=None} in
+  let failed_lines = UI.lines ~width:76 {UI.initial with focus=UI.Instances;
+    snapshot=Some {snapshot with instances=[failed]}} |> entry_lines in
+  check bool "failed row keeps retry and cleanup visible with its long reason" true
+    (List.exists (String.starts_with ~prefix:"> MSX · failed") failed_lines
+     && List.exists (String.starts_with
+       ~prefix:"    Enter:open  o:retry observation  d:remove worker") failed_lines
+     && List.mem "    D:full ·" failed_lines
+     && List.exists (String.starts_with ~prefix:("    " ^ String.make 8 'x')) failed_lines);
+  check int "long failure reason survives wrapping" 120
+    (List.fold_left (fun total line ->
+       String.fold_left (fun total char -> if char='x' then total+1 else total) total line)
+       0 failed_lines);
+  let module S = Masc_tui_lane_standing in
+  let standing = testable (fun f value -> Format.pp_print_string f (S.word value)) ( = ) in
+  check standing "a failed worker is failing" S.Failing (UI.instance_standing ~off_requested:false failed);
+  check standing "an attached worker is ready" S.Ready
+    (UI.instance_standing ~off_requested:false {instance with phase=UI.Row.Attached});
+  check standing "an attached worker whose declaration is switched off is changing" S.Changing
+    (UI.instance_standing ~off_requested:true {instance with phase=UI.Row.Attached});
+  check standing "an attached worker this server does not hold is unknown" S.Unobserved
+    (UI.instance_standing ~off_requested:false
+       {instance with phase=UI.Row.Attached;runtime_presence=UI.Retained_binding});
+  let declaration = {UI.source_path="/config/lane-addons/custom.toml";installation_id=Some "custom";
+    enabled=Some true;desired=Some "1";applied=None;instance_id=None;issues=[];
+    ui_category=None;origin=UI.Parsed_declaration;application=None} in
+  (* The mark follows the application line drawn under the entry. *)
+  let observed ~enabled state =
+    let target = {UI.Application.source_path=declaration.source_path;installation_id="custom";
+      source_revision="1";desired_revision="1";enabled} in
+    let declaration = {declaration with enabled=Some enabled;
+      application=Some {UI.Application.target;state}} in
+    let configuration : UI.configuration =
+      {directory="/config/lane-addons";complete=true;declarations=[declaration]} in
+    UI.declaration_entry_standing
+      {UI.initial with application_reading=UI.Application.accept (Ok configuration)} declaration in
+  check standing "a declaration with a TOML issue is failing" S.Failing
+    (UI.declaration_entry_standing UI.initial {declaration with issues=["invalid TOML"]});
+  check standing "a declaration whose application was not read is unknown" S.Unobserved
+    (UI.declaration_entry_standing UI.initial declaration);
+  check standing "a declaration whose application failed is failing" S.Failing
+    (observed ~enabled:true (UI.Application.Failed ["refused"]));
+  check standing "a declaration whose worker is starting is changing" S.Changing
+    (observed ~enabled:true UI.Application.Starting);
+  check standing "a declaration switched off and cleaned up is off" S.Off
+    (observed ~enabled:false UI.Application.Inactive);
+  check standing "a worker that is detaching is changing" S.Changing
+    (UI.instance_standing ~off_requested:false {instance with phase=UI.Row.Detaching});
+  check standing "an attached worker whose presence is unknown is unknown" S.Unobserved
+    (UI.instance_standing ~off_requested:false
+       {instance with phase=UI.Row.Attached;runtime_presence=UI.Presence_unknown});
+  check bool "technical action schema is folded by default" false
+    (List.exists (fun line -> String.contains line '{') compact);
+  let form_schema = match schema with
+    | `Assoc fields ->
+        let properties = match List.assoc "properties" fields with `Assoc p -> p | _ -> assert false in
+        let action = Yojson.Safe.from_string
+          {|{"type":"object","properties":{"query":{"type":"string","minLength":3}},"required":["query"],"additionalProperties":false}|} in
+        `Assoc (("properties",`Assoc (("action",action)::List.remove_assoc "action" properties))::List.remove_assoc "properties" fields)
+    | _ -> assert false in
+  let form_view = UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000002"
+    {UI.initial with focus=UI.Instances; snapshot=Some {snapshot with instances=[{instance with action_schema=Some form_schema}]}} |> ok in
+  let edit key view = match UI.edit_action ~key view |> ok with
+    | next,None -> next | _,Some _ -> fail "editing must not submit" in
+  let typed = form_view |> edit "j" |> edit "o" |> edit "b" in
+  let reviewed = edit "\019" typed in
+  check bool "review remains explicit before submission" true
+    (List.exists (fun line -> String.starts_with ~prefix:"Review input" line) (UI.lines ~width:100 reviewed));
+  let submitted = match UI.edit_action ~key:"enter" reviewed |> ok with
+    | _,Some request -> request | _ -> fail "review Enter must submit" in
+  check bool "free text including navigation letters is preserved" true
+    (submitted.action=`Assoc ["query",`String "job"]);
+  let replaced = {reviewed with snapshot=Some {snapshot with instances=[{instance with id="replacement";incarnation="replacement";action_schema=Some form_schema}]}} in
+  check bool "review does not authorize a replaced worker" true
+    (Result.is_error (UI.edit_action ~key:"enter" replaced));
+  let pasted_text = "https://예시.test/경기\n\019\r" in
+  let pasted = UI.paste_action ~text:pasted_text form_view in
+  let pasted_review = edit "\019" pasted in
+  let pasted_review = UI.paste_action ~text:"must not change review" pasted_review in
+  let request = match UI.edit_action ~key:"enter" pasted_review |> ok with
+    | _,Some request -> request | _ -> fail "paste review must submit only on Enter" in
+  check bool "paste is Unicode text, never input commands; review stays immutable" true
+    (request.action=`Assoc ["query",`String pasted_text]);
+  let open_schema action =
+    let schema = match form_schema with
+      | `Assoc fields ->
+          let properties = match List.assoc "properties" fields with `Assoc p -> p | _ -> assert false in
+          `Assoc (("properties",`Assoc (("action",Yojson.Safe.from_string action)::List.remove_assoc "action" properties))::List.remove_assoc "properties" fields)
+      | _ -> assert false in
+    UI.open_actions ~request_id:"01901234-1234-7000-8000-000000000003"
+      {UI.initial with focus=UI.Instances; snapshot=Some {snapshot with instances=[{instance with action_schema=Some schema}]}} |> ok in
+  let optional = open_schema
+    {|{"type":"object","properties":{"operation":{"type":"string","const":"search"},"query":{"type":"string"}},"required":["operation"],"additionalProperties":false}|} in
+  let optional = optional |> edit "tab" |> UI.paste_action ~text:"검색" |> edit "\019" in
+  let request = match UI.edit_action ~key:"enter" optional |> ok with
+    | _,Some request -> request | _ -> fail "optional parameter action must submit" in
+  check bool "optional fields remain editable beside a required constant" true
+    (request.action=`Assoc ["operation",`String "search";"query",`String "검색"]);
+  let nested = open_schema
+    {|{"type":"object","properties":{"query":{"type":"string"},"options":{"type":"object","properties":{"mode":{"type":"string","const":"custom"},"target":{"type":"string"}},"required":["mode","target"],"additionalProperties":false}},"required":["query"],"additionalProperties":false}|} in
+  let nested = nested |> UI.paste_action ~text:"search" |> edit "tab" in
+  let reviewed = edit "\019" nested in
+  let request = match UI.edit_action ~key:"enter" reviewed |> ok with
+    | _,Some request -> request | _ -> fail "omitted optional object must submit" in
+  check bool "nested constants never activate an omitted optional object" true
+    (request.action=`Assoc ["query",`String "search"]);
+  let enabled = nested |> edit "tab" |> UI.paste_action ~text:"selected" |> edit "\019" in
+  let request = match UI.edit_action ~key:"enter" enabled |> ok with
+    | _,Some request -> request | _ -> fail "explicit optional object must submit" in
+  check bool "explicit child activates its object's required constants" true
+    (request.action=`Assoc ["options",`Assoc ["mode",`String "custom";"target",`String "selected"];"query",`String "search"]);
+  let unset = enabled |> edit "esc" |> edit "\021" |> edit "\019" in
+  let request = match UI.edit_action ~key:"enter" unset |> ok with
+    | _,Some request -> request | _ -> fail "unset last child must omit optional object" in
+  check bool "unsetting the last explicit child removes optional object" true
+    (request.action=`Assoc ["query",`String "search"])
+
+let context_flow_uses_declared_connections () =
+  let producer : UI.instance = {id="source-worker";incarnation="source-worker";run_id="project";
+    addon_id="any-source";title="Project observer";revision="1";phase=UI.Row.Attached;
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;configuration_revision=Some "1";installation_id=Some "project-observer";source_path=Some "/config/project-observer.toml";binding=`Assoc ["sources",`List []];
+    outputs=["events",UI.Row.All_lanes];skills_directory=None;ui_category=None;action_schema=None; binding_schema=None; display=Masc.Lane_addon_presentation.empty;
+    host_requests=None} in
+  let consumer = {producer with id="metric-worker";incarnation="metric-worker";title="Project metric";
+    installation_id=Some "project-metric";source_path=Some "/config/project-metric.toml";
+    binding=Yojson.Safe.from_string {|{"sources":[{"source_id":"input","kind":"lane_output",
+      "installation_id":"project-observer","output_id":"events","selection":"latest_completed"},
+      {"source_id":"external-fusion","kind":"fusion_run","run_id":"retained-fusion-run"}]}|}} in
+  let declaration installation_id instance_id : UI.declaration =
+    {source_path="/config/" ^ installation_id ^ ".toml";installation_id=Some installation_id;
+      instance_id=Some instance_id;desired=Some "1";applied=Some "1";issues=[];
+      enabled=Some true;ui_category=None;origin=UI.Parsed_declaration;application=None} in
+  let configuration : UI.configuration = {directory="/config";complete=true;
+    declarations=[declaration "project-observer" producer.id;declaration "project-metric" consumer.id]} in
+  let snapshot : UI.snapshot = {instances=[producer;consumer];configuration=Some configuration;
+    output={rows=[];coverage=[]};complete=None} in
+  let view = {UI.initial with focus=UI.Connections;presentation=UI.Flow;snapshot=Some snapshot} in
+  (* The Lane inventory opens the second declaration while the cursor still
+     names the first: the actions must follow the opened document. *)
+  let opened = UI.open_declaration {view with configuration_cursor=0} "/config/project-metric.toml" in
+  check (option string) "an opened declaration is the action target" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance opened));
+  check int "a declaration the snapshot does not list names no row" (-1)
+    (UI.open_declaration view "/config/absent.toml").configuration_cursor;
+  (* Opening a declaration then switching to Summary with an open document
+     keeps the opened declaration as the action target (#41519 review). *)
+  let summary_opened = {opened with presentation=UI.Summary; document_key=Some "/config/project-metric.toml"} in
+  check (option string) "switching to summary with an open document keeps the opened declaration as action target" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance summary_opened));
+  check bool "flow exposes the selected action target" true
+    (List.mem "Action target: Project observer · source-worker" (UI.lines ~width:160 view));
+  let links = UI.lines ~width:160 {view with presentation=UI.Summary;
+    screen=UI.Detail (producer.id,producer.incarnation);focus=UI.Connections} in
+  check bool "embedded Links advertises the first f press accurately" true
+    (List.mem "f:open full flow  D:technical details  J/K:scroll" links
+     && not (List.mem "f:back to observations  D:technical details  J/K:scroll" links));
+  check bool "full Flow keeps its actual return action" true
+    (List.mem "f:back to observations  D:technical details  J/K:scroll" (UI.lines ~width:160 view));
+  let moved = UI.lines ~width:160 {view with instance_cursor=1} in
+  check bool "flow target follows instance selection" true
+    (List.mem "Action target: Project metric · metric-worker" moved
+      && List.mem "> project-metric · Project metric · attached" moved);
+  check bool "flow names the actual configured dependency" true
+    (List.mem "  project-observer -> project-metric" (UI.lines ~width:160 view));
+  let configured = {view with presentation=UI.Summary;focus=UI.Configurations;
+    configuration_cursor=0;instance_cursor=1} in
+  let configured_lines = UI.lines ~width:160 configured |> entry_lines in
+  let flow = UI.toggle_flow {configured with presentation=UI.Technical} in
+  check bool "entering Flow moves hidden configuration focus to visible instances" true
+    (flow.focus=UI.Instances && flow.presentation=UI.Flow);
+  check int "entering Flow preserves the visible instance selection" 1 flow.instance_cursor;
+  check (option string) "Flow actions target the visible selected worker" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance flow));
+  let moved_flow = {flow with instance_cursor=0} in
+  check (option string) "Flow navigation changes its action target" (Some producer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance moved_flow));
+  check bool "leaving Flow keeps overview navigation on visible instances" true
+    (let summary = UI.toggle_flow flow in
+     summary.focus=UI.Instances && summary.presentation=UI.Summary);
+  let mixed = {snapshot with configuration=Some {configuration with
+    declarations=configuration.declarations @ [declaration "pending" "not-installed"]}} in
+  let mixed_flow = {flow with snapshot=Some mixed} in
+  let at_last = UI.move_instance mixed_flow 1 in
+  check int "Flow stops at the last visible worker" 1 at_last.instance_cursor;
+  check (option string) "Flow boundary keeps its visible action target" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance at_last));
+  let retained = {producer with id="retained-worker";incarnation="retained-incarnation";
+    phase=UI.Row.Detached} in
+  let with_history = {mixed_flow with snapshot=Some {mixed with
+    instances=retained :: mixed.instances}} in
+  check (option string) "current Flow ignores retained workers" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance with_history));
+  let history_flow = UI.toggle_flow (UI.toggle_history with_history) in
+  check (option string) "history Flow selects only its retained worker" (Some retained.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance history_flow));
+  check int "history Flow stops at its visible worker" 0
+    (UI.move_instance history_flow 1).instance_cursor;
+  let pending_flow = UI.toggle_flow {mixed_flow with presentation=UI.Summary;
+    instance_cursor=UI.overview_count mixed - 1} in
+  check int "an unresolved declaration has no substitute Flow worker" (-1)
+    pending_flow.instance_cursor;
+  check (option string) "a filtered-out declaration grants no worker action target" None
+    (Option.map (fun (instance : UI.instance) -> instance.id) (UI.selected_instance pending_flow));
+  let empty_flow = UI.toggle_flow {mixed_flow with presentation=UI.Summary;
+    snapshot=Some {mixed with instances=[]}} in
+  check int "Flow with no workers has no selection" (-1) empty_flow.instance_cursor;
+  check (option string) "empty Flow cannot target an unresolved declaration" None
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance empty_flow));
+  check bool "detail Flow preserves its own focus" true
+    (let detail = UI.toggle_flow {flow with screen=UI.Detail (producer.id,producer.incarnation);
+      focus=UI.Connections} in detail.focus=UI.Connections);
+  check (option string) "summary actions target the visibly selected worker despite hidden configuration focus" (Some consumer.id)
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance configured));
+  check (option string) "technical installation actions target their selected declaration" (Some producer.id)
+    (Option.map (fun (i : UI.instance) -> i.id)
+      (UI.selected_instance {configured with presentation=UI.Technical}));
+  check bool "overview starts with its selected worker regardless of hidden focus" true
+    (List.exists (String.starts_with ~prefix:"> project-metric · Project metric · attached") configured_lines
+     && not (List.exists (String.starts_with ~prefix:"  project-observer · Project observer · attached") configured_lines));
+  let observer_lines = UI.lines ~width:160 {configured with instance_cursor=0} |> entry_lines in
+  check bool "moving selection still exposes the preceding observer" true
+    (List.exists (String.starts_with ~prefix:"> project-observer · Project observer · attached") observer_lines
+     && List.exists (String.starts_with ~prefix:"  project-metric · Project metric · attached") observer_lines);
+  check bool "overview offers help and opening" true
+    (List.exists (String.starts_with ~prefix:"?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command  r:refresh") configured_lines);
+  check bool "overview omits the old timeline" true
+    (not (List.exists (String.starts_with ~prefix:"Activity timeline") configured_lines));
+  let worker_lines = UI.lines ~width:160 {configured with focus=UI.Instances} in
+  check bool "worker controls remain visible for the selected worker" true
+    (List.exists (String.starts_with ~prefix:"    Enter:open  o:observe  d:remove") worker_lines);
+  let partial = {snapshot with instances=[consumer];configuration=Some {configuration with complete=false}} in
+  let partial_view = {view with snapshot=Some partial;snapshot_read_error=Some "network failure"} in
+  let partial_lines = UI.lines ~width:160 partial_view in
+  check bool "failed read remains visible in flow" true
+    (List.mem "Read: network failure · previous graph retained" partial_lines);
+  let unread_lines = UI.lines ~width:160
+      {partial_view with snapshot=None} in
+  check bool "unread flow does not claim a graph is retained" true
+    (List.mem "Read: network failure" unread_lines
+     && not (List.mem "Read: network failure · previous graph retained" unread_lines));
+  let input_lines = UI.lines ~width:160
+      {partial_view with error=Some (UI.Input_failure "choose a worker")} in
+  check bool "input and earlier graph read failure remain distinct" true
+    (List.mem "Input: choose a worker" input_lines
+     && List.mem "Read: network failure · previous graph retained" input_lines);
+  check bool "partial inventory cannot establish producer absence" true
+    (List.mem "  project-observer -> project-metric · producer unresolved; inventory incomplete" partial_lines);
+  check bool "missing producer stays visible" true
+    (List.mem "  project-observer -> project-metric · producer absent in this run"
+      (UI.lines ~width:160 {view with snapshot=Some {snapshot with instances=[consumer]}}))
+
+let guided_installation () =
+  let module Install = Masc_tui_lane_installer in
+  let edit key state = match Install.handle ~key state |> ok with
+    | Install.Updated next -> next | _ -> fail "editing must not invoke a request" in
+  let path = Install.create () |> ok |> Install.paste ~text:"/packages/arbitrary/lane.toml" |> edit "\019" in
+  check string "manifest is requested only after explicit reviewed Enter" "/packages/arbitrary/lane.toml"
+    (match Install.handle ~key:"enter" path |> ok with Preview path -> path | _ -> fail "expected preview");
+  let schema = Yojson.Safe.from_string
+    {|{"type":"object","properties":{"topic":{"type":"string","minLength":1}},"required":["topic"],"additionalProperties":false}|} in
+  let preview ?(binding_schema=schema) execution = `Assoc ["manifest_path",`String "/packages/arbitrary/lane.toml";
+    "execution",execution;"package",`Assoc ["title",`String "Arbitrary observer";"revision",`String "revision-1";
+      "binding_schema",binding_schema]] in
+  let container image = `Assoc ["kind",`String "container";"image_name",`String "worker:revision-1";"image",image] in
+  let unverified = `Assoc ["state",`String "unverified";"detail",`String "engine offline"] in
+  let response = preview (container unverified) in
+  let schemaless = preview ~binding_schema:`Null (container unverified) in
+  let pending = Install.begin_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml" path |> ok in
+  let reopened = Install.create () |> ok in
+  check bool "canceled preview cannot replace a freshly opened wizard" true
+    (Option.is_none (Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml" (Ok response) reopened));
+  check bool "different request identity cannot consume pending preview" true
+    (Option.is_none (Install.receive_preview ~request_id:9 ~path:"/packages/arbitrary/lane.toml" (Ok response) pending));
+  check bool "different manifest cannot consume pending preview" true
+    (Option.is_none (Install.receive_preview ~request_id:10 ~path:"/other/lane.toml" (Ok response) pending));
+  let failed,error = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
+    (Error "preview failed") pending |> Option.get in
+  check (option string) "failed preview retains error" (Some "preview failed") error;
+  check bool "failed preview restores editable request for retry" true
+    (Result.is_ok (Install.begin_preview ~request_id:11 ~path:"/packages/arbitrary/lane.toml" failed));
+  let _form,error = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
+    (Ok response) pending |> Option.get in
+  check (option string) "matching preview advances without error" None error;
+  let typed,detail = Install.receive_preview ~request_id:10 ~path:"/packages/arbitrary/lane.toml"
+    (Ok schemaless) pending |> Option.get in
+  check bool "schemaless preview reports a refusal" true (Option.is_some detail);
+  check bool "schemaless preview retires the pending read" true
+    (Option.is_none (Install.pending_read typed));
+  check string "schemaless preview retains the original manifest request" "/packages/arbitrary/lane.toml"
+    (match Install.handle ~key:"enter" typed |> ok with
+     | Preview path -> path | _ -> fail "expected the restored manifest request");
+  check bool "n does not open the editor from the typed path" true
+    (match Install.handle ~key:"n" typed |> ok with Updated _ -> true | _ -> false);
+  let rec closes presses state = presses>0 && (match Install.handle ~key:"esc" state |> ok with
+    | Install.Cancel -> true | Updated next -> closes (presses-1) next | _ -> false) in
+  check bool "Esc leads from the typed path back to the Add-ons list" true (closes 3 typed);
+  check bool "unknown execution is refused without a guessed native fallback" true
+    (Result.is_error (Install.accept_preview (preview (`Assoc ["kind",`String "unknown"]))));
+  check bool "container preview requires its image receipt" true
+    (Result.is_error (Install.accept_preview (preview (`Assoc ["kind",`String "container"]))));
+  let with_package extra = match preview (container unverified) with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "package", `Assoc package -> "package", `Assoc (package @ extra) | field -> field) fields)
+    | json -> json in
+  check bool "declared browser service and role are accepted as declared" true
+    (Result.is_ok (Install.accept_preview (with_package ["service",`String "browser";"ui_category",`String "browser"])));
+  check bool "unknown service is refused, not guessed from the role" true
+    (Result.is_error (Install.accept_preview (with_package ["service",`String "engine";"ui_category",`String "browser"])));
+  check bool "unknown role is refused, not replaced by the service" true
+    (Result.is_error (Install.accept_preview (with_package ["service",`String "browser";"ui_category",`String "nonsense"])));
+  let host = `Assoc ["kind",`String "host_process"] in
+  let with_runtime execution runtime = match preview execution with
+    | `Assoc fields -> `Assoc (List.map (function
+        | "package", `Assoc package -> "package", `Assoc (package @ runtime) | field -> field) fields)
+    | json -> json in
+  check bool "Docker is the omitted runtime of a container" true
+    (Result.is_ok (Install.accept_preview (with_runtime (container unverified) [])));
+  check bool "an explicit Apple container runtime matches a container" true
+    (Result.is_ok (Install.accept_preview (with_runtime (container unverified) ["runtime",`String "apple_container"])));
+  check bool "an explicit docker value is not the wire form and is refused" true
+    (Result.is_error (Install.accept_preview (with_runtime (container unverified) ["runtime",`String "docker"])));
+  check bool "host_process execution needs the explicit host_process runtime" true
+    (Result.is_ok (Install.accept_preview (with_runtime host ["runtime",`String "host_process"])));
+  check bool "host_process execution without its runtime is refused" true
+    (Result.is_error (Install.accept_preview (with_runtime host [])));
+  check bool "a container cannot carry the host_process runtime" true
+    (Result.is_error (Install.accept_preview (with_runtime (container unverified) ["runtime",`String "host_process"])));
+  check bool "a host process cannot carry a container runtime" true
+    (Result.is_error (Install.accept_preview (with_runtime host ["runtime",`String "apple_container"])));
+  let module Catalog = Masc.Lane_addon_catalog in
+  let catalog=Catalog.{directory="/packages";parent=None;
+    entries=[Package {manifest_path="/packages/arbitrary/lane.toml";
+      metadata={title="Previously listed title";revision="older-revision";description=None;ui_category=None}}]} in
+  let browser=Install.browse () in
+  let pending_catalog=Install.begin_catalog ~request_id:20 ~directory:None browser |> ok in
+  check bool "canceled catalog response cannot reopen installer" true
+    (Option.is_none (Install.receive_catalog ~request_id:20 ~directory:None (Ok (Catalog.to_json catalog)) (Install.browse ())));
+  check bool "different directory response ignored" true
+    (Option.is_none (Install.receive_catalog ~request_id:20 ~directory:(Some "/other") (Ok (Catalog.to_json catalog)) pending_catalog));
+  let failed,detail=Install.receive_catalog ~request_id:20 ~directory:None (Error "cannot read folder") pending_catalog |> Option.get in
+  check (option string) "catalog read failure remains explicit" (Some "cannot read folder") detail;
+  check bool "failed catalog can retry" true (Result.is_ok (Install.begin_catalog ~request_id:21 ~directory:None failed));
+  let browser,detail=Install.receive_catalog ~request_id:20 ~directory:None (Ok (Catalog.to_json catalog)) pending_catalog |> Option.get in
+  check (option string) "catalog succeeds" None detail;
+  check (option string) "remember resolved folder" (Some "/packages") (Install.directory browser);
+  check string "Enter selects actual package" "/packages/arbitrary/lane.toml"
+    (match Install.handle ~key:"enter" browser |> ok with Preview path -> path | _ -> fail "missing catalog preview");
+  let pending=Install.begin_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" browser |> ok in
+  let restored,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Error "manifest changed") pending |> Option.get in
+  check (option string) "preview failure preserves folder" (Some "/packages") (Install.directory restored);
+  check (option string) "preview failure shown" (Some "manifest changed") detail;
+  let listed,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Ok schemaless) pending |> Option.get in
+  check bool "schemaless catalog preview reports a refusal" true (Option.is_some detail);
+  check string "schemaless catalog preview retains the selected manifest" "/packages/arbitrary/lane.toml"
+    (match Install.handle ~key:"enter" listed |> ok with
+     | Preview path -> path | _ -> fail "expected the retained catalog selection");
+  check bool "n in the browser opens the raw TOML declaration editor" true
+    (Install.handle ~key:"n" listed = Ok Install.Declare);
+  let remembered=Install.browse ~directory:"/packages/removed" () in
+  let pending_remembered=Install.begin_catalog ~request_id:23 ~directory:(Some "/packages/removed") remembered |> ok in
+  let unread,detail=Install.receive_catalog ~request_id:23 ~directory:(Some "/packages/removed")
+    (Error "folder not found") pending_remembered |> Option.get in
+  check (option string) "remembered folder read failure shown" (Some "folder not found") detail;
+  check bool "Left leaves an unread remembered folder for the workspace root" true
+    (Install.handle ~key:"left" unread = Ok (Install.Browse None));
+  let form,detail=Install.receive_preview ~request_id:22 ~path:"/packages/arbitrary/lane.toml" (Ok response) pending |> Option.get in
+  check (option string) "selected package preview accepted" None detail;
+  let reviewed = form |> Install.paste ~text:"research-observer" |> edit "tab"
+    |> Install.paste ~text:"project-run" |> edit "tab"
+    |> Install.paste ~text:"quoted \"topic\" and 한국어" |> edit "\019" in
+  let session = match Install.handle ~key:"enter" reviewed |> ok with
+    | Draft session -> session | _ -> fail "expected local declaration draft" in
+  check bool "wizard produces unsaved create document" true (session.base=None);
+  check string "declaration filename derives from entered installation" "research-observer.toml" session.file_name;
+  let document = match Otoml.Parser.from_string_result session.text with
+    | Ok document -> document | Error _ -> fail "generated TOML must parse" in
+  check string "actual manifest path survives TOML encoding" "/packages/arbitrary/lane.toml"
+    (Otoml.find_opt document Otoml.get_string ["manifest_path"] |> Option.get);
+  check string "quoted Unicode binding survives serialization" "quoted \"topic\" and 한국어"
+    (Otoml.find_opt document Otoml.get_string ["binding";"topic"] |> Option.get);
+  let pending_native = Install.begin_preview ~request_id:30 ~path:"/packages/arbitrary/lane.toml" path |> ok in
+  let native,error = Install.receive_preview ~request_id:30 ~path:"/packages/arbitrary/lane.toml"
+    (Ok (match preview (`Assoc ["kind",`String "host_process"]) with
+      | `Assoc fields -> `Assoc (List.map (function
+          | "package", `Assoc package -> "package", `Assoc (package @ ["runtime",`String "host_process"])
+          | field -> field) fields)
+      | json -> json)) pending_native |> Option.get in
+  check (option string) "native preview needs no container image" None error;
+  let reviewed_native = native |> Install.paste ~text:"native-browser" |> edit "tab"
+    |> Install.paste ~text:"browser-run" |> edit "tab"
+    |> Install.paste ~text:"Native interaction" |> edit "\019" in
+  let native_draft = match Install.handle ~key:"enter" reviewed_native |> ok with
+    | Draft session -> session | _ -> fail "native preview must produce a local draft" in
+  let native_document = match Otoml.Parser.from_string_result native_draft.text with
+    | Ok value -> value | Error _ -> fail "native declaration must parse" in
+  check bool "native draft remains unsaved" true (native_draft.base=None);
+  check string "native draft retains the selected manifest" "/packages/arbitrary/lane.toml"
+    (Otoml.find_opt native_document Otoml.get_string ["manifest_path"] |> Option.get);
+  check string "native draft retains the reviewed binding" "Native interaction"
+    (Otoml.find_opt native_document Otoml.get_string ["binding";"topic"] |> Option.get)
+
+let object_array_fields () =
+  let module Form = Masc_tui_schema_form in
+  let schema = Yojson.Safe.from_string
+    {|{"type":"object","properties":{"records":{"type":"array","minItems":1,"maxItems":2,"items":{"type":"object","properties":{"label":{"type":"string","minLength":1},"kind":{"type":"string","const":"record"},"note":{"type":"string"}},"required":["label","kind"],"additionalProperties":false}}},"required":["records"],"additionalProperties":false}|} in
+  let edit key form = match Form.handle ~key form |> ok with
+    | Form.Updated form -> form | _ -> fail "array editing must not submit the enclosing form" in
+  let add text form = form |> edit "a" |> Form.insert_text ~text |> edit "\019" |> edit "enter" in
+  let initial = Form.create ~schema ~initial:(`Assoc []) |> ok in
+  let array = edit "\005" initial in
+  check bool "opening an array does not create a required value" true
+    (Result.is_error (Form.value (edit "esc" array)));
+  check bool "empty array enforces declared minItems when applied" true
+    (Result.is_error (Form.handle ~key:"\019" array));
+  let child = edit "a" array in
+  check bool "item validates required fields before review" true
+    (Result.is_error (Form.handle ~key:"\019" child));
+  let two = array |> add "첫번째" |> add "second" in
+  let too_many = add "third" two in
+  check bool "multiple items enforce declared maxItems when applied" true
+    (Result.is_error (Form.handle ~key:"\019" too_many));
+  let fixed = too_many |> edit "d" |> edit "k" |> edit "e" |> edit "\021"
+    |> Form.insert_text ~text:"edited" |> edit "\019" |> edit "enter" in
+  let applied = edit "\019" fixed in
+  let item label = `Assoc ["kind",`String "record";"label",`String label] in
+  let expected = `Assoc ["records",`List [item "edited";item "second"]] in
+  check bool "object items preserve order, constants and absent optional fields" true
+    ((Form.value applied |> ok)=expected);
+  let reviewed = edit "\019" applied in
+  let submitted = match Form.handle ~key:"enter" reviewed |> ok with
+    | Form.Submit json -> json | _ -> fail "only enclosing review Enter submits" in
+  check bool "enclosing form submits the reviewed array" true (submitted=expected);
+  let discarded = applied |> edit "\005" |> edit "d" |> edit "esc" in
+  check bool "canceling array edits preserves its committed value" true
+    ((Form.value discarded |> ok)=expected);
+  let optional_schema = match schema with `Assoc fields ->
+    `Assoc (("required",`List [])::List.remove_assoc "required" fields) | _ -> assert false in
+  let optional = Form.create ~schema:optional_schema ~initial:(`Assoc []) |> ok in
+  let optional = optional |> edit "\005" |> edit "a" |> edit "esc" |> edit "esc" in
+  check bool "canceling new optional item never activates its array" true
+    ((Form.value optional |> ok)=`Assoc []);
+  let primitive_schema = Yojson.Safe.from_string
+    {|{"type":"object","properties":{"values":{"type":"array","items":{"type":"string"}}},"required":["values"],"additionalProperties":false}|} in
+  let primitive = Form.create ~schema:primitive_schema ~initial:(`Assoc []) |> ok in
+  check bool "primitive arrays remain direct JSON input" true
+    (Result.is_error (Form.handle ~key:"\005" primitive));
+  let primitive = primitive |> Form.insert_text ~text:"[\"one\",\"two\"]" |> edit "\019" in
+  check bool "primitive array JSON remains valid" true
+    ((Form.value primitive |> ok)=`Assoc ["values",`List [`String "one";`String "two"]])
+
+(* Marked rows are frozen with `e`. The choice of Keeper is made by name from
+   the workspace roster; before this prompt the only way to name one was the
+   raw `:evidence {...,"keeper_name"}` command. The bundle is preserved either
+   way, and a failed delivery is reported apart from the frozen bundle. *)
+let evidence_export_chooses_a_keeper_by_name () =
+  let row ~owner id : UI.Row.row = {id;lane_id=owner ^ "/events";kind=UI.Row.Event;
+    title=id;observed_at=1.;subject_id="project";clock=None;actor=None;
+    fields=[];evidence=[];related_ids=[]} in
+  let worker id : UI.instance = {id;incarnation=id;run_id="project";
+    addon_id="fixture";title="Observed value changes";revision="1";phase=UI.Row.Attached;
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
+    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;
+    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+  let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
+    output={rows=[row ~owner:"worker" "chosen";row ~owner:"worker" "second";row ~owner:"other" "foreign"];coverage=[]};
+    complete=Some true;configuration=None} in
+  let view = {UI.initial with focus=UI.Timeline;snapshot=Some snapshot;selected=["second";"chosen"]} in
+  let opened = UI.open_evidence ~request_id:"fixture-send" ~keepers:["researcher";"imp"] view |> ok in
+  let prompt = Option.get opened.evidence_prompt in
+  check (list string) "keepers are offered by name in a stable order" ["imp";"researcher"] prompt.keepers;
+  check int "preserve only is the default" 0 prompt.choice;
+  let lines = UI.lines ~width:100 opened in
+  check bool "the prompt names the owner and the count" true
+    (List.mem "Preserve 2 marked rows from Observed value changes" lines);
+  check bool "the default is marked" true (List.mem "> Preserve only" lines);
+  check bool "each Keeper is a choice" true
+    (List.mem "  Preserve and send the reference to imp" lines
+     && List.mem "  Preserve and send the reference to researcher" lines);
+  let bundle = ["instance_id",`String "worker";"row_ids",`List [`String "chosen";`String "second"]] in
+  let closed, request = UI.submit_evidence opened |> ok in
+  check bool "preserve only sends no keeper" true (request = UI.Evidence (`Assoc bundle));
+  check bool "the prompt closes on submit" true (Option.is_none closed.evidence_prompt);
+  let moved = UI.move_evidence (UI.move_evidence opened 1) 1 in
+  let _, request = UI.submit_evidence moved |> ok in
+  check bool "the second choice names the second keeper" true
+    (request = UI.Evidence (`Assoc (bundle @ ["keeper_name",`String "researcher"])));
+  let broadcast = UI.move_evidence moved 5 in
+  check int "the choice stops at Broadcast" 3 (Option.get broadcast.evidence_prompt).choice;
+  let submitted, request = UI.submit_evidence broadcast |> ok in
+  check bool "Broadcast shares the same selected evidence with no Keeper target" true
+    (request = UI.Evidence (`Assoc (bundle @ ["broadcast",`Bool true;"request_id",`String "fixture-send"])));
+  let reopened = UI.open_evidence ~request_id:"discarded-new-id" ~keepers:[] submitted |> ok in
+  let _, retried = UI.submit_evidence (UI.move_evidence reopened 1) |> ok in
+  check bool "unanswered Broadcast retry retains its original identity" true (request=retried);
+  let acknowledged = UI.acknowledge_broadcast submitted (`Assoc ["delivery",`Assoc [
+    "request_id",`String "fixture-send";"status",`String "committed"]]) in
+  let next = UI.open_evidence ~request_id:"new-deliberate-send" ~keepers:[] acknowledged |> ok in
+  let _, next_request = UI.submit_evidence (UI.move_evidence next 1) |> ok in
+  check bool "new deliberate send after receipt uses a fresh identity" true
+    (next_request=UI.Evidence (`Assoc (bundle @ ["broadcast",`Bool true;
+      "request_id",`String "new-deliberate-send"])));
+  check int "the choice stops at preserve only" 0 (Option.get (UI.move_evidence moved (-5)).evidence_prompt).choice;
+  let alone = UI.open_evidence ~request_id:"fixture-send" ~keepers:[] view |> ok in
+  check bool "Broadcast remains available without a roster" true
+    (List.mem "  Preserve and share the reference via Broadcast" (UI.lines ~width:100 alone));
+  check int "without a roster Broadcast is the next choice" 1 (Option.get (UI.move_evidence alone 1).evidence_prompt).choice;
+  check bool "rows of two owners are refused before any request" true
+    (Result.is_error (UI.open_evidence ~request_id:"fixture-send" ~keepers:["imp"] {view with selected=["chosen";"foreign"]}));
+  check bool "nothing marked opens nothing" true
+    (Result.is_error (UI.open_evidence ~request_id:"fixture-send" ~keepers:["imp"] {view with selected=[]}));
+  check bool "submit without an open prompt is refused" true (Result.is_error (UI.submit_evidence view));
+  let evidence = `Assoc ["sha256",`String "abc"] in
+  check (list string) "receipt shows the exact owner selection and intended Keeper without claiming a read"
+    ["Evidence preserved: 2 rows · sha256 abc";"Evidence owner: worker";
+     "Selected row: worker/1/chosen";"Selected row: worker/2/second";
+     "Keeper delivery to imp accepted · Keeper reads and actions are unverified"]
+    (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 2;
+      "instance_id",`String "worker";"row_ids",`List [`String "worker/1/chosen";`String "worker/2/second"];
+      "delivery",`Assoc ["destination",`String "keeper";"keeper_name",`String "imp";"status",`String "accepted"]]));
+  check (list string) "a failed delivery is reported apart from the frozen bundle"
+    ["Evidence preserved: 1 row · sha256 abc";
+     "Keeper delivery failed: keeper not found: imp · the bundle stays preserved"]
+    (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 1;
+      "delivery",`Assoc ["status",`String "failed";"error",`String "keeper not found: imp"]]));
+  check (list string) "a receipt without delivery says so"
+    ["Evidence preserved: 2 rows · sha256 abc";"Not shared."]
+    (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 2]));
+  check (list string) "Broadcast publication is not a read receipt"
+    ["Evidence preserved: 2 rows · sha256 abc";"Broadcast committed · Keeper reads and actions are unverified"]
+    (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 2;
+      "delivery",`Assoc ["destination",`String "broadcast";"status",`String "committed"]]));
+  let broadcast_receipt = `Assoc ["evidence",evidence;"row_count",`Int 2;
+    "delivery",`Assoc ["destination",`String "broadcast";"status",`String "committed"]] in
+  let detail = {(UI.open_selected_instance view) with focus=UI.Rows;
+    receipt=Some broadcast_receipt} in
+  let summary_lines = UI.lines ~width:100 detail in
+  check bool "normal Summary visibly confirms the last evidence operation" true
+    (List.mem "Last evidence receipt" summary_lines
+     && List.mem "Evidence preserved: 2 rows · sha256 abc" summary_lines
+     && List.mem "Broadcast committed · Keeper reads and actions are unverified" summary_lines);
+  let position value = List.find_index (String.equal value) summary_lines |> Option.get in
+  check bool "receipt confirmation precedes potentially long record content" true
+    (position "Last evidence receipt" < position "Row chosen");
+  let another_worker = {view with instance_cursor=1;receipt=Some broadcast_receipt} in
+  check bool "navigation retains an explicitly past receipt without assigning it to another worker" true
+    (List.mem "Last evidence receipt" (UI.lines ~width:100 another_worker)
+     && Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance another_worker)=Some "other");
+  let overview_with_receipt = UI.lines ~width:40 another_worker |> entry_lines in
+  let selected_position = List.find_index (String.starts_with ~prefix:"> Observed value changes")
+      overview_with_receipt |> Option.get in
+  let receipt_position = List.find_index (String.equal "Last evidence receipt")
+      overview_with_receipt |> Option.get in
+  check bool "Overview presents the selected installation before its retained past receipt" true
+    (selected_position < receipt_position);
+  let unsafe_receipt = `Assoc ["evidence",evidence;"row_count",`Int 2;
+    "delivery",`Assoc ["destination",`String "broadcast";"status",`String "failed";
+      "error",`String ("observer\027[2J" ^ String.make 120 'x')]] in
+  let narrow = UI.lines ~width:40 {detail with receipt=Some unsafe_receipt} in
+  (* The frame's own colours are SGR; any other escape left after removing
+     them came from the receipt text. *)
+  check bool "Summary receipt wraps and escapes external terminal controls" true
+    (List.for_all (fun line -> not (String.contains (Masc_tui_theme.strip_sgr line) '\027')
+      && Masc_tui_message_layout.display_width line <= 40) narrow);
+  check (list string) "uncertain sharing requests verification before resending"
+    ["Evidence preserved: 2 rows · sha256 abc";"Broadcast outcome unknown · evidence preserved; verify before resending"]
+    (UI.evidence_receipt_lines (`Assoc ["evidence",evidence;"row_count",`Int 2;
+      "delivery",`Assoc ["destination",`String "broadcast";"status",`String "outcome_unknown"]]));
+  check (list string) "other receipts add nothing" [] (UI.evidence_receipt_lines (`Assoc ["instance_id",`String "x"]))
+
+let refresh_preserves_operator_target () =
+  let row id : UI.Row.row = {id;lane_id="worker/events";kind=UI.Row.Event;
+    title=id;observed_at=1.;subject_id="project";clock=None;actor=None;
+    fields=[];evidence=[];related_ids=[]} in
+  let worker id : UI.instance = {id;incarnation=id;run_id="project";
+    addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
+    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;
+    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+  let declaration id : UI.declaration = {source_path=id ^ ".toml";
+    installation_id=Some id;desired=Some "1";applied=Some "1";
+    instance_id=Some id;issues=[];enabled=Some true;ui_category=None;origin=UI.Parsed_declaration;application=None} in
+  let snapshot : UI.snapshot = {instances=[worker "worker";worker "other"];
+    output={rows=[row "chosen";row "other"];coverage=[]};complete=Some true;
+    configuration=Some {directory="/config";complete=true;
+      declarations=[declaration "worker";declaration "other"]}} in
+  let view = {UI.initial with focus=UI.Instances;snapshot=Some snapshot;scroll=7;selected=["chosen"]} in
+  let reordered = {snapshot with instances=List.rev snapshot.instances;
+    output={snapshot.output with rows=List.rev snapshot.output.rows};
+    configuration=Option.map (fun (c : UI.configuration) -> {c with declarations=List.rev c.declarations}) snapshot.configuration} in
+  let refreshed = UI.reconcile_snapshot view reordered in
+  check (option string) "worker identity survives reorder" (Some "worker")
+    (Option.map (fun (i : UI.instance) -> i.id) (UI.selected_instance refreshed));
+  check (option string) "row identity survives reorder" (Some "chosen")
+    (Option.map (fun (r : UI.Row.row) -> r.id) (UI.selected_row refreshed));
+  check (option string) "declaration identity survives reorder" (Some "worker.toml")
+    (Option.map (fun (d : UI.declaration) -> d.source_path) (UI.selected_declaration refreshed));
+  check int "refresh retains requested scroll position" 7 refreshed.scroll;
+  let removed = UI.reconcile_snapshot refreshed {snapshot with instances=[worker "other"];
+    output={snapshot.output with rows=[row "other"]};configuration=None} in
+  check bool "removed targets do not select arbitrary replacement" true
+    (UI.selected_instance removed=None && UI.selected_row removed=None && UI.selected_declaration removed=None);
+  let replaced = UI.reconcile_snapshot view {snapshot with instances=[{(worker "worker") with incarnation="replacement"}]} in
+  check bool "new incarnation requires explicit selection" true (UI.selected_instance replaced=None);
+  check bool "timeline cannot act through a replaced row owner" true
+    (UI.selected_instance {replaced with focus=UI.Timeline}=None);
+  let draft = Draft.create "worker.toml" |> ok in
+  let editing = UI.put_document {view with focus=UI.Configurations;presentation=UI.Technical} draft in
+  let changed declaration instances = UI.reconcile_snapshot editing {snapshot with instances;
+    configuration=Some {directory="/config";complete=true;declarations=[declaration]}} in
+  List.iter (fun (label,declaration,instances) ->
+    let replaced = changed declaration instances in
+    check bool (label ^ " invalidates same-path operator selection") true
+      (UI.selected_declaration replaced=None && UI.selected_instance replaced=None);
+    check bool (label ^ " retains the independent document draft") true
+      (UI.selected_document replaced=Some draft))
+    ["installation",{(declaration "worker") with installation_id=Some "new-installation"},snapshot.instances;
+     "instance",{(declaration "worker") with instance_id=Some "other"},snapshot.instances;
+     "run",declaration "worker",[{(worker "worker") with run_id="new-run"}];
+     "incarnation",declaration "worker",[{(worker "worker") with incarnation="new-incarnation"}]];
+  (* The timeline status line is painted: its warning tone reaches the text
+     wrapped in SGR codes, so read the text those codes carry. *)
+  let plain line =
+    let n = String.length line in
+    let buf = Buffer.create n in
+    let rec walk i =
+      if i < n then
+        if line.[i] = '\027' then
+          let j = ref (i + 1) in
+          while !j < n && line.[!j] <> 'm' do incr j done;
+          walk (if !j < n then !j + 1 else !j)
+        else (Buffer.add_char buf line.[i]; walk (i + 1)) in
+    walk 0;
+    Buffer.contents buf in
+  let failed = {view with focus=UI.Timeline;snapshot_read_error=Some "network failed"} in
+  check bool "stale snapshot exposes refresh failure" true
+    (List.exists (fun line -> String.starts_with ~prefix:"Read: network failed" (plain line))
+      (UI.lines ~height:24 ~width:120 failed))
+
+let detail_keeps_installation_ownership () =
+  let worker id : UI.instance = {id;incarnation=id ^ "-run";run_id="project";
+    addon_id="fixture";title=id;revision="1";phase=UI.Row.Attached;
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=2;configuration_revision=Some "1";installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
+    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;ui_category=None;
+    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+  let declaration id : UI.declaration = {source_path="/config/" ^ id ^ ".toml";
+    installation_id=Some id;desired=Some "1";applied=Some "1";
+    instance_id=Some id;issues=[];enabled=Some true;ui_category=None;origin=UI.Parsed_declaration;application=None} in
+  let row owner lane observed_at : UI.Row.row = {id=owner ^ "-" ^ lane;
+    lane_id=owner ^ "/" ^ lane;kind=UI.Row.Value;title=owner ^ " " ^ lane;
+    observed_at;subject_id=(if owner="b" && lane="last" then "guest" else "project");
+    clock=(if owner="b" && lane="last" then Some {domain="emulator";value="17"} else None);
+    actor=(if owner="b" && lane="last" then Some "operator" else None);
+    fields=[];evidence=[];related_ids=[]} in
+  let snapshot : UI.snapshot = {instances=[worker "a";worker "b"];
+    output={rows=[row "a" "first" 1.;row "b" "first" 2.;
+      row "a" "last" 3.;row "b" "last" 4.];
+      coverage=[{source_id="source-b";incarnation="inc-17";cursor=Some "offset-42";
+        complete=false;detail=Some "partial read"}]};complete=Some false;
+    configuration=Some {directory="/config";complete=true;
+      declarations=[declaration "a";declaration "b"]}} in
+  let overview = {UI.initial with snapshot=Some snapshot;focus=UI.Instances;
+    instance_cursor=1;configuration_cursor=0;row_cursor=0;selected=["a-first"]} in
+  let overview = UI.put_document overview (Draft.create "a.toml" |> ok) in
+  let detail = UI.open_selected_instance overview in
+  check bool "Enter pins the selected incarnation" true (detail.screen=UI.Detail ("b","b-run"));
+  check (list string) "opening detail clears another installation's evidence" [] detail.selected;
+  check bool "opening detail clears another installation's active document" true
+    (UI.selected_document detail=None);
+  check (option string) "Installation E targets the displayed TOML despite global cursor zero"
+    (Some "/config/b.toml") (UI.selected_source_path {detail with focus=UI.Configurations});
+  let selected_id view = Option.map (fun (r : UI.Row.row) -> r.id) (UI.selected_row view) in
+  check (option string) "Records starts at displayed installation" (Some "b-first") (selected_id detail);
+  let last = UI.move_record {detail with focus=UI.Rows} 1 in
+  let raw = String.concat "" (UI.lines ~width:80 {last with presentation=UI.Technical}) in
+  let contains text =
+    let n = String.length text in
+    let rec at i = i+n <= String.length raw
+      && (String.sub raw i n=text || at (i+1)) in
+    at 0 in
+  List.iter (fun text -> check bool "selected empty-field record keeps its provenance" true
+    (contains text))
+    ["Row b-last";"Observed 1970-01-01 00:00:04.000 UTC";"Subject guest";
+     "Actor operator";"Clock emulator · 17";"Snapshot partial";
+     "source-b · partial · incarnation inc-17 · cursor offset-42 · partial read"];
+  check bool "raw detail excludes another installation's record" false (contains "Row a-last");
+  check (option string) "Records next skips another installation's intervening row"
+    (Some "b-last") (selected_id last);
+  check (option string) "Records next stays within displayed installation"
+    (Some "b-last") (selected_id (UI.move_record last 1));
+  check (option string) "Activity next stays within displayed installation"
+    (Some "b-last") (selected_id (UI.move_observation detail 1));
+  check (option string) "Activity previous lane cannot select another installation"
+    (Some "b-first") (selected_id (UI.move_lane detail (-1)));
+  let selected = {last with selected=["b-last"]} in
+  (match UI.evidence_request selected |> ok with
+   | UI.Evidence evidence ->
+       check string "export belongs to the displayed installation" "b"
+         Yojson.Safe.Util.(evidence |> member "instance_id" |> to_string);
+       check (list string) "export contains the displayed record" ["b-last"]
+         Yojson.Safe.Util.(evidence |> member "row_ids" |> to_list |> List.map to_string)
+   | _ -> fail "expected evidence export");
+  check bool "invisible evidence cannot be exported from detail" true
+    (Result.is_error (UI.evidence_request {detail with selected=["a-first"]}));
+  let replacement = {snapshot with instances=[worker "a";{(worker "b") with incarnation="new-run"}]} in
+  let refreshed = UI.reconcile_snapshot selected replacement in
+  check bool "replacement cannot inherit old detail's edit or row selection" true
+    (UI.selected_instance refreshed=None && UI.selected_row refreshed=None
+     && UI.selected_source_path {refreshed with focus=UI.Configurations}=None);
+  check bool "replacement cannot inherit old detail's evidence export" true
+    (Result.is_error (UI.evidence_request refreshed))
+
+let declared_results_show_body_before_activity_and_keep_raw_evidence () =
+  let module P = Masc.Lane_addon_presentation in
+  let display = P.of_json (`Assoc ["description",`String "Read an analysis report";
+    "readings",`List [
+      `Assoc ["lane_id",`String "report";"path",`List [`String "body"];
+        "label",`String "Report";"format",`String "text"];
+      `Assoc ["lane_id",`String "report";"path",`List [`String "complete"];
+        "label",`String "Input complete";"format",`String "boolean"];
+      `Assoc ["lane_id",`String "report";"path",`List [`String "delivery"];
+        "label",`String "Delivery";"format",`String "text"]]]) |> ok in
+  let worker : UI.instance = {id="report-worker";incarnation="incarnation";run_id="project";
+    addon_id="custom";title="Project report";revision="1";phase=UI.Row.Attached;
+    runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=None;installation_id=None;source_path=None;binding=`Assoc ["sources",`List []];
+    outputs=[];skills_directory=None;ui_category=None;action_schema=None;binding_schema=None;display;host_requests=None} in
+  let row : UI.Row.row = {id="report-row";lane_id="report-worker/report";kind=UI.Row.Value;
+    title="Useful analysis";observed_at=1.;subject_id="project";clock=None;actor=None;
+    fields=["body",`String "First finding\nSecond finding";"complete",`Bool false;
+      "delivery",`String "not attempted";"private_coordinate",`String "retained in raw"];
+    evidence=[];related_ids=[]} in
+  let snapshot : UI.snapshot = {instances=[worker];output={rows=[row];coverage=[]};
+    complete=None;configuration=None} in
+  let overview = {UI.initial with snapshot=Some snapshot} in
+  check bool "package purpose is visible before opening" true
+    (List.mem "    Read an analysis report" (UI.lines ~width:100 overview));
+  let detail = UI.open_selected_instance overview in
+  let selected_id view = Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row view) in
+  let value_texts value = List.map (fun (row : UI.value_row) -> row.text) (UI.value_rows ~depth:0 value) in
+  let reading_texts row = List.map (fun (_, value) -> match value with
+    | Ok value -> value_texts value
+    | Error detail -> fail detail) (UI.result_readings worker row) in
+  check (option string) "opening selects the declared report" (Some row.id) (selected_id detail);
+  check (list (list string)) "a text value keeps its written lines as rows, not escaped JSON"
+    [["First finding"; "Second finding"]; ["false"]; ["not attempted"]] (reading_texts row);
+  check (list (triple int (option string) bool))
+    "an object field is a key, and a list item is a bullet one level deeper"
+    [0, Some "kind", false; 0, Some "points", false; 1, None, true; 1, None, true]
+    (List.map (fun (row : UI.value_row) -> row.depth, row.key, row.bullet)
+      (UI.value_rows ~depth:0 (`Assoc ["kind",`String "rubric";
+        "points",`List [`String "one";`String "two"]])));
+  check (list (pair int (option string)))
+    "a field holding a small object of single-line values takes one row, a deeper one nests"
+    [0, Some "judgment"; 0, Some "points"; 1, None]
+    (List.map (fun (row : UI.value_row) -> row.depth, row.key)
+      (UI.value_rows ~depth:0 (`Assoc ["judgment",`Assoc ["kind",`String "incorrect"];
+        "points",`List [`String "one"]])));
+  check (list (triple int (option string) bool))
+    "an object item puts its bullet on its first field"
+    [0, Some "kind", true; 1, Some "pin", false]
+    (List.map (fun (row : UI.value_row) -> row.depth, row.key, row.bullet)
+      (UI.value_rows ~depth:0 (`List [`Assoc ["kind",`String "pr";"pin",`String "1@a"]])));
+  let long_titles = {detail with snapshot=Some {snapshot with output={rows=[
+      {row with title=String.make 150 'r'};
+      {row with id="long-second";title=String.concat " " (List.init 40 (fun _ -> "결과"));observed_at=2.}];
+    coverage=[]}}} in
+  List.iter (fun width ->
+    check bool "every Results row fits the terminal width" true
+      (List.for_all (fun line -> Masc_tui_message_layout.display_width line <= width)
+        (UI.lines ~width detail @ UI.lines ~width long_titles))) [40; 80; 120; 200];
+  let raw_lines = UI.lines ~width:100 {detail with presentation=UI.Technical} in
+  check bool "raw coordinates remain under details with the JSON formatter's layout" true
+    (List.for_all (fun line -> List.mem line raw_lines)
+      (String.split_on_char '\n' (Yojson.Safe.pretty_to_string (`Assoc row.fields))));
+  let second = {row with id="second-report";title="Another analysis";observed_at=2.;
+    fields=["body",`String "Other first finding\nOther second finding";
+      "complete",`Bool true;"delivery",`String "not attempted"]} in
+  let two = {detail with snapshot=Some {snapshot with output={rows=[row;second];coverage=[]}}} in
+  let moved = UI.move_observation {two with scroll=7} 1 in
+  check int "selecting another report starts at its visible result" 0 moved.scroll;
+  check (option string) "the raw detail target is the visible selected report"
+    (Some second.id) (selected_id moved);
+  let moved_raw = UI.lines ~width:100 {moved with presentation=UI.Technical} in
+  check bool "D exposes the same report and excludes the previous one" true
+    (List.mem "Row second-report" moved_raw && not (List.mem "Row report-row" moved_raw));
+  let unselected = {two with row_cursor=(-1)} in
+  check (option string) "a vanished selection leaves no report selected" None (selected_id unselected);
+  check (option string) "j explicitly chooses a report from no selection" (Some row.id)
+    (selected_id (UI.move_observation unselected 1));
+  check bool "missing declared data is explicitly unavailable" true
+    (match UI.result_readings worker {row with fields=[]} with
+     | (_, Error _) :: _ -> true
+     | (_, Ok _) :: _ | [] -> false);
+  check int "readings are scoped to the exact declared Lane" 0
+    (List.length (UI.result_readings worker {row with lane_id="report-worker/other"}));
+  let windows_body = "First\r\n\r\nSecond\rstandalone\r" in
+  check (list string) "a CRLF break drops its CR, and a standalone CR stays in the text"
+    ["First"; ""; "Second\rstandalone\r"] (value_texts (`String windows_body));
+  let windows = {row with fields=["body",`String windows_body]} in
+  check bool "no written carriage return reaches the terminal" true
+    (List.for_all (fun line -> not (String.contains line '\r'))
+      (UI.lines ~width:100 {detail with snapshot=Some {snapshot with output={rows=[windows];coverage=[]}}}));
+  let many = List.init 40 (fun index -> {row with id=Printf.sprintf "many-%02d" index;
+    title=Printf.sprintf "Result number %02d" index;observed_at=float_of_int index}) in
+  let crowded = {detail with snapshot=Some {snapshot with output={rows=many;coverage=[]}}} in
+  let far = UI.move_observation (UI.select_initial_result crowded) 35 in
+  check (option string) "j reaches a result far down a long list" (Some "many-35") (selected_id far);
+  List.iter (fun (count, focus) ->
+    let first, shown = UI.result_window ~rows:12 ~focus ~count in
+    check bool "the list window keeps the selected row in view within the rows it has" true
+      (first >= 0 && first <= focus && focus < first + shown
+       && shown = min 12 count && first + shown <= count))
+    [41, 36; 41, 0; 41, 40; 8, 7; 300, 150];
+  let two_lanes = P.of_json (`Assoc ["readings",`List [
+      `Assoc ["lane_id",`String "alpha";"path",`List [`String "body"];"label",`String "A";"format",`String "text"];
+      `Assoc ["lane_id",`String "beta";"path",`List [`String "body"];"label",`String "B";"format",`String "text"]]])
+    |> ok in
+  let lane_row id lane observed_at = {row with id;lane_id=worker.id ^ "/" ^ lane;observed_at} in
+  let interleaved = {detail with snapshot=Some {snapshot with
+    instances=[{worker with display=two_lanes}];
+    output={rows=[lane_row "beta-1" "beta" 1.; lane_row "alpha-2" "alpha" 2.; lane_row "beta-3" "beta" 3.];
+      coverage=[]}}} in
+  let walk = UI.select_initial_result interleaved in
+  check (list (option string)) "j walks results Lane by Lane, then by time, as the list groups them"
+    [Some "alpha-2"; Some "beta-1"; Some "beta-3"]
+    [selected_id walk; selected_id (UI.move_observation walk 1); selected_id (UI.move_observation walk 2)];
+  let grade = {row with id="grade";lane_id=worker.id ^ "/grades";
+    title="Old grade";observed_at=0.;fields=["grade",`String "incorrect"]} in
+  let score = {row with id="score";title="Declared score";observed_at=3.} in
+  let score_snapshot = {snapshot with output={rows=[grade;score];coverage=[]}} in
+  let preferred = UI.open_selected_instance {overview with snapshot=Some score_snapshot} in
+  check (option string) "opening selects declared result after preceding ordinary observations"
+    (Some score.id) (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row preferred));
+  let context = {row with id="context";lane_id=worker.id ^ "/report-context";
+    title="Internal report context";observed_at=0.;fields=["raw",`String "retained source"]} in
+  let with_context = {detail with snapshot=Some
+    {snapshot with output={rows=[context;row;second];coverage=[]}};row_cursor=1} in
+  check (option string) "opening a context-only observation does not select its internal row" None
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.select_initial_result {with_context with snapshot=Some
+        {snapshot with output={rows=[context];coverage=[]}}})));
+  let generic = {worker with display=(P.of_json (`Assoc []) |> ok)} in
+  check (option string) "packages without presentation keep generic records as results" (Some context.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.select_initial_result {with_context with snapshot=Some
+        {snapshot with instances=[generic];output={rows=[context];coverage=[]}}})));
+  check (option string) "result navigation skips the supporting context" (Some second.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.move_observation with_context 1)));
+  check (option string) "reverse result navigation stops before supporting context" (Some row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.move_observation with_context (-1))));
+  let context_records = {with_context with focus=UI.Rows;row_cursor=0} in
+  check bool "Records retains the exact supporting context" true
+    (List.mem "Row context" (UI.lines ~width:100 context_records));
+  check bool "supporting context remains explicitly selectable for evidence" true
+    (Result.is_ok (UI.evidence_request {context_records with selected=[context.id]}));
+  let returned_results = {context_records with focus=UI.Timeline} in
+  check (option string) "Records-to-Results transition cannot target hidden context for Space" None
+    (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row returned_results));
+  check (option string) "Flow has no invisible record action target" None
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row {returned_results with presentation=UI.Flow}));
+  check (option string) "overview Flow has no invisible record action target" None
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row {returned_results with screen=UI.Overview;presentation=UI.Flow}));
+  check (option string) "raw details explicitly retain the exact context target" (Some context.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row {returned_results with presentation=UI.Technical}));
+  check (option string) "j after returning to Results selects the first displayed report" (Some row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id)
+      (UI.selected_row (UI.move_observation returned_results 1)));
+  let only_context = {detail with snapshot=Some
+    {snapshot with output={rows=[context];coverage=[]}};row_cursor=0} in
+  check bool "context-only observations explain that declared results are absent" true
+    (List.mem "No declared result rows in this received view." (UI.lines ~width:100 only_context)
+     && List.mem "Supporting records remain available in 4 Records." (UI.lines ~width:100 only_context));
+  let producer_last = {row with id="last";title="Last result";observed_at=5.} in
+  let producer_middle = {row with id="middle";title="Middle result";observed_at=2.} in
+  let unsorted = UI.open_selected_instance {overview with snapshot=Some
+    {snapshot with output={rows=[producer_last;row;producer_middle];coverage=[]}}} in
+  check (option string) "opening uses the same chronology as navigation" (Some row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row unsorted));
+  check (option string) "j reaches the next displayed result" (Some producer_middle.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row (UI.move_observation unsorted 1)));
+  let retained_worker = {worker with phase=UI.Row.Detached} in
+  let other_worker = {worker with id="foreign-worker";incarnation="foreign-incarnation"} in
+  let foreign_row = {row with id="foreign-row";lane_id="foreign-worker/report";observed_at=0.} in
+  let same_title = {producer_middle with id="middle-a";title=row.title;
+    lane_id=worker.id ^ "/other"} in
+  let tied = {producer_middle with id="middle-z"} in
+  let original_rows = [producer_last;foreign_row;tied;row;same_title] in
+  let retained_snapshot = {snapshot with instances=[retained_worker;other_worker];
+    output={rows=original_rows;coverage=[]}} in
+  let records = {detail with snapshot=Some retained_snapshot;
+    screen=UI.Detail (retained_worker.id, retained_worker.incarnation); focus=UI.Rows;
+    row_cursor=(List.find_index (fun (candidate : UI.Row.row) -> candidate.id=row.id) original_rows |> Option.get)} in
+  let selected_id view = Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row view) in
+  let records_lines = UI.lines ~width:100 records in
+  let index text = List.find_index (String.equal text) records_lines |> Option.get in
+  check bool "Records displays retained owner rows chronologically with deterministic ties" true
+    (index ("Row " ^ row.id) < index "Row middle-a"
+     && index "Row middle-a" < index "Row middle-z"
+     && index "Row middle-z" < index "Row last"
+     && not (List.mem "Row foreign-row" records_lines));
+  let next = UI.move_record {records with scroll=9} 1 in
+  check (option string) "Records j selects the next displayed exact row" (Some same_title.id) (selected_id next);
+  check int "Records movement resets document scrolling" 0 next.scroll;
+  check (option string) "Records k returns to the displayed predecessor" (Some row.id)
+    (selected_id (UI.move_record next (-1)));
+  check (option string) "Records timestamp ties use row identity order" (Some tied.id)
+    (selected_id (UI.move_record next 1));
+  check bool "rendering and navigation preserve immutable producer order" true
+    (Option.map (fun (snapshot : UI.snapshot) -> snapshot.output.rows) next.snapshot = Some original_rows);
+  check (option string) "an undeclared record stays out of Results until a result is chosen" None
+    (selected_id {next with focus=UI.Timeline});
+  let same_title_raw = UI.lines ~width:100 {next with presentation=UI.Technical} in
+  check bool "raw evidence joins the same selected row and Lane" true
+    (List.mem ("Row " ^ same_title.id) same_title_raw
+     && List.mem ("Lane " ^ same_title.lane_id) same_title_raw
+     && not (List.mem ("Row " ^ row.id) same_title_raw));
+  let exported = UI.evidence_request {next with selected=[same_title.id]} |> ok in
+  check bool "chronological movement preserves exact export ownership" true
+    (exported = UI.Evidence (`Assoc ["instance_id",`String worker.id;
+      "row_ids",`List [`String same_title.id]]));
+  let many = List.init 6 (fun index -> {worker with id=Printf.sprintf "worker-%d" index;
+    title=Printf.sprintf "Worker %d" index;
+    display={display with description=Some (String.concat " " (List.init 30 (fun _ -> Printf.sprintf "description-%d" index)))}}) in
+  let selected_overview = {overview with instance_cursor=5;snapshot=Some {snapshot with instances=many}} in
+  let selected_lines = UI.lines ~width:30 selected_overview |> entry_lines in
+  let first_rows = List.filteri (fun index _ -> index < 12) selected_lines |> String.concat "\n" in
+  check bool "selected Add-on remains near the overview top despite preceding long descriptions" true
+    (List.exists (String.starts_with ~prefix:"> Worker 5") (String.split_on_char '\n' first_rows)
+     && not (List.exists (fun line -> String.starts_with ~prefix:"    description-4" line) selected_lines))
+
+let current_installations_and_grouped_history_keep_exact_targets () =
+  let worker id run addon phase source_path : UI.instance = {
+    id;incarnation=id;run_id=run;addon_id=addon;title="Repeated title";
+    revision="1";phase;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=1;configuration_revision=Some "1";installation_id=Option.map (fun _ -> addon) source_path;source_path;
+    binding=`Assoc ["sources",`List []];outputs=[];skills_directory=None;ui_category=None;
+    action_schema=None;binding_schema=None;display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+  let old = worker "old-a" "project" "analysis" UI.Row.Detached (Some "/config/a.toml") in
+  let current = worker "live-a" "project" "analysis" UI.Row.Attached (Some "/config/a.toml") in
+  let old_two = {old with id="old-a-two";incarnation="old-a-two"} in
+  let other = worker "old-b" "project" "analysis" UI.Row.Detached (Some "/elsewhere/a.toml") in
+  let declaration : UI.declaration = {source_path="/config/b.toml";installation_id=Some "b";
+    desired=Some "1";applied=Some "1";instance_id=Some "old-b-config";
+    issues=["missing image"];enabled=Some true;ui_category=None;origin=UI.Parsed_declaration;application=None} in
+  let retired_declaration = worker "old-b-config" "project" "b" UI.Row.Detached (Some declaration.source_path) in
+  let historical_row : UI.Row.row = {id="old-a/1/result";lane_id="old-a/result";
+    kind=UI.Row.Value;title="Old result";observed_at=1.;subject_id="project";
+    clock=None;actor=None;fields=[];evidence=[];related_ids=[]} in
+  let snapshot : UI.snapshot = {instances=[old;current;other;old_two;retired_declaration];
+    configuration=Some {directory="/config";complete=true;declarations=[declaration]};
+    output={rows=[historical_row];coverage=[]};complete=None} in
+  let view = {UI.initial with snapshot=Some snapshot} in
+  check int "current worker and inactive declaration replace repeated retained rows" 2
+    (UI.overview_count snapshot);
+  check int "every retained incarnation remains available" 4
+    (UI.overview_count ~mode:UI.Retained_runs snapshot);
+  check (option string) "overview actions target visible live worker, not hidden old worker" (Some current.id)
+    (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance view));
+  List.iter (fun focus ->
+    check (option string) "hidden overview focus cannot select a historical row owner" (Some current.id)
+      (Option.map (fun (item : UI.instance) -> item.id)
+        (UI.selected_instance {view with focus}))) [UI.Timeline;UI.Rows];
+  let lines = UI.lines ~width:120 view in
+  check bool "history is collapsed to an explicit navigation summary" true
+    (List.mem "Retained history · 4 instances · h:open" lines
+     && not (List.exists (String.starts_with ~prefix:"    Instance old-") lines));
+  let config = UI.open_selected_instance {view with instance_cursor=1} in
+  check int "inactive declaration still opens repair details" 0 config.configuration_cursor;
+  check (option string) "inactive current declaration cannot advertise its detached worker" None
+    (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance config));
+  let history = UI.toggle_history view in
+  check bool "history mode is explicit" true (history.overview_mode=UI.Retained_runs);
+  let history_lines = UI.lines ~width:120 history in
+  List.iter (fun header ->
+    check bool "history identifies the full declaration path and package" true
+      (List.mem header history_lines))
+    ["/config/a.toml · add-on analysis · run project";
+     "/elsewhere/a.toml · add-on analysis · run project"];
+  let other_addon = {old with id="old-package";incarnation="old-package";addon_id="other"} in
+  let packages = {history with snapshot=Some {snapshot with instances=other_addon::snapshot.instances}} in
+  check bool "packages on the same source and run have distinct headers" true
+    (List.mem "/config/a.toml · add-on other · run project" (UI.lines ~width:120 packages));
+  List.iter (fun id -> check bool "retained run identity is visible" true
+    (List.mem ("    Instance " ^ id) history_lines)) ["old-a";"old-a-two";"old-b";"old-b-config"];
+  let opened = UI.open_selected_instance history in
+  check (option string) "history Enter pins the selected incarnation" (Some "old-a")
+    (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance opened));
+  let refreshed = UI.reconcile_snapshot history
+    {snapshot with instances=List.filter (fun (item : UI.instance) -> item.id<>"old-a") snapshot.instances} in
+  check int "refresh never selects another retained run when selected run disappears" (-1) refreshed.instance_cursor;
+  check (option string) "removed history target cannot become a live action target" None
+    (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance refreshed));
+  let returned = UI.toggle_history refreshed in
+  check (option string) "explicit return restores current list selection" (Some "live-a")
+    (Option.map (fun (item : UI.instance) -> item.id) (UI.selected_instance returned));
+  check bool "detail ignores history toggle and stays pinned" true
+    (UI.toggle_history opened = opened);
+  let nonzero = {view with instance_cursor=1} in
+  let nonzero_history = UI.toggle_history nonzero in
+  let reordered = UI.reconcile_snapshot nonzero_history
+    {snapshot with instances=worker "new-live" "project" "analysis" UI.Row.Attached None::snapshot.instances} in
+  let restored = UI.toggle_history reordered in
+  check int "return follows the saved declaration identity after list insertion" 2 restored.instance_cursor;
+  check (option string) "nonzero declaration selection survives history navigation" (Some declaration.source_path)
+    (Option.map (fun (item : UI.declaration) -> item.source_path)
+      (UI.selected_declaration (UI.open_selected_instance restored)));
+  let revisit = UI.toggle_history returned in
+  check int "a removed retained selection remains unselected when revisiting" (-1) revisit.instance_cursor;
+  let no_cached_rows = {snapshot with output={rows=[];coverage=[]}} in
+  let empty_open = UI.open_selected_instance {history with snapshot=Some no_cached_rows} in
+  check int "opening retained detail before its slice has no invented record" (-1) empty_open.row_cursor;
+  let loaded = UI.select_initial_result (UI.reconcile_snapshot empty_open snapshot) in
+  check (option string) "fresh scoped records initialize the pinned retained detail" (Some historical_row.id)
+    (Option.map (fun (row : UI.Row.row) -> row.id) (UI.selected_row loaded))
+
+let application_reads_preserve_editor () =
+  let configuration kind = UI.decode_configuration (Yojson.Safe.from_string
+    (Printf.sprintf {|{"configuration":{"directory":"/config","complete":true,"issues":[],
+      "declarations":[{"id":"research","source_path":"/config/research.toml","enabled":false,
+      "source_revision":"off-bytes","desired_revision":"inputs","applied_revision":null,
+      "instance_id":null,"application":{"kind":"%s"}}]}}|} kind)) |> ok in
+  let base : Draft.document = {file_name="research.toml";source_path="/config/research.toml";
+    source_text="id=\"research\"\nenabled=false\n";source_revision="off-bytes";
+    desired_revision=Some "inputs";valid=true;messages=[]} in
+  let session = {(Draft.from_document base) with text="id=\"research\"\nenabled=true\n";
+    message=Some "last save receipt retained"} in
+  let frozen : UI.snapshot = {instances=[];configuration=Some (configuration "cleaning");
+    output={UI.Row.rows=[];coverage=[]};complete=Some false} in
+  let before = {UI.initial with generation=7;snapshot=Some frozen;documents=[session];
+    document_key=Some session.file_name;editor_ready=true;scroll=19;
+    receipt=Some (`String "receipt");error=Some (UI.Request_failure "last save failed")} in
+  let pending,ticket = match UI.begin_application_read before with
+    | Some pair -> pair | None -> fail "editor must permit an independent observation" in
+  check bool "observation never takes foreground loading" false pending.loading;
+  let after = UI.finish_application_read pending ticket (Ok (configuration "inactive")) in
+  check bool "draft, editor, receipt and request failure survive" true
+    (after.documents=before.documents && after.document_key=before.document_key
+     && after.editor_ready && after.receipt=before.receipt && after.error=before.error
+     && after.scroll=before.scroll && after.snapshot=before.snapshot);
+  let visible = UI.lines ~width:240 after in
+  check bool "saved Off can finish while unsaved On stays editable" true
+    (List.exists (String.starts_with ~prefix:"Accepted file application · Off · worker cleanup confirmed") visible);
+  let pending,ticket = Option.get (UI.begin_application_read after) in
+  let failed = UI.finish_application_read pending ticket (Error "application endpoint unavailable") in
+  check bool "read failure leaves saved receipt and draft intact" true
+    (failed.documents=after.documents && failed.receipt=after.receipt && failed.error=after.error);
+  check bool "read failure replaces application completion" true
+    (List.exists (String.starts_with ~prefix:"Accepted file application · Application unknown:")
+      (UI.lines ~width:240 failed));
+  let stale = UI.finish_application_read {pending with generation=8}
+      ticket (Ok (configuration "inactive")) in
+  check bool "explicit action invalidates prior response" true
+    (UI.Application.value stale.application_reading=UI.Application.value after.application_reading)
+
+let application_follows_decoded_observations () =
+  let configuration ?(issues="[]") application = UI.decode_configuration (Yojson.Safe.from_string
+    (Printf.sprintf {|{"configuration":{"directory":"/config","complete":true,"issues":%s,
+      "declarations":[{"id":"research","source_path":"/config/research.toml","enabled":true,
+      "source_revision":"on-bytes","desired_revision":"inputs","applied_revision":null,
+      "instance_id":null,"application":%s}]}}|} issues application)) |> ok in
+  let base : Draft.document = {file_name="research.toml";source_path="/config/research.toml";
+    source_text="id=\"research\"\nenabled=true\n";source_revision="on-bytes";
+    desired_revision=Some "inputs";valid=true;messages=[]} in
+  let application document configuration =
+    let session = Draft.from_document document in
+    UI.lines ~width:240 (UI.receive_application_inventory
+      {UI.initial with documents=[session];document_key=Some session.file_name;editor_ready=true}
+      (Ok configuration))
+    |> List.find_opt (String.starts_with ~prefix:"Accepted file application · ") in
+  let failed = configuration
+    ~issues:{|[{"source_path":"/config/research.toml","id":"research","message":"image reconciliation failed"},
+      {"source_path":"/config/broken.toml","id":null,"message":"expected a TOML table"}]|}
+    {|{"kind":"failed","messages":["image reconciliation failed"]}|} in
+  check (option string) "a reported failure stays a failure"
+    (Some "Accepted file application · Application failed: image reconciliation failed")
+    (application base failed);
+  let broken = {base with file_name="broken.toml";source_path="/config/broken.toml";
+    source_text="id=\"broken\"\nenabled=true\n"} in
+  check (option string) "a file without an observation shows its raw issue"
+    (Some "Accepted file application · Application unknown: expected a TOML table")
+    (application broken failed);
+  let partial_read = {base with valid=false;messages=["configuration inventory is incomplete"]} in
+  check (option string) "a complete refresh tracks a file first read during a partial inventory"
+    (Some "Accepted file application · Applied · worker worker-1")
+    (application partial_read (configuration {|{"kind":"applied","instance_id":"worker-1"}|}))
+
+let connection_workers_preserve_other_installation_owners () =
+  let snapshot = UI.decode (installation_inspect ~runtime:"live" ()) |> ok in
+  let current : UI.instance = match snapshot.instances with
+    | [item] -> item | _ -> fail "one current worker" in
+  let old = {current with id="old-worker";incarnation="old-incarnation";
+    installation_id=Some "previous-installation";runtime_presence=UI.Retained_binding;
+    phase=UI.Row.Failed "cleanup refused";configuration_revision=Some "old-binding"} in
+  let moved = {current with id="same-installation-old-path";incarnation="moved-incarnation";
+    source_path=Some "/previous/operator-quiz.toml";phase=UI.Row.Detached;
+    runtime_presence=UI.Retained_binding} in
+  let unrelated = {old with id="unrelated-worker";source_path=Some "/other/operator-quiz.toml"} in
+  let manual = {old with id="manual-worker";incarnation="manual-incarnation";
+    installation_id=None;source_path=None} in
+  let snapshot = {snapshot with instances=[old;unrelated;current;manual;moved]} in
+  let groups = UI.connection_workers snapshot current in
+  let ids = List.map (fun (item : UI.instance) -> item.id) in
+  check (list string) "same installation follows identity across file moves"
+    [current.id;moved.id] (ids groups.installation_workers);
+  check (list string) "other installation at the exact source stays separate"
+    [old.id] (ids groups.other_path_owners);
+  check bool "the old owner retains its incarnation, revision and cleanup failure" true
+    (groups.other_path_owners=[old]);
+  let manual_groups = UI.connection_workers snapshot manual in
+  check (list string) "manual attachment keeps only its exact incarnation"
+    [manual.id] (ids manual_groups.installation_workers);
+  check (list string) "missing source never joins all manual attachments" []
+    (ids manual_groups.other_path_owners);
+  let removed = UI.connection_workers {snapshot with instances=[{manual with incarnation="replacement"}]} manual in
+  check (list string) "a replacement incarnation is not the original manual observation" []
+    (ids removed.installation_workers)
+
+let detail_reads_keep_original_incarnation_and_receipts () =
+  let snapshot = UI.decode (installation_inspect ~runtime:"live" ()) |> ok in
+  let owner = {(List.hd snapshot.instances) with id="worker";incarnation="epoch-1";run_id="original-run"} in
+  let original = {UI.initial with screen=UI.Detail ("worker", "epoch-1");
+    snapshot=Some {snapshot with instances=[owner]}} in
+  let inspect_target = UI.request_read_target original UI.Inspect |> read_ok in
+  check bool "inventory refresh stays bound before the worker becomes retained" true
+    (inspect_target=UI.Read_detail ("worker", "epoch-1"));
+  let history_target = UI.request_read_target original
+      (UI.Slice ["run_id", "original-run"]) |> read_ok in
+  check bool "history refresh keeps the same original detail" true
+    (history_target=inspect_target);
+  check bool "the matching detail may receive its retained result" true
+    (UI.read_still_wanted original ~showing:true inspect_target);
+  let replacement = {original with screen=UI.Detail ("worker", "epoch-2")} in
+  check bool "same instance name with another incarnation rejects the old read" false
+    (UI.read_still_wanted replacement ~showing:true inspect_target);
+  let another = {original with screen=UI.Detail ("another-worker", "epoch-1")} in
+  check bool "another worker rejects the original history read" false
+    (UI.read_still_wanted another ~showing:true history_target);
+  check bool "returning to the inventory rejects a departed detail read" false
+    (UI.read_still_wanted UI.initial ~showing:true inspect_target);
+  check bool "inventory reads remain inventory reads" true
+    (UI.request_read_target UI.initial UI.Inspect=Ok UI.Read_screen);
+  let action : UI.action_request = {instance_id="worker";incarnation="epoch-1";
+    request_id="original-action";action=`Assoc []} in
+  List.iter (fun request ->
+    let target = UI.request_read_target original request |> read_ok in
+    check bool "submitted effects and status receipts survive detail navigation" true
+      (target=UI.Read_screen
+       && UI.read_still_wanted UI.initial ~showing:false target))
+    [UI.Attach (`Assoc []); UI.Observe "worker"; UI.Detach "worker";
+     UI.Evidence (`Assoc []); UI.Act action; UI.Action_status action;
+     UI.Subscriptions (`Assoc [])]
+
+let partial_detail_read_keeps_original_results_and_fresh_inventory () =
+  let snapshot = UI.decode (installation_inspect ~runtime:"live" ()) |> ok in
+  let original = List.hd snapshot.instances in
+  let other = {original with id="other-worker";incarnation="other-epoch"} in
+  let row (worker : UI.instance) : UI.Row.row = {
+    id=worker.id ^ "/1/result";lane_id=worker.id ^ "/result";
+    kind=UI.Row.Value;title="Recorded result";observed_at=1.;subject_id=worker.run_id;
+    clock=None;actor=None;fields=["value",`Int 17];
+    evidence=[{uri="artifact://original";sha256=Some "original-hash"}];related_ids=[]} in
+  let old_row = row original and unrelated_row = row other in
+  let old_coverage : UI.Row.coverage = {source_id="original-source";incarnation="source-epoch";
+    cursor=Some "1";complete=true;detail=None} in
+  let prior = {snapshot with instances=[original;other];
+    output={rows=[old_row;unrelated_row];coverage=[old_coverage]};complete=Some true} in
+  let draft = Draft.create "unsaved.toml" |> ok in
+  let before = {UI.initial with snapshot=Some prior;
+    screen=UI.Detail (original.id,original.incarnation);row_cursor=0;
+    selected=[old_row.id];documents=[draft];receipt=Some (`String "original-receipt")} in
+  let stopped = {original with runtime_presence=UI.Retained_binding;phase=UI.Row.Detached} in
+  let current_row = {unrelated_row with fields=["value",`Int 23]} in
+  let fresh_configuration : UI.configuration = {directory="/fresh";complete=true;declarations=[]} in
+  let fresh = {snapshot with instances=[stopped;other];configuration=Some fresh_configuration;
+    output={rows=[current_row];coverage=[]}} in
+  let target = UI.request_read_target before UI.Inspect |> read_ok in
+  let apply view fresh = UI.reconcile_read_snapshot view ~target
+      ~diagnostic:(Some (UI.Detail_read_failure "retained store unavailable")) fresh in
+  let after = apply before fresh in
+  let received = Option.get after.snapshot in
+  check bool "new cleanup and configuration remain authoritative" true
+    (received.instances=fresh.instances && received.configuration=fresh.configuration);
+  check bool "retained worker cannot acquire fresh execution authority" false
+    (UI.can_observe (Option.get (UI.selected_instance after)));
+  check bool "only the original result joins fresh unrelated rows" true
+    (received.output.rows=[current_row;old_row]);
+  check bool "old coverage does not certify a failed new read" true
+    (received.output.coverage=fresh.output.coverage && received.complete=None);
+  check (option string) "original selected record remains selected" (Some old_row.id)
+    (Option.map (fun (r : UI.Row.row) -> r.id) (UI.selected_row after));
+  check bool "failure, original receipt and unsaved document are independent" true
+    (after.detail_read_error=Some (original.id,original.incarnation,"retained store unavailable")
+     && after.receipt=before.receipt && after.documents=before.documents
+     && after.selected=before.selected);
+  let retried = apply {after with error=Some (UI.Input_failure "unrelated input")} fresh in
+  check bool "another failed read preserves rows without duplicating them" true
+    ((Option.get retried.snapshot).output.rows=received.output.rows
+     && retried.detail_read_error=after.detail_read_error);
+  let export = UI.evidence_request after |> ok in
+  let export_target = UI.request_read_target after export |> read_ok in
+  check bool "export carries original row IDs independently of detail navigation" true
+    (match export with
+     | UI.Evidence json ->
+         export_target=UI.Read_screen
+         && Yojson.Safe.Util.member "instance_id" json=`String original.id
+         && Yojson.Safe.Util.member "row_ids" json=`List [`String old_row.id]
+     | UI.Inspect | UI.Attach _ | UI.Observe _ | UI.Detach _ | UI.Slice _
+     | UI.Act _ | UI.Action_status _ | UI.Subscriptions _ -> false);
+  let exported = UI.reconcile_read_snapshot after ~target:export_target ~diagnostic:None fresh in
+  check bool "an inventory-only effect reply is not a successful detail read" true
+    ((Option.get exported.snapshot).output.rows=received.output.rows
+     && (Option.get exported.snapshot).instances=fresh.instances
+     && exported.detail_read_error=after.detail_read_error
+     && exported.receipt=after.receipt && exported.documents=after.documents);
+  let binding_order = {original with binding=`Assoc ["sources",`List [];"topic",`String "a"]} in
+  let reordered = {binding_order with phase=UI.Row.Detached;runtime_presence=UI.Retained_binding;
+    binding=`Assoc ["topic",`String "a";"sources",`List []]} in
+  let reordered_before = {before with snapshot=Some {prior with instances=[binding_order;other]}} in
+  let reordered_read = apply reordered_before {fresh with instances=[reordered;other]} in
+  check bool "JSON object order does not change the original binding" true
+    ((Option.get reordered_read.snapshot).output.rows=received.output.rows);
+  let empty = {fresh with output={rows=[];coverage=[]};complete=Some true} in
+  let succeeded = UI.reconcile_read_snapshot after ~target ~diagnostic:None empty in
+  check bool "a successful empty read really replaces the old result" true
+    ((Option.get succeeded.snapshot).output.rows=[]
+     && (Option.get succeeded.snapshot).complete=Some true
+     && succeeded.detail_read_error=None && succeeded.row_cursor=(-1));
+  let unread = apply {before with snapshot=None} fresh in
+  check bool "first read failure does not invent previous results" true
+    ((Option.get unread.snapshot).output=fresh.output && Option.is_some unread.detail_read_error);
+  List.iter (fun replacement ->
+    let replaced = apply before {fresh with instances=[replacement;other]} in
+    check bool "another binding cannot borrow the prior result" true
+      ((Option.get replaced.snapshot).output.rows=[current_row]))
+    [{stopped with incarnation="replacement-epoch"};{stopped with run_id="another-run"};
+     {stopped with revision="another-package-revision"};
+     {stopped with installation_id=Some "another-installation"};
+     {stopped with source_path=Some "/another/owner.toml"};
+     {stopped with configuration_revision=Some "another-binding"};
+     {stopped with binding=`Assoc ["sources",`List [`String "another-source"]]}];
+  let removed_after_export = UI.reconcile_read_snapshot exported ~target:export_target ~diagnostic:None
+      {fresh with instances=[other]} in
+  check bool "a later inventory-only reply removes a withdrawn owner and its stale marker" true
+    ((Option.get removed_after_export.snapshot).output.rows=[current_row]
+     && removed_after_export.detail_read_error=None);
+  let vanished = apply before {fresh with instances=[other]} in
+  check bool "a removed original owner does not borrow another worker's rows" true
+    ((Option.get vanished.snapshot).output.rows=[current_row]);
+  let newly_recorded = {old_row with fields=["value",`Int 31]} in
+  let duplicate = apply before {fresh with output={rows=[newly_recorded;current_row];coverage=[]}} in
+  check bool "a received row wins over a cached row of the same identity" true
+    ((Option.get duplicate.snapshot).output.rows=[newly_recorded;current_row])
+
+let detail_slice_scope_precedes_successful_result_admission () =
+  let snapshot = UI.decode (installation_inspect ~runtime:"live" ()) |> ok in
+  let owner = List.hd snapshot.instances in
+  let row : UI.Row.row = {id=owner.id ^ "/1/result";lane_id=owner.id ^ "/result";
+    kind=UI.Row.Value;title="Recorded result";observed_at=1.;subject_id=owner.run_id;
+    clock=None;actor=None;fields=["value",`Int 17];evidence=[];related_ids=[]} in
+  let before = {UI.initial with screen=UI.Detail (owner.id,owner.incarnation);
+    snapshot=Some {snapshot with output={rows=[row];coverage=[]}};
+    detail_read_error=Some (owner.id,owner.incarnation,"original history unavailable");
+    receipt=Some (`String "original-receipt");draft=Some "original draft";
+    generation=7;selected=[row.id];row_cursor=0} in
+  let slice fields = UI.parse_request ("slice " ^ Yojson.Safe.to_string (`Assoc fields)) |> ok in
+  List.iter (fun (request, expected) ->
+    match UI.request_read_target before request with
+    | Ok _ -> fail "an unrelated scope was admitted to the original detail"
+    | Error refusal ->
+        check bool "the request has its original typed scope refusal" true (refusal=expected);
+        let after = UI.refuse_read_scope before refusal in
+        check bool "refusal changes only the input diagnostic before dispatch" true
+          ({after with error=before.error}=before))
+    [slice ["run_id",`String "other-run"],
+       UI.Slice_run_mismatch {expected=owner.run_id;requested="other-run"};
+     slice [], UI.Slice_run_required;
+     slice ["run_id",`String "  "], UI.Slice_run_blank;
+     slice ["run_id",`String owner.run_id;"run_id",`String "other-run"], UI.Slice_run_ambiguous;
+     slice ["run_id",`String owner.run_id;"run_id",`String owner.run_id], UI.Slice_run_ambiguous];
+  let matching = slice ["run_id",`String owner.run_id;"lane_id",`String "no-matching-lane";
+    "since",`Int 1;"until",`Int 2] in
+  let target = UI.request_read_target before matching |> read_ok in
+  check bool "same-run filters retain the original detail identity" true
+    (target=UI.Read_detail (owner.id,owner.incarnation));
+  List.iter (fun explicit ->
+    check bool "an explicit target cannot bypass original scope" true
+      (UI.request_read_target ~target:explicit before matching=Error UI.Slice_target_mismatch))
+    [UI.Read_screen;UI.Read_detail (owner.id,"replacement");UI.Read_installation_results "other"];
+  check bool "the matching explicit history target remains valid" true
+    (UI.request_read_target ~target before matching=Ok target);
+  check bool "an explicit target cannot admit another run" true
+    (match UI.request_read_target ~target before (slice ["run_id",`String "other-run"]) with
+     | Error (UI.Slice_run_mismatch _) -> true
+     | Error (UI.Detail_owner_unavailable | UI.Slice_run_required | UI.Slice_run_blank
+         | UI.Slice_run_ambiguous | UI.Slice_target_mismatch) | Ok _ -> false);
+  List.iter (fun request ->
+    check bool "Overview still supports arbitrary and global slices" true
+      (UI.request_read_target {before with screen=UI.Overview} request=Ok UI.Read_screen))
+    [slice [];slice ["run_id",`String "other-run"]];
+  let absent = {before with snapshot=Some {snapshot with instances=[]}} in
+  let replacement = {owner with incarnation="replacement"} in
+  List.iter (fun view ->
+    check bool "missing or replaced owners cannot borrow a run" true
+      (UI.request_read_target view matching=Error UI.Detail_owner_unavailable))
+    [absent;{before with snapshot=Some {snapshot with instances=[replacement]}}];
+  List.iter (fun complete ->
+    let empty = UI.decode_slice ~snapshot
+      (`Assoc ["rows",`List [];"coverage",`List [];"complete",`Bool complete]) |> ok in
+    let after = UI.reconcile_read_snapshot before ~target ~diagnostic:None empty in
+    check bool "successful same-run empty filters clear old rows and failure" true
+      ((Option.get after.snapshot).output.rows=[] && after.detail_read_error=None
+       && (Option.get after.snapshot).complete=Some complete
+       && after.receipt=before.receipt && after.draft=before.draft)) [true;false]
+
+let inspect_category_decode_is_strict () =
+  let module Category = Masc.Lane_addon_category in
+  let edit_field name update = function
+    | `Assoc fields -> `Assoc (List.map (fun (key,value) ->
+        key, if String.equal key name then update value else value) fields)
+    | _ -> fail "fixture expected an object" in
+  let package_fields extra =
+    edit_field "instances" (function
+      | `List [instance] -> `List [edit_field "package" (function
+          | `Assoc fields -> `Assoc (fields @ extra)
+          | _ -> fail "fixture expected a package object") instance]
+      | _ -> fail "fixture expected exactly one worker")
+      (installation_inspect ~runtime:"live" ()) in
+  let declaration_fields extra =
+    let declaration = `Assoc (["id",`String "operator-quiz";
+      "source_path",`String "/c/operator-quiz.toml"; "enabled",`Bool true;
+      "source_revision",`String "source-1"; "desired_revision",`String "r1";
+      "applied_revision",`Null; "instance_id",`Null;
+      "application",`Assoc ["kind",`String "starting"]] @ extra) in
+    edit_field "configuration" (edit_field "declarations" (fun _ -> `List [declaration]))
+      (installation_inspect ~runtime:"live" ()) in
+  let categories = ["memory_judgment",Category.Memory_and_judgment;
+    "browser",Category.Browser; "external_communications",Category.External_communications;
+    "voice_media",Category.Voice_and_media; "execution_environment",Category.Execution_environment;
+    "analysis",Category.Analysis] in
+  List.iter (fun (name,category) ->
+    let worker = UI.decode (package_fields ["ui_category",`String name]) |> ok in
+    check bool "worker retains the exact declared package category" true
+      ((List.hd worker.instances).ui_category=Some category);
+    let declared = UI.decode (declaration_fields ["ui_category",`String name]) |> ok in
+    check bool "configuration retains its current declared category" true
+      ((List.hd (Option.get declared.configuration).declarations).ui_category=Some category)) categories;
+  check bool "an omitted package category is unclassified" true
+    (((UI.decode (package_fields []) |> ok).instances |> List.hd).ui_category=None);
+  check bool "an omitted current category is unclassified" true
+    ((UI.decode (declaration_fields []) |> ok).configuration |> Option.get
+      |> fun config -> (List.hd config.declarations).ui_category=None);
+  List.iter (fun fields ->
+    check bool "malformed package role is refused" true
+      (Result.is_error (UI.decode (package_fields fields)));
+    check bool "malformed declaration role is refused" true
+      (Result.is_error (UI.decode (declaration_fields fields))))
+    (List.map (fun value -> ["ui_category",value])
+      [`Null;`String "";`String "browser ";`String "unknown";`Int 1;`Bool true;`List [];`Assoc []]
+     @ [["ui_category",`String "browser";"ui_category",`String "analysis"];
+        ["ui_category",`String "browser";"ui_category",`String "browser"]])
+
+let current_category_requires_exact_id_and_path () =
+  let module Category = Masc.Lane_addon_category in
+  let worker : UI.instance = {
+    id="worker";incarnation="worker-original";run_id="world";addon_id="fixture";
+    title="worker";revision="1";phase=UI.Row.Attached;runtime_presence=UI.Live_entry;
+    observation_seq=1;rows_count=0;installation_id=Some "worker";
+    source_path=Some "/config/worker.toml";configuration_revision=Some "r1";
+    binding=`Assoc [];outputs=[];skills_directory=None;
+    ui_category=Some Category.Browser;action_schema=None;binding_schema=None;
+    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+  let declaration ?(path="/config/worker.toml") ?(id="worker") category : UI.declaration = {
+    source_path=path;installation_id=Some id;ui_category=Some category;
+    desired=Some "r1";applied=Some "r1";instance_id=Some id;issues=[];enabled=Some true;
+    origin=UI.Parsed_declaration;application=None} in
+  let snapshot ~declarations : UI.snapshot = {
+    instances=[worker];configuration=Some {directory="/config";complete=true;declarations};
+    output={rows=[];coverage=[]};complete=Some true} in
+  let exact = snapshot ~declarations:[declaration Category.Browser] in
+  check bool "an exact id and path match reads the declared category" true
+    (UI.current_category exact (`Instance worker)=UI.Classified Category.Browser);
+  check bool "an exact match with no declared category is unclassified" true
+    (UI.current_category (snapshot ~declarations:[{(declaration Category.Browser) with ui_category=None}])
+       (`Instance worker)=UI.Unclassified);
+  let id_only = snapshot ~declarations:[declaration ~path:"/config/elsewhere.toml" Category.Analysis] in
+  check bool "a declaration matching only the id stays unverified" true
+    (UI.current_category id_only (`Instance worker)=UI.Unverified);
+  let path_only = snapshot ~declarations:[declaration ~id:"other" Category.Analysis] in
+  check bool "a declaration matching only the path stays unverified" true
+    (UI.current_category path_only (`Instance worker)=UI.Unverified);
+  let both_claimed = snapshot ~declarations:[
+    declaration ~path:"/config/elsewhere.toml" Category.Analysis;
+    declaration ~id:"other" Category.Browser] in
+  check bool "id-only and path-only claims together stay unverified" true
+    (UI.current_category both_claimed (`Instance worker)=UI.Unverified);
+  let issue = snapshot ~declarations:[{(declaration Category.Browser) with issues=["duplicate"]}] in
+  check bool "an issue on the exact declaration stays unverified" true
+    (UI.current_category issue (`Instance worker)=UI.Unverified);
+  let incomplete = {exact with configuration=
+    Option.map (fun (c : UI.configuration) -> {c with complete=false}) exact.configuration} in
+  check bool "an incomplete inventory stays unverified" true
+    (UI.current_category incomplete (`Instance worker)=UI.Unverified);
+  let drifted = snapshot ~declarations:[declaration Category.Analysis] in
+  check bool "an exact match may read a drifted current category" true
+    (UI.current_category drifted (`Instance worker)=UI.Classified Category.Analysis);
+  (* A declaration entry judges itself by the same rule: another declaration
+     claiming its id makes even the exact pair untrusted. *)
+  let duplicate_id = snapshot ~declarations:[
+    declaration Category.Browser;
+    declaration ~path:"/config/elsewhere.toml" Category.Analysis] in
+  let first = List.hd (Option.get duplicate_id.configuration).declarations in
+  check bool "a declaration entry is judged by the same exact-match rule" true
+    (UI.current_category duplicate_id (`Declaration (0, first))=UI.Unverified);
+  check bool "a lone declaration keeps its own declared category" true
+    (UI.current_category (snapshot ~declarations:[declaration Category.Browser])
+       (`Declaration (0, declaration Category.Browser))=UI.Classified Category.Browser)
+
+let role_refresh_keeps_original_action_and_installation () =
+  let module Category = Masc.Lane_addon_category in
+  let schema = Yojson.Safe.from_string
+    {|{"type":"object","required":["context","request_id","action"],"additionalProperties":false,
+       "properties":{"context":{"type":"object","required":["instance_id","incarnation"],"additionalProperties":false,
+       "properties":{"instance_id":{"type":"string"},"incarnation":{"type":"string"}}},
+       "request_id":{"type":"string"},
+       "action":{"type":"object","required":["operation"],"additionalProperties":false,
+       "properties":{"operation":{"type":"string","enum":["inspect"]}}}}}|} in
+  let worker id category : UI.instance = {
+    id;incarnation=id ^ "-original";run_id="world";addon_id="fixture";title=id;revision="1";
+    phase=UI.Row.Attached;runtime_presence=UI.Live_entry;observation_seq=1;rows_count=0;
+    installation_id=Some id;source_path=Some ("/config/" ^ id ^ ".toml");
+    configuration_revision=Some "r1";binding=`Assoc [];outputs=[];skills_directory=None;
+    ui_category=Some category;action_schema=Some schema;binding_schema=None;
+    display=Masc.Lane_addon_presentation.empty;host_requests=None} in
+  let declaration id category : UI.declaration = {
+    source_path="/config/" ^ id ^ ".toml";installation_id=Some id;
+    desired=Some "r1";applied=Some "r1";instance_id=Some id;issues=[];enabled=Some true;
+    ui_category=Some category;origin=UI.Parsed_declaration;application=None} in
+  let original = worker "original" Category.Browser in
+  let other = worker "other" Category.Analysis in
+  let config : UI.configuration = {directory="/config";complete=true;
+    declarations=[declaration "original" Category.Browser;declaration "other" Category.Analysis]} in
+  let snapshot : UI.snapshot = {instances=[original;other];configuration=Some config;
+    output={rows=[];coverage=[]};complete=Some true} in
+  let before = {UI.initial with snapshot=Some snapshot;focus=UI.Instances} in
+  let request_id = "01901234-1234-7000-8000-000000000001" in
+  let menu = UI.open_actions ~request_id before |> ok in
+  let first = UI.submit_action menu |> ok in
+  let expected : UI.action_request = {instance_id=original.id;incarnation=original.incarnation;
+    request_id;action=`Assoc ["operation",`String "inspect"]} in
+  check bool "the action request retains its worker incarnation and reviewed input" true (first=expected);
+  let refreshed = {snapshot with instances=[other;original];
+    configuration=Some {config with declarations=[declaration "other" Category.Browser;
+      declaration "original" Category.Analysis]}} in
+  let after = UI.reconcile_snapshot before refreshed in
+  check bool "regrouping keeps the exact selected worker and its original package" true
+    (UI.selected_instance after=Some original);
+  let next = UI.open_actions ~request_id after |> ok |> UI.submit_action |> ok in
+  check bool "a fresh action after regrouping retains its original request target" true (next=first);
+  check bool "a previously chosen action retains its exact worker target" true
+    (UI.submit_action (UI.reconcile_snapshot menu refreshed)=Ok first);
+  let replaced = {refreshed with instances=[other;{original with incarnation="replacement"}]} in
+  check bool "a replacement incarnation cannot reuse the original action" true
+    (Result.is_error (UI.submit_action (UI.reconcile_snapshot menu replaced)));
+  (* A saved declaration before the workers makes Summary and Flow use
+     different numeric cursors. Every transition must retain the same target. *)
+  let unresolved = {(declaration "unresolved" Category.Memory_and_judgment) with
+    instance_id=None;applied=None} in
+  let grouped_snapshot = {snapshot with configuration=Some {config with
+    declarations=unresolved :: config.declarations}} in
+  let grouped = {before with snapshot=Some grouped_snapshot;instance_cursor=1} in
+  let assert_original label view =
+    check bool (label ^ " keeps the original selected worker") true
+      (UI.selected_instance view=Some original);
+    let actual = UI.open_actions ~request_id view |> ok |> UI.submit_action |> ok in
+    check bool (label ^ " sends the original exact action request") true (actual=first) in
+  assert_original "grouped source" grouped;
+  let flow = UI.toggle_flow grouped in
+  assert_original "f into Flow" flow;
+  assert_original "f back into Summary" (UI.toggle_flow flow);
+  let technical = UI.set_presentation flow UI.Technical in
+  assert_original "D into technical" technical;
+  assert_original "D or Escape back into Summary" (UI.set_presentation technical UI.Summary);
+  let detail = UI.open_selected_instance flow in
+  let detail_technical = UI.set_presentation detail UI.Technical in
+  check bool "technical detail keeps its original pinned action owner" true
+    (UI.selected_instance detail_technical=Some original);
+  let returned = UI.set_presentation detail_technical UI.Summary in
+  assert_original "returning from a Flow-opened detail after D and Escape"
+    {returned with screen=UI.Overview;focus=UI.Instances};
+  let history_return = UI.toggle_history flow |> UI.toggle_history in
+  assert_original "h into history and back from Flow" history_return;
+  let opened_menu = UI.open_actions ~request_id flow |> ok in
+  check bool "opening actions in Flow keeps the menu's original payload" true
+    (UI.submit_action opened_menu=Ok first);
+  assert_original "closing the Flow action menu" {opened_menu with action_menu=None};
+  let installation = {grouped with presentation=UI.Technical;focus=UI.Configurations;
+    instance_cursor=2;configuration_cursor=1} in
+  let installation_menu = UI.open_actions ~request_id installation |> ok in
+  check bool "an installation-owned action keeps its original exact payload" true
+    (UI.submit_action installation_menu=Ok first);
+  assert_original "closing an installation action menu" {installation_menu with action_menu=None};
+  let filtered_out = UI.toggle_flow {grouped with instance_cursor=0} in
+  List.iter (fun view ->
+    check bool "a declaration filtered out of Flow cannot choose another worker" true
+      (UI.selected_instance view=None);
+    check bool "a filtered-out original cannot open actions on another worker" true
+      (Result.is_error (UI.open_actions ~request_id view)))
+    [filtered_out; UI.toggle_flow filtered_out;
+     UI.set_presentation filtered_out UI.Technical;
+     UI.toggle_history filtered_out |> UI.toggle_history];
+  assert_original "explicit navigation after a filtered-out selection" (UI.move_instance filtered_out 1);
+  let saved = {(declaration "original" Category.Browser) with instance_id=None;applied=None} in
+  let no_worker = {snapshot with instances=[];
+    configuration=Some {config with declarations=[saved]}} in
+  let list_view = {UI.initial with snapshot=Some no_worker;focus=UI.Instances} in
+  let newer_category = {no_worker with configuration=Some {config with
+    declarations=[{saved with ui_category=Some Category.Analysis}]}} in
+  let regrouped = UI.reconcile_snapshot list_view newer_category |> UI.open_selected_instance in
+  check (option string) "opening a reclassified entry targets the same installation" (Some "original")
+    (Option.bind (UI.selected_declaration regrouped) (fun declaration -> declaration.installation_id));
+  let replacement = {no_worker with configuration=Some {config with
+    declarations=[{saved with installation_id=Some "replacement"}]}} in
+  let invalidated = UI.reconcile_snapshot list_view replacement |> UI.open_selected_instance in
+  check bool "same-path replacement needs an explicit selection" true
+    (UI.selected_declaration invalidated=None && UI.selected_instance invalidated=None);
+  let from_history = UI.toggle_history list_view
+    |> fun view -> UI.reconcile_snapshot view replacement |> UI.toggle_history
+    |> UI.open_selected_instance in
+  check bool "a saved list selection cannot inherit another installation through history" true
+    (UI.selected_declaration from_history=None && UI.selected_instance from_history=None);
+  let selected = UI.move_instance invalidated 1 |> UI.open_selected_instance in
+  check (option string) "explicit navigation may select the replacement installation" (Some "replacement")
+    (Option.bind (UI.selected_declaration selected) (fun declaration -> declaration.installation_id))
+
+let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "current category requires exact id and path" `Quick
+    current_category_requires_exact_id_and_path;
+  test_case "Inspect categories use strict shared decoding" `Quick inspect_category_decode_is_strict;
+  test_case "role refresh preserves original action and installation targets" `Quick
+    role_refresh_keeps_original_action_and_installation;
+  test_case "detail Slice scope precedes successful result admission" `Quick
+    detail_slice_scope_precedes_successful_result_admission;
+  test_case "partial detail read keeps original results and fresh authority" `Quick
+    partial_detail_read_keeps_original_results_and_fresh_inventory;
+  test_case "detail reads keep original incarnation and independent receipts" `Quick
+    detail_reads_keep_original_incarnation_and_receipts;
+  test_case "connection workers preserve separate installation owners" `Quick connection_workers_preserve_other_installation_owners;
+  test_case "application reads preserve editor and save diagnostics" `Quick application_reads_preserve_editor;
+  test_case "application lines follow decoded observations and complete refreshes" `Quick
+    application_follows_decoded_observations;
+  test_case "current installations and grouped retained runs preserve exact targets" `Quick
+    current_installations_and_grouped_history_keep_exact_targets;
+  test_case "declared results show body before activity and preserve raw evidence" `Quick
+    declared_results_show_body_before_activity_and_keep_raw_evidence;
+  test_case "detail keeps installation ownership for edit, navigation and export" `Quick detail_keeps_installation_ownership;
+  test_case "refresh retains exact operator targets and exposes failure" `Quick refresh_preserves_operator_target;
+  test_case "evidence export chooses a Keeper by name" `Quick evidence_export_chooses_a_keeper_by_name;
+  test_case "edit object array items through nested schema forms" `Quick object_array_fields;
+  test_case "inspect package and draft schema-bound installation" `Quick guided_installation;
+  test_case "context flow follows declared Add-on dependencies" `Quick context_flow_uses_declared_connections;
+  test_case "choose advertised action without entering IDs or JSON" `Quick guided_actions;
+  test_case "create TOML, conflict, compare and explicitly save" `Quick create_and_conflict_repair;
+  test_case "read invalid existing TOML and repair it" `Quick malformed_file_stays_editable;
+  test_case "switch drafts and reject mismatched file identity" `Quick file_identity_and_draft_sessions;
+  test_case "configuration issues, named outputs and partial slice" `Quick configuration_and_ports;
+  test_case "action identity and unknown outcome survive TUI projection" `Quick action_identity_and_uncertainty;
+  test_case "metric fields and receipts remain readable at terminal widths" `Quick metric_fields_and_receipts_remain_readable;
+  test_case "a host request cycle decodes and fails alone" `Quick host_request_cycle_decodes_and_fails_alone;
+  test_case "every host issue reads back" `Quick every_host_issue_reads_back;
+  test_case "an answered installation opens its Results" `Quick answered_installation_opens_its_results]]

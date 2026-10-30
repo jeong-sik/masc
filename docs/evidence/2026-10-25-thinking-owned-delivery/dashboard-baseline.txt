@@ -1,0 +1,47 @@
+Command: pnpm --dir dashboard exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/keeper-stream.test.ts
+Raw SHA256: a5140b16a915820c578bddceb8046111b37b72e2e25163ce596e1c98e8e3ad73
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-responses-reasoning-delivery-20261025/dashboard
+
+ ❯ src/keeper-stream.test.ts (139 tests | 1 failed) 52ms
+   ❯ Keeper operation stream projection (93)
+     × retains an owned replacement prefix across redactor clears and later flushes 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/keeper-stream.test.ts > Keeper operation stream projection > retains an owned replacement prefix across redactor clears and later flushes
+AssertionError: expected [ { kind: 'think', …(4) }, …(1) ] to match object [ { kind: 'think', …(2) }, …(1) ]
+(4 matching properties omitted from actual)
+
+- Expected
++ Received
+
+@@ -1,10 +1,10 @@
+  [
+    {
+      "agentCoreBlockIndex": 0,
+      "kind": "think",
+-     "text": "replacement [REDACTED] complete",
++     "text": " complete",
+    },
+    {
+      "agentCoreBlockIndex": 1,
+      "kind": "think",
+      "text": "sibling",
+
+ ❯ src/keeper-stream.test.ts:226:88
+    224|     think(0, ' complete')
+    225|     _flushPendingKeeperStreamDeltasForTests()
+    226|     expect(requiredFixture(requiredFixture(keeperThreads.value.sangsu)…
+       |                                                                                        ^
+    227|       { kind: 'think', text: 'replacement [REDACTED] complete', agentC…
+    228|       { kind: 'think', text: 'sibling', agentCoreBlockIndex: 1 },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 138 passed (139)
+   Start at  22:14:22
+   Duration  3.64s (environment 38%, transform 36%, setup 20%, import 4%, tests 2%)

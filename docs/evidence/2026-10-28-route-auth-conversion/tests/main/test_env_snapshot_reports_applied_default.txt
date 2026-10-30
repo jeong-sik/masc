@@ -1,0 +1,17 @@
+Testing `env snapshot reports the applied default'.
+This run has ID `3GGA5YTW'.
+
+  [OK]          http server          0   max connections matches the server.
+  [OK]          http server          1   both sites name one constant.
+  [OK]          http server          2   the host precedent still holds.
+  [OK]          http server          3   base path lease directory is visible.
+  [OK]          http server          4   collector reads environment once.
+  [OK]          http server          5   pure projection redacts explicit obs...
+  [OK]          http server          6   declarations reach the operator surf...
+  [OK]          http server          7   no declaration is reported twice.
+  [OK]          http server          8   no category lists a knob twice.
+  [OK]          http server          9   knobs shared by two sections agree o...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/env snapshot reports the applied default'.
+Test Successful in 0.013s. 10 tests run.
+exit=0

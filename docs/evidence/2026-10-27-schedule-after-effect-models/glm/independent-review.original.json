@@ -1,0 +1,1157 @@
+{
+  "schema": "masc.independent-scheduled-request-loss-review.v1",
+  "is_derivative": true,
+  "recorded_at": "2026-10-26T20:07:47.508825+00:00",
+  "reviewer": "/root/combined_independent_review",
+  "independence": "Reviewer did not author the product changes or controller; source/evidence read only. Only this explicitly requested review report was written.",
+  "source_commit": "d9ba3f57570cc1c1782f21d6f4d9303d014fea2e",
+  "controller_sha256": "090ec200c041b55b9b9f197d77aa919d66910c17e73f7473552baa24e87c8d51",
+  "runtime_profile": "glm-coding.glm-5-3",
+  "finding": {
+    "severity": "P2",
+    "title": "Exact scheduled work request disappears from non-Anthropic tool-round input",
+    "trigger": "An admitted Schedule_due turn runs a discovery or other tool before copying/retrieving its original work request into durable history.",
+    "source_path": [
+      {
+        "file": "lib/keeper/keeper_unified_prompt.ml",
+        "line": 1864,
+        "fact": "Scheduled payload is rendered into the Scheduled_automation world layer."
+      },
+      {
+        "file": "lib/keeper/keeper_unified_prompt.ml",
+        "line": 1994,
+        "fact": "Durable user input consists of the generic wake prompt and answered Ask input, not the scheduled work request."
+      },
+      {
+        "file": "lib/keeper/keeper_run_prompt.ml",
+        "line": 69,
+        "fact": "Post-tool request assembly filters blocks through injected_on_post_tool_round."
+      },
+      {
+        "file": "lib/types/prompt_block_id.ml",
+        "line": 87,
+        "fact": "Dynamic_context is excluded on post-tool rounds."
+      },
+      {
+        "file": "packages/agent_core/lib/agent/agent_turn.ml",
+        "line": 44,
+        "fact": "Extra context is a request carrier; the documented non-Anthropic path does not retain it as ordinary conversation history."
+      }
+    ],
+    "observed_failure": "The exact synthetic A source completed and ACKed without its required A1 note. GLM searched the right tool names, then listed notes for two unrelated schedule IDs and finished.",
+    "repair_direction": "Preserve the exact admitted scheduled request as attributed durable conversation/work input, tied to its source/instance lifecycle. Keep ordinary changing world observations separate. Thinking preservation is not a replacement for durable work input.",
+    "causality_limit": "The source loss mechanism and missing final-snapshot work input are confirmed. The run does not isolate this as the sole cause of model-generated wrong IDs; initial wire delivery remains unproven."
+  },
+  "synthetic_identity": {
+    "schedule_id": "audit-real-model-30fa0db345e24e7790b4f5e0f7c36103",
+    "marker": "SCHEDULE_EFFECT_5132996c9d4e4a76855ff188465915bb",
+    "second_schedule_id": "audit-real-model-30fa0db345e24e7790b4f5e0f7c36103-second",
+    "wrong_schedule_ids": [
+      "schd_2026102708154321d8c7ac2b7",
+      "schd_2026102710304512e4b5c9d8f"
+    ]
+  },
+  "evidence_boundary": {
+    "retained_provider_snapshot_count": 1,
+    "snapshot_is_latest_request_only": true,
+    "latest_capture_source": {
+      "file": "lib/keeper/keeper_agent_run.ml",
+      "line": 2467,
+      "fact": "One request_wire_evidence_ref is published at turn completion; the retained snapshot is the latest observed request."
+    },
+    "first_request_whole_body_available": false,
+    "second_request_whole_body_available": false,
+    "last_request_whole_body_rehashed": false,
+    "conclusion_not_claimed": "The original request was absent from the first provider request.",
+    "confirmed_statement": "The retained final provider-input snapshot has zero original schedule-ID/marker occurrences across all 42 bound parts; wrong IDs occur only in assistant/tool output parts.",
+    "reasoning_privacy": "No thinking or reasoning text is included. Presence in private reasoning is not used as a substitute for exact first-request input proof."
+  },
+  "wire_requests": [
+    {
+      "round": 0,
+      "ordinal": 0,
+      "node_id": "execution-node-020c0a0fb1bf205a67dd5dd00c35dc2f",
+      "body_bytes": 79716,
+      "body_sha256": "1be0f0ac09ab63f0f54c7cfee8245936cb3c279433f4011cb1fe151f0c0f995f",
+      "basis": "Original TurnRecord serialized request provenance; body itself not retained as an independently readable complete request in this bundle.",
+      "whole_body_rehashed_by_reviewer": false
+    },
+    {
+      "round": 1,
+      "ordinal": 0,
+      "node_id": "execution-node-7d2f89f0d254c1cbfb7fef87afacb843",
+      "body_bytes": 78500,
+      "body_sha256": "2324ce05b4bb4f9b0f8973823d7fa74a305118061e572fb0d2a2c1012a347274",
+      "basis": "Original TurnRecord serialized request provenance; body itself not retained as an independently readable complete request in this bundle.",
+      "whole_body_rehashed_by_reviewer": false
+    },
+    {
+      "round": 2,
+      "ordinal": 0,
+      "node_id": "execution-node-2640edf4dcc09a6214340ee3fe670634",
+      "body_bytes": 79235,
+      "body_sha256": "bd703e615f4c40314ca60981f2697867d9601276bf121186efbded38ab7517ac",
+      "basis": "Original TurnRecord serialized request provenance; body itself not retained as an independently readable complete request in this bundle.",
+      "whole_body_rehashed_by_reviewer": false
+    }
+  ],
+  "provider_snapshot": {
+    "source": {
+      "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/keepers/audit-live-glm/provider-inputs/2026-10/26.jsonl",
+      "sha256": "dad720255c86f8619f2c2dad205c9d3524216a901ec0fc3839535aedd4243abb",
+      "bytes": 10709
+    },
+    "wire": {
+      "phase": [
+        "Pre_dispatch_serialization"
+      ],
+      "capture_id": "wr-1a179c8bb94-f24d-0000",
+      "provider": "glm",
+      "model": "glm-5.3",
+      "http_codec": "glm-chat",
+      "stream": true,
+      "body_bytes": 79235,
+      "body_sha256": "bd703e615f4c40314ca60981f2697867d9601276bf121186efbded38ab7517ac"
+    },
+    "part_count": 42,
+    "all_part_hashes_and_lengths_verified": true,
+    "original_id_or_marker_part_labels": [],
+    "wrong_id_part_labels": [
+      "message_3",
+      "message_4"
+    ],
+    "parts": [
+      {
+        "label": "system_prompt",
+        "kind": "system",
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/34/3453cd4095ab5741ff90dc0d3de545866c7ff2605516043c456016c636b5c5a9",
+          "sha256": "3453cd4095ab5741ff90dc0d3de545866c7ff2605516043c456016c636b5c5a9",
+          "bytes": 25173
+        },
+        "reference_sha256": "3453cd4095ab5741ff90dc0d3de545866c7ff2605516043c456016c636b5c5a9",
+        "reference_bytes": 25173,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "message_0",
+        "kind": "message",
+        "role": "user",
+        "index": 0,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/fd/fd7668a4a1bef2f01532d5c07f89b3ae9544d10cacb2754567574dad705ed296",
+          "sha256": "fd7668a4a1bef2f01532d5c07f89b3ae9544d10cacb2754567574dad705ed296",
+          "bytes": 998
+        },
+        "reference_sha256": "fd7668a4a1bef2f01532d5c07f89b3ae9544d10cacb2754567574dad705ed296",
+        "reference_bytes": 998,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "message_1",
+        "kind": "message",
+        "role": "assistant",
+        "index": 1,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/4c/4c16cc7de19368b5c04f90dc2640d8d540e1d20d00c5ffa0dd3b8b3924f2a02a",
+          "sha256": "4c16cc7de19368b5c04f90dc2640d8d540e1d20d00c5ffa0dd3b8b3924f2a02a",
+          "bytes": 604
+        },
+        "reference_sha256": "4c16cc7de19368b5c04f90dc2640d8d540e1d20d00c5ffa0dd3b8b3924f2a02a",
+        "reference_bytes": 604,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "message_2",
+        "kind": "message",
+        "role": "tool",
+        "index": 2,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/63/63bc0867160a4d2e705833fea5cbcab147fb0572a1dcc5b11d9dd9674ff9ed1c",
+          "sha256": "63bc0867160a4d2e705833fea5cbcab147fb0572a1dcc5b11d9dd9674ff9ed1c",
+          "bytes": 519
+        },
+        "reference_sha256": "63bc0867160a4d2e705833fea5cbcab147fb0572a1dcc5b11d9dd9674ff9ed1c",
+        "reference_bytes": 519,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "message_3",
+        "kind": "message",
+        "role": "assistant",
+        "index": 3,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/09/0933e261e76a2f2c1f240bff355fd82257f12380a687f787c7416fe0b51ca0db",
+          "sha256": "0933e261e76a2f2c1f240bff355fd82257f12380a687f787c7416fe0b51ca0db",
+          "bytes": 723
+        },
+        "reference_sha256": "0933e261e76a2f2c1f240bff355fd82257f12380a687f787c7416fe0b51ca0db",
+        "reference_bytes": 723,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": [
+            "schd_2026102708154321d8c7ac2b7",
+            "schd_2026102710304512e4b5c9d8f"
+          ]
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "message_4",
+        "kind": "message",
+        "role": "tool",
+        "index": 4,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/38/384953138f4234f13f9b2313070b9487e4c3e00c09bdf18d422478d9e4852054",
+          "sha256": "384953138f4234f13f9b2313070b9487e4c3e00c09bdf18d422478d9e4852054",
+          "bytes": 495
+        },
+        "reference_sha256": "384953138f4234f13f9b2313070b9487e4c3e00c09bdf18d422478d9e4852054",
+        "reference_bytes": 495,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": [
+            "schd_2026102708154321d8c7ac2b7",
+            "schd_2026102710304512e4b5c9d8f"
+          ]
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_0",
+        "kind": "tool_schema",
+        "name": "Execute",
+        "index": 0,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/bd/bd5ac44448113fcb15456f7dce5c9c8b30a4b7bc519de84a73bfb92c08c1f955",
+          "sha256": "bd5ac44448113fcb15456f7dce5c9c8b30a4b7bc519de84a73bfb92c08c1f955",
+          "bytes": 2379
+        },
+        "reference_sha256": "bd5ac44448113fcb15456f7dce5c9c8b30a4b7bc519de84a73bfb92c08c1f955",
+        "reference_bytes": 2379,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_1",
+        "kind": "tool_schema",
+        "name": "Grep",
+        "index": 1,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/33/3308bcf0f1f4129aee78a25a3e72d4a2792d766255239b3763e933b2120d4945",
+          "sha256": "3308bcf0f1f4129aee78a25a3e72d4a2792d766255239b3763e933b2120d4945",
+          "bytes": 909
+        },
+        "reference_sha256": "3308bcf0f1f4129aee78a25a3e72d4a2792d766255239b3763e933b2120d4945",
+        "reference_bytes": 909,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_2",
+        "kind": "tool_schema",
+        "name": "Read",
+        "index": 2,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/a9/a9078e529141198a80672ee2d3e072a739bde43366e790b0eb0054196b3f5685",
+          "sha256": "a9078e529141198a80672ee2d3e072a739bde43366e790b0eb0054196b3f5685",
+          "bytes": 1993
+        },
+        "reference_sha256": "a9078e529141198a80672ee2d3e072a739bde43366e790b0eb0054196b3f5685",
+        "reference_bytes": 1993,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_3",
+        "kind": "tool_schema",
+        "name": "Edit",
+        "index": 3,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/fc/fc08f18a3cfd1726806f9f82945dbebfda95c2df7c38ae9130102f6ea42c5844",
+          "sha256": "fc08f18a3cfd1726806f9f82945dbebfda95c2df7c38ae9130102f6ea42c5844",
+          "bytes": 1527
+        },
+        "reference_sha256": "fc08f18a3cfd1726806f9f82945dbebfda95c2df7c38ae9130102f6ea42c5844",
+        "reference_bytes": 1527,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_4",
+        "kind": "tool_schema",
+        "name": "Write",
+        "index": 4,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/a9/a962e2e80564a2c254663729b8a2c65e4cb988848ec4d7b8f58e5edd963907b5",
+          "sha256": "a962e2e80564a2c254663729b8a2c65e4cb988848ec4d7b8f58e5edd963907b5",
+          "bytes": 731
+        },
+        "reference_sha256": "a962e2e80564a2c254663729b8a2c65e4cb988848ec4d7b8f58e5edd963907b5",
+        "reference_bytes": 731,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_5",
+        "kind": "tool_schema",
+        "name": "WebSearch",
+        "index": 5,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/cc/ccca6bc817061c3532981aff5ab5b57aa2031f035411b656a872cbe48e34616d",
+          "sha256": "ccca6bc817061c3532981aff5ab5b57aa2031f035411b656a872cbe48e34616d",
+          "bytes": 1388
+        },
+        "reference_sha256": "ccca6bc817061c3532981aff5ab5b57aa2031f035411b656a872cbe48e34616d",
+        "reference_bytes": 1388,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_6",
+        "kind": "tool_schema",
+        "name": "WebFetch",
+        "index": 6,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/8b/8ba3790d140132d996f5bf96c01e42fd5bbd31fba15acbd7d39dd291c30ef7a8",
+          "sha256": "8ba3790d140132d996f5bf96c01e42fd5bbd31fba15acbd7d39dd291c30ef7a8",
+          "bytes": 1170
+        },
+        "reference_sha256": "8ba3790d140132d996f5bf96c01e42fd5bbd31fba15acbd7d39dd291c30ef7a8",
+        "reference_bytes": 1170,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_7",
+        "kind": "tool_schema",
+        "name": "BrowserTabs",
+        "index": 7,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/b9/b9dc17e51d872c18b94d3456d6583302233ccd90cc3eb7ef68bcbd1ee6ac81cc",
+          "sha256": "b9dc17e51d872c18b94d3456d6583302233ccd90cc3eb7ef68bcbd1ee6ac81cc",
+          "bytes": 2741
+        },
+        "reference_sha256": "b9dc17e51d872c18b94d3456d6583302233ccd90cc3eb7ef68bcbd1ee6ac81cc",
+        "reference_bytes": 2741,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_8",
+        "kind": "tool_schema",
+        "name": "BrowserSession",
+        "index": 8,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/c8/c88517f440d5eeec0f0332c90bec1eac9621aa559f6fa3687f37759fb7850632",
+          "sha256": "c88517f440d5eeec0f0332c90bec1eac9621aa559f6fa3687f37759fb7850632",
+          "bytes": 2871
+        },
+        "reference_sha256": "c88517f440d5eeec0f0332c90bec1eac9621aa559f6fa3687f37759fb7850632",
+        "reference_bytes": 2871,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_9",
+        "kind": "tool_schema",
+        "name": "BrowserGoto",
+        "index": 9,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/a4/a4247051b379a492d2a2a88cf2172e87bcdf9f3f54262c8f6ff56bd95778aadd",
+          "sha256": "a4247051b379a492d2a2a88cf2172e87bcdf9f3f54262c8f6ff56bd95778aadd",
+          "bytes": 1115
+        },
+        "reference_sha256": "a4247051b379a492d2a2a88cf2172e87bcdf9f3f54262c8f6ff56bd95778aadd",
+        "reference_bytes": 1115,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_10",
+        "kind": "tool_schema",
+        "name": "BrowserInstruct",
+        "index": 10,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/5f/5f6d8db2b01b2dbf537e9046abd071870f1861039f22d287b8c0c21c42e722aa",
+          "sha256": "5f6d8db2b01b2dbf537e9046abd071870f1861039f22d287b8c0c21c42e722aa",
+          "bytes": 980
+        },
+        "reference_sha256": "5f6d8db2b01b2dbf537e9046abd071870f1861039f22d287b8c0c21c42e722aa",
+        "reference_bytes": 980,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_11",
+        "kind": "tool_schema",
+        "name": "keeper_lane_status",
+        "index": 11,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/44/44ce67343f60de8b8ed7336c16926c991159fbda848c62a713e6be0a9889e745",
+          "sha256": "44ce67343f60de8b8ed7336c16926c991159fbda848c62a713e6be0a9889e745",
+          "bytes": 751
+        },
+        "reference_sha256": "44ce67343f60de8b8ed7336c16926c991159fbda848c62a713e6be0a9889e745",
+        "reference_bytes": 751,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_12",
+        "kind": "tool_schema",
+        "name": "keeper_tools_list",
+        "index": 12,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/bb/bb0a8399eef2ce0683b1befbbd405172020dfd6a12507f2f99f800c142e6585e",
+          "sha256": "bb0a8399eef2ce0683b1befbbd405172020dfd6a12507f2f99f800c142e6585e",
+          "bytes": 420
+        },
+        "reference_sha256": "bb0a8399eef2ce0683b1befbbd405172020dfd6a12507f2f99f800c142e6585e",
+        "reference_bytes": 420,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_13",
+        "kind": "tool_schema",
+        "name": "keeper_capability_search",
+        "index": 13,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/42/42e354a718778ef70702d35d568a4fae9eccdb3966a8871d856f2140deacf187",
+          "sha256": "42e354a718778ef70702d35d568a4fae9eccdb3966a8871d856f2140deacf187",
+          "bytes": 1699
+        },
+        "reference_sha256": "42e354a718778ef70702d35d568a4fae9eccdb3966a8871d856f2140deacf187",
+        "reference_bytes": 1699,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_14",
+        "kind": "tool_schema",
+        "name": "keeper_context_status",
+        "index": 14,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/e2/e26148e74f7737cc3291a8d733a440fb4652a5b5a31ae82e8d53103e5086dfb7",
+          "sha256": "e26148e74f7737cc3291a8d733a440fb4652a5b5a31ae82e8d53103e5086dfb7",
+          "bytes": 633
+        },
+        "reference_sha256": "e26148e74f7737cc3291a8d733a440fb4652a5b5a31ae82e8d53103e5086dfb7",
+        "reference_bytes": 633,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_15",
+        "kind": "tool_schema",
+        "name": "keeper_artifact_read",
+        "index": 15,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/0f/0feb34110e8b4a8d8016e352ff1b6fde02591a6b1a05c3fe36995f7a7ac8cd84",
+          "sha256": "0feb34110e8b4a8d8016e352ff1b6fde02591a6b1a05c3fe36995f7a7ac8cd84",
+          "bytes": 1326
+        },
+        "reference_sha256": "0feb34110e8b4a8d8016e352ff1b6fde02591a6b1a05c3fe36995f7a7ac8cd84",
+        "reference_bytes": 1326,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_16",
+        "kind": "tool_schema",
+        "name": "keeper_memory_search",
+        "index": 16,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/20/20f97b997e83a46083af1a9c191e596ec516bc2a16da0e09a80405f054e4bfcf",
+          "sha256": "20f97b997e83a46083af1a9c191e596ec516bc2a16da0e09a80405f054e4bfcf",
+          "bytes": 2755
+        },
+        "reference_sha256": "20f97b997e83a46083af1a9c191e596ec516bc2a16da0e09a80405f054e4bfcf",
+        "reference_bytes": 2755,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_17",
+        "kind": "tool_schema",
+        "name": "keeper_tasks_list",
+        "index": 17,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/fb/fba3af6b77c4568a2c7f38d730775883b29a1d12ab481b9c5b41a316ad3d2114",
+          "sha256": "fba3af6b77c4568a2c7f38d730775883b29a1d12ab481b9c5b41a316ad3d2114",
+          "bytes": 3185
+        },
+        "reference_sha256": "fba3af6b77c4568a2c7f38d730775883b29a1d12ab481b9c5b41a316ad3d2114",
+        "reference_bytes": 3185,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_18",
+        "kind": "tool_schema",
+        "name": "keeper_task_claim",
+        "index": 18,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/4e/4eb09b3ba1a6eccbe13bc68b1ec866b50afd0488bde18aac77741d58e96555ae",
+          "sha256": "4eb09b3ba1a6eccbe13bc68b1ec866b50afd0488bde18aac77741d58e96555ae",
+          "bytes": 909
+        },
+        "reference_sha256": "4eb09b3ba1a6eccbe13bc68b1ec866b50afd0488bde18aac77741d58e96555ae",
+        "reference_bytes": 909,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_19",
+        "kind": "tool_schema",
+        "name": "keeper_task_create",
+        "index": 19,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/f8/f8579a34149e3ccfa5209c4a3032f52c87ba48f4f6df1071be57c6503df878d7",
+          "sha256": "f8579a34149e3ccfa5209c4a3032f52c87ba48f4f6df1071be57c6503df878d7",
+          "bytes": 1425
+        },
+        "reference_sha256": "f8579a34149e3ccfa5209c4a3032f52c87ba48f4f6df1071be57c6503df878d7",
+        "reference_bytes": 1425,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_20",
+        "kind": "tool_schema",
+        "name": "keeper_task_done",
+        "index": 20,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/15/15ebf216c7827ec7640527f85d0aba7074d4825fa8761b8af3fff21e8f3597f2",
+          "sha256": "15ebf216c7827ec7640527f85d0aba7074d4825fa8761b8af3fff21e8f3597f2",
+          "bytes": 2267
+        },
+        "reference_sha256": "15ebf216c7827ec7640527f85d0aba7074d4825fa8761b8af3fff21e8f3597f2",
+        "reference_bytes": 2267,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_21",
+        "kind": "tool_schema",
+        "name": "masc_goal_measure",
+        "index": 21,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/3b/3b4305fe6a862a9162956a6d1bf7cedf14217f0d2542294b99b6fec6d0f5c3f7",
+          "sha256": "3b4305fe6a862a9162956a6d1bf7cedf14217f0d2542294b99b6fec6d0f5c3f7",
+          "bytes": 1197
+        },
+        "reference_sha256": "3b4305fe6a862a9162956a6d1bf7cedf14217f0d2542294b99b6fec6d0f5c3f7",
+        "reference_bytes": 1197,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_22",
+        "kind": "tool_schema",
+        "name": "keeper_candle_balance",
+        "index": 22,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/e1/e1b8a4f679a9ce8f4c79209803dbf3f7a1bf7db59af623545dd5520694634965",
+          "sha256": "e1b8a4f679a9ce8f4c79209803dbf3f7a1bf7db59af623545dd5520694634965",
+          "bytes": 342
+        },
+        "reference_sha256": "e1b8a4f679a9ce8f4c79209803dbf3f7a1bf7db59af623545dd5520694634965",
+        "reference_bytes": 342,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_23",
+        "kind": "tool_schema",
+        "name": "keeper_candle_catalog",
+        "index": 23,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/68/685c91bebafe8f7396a078d234b9a3b7309e518fa9f6a5a526b152a5b4ee6446",
+          "sha256": "685c91bebafe8f7396a078d234b9a3b7309e518fa9f6a5a526b152a5b4ee6446",
+          "bytes": 260
+        },
+        "reference_sha256": "685c91bebafe8f7396a078d234b9a3b7309e518fa9f6a5a526b152a5b4ee6446",
+        "reference_bytes": 260,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_24",
+        "kind": "tool_schema",
+        "name": "keeper_candle_purchase",
+        "index": 24,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/4d/4d48862e3ff40c69130f24160b1f72d34e9acf6b682b0f860c60da0375f296de",
+          "sha256": "4d48862e3ff40c69130f24160b1f72d34e9acf6b682b0f860c60da0375f296de",
+          "bytes": 687
+        },
+        "reference_sha256": "4d48862e3ff40c69130f24160b1f72d34e9acf6b682b0f860c60da0375f296de",
+        "reference_bytes": 687,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_25",
+        "kind": "tool_schema",
+        "name": "keeper_candle_equip",
+        "index": 25,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/01/01a13bbadc393b90c0935c792b8a41b3e6d54e251fed769850a4ff3f404e95e3",
+          "sha256": "01a13bbadc393b90c0935c792b8a41b3e6d54e251fed769850a4ff3f404e95e3",
+          "bytes": 567
+        },
+        "reference_sha256": "01a13bbadc393b90c0935c792b8a41b3e6d54e251fed769850a4ff3f404e95e3",
+        "reference_bytes": 567,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_26",
+        "kind": "tool_schema",
+        "name": "keeper_candle_gift",
+        "index": 26,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/fa/fa841bc4fd54c09ef1abb638c8cbc72fd0041c80632e3f54a440aa7f8033c67d",
+          "sha256": "fa841bc4fd54c09ef1abb638c8cbc72fd0041c80632e3f54a440aa7f8033c67d",
+          "bytes": 1014
+        },
+        "reference_sha256": "fa841bc4fd54c09ef1abb638c8cbc72fd0041c80632e3f54a440aa7f8033c67d",
+        "reference_bytes": 1014,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_27",
+        "kind": "tool_schema",
+        "name": "masc_board_post",
+        "index": 27,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/43/43b314d01985b6dc1bf95d78905d13296e4071594c760b398e87045f4e452435",
+          "sha256": "43b314d01985b6dc1bf95d78905d13296e4071594c760b398e87045f4e452435",
+          "bytes": 2914
+        },
+        "reference_sha256": "43b314d01985b6dc1bf95d78905d13296e4071594c760b398e87045f4e452435",
+        "reference_bytes": 2914,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_28",
+        "kind": "tool_schema",
+        "name": "masc_board_list",
+        "index": 28,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/27/27cefc5d3f965ed8f3a7a73f5c600000021e17996493e740e6282bd1b2c8b927",
+          "sha256": "27cefc5d3f965ed8f3a7a73f5c600000021e17996493e740e6282bd1b2c8b927",
+          "bytes": 1709
+        },
+        "reference_sha256": "27cefc5d3f965ed8f3a7a73f5c600000021e17996493e740e6282bd1b2c8b927",
+        "reference_bytes": 1709,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_29",
+        "kind": "tool_schema",
+        "name": "masc_board_post_get",
+        "index": 29,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/dd/ddc9a83a57f2379d3c7f3fdd0dcc10cf879ec74835334681c9bdaa448678ff70",
+          "sha256": "ddc9a83a57f2379d3c7f3fdd0dcc10cf879ec74835334681c9bdaa448678ff70",
+          "bytes": 1547
+        },
+        "reference_sha256": "ddc9a83a57f2379d3c7f3fdd0dcc10cf879ec74835334681c9bdaa448678ff70",
+        "reference_bytes": 1547,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_30",
+        "kind": "tool_schema",
+        "name": "masc_board_comment",
+        "index": 30,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/2d/2d19a32783bad82300afb48b1f0d5ad0907a7bbae45bab91d398998d9304ae84",
+          "sha256": "2d19a32783bad82300afb48b1f0d5ad0907a7bbae45bab91d398998d9304ae84",
+          "bytes": 1133
+        },
+        "reference_sha256": "2d19a32783bad82300afb48b1f0d5ad0907a7bbae45bab91d398998d9304ae84",
+        "reference_bytes": 1133,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_31",
+        "kind": "tool_schema",
+        "name": "masc_board_search",
+        "index": 31,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/b9/b92433d993335aea83653b6a9dc80d97e9b09b37ea797d0cd4c53580fae3efd1",
+          "sha256": "b92433d993335aea83653b6a9dc80d97e9b09b37ea797d0cd4c53580fae3efd1",
+          "bytes": 818
+        },
+        "reference_sha256": "b92433d993335aea83653b6a9dc80d97e9b09b37ea797d0cd4c53580fae3efd1",
+        "reference_bytes": 818,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_32",
+        "kind": "tool_schema",
+        "name": "keeper_tool_search",
+        "index": 32,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/ab/abd5182d339c95176d185846187dbfd33e7cb06c8a10fe2d5501274efccc2b91",
+          "sha256": "abd5182d339c95176d185846187dbfd33e7cb06c8a10fe2d5501274efccc2b91",
+          "bytes": 3009
+        },
+        "reference_sha256": "abd5182d339c95176d185846187dbfd33e7cb06c8a10fe2d5501274efccc2b91",
+        "reference_bytes": 3009,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_33",
+        "kind": "tool_schema",
+        "name": "masc_schedule_get",
+        "index": 33,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/d5/d517882ea37861536361cb9c4635c7946ee62a3f5d2161f8fc5aa15e40f8a877",
+          "sha256": "d517882ea37861536361cb9c4635c7946ee62a3f5d2161f8fc5aa15e40f8a877",
+          "bytes": 338
+        },
+        "reference_sha256": "d517882ea37861536361cb9c4635c7946ee62a3f5d2161f8fc5aa15e40f8a877",
+        "reference_bytes": 338,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_34",
+        "kind": "tool_schema",
+        "name": "masc_schedule_note_add",
+        "index": 34,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/d3/d38195c05e0682c0f2d076dd462db0ca0440995c9ef16f0d8b232da73dcf7d9d",
+          "sha256": "d38195c05e0682c0f2d076dd462db0ca0440995c9ef16f0d8b232da73dcf7d9d",
+          "bytes": 1120
+        },
+        "reference_sha256": "d38195c05e0682c0f2d076dd462db0ca0440995c9ef16f0d8b232da73dcf7d9d",
+        "reference_bytes": 1120,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      },
+      {
+        "label": "tool_35",
+        "kind": "tool_schema",
+        "name": "masc_schedule_notes_list",
+        "index": 35,
+        "source": {
+          "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_blobs/ed/ed226a378fde80a6831b4435bc0fa2e7c5bde3a1c0b6317c7fad463aa4395ae3",
+          "sha256": "ed226a378fde80a6831b4435bc0fa2e7c5bde3a1c0b6317c7fad463aa4395ae3",
+          "bytes": 762
+        },
+        "reference_sha256": "ed226a378fde80a6831b4435bc0fa2e7c5bde3a1c0b6317c7fad463aa4395ae3",
+        "reference_bytes": 762,
+        "hash_and_length_verified": true,
+        "presence": {
+          "original_schedule_id": false,
+          "original_marker": false,
+          "wrong_schedule_ids": []
+        },
+        "raw_content_retained_in_this_report": false
+      }
+    ]
+  },
+  "checkpoint_user_input": {
+    "source": {
+      "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/traces/trace-1793044558619-00000/trace-1793044558619-00000.json",
+      "sha256": "b2100c8731991aa9c24e0775bc2cf3b126331e693ac8333eaf33ef0d954b8f45",
+      "bytes": 106500
+    },
+    "selected_user_blocks": [
+      {
+        "utf8_bytes": 795,
+        "sha256": "18b0544cc7d261428b8ecf48fd2e2e8ac512533d45995d6f20cb5dec7f73d08b",
+        "contains_original_schedule_id": false,
+        "contains_original_marker": false,
+        "content_included": false,
+        "classification": "Generic autonomous wake/end-condition cue; no exact scheduled request identity or body."
+      }
+    ],
+    "full_checkpoint_content_included": false
+  },
+  "actual_tool_calls": {
+    "sources": [
+      {
+        "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+        "sha256": "7d69e44e0847b57e57d83b5f4386131a502b131119e9c8acf6bd84e2ba14e550",
+        "bytes": 11546
+      }
+    ],
+    "entries": [
+      {
+        "ts": 1793044570.116991,
+        "tool": "keeper_tool_search",
+        "input": {
+          "names": [
+            "masc_schedule_note_add",
+            "masc_schedule_notes_list",
+            "masc_schedule_get"
+          ]
+        },
+        "execution_id": "execution-node-ac013795df57d1e38b0028d84c94f42b",
+        "tool_use_id": "call_75064192be064bfc87b6169b",
+        "keeper_turn_id": 1,
+        "trace_id": "trace-1793044558619-00000",
+        "wire_outcome": "ok",
+        "output_text_sha256": "87e0087523c71dea9a716699c810426367ab5fee8a7e5af2422e29778478d591",
+        "output_content_included": false,
+        "output_limit": "Search result tool descriptions are omitted; requested names, actual wire outcome and output-text hash are retained."
+      },
+      {
+        "ts": 1793044576.688759,
+        "tool": "masc_schedule_notes_list",
+        "input": {
+          "schedule_id": "schd_2026102708154321d8c7ac2b7"
+        },
+        "execution_id": "execution-node-1913f7cb94627ff3ceda2f0c9f9c532c",
+        "tool_use_id": "call_b85914a5e315401a8189e062",
+        "keeper_turn_id": 1,
+        "trace_id": "trace-1793044558619-00000",
+        "wire_outcome": "ok",
+        "output_text_sha256": "5ed54a633f57a5a37661d8c8b9f97c85dabc5d57f043115a8f3f96836f83c55b",
+        "output_content_included": true,
+        "output": {
+          "status": "ok",
+          "schedule_id": "schd_2026102708154321d8c7ac2b7",
+          "limit": 50,
+          "notes": []
+        }
+      },
+      {
+        "ts": 1793044576.690824,
+        "tool": "masc_schedule_notes_list",
+        "input": {
+          "schedule_id": "schd_2026102710304512e4b5c9d8f"
+        },
+        "execution_id": "execution-node-97c2c77f75aa27af88016953f323785d",
+        "tool_use_id": "call_182ed6760a7b4f19a625cfa5",
+        "keeper_turn_id": 1,
+        "trace_id": "trace-1793044558619-00000",
+        "wire_outcome": "ok",
+        "output_text_sha256": "1878d61fc510a65ceed2c0291218e0defefe45740383446ca7aa80e7c54c981d",
+        "output_content_included": true,
+        "output": {
+          "status": "ok",
+          "schedule_id": "schd_2026102710304512e4b5c9d8f",
+          "limit": 50,
+          "notes": []
+        }
+      }
+    ],
+    "error_count": 0,
+    "important_result": "All three calls were wire ok. Both unrelated-ID notes_list results were status ok with notes=[], not errors."
+  },
+  "terminal_without_required_effect": {
+    "primary_source": {
+      "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/schedules.json",
+      "sha256": "d8c0b859c56b901fad8e2da09e4615ff634207104d54d4c43122efb675784d40",
+      "bytes": 2902
+    },
+    "synthetic_note_count": 0,
+    "reaction_source": {
+      "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/workspace/.masc/keepers/audit-live-glm/reaction-ledger/v7/2026-10/26.jsonl",
+      "sha256": "868120944d29eeab9f5eded341831f37e75383593a3b1f0bae4645bbb67f606f",
+      "bytes": 4846
+    },
+    "exact_source_events": [
+      {
+        "event_id": "krl:06c4894fa6e9b3f1deecdfe46b9ccc66ba6dcc291dcc4b3aced32a53ca6def3a",
+        "recorded_at_unix": 1793044560.622143,
+        "record_kind": "stimulus",
+        "stimulus_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+        "reaction_kind": null,
+        "disposition": null,
+        "source_incarnation": null,
+        "source_receipt_kind": null,
+        "schedule_instance_id": null
+      },
+      {
+        "event_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9:reaction:turn_started",
+        "recorded_at_unix": 1793044560.760328,
+        "record_kind": "reaction",
+        "stimulus_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+        "reaction_kind": "turn_started",
+        "disposition": null,
+        "source_incarnation": null,
+        "source_receipt_kind": null,
+        "schedule_instance_id": null
+      },
+      {
+        "event_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9:reaction:turn_finished",
+        "recorded_at_unix": 1793044598.310148,
+        "record_kind": "reaction",
+        "stimulus_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+        "reaction_kind": "turn_finished",
+        "disposition": "completed",
+        "source_incarnation": null,
+        "source_receipt_kind": null,
+        "schedule_instance_id": null
+      },
+      {
+        "event_id": "keeper-event-queue-transition:pending-source-terminal-ack:turn-attempt-terminal:0:8f7bd44bb866da817fb535a323ec816633f88f433a5e49cdfb3eef0b279ff28d:source:0",
+        "recorded_at_unix": 1793044598.310182,
+        "record_kind": "reaction",
+        "stimulus_id": "69677351ff3494687f3eedc50f207c404cd838461529e994e03209b6ccb3b1d9",
+        "reaction_kind": "event_queue_ack",
+        "disposition": null,
+        "source_incarnation": 0,
+        "source_receipt_kind": "turn_completed",
+        "schedule_instance_id": "01a179c8-b3b5-7000-b855-e9c27ee9099b"
+      }
+    ],
+    "B_not_created": "Controller submits B only after A1; A1 never appeared, so the after-effect chain never began."
+  },
+  "deepseek_comparison": {
+    "scope": "Observed source-recovery path, not model ranking or common-provider proof.",
+    "facts": "DeepSeek also began with tool discovery, then used schedule_list(all) and schedule_get to recover its actual request before A1. It did not write A1 before the first discovery/drop boundary.",
+    "other_limits": "Its required mechanical A1/B/A2 chain succeeded, but it added a fourth, incorrect self-invalidation note; broad semantic correctness did not pass."
+  },
+  "observer_and_process_boundary": {
+    "controller_result_original": {
+      "verdict": "INCOMPLETE",
+      "error_type": "KeyboardInterrupt",
+      "detail": "",
+      "producer_terminal": false,
+      "producer_returncode": null,
+      "owned_pid": 62029,
+      "scope": "No automatic retry, provider switch, resume, cancellation or forced kill."
+    },
+    "root_early_completion_capture": {
+      "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/root-early-completion-observation.json",
+      "sha256": "aa5fb26bf5a9057390bf85201f86e1acb68d2e3d9a4c40166d9e4a35923c15d5",
+      "bytes": 7677
+    },
+    "root_owned_stop_capture": {
+      "path": "artifacts/schedule-combined-candidate-20261027/runs/after-effect-glm-1/root-owned-server-stop.json",
+      "sha256": "7b04f41b3fcb9df5368b0f4d232cc285e315ea318d9258e0b220e3fbb4c8cb40",
+      "bytes": 891
+    },
+    "classification": "Original controller INCOMPLETE/KeyboardInterrupt is preserved separately from the exact-source missing-effect failure. Root sent SIGTERM to the owned server; server exit status was not observed. No forced kill, retry or provider failover is claimed."
+  },
+  "privacy": "Only synthetic request identities, public tool names, selected tool arguments/results, bindings and metadata are included. No credentials, full prompts, thinking/reasoning or private instructions are copied.",
+  "not_proven": [
+    "Initial complete wire input identity/content",
+    "GLM after-effect checkpoint/reentry behavior",
+    "Provider failover",
+    "Restart",
+    "Identical checkpoint-byte reload",
+    "Operating installation",
+    "Whole scheduled-Job correctness"
+  ]
+}

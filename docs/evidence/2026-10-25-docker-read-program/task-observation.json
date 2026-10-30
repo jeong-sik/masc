@@ -1,0 +1,16 @@
+{
+  "schema": "masc.read-program.task-observation.v1",
+  "observed_at": "2026-10-25T12:00:23.529043+00:00",
+  "current_task": {
+    "id": "task-2656",
+    "status": "in_progress",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "creation_request_id": "codex-goal-read-program-20261025-v1"
+  },
+  "prior_bootstrap_task": {
+    "id": "task-2652",
+    "status": "done",
+    "completed_at": "2026-10-25T11:35:29Z"
+  },
+  "prior_task_done_is_original_goal_complete": false
+}

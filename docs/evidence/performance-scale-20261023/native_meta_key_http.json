@@ -1,0 +1,383 @@
+{
+  "scope": "Native metadata-key validation comparison, not the subsequent optional-file-read change. Paused350 metadata with real Candle; shared-host latency is not acceptance.",
+  "experiments": [
+    {
+      "side": "before",
+      "round": 1,
+      "identity": {
+        "source": "196f1f7134dc0bb3835c5e1d74e19d4cd4c6871c",
+        "binary_sha256": "794a9488148c88b3490aadead45601b83110f90d748385e1b94bb257aeb409a1",
+        "runtime_instance": "01a168b5-1775-7000-8dfd-c991978eb27b",
+        "keepers": 350,
+        "samples": 10,
+        "interval_s": 1.1,
+        "encoding": "gzip",
+        "driver_sha256": "5c6c12144b344b5c3edb67b3e5cda4b9bd02c677d3c314370ad6e2f2a14adb9b",
+        "scope": "Measure execution observations against one isolated native server.\n\nSeeds paused Keeper metadata and synthetic Candle grants, never active agents.\nPublic HTTP reads exercise real metadata/ledger reads; an owned TOML edit checks\nfresh Board addresses after the snapshot is cached. No operator workspace or\ncredentials are used, and any attempted model POST fails the experiment.\n",
+        "environment_keys": [
+          "DOCKER_HOST",
+          "LANG",
+          "MASC_BASE_PATH",
+          "MASC_CONFIG_BOOTSTRAP",
+          "MASC_CONFIG_DIR",
+          "MASC_GRPC_ENABLED",
+          "MASC_HTTP_AUTH_STRICT",
+          "MASC_KEEPER_AUTONOMOUS_ENABLED",
+          "MASC_ORCHESTRATOR_ENABLED",
+          "MASC_OTEL_ENABLED",
+          "MASC_WS_ENABLED",
+          "PATH"
+        ],
+        "load_before": [
+          92.87646484375,
+          117.25439453125,
+          76.29345703125
+        ]
+      },
+      "summary": {
+        "semantic_checks_passed": true,
+        "paused_fixture_verified_before_and_after": true,
+        "target_ms": 0.1,
+        "phases": {
+          "unchanged": {
+            "samples": 10,
+            "p50_ms": 157.600042,
+            "p95_ms": 200.126,
+            "max_ms": 200.126,
+            "all_within_target": false,
+            "encodings": {
+              "gzip": 10
+            },
+            "unique_body_hashes": 1
+          },
+          "address_changed": {
+            "samples": 10,
+            "p50_ms": 169.442708,
+            "p95_ms": 644.667625,
+            "max_ms": 644.667625,
+            "all_within_target": false,
+            "encodings": {
+              "identity": 10
+            },
+            "unique_body_hashes": 1
+          }
+        }
+      },
+      "cleanup": {
+        "server_reaped": true,
+        "server_returncode": 0,
+        "model_requests": [
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ]
+      },
+      "candle_cleanup": {
+        "verified_absent": true,
+        "removed_containers": [],
+        "removed_volumes": [
+          "masc-lane-state-e076e2510941740814af448192bc33097b68b7f79b4b70edd5af017960880c6d"
+        ]
+      },
+      "raw_requests_sha256": "7fff4d5178cb4ccad614468bb29237ba7035602a915cf0ec6762ff19a7cbb379"
+    },
+    {
+      "side": "after",
+      "round": 1,
+      "identity": {
+        "source": "0b4ebf61148ebc0f68844af9ed20ed3dd6f88400",
+        "binary_sha256": "dc5bbfbf4bc3decb2896d93915c4fbddc11fa3ea0c9da2928f1882752e1bc20c",
+        "runtime_instance": "01a168b5-b69b-7000-8523-c2e7072a1e03",
+        "keepers": 350,
+        "samples": 10,
+        "interval_s": 1.1,
+        "encoding": "gzip",
+        "driver_sha256": "5c6c12144b344b5c3edb67b3e5cda4b9bd02c677d3c314370ad6e2f2a14adb9b",
+        "scope": "Measure execution observations against one isolated native server.\n\nSeeds paused Keeper metadata and synthetic Candle grants, never active agents.\nPublic HTTP reads exercise real metadata/ledger reads; an owned TOML edit checks\nfresh Board addresses after the snapshot is cached. No operator workspace or\ncredentials are used, and any attempted model POST fails the experiment.\n",
+        "environment_keys": [
+          "DOCKER_HOST",
+          "LANG",
+          "MASC_BASE_PATH",
+          "MASC_CONFIG_BOOTSTRAP",
+          "MASC_CONFIG_DIR",
+          "MASC_GRPC_ENABLED",
+          "MASC_HTTP_AUTH_STRICT",
+          "MASC_KEEPER_AUTONOMOUS_ENABLED",
+          "MASC_ORCHESTRATOR_ENABLED",
+          "MASC_OTEL_ENABLED",
+          "MASC_WS_ENABLED",
+          "PATH"
+        ],
+        "load_before": [
+          82.74609375,
+          110.5029296875,
+          75.87451171875
+        ]
+      },
+      "summary": {
+        "semantic_checks_passed": true,
+        "paused_fixture_verified_before_and_after": true,
+        "target_ms": 0.1,
+        "phases": {
+          "unchanged": {
+            "samples": 10,
+            "p50_ms": 152.671625,
+            "p95_ms": 188.490917,
+            "max_ms": 188.490917,
+            "all_within_target": false,
+            "encodings": {
+              "gzip": 10
+            },
+            "unique_body_hashes": 1
+          },
+          "address_changed": {
+            "samples": 10,
+            "p50_ms": 188.173667,
+            "p95_ms": 1569.289667,
+            "max_ms": 1569.289667,
+            "all_within_target": false,
+            "encodings": {
+              "identity": 10
+            },
+            "unique_body_hashes": 1
+          }
+        }
+      },
+      "cleanup": {
+        "server_reaped": true,
+        "server_returncode": 0,
+        "model_requests": [
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ]
+      },
+      "candle_cleanup": {
+        "verified_absent": true,
+        "removed_containers": [],
+        "removed_volumes": [
+          "masc-lane-state-8a9a2c9d45454700a083323eb3b8a327206d52d7270d7e15a7c1ccdba780e625"
+        ]
+      },
+      "raw_requests_sha256": "6730b2d3f84b648c9b52d031f3dec1cc899987bb747ee3b8f548a5a7efc43f6c"
+    },
+    {
+      "side": "after",
+      "round": 2,
+      "identity": {
+        "source": "0b4ebf61148ebc0f68844af9ed20ed3dd6f88400",
+        "binary_sha256": "dc5bbfbf4bc3decb2896d93915c4fbddc11fa3ea0c9da2928f1882752e1bc20c",
+        "runtime_instance": "01a168b6-73b1-7000-ad96-0cd59b9baf5b",
+        "keepers": 350,
+        "samples": 10,
+        "interval_s": 1.1,
+        "encoding": "gzip",
+        "driver_sha256": "5c6c12144b344b5c3edb67b3e5cda4b9bd02c677d3c314370ad6e2f2a14adb9b",
+        "scope": "Measure execution observations against one isolated native server.\n\nSeeds paused Keeper metadata and synthetic Candle grants, never active agents.\nPublic HTTP reads exercise real metadata/ledger reads; an owned TOML edit checks\nfresh Board addresses after the snapshot is cached. No operator workspace or\ncredentials are used, and any attempted model POST fails the experiment.\n",
+        "environment_keys": [
+          "DOCKER_HOST",
+          "LANG",
+          "MASC_BASE_PATH",
+          "MASC_CONFIG_BOOTSTRAP",
+          "MASC_CONFIG_DIR",
+          "MASC_GRPC_ENABLED",
+          "MASC_HTTP_AUTH_STRICT",
+          "MASC_KEEPER_AUTONOMOUS_ENABLED",
+          "MASC_ORCHESTRATOR_ENABLED",
+          "MASC_OTEL_ENABLED",
+          "MASC_WS_ENABLED",
+          "PATH"
+        ],
+        "load_before": [
+          75.87158203125,
+          105.16552734375,
+          75.50244140625
+        ]
+      },
+      "summary": {
+        "semantic_checks_passed": true,
+        "paused_fixture_verified_before_and_after": true,
+        "target_ms": 0.1,
+        "phases": {
+          "unchanged": {
+            "samples": 10,
+            "p50_ms": 138.934291,
+            "p95_ms": 780.160792,
+            "max_ms": 780.160792,
+            "all_within_target": false,
+            "encodings": {
+              "gzip": 10
+            },
+            "unique_body_hashes": 1
+          },
+          "address_changed": {
+            "samples": 10,
+            "p50_ms": 176.638375,
+            "p95_ms": 196.48625,
+            "max_ms": 196.48625,
+            "all_within_target": false,
+            "encodings": {
+              "identity": 10
+            },
+            "unique_body_hashes": 1
+          }
+        }
+      },
+      "cleanup": {
+        "server_reaped": true,
+        "server_returncode": 0,
+        "model_requests": [
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ]
+      },
+      "candle_cleanup": {
+        "verified_absent": true,
+        "removed_containers": [],
+        "removed_volumes": [
+          "masc-lane-state-9b5ee2c9b8b7e094aa93778a5416648931b37f51170eb9418ffdb148ee027086"
+        ]
+      },
+      "raw_requests_sha256": "9a16a5d760f62b0ce94109348594592ecef9d9a65d4cc5f748230f13f263acce"
+    },
+    {
+      "side": "before",
+      "round": 2,
+      "identity": {
+        "source": "196f1f7134dc0bb3835c5e1d74e19d4cd4c6871c",
+        "binary_sha256": "794a9488148c88b3490aadead45601b83110f90d748385e1b94bb257aeb409a1",
+        "runtime_instance": "01a168b7-0c42-7000-9f9b-e3856e1835a9",
+        "keepers": 350,
+        "samples": 10,
+        "interval_s": 1.1,
+        "encoding": "gzip",
+        "driver_sha256": "5c6c12144b344b5c3edb67b3e5cda4b9bd02c677d3c314370ad6e2f2a14adb9b",
+        "scope": "Measure execution observations against one isolated native server.\n\nSeeds paused Keeper metadata and synthetic Candle grants, never active agents.\nPublic HTTP reads exercise real metadata/ledger reads; an owned TOML edit checks\nfresh Board addresses after the snapshot is cached. No operator workspace or\ncredentials are used, and any attempted model POST fails the experiment.\n",
+        "environment_keys": [
+          "DOCKER_HOST",
+          "LANG",
+          "MASC_BASE_PATH",
+          "MASC_CONFIG_BOOTSTRAP",
+          "MASC_CONFIG_DIR",
+          "MASC_GRPC_ENABLED",
+          "MASC_HTTP_AUTH_STRICT",
+          "MASC_KEEPER_AUTONOMOUS_ENABLED",
+          "MASC_ORCHESTRATOR_ENABLED",
+          "MASC_OTEL_ENABLED",
+          "MASC_WS_ENABLED",
+          "PATH"
+        ],
+        "load_before": [
+          65.8369140625,
+          99.19677734375,
+          74.697265625
+        ]
+      },
+      "summary": {
+        "semantic_checks_passed": true,
+        "paused_fixture_verified_before_and_after": true,
+        "target_ms": 0.1,
+        "phases": {
+          "unchanged": {
+            "samples": 10,
+            "p50_ms": 174.54825,
+            "p95_ms": 318.08425,
+            "max_ms": 318.08425,
+            "all_within_target": false,
+            "encodings": {
+              "gzip": 10
+            },
+            "unique_body_hashes": 1
+          },
+          "address_changed": {
+            "samples": 10,
+            "p50_ms": 224.84075,
+            "p95_ms": 347.00825,
+            "max_ms": 347.00825,
+            "all_within_target": false,
+            "encodings": {
+              "identity": 10
+            },
+            "unique_body_hashes": 1
+          }
+        }
+      },
+      "cleanup": {
+        "server_reaped": true,
+        "server_returncode": 0,
+        "model_requests": [
+          {
+            "method": "GET",
+            "path": "/v1/models"
+          }
+        ]
+      },
+      "candle_cleanup": {
+        "verified_absent": true,
+        "removed_containers": [],
+        "removed_volumes": [
+          "masc-lane-state-79d638f4431b6a6414dfd4efa973f3456163f3b3631c1bc4cc188e5ac30a18d6"
+        ]
+      },
+      "raw_requests_sha256": "76221ae2acba073e6d07f41007c85f489faf9c80aea0d9edee0dc97471c53ef1"
+    }
+  ],
+  "artifact_identity": {
+    "artifact": {
+      "id": 12497929261,
+      "node_id": "MDg6QXJ0aWZhY3QxMjQ5NzkyOTI2MQ==",
+      "name": "macos-arm64-probe-0b4ebf61148ebc0f68844af9ed20ed3dd6f88400-attempt-1",
+      "size_in_bytes": 175490779,
+      "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12497929261",
+      "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12497929261/zip",
+      "expired": false,
+      "digest": "sha256:c7a6d6ecd2a0d40b15aee024a86efa16d33f9d0a00a83f31dae1d9cfaffa9472",
+      "created_at": "2026-10-23T11:31:51Z",
+      "updated_at": "2026-10-23T11:31:51Z",
+      "expires_at": "2026-10-30T11:31:36Z",
+      "workflow_run": {
+        "id": 39945639233,
+        "repository_id": 1136640865,
+        "head_repository_id": 1136640865,
+        "head_branch": "main",
+        "head_sha": "9c2256fea8fad3bb8ca7e5aed8a92cd803fcbdda"
+      }
+    },
+    "probe": {
+      "source_commit": "0b4ebf61148ebc0f68844af9ed20ed3dd6f88400",
+      "source_tree": "ae290ec6f9f84fa820c9ce5e22d87586d690370a",
+      "workflow_head": "9c2256fea8fad3bb8ca7e5aed8a92cd803fcbdda",
+      "platform": "macos-arm64",
+      "run_id": "39945639233",
+      "run_attempt": "1",
+      "release_verified": false,
+      "published": false
+    },
+    "downloaded_files_sha256": {
+      "dependencies.txt": "3bea42abc67e4994dcb319f9e5be6fb6fe53458f91b3ef98f5f82f6599a74210",
+      "masc-browser-host-macos-arm64": "91559e48532603ac5afbddf05e3399d4c1be45420e934ae1a76845d4b386624e",
+      "masc-check-runtime-deployment-preflight-macos-arm64": "af7b33ec59d5e73c2998323a1a89afe4e6f3dbc7448fb7765d2c00b481c829d5",
+      "masc-deployment-preflight-helper-macos-arm64": "fa601dab21736497d82335aa3bda827cfdb4e4a92adbd141a3bb5ee38bcb577c",
+      "masc-macos-arm64": "dc5bbfbf4bc3decb2896d93915c4fbddc11fa3ea0c9da2928f1882752e1bc20c",
+      "masc-runtime-macos-arm64.tar.gz": "c1d1ab6668b020b792b276fba91078b6c8a33a3d283f259af5bff5d8a3ff1d54",
+      "masc-tui-macos-arm64": "9b7253af858883d613aa5cd615e10d777f2e037d94a0ed8ffa928358504acba5",
+      "probe.json": "b5c0d6040676b1710dff46e582bb735c94620e9a33445c85bd618a8e0457f805",
+      "runtime-provenance.json": "5f9c35dc126fa10c9c017d88b72781af5e8887158d19271272574d01399a4498",
+      "server-version.txt": "9a108132abcbb17753ee4b8233d534e0958f6bfbea06cb41bde50a0aa9ac0cf9",
+      "tui-build-commit.txt": "d497f091021912e2e59ff0df14ac6ab67a7541b6b22daf91aff465ec1f92f01b",
+      "tui-version.txt": "9a108132abcbb17753ee4b8233d534e0958f6bfbea06cb41bde50a0aa9ac0cf9"
+    },
+    "extracted_binary_sha256": {
+      "masc": "dc5bbfbf4bc3decb2896d93915c4fbddc11fa3ea0c9da2928f1882752e1bc20c",
+      "masc-tui": "9b7253af858883d613aa5cd615e10d777f2e037d94a0ed8ffa928358504acba5",
+      "masc-browser-host": "91559e48532603ac5afbddf05e3399d4c1be45420e934ae1a76845d4b386624e",
+      "masc-deployment-preflight-helper": "fa601dab21736497d82335aa3bda827cfdb4e4a92adbd141a3bb5ee38bcb577c",
+      "masc-check-runtime-deployment-preflight": "af7b33ec59d5e73c2998323a1a89afe4e6f3dbc7448fb7765d2c00b481c829d5"
+    },
+    "scope": "CI native artifact verified; not installed/released"
+  }
+}

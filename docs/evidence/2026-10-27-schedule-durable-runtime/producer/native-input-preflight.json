@@ -1,0 +1,25 @@
+{
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "artifacts/schedule-durable-candidate-20261027/probe_real_busy_after_effect_c2_v2.py",
+    "--output",
+    "artifacts/schedule-durable-candidate-20261027/runs/native-preflight-only",
+    "--binary",
+    "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+    "--native-binding",
+    "artifacts/schedule-durable-candidate-20261027/native40396800146/c2-native-binding.json",
+    "--image-reference",
+    "masc-sandbox:general",
+    "--provider",
+    "glm-coding",
+    "--observation-deadline-unix",
+    "1793048072.29108",
+    "--preflight-only"
+  ],
+  "controller_sha256": "3b587c0c19d98301da5c07c76e70abb80a857b804191f21180784dfa66855095",
+  "returncode": 0,
+  "stdout": "{\"scope\": \"local native inputs only; no server/model/credential access\", \"source_sha\": \"a3950a189b9cc5a7ce82cb725699455d79923f42\", \"workflow_run\": 40396800146, \"workflow_sha\": \"9377c7f3025d68e3856d2afd3762468dabc77813\", \"workflow_ref\": \"main\", \"server_sha256\": \"1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c\", \"binding_sha256\": \"89599a1c52c93d774eff7675f216b65d0b208a913c428506dbee2ebf097f3c17\"}\n",
+  "stderr": "",
+  "output_directory_created": false,
+  "scope": "Local immutable native inputs only; no credentials/server/model access"
+}

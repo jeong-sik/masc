@@ -1,0 +1,40 @@
+{
+  "scope": "targeted semantic review, not all sixteen claims; underlying artifacts and current domain stores not revalidated",
+  "group_sources": 81,
+  "claims": 16,
+  "conflicts": 1,
+  "excluded": 1,
+  "findings": [
+    {
+      "id": "metadata_exclusion",
+      "sources": [
+        "s92",
+        "s93"
+      ],
+      "assessment": "unsupported exclusion rationale",
+      "detail": "s93 resolves to snapshot2.metadata.change, whose added entry contains the complete library import recollection also present as s92. Redundancy could justify exclusion, absence of factual evidence does not."
+    },
+    {
+      "id": "conflict_classification",
+      "sources": [
+        "s35",
+        "s36"
+      ],
+      "assessment": "accurate wording difference, imprecise conflict classification",
+      "detail": "The same observer moves from possible typography difference to confirmed difference between two artifacts. These sources do not contradict each other. Unresolved harmonization is a decision, not a factual disagreement."
+    },
+    {
+      "id": "goal_temporal_scope",
+      "sources": [
+        "s88",
+        "s90",
+        "s91",
+        "s92"
+      ],
+      "assessment": "historical transition faithfully attributed but latest state omitted from goal-focused claim",
+      "detail": "Claim 10 describes verifying/proof_pending as a transition reported by s88. Later sources explicitly report all three Goals awaiting human confirmation; this must not be read as current verifying state."
+    }
+  ],
+  "prompt_scope": "This request captured the earlier prompt. Existing source prompt corrections were not used by this group. No evidence of corrected-prompt model improvement.",
+  "runtime_scope": "standalone local model; no proposal publication, promotion, or actual Keeper adoption"
+}

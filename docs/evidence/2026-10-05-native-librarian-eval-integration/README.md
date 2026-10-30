@@ -1,0 +1,7 @@
+# Native Librarian evaluator integration
+
+Main is pinned to `87123f7df94a27ded447b5b05d01c2f5178de029`. The three old published heads and locally reconciled code heads are recorded in checks.json. The original reporter, evaluator and UI scopes were retained: before the compile repair, their normalized zero-context own diffs matched the old published heads exactly. The additive bin/dune conflict retains both main's model-form library and the evaluator executable. Historical keyboard split conflicts use the independently clean merge-preview blobs, identical to the original published leaf.
+
+The focused evaluator build first failed on Time_compat, then on Ids. Their actual owning public libraries are masc.time_compat (lib/time_compat/dune) and masc.masc_types (lib/types/dune, unwrapped ids). The evaluator stanza now names both explicitly; implicit transitive dependencies remain disabled. These two direct dependencies are the only additional product change after own-scope preservation. Raw failure and final successful build logs are copied byte-for-byte, including trailing blank lines.
+
+The final focused wrapper build exited 0 on compiled leaf `1b43702d01ba465e9d1413eb900819191081e648`; checks.json pins source and binary hashes. Evidence-only followup commits do not change its compiled source closure. No provider/model execution, full build, full test suite, CI or deployment is claimed. This evidence does not independently approve the complete Native Stack or attest a release.

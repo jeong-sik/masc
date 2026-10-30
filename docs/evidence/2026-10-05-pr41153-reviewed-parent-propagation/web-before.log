@@ -1,0 +1,104 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41153-parent-sync-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/lane-inventory.test.ts src/components/lane-inventory-panel.test.ts src/components/lane-addons-panel.test.ts src/components/lane-addons-workspace.test.ts src/components/lane-declaration-editor.test.ts src/api/lane-declarations.test.ts src/config/navigation.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41153-parent-sync-20261004/dashboard
+
+ ❯ src/components/lane-addons-panel.test.ts (41 tests | 3 failed) 706ms
+   ❯ optional Lane Add-on surface (41)
+     × offers the editor for the loader-supported suffix-only TOML filename 6ms
+     × blocks removal for backend refusal: owned file renamed to another ID 1ms
+     × blocks removal for backend refusal: duplicate ID declarations 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > offers the editor for the loader-supported suffix-only TOML filename
+ParseError: { readonly configuration: { readonly directory: NonEmptyString; readonly complete: boolean; readonly issues: ReadonlyArray<{ readonly source_path: NonEmptyString; readonly id: NonEmptyString | null; readonly message: NonEmptyString }>; readonly declarations: ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }> } | null; readonly instances: ReadonlyArray<{ readonly instance_id: NonEmptyString; readonly run_id: NonEmptyString; readonly addon_id: NonEmptyString; readonly title: NonEmptyString; readonly revision: NonEmptyString; readonly incarnation: NonEmptyString; readonly action_schema: { readonly [x: string]: unknown } | null; readonly package: { readonly outputs: { readonly [x: NonEmptyString]: { readonly lanes: readonly [NonEmptyString, ...NonEmptyString[]]; readonly all_lanes?: undefined } | { readonly all_lanes: true; readonly lanes?: undefined } }; readonly binding_schema: { readonly [x: string]: unknown } | null; readonly presentation: { readonly description: NonEmptyString | null; readonly readings: ReadonlyArray<{ readonly lane_id: NonEmptyString; readonly path: readonly [NonEmptyString, ...NonEmptyString[]]; readonly label: NonEmptyString; readonly unit: NonEmptyString | null; readonly format: "text" | "number" | "boolean" | "json" }> } }; readonly configuration: { readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly revision: NonEmptyString } | null; readonly phase: { readonly kind: "attached" | "observing" | "failed" | "detaching" | "detached"; readonly message?: string | undefined }; readonly observation_seq: Int & nonNegative; readonly rows_count: Int & nonNegative; readonly error?: string | null | undefined }>; readonly rows: ReadonlyArray<{ readonly id: NonEmptyString; readonly lane_id: NonEmptyString; readonly kind: "event" | "value" | "relation"; readonly title: NonEmptyString; readonly observed_at: finite; readonly subject_id: NonEmptyString; readonly clock: { readonly domain: NonEmptyString; readonly value: NonEmptyString } | null; readonly actor: NonEmptyString | null; readonly fields: { readonly [x: string]: unknown }; readonly evidence: ReadonlyArray<{ readonly uri: NonEmptyString; readonly sha256: NonEmptyString | null }>; readonly related_ids: ReadonlyArray<NonEmptyString> }>; readonly coverage: ReadonlyArray<{ readonly source_id: NonEmptyString; readonly incarnation: NonEmptyString; readonly cursor: NonEmptyString | null; readonly complete: boolean; readonly detail: NonEmptyString | null }> }
+└─ ["configuration"]
+   └─ { readonly directory: NonEmptyString; readonly complete: boolean; readonly issues: ReadonlyArray<{ readonly source_path: NonEmptyString; readonly id: NonEmptyString | null; readonly message: NonEmptyString }>; readonly declarations: ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }> } | null
+      ├─ { readonly directory: NonEmptyString; readonly complete: boolean; readonly issues: ReadonlyArray<{ readonly source_path: NonEmptyString; readonly id: NonEmptyString | null; readonly message: NonEmptyString }>; readonly declarations: ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }> }
+      │  └─ ["declarations"]
+      │     └─ ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }>
+      │        └─ [0]
+      │           └─ { readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }
+      │              └─ ["enabled"]
+      │                 └─ is missing
+      └─ Expected null, actual {"directory":"/config","complete":true,"issues":[],"declarations":[{"id":"suffix-only","source_path":"/config/.toml","desired_revision":"r1","applied_revision":null,"instance_id":null}]}
+ ❯ parseError node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/ParseResult.ts:266:62
+ ❯ onLeft node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/Either.ts:1023:9
+ ❯ body node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/Function.ts:245:18
+ ❯ getOrThrowWith node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/ParseResult.ts:481:12
+ ❯ src/components/lane-addons-panel.test.ts:64:43
+     62|   it('offers the editor for the loader-supported suffix-only TOML file…
+     63|     const sourcePath = '/config/.toml'
+     64|     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...…
+       |                                           ^
+     65|       configuration: { directory: '/config', complete: true, issues: […
+     66|         { id: 'suffix-only', source_path: sourcePath, desired_revision…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > blocks removal for backend refusal: owned file renamed to another ID
+ParseError: { readonly configuration: { readonly directory: NonEmptyString; readonly complete: boolean; readonly issues: ReadonlyArray<{ readonly source_path: NonEmptyString; readonly id: NonEmptyString | null; readonly message: NonEmptyString }>; readonly declarations: ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }> } | null; readonly instances: ReadonlyArray<{ readonly instance_id: NonEmptyString; readonly run_id: NonEmptyString; readonly addon_id: NonEmptyString; readonly title: NonEmptyString; readonly revision: NonEmptyString; readonly incarnation: NonEmptyString; readonly action_schema: { readonly [x: string]: unknown } | null; readonly package: { readonly outputs: { readonly [x: NonEmptyString]: { readonly lanes: readonly [NonEmptyString, ...NonEmptyString[]]; readonly all_lanes?: undefined } | { readonly all_lanes: true; readonly lanes?: undefined } }; readonly binding_schema: { readonly [x: string]: unknown } | null; readonly presentation: { readonly description: NonEmptyString | null; readonly readings: ReadonlyArray<{ readonly lane_id: NonEmptyString; readonly path: readonly [NonEmptyString, ...NonEmptyString[]]; readonly label: NonEmptyString; readonly unit: NonEmptyString | null; readonly format: "text" | "number" | "boolean" | "json" }> } }; readonly configuration: { readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly revision: NonEmptyString } | null; readonly phase: { readonly kind: "attached" | "observing" | "failed" | "detaching" | "detached"; readonly message?: string | undefined }; readonly observation_seq: Int & nonNegative; readonly rows_count: Int & nonNegative; readonly error?: string | null | undefined }>; readonly rows: ReadonlyArray<{ readonly id: NonEmptyString; readonly lane_id: NonEmptyString; readonly kind: "event" | "value" | "relation"; readonly title: NonEmptyString; readonly observed_at: finite; readonly subject_id: NonEmptyString; readonly clock: { readonly domain: NonEmptyString; readonly value: NonEmptyString } | null; readonly actor: NonEmptyString | null; readonly fields: { readonly [x: string]: unknown }; readonly evidence: ReadonlyArray<{ readonly uri: NonEmptyString; readonly sha256: NonEmptyString | null }>; readonly related_ids: ReadonlyArray<NonEmptyString> }>; readonly coverage: ReadonlyArray<{ readonly source_id: NonEmptyString; readonly incarnation: NonEmptyString; readonly cursor: NonEmptyString | null; readonly complete: boolean; readonly detail: NonEmptyString | null }> }
+└─ ["configuration"]
+   └─ { readonly directory: NonEmptyString; readonly complete: boolean; readonly issues: ReadonlyArray<{ readonly source_path: NonEmptyString; readonly id: NonEmptyString | null; readonly message: NonEmptyString }>; readonly declarations: ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }> } | null
+      ├─ { readonly directory: NonEmptyString; readonly complete: boolean; readonly issues: ReadonlyArray<{ readonly source_path: NonEmptyString; readonly id: NonEmptyString | null; readonly message: NonEmptyString }>; readonly declarations: ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }> }
+      │  └─ ["declarations"]
+      │     └─ ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }>
+      │        └─ [0]
+      │           └─ { readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }
+      │              └─ ["enabled"]
+      │                 └─ is missing
+      └─ Expected null, actual {"directory":"/config","complete":true,"declarations":[{"id":"renamed","source_path":"/config/site.toml","desired_revision":"r2","applied_revision":null,"instance_id":null}],"issues":[]}
+ ❯ parseError node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/ParseResult.ts:266:62
+ ❯ onLeft node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/Either.ts:1023:9
+ ❯ body node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/Function.ts:245:18
+ ❯ getOrThrowWith node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/ParseResult.ts:481:12
+ ❯ src/components/lane-addons-panel.test.ts:336:43
+    334|     ], []],
+    335|   ] as const)('blocks removal for backend refusal: %s', async (_name, …
+    336|     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...…
+       |                                           ^
+    337|       configuration: { directory: '/config', complete, declarations, i…
+    338|       instances: [{ ...snapshot.instances[0], configuration: { id: 'we…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/components/lane-addons-panel.test.ts > optional Lane Add-on surface > blocks removal for backend refusal: duplicate ID declarations
+ParseError: { readonly configuration: { readonly directory: NonEmptyString; readonly complete: boolean; readonly issues: ReadonlyArray<{ readonly source_path: NonEmptyString; readonly id: NonEmptyString | null; readonly message: NonEmptyString }>; readonly declarations: ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }> } | null; readonly instances: ReadonlyArray<{ readonly instance_id: NonEmptyString; readonly run_id: NonEmptyString; readonly addon_id: NonEmptyString; readonly title: NonEmptyString; readonly revision: NonEmptyString; readonly incarnation: NonEmptyString; readonly action_schema: { readonly [x: string]: unknown } | null; readonly package: { readonly outputs: { readonly [x: NonEmptyString]: { readonly lanes: readonly [NonEmptyString, ...NonEmptyString[]]; readonly all_lanes?: undefined } | { readonly all_lanes: true; readonly lanes?: undefined } }; readonly binding_schema: { readonly [x: string]: unknown } | null; readonly presentation: { readonly description: NonEmptyString | null; readonly readings: ReadonlyArray<{ readonly lane_id: NonEmptyString; readonly path: readonly [NonEmptyString, ...NonEmptyString[]]; readonly label: NonEmptyString; readonly unit: NonEmptyString | null; readonly format: "text" | "number" | "boolean" | "json" }> } }; readonly configuration: { readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly revision: NonEmptyString } | null; readonly phase: { readonly kind: "attached" | "observing" | "failed" | "detaching" | "detached"; readonly message?: string | undefined }; readonly observation_seq: Int & nonNegative; readonly rows_count: Int & nonNegative; readonly error?: string | null | undefined }>; readonly rows: ReadonlyArray<{ readonly id: NonEmptyString; readonly lane_id: NonEmptyString; readonly kind: "event" | "value" | "relation"; readonly title: NonEmptyString; readonly observed_at: finite; readonly subject_id: NonEmptyString; readonly clock: { readonly domain: NonEmptyString; readonly value: NonEmptyString } | null; readonly actor: NonEmptyString | null; readonly fields: { readonly [x: string]: unknown }; readonly evidence: ReadonlyArray<{ readonly uri: NonEmptyString; readonly sha256: NonEmptyString | null }>; readonly related_ids: ReadonlyArray<NonEmptyString> }>; readonly coverage: ReadonlyArray<{ readonly source_id: NonEmptyString; readonly incarnation: NonEmptyString; readonly cursor: NonEmptyString | null; readonly complete: boolean; readonly detail: NonEmptyString | null }> }
+└─ ["configuration"]
+   └─ { readonly directory: NonEmptyString; readonly complete: boolean; readonly issues: ReadonlyArray<{ readonly source_path: NonEmptyString; readonly id: NonEmptyString | null; readonly message: NonEmptyString }>; readonly declarations: ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }> } | null
+      ├─ { readonly directory: NonEmptyString; readonly complete: boolean; readonly issues: ReadonlyArray<{ readonly source_path: NonEmptyString; readonly id: NonEmptyString | null; readonly message: NonEmptyString }>; readonly declarations: ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }> }
+      │  └─ ["declarations"]
+      │     └─ ReadonlyArray<{ readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }>
+      │        └─ [0]
+      │           └─ { readonly id: NonEmptyString; readonly source_path: NonEmptyString; readonly enabled: boolean; readonly desired_revision: NonEmptyString; readonly applied_revision: NonEmptyString | null; readonly instance_id: NonEmptyString | null }
+      │              └─ ["enabled"]
+      │                 └─ is missing
+      └─ Expected null, actual {"directory":"/config","complete":true,"declarations":[{"id":"website","source_path":"/config/site.toml","desired_revision":"r1","applied_revision":"r1","instance_id":"instance-1"},{"id":"website","source_path":"/config/other.toml","desired_revision":"r1","applied_revision":null,"instance_id":null}],"issues":[]}
+ ❯ parseError node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/ParseResult.ts:266:62
+ ❯ onLeft node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/Either.ts:1023:9
+ ❯ body node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/Function.ts:245:18
+ ❯ getOrThrowWith node_modules/.pnpm/effect@3.22.1/node_modules/effect/src/ParseResult.ts:481:12
+ ❯ src/components/lane-addons-panel.test.ts:336:43
+    334|     ], []],
+    335|   ] as const)('blocks removal for backend refusal: %s', async (_name, …
+    336|     api.fetchLaneAddons.mockResolvedValue(parseLaneAddonSnapshot({ ...…
+       |                                           ^
+    337|       configuration: { directory: '/config', complete, declarations, i…
+    338|       instances: [{ ...snapshot.instances[0], configuration: { id: 'we…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed | 6 passed (7)
+      Tests  3 failed | 144 passed (147)
+   Start at  03:15:03
+   Duration  7.05s (import 36%, tests 26%, environment 16%, setup 12%, transform 10%)
+
+     Import  147 modules were evaluated 516 times · 2.26s total, 36% of tracked time
+             ~1.62s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation
+
+ ELIFECYCLE  Test failed. See above for more details.

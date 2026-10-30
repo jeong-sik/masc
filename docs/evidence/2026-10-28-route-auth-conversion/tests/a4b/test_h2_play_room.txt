@@ -1,0 +1,9 @@
+[2026-10-29 00:25:48] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `H2 Play room'.
+This run has ID `7PJ18Y3R'.
+
+  [OK]          routes          0   read, write, auth and validation.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/H2 Play room'.
+Test Successful in 0.996s. 1 test run.
+exit=0

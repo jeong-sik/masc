@@ -1,0 +1,94 @@
+type t =
+  { category : Agent_core.Error.category
+  ; message : string
+  }
+
+(* [category] already names the family, so [message] must not say it again.
+   Agent-core renders [Internal] and [Internal_carried] as
+   "Internal error: <payload>", which is that label and nothing more, and the
+   summary then reads "internal: Internal error: ...". Every other family
+   renders the specific failure -- "Rate limited: ...", "Payment required:
+   ...", "Invalid config 'x': ...", "Task timed out: ..." -- which the coarse
+   category does not carry, so those keep what agent-core wrote.
+
+   Matched by constructor. Stripping a prefix off the rendered string would be
+   one new "Internal ..." sentence away from cutting a real message.
+
+   A carried MASC error's payload is its own prefixed JSON, which is the
+   escaping RFC-0454 removes. Both producers classify before they reach here
+   (the header says so), and that precondition carries the same weight either
+   way: [to_string] would have written the same payload behind the prefix. *)
+let message_of_core_error = function
+  | Agent_core.Error.Internal message
+  | Agent_core.Error.Internal_carried { message; _ } -> message
+  | (Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _) as error -> Agent_core.Error.to_string error
+;;
+
+let of_core_error error =
+  { category = Agent_core.Error.category error
+  ; message = message_of_core_error error
+  }
+;;
+
+(* A leaf message is agent-core's own text and may span lines; the summary is
+   one line. *)
+let one_line text = String.map (function '\n' | '\r' -> ' ' | c -> c) text
+
+let category_to_string : Agent_core.Error.category -> string = function
+  | Agent_core.Error.Api_category -> "api"
+  | Agent_core.Error.Provider_category -> "provider"
+  | Agent_core.Error.Agent_category -> "agent"
+  | Agent_core.Error.Mcp_category -> "mcp"
+  | Agent_core.Error.Config_category -> "config"
+  | Agent_core.Error.Serialization_category -> "serialization"
+  | Agent_core.Error.Io_category -> "io"
+  | Agent_core.Error.Orchestration_category -> "orchestration"
+  | Agent_core.Error.Media_category -> "media"
+  | Agent_core.Error.Internal_category -> "internal"
+;;
+
+let category_of_string = function
+  | "api" -> Some Agent_core.Error.Api_category
+  | "provider" -> Some Agent_core.Error.Provider_category
+  | "agent" -> Some Agent_core.Error.Agent_category
+  | "mcp" -> Some Agent_core.Error.Mcp_category
+  | "config" -> Some Agent_core.Error.Config_category
+  | "serialization" -> Some Agent_core.Error.Serialization_category
+  | "io" -> Some Agent_core.Error.Io_category
+  | "orchestration" -> Some Agent_core.Error.Orchestration_category
+  | "media" -> Some Agent_core.Error.Media_category
+  | "internal" -> Some Agent_core.Error.Internal_category
+  | _ -> None
+;;
+
+let summary { category; message } =
+  Printf.sprintf "%s: %s" (category_to_string category) (one_line message)
+;;
+
+let to_yojson { category; message } =
+  `Assoc
+    [ "category", `String (category_to_string category); "message", `String message ]
+;;
+
+let of_yojson json =
+  match json with
+  | `Assoc fields ->
+    let actual = List.sort String.compare (List.map fst fields) in
+    if not (List.equal String.equal actual [ "category"; "message" ])
+    then
+      Error
+        (Printf.sprintf
+           "core failure fields must be exactly [category,message], got [%s]"
+           (String.concat "," actual))
+    else (
+      match List.assoc_opt "category" fields, List.assoc_opt "message" fields with
+      | Some (`String category), Some (`String message) ->
+        (match category_of_string category with
+         | Some category -> Ok { category; message }
+         | None ->
+           Error
+             (Printf.sprintf "core failure has unknown category %S" category))
+      | _ -> Error "core failure category and message must both be strings")
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error "core failure is not an object"
+;;

@@ -1,0 +1,404 @@
+(* Real Play seat/invite and DOS pass routes share current named authority.
+   Old UUID and alias payloads stay intact as data across external replacement. *)
+open Alcotest
+module D = Masc_domain
+module Invite = Masc.Play_invite
+
+let () = Mirage_crypto_rng_unix.use_default ()
+
+let auth_ok = function
+  | Ok value -> value
+  | Error error -> fail (D.masc_error_to_string error)
+
+let dos_ok = function
+  | Ok value -> value
+  | Error error -> fail (Dos_lane.error_to_string error)
+
+let read path = In_channel.with_open_bin path In_channel.input_all
+let controller () = (dos_ok (Dos_lane.screen ())).Dos_lane.controller
+
+let with_workspace f =
+  let base_path = Filename.temp_dir "play-current-authority-" "" in
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio_mock.Clock.make () in
+  Eio_mock.Clock.set_time clock 1893455900.;
+  Time_compat.set_clock (clock :> float Eio.Time.clock_ty Eio.Resource.t);
+  Eio.Switch.run @@ fun sw ->
+  Eio.Switch.on_release sw (fun () ->
+    Dos_lane.install_activity_observer None;
+    (match Dos_lane.screen () with
+     | Ok { controller; _ } ->
+       (match Dos_lane.eject ~who:(Option.value controller ~default:"cleanup") ~announce:ignore () with
+        | Ok () | Error _ -> ())
+     | Error _ -> ());
+    Time_compat.clear_clock ();
+    Fs_compat.remove_tree base_path;
+    Fs_compat.clear_fs ());
+  Dos_lane.install_activity_observer (Some (fun () -> Machine_configuration.Enabled));
+  Auth.save_auth_config base_path { D.default_auth_config with enabled = true; require_token = true };
+  let operator, _ = auth_ok (Auth.create_token_without_expiry base_path ~agent_name:"operator" ~role:D.Admin) in
+  let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+  let _screen = dos_ok (Dos_lane.load ~who:"operator"
+    ~ledger_dir:(Filename.concat base_path "ledger") ~saves_dir:(Filename.concat base_path "saves")
+    ~checkpoint_dir:(Filename.concat base_path "checkpoints") ~previous_autosave:Dos_lane.Keep_previous_autosave ~program_name:"spin.com"
+    ~program_bytes:"\xeb\xfe" ~files:[] ~announce:ignore) in
+  (* #42001: machine actions on the HTTP surface go through an attached
+     worker. Attach one for the success paths; the pre-attach 503 refusal
+     assertions keep covering the unattached surface. The real clock drives
+     the fixture's readiness polling; the product mock clock stays in
+     Time_compat for timestamp determinism. The root switch comes from
+     Eio_context.with_test_env, which the attach dispatch needs as the
+     server background owner (lane_addon_runtime Attach). *)
+  Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+    (fun () ->
+      (* The attach dispatch needs a loaded runtime state, and machine
+         tools refuse calls while machines.dos is off. Seed the same minimal
+         runtime.toml the seat fixture loads, then restore the prior state
+         so other suites are unaffected. *)
+      Masc.Lane_addon_runtime.For_testing.reset ();
+      let runtime_path = Filename.concat base_path "runtime.toml" in
+      Out_channel.with_open_bin runtime_path (fun channel -> output_string channel {|[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+[models.sample]
+api-name = "sample"
+max-context = 1024
+[local.sample]
+[runtime]
+default = "local.sample"
+[machines.dos]
+enabled = true
+[machines.msx]
+enabled = true
+|});
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> () | Error detail -> fail detail);
+      Machine_worker_fixture.with_dos ~clock:(Eio.Stdenv.clock env) ~sw ~base_path
+        (fun ~invoke:_ ~detach ->
+          f base_path state operator;
+          detach ()))
+
+let dispatch ~state ~token ~meth ~target ~body =
+  let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+    | Ok authority -> authority | Error `Malformed -> fail "invalid fixture authority" in
+  Server_request_authority.with_current authority (fun () ->
+    let router = Masc.Http_server_eio.Router.create ()
+      |> Server_routes_http_routes_play.add_routes
+      |> Server_routes_http_routes_play_page.add_routes
+      |> Server_routes_http_routes_dos.add_routes in
+    Server_auth.publish_server_state state;
+    let response = Buffer.create 1024 in
+    let connection = Httpun.Server_connection.create (fun reqd ->
+      Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    let request = Printf.sprintf
+      "%s %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\nAuthorization: Bearer %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s"
+      meth target token (String.length body) body in
+    let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+    let _consumed = Httpun.Server_connection.read_eof connection bytes ~off:0 ~len:(Bigstringaf.length bytes) in
+    let rec flush () = match Httpun.Server_connection.next_write_operation connection with
+      | `Write iovecs ->
+        let count = List.fold_left (fun count (iov : Bigstringaf.t Httpun.IOVec.t) ->
+          Buffer.add_string response (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+          count + iov.len) 0 iovecs in
+        Httpun.Server_connection.report_write_result connection (`Ok count); flush ()
+      | `Yield | `Close _ -> () in
+    flush ();
+    Server_auth.clear_server_state ();
+    Buffer.contents response)
+
+let status response = match String.split_on_char ' ' response with
+  | _ :: code :: _ -> int_of_string code
+  | _ -> fail "fixture response has no status"
+
+let json response =
+  let rec body at =
+    if at + 4 > String.length response then fail "fixture response has no body"
+    else if String.sub response at 4 = "\r\n\r\n" then at + 4
+    else body (at + 1) in
+  let at = body 0 in
+  Yojson.Safe.from_string (String.sub response at (String.length response - at))
+
+let member field = function
+  | `Assoc fields -> List.assoc_opt field fields
+  | _ -> None
+
+let seed_guest base_path role =
+  let token, initial = auth_ok (Auth.ensure_keeper_credential base_path ~agent_name:"guest") in
+  let credential = { initial with D.role; expires_at = Some "2030-01-01T00:00:00Z" } in
+  Auth.save_credential base_path credential;
+  let uuid = match credential.id with
+    | Some id -> Auth.credential_file base_path (D.Credential_id.to_string id)
+    | None -> fail "guest fixture requires a UUID" in
+  let () = auth_ok (Auth.ensure_credential_alias base_path ~canonical_name:"guest" ~alias_name:"short-guest") in
+  token, credential, uuid
+
+let check_routes ~state ~operator ~names ~invites =
+  let seat = dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
+  check int "current seat route succeeds" 200 (status seat);
+  let roster = dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play_page.participants_path ~body:"" in
+  check int "current roster route succeeds" 200 (status roster);
+  check (option string) "roster names are current" (Some (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) names))))
+    (Option.map Yojson.Safe.to_string (member "participants" (json roster)));
+  let response = dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play.invites_path ~body:"" in
+  check int "current invite route succeeds" 200 (status response);
+  let listed = match member "invites" (json response) with
+    | Some (`List rows) -> List.map (fun row -> match member "name" row with
+        | Some (`String name) -> name | _ -> fail "invite has no name") rows
+    | _ -> fail "invite list missing" in
+  check (list string) "invite names are current" invites listed
+
+type transition = Removed | Worker
+
+let test_surviving_data ~role transition = with_workspace @@ fun base_path state operator ->
+  let guest_token, credential, uuid = seed_guest base_path role in
+  let uuid_before = read uuid in
+  let alias = Auth.credential_file base_path "short-guest" in
+  let alias_before = read alias in
+  check_routes ~state ~operator ~names:[ "guest"; "operator" ]
+    ~invites:(match role with D.Player -> [ "guest" ] | D.Admin | D.Worker -> []);
+  let pass token target = dispatch ~state ~token ~meth:"POST" ~target:"/api/v1/dos/pass"
+      ~body:(Yojson.Safe.to_string (`Assoc [ "to", `String target ])) in
+  check int "a healthy current guest receives the controller" 200 (status (pass operator "guest"));
+  check (option string) "the guest holds its turn" (Some "guest") (controller ());
+  check int "the current guest can pass back" 200 (status (pass guest_token "operator"));
+  let named = Auth.credential_file base_path "guest" in
+  let worker_token = "play-current-worker-fixture" in
+  (match transition with
+   | Removed -> Unix.unlink named
+   | Worker ->
+     let worker = { credential with D.id = None; role = D.Worker; token = Auth.sha256_hash worker_token } in
+     Auth.save_private_text_file named (D.agent_credential_to_yojson worker |> Yojson.Safe.to_string));
+  check_routes ~state ~operator ~names:[ "operator" ] ~invites:[];
+  check int "a stale guest is not an eligible handoff target" 400 (status (pass operator "guest"));
+  check (option string) "refused handoff preserves the operator turn" (Some "operator") (controller ());
+  check int "current operator handoff remains usable" 200 (status (pass operator "operator"));
+  (match transition with
+   | Removed -> ()
+   | Worker -> check bool "the current Worker still authenticates without becoming a seat" true
+       (Result.is_ok (Auth.verify_token base_path ~agent_name:"guest" ~token:worker_token)));
+  check string "old UUID bytes preserved" uuid_before (read uuid);
+  check string "stored alias bytes preserved" alias_before (read alias);
+  check bool "surviving alias remains readable as credential data" true
+    (Auth.load_credential base_path "short-guest" = Some credential)
+
+type unknown = Malformed | Dangling | Foreign
+
+let test_unknown_current_binding unknown = with_workspace @@ fun base_path state operator ->
+  let _, credential, uuid = seed_guest base_path D.Player in
+  let uuid_before = read uuid in
+  let named = Auth.credential_file base_path "guest" in
+  let named_before = read named in
+  (match unknown with
+   | Malformed -> Auth.save_private_text_file named "{"
+   | Dangling -> Unix.unlink named; Unix.symlink (named ^ ".absent") named
+   | Foreign -> Auth.save_private_text_file named {|{"redirect_to":"operator.json"}|});
+  check bool "unknown current authority is an Auth error" true (Result.is_error (Auth.list_current_credentials base_path));
+  let roster = dispatch ~state ~token:operator ~meth:"GET"
+      ~target:Server_routes_http_routes_play_page.participants_path ~body:"" in
+  check int "unknown seats are not an empty successful list" 503 (status roster);
+  (* The seat reads only the caller and the holder, so another credential's
+     unknown binding does not take it down. *)
+  let seat = dispatch ~state ~token:operator ~meth:"GET"
+      ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
+  check int "the operator's own seat stays readable" 200 (status seat);
+  let invites = dispatch ~state ~token:operator ~meth:"GET"
+      ~target:Server_routes_http_routes_play.invites_path ~body:"" in
+  check int "unknown invites are unavailable" 503 (status invites);
+  check (option string) "invite refusal has a typed storage code" (Some "credentials_unreadable")
+    (match member "code" (json invites) with Some (`String code) -> Some code | _ -> None);
+  let passed = dispatch ~state ~token:operator ~meth:"POST" ~target:"/api/v1/dos/pass" ~body:{|{"to":"guest"}|} in
+  check int "an unreadable seat cannot authorize a pass" 503 (status passed);
+  check (option string) "unknown authority preserves the controller" (Some "operator") (controller ());
+  check string "lookup preserves old UUID bytes" uuid_before (read uuid);
+  (match unknown with
+   | Malformed -> check string "malformed current file preserved" "{" (read named)
+   | Dangling -> check string "dangling current binding preserved" (named ^ ".absent") (Unix.readlink named)
+   | Foreign -> check string "foreign redirect preserved" {|{"redirect_to":"operator.json"}|} (read named));
+  Unix.unlink named;
+  Auth.save_private_text_file named named_before;
+  check bool "current named credential is recovered" true (Auth.load_credential base_path "guest" = Some credential);
+  check_routes ~state ~operator ~names:[ "guest"; "operator" ] ~invites:[ "guest" ]
+
+let test_unresolved_data_does_not_hide_healthy_current_owners () = with_workspace @@ fun base_path state operator ->
+  let _, _, _uuid = seed_guest base_path D.Player in
+  let unresolved = Auth.credential_file base_path "unknown-data" in
+  Auth.save_private_text_file unresolved "{";
+  check_routes ~state ~operator ~names:[ "guest"; "operator" ] ~invites:[ "guest" ];
+  check string "unresolved data with no established owner is preserved" "{" (read unresolved)
+
+let test_stale_invalid_expiry_does_not_override_current_worker () =
+  with_workspace @@ fun base_path state operator ->
+  let _, old, uuid = seed_guest base_path D.Player in
+  let current = { old with D.id = None; role = D.Worker;
+    token = Auth.sha256_hash "current-worker-token" } in
+  Auth.save_private_text_file (Auth.credential_file base_path "guest")
+    (D.agent_credential_to_yojson current |> Yojson.Safe.to_string);
+  Auth.save_private_text_file uuid
+    (D.agent_credential_to_yojson { old with expires_at = Some "invalid-expiry" }
+      |> Yojson.Safe.to_string);
+  check_routes ~state ~operator ~names:["operator"] ~invites:[]
+
+let test_invite_listing_completes_after_credential_publication () =
+  with_workspace @@ fun base_path state operator ->
+  let _, _, _uuid = seed_guest base_path D.Player in
+  (* Keep HTTP authentication out of the contention being exercised. The
+     fixture clock is fixed, so this index stays current until the deletion. *)
+  ignore (auth_ok (Auth.find_credential_by_token base_path ~token:operator));
+  let lock_path = Filename.concat (Unix.realpath (Auth.auth_dir base_path)) ".credentials.lock" in
+  Eio.Switch.run @@ fun sw ->
+  let completed, resolve = Eio.Promise.create () in
+  ignore (auth_ok (Auth.with_credential_transaction base_path (fun transaction ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve resolve (dispatch ~state ~token:operator ~meth:"GET"
+        ~target:Server_routes_http_routes_play.invites_path ~body:""));
+    let rec await_listing () =
+      (* Two admitted/waiting operations are this publisher and the listing.
+         No elapsed-time threshold stands in for reaching that boundary. *)
+      if File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 2 then ()
+      else match Eio.Promise.peek completed with
+        | Some _ -> fail "invite listing bypassed the credential transaction"
+        | None -> Eio.Fiber.yield (); await_listing () in
+    await_listing ();
+    ignore (auth_ok (Auth.delete_credential_in_transaction transaction "guest")))));
+  let response = Eio.Promise.await completed in
+  check int "the contended HTTP listing completes" 200 (status response);
+  check (option string) "the completed publication determines the invite list" (Some "[]")
+    (Option.map Yojson.Safe.to_string (member "invites" (json response)));
+  check (option string) "listing never changes the machine controller" (Some "operator") (controller ())
+
+let test_waiting_invite_listing_is_cancellable ~invalid_expiry () =
+  with_workspace @@ fun base_path _state _operator ->
+  let _, guest, _uuid = seed_guest base_path D.Player in
+  if invalid_expiry then
+    Auth.save_credential base_path { guest with expires_at = Some "invalid-expiry" };
+  let lock_path = Filename.concat (Unix.realpath (Auth.auth_dir base_path)) ".credentials.lock" in
+  let cancelled = auth_ok (Auth.with_credential_transaction base_path (fun _transaction ->
+    let cancelled = Eio.Fiber.first
+      (fun () -> ignore (Invite.list ~base_path ~now:(Time_compat.now ())); false)
+      (fun () ->
+        let rec await_listing () =
+          if File_lock_eio.For_testing.holders_and_waiters ~lock_path >= 2 then true
+          else (Eio.Fiber.yield (); await_listing ()) in
+        await_listing ()) in
+    (* The publisher still owns this transaction. Cancellation must remove the
+       listing's waiter before this callback releases it, without a worker
+       remaining blocked in a non-Eio mutex or process lock. *)
+    check int "only the publisher remains after request cancellation" 1
+      (File_lock_eio.For_testing.holders_and_waiters ~lock_path);
+    cancelled)) in
+  check bool "the waiting listing is cancelled" true cancelled;
+  check bool "cancellation preserves the invite" true
+    (Sys.file_exists (Auth.credential_file base_path "guest"));
+  let next = Invite.list ~base_path ~now:(Time_compat.now ()) in
+  match invalid_expiry, next with
+  | false, Ok [ { Invite.invite_name = "guest"; _ } ] -> ()
+  | true, Error (Invite.Invalid_expiry (D.Credential_expiry.Invalid_timestamp "invalid-expiry")) -> ()
+  | _ -> fail "the next listing must retain the authoritative invite or expiry refusal"
+
+(* The invite list names the workspace the terminal confirmed. A server swapped
+   onto the same port answers 409 before any credential is listed. *)
+let test_invite_listing_is_bound_to_the_expected_workspace () =
+  with_workspace @@ fun base_path state operator ->
+  let config = Masc.Workspace.default_config base_path in
+  let masc_root = Masc.Workspace.masc_dir config in
+  let other = Filename.temp_dir "play-invites-other-" "" in
+  let path = Server_routes_http_routes_play.invites_path in
+  let bound base root = Printf.sprintf "%s?expected_base_path=%s&expected_masc_root=%s" path base root in
+  let get target = dispatch ~state ~token:operator ~meth:"GET" ~target ~body:"" in
+  let code response = match member "code" (json response) with
+    | Some (`String code) -> Some code | _ -> None in
+  check int "an unbound listing is served" 200 (status (get path));
+  check int "this workspace is served" 200
+    (status (get (bound (Unix.realpath base_path) (Unix.realpath masc_root))));
+  let conflict = get (bound (Unix.realpath other) (Unix.realpath other)) in
+  check int "another workspace is a conflict" 409 (status conflict);
+  check (option string) "the conflict names the precondition" (Some "workspace_precondition_failed")
+    (code conflict);
+  let partial = get (path ^ "?expected_base_path=" ^ Unix.realpath base_path) in
+  check int "one field alone is a bad request" 400 (status partial);
+  Fs_compat.remove_tree other
+
+type controller_holder = Live_holder | Expired_holder | Removed_holder | Stopped_keeper
+
+let test_seat_reports_controller_recovery holder =
+  with_workspace @@ fun base_path state operator ->
+  let _, guest, _ = seed_guest base_path D.Player in
+  ignore (dos_ok (Dos_lane.pass ~who:"operator" ~to_:(Some "guest") ~announce:ignore));
+  (match holder with
+   | Live_holder -> ()
+   | Expired_holder ->
+     Auth.save_credential base_path { guest with expires_at = Some "2000-01-01T00:00:00Z" }
+   | Removed_holder -> Auth.delete_credential base_path "guest"
+   | Stopped_keeper ->
+     let meta = match Masc_test_deps.meta_of_json_fixture
+       (`Assoc [ "name", `String "guest"; "activation_mode", `String "manual" ]) with
+       | Ok meta -> meta | Error error -> fail error in
+     (match Masc.Keeper_meta_store.replace_snapshot (Masc.Mcp_server.workspace_config state) meta with
+      | Ok () -> () | Error error -> fail error));
+  let recoverable = match holder with
+    | Live_holder -> false
+    | Expired_holder | Removed_holder | Stopped_keeper -> true in
+  let answer = dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
+  check int "the current seat can be observed" 200 (status answer);
+  check bool "departure is reported from authoritative holder state" true
+    (member "controller_recoverable" (json answer) = Some (`Bool recoverable));
+  check (option string) "observing departure never releases the controller" (Some "guest") (controller ());
+  let moved = dispatch ~state ~token:operator ~meth:"POST" ~target:"/api/v1/dos/step"
+    ~body:{|{"steps":1,"until_ready":false}|} in
+
+  if status moved <> (if recoverable then 200 else 400)
+  then prerr_endline ("PROBE moved=" ^ moved);
+  check int "only an actual move can recover a departed controller" (if recoverable then 200 else 400) (status moved);
+  check (option string) "the authoritative move retains or recovers the expected holder"
+    (Some (if recoverable then "operator" else "guest")) (controller ())
+
+let test_recovery_eligibility_is_rechecked_before_move () =
+  with_workspace @@ fun base_path state operator ->
+  let _, guest, _ = seed_guest base_path D.Player in
+  ignore (dos_ok (Dos_lane.pass ~who:"operator" ~to_:(Some "guest") ~announce:ignore));
+  Auth.save_credential base_path { guest with expires_at = Some "2000-01-01T00:00:00Z" };
+  let answer = dispatch ~state ~token:operator ~meth:"GET"
+    ~target:Server_routes_http_routes_play_page.seat_path ~body:"" in
+  check int "the departed holder can be observed" 200 (status answer);
+  check bool "the observed controller can be recovered" true
+    (member "controller_recoverable" (json answer) = Some (`Bool true));
+  Auth.save_credential base_path guest;
+  let moved = dispatch ~state ~token:operator ~meth:"POST" ~target:"/api/v1/dos/step"
+    ~body:{|{"steps":1,"until_ready":false}|} in
+  check int "a renewed holder rejects the move despite an older recoverable seat" 400 (status moved);
+  check (option string) "the renewed holder keeps the controller" (Some "guest") (controller ())
+
+let () = run "Play current named authority" [ "routes", [
+  test_case "a newer credential invalidates observed recovery eligibility" `Quick
+    test_recovery_eligibility_is_rechecked_before_move;
+  test_case "seat keeps a live holder observation-only" `Quick
+    (fun () -> test_seat_reports_controller_recovery Live_holder);
+  test_case "seat exposes expired-holder recovery without mutating it" `Quick
+    (fun () -> test_seat_reports_controller_recovery Expired_holder);
+  test_case "seat exposes revoked-holder recovery without mutating it" `Quick
+    (fun () -> test_seat_reports_controller_recovery Removed_holder);
+  test_case "seat exposes stopped-Keeper recovery without mutating it" `Quick
+    (fun () -> test_seat_reports_controller_recovery Stopped_keeper);
+  test_case "listing completes after credential publication in Eio" `Quick test_invite_listing_completes_after_credential_publication;
+  test_case "current-owner listing admission is cancellable" `Quick
+    (test_waiting_invite_listing_is_cancellable ~invalid_expiry:false);
+  test_case "invalid-expiry recheck admission is cancellable" `Quick
+    (test_waiting_invite_listing_is_cancellable ~invalid_expiry:true);
+  test_case "invalid stale UUID cannot override current Worker" `Quick test_stale_invalid_expiry_does_not_override_current_worker;
+  test_case "removed Player keeps data but loses seat and invite" `Quick (fun () -> test_surviving_data ~role:D.Player Removed);
+  test_case "replaced Player uses current Worker authority" `Quick (fun () -> test_surviving_data ~role:D.Player Worker);
+  test_case "removed Admin keeps data but loses seat" `Quick (fun () -> test_surviving_data ~role:D.Admin Removed);
+  test_case "replaced Admin uses current Worker authority" `Quick (fun () -> test_surviving_data ~role:D.Admin Worker);
+  test_case "malformed current binding refuses listing and pass" `Quick (fun () -> test_unknown_current_binding Malformed);
+  test_case "dangling current binding refuses listing and pass" `Quick (fun () -> test_unknown_current_binding Dangling);
+  test_case "foreign current binding refuses listing and pass" `Quick (fun () -> test_unknown_current_binding Foreign);
+  test_case "unresolved ownerless data does not disable healthy seats" `Quick test_unresolved_data_does_not_hide_healthy_current_owners;
+  test_case "invite listing is bound to the expected workspace" `Quick test_invite_listing_is_bound_to_the_expected_workspace;
+] ]

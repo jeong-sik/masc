@@ -1,0 +1,4 @@
+(test
+ (name test_server_oauth_protocol)
+ (modules test_server_oauth_protocol)
+ (libraries alcotest eio eio_main fs_compat h2 httpun masc.auth masc.masc_core masc.masc_tool_dispatch masc.server masc_types mirage-crypto-rng.unix unix uri yojson))

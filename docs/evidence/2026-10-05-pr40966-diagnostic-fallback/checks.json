@@ -1,0 +1,28 @@
+{
+  "baseline_head": "59fe5af3f9cfe84f179ae2d1946f12fdcfd6896c",
+  "source_sha256": {
+    "lib/server/server_lane_addon_sampling.ml": "dd396777b804a1cefc8d42f43416df944ce1583f58408c996c27905cacb88702",
+    "lib/server/server_lane_addon_sampling.mli": "fe3752061ffe887e5526aafb6967773060daf194359c558ad242e4c91326e0e1",
+    "test/test_server_lane_addon_sampling.ml": "087e97ee328e2391d6c50a896a699f45aa8c07a60e64567257e5eb8f18c73e96"
+  },
+  "raw_log_sha256": {
+    "pr40966-diagnostic-red-build.log": "2e3d2a44dcdf5aa7b0b4e3fb2bf06071fbdf27f28bc3bdc9636d865b6689a398",
+    "pr40966-diagnostic-red-build2.log": "988bcadd6b749890bd5f51fc0c4406ba70b4092c79af1e92ac6b2190be1699a4",
+    "pr40966-diagnostic-red.log": "e338f2055a43f48dae28f604a65c1e3c822db0f0191b793826f4e2f138946c92",
+    "pr40966-diagnostic-green-build.log": "988bcadd6b749890bd5f51fc0c4406ba70b4092c79af1e92ac6b2190be1699a4",
+    "pr40966-diagnostic-green.log": "7967646b6c660fdac86cfc345491936bd040a202a6e30e170cb38430be9d6f90"
+  },
+  "binary_sha256": "58df4ac455381d652f72796ccb2957d2b373e37c4497c68aa319a6e7436e7680",
+  "red": {
+    "selector": "host boundary 15",
+    "tests": 1,
+    "failed": 1
+  },
+  "green": {
+    "tests": 18,
+    "failed": 0
+  },
+  "full_suite": false,
+  "provider_dispatch": "loopback fixture only",
+  "TerminalBench": "unrun"
+}

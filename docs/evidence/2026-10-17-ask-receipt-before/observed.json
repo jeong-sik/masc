@@ -1,0 +1,27 @@
+{
+  "scope": "one isolated native diagnostic capture; ancestor source, not matched parent/After proof",
+  "source": "3a8dff0fe1e7ec1c744168fc923ba6dd05856d62",
+  "server_source": "1b5479e708100b482295681b40cd31435ae89ce6",
+  "viewport": [
+    80,
+    24
+  ],
+  "attempts": 1,
+  "native_arms": 1,
+  "captured": 1,
+  "collector_failed": 0,
+  "fixture_verified": true,
+  "answer_posts": 1,
+  "answer_post_status": 200,
+  "recorded": true,
+  "durable_wake_accepted": true,
+  "late_frame_ms_after_confirm_key": 5216.962625039741,
+  "manual_late_frame_observation": "No retained answer outcome is visible after the transient notice; questions/approvals are empty. This is a human observation, not a UI assertion test.",
+  "http_outcomes": {
+    "returned": 71,
+    "stream_closed": 1
+  },
+  "keeper_consumption_or_action_observed": false,
+  "implementation_after": "not built or observed",
+  "latency_distribution": null
+}

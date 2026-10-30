@@ -1,0 +1,644 @@
+(** Regression tests for the keeper-context checkpoint projection.
+
+    1. [message_to_json] no longer emits the flat ["content"] field;
+       [content_blocks] is the write-side source of truth.
+    2. Readers consume [content_blocks] as the sole supported history /
+       checkpoint content shape. *)
+
+module C = Masc.Keeper_context_core
+module T = Agent_core.Types
+
+let checkpoint_write_error_to_string =
+  C.checkpoint_write_error_to_string ~persistence_error_to_string:Fun.id
+
+(* --- message_to_json: no flat [content] field --- *)
+
+let test_message_to_json_omits_flat_content () =
+  let msg : T.message =
+    { origin = Llm_provider.Types.Conversation;
+      T.role = T.User;
+      content = [ T.Text "hello" ];
+      name = None;
+      tool_call_id = None;
+      metadata = [];
+    }
+  in
+  let json = C.message_to_json msg in
+  match json with
+  | `Assoc fields ->
+      Alcotest.(check bool)
+        "no flat content field" false
+        (List.mem_assoc "content" fields);
+      Alcotest.(check bool)
+        "content_blocks present" true
+        (List.mem_assoc "content_blocks" fields)
+  | _ -> Alcotest.fail "expected `Assoc"
+
+(* --- message_of_json: canonical content_blocks only --- *)
+
+let test_message_of_json_new_content_blocks_only () =
+  (* New checkpoints have only content_blocks — must load as before. *)
+  let new_msg : T.message =
+    { origin = Llm_provider.Types.Conversation;
+      T.role = T.Assistant;
+      content = [ T.Text "world" ];
+      name = None;
+      tool_call_id = None;
+      metadata = [];
+    }
+  in
+  let json = C.message_to_json new_msg in
+  let parsed = C.message_of_json json in
+  match parsed.content with
+  | [ T.Text s ] -> Alcotest.(check string) "text" "world" s
+  | _ -> Alcotest.fail "expected one Text block"
+
+let test_message_of_json_rejects_unknown_role () =
+  let json : Yojson.Safe.t =
+    `Assoc [ "origin", `String "conversation";  ("role", `String "operator"); ("content_blocks", `List []) ]
+  in
+  Alcotest.check_raises
+    "unknown role rejected"
+    (Invalid_argument "keeper_context_core: unknown role \"operator\"")
+    (fun () -> C.message_of_json json |> ignore)
+
+let test_message_of_json_rejects_flat_content () =
+  let json : Yojson.Safe.t =
+    `Assoc
+      [ "origin", `String "conversation";
+        ("role", `String "tool");
+        ("content", `String "legacy tool output");
+        ("tool_call_id", `String "call_old");
+      ]
+  in
+  Alcotest.check_raises
+    "flat content rejected"
+    (Invalid_argument "keeper_context_core: missing or invalid content_blocks")
+    (fun () -> C.message_of_json json |> ignore)
+
+(* --- text_of_history_jsonl_json --- *)
+
+let test_history_jsonl_text_uses_blocks_first () =
+  let new_format : Yojson.Safe.t =
+    C.message_to_json
+      { origin = Llm_provider.Types.Conversation;
+        T.role = T.User;
+        content = [ T.Text "structured payload" ];
+        name = None;
+        tool_call_id = None;
+      metadata = [];
+      }
+  in
+  let text = C.text_of_history_jsonl_json new_format in
+  Alcotest.(check string) "text from blocks" "structured payload" text
+
+let test_history_jsonl_text_empty_when_neither () =
+  let empty : Yojson.Safe.t = `Assoc [ ("role", `String "user") ] in
+  let text = C.text_of_history_jsonl_json empty in
+  Alcotest.(check string) "empty when neither field" "" text
+
+(* --- Round-trip: message_to_json then message_of_json then equality on text --- *)
+
+let test_roundtrip_text_preserved () =
+  let original : T.message =
+    { origin = Llm_provider.Types.Conversation;
+      T.role = T.Assistant;
+      content = [ T.Text "alpha"; T.Text "beta" ];
+      name = None;
+      tool_call_id = None;
+      metadata = [];
+    }
+  in
+  let json = C.message_to_json original in
+  let reparsed = C.message_of_json json in
+  let text_of (m : T.message) =
+    String.concat "\n"
+      (List.filter_map
+         (function T.Text s -> Some s | _ -> None)
+         m.content)
+  in
+  Alcotest.(check string) "text preserved"
+    (text_of original) (text_of reparsed)
+
+(* [message_to_json] calls the provider-wire projection for every block, and
+   that projection drops the ToolResult fields a history reader needs: the
+   typed [json] payload is not emitted at all, and [outcome] is flattened to
+   [is_error], so Tool_failed provenance cannot come back. This file says
+   content_blocks is the write-side source of truth; for ToolResult it is a
+   wire copy (#25109). *)
+let test_roundtrip_preserves_tool_result_payload_and_provenance () =
+  let original : T.message =
+    { origin = Llm_provider.Types.Conversation;
+      T.role = T.Tool;
+      content =
+        [
+          T.ToolResult
+            {
+              tool_use_id = "toolu_roundtrip";
+              content = "2 rows matched";
+              outcome =
+                T.Tool_failed
+                  {
+                    failure_kind = T.Validation_error;
+                    error_class = None;
+                  };
+              json = Some (`Assoc [ ("rows", `Int 2) ]);
+              content_blocks = None;
+            };
+        ];
+      name = None;
+      tool_call_id = Some "toolu_roundtrip";
+      metadata = [];
+    }
+  in
+  let reparsed = C.message_of_json (C.message_to_json original) in
+  match reparsed.content with
+  | [ T.ToolResult { json; outcome; _ } ] ->
+      Alcotest.(check string)
+        "typed json payload survives the round-trip"
+        {|{"rows":2}|}
+        (match json with
+         | Some value -> Yojson.Safe.to_string value
+         | None -> "<none>");
+      Alcotest.(check string)
+        "the exact failure kind survives the round-trip"
+        "Types.Validation_error"
+        (match outcome with
+         | T.Tool_failed { failure_kind; _ } ->
+             T.show_tool_failure_kind failure_kind
+         | T.Tool_succeeded -> "<succeeded>")
+  | blocks ->
+      Alcotest.failf "expected one ToolResult block, got %d" (List.length blocks)
+;;
+
+let test_roundtrip_preserves_thinking_signature () =
+  let original : T.message =
+    { origin = Llm_provider.Types.Conversation;
+      T.role = T.Assistant;
+      content =
+        [
+          T.Thinking { signature = None; content = "chain" };
+          T.Thinking { signature = Some "anthropic-signature"; content = "signed" };
+          T.RedactedThinking "encrypted";
+          T.Text "done";
+        ];
+      name = None;
+      tool_call_id = None;
+      metadata = [];
+    }
+  in
+  let json = C.message_to_json original in
+  let reparsed = C.message_of_json json in
+  match reparsed.content with
+  | [
+   T.Thinking { signature = first_signature; content = first_content };
+   T.Thinking { signature = second_signature; content = second_content };
+   T.RedactedThinking blob;
+   T.Text text;
+  ] ->
+      Alcotest.(check (option string)) "first thinking signature" None
+        first_signature;
+      Alcotest.(check string) "first thinking content" "chain" first_content;
+      Alcotest.(check (option string))
+        "second thinking signature" (Some "anthropic-signature")
+        second_signature;
+      Alcotest.(check string) "second thinking content" "signed" second_content;
+      Alcotest.(check string) "redacted thinking" "encrypted" blob;
+      Alcotest.(check string) "text" "done" text
+  | _ -> Alcotest.fail "expected thinking, thinking, redacted thinking, text"
+
+let test_thinking_block_json_uses_agent_core_signature () =
+  let original : T.message =
+    { origin = Llm_provider.Types.Conversation;
+      T.role = T.Assistant;
+      content =
+        [ T.Thinking { signature = Some "anthropic-signature"; content = "signed" } ];
+      name = None;
+      tool_call_id = None;
+      metadata = [];
+    }
+  in
+  match C.message_to_json original with
+  | `Assoc fields -> (
+      match List.assoc_opt "content_blocks" fields with
+      | Some (`List [ `Assoc block_fields ]) ->
+          Alcotest.(check bool)
+            "uses AGENT_CORE canonical signature carrier" true
+            (List.mem_assoc "signature" block_fields);
+          Alcotest.(check bool)
+            "does not emit legacy thinking_type carrier" false
+            (List.mem_assoc "thinking_type" block_fields);
+          Alcotest.(check string)
+            "signature preserved"
+            "anthropic-signature"
+            (Yojson.Safe.Util.member "signature" (`Assoc block_fields)
+             |> Yojson.Safe.Util.to_string)
+      | _ -> Alcotest.fail "expected one content block")
+  | _ -> Alcotest.fail "expected message object"
+
+let test_legacy_thinking_type_is_not_promoted_to_signature () =
+  let json : Yojson.Safe.t =
+    `Assoc
+      [ "origin", `String "conversation";
+        ("role", `String "assistant");
+        ( "content_blocks",
+          `List
+            [
+              `Assoc
+                [
+                  ("type", `String "thinking");
+                  ("thinking", `String "signed");
+                  ("thinking_type", `String "legacy-signature");
+                ];
+            ] );
+      ]
+  in
+  let parsed = C.message_of_json json in
+  match parsed.content with
+  | [ T.Thinking { signature; content } ] ->
+      Alcotest.(check (option string)) "legacy thinking type ignored" None
+        signature;
+      Alcotest.(check string) "content" "signed" content
+  | _ -> Alcotest.fail "expected legacy thinking block"
+
+(* --- checkpoint projection: exact message preservation --- *)
+
+let text_message text : T.message =
+  { origin = Llm_provider.Types.Conversation;
+    T.role = T.User;
+    content = [ T.Text text ];
+    name = None;
+    tool_call_id = None;
+    metadata = [];
+  }
+
+let test_resume_checkpoint_preserves_all_messages_in_order () =
+  let messages =
+    List.init 130 (fun index -> text_message (Printf.sprintf "message-%03d" index))
+  in
+  let context =
+    C.create ~eio:false ~system_prompt:"system"
+    |> fun context -> C.append_many context messages
+  in
+  let resumed = C.resume_checkpoint_of_context context in
+  Alcotest.(check int)
+    "no fixed checkpoint message window"
+    (List.length messages)
+    (List.length resumed.Agent_core.Checkpoint.messages);
+  Alcotest.(check bool)
+    "source order and oldest messages are preserved"
+    true
+    (resumed.Agent_core.Checkpoint.messages = messages)
+
+let test_resume_checkpoint_preserves_full_tool_result () =
+  let content = String.make 20_000 'x' in
+  let json = `Assoc [ "payload", `String (String.make 20_000 'y') ] in
+  let tool_result : T.message =
+    { origin = Llm_provider.Types.Conversation;
+      T.role = T.Tool;
+      content =
+        [
+          T.ToolResult
+            {
+              tool_use_id = "call-exact";
+              content;
+              outcome = T.Tool_succeeded;
+              json = Some json;
+              content_blocks = None;
+            };
+        ];
+      name = None;
+      tool_call_id = Some "call-exact";
+      metadata = [];
+    }
+  in
+  let context =
+    C.create ~eio:false ~system_prompt:"system"
+    |> fun context -> C.append context tool_result
+  in
+  let resumed = C.resume_checkpoint_of_context context in
+  match resumed.Agent_core.Checkpoint.messages with
+  | [ { T.content = [ T.ToolResult result ]; _ } ] ->
+      Alcotest.(check string) "tool-result content is not stubbed" content
+        result.content;
+      Alcotest.(check bool) "typed JSON is preserved" true (result.json = Some json)
+  | _ -> Alcotest.fail "expected one exact ToolResult message"
+
+let test_checkpoint_save_load_preserves_exact_messages () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-checkpoint-exact-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session_id = "checkpoint-exact" in
+      let session = C.create_session ~session_id ~base_dir in
+      let messages =
+        List.init 130 (fun index ->
+          text_message (Printf.sprintf "persisted-%03d" index))
+      in
+      let context =
+        C.create ~eio:true ~system_prompt:"system"
+        |> fun context -> C.append_many context messages
+      in
+      (match
+         C.save_agent_core_checkpoint
+           ~base_path:base_dir
+           ~runtime_id:"test-runtime"
+           ~keeper_name:"checkpoint-exact"
+           ~session
+           ~agent_name:"checkpoint-exact"
+           ~ctx:context
+       with
+       | Ok checkpoint ->
+         Alcotest.(check bool) "save returns exact source messages" true
+           (checkpoint.Agent_core.Checkpoint.messages = messages)
+       | Error error ->
+         Alcotest.failf
+           "checkpoint save failed: %s"
+           (checkpoint_write_error_to_string error));
+      let _, loaded =
+        C.load_context_from_checkpoint
+          ~trace_id:session_id
+          ~base_dir
+      in
+      match loaded with
+      | None -> Alcotest.fail "checkpoint was not loaded"
+      | Some loaded_context ->
+        Alcotest.(check bool) "load preserves every source message" true
+          (C.messages_of_context loaded_context = messages))
+
+(* --- persist_message: one timestamp key --- *)
+
+let test_persist_message_writes_single_ts_unix_key () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-history-ts-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session = C.create_session ~session_id:"history-ts" ~base_dir in
+      C.persist_message
+        ~keeper_name:"history-ts"
+        ~turn_ref:(Ids.Turn_ref.make ~trace_id:"history-ts" ~absolute_turn:1)
+        session
+        (text_message "hello");
+      let path =
+        Filename.concat session.session_dir "history.jsonl"
+      in
+      let line =
+        In_channel.with_open_bin path In_channel.input_all |> String.trim
+      in
+      match Yojson.Safe.from_string line with
+      | `Assoc fields ->
+          Alcotest.(check bool) "no timestamp key" false
+            (List.mem_assoc "timestamp" fields);
+          (match List.assoc_opt "ts_unix" fields with
+           | Some (`Float ts) ->
+               Alcotest.(check bool) "ts_unix is a positive epoch" true (ts > 0.0)
+           | other ->
+               Alcotest.failf "ts_unix must be a float, got %s"
+                 (match other with
+                  | Some json -> Yojson.Safe.to_string json
+                  | None -> "<missing>"))
+      | _ -> Alcotest.fail "history line is not an object")
+
+let test_checkpoint_write_accepts_exact_open_tool_cycle () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-checkpoint-open-cycle-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session =
+        C.create_session ~session_id:"checkpoint-open-cycle" ~base_dir
+      in
+      let open_tool_use : T.message =
+        { origin = Llm_provider.Types.Conversation;  role = T.Assistant
+        ; content =
+            [ T.ToolUse { id = "open-call"; name = "test"; input = `Null } ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+      in
+      let context =
+        C.create ~eio:true ~system_prompt:"system"
+        |> fun context -> C.append context open_tool_use
+      in
+      match
+        C.save_agent_core_checkpoint
+          ~base_path:base_dir
+          ~runtime_id:"test-runtime"
+          ~keeper_name:"checkpoint-open-cycle"
+          ~session
+          ~agent_name:"checkpoint-open-cycle"
+          ~ctx:context
+      with
+      | Ok checkpoint ->
+        Alcotest.(check bool) "open cycle is persisted exactly" true
+          (checkpoint.Agent_core.Checkpoint.messages = [ open_tool_use ])
+      | Error error ->
+        Alcotest.failf
+          "open tool cycle was rejected: %s"
+          (checkpoint_write_error_to_string error))
+
+let test_checkpoint_write_rejects_orphan_tool_result () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-checkpoint-orphan-result-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session_id = "checkpoint-orphan-result" in
+      let session = C.create_session ~session_id ~base_dir in
+      let orphan : T.message =
+        { origin = Llm_provider.Types.Conversation;  role = T.User
+        ; content =
+            [ T.ToolResult
+                { tool_use_id = "orphan"
+                ; content = "must remain exact"
+                ; outcome = T.Tool_succeeded
+                ; json = None
+                ; content_blocks = None
+                }
+            ]
+        ; name = None
+        ; tool_call_id = None
+        ; metadata = []
+        }
+      in
+      let context =
+        C.create ~eio:true ~system_prompt:"system"
+        |> fun context -> C.append context orphan
+      in
+      (match
+         C.save_agent_core_checkpoint
+           ~base_path:base_dir
+           ~runtime_id:"test-runtime"
+           ~keeper_name:session_id
+           ~session
+           ~agent_name:session_id
+           ~ctx:context
+       with
+       | Error
+           (C.Tool_history_invalid
+              (Masc.Keeper_transcript_unit.Orphan_tool_result
+                 { message_index = 0; tool_use_id = "orphan" })) ->
+         ()
+       | Error error ->
+         Alcotest.failf
+           "wrong checkpoint write error: %s"
+           (checkpoint_write_error_to_string error)
+       | Ok _ -> Alcotest.fail "orphan ToolResult checkpoint was persisted");
+      match
+        Masc.Keeper_checkpoint_store.load_agent_core
+          ~session_dir:session.session_dir
+          ~session_id
+      with
+      | Error Masc.Keeper_checkpoint_store.Not_found -> ()
+      | Error (Masc.Keeper_checkpoint_store.Superseded_version { expected; got }) ->
+        Alcotest.failf
+          "an invalid checkpoint was read as version %d superseded by %d"
+          got expected
+      | Error (Masc.Keeper_checkpoint_store.Newer_version { expected; got }) ->
+        Alcotest.failf
+          "an invalid checkpoint was read as version %d written by a later binary (this one reads %d)"
+          got expected
+      | Error
+          (Masc.Keeper_checkpoint_store.Store_error detail
+          | Parse_error detail
+          | Io_error detail
+          | Read_failed { detail; _ }
+          | Agent_core_error detail) ->
+        Alcotest.failf
+          "invalid checkpoint produced an unexpected store result: %s"
+          detail
+      | Error (Masc.Keeper_checkpoint_store.Objects_invalid _ as error) ->
+        Alcotest.failf
+          "invalid checkpoint produced an unexpected store result: %s"
+          (Masc.Keeper_checkpoint_store.checkpoint_load_error_to_string error)
+      | Ok _ -> Alcotest.fail "invalid checkpoint created a durable file")
+
+let test_naming_a_session_does_not_open_one () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-session-name-only-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let session = C.create_session ~session_id:"never-written" ~base_dir in
+      Alcotest.(check bool)
+        "naming a session leaves no directory"
+        false
+        (Sys.file_exists session.session_dir);
+      let _session, ctx =
+        C.load_context_from_checkpoint ~trace_id:"never-written" ~base_dir
+      in
+      Alcotest.(check bool) "no checkpoint to load" true (Option.is_none ctx);
+      Alcotest.(check bool)
+        "reading a checkpoint leaves no directory"
+        false
+        (Sys.file_exists session.session_dir))
+;;
+
+(* "There is no checkpoint" and "the checkpoint could not be read" are different
+   facts: after the second, the saved history may still be there. The plain
+   loader answers [None] for both; the classified one keeps them apart. *)
+let describe_load = function
+  | C.Checkpoint_loaded _ -> "loaded"
+  | C.Checkpoint_absent -> "absent"
+  | C.Checkpoint_unread _ -> "unread"
+;;
+
+let test_a_missing_checkpoint_is_not_an_unreadable_one () =
+  Eio_main.run @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "keeper-load-classified-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+      let _session, missing =
+        C.load_context_from_checkpoint_classified ~keeper_name:"load-classified-keeper"
+          ~trace_id:"never-written" ~base_dir
+      in
+      Alcotest.(check string) "no file" "absent" (describe_load missing);
+      let trace_id = "written-badly" in
+      let session = C.create_session ~session_id:trace_id ~base_dir in
+      Fs_compat.mkdir_p session.session_dir;
+      Out_channel.with_open_bin
+        (Masc.Keeper_checkpoint_store.agent_core_checkpoint_path
+           ~session_dir:session.session_dir
+           ~session_id:trace_id)
+        (fun channel -> Out_channel.output_string channel "{ not a checkpoint");
+      let _session, unreadable =
+        C.load_context_from_checkpoint_classified ~keeper_name:"load-classified-keeper"
+          ~trace_id ~base_dir
+      in
+      Alcotest.(check string) "a file that does not parse" "unread"
+        (describe_load unreadable);
+      let _session, plain = C.load_context_from_checkpoint ~trace_id ~base_dir in
+      Alcotest.(check bool) "the plain loader still answers None" true
+        (Option.is_none plain))
+;;
+
+let () =
+  Alcotest.run "keeper_context_core_dedup"
+    [
+      ( "message_to_json",
+        [
+          Alcotest.test_case "omits flat content" `Quick
+            test_message_to_json_omits_flat_content;
+        ] );
+      ( "message_of_json",
+        [
+          Alcotest.test_case "new content_blocks-only loads" `Quick
+            test_message_of_json_new_content_blocks_only;
+          Alcotest.test_case "unknown role rejected" `Quick
+            test_message_of_json_rejects_unknown_role;
+          Alcotest.test_case "flat legacy content rejected" `Quick
+            test_message_of_json_rejects_flat_content;
+          Alcotest.test_case "round-trip text preserved" `Quick
+            test_roundtrip_text_preserved;
+          Alcotest.test_case "round-trip thinking signature preserved" `Quick
+            test_roundtrip_preserves_thinking_signature;
+          Alcotest.test_case "round-trip tool_result payload preserved" `Quick
+            test_roundtrip_preserves_tool_result_payload_and_provenance;
+          Alcotest.test_case "thinking block JSON uses AGENT_CORE signature" `Quick
+            test_thinking_block_json_uses_agent_core_signature;
+          Alcotest.test_case "legacy thinking_type is not promoted" `Quick
+            test_legacy_thinking_type_is_not_promoted_to_signature;
+        ] );
+      ( "text_of_history_jsonl_json",
+        [
+          Alcotest.test_case "blocks first" `Quick
+            test_history_jsonl_text_uses_blocks_first;
+          Alcotest.test_case "empty when neither" `Quick
+            test_history_jsonl_text_empty_when_neither;
+        ] );
+      ( "persist_message",
+        [
+          Alcotest.test_case "writes ts_unix only" `Quick
+            test_persist_message_writes_single_ts_unix_key;
+        ] );
+      ( "session_dir",
+        [
+          Alcotest.test_case "a missing checkpoint is not an unreadable one" `Quick
+            test_a_missing_checkpoint_is_not_an_unreadable_one;
+          Alcotest.test_case "naming a session does not open one" `Quick
+            test_naming_a_session_does_not_open_one;
+        ] );
+      ( "checkpoint_projection",
+        [
+          Alcotest.test_case "preserves every message in source order" `Quick
+            test_resume_checkpoint_preserves_all_messages_in_order;
+          Alcotest.test_case "preserves full typed tool result" `Quick
+            test_resume_checkpoint_preserves_full_tool_result;
+          Alcotest.test_case "save/load preserves exact message list" `Quick
+            test_checkpoint_save_load_preserves_exact_messages;
+          Alcotest.test_case "write accepts exact open tool cycle" `Quick
+            test_checkpoint_write_accepts_exact_open_tool_cycle;
+          Alcotest.test_case "write rejects orphan tool result" `Quick
+            test_checkpoint_write_rejects_orphan_tool_result;
+        ] );
+    ]

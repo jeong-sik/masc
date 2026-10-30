@@ -1,0 +1,37 @@
+{
+  "head": "2c3a9f701afd57cd0f62deb853325cb0197e0432",
+  "run": 40101565461,
+  "job": 120894625463,
+  "actual_checkout_log_line": 181,
+  "actual_checkout_command_line": 180,
+  "typecheck_command_line": 639,
+  "outcome": "FAILURE",
+  "error_count": 2,
+  "errors": [
+    {
+      "path": "packages/agent_core/test/test_checkpoint_delta.ml",
+      "lines": [
+        697,
+        699
+      ],
+      "compiler_error": "Some record fields are undefined: content_carrier"
+    },
+    {
+      "path": "packages/agent_core/test/test_checkpoint.ml",
+      "lines": [
+        905,
+        907
+      ],
+      "compiler_error": "Some record fields are undefined: content_carrier"
+    }
+  ],
+  "raw_log": {
+    "file": "job-120894625463.log",
+    "bytes": 71271,
+    "sha256": "57cfcfe6db66b034b800946f13deeea743a55777da606cdf63612b741ad62b32"
+  },
+  "classification": "New known-base provider replay-contract field has two unupdated checkpoint test fixtures. Prior three-test consumer repair remains present and passes targeted tests; this failure is not that old candidate rerun.",
+  "no_test_cases_executed_by_typecheck_lane": true,
+  "separate_execution_results": "Same fixedmain actualfourproducts+8suiteSUCCESS observed; rawaudits in progress. Does not erase this @checkfailure.",
+  "next_action": "Minimal fresh typed field repair in the two existing checkpoint fixtures; no product compatibility default and no blind CI retry."
+}

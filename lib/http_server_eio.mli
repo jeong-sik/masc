@@ -1,0 +1,598 @@
+(** Http_server_eio — Eio-native HTTP/1.1 server using
+    [httpun-eio].
+
+    Conflict-free with [httpun-ws-eio] (no cohttp 6.x dependency).
+
+    This module carries no routes and no handlers: it exposes
+    {!config}, the {!request_handler} type, and the
+    {!Response} / {!Late_response} / {!Request} / {!Router}
+    building blocks.  Concrete routes, the server accept loop,
+    and connection error handling live in the
+    [Server_bootstrap_*] facade modules; the [Eio_main] entry
+    point (with signal handlers) lives in the executable
+    [bin/main_eio.ml] (and sibling [bin/*_eio.ml] binaries).
+
+    Internal: [safe_respond_with_string] stays private.
+
+    @see <https://github.com/anmonteiro/httpun> httpun
+    documentation *)
+
+(** {1 Server configuration} *)
+
+(** Concrete record because callers (test fixtures + server
+    bootstrap) construct + tweak fields directly. *)
+type config =
+  { port : int
+  ; host : string
+  ; max_connections : int
+  ; listen_backlog : int
+  }
+
+(** [default_config] is
+    [{ port = Env_config_core.masc_http_port_int ();
+       host = MASC_HTTP_HOST or default;
+       max_connections = MASC_HTTP_MAX_CONNECTIONS or 512;
+       listen_backlog = MASC_TCP_LISTEN_BACKLOG or 128 }].
+    Reads env at module load time — restart required for env
+    changes to take effect. *)
+val default_config : config
+
+(** {1 Request handler type} *)
+
+(** Standard httpun request handler shape.  Used by {!Router.t}. *)
+type request_handler = Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+(** {1 Response helpers} *)
+
+(** Status / body / streaming response writers over the
+    [httpun] streaming API.  Every helper closes the response
+    body except the 304 path in [html_cached]. *)
+module Response : sig
+  val with_scoped_headers : (string * string) list -> (unit -> 'a) -> 'a
+  (** Bind additional JSON and {!bytes} response headers to this request fiber
+      and its children, including conditional JSON 304 replies. A nested scope
+      replaces the enclosing scope's list. Other request fibers retain their
+      own list. *)
+
+  val scoped_headers : unit -> (string * string) list
+  (** Headers admitted for this request, for streaming responses constructed
+      directly instead of through {!json} or {!bytes}. *)
+
+  (** [#28400] Register the dashboard timeout-envelope recognizer (installed
+      by [Dashboard_cache] at library init). Once registered, [json_value]
+      and [json_value_on_cpu] reclassify a detected envelope as 504
+      [Gateway_timeout] instead of echoing it as HTTP 200 data. No recognizer
+      registered (a build that links no dashboard producer) leaves every
+      response untouched. *)
+  val register_timeout_envelope_recognizer : (Yojson.Safe.t -> bool) -> unit
+
+  (** The installed recognizer, exposed for tests that must save/restore the
+      registration state around a check. Production code registers once at
+      library init and never reads this. *)
+  val timeout_envelope_recognizer : (Yojson.Safe.t -> bool) option ref
+
+  (** Resolve the status for a JSON value response: [Some `OK] or [None]
+      (the default) plus a registered recognizer match reclassifies the
+      response to 504 [Gateway_timeout]; any other explicit status wins.
+      Shared with the HTTP/2 JSON-value responders so both transports apply
+      the same timeout-envelope contract. *)
+  val timeout_envelope_status_override
+    :  ?status:Httpun.Status.t
+    -> Yojson.Safe.t
+    -> Httpun.Status.t
+
+  (** JSON response content type used by {!json} and header-order
+      regression tests. *)
+  val json_content_type : string
+
+  (** Build deterministic content headers around the mandatory
+      [content-type] / [content-length] pair.  Optional header segments
+      preserve caller order as [before_headers], core headers,
+      [after_headers], then [tail_headers]. *)
+  val content_headers
+    :  ?before_headers:(string * string) list
+    -> ?after_headers:(string * string) list
+    -> ?tail_headers:(string * string) list
+    -> content_type:string
+    -> string
+    -> Httpun.Headers.t
+
+  (** Plain-text response.  Default status [`OK].  Sets
+      [content-type: text/plain; charset=utf-8] +
+      [content-length]. *)
+  val text : ?status:Httpun.Status.t -> string -> Httpun.Reqd.t -> unit
+
+  (** HTML response.  Default status [`OK].  Caller-supplied
+      headers append after [content-type] / [content-length]. *)
+  val html
+    :  ?status:Httpun.Status.t
+    -> ?headers:(string * string) list
+    -> string
+    -> Httpun.Reqd.t
+    -> unit
+
+  (** Arbitrary-content response with caller-supplied [content_type]. Scoped
+      headers precede caller headers after [content-type] / [content-length].
+      The body is sent unchanged. *)
+  val bytes
+    :  ?status:Httpun.Status.t
+    -> ?headers:(string * string) list
+    -> content_type:string
+    -> string
+    -> Httpun.Reqd.t
+    -> unit
+
+  (** Empty response.  Default status [`No_content].  Sends no
+      content-type header; always includes [content-length: 0] so
+      keep-alive clients and proxies see an explicit end-of-body. *)
+  val empty : ?status:Httpun.Status.t -> Httpun.Reqd.t -> unit
+
+  val etag_hex_chars : int
+  (** Hex digest characters kept in an entity tag. A tag only has to
+      distinguish this body from the previous body of the same resource, so it
+      is truncated rather than carrying a full digest. *)
+
+  val etag_of_body : string -> string
+  (** Entity tag for a response body: a hex digest truncated to
+      {!etag_hex_chars}. One policy for every response that carries a tag,
+      {!json} and {!html_cached} alike. *)
+
+  val weak_etag_value : string -> string
+  (** Weak ETag value formatted as [W/"<hash>"] derived from the body string. *)
+
+  val client_tag_matches : etag:string -> client_tag:string -> bool
+  (** Shared conditional-request matching for H1 and H2 cached responses.
+      [client_tag] is an If-None-Match value: ["*"], or a comma-separated
+      list of tags. Comparison is weak (RFC 9110 section 13.1.2): [W/"x"] and
+      ["x"] match each other. *)
+
+  val json_revalidate_cache_control : string
+  (** Cache policy for JSON carrying a response validator. *)
+
+  type json_conditional =
+    | Untagged
+    | Tagged of string
+    | Not_modified of string
+
+  val json_conditional
+    :  status:Httpun.Status.t
+    -> meth:Httpun.Method.t
+    -> if_none_match:string option
+    -> body:string
+    -> json_conditional
+  (** What {!json} will send, decided before any socket work.
+
+      [Untagged] when the response is not a [`OK] answer to [`GET]/[`HEAD]: a
+      validator there would invite revalidation of something that should not be
+      reused. Otherwise [Not_modified] when [if_none_match] equals the body's
+      weak tag (or caller-supplied [?etag]), and [Tagged] with that tag when it
+      does not — including when the client sent nothing, since it has not claimed
+      to hold a copy.
+
+      Exposed so the rule is testable in full without constructing a
+      [Httpun.Reqd.t]. *)
+
+  val prepare_json
+    :  ?status:Httpun.Status.t
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> request:Httpun.Request.t
+    -> ?etag:string
+    -> string
+    -> Httpun.Response.t * string
+  (** Prepare the same conditional, compressed JSON response for transports
+      which write it themselves. The caller owns timeout-envelope status
+      selection and must write the returned body before closing its stream. *)
+
+  (** JSON response with optional negotiated zstd or gzip compression.
+      Default status [`OK]. Compression from an Eio fiber runs on the shared
+      CPU pool when available; bodies below the codec minimum, identity
+      responses and matching validators do not submit work. Socket writes remain on the
+      caller fiber. Without a pool or outside Eio, compression runs inline.
+
+      A [`OK] response to a GET or HEAD also carries a weak [ETag] over the
+      uncompressed body and [Cache-Control: no-cache], and answers
+      [`Not_modified] when the request's [If-None-Match] matches. The tag is
+      weak because the same JSON is served under several content encodings,
+      which are encodings of one payload rather than several payloads.
+
+      A client that sends no [If-None-Match] is unaffected — it has not
+      claimed to hold a copy, so it always receives the body. Responses that
+      are not [`OK], and responses to unsafe methods, carry no tag. *)
+  val json
+    :  ?status:Httpun.Status.t
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> ?request:Httpun.Request.t
+    -> ?etag:string
+    -> string
+    -> Httpun.Reqd.t
+    -> unit
+
+  (** Zero-cost conditional JSON response with a lazy body.
+      When the client supplies [If-None-Match] matching [etag], returns
+      [`Not_modified] immediately without evaluating the [lazy_body] closure,
+      avoiding any JSON string allocation or compression entirely.
+      Otherwise evaluates [lazy_body] on the caller, then compresses its
+      immutable result on the shared CPU pool as for [json]. *)
+  val json_lazy
+    :  ?status:Httpun.Status.t
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> ?request:Httpun.Request.t
+    -> etag:string
+    -> (unit -> string)
+    -> Httpun.Reqd.t
+    -> unit
+
+  val json_value
+    :  ?status:Httpun.Status.t
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> ?request:Httpun.Request.t
+    -> Yojson.Safe.t
+    -> Httpun.Reqd.t
+    -> unit
+
+  (** Serialize, select validators and encode one immutable JSON response on
+      the shared CPU executor. Request selection and socket writes remain on
+      the caller fiber. Falls back inline when no executor is installed. *)
+  val json_value_on_cpu
+    :  ?status:Httpun.Status.t
+    -> ?compress:bool
+    -> ?extra_headers:(string * string) list
+    -> ?request:Httpun.Request.t
+    -> Yojson.Safe.t
+    -> Httpun.Reqd.t
+    -> unit
+
+  (** HTML response with ETag + conditional 304 support.  When
+      the request If-None-Match header matches the quoted etag
+      value, returns [`Not_modified] with no body; otherwise
+      serves the full response with ETag and negotiated compression on the
+      shared CPU pool, with the same inline cases as [json]. Used for static
+      dashboard
+      HTML. *)
+  val html_cached
+    :  ?status:Httpun.Status.t
+    -> etag:string
+    -> request:Httpun.Request.t
+    -> string
+    -> Httpun.Reqd.t
+    -> unit
+
+  (** Whether the request's [If-None-Match] names the strong tag
+      ["\"<etag>\""] (or is ["*"]), compared as {!client_tag_matches} does.
+      For a caller that can name the tag before it has the body, so a
+      revalidation is answered without producing the body at all. *)
+  val request_holds_tag : etag:string -> Httpun.Request.t -> bool
+
+  (** [`Not_modified] carrying the scoped headers and [headers] (validators,
+      CORS, [Vary]) and nothing else: no body, no [content-length] and no
+      [content-type] (RFC 9110 section 15.4.5). *)
+  val not_modified : headers:(string * string) list -> Httpun.Reqd.t -> unit
+
+  (** [`Not_modified] with the strong [ETag] ["\"<etag>\""] and the given
+      [Cache-Control], and no body: the answer {!bytes_cached} gives a request
+      that already holds the tag. *)
+  val bytes_not_modified :
+    etag:string -> cache_control:string -> Httpun.Reqd.t -> unit
+
+  (** A [`OK] body under a strong [ETag] of ["\"<etag>\""] and the given
+      [Cache-Control], or {!bytes_not_modified} when the request already
+      holds that tag ({!request_holds_tag}). The body is sent as it is;
+      formats that are already compressed gain nothing from a second pass. *)
+  val bytes_cached
+    :  etag:string
+    -> cache_control:string
+    -> request:Httpun.Request.t
+    -> content_type:string
+    -> string
+    -> Httpun.Reqd.t
+    -> unit
+
+  (** Pinned ["404 Not Found"] body, status [`Not_found]. *)
+  val not_found : Httpun.Reqd.t -> unit
+
+  (** Pinned ["405 Method Not Allowed"] body, status
+      [`Method_not_allowed]. *)
+  val method_not_allowed : Httpun.Reqd.t -> unit
+
+  (** [internal_error msg reqd] returns status
+      [`Internal_server_error] with body of the form
+      [500 Internal Server Error: <msg>] (literal prefix
+      concatenated with the caller-supplied message). *)
+  val internal_error : string -> Httpun.Reqd.t -> unit
+end
+
+(** {1 Late-response failure classifier (#13059)} *)
+
+(** Classification helper for the cancellation-vs-late-write race.
+
+    When a handler's request is cancelled (peer closed, deadline hit,
+    or upstream switch failed) the underlying writer enters either
+    "invalid state" or "closed writer" — calling
+    {!Response.internal_error} from a top-level handler
+    [exception] arm at that point raises a *secondary* failure that
+    masks the original cancellation.  The classifier identifies the
+    two well-known failure shapes so callers can downgrade to a
+    log-and-skip rather than emit a 500 onto a closed wire. *)
+module Late_response : sig
+  (** [classify_write_failure exn] returns [Some msg] when [exn] is
+      one of the two well-known late-response failure modes:
+
+      - [Failure "httpun.Reqd.respond_with_string: invalid state ..."]
+        — httpun rejected a write because the response handle
+        already moved past the writable state.
+      - [Failure "cannot write to closed writer"] — the underlying
+        writer was closed while a deferred handler was still
+        attempting to drain.
+
+      Returns [None] for every other exception (including
+      [Eio.Cancel.Cancelled] which the caller MUST re-raise rather
+      than classify). *)
+  val classify_write_failure : exn -> string option
+end
+
+(** {1 Request helpers} *)
+
+(** Per-request projections + body readers.  Body size is
+    capped at [max_body_bytes]; oversized requests respond
+    [`Payload_too_large] before the handler is invoked. *)
+module Request : sig
+
+  (** Effective max body size, resolved at module-load time
+      from [MASC_MAX_BODY_BYTES], falling back to
+      [default_max_body_bytes].  Restart required for env
+      changes.  The HTTP/2 gateway reads bodies under the same
+      ceiling ([Server_h2_gateway_helpers.h2_read_body]). *)
+  val max_body_bytes : int
+
+  (** [too_large_body max_bytes] is the text of the 413 answer given to a
+      body over [max_bytes], on either transport. *)
+  val too_large_body : int -> string
+
+  type body_read_error =
+    [ `Too_large of int
+    | `Internal of exn
+    ]
+
+  val read_body_async_with_limit :
+    Httpun.Reqd.t ->
+    max_bytes:int ->
+    on_body:(string -> unit) ->
+    on_error:(body_read_error -> unit) ->
+    unit
+  (** Streaming body reader with a caller-owned allocation bound and typed
+      error callback. *)
+
+  (** [read_body_async reqd callback] reads the request body
+      via [schedule_read] loops; [callback body_str] fires on
+      EOF.  413 / 500 errors auto-respond before [callback] is
+      invoked. *)
+  val read_body_async : Httpun.Reqd.t -> (string -> unit) -> unit
+
+  (** [path request] is the path portion of the URI (everything
+      before [?]). *)
+  val path : Httpun.Request.t -> string
+
+  (** Convenience: [request.meth]. *)
+  val method_ : Httpun.Request.t -> Httpun.Method.t
+
+  (** [header request name] looks up [name] in
+      [request.headers]. *)
+  val header : Httpun.Request.t -> string -> string option
+end
+
+(** {1 Router} *)
+
+(** Path + method router with prefix-match support.  Exact
+    matches take precedence over prefix matches (longest prefix
+    wins among prefix matches). *)
+module Router : sig
+  type route_kind = Exact | Prefix
+
+  (** The Gluten protocol-upgrade capability, available only at the
+      httpun-eio connection-handler boundary.  WebSocket-upgrade routes
+      ({!ws_get}) need it to drive the post-101 connection; plain routes
+      do not.  RFC-0281. *)
+  type upgrade = Gluten.impl -> unit
+
+  (** A WebSocket-upgrade route handler.  Receives the per-request
+      {!upgrade} capability in addition to the request + descriptor. *)
+  type ws_handler =
+    upgrade:upgrade -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+  (** A route either handles the request in-band ([Plain]) or upgrades
+      the connection to WebSocket ([Ws]).  RFC-0281 S3.3. *)
+  type route_target =
+    | Plain of request_handler
+    | Ws of ws_handler
+
+  type route =
+    { kind : route_kind
+    ; path : string
+    ; methods : Httpun.Method.t list
+    ; handler : route_target
+    ; access : Route_access.t
+        (** What the registration says about who may call the route: the kind
+            the functor {!Make_typed} was given. *)
+    }
+
+  type resolution =
+    [ `Matched of route
+    | `Method_not_allowed
+    | `Not_found
+    ]
+
+  (** Indexed dispatch table.  Route registration updates method-specific
+      exact path tables and prefix tries at build time, so request dispatch
+      does not scan/sort the full endpoint list or perform per-candidate
+      method-list membership checks. *)
+  type t
+
+  val create : unit -> t
+  val route_count : t -> int
+
+  (** Every registration, in the order it was made. The router is one shared
+      table: a registration function adds to the router it is given, so an older
+      reference to that router sees the registration in [routes], [route_count]
+      and {!resolve} alike. A path registered twice has two rows here. *)
+  val routes : t -> route list
+
+  (** The routes that dispatch can reach, in registration order. Dispatch uses
+      the route registered last for a method and an exact path, and the newest
+      route among equal prefixes, so a row that a later one replaced is left out,
+      and a route replaced for some of its methods keeps the others. A method the
+      router does not index is dropped. Read this, not {!routes}, to learn which
+      access applies to a request. *)
+  val effective_routes : t -> route list
+
+  (** {2 Typed registration}
+
+      {!Make_typed} is the only way to register a route. It applies the wrapper
+      that goes with the kind to the handler and records the kind in the same
+      call, so a route cannot declare [Permission] and run a handler that checks
+      nothing. The function that takes the access and the handler as separate
+      arguments is not exported.
+
+      The functor takes the wrappers as an argument because they live in a
+      library above this one. Applying it to wrappers that check nothing is the
+      one way around the guarantee; [Server_route] is meant to be its only
+      application. *)
+
+  (** The authentication wrappers a typed route can ask for. [state] is whatever
+      the wrappers hand to the handler on success. *)
+  module type Wrappers = sig
+    type state
+
+    val with_public_read
+      :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    val with_read_auth
+      :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    val with_permission_auth
+      :  permission:Masc_domain.permission
+      -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    (** The [string] handed to the handler is the token id the credential
+        resolved to. *)
+    val with_token_permission_auth
+      :  permission:Masc_domain.permission
+      -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    val with_private_token_permission_auth
+      :  permission:Masc_domain.permission
+      -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    val with_tool_auth
+      :  tool_name:string
+      -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    (** The [string] handed to the handler is the principal that authorised the
+        tool call. *)
+    val with_tool_actor_auth
+      :  tool_name:string
+      -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
+    (** Redirects a request that names a loopback alias to the canonical
+        loopback host, and hands any other request to the handler. It checks no
+        credential. [port] is the one to use when the request names none. *)
+    val with_canonical_loopback_host : port:int -> request_handler -> request_handler
+  end
+
+  (** HTTP route registration that names the authentication each route needs. *)
+  module type Typed = sig
+    type state
+    type state_handler = state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+    (** The [string] is the token id the credential resolved to. *)
+    type token_handler =
+      state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+    (** The [string] is the principal that authorised the tool call. *)
+    type actor_handler =
+      state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+
+    (** The type parameter is the handler the kind wraps. The handler of a kind
+        that wraps nothing sees the request itself. *)
+    type _ auth =
+      | Always_public : request_handler auth
+      | Public_read : state_handler auth
+      | Public_read_on_canonical_host : { port : int } -> state_handler auth
+          (** [Public_read] behind the canonical-host redirect: a request for a
+              loopback alias is redirected before the server's readiness, the
+              workspace precondition or the credential is looked at. The route
+              records the same access as [Public_read]; only the order of the
+              two checks differs. *)
+      | Read_auth : state_handler auth
+      | Permission : Masc_domain.permission -> state_handler auth
+      | Token_permission : Masc_domain.permission -> token_handler auth
+      | Private_token_permission : Masc_domain.permission -> token_handler auth
+      | Tool : { tool_name : string } -> state_handler auth
+      | Tool_actor : { tool_name : string } -> actor_handler auth
+      | Self_authenticated :
+          Route_access.self_authenticated_reason
+          -> request_handler auth
+
+    (** What a route registered with this kind records. *)
+    val access : _ auth -> Route_access.t
+
+    val get : 'h auth -> string -> 'h -> t -> t
+    val post : 'h auth -> string -> 'h -> t -> t
+
+    val add
+      :  'h auth
+      -> path:string
+      -> methods:Httpun.Method.t list
+      -> 'h
+      -> t
+      -> t
+
+    (** The prefix functions match any path that starts with the prefix; the
+        suffix is available through {!Request.path}. *)
+    val prefix_get : 'h auth -> string -> 'h -> t -> t
+
+    val prefix_post : 'h auth -> string -> 'h -> t -> t
+    val prefix_put : 'h auth -> string -> 'h -> t -> t
+    val prefix_delete : 'h auth -> string -> 'h -> t -> t
+
+    (** A WebSocket-upgrade route. The handler checks the credential before it
+        upgrades, so the only kind that applies is [Self_authenticated
+        Websocket_upgrade]. *)
+    val ws_get : string -> ws_handler -> t -> t
+  end
+
+  module Make_typed (W : Wrappers) : Typed with type state = W.state
+
+  (** [resolve routes request] returns [`Matched route] when
+      either an exact path+method match exists OR the
+      longest prefix match for that method exists.  Returns
+      [`Method_not_allowed] when an exact path exists but no
+      route for the request method exists, [`Not_found]
+      otherwise. *)
+  val resolve : t -> Httpun.Request.t -> resolution
+
+  (** [dispatch routes ?upgrade request reqd] wires {!resolve} to the
+      route's handler, falling back to {!Response.not_found} /
+      {!Response.method_not_allowed} based on the resolution.
+
+      [?upgrade] supplies the Gluten upgrade capability for {!Ws}
+      routes.  When a {!Ws} route is matched but [?upgrade] is absent
+      (e.g. the HTTP/2 dispatch path), responds [`Upgrade_required]
+      (426) — an explicit error, never a silent drop.  RFC-0281. *)
+  val dispatch
+    :  t
+    -> ?upgrade:upgrade
+    -> Httpun.Request.t
+    -> Httpun.Reqd.t
+    -> unit
+end

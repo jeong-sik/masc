@@ -1,0 +1,26 @@
+[
+  {
+    "repetition": 1,
+    "transitions": 100,
+    "median_ms": 17.1352495,
+    "max_ms": 19.442417,
+    "worst_present": "worst[0] frame=79 25.37ms tag=keeper-detail write=0.001ms flush=25.365ms other=0.004ms bytes=2589 writes=1 flushes=1",
+    "child_cpu_seconds": 0.16999799999999998
+  },
+  {
+    "repetition": 2,
+    "transitions": 100,
+    "median_ms": 17.3902085,
+    "max_ms": 18.024292,
+    "worst_present": "worst[0] frame=79 24.52ms tag=keeper-detail write=0.001ms flush=24.511ms other=0.005ms bytes=2589 writes=1 flushes=1",
+    "child_cpu_seconds": 0.140986
+  },
+  {
+    "repetition": 3,
+    "transitions": 100,
+    "median_ms": 17.427854,
+    "max_ms": 22.804333,
+    "worst_present": "worst[0] frame=79 22.03ms tag=keeper-detail write=0.001ms flush=22.024ms other=0.005ms bytes=2589 writes=1 flushes=1",
+    "child_cpu_seconds": 0.14457399999999998
+  }
+]

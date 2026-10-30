@@ -1,0 +1,1146 @@
+module Types = Masc_domain
+
+open Alcotest
+
+let () = Mirage_crypto_rng_unix.use_default ()
+
+(* [Masc.Keeper_tool_call_log.read_recent] answers [Error Index_unavailable]
+   when the read index cannot be read (audit F397); here the rows are the
+   subject, so that failure fails the case. *)
+let tool_call_rows ?keeper_name ?n () =
+  match Masc.Keeper_tool_call_log.read_recent ?keeper_name ?n () with
+  | Ok rows -> rows
+  | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
+
+module U = Yojson.Safe.Util
+let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_mcp_server_eio_call_tool_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.is_directory path then begin
+      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    end else
+      Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
+let make_keeper_meta ?current_task_id name =
+  let fields =
+    [
+      ("name", `String name);
+      ("trace_id", `String ("trace-test-" ^ name));
+    ]
+    @
+    (match current_task_id with
+     | Some task_id -> [ ("current_task_id", `String task_id) ]
+     | None -> [])
+  in
+  match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
+  | Ok meta -> meta
+  | Error err -> fail ("make_keeper_meta failed: " ^ err)
+
+let empty_contract : Masc_domain.task_contract =
+  {
+    strict = false;
+    completion_contract = [];
+    required_evidence = [];
+    inspect_gate_evidence = [];
+    verify_gate_evidence = [];
+  }
+
+let extract_json_from_text text =
+  try
+    let idx = String.index text '{' in
+    Yojson.Safe.from_string (String.sub text idx (String.length text - idx))
+  with Not_found ->
+    failf "expected JSON payload in text: %s" text
+
+let rec check_json_strings_valid_utf8 label = function
+  | `String value ->
+      check bool (label ^ " string is valid UTF-8") true
+        (String.is_valid_utf_8 value)
+  | `Assoc fields ->
+      List.iter
+        (fun (key, value) -> check_json_strings_valid_utf8 (label ^ "." ^ key) value)
+        fields
+  | `List values ->
+      List.iteri
+        (fun idx value ->
+           check_json_strings_valid_utf8
+             (Printf.sprintf "%s[%d]" label idx)
+             value)
+        values
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ -> ()
+
+let with_call_tool_state f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "projection-test"));
+      let state = Masc.Mcp_server_eio.For_testing.create_state ~base_path () in
+      f env sw state)
+;;
+
+let admit_call params =
+  match Masc.Mcp_server_eio_call_request.decode (Some params) with
+  | Ok request -> request
+  | Error error ->
+    fail
+      ("test supplied invalid tools/call params: "
+       ^ Masc.Mcp_server_eio_call_request.error_message error)
+;;
+
+let test_call_request_decodes_current_shape_once () =
+  let module Call = Masc.Mcp_server_eio_call_request in
+  let arguments = `Assoc [ "query", `String "status" ] in
+  (match
+     Call.decode
+       (Some
+          (`Assoc
+            [ "name", `String "masc_status"; "arguments", arguments ]))
+   with
+   | Ok request ->
+     check string "typed name" "masc_status" (Call.requested_name request);
+     check yojson "typed arguments" arguments (Call.arguments request)
+   | Error error -> fail (Call.error_message error));
+  (match Call.decode (Some (`Assoc [ "name", `String "masc_status" ])) with
+   | Ok request -> check yojson "absent arguments mean empty object" (`Assoc []) (Call.arguments request)
+   | Error error -> fail (Call.error_message error))
+;;
+
+let test_call_request_rejects_noncanonical_shapes () =
+  let module Call = Masc.Mcp_server_eio_call_request in
+  let rejected expected params =
+    match Call.decode params with
+    | Error error -> check string expected expected (Call.error_message error)
+    | Ok _ -> fail ("accepted invalid tools/call params: " ^ expected)
+  in
+  rejected "Missing params" None;
+  rejected "Invalid params: expected object" (Some (`List []));
+  rejected "Invalid params: name must be a string" (Some (`Assoc []));
+  rejected
+    "Invalid params: name must be a non-empty string"
+    (Some (`Assoc [ "name", `String "  " ]));
+  rejected
+    "Invalid params: name must not contain surrounding whitespace"
+    (Some (`Assoc [ "name", `String " masc_status" ]));
+  rejected
+    "Invalid params: arguments must be an object"
+    (Some
+       (`Assoc
+         [ "name", `String "masc_status"; "arguments", `Null ]));
+  rejected
+    "Invalid params: duplicate name field"
+    (Some
+       (`Assoc
+         [ "name", `String "masc_status"; "name", `String "masc_status" ]));
+  rejected
+    "Invalid params: duplicate arguments field"
+    (Some
+       (`Assoc
+         [ "name", `String "masc_status"
+         ; "arguments", `Assoc []
+         ; "arguments", `Assoc []
+         ]))
+;;
+
+let test_invalid_call_params_do_not_reach_dispatch_handler () =
+  with_call_tool_state (fun env sw state ->
+    Auth.disable_auth (Masc.Mcp_server.workspace_config state).base_path;
+    let handler_calls = ref 0 in
+    let handle_call_tool_eio
+          ~sw:_
+          ~clock:_
+          ~profile:_
+          ?mcp_session_id:_
+          ?auth_token:_
+          ~internal_keeper_runtime:_
+          _state
+          _id
+          _request
+      =
+      incr handler_calls;
+      `Assoc []
+    in
+    let request params =
+      Yojson.Safe.to_string
+        (`Assoc
+          [ "jsonrpc", `String "2.0"
+          ; "id", `Int 1
+          ; "method", `String "tools/call"
+          ; "params", params
+          ])
+    in
+    List.iter
+      (fun params ->
+         let response =
+           Masc.Mcp_server_eio_protocol.handle_request
+             ~handle_call_tool_eio
+             ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+             ~clock:(Eio.Stdenv.clock env)
+             ~sw
+             state
+             (request params)
+         in
+         check
+           int
+           "wire error is Invalid_params"
+           (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_params)
+           U.(response |> member "error" |> member "code" |> to_int))
+      [ `Assoc [ "name", `String "masc_status"; "arguments", `Null ]
+      ; `Assoc [ "name", `String " " ]
+      ; `Assoc [ "name", `String "masc_status"; "name", `String "masc_status" ]
+      ];
+    check int "invalid calls never reach dispatch" 0 !handler_calls;
+    let meta = `Assoc
+      [ Mcp_transport_protocol.protocol_version_meta_key, `String "2026-07-28"
+      ; Mcp_transport_protocol.client_capabilities_meta_key, `Assoc [] ] in
+    List.iter
+      (fun (key, value) ->
+         let response =
+           Masc.Mcp_server_eio_protocol.handle_request
+             ~handle_call_tool_eio
+             ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+             ~clock:(Eio.Stdenv.clock env) ~sw state
+             (request (`Assoc
+                 [ "_meta", meta; "name", `String "masc_status"; key, value ]))
+         in
+         check int "unissued modern continuation rejected" (-32602)
+           U.(response |> member "error" |> member "code" |> to_int);
+         check int "continuation preserves ID" 1 U.(response |> member "id" |> to_int))
+      [ "requestState", `String "opaque"; "inputResponses", `Assoc [] ];
+    check int "modern continuations never reach dispatch" 0 !handler_calls;
+    List.iter
+      (fun (key, value) ->
+         ignore (Masc.Mcp_server_eio_protocol.handle_request
+           ~handle_call_tool_eio
+           ~handle_read_resource_eio:(fun _state _id _params -> `Assoc [])
+           ~clock:(Eio.Stdenv.clock env) ~sw state
+           (request (`Assoc [ "name", `String "masc_status"; key, value ]))))
+      [ "requestState", `String "legacy-extension"; "inputResponses", `Assoc [] ];
+    check int "legacy extensions still reach dispatch" 2 !handler_calls)
+;;
+
+let call_with_result ?mcp_session_id ?observe_invocation ~env ~sw state result =
+  Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+    ~execute_tool_eio:
+      (fun
+        ~sw:_
+        ~clock:_
+        ~workspace_scope:_
+        ?profile:_
+        ?mcp_session_id:_
+        ?invocation_ref
+        ?auth_token:_
+        ?internal_keeper_runtime:_
+        ?on_caller_resolved:_
+        _state
+        ~name:_
+        ~arguments:_ ->
+        Option.iter (fun observe -> observe invocation_ref) observe_invocation;
+        result)
+    ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+    ~broadcast_tools_list_changed:(fun () -> ())
+    ~sw
+    ~clock:(Eio.Stdenv.clock env)
+    ?mcp_session_id
+    state
+    (`Int 1)
+    (admit_call
+       (`Assoc
+         [ "name", `String "masc_status"
+         ; "arguments", `Assoc [ "_agent_name", `String "projection-test" ]
+         ]))
+;;
+
+let test_threads_exact_mcp_invocation_identity () =
+  with_call_tool_state (fun env sw state ->
+    let observed = ref None in
+    let result =
+      Tool_result.make_ok
+        ~tool_name:"masc_status"
+        ~start_time:(Tool_timing.start ())
+        ~data:(`String "ok")
+        ()
+    in
+    ignore
+      (call_with_result
+         ~mcp_session_id:"typed-session"
+         ~observe_invocation:(fun invocation -> observed := invocation)
+         ~env ~sw state result);
+    let request_id =
+      Mcp_transport_protocol.request_id_of_yojson (`Int 1) |> Result.get_ok
+    in
+    let expected =
+      Tool_invocation_ref.external_mcp
+        ~request_id
+        ~session_id:"typed-session"
+      |> Result.get_ok
+    in
+    match !observed with
+    | Some actual ->
+      check bool "exact invocation identity" true
+        (Tool_invocation_ref.equal expected actual)
+    | None -> fail "execute callback did not receive invocation identity")
+
+let result_fields response = response |> U.member "result"
+(* The envelope and the call's telemetry both sit under this server's own
+   [_meta] key: [CallToolResult] defines no member for either. *)
+let call_meta response =
+  result_fields response
+  |> U.member "_meta"
+  |> U.member Masc.Mcp_server.tool_call_meta_key
+
+let result_envelope response = call_meta response |> U.member "envelope"
+
+let has_field key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
+;;
+
+let test_free_form_failure_text_does_not_control_response () =
+  with_call_tool_state (fun env sw state ->
+    List.iter
+      (fun message ->
+         let producer_data = `Assoc [ "producer", `String "typed" ] in
+         let result =
+           Tool_result.make_err
+             ~tool_name:"masc_status"
+             ~class_:Tool_result.Runtime_failure
+             ~start_time:(Tool_timing.start ())
+             ~data:producer_data
+             message
+         in
+         let response = call_with_result ~env ~sw state result in
+         let envelope = result_envelope response in
+         check string "generic error status" "error"
+           (envelope |> U.member "status" |> U.to_string);
+         check string "producer message is unchanged" message
+           (envelope |> U.member "summary" |> U.to_string);
+         check yojson "typed producer data is structured content" producer_data
+           (result_fields response |> U.member "structuredContent");
+         check bool "required_follow_up is not fabricated" false
+           (has_field "required_follow_up" envelope);
+         check bool "quality is not fabricated" false (has_field "quality" envelope);
+         check bool "telemetry trace is outside model envelope" false
+           (has_field "trace_id" envelope);
+         check string "typed failure class is telemetry metadata" "runtime_failure"
+           (call_meta response |> U.member "failure_class" |> U.to_string);
+         check string "model text is producer text only" message
+           (result_fields response
+            |> U.member "content"
+            |> U.to_list
+            |> List.hd
+            |> U.member "text"
+            |> U.to_string))
+      [ "input required: this is only prose"
+      ; "authentication required: this is only prose"
+      ; "operation timed out: this is only prose"
+      ])
+;;
+
+let test_typed_outcome_alone_controls_projection () =
+  with_call_tool_state (fun env sw state ->
+    let success =
+      Tool_result.make_ok
+        ~tool_name:"masc_status"
+        ~start_time:(Tool_timing.start ())
+        ~data:(`String "authentication required and timed out")
+        ()
+    in
+    let success_response = call_with_result ~env ~sw state success in
+    check string "success remains ok despite prose" "ok"
+      (result_envelope success_response |> U.member "status" |> U.to_string);
+    check bool "success has no failure metadata" false
+      (has_field "failure_class" (call_meta success_response));
+    let json_looking_text = {|{"producer":"text-only"}|} in
+    let text_success =
+      Tool_result.ok
+        ~tool_name:"masc_status"
+        ~start_time:(Tool_timing.start ())
+        json_looking_text
+    in
+    let text_response = call_with_result ~env ~sw state text_success in
+    check bool "JSON-looking text has no structured content" false
+      (has_field "structuredContent" (result_fields text_response));
+    check string "JSON-looking text is unchanged" json_looking_text
+      (result_fields text_response
+       |> U.member "content"
+       |> U.to_list
+       |> List.hd
+       |> U.member "text"
+       |> U.to_string);
+    let list_success =
+      Tool_result.make_ok
+        ~tool_name:"masc_status"
+        ~start_time:(Tool_timing.start ())
+        ~data:(`List [ `String "producer-item" ])
+        ()
+    in
+    let list_response = call_with_result ~env ~sw state list_success in
+    check bool "list data is not reclassified into an invented object" false
+      (has_field "structuredContent" (result_fields list_response));
+    let transient =
+      Tool_result.make_err
+        ~tool_name:"masc_status"
+        ~class_:Tool_result.Dependency_unavailable
+        ~start_time:(Tool_timing.start ())
+        "ordinary producer failure"
+    in
+    let transient_response = call_with_result ~env ~sw state transient in
+    check string "typed transient class is preserved" "dependency_unavailable"
+      (call_meta transient_response |> U.member "failure_class" |> U.to_string))
+;;
+
+let test_handle_call_executes_transient_failure_once () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "single-call-test"));
+      let state = Masc.Mcp_server_eio.For_testing.create_state ~base_path () in
+      let calls = ref 0 in
+      let response =
+        Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+          ~execute_tool_eio:
+            (fun
+              ~sw:_
+              ~clock:_
+              ~workspace_scope:_
+              ?profile:_
+              ?mcp_session_id:_
+              ?invocation_ref:_
+              ?auth_token:_
+              ?internal_keeper_runtime:_
+              ?on_caller_resolved:_
+              _state
+              ~name
+              ~arguments:_
+            ->
+              incr calls;
+              Tool_result.make_err
+                ~tool_name:name
+                ~class_:Tool_result.Dependency_unavailable
+                ~start_time:(Tool_timing.start ())
+                "transient failure")
+          ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+          ~broadcast_tools_list_changed:(fun () -> ())
+          ~sw
+          ~clock:(Eio.Stdenv.clock env)
+          state
+          (`Int 1)
+          (admit_call
+             (`Assoc
+               [ "name", `String "masc_status"
+               ; "arguments", `Assoc [ "_agent_name", `String "single-call-test" ]
+               ]))
+      in
+      check int "transient tool invoked once" 1 !calls;
+      check int
+        "response records one attempt"
+        1
+        (call_meta response |> U.member "attempts" |> U.to_int))
+
+let test_call_captures_admission_scope_across_workspace_switch () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let root = temp_dir () in
+  let destination_workspace = Filename.concat root "destination-workspace" in
+  Unix.mkdir destination_workspace 0o755;
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir root)
+    (fun () ->
+      let source_config = Masc.Workspace.default_config root in
+      let destination_config =
+        { source_config with workspace_path = destination_workspace }
+      in
+      ignore
+        (Masc.Workspace.init
+           source_config
+           ~agent_name:(Some "scope-admission-test"));
+      let state =
+        Masc.Mcp_server_eio.For_testing.create_state ~base_path:root ()
+      in
+      let admission_scope = Masc.Mcp_server.workspace_scope state in
+      let executed_scope = ref None in
+      let response =
+        Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+          ~execute_tool_eio:
+            (fun
+              ~sw:_
+              ~clock:_
+              ~workspace_scope
+              ?profile:_
+              ?mcp_session_id:_
+              ?invocation_ref:_
+              ?auth_token:_
+              ?internal_keeper_runtime:_
+              ?on_caller_resolved:_
+              callback_state
+              ~name
+              ~arguments:_
+            ->
+              executed_scope := Some workspace_scope;
+              (match
+                 Masc.Mcp_server.set_workspace_config
+                   callback_state
+                   destination_config
+               with
+               | Ok () -> ()
+               | Error error ->
+                 fail
+                   (Masc.Mcp_server.workspace_switch_error_to_string error));
+              Tool_result.make_ok
+                ~tool_name:name
+                ~start_time:(Tool_timing.start ())
+                ~data:(`String "workspace switched")
+                ())
+          ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+          ~broadcast_tools_list_changed:(fun () -> ())
+          ~sw
+          ~clock:(Eio.Stdenv.clock env)
+          state
+          (`Int 41)
+          (admit_call
+             (`Assoc
+               [ "name", `String "masc_status"
+               ; ( "arguments"
+                 , `Assoc [ "_agent_name", `String "scope-admission-test" ] )
+               ]))
+      in
+      check string "tool call succeeds" "ok"
+        (result_envelope response |> U.member "status" |> U.to_string);
+      let callback_scope =
+        match !executed_scope with
+        | Some scope -> scope
+        | None -> fail "execute callback did not receive workspace scope"
+      in
+      check bool "execute receives exact admission scope object" true
+        (callback_scope == admission_scope);
+      check string "server process root stays fixed"
+        source_config.base_path
+        (Masc.Mcp_server.workspace_config state).base_path;
+      check string "server current workspace projection moved"
+        destination_workspace
+        (Masc.Mcp_server.workspace_config state).workspace_path)
+;;
+
+let test_activity_payload_sanitizes_invalid_utf8 () =
+  let payload =
+    Masc.Mcp_server_eio_call_tool.For_testing.activity_tool_called_payload
+      ~tool_name:"tool_execute"
+      ~success:false
+      ~duration_ms:42
+      ~source:"keeper_internal"
+      ~error_detail:"bad\xfferror"
+      ~tool_args_preview:"preview\xfe"
+      (`Assoc
+        [
+          ("cmd", `String "printf '\xff'");
+          ("message", `String "message\xfd");
+          ("title", `String "title\xfc");
+          ("pr_number", `Int 15310);
+        ])
+  in
+  check_json_strings_valid_utf8 "activity_payload" payload;
+  check string "tool name preserved" "tool_execute"
+    (payload |> U.member "tool_name" |> U.to_string);
+  check int "numeric field preserved" 15310
+    (payload |> U.member "pr_number" |> U.to_int)
+
+let test_failure_observation_uses_typed_failed_payload () =
+  let failed : Tool_result.result =
+    Tool_result.Failed
+      { effect_disposition = Tool_result.Effect_outcome_unknown
+      ; class_ = Tool_result.Policy_rejection
+      ; message = "operator denied"
+      ; data_source = Tool_result.Explicit_data `Null
+      ; metadata = None
+      ; tool_name = "restricted-tool"
+      ; duration_ms = 0.0
+      }
+  in
+  let completed : Tool_result.result =
+    Tool_result.Completed
+      { retained_artifacts = []; content_blocks = None; data = `Null
+      ; metadata = None
+      ; tool_name = "completed-tool"
+      ; duration_ms = 0.0
+      }
+  in
+  check
+    (option (pair (testable Tool_result.pp_tool_failure_class ( = )) string))
+    "failed payload is the sole class/detail source"
+    (Some (Tool_result.Policy_rejection, "duration_ms=42|detail=operator denied"))
+    (Masc.Mcp_server_eio_call_tool.For_testing.failure_observation
+       ~duration_ms:42 failed);
+  check
+    (option (pair (testable Tool_result.pp_tool_failure_class ( = )) string))
+    "completed result has no failure observation"
+    None
+    (Masc.Mcp_server_eio_call_tool.For_testing.failure_observation
+       ~duration_ms:42 completed)
+
+let test_records_mcp_server_operation_duration_metric () =
+  let context =
+    { Otel_dispatch_hook.jsonrpc_request_id = Some "metric-request-otel"
+    ; mcp_session_id = Some "metric-session-otel"
+    ; mcp_protocol_version = Some "2025-06-18"
+    ; transport =
+        Some
+          (Otel_dispatch_hook.http_transport_context ~protocol_version:"2")
+    }
+  in
+  let result : Tool_result.result =
+    Tool_result.Completed
+      { retained_artifacts = []; content_blocks = None; Tool_result.data = `String "ok"
+      ; metadata = None
+      ; tool_name = "get-weather"
+      ; duration_ms = 123.0
+      }
+  in
+  let labels =
+    [ Otel_genai.Mcp_attr_key.mcp_method_name
+    , Otel_genai.Mcp_value.tools_call_method
+    ; Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool"
+    ; Otel_genai.Attr_key.gen_ai_tool_name, "get-weather"
+    ; Otel_genai.Mcp_attr_key.mcp_protocol_version, "2025-06-18"
+    ; Otel_genai.Mcp_attr_key.network_protocol_name, "http"
+    ; Otel_genai.Mcp_attr_key.network_protocol_version, "2"
+    ; Otel_genai.Mcp_attr_key.network_transport, "tcp"
+    ]
+  in
+  let metric_name = Otel_genai.Mcp_metric_name.server_operation_duration in
+  let before_value =
+    Masc.Otel_metric_store.metric_value_or_zero metric_name ~labels ()
+  in
+  let before_count =
+    Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
+  Eio_main.run (fun _env ->
+    Otel_dispatch_hook.with_request_context context (fun () ->
+      Masc.Mcp_server_eio_call_tool.For_testing.record_mcp_server_operation_duration
+        result
+        ~duration_ms:250));
+  check (float 0.0001) "duration seconds delta" 0.250
+    (Masc.Otel_metric_store.metric_value_or_zero metric_name ~labels ()
+     -. before_value);
+  check (float 0.0001) "duration count delta" 1.0
+    (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+     -. before_count)
+
+(* Per-caller wrapper timeout was removed on 2026-06-08 (PR cleanup,
+   spirit: "tool 자체가 알아서 타임아웃으로 튕기든 해야지 그걸 왜 되나 안
+   되나 우리가 관찰하고 있나?").  The previous test_block asserted caller
+   timeout policy (default/board-write/min-max clamps) — that domain is
+   gone, so the tests are deleted rather than rewritten to assert "no
+   timeout".  The tool itself owns hang protection. *)
+
+let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
+  let base_path = temp_dir () in
+  let keeper_name = "alpha-context" in
+  let meta =
+    make_keeper_meta
+      ~current_task_id:"task-123"
+      keeper_name
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
+      cleanup_dir base_path)
+    (fun () ->
+      ignore
+        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+      Masc.Keeper_registry.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
+        ~wake:Masc.Keeper_registry.Proactive_tick keeper_name;
+      let entry =
+        match Masc.Keeper_registry.get ~base_path keeper_name with
+        | Some entry -> entry
+        | None -> fail "expected registered keeper entry"
+      in
+      let ctx =
+        Masc.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
+          ~mcp_session_id:"mcp-session-1"
+          entry
+          ~arguments:(`Assoc [ ("session_id", `String "session-explicit") ])
+      in
+      check (option string) "trace_id"
+        (Some ("trace-test-" ^ keeper_name))
+        ctx.trace_id;
+      check (option string) "agent_name"
+        (Some keeper_name)
+        ctx.agent_name;
+      check (option string) "session_id"
+        (Some "session-explicit")
+        ctx.session_id;
+      check (option int) "turn" (Some 1) ctx.turn;
+      check (option int) "keeper_turn_id" (Some 1) ctx.keeper_turn_id;
+      check (option string) "task_id" (Some "task-123") ctx.task_id;
+      check bool "model populated" true (String.trim ctx.model <> "");
+      check bool "sandbox profile present" true (Option.is_some ctx.sandbox_profile);
+      check bool "sandbox root present" true (Option.is_some ctx.sandbox_root);
+      check bool "sandbox roots present" true (Option.is_some ctx.sandbox_roots);
+      check bool "network mode present" true (Option.is_some ctx.network_mode))
+
+let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  let keeper_name = "alpha-task-contract" in
+  let config = Masc.Workspace.default_config base_path in
+  ignore (Masc.Workspace.init config ~agent_name:(Some keeper_name));
+  let contract = empty_contract in
+  ignore
+    (Masc.Workspace.add_task
+       ~contract
+       config
+       ~title:"Needs execution tools"
+       ~priority:1
+       ~description:"exercise runtime MCP tool logging");
+  let meta =
+    make_keeper_meta
+      ~current_task_id:"task-001"
+      keeper_name
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
+      cleanup_dir base_path)
+    (fun () ->
+      ignore
+        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+      let entry =
+        match Masc.Keeper_registry.get ~base_path keeper_name with
+        | Some entry -> entry
+        | None -> fail "expected registered keeper entry"
+      in
+      let ctx =
+        Masc.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
+          entry
+          ~arguments:(`Assoc [])
+      in
+      check bool "runtime mcp keeps task contract out of log context" true
+        (Option.is_some ctx.task_id))
+
+let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  let keeper_name = "alpha-runtime-mcp" in
+  let meta =
+    make_keeper_meta
+      ~current_task_id:"task-456"
+      keeper_name
+  in
+  let subscriber_id = "test-runtime-mcp-tool-trace" in
+  let received_sse = ref None in
+  Masc.Keeper_tool_call_log.reset_for_testing ();
+  Masc.Keeper_tool_call_log.init ~base_path ();
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Sse.unsubscribe_external subscriber_id;
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      cleanup_dir base_path)
+    (fun () ->
+      ignore
+        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+      Masc.Keeper_registry.mark_turn_started ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
+        ~wake:Masc.Keeper_registry.Proactive_tick keeper_name;
+      let entry =
+        match Masc.Keeper_registry.get ~base_path keeper_name with
+        | Some entry -> entry
+        | None -> fail "expected registered keeper entry"
+      in
+      Masc.Sse.subscribe_external
+        ~id:subscriber_id
+        ~callback:(fun (ev : Masc.Sse.external_event) ->
+          received_sse := Some ev.Masc.Sse.ext_frame)
+        ();
+      Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+        ~mcp_session_id:"mcp-session-9"
+        entry
+        ~tool_name:"tool_execute"
+        ~arguments:
+          (`Assoc
+            [
+              ("cmd", `String "false");
+              ("session_id", `String "session-explicit");
+            ])
+        ~message:"command exited 1"
+        ~disposition:(Tool_result.Failed Tool_result.Runtime_failure)
+        ~execution_id:(Ids.Execution_id.generate ())
+        ~duration_ms:87;
+      let rows =
+        tool_call_rows ~keeper_name ~n:1 ()
+      in
+      check int "logged row count" 1 (List.length rows);
+      let row = List.hd rows in
+      check string "tool" "tool_execute" (row |> U.member "tool" |> U.to_string);
+      check string "wire outcome" "error"
+        (row |> U.member "wire_outcome" |> U.to_string);
+      check string "output" "command exited 1"
+        (row |> U.member "output" |> U.to_string);
+      check string "lane" "runtime_mcp"
+        (row |> U.member "lane" |> U.to_string);
+      check string "trace id" ("trace-test-" ^ keeper_name)
+        (row |> U.member "trace_id" |> U.to_string);
+      check string "session id" "session-explicit"
+        (row |> U.member "session_id" |> U.to_string);
+      check int "turn" 1 (row |> U.member "turn" |> U.to_int);
+      check int "keeper turn id" 1
+        (row |> U.member "keeper_turn_id" |> U.to_int);
+      check string "task id" "task-456"
+        (row |> U.member "task_id" |> U.to_string);
+      let runtime_contract = row |> U.member "runtime_contract" in
+      check string "runtime contract keeper"
+        keeper_name
+        (runtime_contract |> U.member "keeper_name" |> U.to_string);
+      check string "runtime contract sandbox profile"
+        (row |> U.member "sandbox_profile" |> U.to_string)
+        (runtime_contract |> U.member "sandbox_profile" |> U.to_string);
+      let omits_field name =
+        match runtime_contract with
+        | `Assoc fields -> not (List.mem_assoc name fields)
+        | _ -> false
+      in
+      check bool "runtime contract omits legacy required_tools" true
+        (omits_field "required_tools");
+      check bool "runtime contract omits legacy missing_required_tools" true
+        (omits_field "missing_required_tools");
+      check bool "runtime contract has runtime_profile field" true
+        (match runtime_contract |> U.member "runtime_profile" with
+         | `String _ | `Null -> true
+         | _ -> false);
+      let masc_root =
+        Filename.concat base_path Common.masc_dirname
+      in
+      let trace_id = "trace-test-" ^ keeper_name in
+      let trajectory_entries =
+        Trajectory.read_entries
+          ~masc_root
+          ~keeper_name
+          ~trace_id
+      in
+      check int "trajectory row count" 1 (List.length trajectory_entries);
+      let trajectory_entry = List.hd trajectory_entries in
+      check string "trajectory tool" "tool_execute"
+        trajectory_entry.Trajectory.tool_name;
+      check int "trajectory turn" 1
+        trajectory_entry.Trajectory.turn;
+      check int "trajectory round" 1
+        trajectory_entry.Trajectory.round;
+      let trajectory_json =
+        let path =
+          Trajectory.trajectory_path masc_root keeper_name trace_id
+        in
+        let ic = open_in path in
+        let content =
+          Fun.protect
+            ~finally:(fun () -> close_in_noerr ic)
+            (fun () -> really_input_string ic (in_channel_length ic))
+        in
+        content
+        |> String.split_on_char '\n'
+        |> List.find (fun line -> String.trim line <> "")
+        |> Yojson.Safe.from_string
+      in
+      check string "trajectory runtime keeper" keeper_name
+        (trajectory_json |> U.member "runtime_contract" |> U.member "keeper_name"
+         |> U.to_string);
+      check bool "trajectory runtime has runtime_profile field" true
+        (match trajectory_json |> U.member "runtime_contract"
+               |> U.member "runtime_profile" with
+         | `String _ | `Null -> true
+         | _ -> false);
+      check string "trajectory action tool" "tool_execute"
+        (trajectory_json |> U.member "action_radius" |> U.member "tool_name"
+         |> U.to_string);
+      let sse_payload =
+        match !received_sse with
+        | Some payload -> extract_json_from_text payload
+        | None -> fail "expected runtime MCP SSE payload"
+      in
+      check string "sse type" "keeper_tool_call"
+        (sse_payload |> U.member "type" |> U.to_string);
+      check string "sse keeper name" keeper_name
+        (sse_payload |> U.member "name" |> U.to_string);
+      check int "sse keeper turn id, the ledger row's" 1
+        (sse_payload |> U.member "keeper_turn_id" |> U.to_int);
+      check string "sse tool name" "tool_execute"
+        (sse_payload |> U.member "tool_name" |> U.to_string);
+      check string "sse disposition" "failed"
+        (sse_payload |> U.member "disposition" |> U.to_string);
+      check bool "sse omits legacy success bool" true
+        (sse_payload |> U.member "success" = `Null);
+      check string "sse error text" "command exited 1"
+        (sse_payload |> U.member "error_text" |> U.to_string);
+      check string "sse args structured input" "false"
+        (sse_payload |> U.member "tool_args" |> U.member "cmd" |> U.to_string);
+      check string "sse result structured text" "command exited 1"
+        (sse_payload |> U.member "tool_result" |> U.to_string);
+      check string "sse args preview includes input" {|{"cmd":"false","session_id":"session-explicit"}|}
+        (sse_payload |> U.member "tool_args_preview" |> U.to_string);
+      check string "sse output preview includes result" "command exited 1"
+        (sse_payload |> U.member "tool_output_preview" |> U.to_string);
+      let reference = Tool_blob_store.put_durable
+          (Tool_blob_store.create ~base_path) ~bytes:"retained native observation"
+          ~mime:"application/vnd.masc.browser-scene+json" in
+      Masc.Sse.subscribe_external ~id:subscriber_id
+        ~callback:(fun _ -> failwith "post-commit subscriber unavailable") ();
+      let observed = Tool_result.make_ok ~tool_name:"BrowserRead" ~start_time:(Tool_timing.start ())
+          ~data:(`Assoc ["url",`String "https://example.org/page"]) ()
+          |> Tool_result.with_retained_artifacts [reference] in
+      Eio.Switch.run (fun sw ->
+      Masc.Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+      Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+        ~typed_result:observed entry ~tool_name:"BrowserRead"
+        ~arguments:(`Assoc ["mode",`String "scene"])
+        ~message:(Tool_result.message observed) ~disposition:(Tool_result.Completed ())
+        ~execution_id:(Ids.Execution_id.generate ()) ~duration_ms:1;
+      check int "native observation root bypasses the lossy async queue" 0
+        (Masc.Keeper_tool_call_log.queued_count_for_testing ());
+      let observed_row = tool_call_rows ~keeper_name ~n:1 () |> List.hd in
+      let roots = Tool_output.normalized_artifact_refs_in_json (observed_row |> U.member "artifact_refs") in
+      check bool "native MCP logger retains the producer observation" true
+        (List.exists (fun (root : Tool_output.artifact_ref) -> root.sha256=reference.sha256) roots);
+      check string "native row keeps inline body" (Tool_result.message observed)
+        (observed_row |> U.member "output" |> U.to_string));
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      let failed = try
+        Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+          ~typed_result:observed entry ~tool_name:"BrowserRead" ~arguments:(`Assoc [])
+          ~message:(Tool_result.message observed) ~disposition:(Tool_result.Completed ())
+          ~execution_id:(Ids.Execution_id.generate ()) ~duration_ms:1;
+        false
+      with Eio.Cancel.Cancelled _ as error -> raise error | _ -> true in
+      check bool "native retained receipt requires successful log commit" true failed)
+
+let test_canonical_keeper_retention ?(rebind = false) ~bearer ~fail_audit () =
+  with_call_tool_state (fun env sw state ->
+    let config = (Masc.Mcp_server.workspace_scope state).config in
+    let base_path = config.base_path in
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    let alias = "retention" in
+    ignore (Masc.Workspace.bind_session config ~agent_name:alias ~capabilities:[] ());
+    let keeper_name = Masc.Workspace.resolve_agent_name config alias in
+    check bool "fixture resolves a bound workspace alias" true (keeper_name <> alias);
+    let original_name = keeper_name in
+    let keeper_name = if rebind then "rebound-keeper" else original_name in
+    let session_id = "retention-session-" ^ Filename.basename base_path in
+    Masc.Client_registry_eio.set_resolved_name session_id original_name ~is_ephemeral:false;
+    if rebind then ignore (Masc.Keeper_registry.register_offline ~base_path original_name
+      (make_keeper_meta original_name));
+    let meta = make_keeper_meta keeper_name in
+    ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+    Masc.Keeper_tool_call_log.reset_for_testing ();
+    Masc.Keeper_tool_call_log.init ~base_path ();
+    Fun.protect ~finally:(fun () ->
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
+      if rebind then Masc.Keeper_registry.For_testing.unregister ~base_path original_name;
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      Browser_lane.install_activity_observer None;
+      Browser_lane.install_automation_executor None;
+      Masc.Client_registry_eio.unregister_mcp_session session_id;
+      Time_compat.clear_clock ()) (fun () ->
+      let auth_token = if bearer then
+        match Auth.create_token base_path ~agent_name:keeper_name ~role:Masc_domain.Worker with
+        | Ok (token, _) -> Some token
+        | Error _ -> fail "credential fixture creation failed"
+        else None in
+      let arguments = `Assoc ["lane",`String "automation"; "tabId",`Int 7;
+        "mode",`String "scene"] in
+      let data = `Assoc [
+        "schema",`String "masc.browser.scene.v1"; "tabId",`Int 7;
+        "source",`String "automation"; "clientId",`Null;
+        "documentId",`String "canonical-owner-document";
+        "url",`String "https://example.org/page"; "title",`String "Observed";
+        "view",`String "content"; "scope",`Null;
+        "viewport",`Assoc ["width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0];
+        "chars",`Int 0; "truncated",`Bool false; "nodes",`List []] in
+      let dispatch_count = ref 0 in
+      Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
+      Browser_lane.install_automation_executor (Some (function
+        | Browser_lane.Page_scene { tab_id = 7; view = Content; scope = None; _ } ->
+          incr dispatch_count;
+          check bool "browser action runs as the executor-resolved caller" true
+            (Option.is_some (Masc.Session.get_session state.session_registry ~agent_name:keeper_name));
+          if rebind then (
+            check bool "prior binding did not execute this action" true
+              (Option.is_none (Masc.Session.get_session state.session_registry ~agent_name:original_name));
+            Masc.Client_registry_eio.set_resolved_name session_id original_name ~is_ephemeral:false);
+          Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data])
+        | _ -> fail "only a scene read is expected"));
+      let failed = try
+        ignore (Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+          ~execute_tool_eio:(fun ~sw ~clock ~workspace_scope ?profile
+            ?mcp_session_id ?invocation_ref ?auth_token ?internal_keeper_runtime
+            ?on_caller_resolved state ~name ~arguments ->
+            (* Deterministically model a concurrent rebind after admission but
+               before the actual execution resolves its caller. *)
+            if rebind then Masc.Client_registry_eio.set_resolved_name session_id keeper_name ~is_ephemeral:false;
+            let result = Masc.Mcp_server_eio_execute.execute_tool_eio
+              ~sw ~clock ~workspace_scope ?profile ?mcp_session_id ?invocation_ref
+              ?auth_token ?internal_keeper_runtime ?on_caller_resolved state ~name ~arguments in
+            check bool ("actual executor succeeds: " ^ Tool_result.message result) true
+              (Tool_result.is_success result);
+            (* Inject failure only after the inner dispatch's own audit. *)
+            if fail_audit then (
+              let path = Filename.concat (Masc.Workspace.masc_dir config) Masc.Audit_log.store_dirname in
+              if Sys.file_exists path then Fs_compat.remove_tree path;
+              let channel = open_out path in close_out channel);
+            result)
+          ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+          ~broadcast_tools_list_changed:(fun () -> ())
+          ~sw ~clock:(Eio.Stdenv.clock env) ?auth_token
+          ?mcp_session_id:(if bearer then None else Some session_id) state (`Int 19)
+          (admit_call (`Assoc ["name",`String "masc_browser_read"; "arguments",arguments])));
+        false
+      with Eio.Cancel.Cancelled _ as error -> raise error | _ -> true in
+      check int "one physical browser dispatch" 1 !dispatch_count;
+      check bool "audit failure remains visible after root commit" fail_audit failed;
+      if rebind then check int "old and later cache owner has no receipt" 0
+        (List.length (tool_call_rows ~keeper_name:original_name ()));
+      let rows = tool_call_rows ~keeper_name () in
+      let row = match rows with [row] -> row | _ -> fail "canonical Keeper needs exactly one receipt" in
+      let roots = Tool_output.normalized_artifact_refs_in_json (row |> U.member "artifact_refs") in
+      check int "canonical caller owns the retained scene" 1 (List.length roots);
+      let gc = match Tool_blob_maintenance.run ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~base_path ~mode:Observe_only with
+        | Ok gc -> gc | Error error -> fail (Tool_blob_maintenance.error_to_string error) in
+      check int "receipt is a durable GC root even after audit failure" 1 gc.live_references))
+
+(* A result's media reaches an MCP client after its text, through the same
+   projection the official-client bridge uses; media MCP cannot carry is named
+   as not sent, never dropped quietly. *)
+let content_types response =
+  U.(response |> member "result" |> member "content" |> to_list)
+  |> List.map U.(fun item -> item |> member "type" |> to_string)
+
+let is_error response = U.(response |> member "result" |> member "isError" |> to_bool)
+
+let png_1x1 =
+  "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
+
+let result_with_blocks ?(message = "observed") blocks =
+  Tool_result.make_ok ~tool_name:"masc_status" ~start_time:(Tool_timing.start ())
+    ~data:(`String message) ~content_blocks:blocks ()
+
+let test_media_blocks_become_mcp_items () =
+  with_call_tool_state (fun env sw state ->
+    let response =
+      call_with_result ~env ~sw state
+        (result_with_blocks
+           [ Llm_provider.Types.Text "observed"
+           ; Llm_provider.Types.image_block ~media_type:"image/png"
+               ~source:(Llm_provider.Types.Base64 (Base64.encode_exn png_1x1))
+           ])
+    in
+    check (list string) "text then image" [ "text"; "image" ] (content_types response);
+    check bool "not an error" false (is_error response);
+    check string "the image keeps its media type" "image/png"
+      U.(response |> member "result" |> member "content" |> index 1 |> member "mimeType" |> to_string))
+
+let test_media_mcp_cannot_carry_is_named () =
+  with_call_tool_state (fun env sw state ->
+    (* A tool may have completed with non-UTF8 process output. Rejecting its
+       media must not bypass the text sanitization used by the normal MCP
+       projection, or the client loses the explanatory fallback as well. *)
+    let raw_message = "observed\xff frame \xed\x95\x9c" in
+    check bool "fixture message contains invalid UTF-8" false
+      (String.is_valid_utf_8 raw_message);
+    let response =
+      call_with_result ~env ~sw state
+        (result_with_blocks ~message:raw_message
+           [ Llm_provider.Types.image_block ~media_type:"image/png"
+               ~source:(Llm_provider.Types.Url "https://example.invalid/frame.png")
+           ])
+    in
+    check (list string) "what was not sent, then the message" [ "text"; "text" ]
+      (content_types response);
+    check bool "the call reads as failed" true (is_error response);
+    let content = U.(response |> member "result" |> member "content") in
+    check_json_strings_valid_utf8 "unsupported media content" content;
+    check string "the second item preserves the sanitized observation"
+      (Llm_provider.Utf8_sanitize.sanitize raw_message)
+      U.(content |> index 1 |> member "text" |> to_string);
+    let envelope = result_envelope response in
+    check_json_strings_valid_utf8 "unsupported media envelope" envelope;
+    check string "envelope summary preserves the same sanitized observation"
+      (Llm_provider.Utf8_sanitize.sanitize raw_message)
+      U.(envelope |> member "summary" |> to_string);
+    check bool "valid non-ASCII text survives the fallback" true
+      (String_util.contains_substring
+         U.(content |> index 1 |> member "text" |> to_string) "\xed\x95\x9c");
+    check bool "the first item names the media" true
+      (String_util.contains_substring
+         U.(content |> index 0 |> member "text" |> to_string)
+         "cannot deliver URL image content"))
+
+let () =
+  run "mcp_server_eio_call_tool"
+    [
+      ( "typed projection",
+        [
+          test_case "actual executor identity survives session rebinding" `Quick
+            (test_canonical_keeper_retention ~rebind:true ~bearer:false ~fail_audit:false);
+          test_case "bearer-resolved Keeper owns retained reads" `Quick
+            (test_canonical_keeper_retention ~bearer:true ~fail_audit:false);
+          test_case "cached canonical Keeper owns retained reads" `Quick
+            (test_canonical_keeper_retention ~bearer:false ~fail_audit:false);
+          test_case "audit failure follows retained root commit" `Quick
+            (test_canonical_keeper_retention ~bearer:false ~fail_audit:true);
+          test_case "free-form text does not control response" `Quick
+            test_free_form_failure_text_does_not_control_response;
+          test_case "call request decodes current shape once" `Quick
+            test_call_request_decodes_current_shape_once;
+          test_case "call request rejects noncanonical shapes" `Quick
+            test_call_request_rejects_noncanonical_shapes;
+          test_case "invalid call params stop before dispatch" `Quick
+            test_invalid_call_params_do_not_reach_dispatch_handler;
+          test_case "typed outcome alone controls projection" `Quick
+            test_typed_outcome_alone_controls_projection;
+          test_case "transient failure executes once" `Quick
+            test_handle_call_executes_transient_failure_once;
+          test_case "captures admission scope across workspace switch" `Quick
+            test_call_captures_admission_scope_across_workspace_switch;
+          test_case "threads exact MCP invocation identity" `Quick
+            test_threads_exact_mcp_invocation_identity;
+          test_case "media blocks become MCP items" `Quick test_media_blocks_become_mcp_items;
+          test_case "media MCP cannot carry is named" `Quick test_media_mcp_cannot_carry_is_named;
+          test_case "activity payload sanitizes invalid UTF-8" `Quick
+            test_activity_payload_sanitizes_invalid_utf8;
+          test_case "failure observation follows typed failed payload" `Quick
+            test_failure_observation_uses_typed_failed_payload;
+          test_case "records MCP server operation duration metric" `Quick
+            test_records_mcp_server_operation_duration_metric;
+          test_case "runtime MCP log context uses keeper trace/current turn" `Quick
+            test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn;
+          test_case "runtime MCP log context loads current task contract" `Quick
+            test_runtime_mcp_keeper_log_context_loads_current_task_contract;
+          test_case "runtime MCP trace logs and broadcasts" `Quick
+            test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts;
+        ] );
+    ]

@@ -1,0 +1,8 @@
+; What keeper_voice_speak tells the model about whether anyone heard it. say
+; and the player are scripts on PATH, so the check needs neither macOS nor a
+; speaker.
+
+(test
+ (name test_voice_speak_status)
+ (libraries alcotest eio eio_main unix yojson masc masc_test_deps
+  masc.config_dir_resolver))

@@ -1,0 +1,269 @@
+{
+  "instances": [
+    {
+      "instance_id": "worker-execution",
+      "incarnation": "worker-execution",
+      "run_id": "proof-run",
+      "addon_id": "worker-execution-package",
+      "title": "Execution worker raw-first",
+      "revision": "1",
+      "phase": {
+        "kind": "attached"
+      },
+      "runtime_presence": "live",
+      "observation_seq": 1,
+      "rows_count": 0,
+      "configuration": null,
+      "binding": {
+        "sources": []
+      },
+      "package": {
+        "outputs": {},
+        "skills_directory": null,
+        "ui_category": "execution_environment"
+      },
+      "action_schema": {
+        "type": "object",
+        "required": [
+          "context",
+          "request_id",
+          "action"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "object",
+            "required": [
+              "instance_id",
+              "incarnation"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "instance_id": {
+                "type": "string"
+              },
+              "incarnation": {
+                "type": "string"
+              }
+            }
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 36
+          },
+          "action": {
+            "type": "object",
+            "required": [
+              "operation"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "inspect"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "instance_id": "worker-browser",
+      "incarnation": "worker-browser",
+      "run_id": "proof-run",
+      "addon_id": "worker-browser-package",
+      "title": "Browser original target",
+      "revision": "1",
+      "phase": {
+        "kind": "attached"
+      },
+      "runtime_presence": "live",
+      "observation_seq": 1,
+      "rows_count": 0,
+      "configuration": {
+        "id": "browser-installation",
+        "source_path": "/private/tmp/masc-installed-addon-role-proof-20261024/workspace/.masc/config/lane-addons/browser.toml",
+        "revision": "r1"
+      },
+      "binding": {
+        "sources": []
+      },
+      "package": {
+        "outputs": {},
+        "skills_directory": null,
+        "ui_category": "analysis"
+      },
+      "action_schema": {
+        "type": "object",
+        "required": [
+          "context",
+          "request_id",
+          "action"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "object",
+            "required": [
+              "instance_id",
+              "incarnation"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "instance_id": {
+                "type": "string"
+              },
+              "incarnation": {
+                "type": "string"
+              }
+            }
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 36
+          },
+          "action": {
+            "type": "object",
+            "required": [
+              "operation"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "inspect"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "instance_id": "worker-mismatch",
+      "incarnation": "worker-mismatch",
+      "run_id": "proof-run",
+      "addon_id": "worker-mismatch-package",
+      "title": "Mismatch must stay unverified",
+      "revision": "1",
+      "phase": {
+        "kind": "attached"
+      },
+      "runtime_presence": "live",
+      "observation_seq": 1,
+      "rows_count": 0,
+      "configuration": {
+        "id": "mismatch-installation",
+        "source_path": "/private/tmp/masc-installed-addon-role-proof-20261024/workspace/mismatch-original.toml",
+        "revision": "r1"
+      },
+      "binding": {
+        "sources": []
+      },
+      "package": {
+        "outputs": {},
+        "skills_directory": null,
+        "ui_category": "analysis"
+      },
+      "action_schema": {
+        "type": "object",
+        "required": [
+          "context",
+          "request_id",
+          "action"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "type": "object",
+            "required": [
+              "instance_id",
+              "incarnation"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "instance_id": {
+                "type": "string"
+              },
+              "incarnation": {
+                "type": "string"
+              }
+            }
+          },
+          "request_id": {
+            "type": "string",
+            "minLength": 36
+          },
+          "action": {
+            "type": "object",
+            "required": [
+              "operation"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "inspect"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "rows": [],
+  "coverage": [],
+  "configuration": {
+    "directory": "/private/tmp/masc-installed-addon-role-proof-20261024/workspace/.masc/config/lane-addons",
+    "complete": true,
+    "declarations": [
+      {
+        "id": "inactive-memory",
+        "source_path": "/private/tmp/masc-installed-addon-role-proof-20261024/workspace/memory.toml",
+        "source_revision": "s1",
+        "desired_revision": "r1",
+        "enabled": false,
+        "applied_revision": null,
+        "instance_id": null,
+        "ui_category": "memory_judgment",
+        "application": {
+          "kind": "inactive"
+        }
+      },
+      {
+        "id": "browser-installation",
+        "source_path": "/private/tmp/masc-installed-addon-role-proof-20261024/workspace/.masc/config/lane-addons/browser.toml",
+        "source_revision": "s1",
+        "desired_revision": "r1",
+        "enabled": true,
+        "applied_revision": "r1",
+        "instance_id": "worker-browser",
+        "ui_category": "browser",
+        "application": {
+          "kind": "applied",
+          "instance_id": "worker-browser"
+        }
+      },
+      {
+        "id": "mismatch-installation",
+        "source_path": "/private/tmp/masc-installed-addon-role-proof-20261024/workspace/different-path.toml",
+        "source_revision": "s1",
+        "desired_revision": "r1",
+        "enabled": true,
+        "applied_revision": "r1",
+        "instance_id": "worker-mismatch",
+        "ui_category": "voice_media",
+        "application": {
+          "kind": "applied",
+          "instance_id": "worker-mismatch"
+        }
+      }
+    ],
+    "issues": []
+  }
+}

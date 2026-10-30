@@ -1,0 +1,16 @@
+{
+  "source": "6d8d70039f2e4011eb43b35c940c1a999ada340a",
+  "model": "gpt-5.3-codex-spark",
+  "platform": "macOS arm64",
+  "fixture_model": false,
+  "approval_overrides": false,
+  "keeper": "imp",
+  "chats": 4,
+  "scope": "baseline before onboarding patch; explicit tool-directed prompts and existing Codex auth home",
+  "not_measured": [
+    "new setup command",
+    "clean CLI home",
+    "Linux",
+    "final release artifact"
+  ]
+}

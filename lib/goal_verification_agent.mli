@@ -1,0 +1,139 @@
+(** Goal_verification_agent — the RFC-0387 stage-2 verifier caller.
+
+    Application-owned LLM agent (not a Keeper) that drains the goal
+    verification ledger's durable [Proof_pending] requests (B3), judges each
+    through
+    the durable {!Goal_verifier_worker} on the [verifier_exact] lane, and
+    commits the verdict through {!Workspace_goals.commit_verifier_decision},
+    the typed internal FSM+ledger+phase+event boundary, under the fixed
+    identity [System_llm_agent { agent_run_id = "verifier_exact" }]
+    (RFC-0361 D7(b)).
+
+    Typed non-verdicts (evaluator unavailable, malformed reply after all
+    slots failed, verdict without a stated reason, refused commit) leave the
+    pending row durable. Typed definite retryable evaluator errors select a
+    durably linked successor after candidate rest. Proven pre-admission repair
+    reuses the original; unknown dispatch never replays. Boot restores saved
+    judgments/commits before lookup preparation, including phase-moved Goals.
+    Other deferrals need an explicit wake.
+    A pending row is never consumed on failure and has no wall-clock expiry.
+
+    The daemon retains discovered, not-yet-admitted Goal identities in a
+    process-local queue. Returning a review slot drains that queue even when
+    the review failed; it does not rediscover and retry failed Goals. Explicit
+    Goal wakes and provider retry timers request fresh discovery. Queued work
+    is an observation only: the current request and original authority are
+    revalidated by the worker, and restart reconstructs work from the owners. *)
+
+val start :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  config:Workspace_utils_backend_setup.config ->
+  unit
+
+val scan_skipped_log_prefix : string
+(** [goal verifier scan skipped] — the first words of the one WARN line each
+    scan the goal store refused writes (RFC-0444 §2.3 row 7, criterion 3:
+    line count = skipped scan count). The same scan appends one
+    {!Goal_verification_run_registry.Scan_skipped} row. *)
+
+val unreconciled_to_yojson :
+  config:Workspace_utils_backend_setup.config ->
+  record:Goal_verification.record option -> Goal_store.goal -> Yojson.Safe.t
+(** [null], or [{step; detail}] for a still-Verifying Goal that the latest
+    scan could not settle or whose original read failed. Original failures
+    are observations bound to this workspace root, Goal criterion and exact
+    pending request; they are never permission to dispatch or retry. [record]
+    is the caller's already loaded authoritative row, or [None] when absent
+    or unavailable (the caller separately renders the ledger error). No ledger
+    or original is loaded here. Successful reads clear only their own
+    observation; a stale completion cannot clear a newer read's failure.
+    Historical publication failures after the Goal leaves Verifying are not
+    represented by this pending-request projection. *)
+
+module For_testing : sig
+  val retry_pending : goal_id:string -> bool
+  val scan_active_once : unit -> bool
+  (** Consume one discovery scan and drain available queued work on the real
+      active runtime for deterministic wake/ownership race tests. Existing
+      claims and queued work keep their ownership. False means no runtime is
+      active. *)
+  type pending_work = { goal_id : string }
+
+  (** Why a review ended without a verdict. *)
+  type deferral =
+    | Review_not_bound of { detail : string }
+    | Proof_lookup_unavailable of { detail : string }
+    | Not_reviewed of
+        { gate : string
+        ; detail : string
+        ; evaluator_runtime : string option
+      ; retryable_runtimes : string list
+      ; model_absent_runtimes : string list
+        }
+    | Verdict_without_reason
+    | Commit_refused of { detail : string }
+
+  (** How one review ended. [Deferred] carries why no verdict was committed;
+      the pending row it names is still durable. A deferral of a request
+      that still stands is posted once per (Goal, request, gate) through
+      {!Verification_protocol.notify_stalled_verification}. *)
+  type process_outcome =
+    | Committed
+    | Superseded
+    | Deferred of deferral
+
+  val deferral_gate : deferral -> string
+  (** The [gate] the Board notice keys its repeat check on: the evaluator's
+      gate name for [Not_reviewed], the constructor name otherwise. *)
+
+  val deferral_detail : deferral -> string
+
+  (** Why a scan produced no work: the goal store this build cannot read.
+      It is recorded as a durable row and a WARN line. *)
+  type scan_failure = Scan_skipped of Goal_store.unavailable
+
+  (** One Verifying goal whose ledger the scan could read but not reconcile
+      or re-arm. The scan skips it and keeps collecting the other goals; the
+      scan that calls {!collect_pending} logs it at ERROR, and its pending
+      row stays durable. *)
+  type reconcile_failure =
+    { failed_goal_id : string
+    ; step : Goal_reconcile_step.t
+    ; failure : Goal_store.write_error
+    }
+
+  type scan =
+    { collected : pending_work list
+    ; unreconciled : reconcile_failure list
+    }
+
+  val scan_failure_to_string : scan_failure -> string
+  (** For a test's failure message; nothing branches on it. *)
+
+  val collect_pending :
+    Workspace_utils_backend_setup.config ->
+    (scan, scan_failure) result
+  (** Reconciles or re-arms only currently-Verifying Goals through
+      authoritative, locked reads. A goal that fails reconciliation lands in
+      [unreconciled] and does not stop the other goals from being collected.
+      It writes the Goal store when it reconciles or re-arms a proof, and
+      writes no log: the row and the WARN line for a skipped scan, and the
+      ERROR line for each unreconciled goal, come from the scan that calls it
+      ({!drain_once}, the daemon). *)
+
+  val process_pending_work :
+    ?sw:Eio.Switch.t option ->
+    Workspace_utils_backend_setup.config ->
+    pending_work ->
+    process_outcome
+
+  val drain_once :
+    ?sw:Eio.Switch.t option ->
+    Workspace_utils_backend_setup.config ->
+    (unit, scan_failure) result
+  (** Synchronous single scan + process of every pending row. Tests use this
+      instead of booting the daemon. A scan the store refused is recorded
+      exactly as the daemon records it — one WARN line, one row — and is
+      still returned as [Error (Scan_skipped _)]. *)
+end

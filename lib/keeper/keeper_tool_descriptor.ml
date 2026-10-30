@@ -1,0 +1,3683 @@
+(** Agent-facing tool descriptor spine. *)
+
+type executor =
+  | Shell_ir
+  | Filesystem
+  | In_process
+
+type backend =
+  | Ocaml_runtime
+  | Sandbox_process
+
+type sandbox =
+  | No_sandbox
+  | Backend_selected
+
+type keeper_model_projection =
+  | Preferred_public_name
+  | Internal_name
+  | Operator_only
+  | Transport_alias of { projected_by : string }
+
+
+
+type input_schema_source =
+  | Descriptor_owned
+  | Canonical_registry
+  | Keeper_projection
+
+type readonly_of_input = Yojson.Safe.t -> bool option
+
+type ordinary_execution_mode =
+  | Serial
+  | Concurrent
+
+type execution =
+  | Ordinary of ordinary_execution_mode
+  | Terminal
+
+let execution_to_string = function
+  | Ordinary Serial -> "serial"
+  | Ordinary Concurrent -> "concurrent"
+  | Terminal -> "terminal"
+;;
+
+type tool_kind =
+  | Atomic_tool
+  | Composition_tool
+  | Async_composition_tool
+
+type prepared_leaf_admission =
+  | Read_only_ordinary_leaf
+  | Owned_job_launch_leaf
+  | Owned_ask_leaf
+  | Owned_file_mutation_leaf
+  | Direct_only
+
+let tool_kind_to_string = function
+  | Atomic_tool -> "atomic"
+  | Composition_tool -> "composition"
+  | Async_composition_tool -> "async_composition"
+;;
+
+let tool_kind_of_string = function
+  | "atomic" -> Ok Atomic_tool
+  | "composition" -> Ok Composition_tool
+  | "async_composition" -> Ok Async_composition_tool
+  | unknown -> Error ("unknown tool kind: " ^ unknown)
+;;
+
+type composable_output =
+  | Opaque_output
+  | Json_output of { schema : Yojson.Safe.t }
+
+let composable_output_kind = function
+  | Opaque_output -> "opaque"
+  | Json_output _ -> "json"
+;;
+
+let composable_output_to_json = function
+  | Opaque_output -> `Assoc [ "kind", `String "opaque" ]
+  | Json_output { schema } ->
+    `Assoc [ "kind", `String "json"; "schema", schema ]
+;;
+
+type identity_validation =
+  | Validate_once_before_translation
+  | Validate_once_after_translation
+
+type shape_changing_validation =
+  | Validate_before_and_after_translation
+  | Validate_before_then_runtime_handler
+
+type input_translation =
+  | Identity of identity_validation
+  | Shape_changing of
+      { translate : Yojson.Safe.t -> Yojson.Safe.t
+      ; validation : shape_changing_validation
+      }
+
+type runtime_handler =
+  | Tool_lane_addon of Lane_addon_tool_export.t
+  | Tool_execute
+  | Tool_search_files
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_lane_status
+  | Tool_tools_list
+  | Tool_capability_search
+  | Tool_context_status
+  | Tool_peer_artifact
+  | Tool_artifact_read
+  | Tool_skill_validate
+  | Tool_artifact_draft
+  | Tool_artifact_publish
+  | Tool_skill_publish
+  | Tool_workspace_memory_read
+  | Tool_memory_search
+  | Tool_memory_select
+  | Tool_memory_retract
+  | Tool_memory_write
+  | Tool_constitution_write
+  | Tool_constitution_read
+  | Tool_constitution_remove
+  | Tool_wiki_search
+  | Tool_wiki_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
+  | Tool_ide_annotate
+  | Tool_voice_dispatch
+  | Tool_task_dispatch
+  | Tool_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_workspace_dispatch
+  | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
+  | Tool_browser_act
+  | Tool_browser_instruct
+  | Tool_browser_interact
+  | Tool_masc_control_dispatch
+  | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
+  | Tool_keeper_spawn_dispatch
+  | Tool_keeper_job_dispatch
+  | Tool_keeper_composition_result_dispatch
+  | Tool_keeper_code_query_dispatch
+  | Tool_keeper_webmcp_dispatch
+  | Tool_masc_keeper_dispatch
+  | Tool_masc_fusion_dispatch
+  | Tool_masc_fusion_status
+  | Tool_masc_fusion_decision
+  | Tool_masc_file_dispatch
+  | Tool_masc_wiki_dispatch
+  | Tool_masc_local_runtime_dispatch
+  | Tool_analyze_image
+  | Tool_read_image
+
+type policy =
+  { readonly_of_input : readonly_of_input
+  ; readonly_hint : bool option
+  ; cwd_scope : string option
+  ; polling_read : bool
+  ; leaves_masc : bool
+      (** Whether a call that is not a read reaches past masc's own stores —
+          the sandbox filesystem, a process, a service. A write that only
+          moves masc's durable rows (a memory entry, a board post, a surface
+          row) is visible and undoable inside the workspace, so the approval
+          policy runs it; anything that leaves is asked about. Declared per
+          descriptor rather than derived from [cwd_scope], which answers a
+          different question and would make this gate quietly wrong the day
+          a sandbox-scoped read-only tool appears. *)
+  }
+
+type t =
+  { id : string
+  ; capability_id : string
+  ; keeper_model_projection : keeper_model_projection
+  ; input_schema_source : input_schema_source
+  ; public_name : string
+  ; internal_name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; model_output_projection : Tool_output.model_projection
+  ; composable_output : composable_output
+  ; execution : execution
+  ; tool_kind : tool_kind
+  ; policy : policy
+  ; executor : executor
+  ; backend : backend
+  ; sandbox : sandbox
+  ; runtime_handler : runtime_handler
+  ; input_translation : input_translation
+  ; receipt_labels : (string * string) list
+  ; eval_tags : string list
+  ; examples : Yojson.Safe.t list
+  }
+
+let executor_to_string = function
+  | Shell_ir -> "shell_ir"
+  | Filesystem -> "filesystem"
+  | In_process -> "in_process"
+;;
+
+let backend_to_string = function
+  | Ocaml_runtime -> "ocaml_runtime"
+  | Sandbox_process -> "sandbox_process"
+;;
+
+let sandbox_to_string = function
+  | No_sandbox -> "none"
+  | Backend_selected -> "backend_selected"
+;;
+
+let keeper_model_projection_to_string = function
+  | Preferred_public_name -> "preferred_public_name"
+  | Internal_name -> "internal_name"
+  | Operator_only -> "operator_only"
+  | Transport_alias _ -> "transport_alias"
+;;
+
+;;
+
+
+let input_schema_source_to_string = function
+  | Descriptor_owned -> "descriptor_owned"
+  | Canonical_registry -> "canonical_registry"
+  | Keeper_projection -> "keeper_projection"
+;;
+
+let runtime_handler_to_string = function
+  | Tool_lane_addon _ -> "tool_lane_addon"
+  | Tool_execute -> "tool_execute"
+  | Tool_search_files -> "tool_search_files"
+  | Tool_read_file -> "tool_read_file"
+  | Tool_edit_file -> "tool_edit_file"
+  | Tool_write_file -> "tool_write_file"
+  | Tool_lane_status -> "tool_lane_status"
+  | Tool_tools_list -> "tool_tools_list"
+  | Tool_capability_search -> "tool_capability_search"
+  | Tool_context_status -> "tool_context_status"
+  | Tool_peer_artifact -> "keeper_artifact_transfer"
+  | Tool_artifact_read -> "tool_artifact_read"
+  | Tool_skill_validate -> "tool_skill_validate"
+  | Tool_artifact_draft -> "tool_artifact_draft"
+  | Tool_artifact_publish -> "tool_artifact_publish"
+  | Tool_skill_publish -> "tool_skill_publish"
+  | Tool_workspace_memory_read -> "tool_workspace_memory_read"
+  | Tool_memory_search -> "tool_memory_search"
+  | Tool_memory_select -> "tool_memory_select"
+  | Tool_memory_retract -> "tool_memory_retract"
+  | Tool_memory_write -> "tool_memory_write"
+  | Tool_constitution_write -> "tool_constitution_write"
+  | Tool_constitution_read -> "tool_constitution_read"
+  | Tool_constitution_remove -> "tool_constitution_remove"
+  | Tool_wiki_search -> "tool_wiki_search"
+  | Tool_wiki_read -> "tool_wiki_read"
+  | Tool_surface_read -> "tool_surface_read"
+  | Tool_surface_post -> "tool_surface_post"
+  | Tool_person_note_set -> "tool_person_note_set"
+  | Tool_ide_annotate -> "tool_ide_annotate"
+  | Tool_voice_dispatch -> "tool_voice_dispatch"
+  | Tool_task_dispatch -> "tool_task_dispatch"
+  | Tool_board_dispatch -> "tool_board_dispatch"
+  | Tool_masc_task_dispatch -> "tool_masc_task_dispatch"
+  | Tool_masc_plan_dispatch -> "tool_masc_plan_dispatch"
+  | Tool_masc_run_dispatch -> "tool_masc_run_dispatch"
+  | Tool_masc_agent_dispatch -> "tool_masc_agent_dispatch"
+  | Tool_masc_workspace_dispatch -> "tool_masc_workspace_dispatch"
+  | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
+  | Tool_web_search -> "tool_web_search"
+  | Tool_web_fetch -> "tool_web_fetch"
+  | Tool_browser_tabs -> "tool_browser_tabs"
+  | Tool_browser_read -> "tool_browser_read"
+  | Tool_browser_session -> "tool_browser_session"
+  | Tool_browser_goto -> "tool_browser_goto"
+  | Tool_browser_act -> "tool_browser_act"
+  | Tool_browser_instruct -> "tool_browser_instruct"
+  | Tool_browser_interact -> "tool_browser_interact"
+  | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
+  | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
+  | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
+  | Tool_keeper_spawn_dispatch -> "tool_keeper_spawn_dispatch"
+  | Tool_keeper_job_dispatch -> "tool_keeper_job_dispatch"
+  | Tool_keeper_composition_result_dispatch -> "tool_keeper_composition_result_dispatch"
+  | Tool_keeper_code_query_dispatch -> "tool_keeper_code_query_dispatch"
+  | Tool_keeper_webmcp_dispatch -> "tool_keeper_webmcp_dispatch"
+  | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
+  | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
+  | Tool_masc_fusion_status -> "tool_masc_fusion_status"
+  | Tool_masc_fusion_decision -> "tool_masc_fusion_decision"
+  | Tool_masc_file_dispatch -> "tool_masc_file_dispatch"
+  | Tool_masc_wiki_dispatch -> "tool_masc_wiki_dispatch"
+  | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
+  | Tool_analyze_image -> "tool_analyze_image"
+  | Tool_read_image -> "tool_read_image"
+;;
+
+
+let discovery_example ~label ?cwd ~argv () =
+  let input =
+    `Assoc
+      ([ "argv", Json_util.json_string_list argv ]
+       @
+       match cwd with
+       | Some cwd -> [ "cwd", `String cwd ]
+       | None -> [])
+  in
+  `Assoc [ "label", `String label; "input", input ]
+;;
+
+let policy ?readonly ?readonly_of_input ?cwd_scope ?(polling_read = false)
+      ?(leaves_masc = false) ()
+  =
+  let readonly_of_input =
+    match readonly_of_input with
+    | Some readonly_of_input -> readonly_of_input
+    | None -> fun _input -> readonly
+  in
+  { readonly_of_input
+  ; readonly_hint = readonly
+  ; cwd_scope
+  ; polling_read
+  ; leaves_masc
+  }
+;;
+
+let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
+
+
+(* [offset]/[limit] pass through as LINE coordinates — the runtime owns the
+   line-window contract (keeper_tool_filesystem_runtime.slice_read_window).
+   [limit] used to be renamed to [max_bytes] here, which silently turned "200
+   lines" into "512 bytes" (the min byte clamp) and starved every code read. *)
+let translate_read_file input =
+  match input with
+  | `Assoc fields ->
+    let out = ref [] in
+    List.iter
+      (fun (k, v) ->
+         match k with
+         | "file_path" -> out := ("path", v) :: !out
+         | _ -> out := (k, v) :: !out)
+      fields;
+    `Assoc (List.rev !out)
+  | _ -> input
+;;
+
+(* Edit is patch-only: mode is pinned here, never inferred from the input. The
+   closed Edit schema rejects an undeclared 'content' key before translation;
+   inferring overwrite from its presence turned a mistaken key into a silent
+   whole-file overwrite (masc#31573). Translation is closed to match: only the
+   declared patch fields reach the runtime, so even a validation-bypassing
+   caller cannot smuggle extra members through this path.
+   [cwd] joins here, syntactically, the way Read resolves it: a relative
+   [file_path] reads against [cwd] and an absolute one ignores it. The joined
+   string faces the runtime's containment and gates exactly as a directly
+   spelled path, so no new expressiveness reaches the write path; [cwd]
+   itself never leaves the translator.
+   Both parts are trimmed before the join, as Read trims each of them
+   (keeper_tool_filesystem_runtime.resolve_read_file_target). The runtime
+   trims only the whole path, so an untrimmed join would turn [cwd = "lib "]
+   into "lib /src.ml" and [file_path = " /abs"] into a relative name under
+   [cwd]: a different file than Read opens for the same arguments. A blank
+   [file_path] stays blank so the runtime still refuses it as missing. *)
+let translate_edit_file input =
+  match input with
+  | `Assoc fields ->
+    let out = ref [ "mode", `String "patch" ] in
+    let cwd =
+      match List.assoc_opt "cwd" fields with
+      | Some (`String raw) ->
+        let cwd = String.trim raw in
+        if cwd = "" then None else Some cwd
+      | Some _ | None -> None
+    in
+    let join_cwd path =
+      match path, cwd with
+      | `String raw, Some cwd ->
+        let file = String.trim raw in
+        if file <> "" && Filename.is_relative file
+        then `String (Filename.concat cwd file)
+        else `String file
+      | path, _ -> path
+    in
+    List.iter
+      (fun (k, v) ->
+         match k with
+         | "file_path" -> out := ("path", join_cwd v) :: !out
+         | "old_string" | "new_string" | "replace_all" -> out := (k, v) :: !out
+         | "cwd" -> ()
+         | _ -> ())
+      fields;
+    `Assoc (List.rev !out)
+  | _ -> input
+;;
+
+let translate_write_file input =
+  match input with
+  | `Assoc fields ->
+    let out = ref [ "mode", `String "overwrite" ] in
+    List.iter
+      (fun (k, v) ->
+         match k with
+         | "file_path" -> out := ("path", v) :: !out
+         | "content" -> out := ("content", v) :: !out
+         | "mode" -> ()
+         | _ -> out := (k, v) :: !out)
+      fields;
+    `Assoc (List.rev !out)
+  | _ -> input
+;;
+
+(* search_files is rg (pattern search) only. Fold -i into the pattern as a
+   (?i) prefix; pass pattern/path/glob/type through. *)
+let translate_search_files input =
+  match input with
+  | `Assoc fields ->
+    let is_case_insensitive =
+      match List.assoc_opt "-i" fields with
+      | Some (`Bool true) -> true
+      | _ -> false
+    in
+    let out = ref [] in
+    List.iter
+      (fun (k, v) ->
+         match k with
+         | "pattern" ->
+           let v' =
+             if is_case_insensitive
+             then (
+               match v with
+               | `String s -> `String ("(?i)" ^ s)
+               | _ -> v)
+             else v
+           in
+           out := (k, v') :: !out
+         | "-i" -> ()
+         | _ -> out := (k, v) :: !out)
+      fields;
+    `Assoc (List.rev !out)
+  | _ -> input
+;;
+
+(* search_files is now rg (pattern search) only — always read-only. *)
+let search_files_readonly_of_input _input = Some true
+
+let translate_input_for_descriptor descriptor input =
+  match descriptor.input_translation with
+  | Identity _ -> input
+  | Shape_changing { translate; _ } -> translate input
+;;
+
+type capability_identity =
+  | Internal_name_identity
+  | Named_capability of string
+
+let capability_id_of_identity ~internal_name = function
+  | Internal_name_identity -> internal_name
+  | Named_capability capability_id -> capability_id
+;;
+
+let descriptor
+      ?(examples = [])
+      ~capability_identity
+      ~keeper_model_projection
+      ~input_schema_source
+      ~id
+      ~public_name
+      ~internal_name
+      ~description
+      ~input_schema
+      ?(model_output_projection = Tool_output.default_model_projection)
+      ?(composable_output = Opaque_output)
+      ?(ordinary_execution_mode = Serial)
+      ?(tool_kind = Atomic_tool)
+      ~policy
+      ~executor
+      ~backend
+      ~sandbox
+      ~runtime_handler
+      ~input_translation
+      ()
+  =
+  let capability_id =
+    capability_id_of_identity ~internal_name capability_identity
+  in
+  let execution =
+    match runtime_handler with
+    | Tool_surface_post -> Terminal
+    | ( Tool_lane_addon _
+      | Tool_execute
+      | Tool_memory_write
+      | Tool_memory_retract
+      | Tool_constitution_write
+      | Tool_constitution_read
+      | Tool_constitution_remove
+      | Tool_keeper_composition_result_dispatch
+      | Tool_keeper_code_query_dispatch
+      | Tool_keeper_webmcp_dispatch
+      | Tool_search_files
+      | Tool_read_file
+      | Tool_edit_file
+      | Tool_write_file
+      | Tool_lane_status
+      | Tool_tools_list
+      | Tool_capability_search
+      | Tool_context_status
+      | Tool_peer_artifact
+  | Tool_artifact_read
+      | Tool_skill_validate
+      | Tool_artifact_draft | Tool_artifact_publish | Tool_skill_publish
+      | Tool_workspace_memory_read
+      | Tool_memory_search
+      | Tool_memory_select
+      | Tool_wiki_search
+      | Tool_wiki_read
+      | Tool_surface_read
+      | Tool_person_note_set
+      | Tool_ide_annotate
+      | Tool_voice_dispatch
+      | Tool_task_dispatch
+      | Tool_board_dispatch
+      | Tool_masc_task_dispatch
+      | Tool_masc_plan_dispatch
+      | Tool_masc_run_dispatch
+      | Tool_masc_agent_dispatch
+      | Tool_masc_workspace_dispatch
+      | Tool_masc_misc_dispatch
+      | Tool_web_search
+      | Tool_web_fetch
+      | Tool_browser_tabs
+      | Tool_browser_read
+      | Tool_browser_session
+      | Tool_browser_goto
+  | Tool_browser_act
+      | Tool_browser_instruct
+      | Tool_browser_interact
+      | Tool_masc_control_dispatch
+      | Tool_masc_agent_timeline_dispatch
+      | Tool_masc_schedule_dispatch
+      | Tool_keeper_spawn_dispatch
+      | Tool_keeper_job_dispatch
+      | Tool_masc_keeper_dispatch
+      | Tool_masc_fusion_dispatch
+      | Tool_masc_fusion_status
+      | Tool_masc_fusion_decision
+      | Tool_masc_file_dispatch
+      | Tool_masc_wiki_dispatch
+      | Tool_masc_local_runtime_dispatch
+      | Tool_analyze_image | Tool_read_image ) -> Ordinary ordinary_execution_mode
+  in
+  (* Fail-closed admission rule for parallel tool use: a descriptor may opt
+     into [Concurrent] batches only when its policy carries a static
+     read-only hint. The batch planner (Agent_core Agent_tool_batch_plan)
+     fans an ordinary [Concurrent] run out onto sibling Eio fibers, so an
+     effectful tool admitted by mistake would execute its side effect
+     concurrently with no ordering guarantee. Async catalog admission also
+     accepts the durable owned-job producer; that effectful launch retains
+     its Serial execution contract. *)
+  (match execution, policy.readonly_hint with
+   | Ordinary Concurrent, Some true -> ()
+   | Ordinary Concurrent, (Some false | None) ->
+     invalid_arg
+       (Printf.sprintf
+          "descriptor %S declares Concurrent execution without a static \
+           read-only policy hint"
+          internal_name)
+   | Ordinary Serial, _ | Terminal, _ -> ());
+  let receipt_labels =
+    [ "descriptor_id", id
+    ; "capability_id", capability_id
+    ; ( "keeper_model_projection"
+      , keeper_model_projection_to_string keeper_model_projection )
+    ; "public_name", public_name
+    ; "canonical_name", internal_name
+    ; "executor", executor_to_string executor
+    ; "backend", backend_to_string backend
+    ; "sandbox", sandbox_to_string sandbox
+    ; "runtime_handler", runtime_handler_to_string runtime_handler
+    ; "execution", execution_to_string execution
+    ; "composable_output", composable_output_kind composable_output
+    ; "input_schema_source", input_schema_source_to_string input_schema_source
+    ]
+    @ (match keeper_model_projection with
+       | Transport_alias { projected_by } ->
+         [ "transport_alias_of", projected_by ]
+       | Preferred_public_name | Internal_name | Operator_only -> [])
+  in
+  { id
+  ; capability_id
+  ; keeper_model_projection
+  ; input_schema_source
+  ; public_name
+  ; internal_name
+  ; description
+  ; input_schema
+  ; model_output_projection
+  ; composable_output
+  ; execution
+  ; tool_kind
+  ; policy
+  ; executor
+  ; backend
+  ; sandbox
+  ; runtime_handler
+  ; input_translation
+  ; receipt_labels
+  ; eval_tags = []
+  ; examples
+  }
+;;
+
+let with_eval_tags eval_tags descriptor =
+  { descriptor with eval_tags }
+;;
+
+let with_model_output_projection model_output_projection descriptor =
+  { descriptor with model_output_projection }
+;;
+
+let with_composable_output composable_output descriptor =
+  { descriptor with composable_output }
+;;
+
+let normalized_artifact_ref_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ( "_blob"
+            , `Assoc
+                [ "type", `String "object"
+                ; ( "properties"
+                  , `Assoc
+                      [ "sha256", `Assoc [ "type", `String "string" ]
+                      ; "bytes", `Assoc [ "type", `String "integer" ]
+                      ; "mime", `Assoc [ "type", `String "string" ]
+                      ; "preview", `Assoc [ "type", `String "string" ]
+                      ] )
+                ; ( "required"
+                  , `List
+                      (List.map
+                         (fun name -> `String name)
+                         [ "sha256"; "bytes"; "mime"; "preview" ]) )
+                ; "additionalProperties", `Bool false
+                ] )
+          ] )
+    ; "required", `List [ `String "_blob" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let execute_output_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ "ok", `Assoc [ "type", `String "boolean" ]
+          ; ( "status"
+            , `Assoc
+                [ "type", `String "object"
+                ; ( "properties"
+                  , `Assoc
+                      [ "kind", `Assoc [ "type", `String "string" ]
+                      ; "code", `Assoc [ "type", `String "integer" ]
+                      ; "signal", `Assoc [ "type", `String "integer" ]
+                      ] )
+                ; "required", `List [ `String "kind" ]
+                ; "additionalProperties", `Bool false
+                ] )
+          ; "output", `Assoc [ "type", `String "string" ]
+          ; "output_artifact", normalized_artifact_ref_schema
+          ; "stdout_artifact", normalized_artifact_ref_schema
+          ; "stderr_artifact", normalized_artifact_ref_schema
+            (* "complete" means both streams reached EOF and were preserved;
+               "capture_only" means the producer supplied retained output
+               without that proof. A completed Execute's output carries only
+               "complete"; "capture_only" is recorded in the tool-call
+               ledger's execution_evidence and is absent here (#39035).
+               The values are not declared as an [enum]:
+               the composable schema contract admits only [type] on a string
+               (validate_schema_contract), the plan runtime checks nothing an
+               enum would add, and the keyword kept every declared schema from
+               satisfying the contract test since #33925. *)
+          ; "output_completeness", `Assoc [ "type", `String "string" ]
+          ; "typed", `Assoc [ "type", `String "boolean" ]
+          ; "execution_time_ms", `Assoc [ "type", `String "integer" ]
+          ] )
+    ; ( "required"
+      , `List
+          (List.map
+             (fun name -> `String name)
+             [ "ok"; "status"; "typed"; "execution_time_ms" ]) )
+    ; "additionalProperties", `Bool true
+    ]
+;;
+
+(* Browser reads have mode-specific payloads. Compositions can retain the whole
+   object; navigation and interaction receipts expose typed data edges. *)
+let browser_read_output_schema = `Assoc ["type",`String "object";
+  "properties",`Assoc [];"required",`List [];"additionalProperties",`Bool true]
+
+(* Browser_webdriver.page_summary observes the landing document after Page_goto.
+   Its URL can differ from the requested URL after a redirect. Browser_addon_tools
+   returns that receipt with the browser that served it (Browser_binding.annotate:
+   [source], [lane], [browserSelection], and the connection's [clientId] and, on a
+   live browser, [transport]). Only the page receipt is required; the browser
+   fields are declared so the object stays closed. [clientId] is null on an owned
+   browser. *)
+let browser_goto_output_schema =
+  let object_value = `Assoc [ "type", `String "object" ] in
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc
+        [ "url", `Assoc [ "type", `String "string" ]
+        ; "title", `Assoc [ "type", `String "string" ]
+        ; "source", `Assoc [ "type", `String "string" ]
+        ; "lane", `Assoc [ "type", `String "string" ]
+        ; "clientId", `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+        ; "transport", `Assoc [ "type", `String "string" ]
+        ; "browserSelection", object_value
+        ]
+    ; "required", `List [ `String "url"; `String "title" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let browser_interact_output_schema = `Assoc ["type",`String "object";
+  "properties",`Assoc ["tabId",`Assoc ["type",`String "integer"];
+    "url",`Assoc ["type",`String "string"];"urlBefore",`Assoc ["type",`String "string"];
+    "action",`Assoc ["type",`String "string"];
+    "destinationUrl",`Assoc ["type",`String "string"];
+    "active",`Assoc ["type",`String "boolean"];
+    "navigationSource",`Assoc ["type",`String "object";
+      "properties",`Assoc ["url",`Assoc ["type",`String "string"];
+        "documentId",`Assoc ["type",`String "string"]];
+      "required",`List [`String "url";`String "documentId"];"additionalProperties",`Bool false]];
+  "required",`List (List.map (fun key -> `String key) ["tabId";"url";"urlBefore";"action"]);
+  "additionalProperties",`Bool true]
+
+(* [object_output_schema] sits ahead of [public_descriptors] so the
+   filesystem tool descriptors can name their schemas; the schemas for tools
+   declared later in this file stay next to those declarations. *)
+(* An object this schema does not open: the value must be an object and its
+   contents are owned elsewhere. browser_read_output_schema is the same shape
+   for the same reason. *)
+let opaque_object_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc []
+    ; "required", `List []
+    ; "additionalProperties", `Bool true
+    ]
+;;
+
+let object_output_schema ~properties ~required =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc properties
+    ; "required", `List (List.map (fun name -> `String name) required)
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+(* Producers: Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+   [payload_of_slice] and handle_owned_read_file_with_outcome
+   (lib/keeper/keeper_tool_filesystem_runtime.ml); the owned lane serves
+   verification_authority_tools.ml, not composition, and always carries
+   [file_bytes] but never [via]. On the dispatch lane [via] marks a
+   backend-routed read and is absent on the host lane; [next_offset] appears
+   only on a truncated window; [file_bytes] only on the host lane;
+   [last_line_partial] only when the window ends mid-line. *)
+let read_file_output_schema =
+  object_output_schema
+    ~properties:
+      [ "ok", `Assoc [ "type", `String "boolean" ]
+      ; "path", `Assoc [ "type", `String "string" ]
+      ; "bytes", `Assoc [ "type", `String "integer" ]
+      ; "truncated", `Assoc [ "type", `String "boolean" ]
+      ; "offset", `Assoc [ "type", `String "integer" ]
+      ; "returned_lines", `Assoc [ "type", `String "integer" ]
+      ; "content", `Assoc [ "type", `String "string" ]
+      ; "next_offset", `Assoc [ "type", `String "integer" ]
+      ; "last_line_partial", `Assoc [ "type", `String "boolean" ]
+      ; "file_bytes", `Assoc [ "type", `String "integer" ]
+      ; "via", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:
+      [ "ok"; "path"; "bytes"; "truncated"; "offset"; "returned_lines"; "content" ]
+;;
+
+(* Producer: Keeper_workspace_read_ops.try_handle_with_outcome, rg lane —
+   the sandbox-routed and host argv branches build the same envelope
+   (lib/keeper/keeper_workspace_read_ops.ml). [error_detail] is failure-side
+   only; composition validation sees Completed nodes, where it is absent. It
+   is declared so a composition may reference /error_detail — not declaring it
+   would reject such a node at plan-create time. *)
+let search_files_output_schema =
+  object_output_schema
+    ~properties:
+      [ "ok", `Assoc [ "type", `String "boolean" ]
+      ; "op", `Assoc [ "type", `String "string" ]
+      ; "path", `Assoc [ "type", `String "string" ]
+      ; "pattern", `Assoc [ "type", `String "string" ]
+      ; "via", `Assoc [ "type", `String "string" ]
+      ; ( "status"
+        , `Assoc
+            [ "type", `String "object"
+            ; ( "properties"
+              , `Assoc
+                  [ "kind", `Assoc [ "type", `String "string" ]
+                  ; "code", `Assoc [ "type", `String "integer" ]
+                  ; "signal", `Assoc [ "type", `String "integer" ]
+                  ] )
+            ; "required", `List [ `String "kind" ]
+            ; "additionalProperties", `Bool false
+            ] )
+      ; ( "matches"
+        , `Assoc
+            [ "type", `String "array"; "items", `Assoc [ "type", `String "string" ] ] )
+      ; "error_detail", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:[ "ok"; "op"; "path"; "pattern"; "via"; "status"; "matches" ]
+;;
+
+(* Producer: Keeper_tool_filesystem_runtime content-write
+   (overwrite/append) [Write_succeeded] sites, and
+   Keeper_tool_filesystem_remote_write.success_payload for endpoint-owned
+   trees. [via] is absent on the host lane. Write's input is content-only, so
+   every advertised field is emitted by every mode Write can take, on both
+   lanes — advertising the patch fields here let a Write node reference
+   [/occurrences] past plan-create and fail only after the file was already
+   written (PR #34928 review). *)
+let file_write_output_schema =
+  object_output_schema
+    ~properties:
+      [ "ok", `Assoc [ "type", `String "boolean" ]
+      ; "path", `Assoc [ "type", `String "string" ]
+      ; "mode", `Assoc [ "type", `String "string" ]
+      ; "bytes_written", `Assoc [ "type", `String "integer" ]
+      ; "via", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:[ "ok"; "path"; "mode"; "bytes_written" ]
+;;
+
+(* Producer: the patch-write [Write_succeeded] site on the host lane, and
+   Keeper_tool_filesystem_remote_write's patch branch for endpoint-owned
+   trees — both emit [occurrences] and [replace_all] (the remote branch from
+   the same apply_patch application it already computes evidence from).
+   Edit's input schema is closed to the four patch keys, so the insert
+   operation the shared runtime handler knows is unreachable from this tool
+   and its fields are not advertised. [via] is absent on the host lane.
+
+   [edit_snapshots] is the patch lane's before/after evidence. It is added at
+   the payload site from [store_edit_snapshots] rather than by the field list
+   around it, which is how it reached the wire undeclared: the
+   composable-output probe rejects an Edit result carrying it, and
+   test_keeper_tool_dispatch_runtime has been red on that since nightly
+   34384710653. [status] is "stored" or "unavailable"; a stored pair carries
+   [before] and [after], an unavailable one carries [detail]. This validator
+   has no oneOf, so both shapes live in one object with [status] the only
+   required key. [before] and [after] are normalized artifact references whose
+   shape Tool_output owns ([normalized_artifact_ref_to_json]); declaring it
+   again here would give that shape a second place to drift from, so they stay
+   objects this schema does not open. Only the host and sandbox patch site
+   emits the field -- Keeper_tool_filesystem_remote_write's patch branch does
+   not -- so it is advertised and not required. *)
+let file_edit_output_schema =
+  object_output_schema
+    ~properties:
+      [ "ok", `Assoc [ "type", `String "boolean" ]
+      ; "path", `Assoc [ "type", `String "string" ]
+      ; "mode", `Assoc [ "type", `String "string" ]
+      ; "bytes_written", `Assoc [ "type", `String "integer" ]
+      ; "via", `Assoc [ "type", `String "string" ]
+      ; "changed", `Assoc [ "type", `String "boolean" ]
+      ; "occurrences", `Assoc [ "type", `String "integer" ]
+      ; "replace_all", `Assoc [ "type", `String "boolean" ]
+      ; ( "edit_snapshots"
+        , `Assoc
+            [ "type", `String "object"
+            ; ( "properties"
+              , `Assoc
+                  [ "status", `Assoc [ "type", `String "string" ]
+                  ; "before", opaque_object_schema
+                  ; "after", opaque_object_schema
+                  ; "detail", `Assoc [ "type", `String "string" ]
+                  ] )
+            ; "required", `List [ `String "status" ]
+            ; "additionalProperties", `Bool false
+            ] )
+      ]
+    ~required:[ "ok"; "path"; "mode"; "bytes_written" ]
+;;
+
+let public_descriptors =
+  [ (descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Descriptor_owned
+      ~id:"agent.execute"
+      ~public_name:"Execute"
+      ~internal_name:"tool_execute"
+      ~description:Tool_shard_types.tool_execute_schema.description
+      ~input_schema:execute_schema
+      ~policy:
+        (policy
+           ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
+           ())
+      ~executor:Shell_ir
+      ~backend:Sandbox_process
+      ~sandbox:Backend_selected
+      ~runtime_handler:Tool_execute
+      ~examples:
+        [ discovery_example
+            ~label:"Run an opaque typed program"
+            ~cwd:"<allowed-directory>"
+            ~argv:[ "program"; "--version" ]
+            ()
+        ]
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+     |> with_composable_output (Json_output { schema = execute_output_schema }))
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.search_files"
+      ~public_name:"Grep"
+      ~internal_name:"tool_search_files"
+      ~description:Tool_schemas_filesystem_files.search_files.description
+      ~input_schema:Tool_schemas_filesystem_files.search_files.input_schema
+      (* Concurrent: each call spawns its own rg process through the sandbox
+         backend; the only shared write is the bash-history audit line, a
+         single O_APPEND write with no fiber yield inside it. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:
+        (policy
+           ~readonly:true
+           ~readonly_of_input:search_files_readonly_of_input
+           ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
+           ())
+      ~executor:Shell_ir
+      ~backend:Sandbox_process
+      ~sandbox:Backend_selected
+      ~runtime_handler:Tool_search_files
+      ~input_translation:
+        (Shape_changing
+           { translate = translate_search_files
+           ; validation = Validate_before_and_after_translation
+           })
+      ()
+      |> with_composable_output (Json_output { schema = search_files_output_schema })
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.read_file"
+      ~public_name:"Read"
+      ~internal_name:"tool_read_file"
+      ~description:Tool_schemas_filesystem_files.read_file.description
+      ~input_schema:Tool_schemas_filesystem_files.read_file.input_schema
+      (* Concurrent: a pure read — containment check plus either a host
+         file read (Safe_ops.read_file_result) or a per-call backend read
+         runner process; no shared mutable state on the path. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:
+        (policy
+           ~readonly:true
+           ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
+           ())
+      ~executor:Filesystem
+      ~backend:Sandbox_process
+      ~sandbox:Backend_selected
+      ~runtime_handler:Tool_read_file
+      ~input_translation:
+        (Shape_changing
+           { translate = translate_read_file
+           ; validation = Validate_before_then_runtime_handler
+           })
+      ()
+      |> with_composable_output (Json_output { schema = read_file_output_schema })
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.edit_file"
+      ~public_name:"Edit"
+      ~internal_name:"tool_edit_file"
+      ~description:Tool_schemas_filesystem_files.edit_file.description
+      ~input_schema:Tool_schemas_filesystem_files.edit_file.input_schema
+      ~policy:
+        (policy
+           ~readonly:false
+           ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
+           ())
+      ~executor:Filesystem
+      ~backend:Sandbox_process
+      ~sandbox:Backend_selected
+      ~runtime_handler:Tool_edit_file
+      ~input_translation:
+        (Shape_changing
+           { translate = translate_edit_file
+           ; validation = Validate_before_then_runtime_handler
+           })
+      ()
+      |> with_composable_output (Json_output { schema = file_edit_output_schema })
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.write_file"
+      ~public_name:"Write"
+      ~internal_name:"tool_write_file"
+      ~description:Tool_schemas_filesystem_files.write_file.description
+      ~input_schema:Tool_schemas_filesystem_files.write_file.input_schema
+      ~policy:
+        (policy
+           ~readonly:false
+           ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
+           ())
+      ~executor:Filesystem
+      ~backend:Sandbox_process
+      ~sandbox:Backend_selected
+      ~runtime_handler:Tool_write_file
+      ~input_translation:
+        (Shape_changing
+           { translate = translate_write_file
+           ; validation = Validate_before_then_runtime_handler
+           })
+      ()
+      |> with_composable_output (Json_output { schema = file_write_output_schema })
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.search_web"
+      ~public_name:"WebSearch"
+      ~internal_name:Tool_schemas_misc.web_search_schema.name
+      ~description:Tool_schemas_misc.web_search_schema.description
+      ~input_schema:Tool_schemas_misc.web_search_schema.input_schema
+      (* Concurrent: every call runs its own curl subprocess via
+         Tool_local_runtime_http; provider selection reads env only, so
+         there is no shared mutable state between sibling calls. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:
+        (policy
+           ~readonly:true
+           ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_web_search
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.fetch_web"
+      ~public_name:"WebFetch"
+      ~internal_name:Tool_schemas_misc.web_fetch_schema.name
+      ~description:Tool_schemas_misc.web_fetch_schema.description
+      ~input_schema:Tool_schemas_misc.web_fetch_schema.input_schema
+      (* Concurrent: per-call curl subprocess; the full-text offload writes
+         into the content-addressed Tool_blob_store (Atomic CAS cache, the
+         same store keeper_artifact_read already reads concurrently) and
+         appends the index row through Fs_compat.append_jsonl's per-path
+         mutex. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:
+        (policy
+           ~readonly:true
+           ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_web_fetch
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_tabs"
+      ~public_name:"BrowserTabs"
+      ~internal_name:Tool_schemas_misc.browser_tabs_schema.name
+      ~description:Tool_schemas_misc.browser_tabs_schema.description
+      ~input_schema:Tool_schemas_misc.browser_tabs_schema.input_schema
+      (* Concurrent: one lane queue hop; the wait is bounded by the tool's
+         own timeout. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(policy ~readonly:true ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_tabs
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_read"
+      ~public_name:"BrowserRead"
+      ~internal_name:Tool_schemas_misc.browser_read_schema.name
+      ~description:Tool_schemas_misc.browser_read_schema.description
+      ~input_schema:Tool_schemas_misc.browser_read_schema.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(policy ~readonly:true ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_read
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+      |> with_composable_output (Json_output {schema=browser_read_output_schema})
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_session"
+      ~public_name:"BrowserSession"
+      ~internal_name:Tool_schemas_misc.browser_session_schema.name
+      ~description:Tool_schemas_misc.browser_session_schema.description
+      ~input_schema:Tool_schemas_misc.browser_session_schema.input_schema
+      (* Session lifecycle changes must preserve tool-call order relative to
+         browser reads and navigation in the same batch. *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_session
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_goto"
+      ~public_name:"BrowserGoto"
+      ~internal_name:Tool_schemas_misc.browser_goto_schema.name
+      ~description:Tool_schemas_misc.browser_goto_schema.description
+      ~input_schema:Tool_schemas_misc.browser_goto_schema.input_schema
+      ~composable_output:(Json_output { schema = browser_goto_output_schema })
+      (* A navigation reaches the web from a browser the server owns
+         (automation or stagehand); the live lane refuses navigation verbs at
+         the state layer. Serial: each server lane is one browser, and
+         Concurrent here demands a statically read-only tool this is not. *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_goto
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_act"
+      ~public_name:"BrowserAct"
+      ~internal_name:Tool_schemas_misc.browser_act_schema.name
+      ~description:Tool_schemas_misc.browser_act_schema.description
+      ~input_schema:Tool_schemas_misc.browser_act_schema.input_schema
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_act
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_interact"
+      ~public_name:"BrowserInteract"
+      ~internal_name:Tool_schemas_misc.browser_interact_schema.name
+      ~description:Tool_schemas_misc.browser_interact_schema.description
+      ~input_schema:Tool_schemas_misc.browser_interact_schema.input_schema
+      (* Browser interactions are ordered writes, including on live tabs. *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_interact
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+      |> with_composable_output (Json_output {schema=browser_interact_output_schema})
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Preferred_public_name
+      ~input_schema_source:Canonical_registry
+      ~id:"agent.browser_instruct"
+      ~public_name:"BrowserInstruct"
+      ~internal_name:Tool_schemas_misc.browser_instruct_schema.name
+      ~description:Tool_schemas_misc.browser_instruct_schema.description
+      ~input_schema:Tool_schemas_misc.browser_instruct_schema.input_schema
+      (* A sentence can act on the page, and the Stagehand lane is one
+         browser whose runtime takes one call at a time
+         (RFC-browser-lane-stagehand §3.4, §3.8). *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(policy ~readonly:false ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_browser_instruct
+      ~input_translation:(Identity Validate_once_before_translation)
+      ()
+  ]
+;;
+
+(** Descriptor-backed workspace tools that are not public model names. *)
+
+(* The whole registry record, not just its input schema: [cluster_descriptor]
+   takes the description from this same lookup. *)
+let find_schema_opt schemas name =
+  List.find_opt (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+    schemas
+;;
+
+let find_taskboard_schema_opt name =
+  find_schema_opt Tool_shard_types.taskboard_tools name
+;;
+
+let find_voice_schema_opt name =
+  find_schema_opt Tool_shard_types.voice_tools name
+;;
+
+let find_misc_schema_opt name =
+  find_schema_opt Tool_schemas_misc.schemas name
+;;
+
+let find_base_schema_opt name =
+  match find_schema_opt Tool_shard_types.base_tools name with
+  | Some _ as schema -> schema
+  | None -> find_schema_opt Tool_shard_types.filesystem_tools name
+;;
+
+let remove_schema_fields removed schema =
+  match schema with
+  | `Assoc fields ->
+      let fields =
+        List.filter_map
+          (function
+            | ("properties", `Assoc properties) ->
+              Some
+                ( "properties",
+                  `Assoc
+                    (List.filter
+                       (fun (name, _) -> not (List.mem name removed))
+                       properties) )
+            | ("required", `List required) ->
+              Some
+                ( "required",
+                  `List
+                    (List.filter
+                       (function
+                         | `String name -> not (List.mem name removed)
+                         | _ -> true)
+                       required) )
+            | field -> Some field)
+          fields
+      in
+      `Assoc fields
+  | _ -> schema
+
+let find_masc_schema_opt name =
+  match Tools.find_tool name with
+  | Some _ as schema -> schema
+  | None ->
+    (* [Tool_agent_timeline] is registered by the main composition root and is
+       intentionally absent from [Tools.all_schemas_extended] to avoid pulling
+       keeper/runtime dependencies into the neutral schema aggregate. *)
+    (match find_schema_opt Tool_agent_timeline.schemas name with
+     | Some _ as schema -> schema
+     | None -> find_schema_opt Keeper_schema.schemas name)
+
+let find_cluster_schema_opt name =
+  (* Keeper taskboard tools are checked before voice, misc, and public
+     aggregates. Board descriptors use their typed registry directly.
+     The namespaces are disjoint because every registry reached here is also
+     concatenated into [Config.raw_all_tool_schemas], whose module initialiser
+     runs [Config.validate_schemas] and raises on a repeated name. This order
+     is therefore not a conflict resolver. Control descriptors use their dedicated typed schema projection
+     and do not enter this name-based lookup. *)
+  match find_taskboard_schema_opt name with
+  | Some _ as schema -> schema
+  | None ->
+    (match find_voice_schema_opt name with
+     | Some _ as schema -> schema
+     | None ->
+       (match find_misc_schema_opt name with
+        | Some _ as schema -> schema
+        | None -> find_masc_schema_opt name))
+;;
+
+(* The whole schema record: the descriptor's description is the TOML's own,
+   so the catalog is the one declaration the model reads -- never a thinner
+   OCaml literal standing in for it. *)
+let base_schema_declared name =
+  match find_base_schema_opt name with
+  | Some (schema : Masc_domain.tool_schema) -> Canonical_registry, schema
+  | None -> invalid_arg ("missing base tool schema for " ^ name)
+
+let keeper_tools_list_schema =
+  match find_base_schema_opt "keeper_tools_list" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_tools_list"
+;;
+
+let lane_status_schema =
+  match find_base_schema_opt "keeper_lane_status" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_lane_status"
+;;
+
+let context_status_schema =
+  match find_base_schema_opt "keeper_context_status" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_context_status"
+;;
+
+let keeper_capability_search_schema =
+  match find_base_schema_opt "keeper_capability_search" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_capability_search"
+;;
+
+(* The keeper_wiki_* schemas are declared once, in the wiki shard
+   (config/tools/keeper_wiki_*.toml). This file reads them from there. *)
+let shard_wiki_schema name =
+  match find_schema_opt Tool_shard_types.wiki_tools name with
+  | Some schema -> schema
+  | None -> failwith (Printf.sprintf "wiki shard is missing %s" name)
+;;
+
+let wiki_search = shard_wiki_schema "keeper_wiki_search"
+let wiki_read = shard_wiki_schema "keeper_wiki_read"
+
+let shard_surface_schema name =
+  match find_schema_opt Tool_shard_types.surface_tools name with
+  | Some schema -> schema
+  | None -> failwith (Printf.sprintf "surface shard is missing %s" name)
+;;
+
+let surface_read_schema = shard_surface_schema "keeper_surface_read"
+let surface_post_schema = shard_surface_schema "keeper_surface_post"
+let person_note_set_schema = shard_surface_schema "keeper_person_note_set"
+
+let workspace_memory_schema_source, workspace_memory_schema =
+  base_schema_declared "keeper_workspace_memory_read"
+;;
+
+let memory_select_schema_source, memory_select_schema =
+  base_schema_declared "keeper_memory_select"
+;;
+
+let memory_search_schema_source, memory_search_schema =
+  base_schema_declared "keeper_memory_search"
+;;
+
+let memory_retract_schema_source, memory_retract_schema =
+  base_schema_declared "keeper_memory_retract"
+;;
+
+let memory_write_schema_source, memory_write_schema =
+  base_schema_declared "keeper_memory_write"
+;;
+
+let constitution_write_schema_source, constitution_write_schema =
+  base_schema_declared "keeper_constitution_write"
+;;
+
+let constitution_remove_schema_source, constitution_remove_schema =
+  base_schema_declared "keeper_constitution_remove"
+;;
+
+let constitution_read_schema_source, constitution_read_schema =
+  base_schema_declared "keeper_constitution_read"
+;;
+
+let ide_annotate_schema_source, ide_annotate_schema =
+  base_schema_declared "keeper_ide_annotate"
+;;
+
+let read_only_in_process_policy ?(polling_read = false) () =
+  policy ~readonly:true ~polling_read ()
+;;
+
+let write_in_process_policy () =
+  policy ~readonly:false ()
+;;
+
+let in_process_descriptor_with_schema_source
+      ~capability_identity
+      ~keeper_model_projection
+      ~input_schema_source ~id ~name ~description ~input_schema ~policy ~handler
+      ?ordinary_execution_mode
+      ()
+  =
+  descriptor
+    ~capability_identity
+    ~keeper_model_projection
+    ~input_schema_source
+    ~id
+    ~public_name:name
+    ~internal_name:name
+    ~description
+    ~input_schema
+    ?ordinary_execution_mode
+    ~policy
+    ~executor:In_process
+    ~backend:Ocaml_runtime
+    ~sandbox:No_sandbox
+    ~runtime_handler:handler
+    ~input_translation:(Identity Validate_once_after_translation)
+    ()
+;;
+
+let in_process_descriptor ~keeper_model_projection ~id ~name ~description
+      ~input_schema ~policy ?ordinary_execution_mode ~handler
+      ()
+  =
+  in_process_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection
+    ~input_schema_source:Descriptor_owned
+    ~id
+    ~name
+    ~description
+    ~input_schema
+    ~policy
+    ~handler
+    ?ordinary_execution_mode
+    ()
+;;
+
+(* Cluster-dispatched tools (board / voice / task) share a single
+   [runtime_handler] variant but expose distinct [internal_name]s so each
+   tool retains its own descriptor entry and receipt evidence. The
+   [keeper_tool_in_process_runtime] handler routes by descriptor.internal_name. *)
+let cluster_policy ?(polling_read = false) ~readonly () =
+  if polling_read && not readonly then
+    invalid_arg "polling_read descriptors must declare readonly=true";
+  if readonly
+  then read_only_in_process_policy ~polling_read ()
+  else write_in_process_policy ()
+;;
+
+let cluster_descriptor_with_schema_source
+      ?(polling_read = false)
+      ?ordinary_execution_mode
+      ~capability_identity
+      ~keeper_model_projection
+      ~input_schema_source
+      ~input_schema
+      ~id
+      ~name
+      ~description
+      ~handler
+      ~readonly
+      ()
+  =
+  let policy = cluster_policy ~polling_read ~readonly () in
+  in_process_descriptor_with_schema_source
+    ~capability_identity
+    ~keeper_model_projection
+    ~input_schema_source
+    ~id
+    ~name
+    ~description
+    ~input_schema
+    ?ordinary_execution_mode
+    ~policy
+    ~handler
+    ()
+;;
+
+(* Schema and description both come from the one registry lookup. Callers used
+   to pass a second description inline and nothing kept the two in agreement:
+   measured 2026-08-06 over [model_visible_descriptors], 66 of 98 descriptors
+   disagreed with their canonical schema and the model saw the shorter string
+   in 57 — including every Goal tool and [masc_transition], whose canonical
+   text is the only place [release] is named. Taking one field from the record
+   and re-typing the other beside it is what allowed the drift. *)
+let cluster_descriptor ?(polling_read = false) ?ordinary_execution_mode
+      ~capability_identity
+      ~keeper_model_projection ~id ~name
+      ~handler ~readonly ()
+  =
+  let input_schema_source, (schema : Masc_domain.tool_schema) =
+    match find_cluster_schema_opt name with
+    | Some schema -> Canonical_registry, schema
+    | None -> invalid_arg ("missing canonical registry schema for " ^ name)
+  in
+  cluster_descriptor_with_schema_source
+    ~polling_read
+    ?ordinary_execution_mode
+    ~capability_identity
+    ~keeper_model_projection
+    ~input_schema_source
+    ~input_schema:schema.input_schema
+    ~id
+    ~name
+    ~description:schema.description
+    ~handler
+    ~readonly
+    ()
+;;
+
+let board_stats_output_schema =
+  object_output_schema
+    ~properties:
+      [ "post_count", `Assoc [ "type", `String "integer" ]
+      ; "comment_count", `Assoc [ "type", `String "integer" ]
+      ; "expired_pending", `Assoc [ "type", `String "integer" ]
+      ; "last_sweep", `Assoc [ "type", `String "number" ]
+      ; "backend", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:
+      [ "post_count"; "comment_count"; "expired_pending"; "last_sweep"; "backend" ]
+;;
+
+let portrait_read_output_schema =
+  let module Item = Keeper_portrait_item in
+  let string_schema = `Assoc [ "type", `String "string" ] in
+  let slot_ids = List.map Item.slot_id Item.slots in
+  let equipment_fields =
+    [ "properties", `Assoc (List.map (fun slot -> Item.slot_id slot, string_schema) Item.slots)
+    ; "required", `List (List.map (fun slot -> `String slot) slot_ids)
+    ; "additionalProperties", `Bool false
+    ]
+  in
+  let equipment = `Assoc (("type", `String "object") :: equipment_fields) in
+  let nullable_equipment =
+    `Assoc (("type", `List [ `String "object"; `String "null" ]) :: equipment_fields)
+  in
+  let item =
+    object_output_schema
+      ~properties:[ "id", string_schema; "slot", string_schema ]
+      ~required:[ "id"; "slot" ]
+  in
+  object_output_schema
+    ~properties:
+      [ "name", `Assoc [ "type", `String "string" ]
+      ; "mode", string_schema
+      ; "preview_item", `Assoc
+          [ "type", `List [ `String "string"; `String "null" ] ]
+      ; "starting_equipment", equipment
+      ; "current_equipment", nullable_equipment
+      ; "equipment_observation", object_output_schema
+          ~properties:["status", string_schema;
+            "detail", `Assoc ["type", `List [`String "string"; `String "null"]]]
+          ~required:["status"; "detail"]
+      ; "equipment", equipment
+      ; "catalog", `Assoc [ "type", `String "array"; "items", item ]
+      ; "artifact", `Assoc [ "type", `String "string" ]
+      ; "media_type", `Assoc [ "type", `String "string" ]
+      ; "width", `Assoc [ "type", `String "integer" ]
+      ; "height", `Assoc [ "type", `String "integer" ]
+      ; "bytes", `Assoc [ "type", `String "integer" ]
+      ]
+    ~required:[ "name"; "mode"; "preview_item"; "starting_equipment"; "current_equipment"; "equipment_observation"; "equipment"
+              ; "catalog"; "artifact"; "media_type"; "width"; "height"; "bytes" ]
+;;
+
+(* Producer: Keeper_tool_lane_status.handle. [lane], [endpoint] and
+   [operator_action] are null when unknown; [probe] and [last_dispatch] are
+   the typed report's variants spelled out. Docker adds [note]; an unattached
+   remote lane adds [unreachable]. Both are successful status observations. *)
+let lane_status_output_schema =
+  object_output_schema
+    ~properties:
+      [ "profile", `Assoc [ "type", `String "string" ]
+      ; "lane", `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+      ; "endpoint", `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+      ; "probe", `Assoc [ "type", `List [ `String "object"; `String "null" ] ]
+      ; "last_dispatch", `Assoc [ "type", `List [ `String "object"; `String "null" ] ]
+      ; "operator_action", `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+      ; "note", `Assoc [ "type", `String "string" ]
+      ; "unreachable", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:[ "profile"; "lane"; "endpoint"; "operator_action" ]
+;;
+
+(* Producer: Snapshot_protocol.to_yojson via dispatch_board_list
+   (keeper_tool_board_runtime.ml). [snapshot] carries the formatted post
+   listing as one string and is absent on the [unchanged] variant. *)
+let board_list_output_schema =
+  object_output_schema
+    ~properties:
+      [ "kind", `Assoc [ "type", `String "string" ]
+      ; "revision", `Assoc [ "type", `String "string" ]
+      ; "snapshot", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:[ "kind"; "revision" ]
+;;
+
+(* Producer: Masc_domain.task_compact_to_yojson by default and
+   Masc_domain.task_to_yojson under projection "full" (lib/types/types_core.ml).
+   Required are the fields both shapes emit unconditionally; [description] and
+   [files] are declared because the full shape always carries them; the
+   status-variant and presence-conditional fields pass through
+   [additionalProperties]. *)
+let exact_skill_identity_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ "source_id", `Assoc [ "type", `String "string" ]
+          ; "package_id", `Assoc [ "type", `String "string" ]
+          ; "name", `Assoc [ "type", `String "string" ]
+          ] )
+    ; ( "required"
+      , `List
+          [ `String "source_id"; `String "package_id"; `String "name" ] )
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let exact_skill_reference_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ "identity", exact_skill_identity_schema
+          ; ( "content_revision"
+            , `Assoc [ "type", `String "string" ] )
+          ] )
+    ; ( "required"
+      , `List [ `String "identity"; `String "content_revision" ] )
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let tasks_list_task_item_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ "id", `Assoc [ "type", `String "string" ]
+          ; "title", `Assoc [ "type", `String "string" ]
+          ; "description", `Assoc [ "type", `String "string" ]
+          ; "priority", `Assoc [ "type", `String "integer" ]
+          ; ( "files"
+            , `Assoc
+                [ "type", `String "array"
+                ; "items", `Assoc [ "type", `String "string" ]
+                ] )
+          ; ( "skills"
+            , `Assoc
+                [ "type", `String "array"
+                ; "items", exact_skill_reference_schema
+                ] )
+          ; "created_at", `Assoc [ "type", `String "string" ]
+          ; "status", `Assoc [ "type", `String "string" ]
+          ] )
+    ; ( "required"
+      , `List
+          (List.map
+             (fun name -> `String name)
+             [ "id"; "title"; "priority"; "created_at"; "status" ]) )
+    ; "additionalProperties", `Bool true
+    ]
+;;
+
+(* Producer: Tasks_list Ok branch (keeper_tool_task_runtime.ml) — the
+   Snapshot_protocol envelope prefixed with backlog provenance and the row
+   shape that was served. [snapshot] and the row statistics
+   ([matching_count]/[returned_count]/[truncated]) are absent on the
+   [unchanged] variant: it carries no rows, so row statistics would
+   contradict it. [new_tasks]/[new_tasks_count] name the newest visible
+   rows the first claim-order page does not already carry, so a task that
+   sorts behind it is still reported. Continuation pages carry an empty
+   newest window; both fields are absent on [unchanged]. *)
+let tasks_list_output_schema =
+  object_output_schema
+    ~properties:
+      [ "backlog_authority", `Assoc [ "type", `String "string" ]
+      ; "degraded", `Assoc [ "type", `String "boolean" ]
+      ; "projection", `Assoc [ "type", `String "string" ]
+      ; "kind", `Assoc [ "type", `String "string" ]
+      ; "revision", `Assoc [ "type", `String "string" ]
+      ; ( "snapshot"
+        , `Assoc
+            [ "type", `String "array"; "items", tasks_list_task_item_schema ] )
+      ; "matching_count", `Assoc [ "type", `String "integer" ]
+      ; "returned_count", `Assoc [ "type", `String "integer" ]
+      ; ( "new_tasks"
+        , `Assoc
+            [ "type", `String "array"; "items", tasks_list_task_item_schema ] )
+      ; "new_tasks_count", `Assoc [ "type", `String "integer" ]
+      ; "truncated", `Assoc [ "type", `String "boolean" ]
+        (* Emitted by [Keeper_tool_task_runtime] only when a page is cut
+           short; the last page carries none, so it stays optional. Absent
+           here until #32488 added the keyset cursor to the response without
+           widening this schema, which made every composition holding a
+           [keeper_tasks_list] node fail output validation with
+           [unexpected_field: next_cursor] instead of returning. *)
+      ; "next_cursor", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:
+      [ "backlog_authority"; "degraded"; "projection"; "kind"; "revision" ]
+;;
+
+(* Producer: Keeper_artifact_read.page_to_json — the single success path. *)
+let artifact_read_output_schema =
+  object_output_schema
+    ~properties:
+      [ "ok", `Assoc [ "type", `String "boolean" ]
+      ; "sha256", `Assoc [ "type", `String "string" ]
+      ; "offset", `Assoc [ "type", `String "integer" ]
+      ; "next_offset", `Assoc [ "type", `String "integer" ]
+      ; "total_bytes", `Assoc [ "type", `String "integer" ]
+      ; "eof", `Assoc [ "type", `String "boolean" ]
+      ; "encoding", `Assoc [ "type", `String "string" ]
+      ; "content", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:
+      [ "ok"
+      ; "sha256"
+      ; "offset"
+      ; "next_offset"
+      ; "total_bytes"
+      ; "eof"
+      ; "encoding"
+      ; "content"
+      ]
+;;
+
+(* Producer: Workspace_goals.handle_goal_list over Goal_store.goal_to_yojson
+   and rollup_to_yojson, with the RFC-0387 verification ledger
+   (Goal_verification.record_to_yojson) joined per goal as [verification].
+   Option-carrying goal fields serialize as string-or-null and stay
+   undeclared; [verification] rides the items' additionalProperties:true. *)
+let goal_list_output_schema =
+  object_output_schema
+    ~properties:
+      [ "status", `Assoc [ "type", `String "string" ]
+      ; "generated_at", `Assoc [ "type", `String "string" ]
+      ; "count", `Assoc [ "type", `String "integer" ]
+      ; ( "goals"
+        , `Assoc
+            [ "type", `String "array"
+            ; ( "items"
+              , `Assoc
+                  [ "type", `String "object"
+                  ; ( "properties"
+                    , `Assoc
+                        [ "id", `Assoc [ "type", `String "string" ]
+                        ; "title", `Assoc [ "type", `String "string" ]
+                        ; "priority", `Assoc [ "type", `String "integer" ]
+                        ; "phase", `Assoc [ "type", `String "string" ]
+                        ; "created_at", `Assoc [ "type", `String "string" ]
+                        ; "updated_at", `Assoc [ "type", `String "string" ]
+                        ] )
+                  ; ( "required"
+                    , `List
+                        (List.map
+                           (fun name -> `String name)
+                           [ "id"
+                           ; "title"
+                           ; "priority"
+                           ; "phase"
+                           ; "created_at"
+                           ; "updated_at"
+                           ]) )
+                  ; "additionalProperties", `Bool true
+                  ] )
+            ] )
+      ; ( "rollup"
+        , object_output_schema
+            ~properties:
+              [ "active_count", `Assoc [ "type", `String "integer" ]
+              ; "verifying_count", `Assoc [ "type", `String "integer" ]
+              ; "awaiting_confirmation_count", `Assoc [ "type", `String "integer" ]
+              ; "done_count", `Assoc [ "type", `String "integer" ]
+              ; "paused_count", `Assoc [ "type", `String "integer" ]
+              ; "blocked_count", `Assoc [ "type", `String "integer" ]
+              ; "dropped_count", `Assoc [ "type", `String "integer" ]
+              ]
+            ~required:
+              [ "active_count"; "verifying_count"; "awaiting_confirmation_count"; "done_count"
+              ; "paused_count"; "blocked_count"; "dropped_count" ] )
+      ]
+    ~required:[ "status"; "generated_at"; "count"; "goals"; "rollup" ]
+;;
+
+(* Producer: Run_eio.list over run_record_to_json. [agent_name] serializes
+   as string-or-null and stays undeclared. *)
+let run_list_output_schema =
+  object_output_schema
+    ~properties:
+      [ "count", `Assoc [ "type", `String "integer" ]
+      ; ( "runs"
+        , `Assoc
+            [ "type", `String "array"
+            ; ( "items"
+              , `Assoc
+                  [ "type", `String "object"
+                  ; ( "properties"
+                    , `Assoc
+                        [ "task_id", `Assoc [ "type", `String "string" ]
+                        ; "plan", `Assoc [ "type", `String "string" ]
+                        ; "created_at", `Assoc [ "type", `String "string" ]
+                        ; "updated_at", `Assoc [ "type", `String "string" ]
+                        ] )
+                  ; ( "required"
+                    , `List
+                        (List.map
+                           (fun name -> `String name)
+                           [ "task_id"; "plan"; "created_at"; "updated_at" ]) )
+                  ; "additionalProperties", `Bool true
+                  ] )
+            ] )
+      ]
+    ~required:[ "count"; "runs" ]
+;;
+
+(* Producer: Metrics_store_eio.agent_metrics_to_yojson. Absence is explicit. *)
+let metric_number_schema = `Assoc [ "type", `String "number" ]
+let nullable_metric_number_schema =
+  `Assoc [ "type", `List [ `String "number"; `String "null" ] ]
+
+let agent_metrics_output_properties =
+  [ "agent_id", `Assoc [ "type", `String "string" ]
+  ; "period_start", metric_number_schema
+  ; "period_end", metric_number_schema
+  ; "outcome_basis", `Assoc [ "type", `String "string" ]
+  ; "external_acceptance", object_output_schema
+      ~properties:
+        [ "kind", `Assoc [ "type", `String "string" ]
+        ; "completed_tasks", `Assoc [ "type", `String "integer" ] ]
+      ~required:[ "kind"; "completed_tasks" ]
+  ]
+  @ List.map (fun name -> name, `Assoc [ "type", `String "integer" ])
+      [ "record_count"; "total_tasks"; "conflicting_tasks"; "completed_tasks"; "successful_tasks"; "failed_tasks";
+        "handoff_tasks"; "completed_handoff_tasks"; "successful_handoff_tasks" ]
+  @ [ "avg_completion_time_s", nullable_metric_number_schema
+    ; "task_completion_rate", metric_number_schema
+    ; "task_success_rate", nullable_metric_number_schema
+    ; "error_rate", nullable_metric_number_schema
+    ; "handoff_task_success_rate", nullable_metric_number_schema
+    ; "unique_collaborators", `Assoc
+        [ "type", `String "array"; "items", `Assoc [ "type", `String "string" ] ]
+    ]
+;;
+
+(* Every aggregate property is always emitted; absence uses a nullable value. *)
+let agent_metrics_output_required = List.map fst agent_metrics_output_properties
+;;
+
+(* Producer: Tool_agent.handle_get_metrics serializes the observed aggregate. *)
+let get_metrics_output_schema =
+  object_output_schema
+    ~properties:agent_metrics_output_properties
+    ~required:agent_metrics_output_required
+;;
+
+(* Producer: Tool_agent.handle_agent_fitness. A named missing observation has
+   null metrics and components. Metric source failures are tool errors. *)
+let agent_fitness_output_schema =
+  let nullable_object ~properties ~required =
+    `Assoc [
+      "type", `List [ `String "object"; `String "null" ];
+      "properties", `Assoc properties;
+      "required", `List (List.map (fun name -> `String name) required);
+      "additionalProperties", `Bool false;
+    ]
+  in
+  object_output_schema
+    ~properties:[
+      "count", `Assoc [ "type", `String "integer" ];
+      "agents", `Assoc [ "type", `String "array";
+        "items", object_output_schema
+          ~properties:[
+            "agent_id", `Assoc [ "type", `String "string" ];
+            "components", nullable_object
+              ~properties:[
+                "completion", `Assoc [ "type", `String "number" ];
+                "task_lifecycle_success", nullable_metric_number_schema;
+                "speed", nullable_metric_number_schema;
+                "handoff_task_success", nullable_metric_number_schema;
+              ]
+              ~required:[ "completion"; "task_lifecycle_success"; "speed"; "handoff_task_success" ];
+            "metrics", nullable_object ~properties:agent_metrics_output_properties
+              ~required:agent_metrics_output_required;
+          ] ~required:[ "agent_id"; "components"; "metrics" ];
+      ];
+    ] ~required:[ "count"; "agents" ]
+;;
+
+let masc_board_descriptor board_name =
+  let canonical_schema = Board_tool_registry.schema_for_board_name board_name in
+  let name = Tool_name.Board_name.to_string board_name in
+  let operation_policy = Board_tool_registry.operation_policy board_name in
+  let readonly = operation_policy.readonly in
+  (* Concurrent rows are the store-read operations: each resolves through
+     [Board_dispatch] into [Board_core] reads that snapshot under
+     [store.mutex] (an [Eio.Mutex]; board_core.mli "Locking + cache
+     invalidation"), or into the [Atomic]-held curation snapshot
+     ([Board_curation.latest_snapshot]). The [maybe_sweep] hook on reads
+     reserves timestamps under the same mutex and hands the work to the
+     flusher fiber. Write operations stay [Serial]. *)
+  let ordinary_execution_mode =
+    match board_name with
+    | Tool_name.Board_name.Board_stats
+    | Board_curation_read
+    | Board_hearths
+    | Board_list
+    | Board_post_get
+    | Board_profile
+    | Board_search
+    | Board_sub_board_get
+    | Board_sub_board_list -> Concurrent
+    | ( Board_cleanup
+      | Board_close
+      | Board_comment
+      | Board_comment_vote
+      | Board_curation_submit
+      | Board_delete
+      | Board_post
+      | Board_post_update
+      | Board_reaction
+      | Board_reopen
+      | Board_sub_board_create
+      | Board_sub_board_delete
+      | Board_sub_board_update
+      | Board_vote ) -> Serial
+  in
+  let policy = policy ~readonly () in
+  let canonical_keeper_input_schema =
+    remove_schema_fields
+      (Board_tool_registry.identity_fields_for_board_name board_name)
+      canonical_schema.input_schema
+  in
+  let input_schema_source, description, input_schema =
+    match Tool_shard_types.keeper_board_schema board_name with
+    | Some projection ->
+      Keeper_projection, projection.description, projection.input_schema
+    | None ->
+      Canonical_registry, canonical_schema.description, canonical_keeper_input_schema
+  in
+  let descriptor =
+    in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
+       (* The sub-board CRUD tools stay registered for operator entrypoints
+          but leave the keeper model surface: no keeper called them in the
+          August .masc/tool_calls log, and every turn carried their schemas.
+          The board's own core and dashboard paths do not go through this
+          projection.
+          [Board_cleanup] deletes up to 50 posts by any author and sits at
+          CanAdmin in Tool_catalog; the keeper lane does not read that
+          permission, so only the projection keeps it off Keepers.
+          [Board_delete] is also CanAdmin but its handler refuses a caller who
+          is not the post's author. *)
+       ~keeper_model_projection:
+         (match board_name with
+          | Tool_name.Board_name.Board_cleanup
+          | Board_sub_board_create
+          | Board_sub_board_update
+          | Board_sub_board_delete
+          | Board_sub_board_get
+          | Board_sub_board_list -> Operator_only
+          | Board_close
+          | Board_comment
+          | Board_comment_vote
+          | Board_curation_read
+          | Board_curation_submit
+          | Board_delete
+          | Board_hearths
+          | Board_list
+          | Board_post
+          | Board_post_get
+          | Board_post_update
+          | Board_profile
+          | Board_reaction
+          | Board_reopen
+          | Board_search
+          | Board_stats
+          | Board_vote -> Internal_name)
+       ~input_schema_source
+       ~id:("masc.board." ^ Tool_name.Board_name.operation_name board_name)
+       ~name
+       ~description
+       ~input_schema
+       ~ordinary_execution_mode
+       ~policy
+       ~handler:Tool_board_dispatch
+       ()
+  in
+  match board_name with
+  | Tool_name.Board_name.Board_stats ->
+    descriptor
+    |> with_composable_output (Json_output { schema = board_stats_output_schema })
+  | Tool_name.Board_name.Board_list ->
+    descriptor
+    |> with_composable_output (Json_output { schema = board_list_output_schema })
+  | ( Board_cleanup
+    | Board_close
+    | Board_comment
+    | Board_comment_vote
+    | Board_curation_read
+    | Board_curation_submit
+    | Board_delete
+    | Board_hearths
+    | Board_post
+    | Board_post_get
+    | Board_post_update
+    | Board_profile
+    | Board_reaction
+    | Board_reopen
+    | Board_search
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
+    | Board_vote ) -> descriptor
+;;
+
+let masc_board_descriptors =
+  List.map masc_board_descriptor Tool_name.Board_name.all
+;;
+
+let voice_descriptor ?ordinary_execution_mode name ~readonly =
+  cluster_descriptor
+    ?ordinary_execution_mode
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~id:("keeper.voice." ^ String.sub name (String.length "keeper_voice_")
+         (String.length name - String.length "keeper_voice_"))
+    ~name
+    ~handler:Tool_voice_dispatch
+    ~readonly
+    ()
+;;
+
+let task_descriptor ?ordinary_execution_mode ~capability_identity id name ~readonly =
+  cluster_descriptor
+    ?ordinary_execution_mode
+    ~capability_identity
+    ~keeper_model_projection:Internal_name
+    ~id:("keeper.task." ^ id)
+    ~name
+    ~handler:Tool_task_dispatch
+    ~readonly
+    ()
+;;
+
+(* RFC-0182 §3.1 — additional masc_* cluster descriptor helpers (task /
+   plan / run / agent / workspace). The masc_board_descriptor lives above
+   (registry-driven); these helpers follow the same projection pattern
+   but use hardcoded id+description because their dispatchers
+   (Task.Tool / Tool_plan / Tool_run / Tool_agent / Tool_workspace) are not
+   schema-registry-backed. The handler routes by descriptor.internal_name
+   through the existing typed dispatcher. *)
+let masc_task_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    id
+    name
+    ~readonly
+  =
+  cluster_descriptor
+    ?ordinary_execution_mode
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection
+    ~id:("masc.task." ^ id)
+    ~name
+    ~handler:Tool_masc_task_dispatch
+    ~readonly
+    ()
+;;
+
+let masc_task_transport_descriptor ?ordinary_execution_mode id name ~readonly =
+  cluster_descriptor
+    ?ordinary_execution_mode
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:
+      (Transport_alias { projected_by = "keeper_tasks_list" })
+    ~id:("masc.task." ^ id)
+    ~name
+    ~handler:Tool_masc_task_dispatch
+    ~readonly
+    ()
+;;
+
+let masc_plan_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    id
+    name
+    ~readonly
+  =
+  cluster_descriptor
+    ?ordinary_execution_mode
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection
+    ~id:("masc.plan." ^ id)
+    ~name
+    ~handler:Tool_masc_plan_dispatch
+    ~readonly
+    ()
+;;
+
+let masc_run_descriptor ?ordinary_execution_mode name ~readonly =
+  cluster_descriptor
+    ?ordinary_execution_mode
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~id:("masc.run." ^ String.sub name (String.length "masc_run_")
+         (String.length name - String.length "masc_run_"))
+    ~name
+    ~handler:Tool_masc_run_dispatch
+    ~readonly
+    ()
+;;
+
+let masc_agent_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    id
+    name
+    ~readonly
+  =
+  cluster_descriptor
+    ?ordinary_execution_mode
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection
+    ~id:("masc.agent." ^ id)
+    ~name
+    ~handler:Tool_masc_agent_dispatch
+    ~readonly
+    ()
+;;
+
+let masc_workspace_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    id
+    name
+    ~readonly
+  =
+  cluster_descriptor
+    ?ordinary_execution_mode
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection
+    ~id:("masc.workspace." ^ id)
+    ~name
+    ~handler:Tool_masc_workspace_dispatch
+    ~readonly
+    ()
+;;
+
+(* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
+   misc / control / agent_timeline / local_runtime). *)
+let masc_misc_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    id
+    name
+    ~readonly
+  =
+  cluster_descriptor
+    ?ordinary_execution_mode
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection
+    ~id:("masc.misc." ^ id)
+    ~name
+    ~handler:Tool_masc_misc_dispatch
+    ~readonly
+    ()
+;;
+
+let masc_control_descriptor operation =
+  let schema = Tool_schemas_misc.control_schema operation in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Operator_only
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:("masc.control." ^ Tool_schemas_misc.control_operation_id operation)
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_masc_control_dispatch
+    ~readonly:false
+    ()
+;;
+
+let masc_agent_timeline_descriptor
+    ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
+    name
+    ~readonly
+  =
+  cluster_descriptor
+    ?ordinary_execution_mode
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection
+    ~id:"masc.agent_timeline"
+    ~name
+    ~handler:Tool_masc_agent_timeline_dispatch
+    ~readonly
+    ()
+;;
+
+let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
+  let schema : Masc_domain.tool_schema = definition.schema in
+  (* The three reads share Schedule_store's whole-file loads: writers take the
+     schedules-path file lock, readers hold no shared mutable state, so
+     sibling fibers only ever re-read the file. Matched on the closed action
+     so a new read stays Serial until it is audited like these were. *)
+  let ordinary_execution_mode =
+    match (definition : Tool_schemas_schedule.definition).action with
+    | Tool_schemas_schedule.List_requests
+    | Tool_schemas_schedule.Get_request
+    | Tool_schemas_schedule.List_notes -> Concurrent
+    | Tool_schemas_schedule.Create_request
+    | Tool_schemas_schedule.Update_request
+    | Tool_schemas_schedule.Cancel_request
+    | Tool_schemas_schedule.Add_note -> Serial
+  in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:("masc.schedule." ^ definition.id)
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_masc_schedule_dispatch
+    ~ordinary_execution_mode
+    ~readonly:definition.read_only
+    ()
+;;
+
+(* What [keeper_spawn] answers on a start: the handle every later spawn
+   call names. Declared so a composition can hand it on. The builtin
+   run-and-read skill (start, wait, read as one plan) referenced [/handle],
+   and with the output opaque the plan was refused on every keeper turn
+   (live log 2026-09-08). Read, wait and stop stay opaque: their shape
+   depends on the outcome. *)
+let spawn_start_output_schema =
+  object_output_schema
+    ~properties:
+      [ "status", `Assoc [ "type", `String "string" ]
+      ; "handle", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:[ "status"; "handle" ]
+;;
+
+let keeper_spawn_descriptor (definition : Tool_schemas_spawn.definition) =
+  let schema : Masc_domain.tool_schema = definition.schema in
+  let descriptor =
+    cluster_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~input_schema:schema.input_schema
+      ~id:("masc.spawn." ^ definition.id)
+      ~name:schema.name
+      ~description:schema.description
+      ~handler:Tool_keeper_spawn_dispatch
+      ~readonly:definition.read_only
+      ()
+  in
+  (* Serial throughout, including the read: Spawn_registry entries live in a
+     bare Hashtbl shared with start/stop writers, so a read on a sibling
+     fiber could meet a concurrent mutation. B4 audited this and left it. *)
+  match definition.action with
+  | Tool_schemas_spawn.Start ->
+    with_composable_output (Json_output { schema = spawn_start_output_schema }) descriptor
+  | Tool_schemas_spawn.Read | Tool_schemas_spawn.Wait | Tool_schemas_spawn.Stop -> descriptor
+;;
+
+(* All owned-job actions use Keeper_owned_job_store.result_json. Composition
+   schemas describe its field structure; enum refinements are unsupported.
+   Phase/status and cleanup values come from the store's closed codecs and projection,
+   while artifacts retain the canonical normalized _blob wrapper. Status may
+   persist terminal evidence, so it shares the Serial effectful policy. *)
+let owned_job_output_schema =
+  let nullable_string =
+    `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+  in
+  let nullable_integer =
+    `Assoc [ "type", `List [ `String "integer"; `String "null" ] ]
+  in
+  let source_schema =
+    object_output_schema
+      ~properties:
+        [ "task_id", nullable_string
+        ; "turn_ref", nullable_string
+        ; "tool_use_id", nullable_string
+        ; "trace_id", nullable_string
+        ; "keeper_turn_id", nullable_integer
+        ]
+      ~required:[ "task_id"; "turn_ref"; "tool_use_id"; "trace_id"; "keeper_turn_id" ]
+  in
+  let reconciliation_schema =
+    object_output_schema
+      ~properties:
+        [ "state", `Assoc [ "type", `String "string" ]
+        ; "reason", nullable_string ]
+      ~required:[ "state"; "reason" ]
+  in
+  object_output_schema
+    ~properties:
+      [ "job_id", `Assoc [ "type", `String "string" ]
+      ; "status", `Assoc [ "type", `String "string" ]
+      ; "result_ready", `Assoc [ "type", `String "boolean" ]
+      ; "reconciliation", reconciliation_schema
+      ; "source", source_schema
+      ; "phase", `Assoc [ "type", `String "string" ]
+      ; "cancel_requested", `Assoc [ "type", `String "boolean" ]
+      ; "cleanup", `Assoc [ "type", `String "string" ]
+      ; "artifacts", `Assoc
+          [ "type", `String "array"; "items", normalized_artifact_ref_schema ]
+      ; "detail", nullable_string
+      ; "container_id", nullable_string
+      ; "exit_code", nullable_integer
+      ]
+    ~required:[ "job_id"; "status"; "result_ready"; "reconciliation";
+                "source"; "phase"; "cancel_requested"; "cleanup";
+                "artifacts"; "detail"; "container_id"; "exit_code" ]
+;;
+
+let keeper_owned_job_descriptor (definition : Tool_schemas_owned_job.definition) =
+  let schema : Masc_domain.tool_schema = definition.schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:("masc.job." ^ definition.id)
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_keeper_job_dispatch
+    ~ordinary_execution_mode:(if definition.read_only then Concurrent else Serial)
+    ~readonly:definition.read_only
+    ()
+  |> with_composable_output (Json_output { schema = owned_job_output_schema })
+;;
+
+let keeper_composition_result_descriptor () =
+  let schema : Masc_domain.tool_schema = Tool_schemas_composition_control.result_schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:"masc.composition_result"
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_keeper_composition_result_dispatch
+    ~ordinary_execution_mode:Concurrent
+    ~readonly:true
+    ()
+  |> with_composable_output (Json_output { schema =
+       object_output_schema
+         ~properties:["binding", opaque_object_schema;
+                      "result", opaque_object_schema;
+                      "result_artifact", normalized_artifact_ref_schema]
+         ~required:["binding"; "result"; "result_artifact"] })
+;;
+
+let keeper_code_query_descriptor () =
+  let schema : Masc_domain.tool_schema = Tool_schemas_code_query.schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:"masc.code_query"
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_keeper_code_query_dispatch
+    (* Reads code and writes nothing. It does start a language server, but the
+       turn's pool owns that and ends it; the caller is left holding an answer
+       or a refusal. The wait is the pool's own bound, not one a caller states,
+       so the reason keeper_spawn_wait is not read-only does not apply. *)
+    (* Concurrent: the turn pool's server table is Eio.Mutex-guarded, so
+       sibling fibers share servers rather than race for them. *)
+    ~ordinary_execution_mode:Concurrent
+    ~readonly:true
+    ()
+;;
+
+(* RFC-webmcp-keeper-consumption Lane B: relay to WebMCP tools a browser page
+   registered, through the embedded node bridge and an operator-run Chrome. *)
+let keeper_webmcp_list_descriptor () =
+  let schema : Masc_domain.tool_schema = Tool_schemas_webmcp.list_schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:"masc.webmcp_list"
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_keeper_webmcp_dispatch
+    (* Discovery only: reads the page's registered tool catalog. *)
+    (* Concurrent: one bridge subprocess per call; the only shared state is
+       the mutex-guarded script-path cache. *)
+    ~ordinary_execution_mode:Concurrent
+    ~readonly:true
+    ()
+;;
+
+let keeper_webmcp_call_descriptor () =
+  let schema : Masc_domain.tool_schema = Tool_schemas_webmcp.call_schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:"masc.webmcp_call"
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_keeper_webmcp_dispatch
+    (* Executes whatever the page tool does — a page may register mutating
+       tools, and the bridge cannot know which kind it called. *)
+    ~readonly:false
+    ()
+;;
+
+let masc_keeper_descriptor
+    ?(polling_read = false)
+    ?ordinary_execution_mode
+    ~keeper_model_projection
+    id
+    name
+    ~readonly =
+  let schema =
+    match
+      List.find_opt
+        (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
+        (Keeper_schema.schemas @ Tool_schemas_misc.schemas)
+    with
+    | Some schema -> schema
+    | None -> invalid_arg ("missing Keeper surface schema for " ^ name)
+  in
+  cluster_descriptor_with_schema_source
+    ?ordinary_execution_mode
+    ~polling_read
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:("masc.keeper." ^ id)
+    ~name
+    ~description:schema.description
+    ~handler:Tool_masc_keeper_dispatch
+    ~readonly
+    ()
+;;
+
+(* A wiki tool reaches the Keeper under the file's [keeper_projection]
+   when the file declares one (masc_wiki_list names its siblings by the
+   keeper_* names a Keeper can call) and under the catalog row otherwise. *)
+let masc_wiki_descriptor (definition : Tool_schemas_wiki.definition) =
+  let schema = definition.schema in
+  let keeper_model_projection =
+    match definition.operation with
+    | Tool_schemas_wiki.List_pages -> Internal_name
+    | Tool_schemas_wiki.Read_page ->
+      Transport_alias { projected_by = "keeper_wiki_read" }
+    | Tool_schemas_wiki.Search_pages ->
+      Transport_alias { projected_by = "keeper_wiki_search" }
+    | Tool_schemas_wiki.Create_page
+    | Tool_schemas_wiki.Update_page
+    | Tool_schemas_wiki.Lint_pages -> Internal_name
+  in
+  let input_schema_source, description, input_schema =
+    match definition.keeper_projection with
+    | Some projection ->
+      Keeper_projection, projection.description, projection.input_schema
+    | None -> Canonical_registry, schema.description, schema.input_schema
+  in
+  (* List, read and search are directory listing plus whole-file reads in
+     Tool_wiki, which holds no shared mutable state -- the same ground the
+     keeper_wiki_* pair already stands on. Matched on the closed operation
+     so a new read stays Serial until it is audited like these were. *)
+  let ordinary_execution_mode =
+    match (definition : Tool_schemas_wiki.definition).operation with
+    | Tool_schemas_wiki.List_pages
+    | Tool_schemas_wiki.Read_page
+    | Tool_schemas_wiki.Search_pages
+    | Tool_schemas_wiki.Lint_pages -> Concurrent
+    | Tool_schemas_wiki.Create_page | Tool_schemas_wiki.Update_page -> Serial
+  in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection
+    ~input_schema_source
+    ~input_schema
+    ~id:("masc.wiki." ^ Tool_schemas_wiki.operation_id definition.operation)
+    ~name:schema.name
+    ~description
+    ~handler:Tool_masc_wiki_dispatch
+    ~ordinary_execution_mode
+    ~readonly:definition.read_only
+    ()
+;;
+
+let masc_wiki_descriptors =
+  List.map masc_wiki_descriptor Tool_schemas_wiki.definitions
+;;
+
+let masc_local_runtime_descriptor
+      (definition : Tool_schemas_local_runtime.definition) =
+  let schema = definition.schema in
+  let execution_policy =
+    Tool_schemas_local_runtime.execution_policy definition.operation
+  in
+  let policy =
+    policy ~readonly:execution_policy.read_only ()
+  in
+  (* Operator diagnostics: registered in the catalog, never in the Keeper
+     model's per-turn tool list. Both operations can load a model and need
+     Admin. The metadata-only dashboard runtime probe has its own
+     [CanReadState] route and does not reuse these tool identities. *)
+  in_process_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Operator_only
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:
+      ("masc.local_runtime."
+       ^ Tool_schemas_local_runtime.operation_id definition.operation)
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_masc_local_runtime_dispatch
+    ~policy
+    ()
+;;
+
+let masc_local_runtime_descriptors =
+  List.map
+    masc_local_runtime_descriptor
+    Tool_schemas_local_runtime.definitions
+;;
+
+let internal_descriptors : t list =
+  [ (* ── lane / catalog ────────── *)
+    (in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
+       ~keeper_model_projection:Internal_name
+       ~input_schema_source:Canonical_registry
+       ~id:"keeper.lane.status"
+       ~name:"keeper_lane_status"
+       ~description:lane_status_schema.description
+       ~input_schema:lane_status_schema.input_schema
+       ~ordinary_execution_mode:Concurrent
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_lane_status
+       ()
+     |> with_composable_output (Json_output { schema = lane_status_output_schema }))
+  ; (in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
+       ~keeper_model_projection:Internal_name
+       ~input_schema_source:Canonical_registry
+       ~id:"keeper.tools_list"
+       ~name:"keeper_tools_list"
+       ~description:keeper_tools_list_schema.description
+       ~input_schema:keeper_tools_list_schema.input_schema
+       (* Concurrent: pure projection over the boot-time descriptor
+          registry and registered schemas; no shared mutable state. *)
+       ~ordinary_execution_mode:Concurrent
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_tools_list
+       ()
+     |> with_eval_tags [ "capability_introspection" ])
+  ; (in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
+       ~keeper_model_projection:Internal_name
+       ~input_schema_source:Canonical_registry
+       ~id:"keeper.capability_search"
+       ~name:"keeper_capability_search"
+       ~description:keeper_capability_search_schema.description
+       ~input_schema:keeper_capability_search_schema.input_schema
+       ~ordinary_execution_mode:Concurrent
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_capability_search
+       ()
+     |> with_eval_tags [ "capability_introspection" ])
+    (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.context.status"
+      ~name:"keeper_context_status"
+      ~description:context_status_schema.description
+      ~input_schema:context_status_schema.input_schema
+      (* Concurrent: file reads plus a revalidate whose write-during-read is
+         serialized by the source-store file lock, so sibling fibers queue
+         rather than interleave; event and decision-log appends ride the
+         per-path mutex. The audit that promoted this is B4's. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_context_status
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.artifact.transfer"
+      ~name:Keeper_runtime_schemas_toml.peer_artifact.name
+      ~description:Keeper_runtime_schemas_toml.peer_artifact.description
+      ~input_schema:Keeper_runtime_schemas_toml.peer_artifact.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_peer_artifact
+      ()
+  ; (in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.artifact.read"
+      ~name:Keeper_runtime_schemas_toml.artifact_read.name
+      ~description:Keeper_runtime_schemas_toml.artifact_read.description
+      ~input_schema:Keeper_runtime_schemas_toml.artifact_read.input_schema
+      (* Concurrent: content-addressed blob reads; the validated-file
+         cache in Tool_blob_store is an Atomic CAS over an immutable map. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_artifact_read
+      ()
+    |> with_model_output_projection Tool_output.bounded_inline_model_projection
+    |> with_composable_output (Json_output { schema = artifact_read_output_schema }))
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.artifact.draft"
+      ~name:Keeper_runtime_schemas_toml.artifact_draft.name
+      ~description:Keeper_runtime_schemas_toml.artifact_draft.description
+      ~input_schema:Keeper_runtime_schemas_toml.artifact_draft.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_artifact_draft
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.artifact.publish"
+      ~name:Keeper_runtime_schemas_toml.artifact_publish.name
+      ~description:Keeper_runtime_schemas_toml.artifact_publish.description
+      ~input_schema:Keeper_runtime_schemas_toml.artifact_publish.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_artifact_publish
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.skill.validate"
+      ~name:Keeper_runtime_schemas_toml.skill_validate.name
+      ~description:Keeper_runtime_schemas_toml.skill_validate.description
+      ~input_schema:Keeper_runtime_schemas_toml.skill_validate.input_schema
+      (* Concurrent: an artifact fetch plus static validation; the catalog's
+         snapshot cache is an Atomic over immutable values. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_skill_validate
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.skill.publish"
+      ~name:Keeper_runtime_schemas_toml.skill_publish.name
+      ~description:Keeper_runtime_schemas_toml.skill_publish.description
+      ~input_schema:Keeper_runtime_schemas_toml.skill_publish.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_skill_publish
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:workspace_memory_schema_source
+      ~id:"keeper.workspace.memory.read"
+      ~name:"keeper_workspace_memory_read"
+      ~description:workspace_memory_schema.description
+      ~input_schema:workspace_memory_schema.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_workspace_memory_read
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:memory_search_schema_source
+      ~id:"keeper.memory.search"
+      ~name:"keeper_memory_search"
+      ~description:memory_search_schema.description
+      ~input_schema:memory_search_schema.input_schema
+      (* Concurrent: file reads and pure ranking, plus a revalidate whose
+         write-during-read is serialized by the source-store file lock;
+         Retrieved-event and decision-log appends ride the per-path mutex,
+         and the log-once flag is an Atomic. The audit that promoted this
+         overrides the older Serial-deliberately note (B4). *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_memory_search
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:memory_select_schema_source
+      ~id:"keeper.memory.select"
+      ~name:"keeper_memory_select"
+      ~description:memory_select_schema.description
+      ~input_schema:memory_select_schema.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_memory_select
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:memory_retract_schema_source
+      ~id:"keeper.memory.retract"
+      ~name:"keeper_memory_retract"
+      ~description:memory_retract_schema.description
+      ~input_schema:memory_retract_schema.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_memory_retract
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:memory_write_schema_source
+      ~id:"keeper.memory.write"
+      ~name:"keeper_memory_write"
+      ~description:memory_write_schema.description
+      ~input_schema:memory_write_schema.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_memory_write
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:constitution_write_schema_source
+      ~id:"keeper.constitution.write"
+      ~name:"keeper_constitution_write"
+      ~description:constitution_write_schema.description
+      ~input_schema:constitution_write_schema.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_constitution_write
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:constitution_remove_schema_source
+      ~id:"keeper.constitution.remove"
+      ~name:"keeper_constitution_remove"
+      ~description:constitution_remove_schema.description
+      ~input_schema:constitution_remove_schema.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_constitution_remove
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:constitution_read_schema_source
+      ~id:"keeper.constitution.read"
+      ~name:"keeper_constitution_read"
+      ~description:constitution_read_schema.description
+      ~input_schema:constitution_read_schema.input_schema
+      (* Concurrent: each read opens its own ledger channel, then folds and
+         renders local immutable values; it never creates or mutates the ledger. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_constitution_read
+      ()
+    (* ── wiki ─────────────────────────────────────────────────── *)
+  ; in_process_descriptor
+      ~keeper_model_projection:Internal_name
+      ~id:"keeper.wiki.search"
+      ~name:"keeper_wiki_search"
+      ~description:wiki_search.Masc_domain.description
+      ~input_schema:wiki_search.Masc_domain.input_schema
+      (* Concurrent: directory listing + whole-file reads in
+         Tool_wiki; no shared mutable state on the search path. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_wiki_search
+      ()
+  ; in_process_descriptor
+      ~keeper_model_projection:Internal_name
+      ~id:"keeper.wiki.read"
+      ~name:"keeper_wiki_read"
+      ~description:wiki_read.Masc_domain.description
+      ~input_schema:wiki_read.Masc_domain.input_schema
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_wiki_read
+      ()
+    (* ── connector surfaces (RFC-0223 P3) ─────────────────────── *)
+  ; (in_process_descriptor
+       ~keeper_model_projection:Internal_name
+       ~id:"keeper.surface.read"
+       ~name:"keeper_surface_read"
+       ~description:surface_read_schema.description
+       ~input_schema:surface_read_schema.input_schema
+       (* Concurrent: the local lane pages the chat store and person notes
+          through plain file reads (the person-notes Hashtbl is
+          function-local); the Discord lane issues one HTTP request per
+          call through Discord_rest_client, whose only shared state is an
+          Atomic request-sequence counter. *)
+       ~ordinary_execution_mode:Concurrent
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_surface_read
+       ()
+     |> with_eval_tags [ "surface_context_read" ])
+  ; in_process_descriptor
+      ~keeper_model_projection:Internal_name
+      ~id:"keeper.surface.post"
+      ~name:"keeper_surface_post"
+      ~description:surface_post_schema.description
+      ~input_schema:surface_post_schema.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_surface_post
+      ()
+  ; in_process_descriptor
+      ~keeper_model_projection:Internal_name
+      ~id:"keeper.person.note_set"
+      ~name:"keeper_person_note_set"
+      ~description:person_note_set_schema.description
+      ~input_schema:person_note_set_schema.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_person_note_set
+      ()
+    (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
+    (* A memo is a comment inserted into a file, so the tool is a
+       filesystem write with Edit's roots, Gate and evidence. *)
+  ; descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:ide_annotate_schema_source
+      ~id:"keeper.ide.annotate"
+      ~public_name:"keeper_ide_annotate"
+      ~internal_name:"keeper_ide_annotate"
+      ~description:ide_annotate_schema.description
+      ~input_schema:ide_annotate_schema.input_schema
+      ~policy:
+        (policy
+           ~readonly:false
+           ~cwd_scope:"keeper_sandbox"
+           ~leaves_masc:true
+           ())
+      ~executor:Filesystem
+      ~backend:Sandbox_process
+      ~sandbox:Backend_selected
+      ~runtime_handler:Tool_ide_annotate
+      ~input_translation:(Identity Validate_once_after_translation)
+      ()
+    (* ── fusion deliberation (RFC-0252) ───────────────────────── *)
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.fusion.deliberate"
+      ~name:Keeper_runtime_schemas_toml.fusion.name
+      ~description:Keeper_runtime_schemas_toml.fusion.description
+      ~input_schema:Keeper_runtime_schemas_toml.fusion.input_schema
+      (* The explicit [Internal_name] projection makes Fusion available. *)
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_fusion_dispatch
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.fusion.decision"
+      ~name:Keeper_runtime_schemas_toml.fusion_decision.name
+      ~description:Keeper_runtime_schemas_toml.fusion_decision.description
+      ~input_schema:Keeper_runtime_schemas_toml.fusion_decision.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_fusion_decision
+      ()
+    (* ── fusion status (RFC-0266 §7 Phase 3) ──────────────────── *)
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.fusion.status"
+      ~name:Keeper_runtime_schemas_toml.fusion_status.name
+      ~description:Keeper_runtime_schemas_toml.fusion_status.description
+      ~input_schema:Keeper_runtime_schemas_toml.fusion_status.input_schema
+      (* [Internal_name] is the model exposure authority. *)
+      (* Concurrent: projects an [Atomic.get] snapshot of the fusion run
+         registry (Run_registry_core); mutation goes through its own
+         cross-context mutex on the write side. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_masc_fusion_status
+      ()
+    (* ── provider Files tools (RFC-0430 Phase 3) ──────────────── *)
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.file.upload"
+      ~name:Keeper_runtime_schemas_toml.file_upload.Masc_domain.name
+      ~description:Keeper_runtime_schemas_toml.file_upload.Masc_domain.description
+      ~input_schema:Keeper_runtime_schemas_toml.file_upload.Masc_domain.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_file_dispatch
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.file.delete"
+      ~name:Keeper_runtime_schemas_toml.file_delete.Masc_domain.name
+      ~description:Keeper_runtime_schemas_toml.file_delete.Masc_domain.description
+      ~input_schema:Keeper_runtime_schemas_toml.file_delete.Masc_domain.input_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_file_dispatch
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"masc.file.list"
+      ~name:Keeper_runtime_schemas_toml.file_list.Masc_domain.name
+      ~description:Keeper_runtime_schemas_toml.file_list.Masc_domain.description
+      ~input_schema:Keeper_runtime_schemas_toml.file_list.Masc_domain.input_schema
+      (* Concurrent: one HTTPS list call plus pure row rendering; no shared
+         mutable state on the path. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_masc_file_dispatch
+      ()
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.vision.read_image"
+      ~name:Keeper_runtime_schemas_toml.keeper_image_read.name
+      ~description:Keeper_runtime_schemas_toml.keeper_image_read.description
+      ~input_schema:Keeper_runtime_schemas_toml.keeper_image_read.input_schema
+      (* Concurrent: one file or stored-image read; the only write keeps the
+         verified bytes in the content-addressed vision store, which replaces a
+         file atomically and is not pruned on this path. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_read_image
+      ()
+    (* ── vision delegation (RFC-keeper-vision-delegation-tool §2.6) ─ *)
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      (* Text-only runtimes can recover an owned image's meaning through this
+         explicit sub-call; native readers receive pixels instead. *)
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.vision.analyze_image"
+      ~name:Keeper_runtime_schemas_toml.keeper_analyze_image.name
+      ~description:Keeper_runtime_schemas_toml.keeper_analyze_image.description
+      ~input_schema:Keeper_runtime_schemas_toml.keeper_analyze_image.input_schema
+      (* Concurrent: a read-only vision sub-call over net; call-ledger writes
+         ride the store's Eio.Mutex like every other tool's. *)
+      ~ordinary_execution_mode:Concurrent
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_analyze_image
+      ()
+    (* ── voice cluster (RFC-0179 PR-3, 6 tools) ───────────────── *)
+  ; voice_descriptor
+      "keeper_voice_speak"
+      ~readonly:false
+  ; voice_descriptor
+      "keeper_voice_listen"
+      ~readonly:false
+  (* Concurrent: both read the voice session manager, whose state is an
+     Atomic over an immutable map; neither starts, ends, nor speaks. *)
+  ; voice_descriptor ~ordinary_execution_mode:Concurrent
+      "keeper_voice_agent"
+      ~readonly:true
+  ; voice_descriptor ~ordinary_execution_mode:Concurrent
+      "keeper_voice_sessions"
+      ~readonly:true
+  ; voice_descriptor
+      "keeper_voice_session_start"
+      ~readonly:false
+  ; voice_descriptor
+      "keeper_voice_session_end"
+      ~readonly:false
+    (* ── task / broadcast cluster (RFC-0179 PR-3, 6 tools) ────── *)
+  ; (task_descriptor
+       (* Concurrent: backlog reads go through the mtime/size-keyed cache in
+          Workspace_backlog, whose lookups and refreshes run under a
+          Stdlib.Mutex with no suspension inside the critical section. *)
+       ~ordinary_execution_mode:Concurrent
+       ~capability_identity:(Named_capability "masc_tasks")
+       "list"
+       "keeper_tasks_list"
+       ~readonly:true
+     |> with_composable_output (Json_output { schema = tasks_list_output_schema }))
+  ; task_descriptor
+      ~ordinary_execution_mode:Concurrent
+      ~capability_identity:Internal_name_identity
+      "audit"
+      "keeper_tasks_audit"
+      ~readonly:true
+  ; task_descriptor
+      ~capability_identity:(Named_capability "masc_broadcast")
+      "broadcast"
+      "keeper_broadcast"
+      ~readonly:false
+  ; task_descriptor
+      ~capability_identity:Internal_name_identity
+      "claim"
+      "keeper_task_claim"
+      ~readonly:false
+  ; task_descriptor
+      ~capability_identity:Internal_name_identity
+      "create"
+      "keeper_task_create"
+      ~readonly:false
+  ; task_descriptor
+      ~capability_identity:Internal_name_identity
+      "done"
+      "keeper_task_done"
+      (* The name says done; the handler issues submit_for_verification
+         (keeper_tool_task_runtime.ml:910). The description that says so now
+         lives once, on the canonical schema this descriptor reads. *)
+      ~readonly:false
+  ; task_descriptor
+      ~capability_identity:Internal_name_identity
+      "cancel"
+      "keeper_task_cancel"
+      (* The handler issues the cancel action, which ends a task the keeper
+         holds. A keeper that finds the premise gone stops it here; one that
+         simply cannot finish uses release beside it. *)
+      ~readonly:false
+  ; task_descriptor
+      ~capability_identity:Internal_name_identity
+      "release"
+      "keeper_task_release"
+      (* The other half of the claim refusal: a keeper holding work it cannot
+         finish is also barred from claiming anything else, and until this
+         existed the only way back was shutting the keeper down. *)
+      ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
+  (* Zero keeper dispatches in the live window (tool_usage 2026-07..08):
+     keepers create and move tasks through the keeper_task_* surface, so the
+     masc_* twins stay on the transport surface only. Transport_alias names
+     the keeper tool that already covers the capability. *)
+  ; masc_task_descriptor
+       ~keeper_model_projection:(Transport_alias { projected_by = "keeper_task_create" })
+       "add" "masc_add_task"
+       ~readonly:false
+  ; masc_task_descriptor
+       ~keeper_model_projection:(Transport_alias { projected_by = "keeper_task_create" })
+       "batch_add" "masc_batch_add_tasks"
+       ~readonly:false
+  ; masc_task_descriptor ~ordinary_execution_mode:Concurrent
+       "task_history" "masc_task_history"
+       ~readonly:true
+  ; masc_task_transport_descriptor ~ordinary_execution_mode:Concurrent
+       "tasks" "masc_tasks"
+       ~readonly:true
+  ; masc_task_descriptor
+       ~keeper_model_projection:(Transport_alias { projected_by = "keeper_task_claim" })
+       "transition" "masc_transition"
+       ~readonly:false
+  ; masc_task_descriptor
+       ~keeper_model_projection:(Transport_alias { projected_by = "keeper_task_claim" })
+       "update_priority" "masc_update_priority"
+       ~readonly:false
+  ; masc_task_descriptor "set_goal" "masc_task_set_goal"
+       ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_plan_* current-task trio (3 entries): the
+     session pointer to the Keeper's current task. ── *)
+  ; masc_plan_descriptor ~keeper_model_projection:Operator_only
+       "set_task" "masc_plan_set_task"
+       ~readonly:false
+  ; masc_plan_descriptor ~ordinary_execution_mode:Concurrent
+       "get_task" "masc_plan_get_task"
+       ~readonly:true
+  ; masc_plan_descriptor "clear_task" "masc_plan_clear_task"
+       ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_run_* cluster (4 entries) ──────────── *)
+  ; masc_run_descriptor "masc_run_init"
+       ~readonly:false
+  ; (masc_run_descriptor ~ordinary_execution_mode:Concurrent
+       "masc_run_list"
+       ~readonly:true
+     |> with_composable_output (Json_output { schema = run_list_output_schema }))
+  ; masc_run_descriptor "masc_run_get"
+      ~readonly:false
+  (* readonly:false: Run_eio.update_plan writes run.json and the plan
+     mirror. It was declared readonly:true; the write would have been
+     admittable to Concurrent batches and Async admission on that hint. *)
+  ; masc_run_descriptor "masc_run_plan"
+       ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries) ────────── *)
+  ; (masc_agent_descriptor ~keeper_model_projection:Operator_only
+        ~ordinary_execution_mode:Concurrent
+        "card" "masc_agent_card"
+        ~readonly:true
+     (* No composable output: #29681 took this off the model surface, and a
+        composable schema only means "a Keeper plan may reference this node's
+        output" -- every reader of the field is in keeper_tool_plan*. A tool
+        the model cannot name is never a plan node, so the schema described a
+        reference nobody can write. *)
+     |> with_eval_tags [ "agent_profile_lookup" ])
+  ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
+       "fitness" "masc_agent_fitness"
+       ~readonly:true
+     |> with_composable_output
+          (Json_output { schema = agent_fitness_output_schema }))
+  ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
+       "get_metrics" "masc_get_metrics"
+       ~readonly:true
+     |> with_composable_output (Json_output { schema = get_metrics_output_schema }))
+  (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)
+  (* Operator-only: [masc_status] answers with the operator's status *screen*.
+     Workspace_status renders it for a terminal — emoji, a box-drawing rule, a
+     [Players:] roster that includes non-Keeper MCP clients, a [Task binding:]
+     line of seven fields, and an [Attention:] list whose entry for a Keeper is
+     "Your agent session is not bound", a CLI concept a Keeper has no session to
+     bind. Its own header calls it a display and caps the roster at
+     [max_agents_display].
+
+     A Keeper is handed the same facts as typed per-turn context: the world
+     state frame already carries the backlog counts, the running fiber count,
+     and the Keeper's own recent Board posts. Exposing the screen on top of that
+     offered a second, untyped copy whose only Keeper-specific line was a false
+     warning.
+
+     The tool itself stays registered: the dashboard Settings "Server check"
+     calls it through MCP, [GET /api/v1/status] maps to it, and it remains in
+     the public MCP surface for CLI clients. Only the Keeper model projection
+     goes. *)
+  ; masc_workspace_descriptor ~ordinary_execution_mode:Concurrent
+      ~keeper_model_projection:Operator_only
+      (* Concurrent: backlog reads under the file lock plus pure rendering. *)
+      "status"
+      "masc_status"
+       ~readonly:true
+  ; masc_workspace_descriptor ~keeper_model_projection:Operator_only
+      "heartbeat"
+      "masc_heartbeat"
+       ~readonly:false
+  ; masc_workspace_descriptor ~ordinary_execution_mode:Concurrent
+      ~keeper_model_projection:Operator_only
+      (* Concurrent: backlog reads plus assertion evaluation; nothing written. *)
+      "check" "masc_check"
+       ~readonly:true
+  ; (masc_workspace_descriptor ~ordinary_execution_mode:Concurrent
+       "goal_list" "masc_goal_list"
+       ~readonly:true
+     |> with_composable_output (Json_output { schema = goal_list_output_schema }))
+  ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
+       ~readonly:false
+  ; masc_workspace_descriptor "goal_measure" "masc_goal_measure"
+       ~readonly:false
+  ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
+       ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_misc_* cluster ─────────── *)
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "config" "masc_config"
+       ~readonly:true
+  (* Optional layers contribute observations; their replies do not gate
+     existing Keeper work or replace the machine/browser owners. *)
+  ; masc_misc_descriptor "lane_act" "masc_lane_act" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_action_status" "masc_lane_action_status" ~readonly:true
+  ; masc_misc_descriptor "lane_attach" "masc_lane_attach" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_declaration_read" "masc_lane_declaration_read" ~readonly:true
+  ; masc_misc_descriptor "lane_declaration_save" "masc_lane_declaration_save" ~readonly:false
+  ; masc_misc_descriptor "lane_updates" "masc_lane_updates" ~readonly:false
+  ; masc_misc_descriptor "play_room" "masc_play_room" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_inspect" "masc_lane_inspect" ~readonly:true
+  ; masc_misc_descriptor "lane_observe" "masc_lane_observe" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "lane_slice" "masc_lane_slice" ~readonly:true
+  ; masc_misc_descriptor "lane_detach" "masc_lane_detach" ~readonly:false
+  ; masc_misc_descriptor "lane_evidence" "masc_lane_evidence" ~readonly:false
+  ; (masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "portrait_read" "keeper_portrait_read" ~readonly:true
+       |> with_composable_output (Json_output { schema = portrait_read_output_schema }))
+  ; masc_misc_descriptor "candle_balance" "keeper_candle_balance" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "candle_catalog" "keeper_candle_catalog" ~readonly:true
+  ; masc_misc_descriptor "candle_purchase" "keeper_candle_purchase" ~readonly:false
+  ; masc_misc_descriptor "candle_equip" "keeper_candle_equip" ~readonly:false
+  ; masc_misc_descriptor "candle_gift" "keeper_candle_gift" ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "dashboard"
+       "masc_dashboard"
+       (* Concurrent: config reads plus pure text generation; the dashboard
+          module holds no shared mutable state. *)
+       ~readonly:true
+  ; cluster_descriptor
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Operator_only
+      ~id:"masc.misc.keeper_waiting_inventory"
+      ~name:"masc_keeper_waiting_inventory"
+      ~handler:Tool_masc_misc_dispatch
+      (* Concurrent: approval-queue reads are Atomics over immutable maps;
+         the only tables built are function-local. *)
+      ~ordinary_execution_mode:Concurrent
+      ~readonly:true
+      ()
+  ; masc_misc_descriptor ~keeper_model_projection:Operator_only
+       ~ordinary_execution_mode:Concurrent
+       "tool_help" "masc_tool_help"
+       ~readonly:true
+  (* Tool_catalog keeps masc_gc at CanAdmin and the keeper lane has no other
+     permission check, so a model-visible name let any Keeper sweep the
+     workspace (a 09-20 call removed 3,462 messages). *)
+  ; masc_misc_descriptor ~keeper_model_projection:Operator_only "gc" "masc_gc"
+      ~readonly:false
+  (* The ask chain — store, operator surfaces, answer→wake — was reachable
+     only from the MCP lane: nothing in this registry named the tools, so the
+     agent-core lane never advertised them and could not dispatch a call.
+     [Internal_name] puts them on the model surface; [Tool_masc_misc_dispatch]
+     routes them to the same handlers the MCP lane uses, with the Keeper's own
+     [meta.name] as the asking identity, so the store's unregistered-keeper
+     refusal still applies. *)
+  ; masc_misc_descriptor "ask" "masc_ask"
+      ~readonly:false
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "ask_status"
+      "masc_ask_status"
+      (* Concurrent: ask-store file reads behind a mutex-guarded version
+         cache; pure row filtering after that. *)
+      ~readonly:true
+  ; masc_misc_descriptor "ask_withdraw" "masc_ask_withdraw"
+      ~readonly:false
+  (* [masc_web_search] / [masc_web_fetch] are already owned by the
+     MASC-owned web descriptors above. Do not add
+     duplicate internal descriptors here; that would make runtime receipt
+     projection depend on list order. *)
+  (* ── RFC-0182 §3.1 — masc_control_* cluster (2 entries) ──────── *)
+  ; masc_control_descriptor Tool_schemas_misc.Pause
+  ; masc_control_descriptor Tool_schemas_misc.Resume
+  (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
+  ; (masc_agent_timeline_descriptor ~keeper_model_projection:Operator_only
+       ~ordinary_execution_mode:Concurrent
+       "masc_agent_timeline"
+       (* No composable output, for the same reason as masc_agent_card above:
+          off the model surface since #29681, so no plan can name it. *)
+       ~readonly:true)
+  (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
+  ]
+  @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
+  @ List.map keeper_spawn_descriptor Tool_schemas_spawn.definitions
+  @ List.map keeper_owned_job_descriptor Tool_schemas_owned_job.definitions
+  @ [ keeper_composition_result_descriptor () ]
+  (* ── RFC a-language-server-the-keeper-can-ask (1 entry) ───────── *)
+  @ [ keeper_code_query_descriptor () ]
+  (* ── RFC-webmcp-keeper-consumption Lane B (2 entries) ─────────── *)
+  @ [ keeper_webmcp_list_descriptor (); keeper_webmcp_call_descriptor () ]
+  @ [
+  (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
+    masc_keeper_descriptor ~keeper_model_projection:Operator_only
+      ~ordinary_execution_mode:Concurrent "list" Keeper_tool_name.(to_string Keeper_list)
+      (* Concurrent: registry and roster reads; the list cache is an Atomic
+         over an immutable record with CAS install. *)
+      ~readonly:true
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      ~ordinary_execution_mode:Concurrent "delegate_status" Keeper_tool_name.(to_string Keeper_delegate_status)
+      (* Concurrent: owner-registry reads behind its Eio.Mutex; pure render. *)
+      ~readonly:true
+      ~polling_read:true
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" Keeper_tool_name.(to_string Keeper_delegate_cancel)
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only
+      ~ordinary_execution_mode:Concurrent "delegate_list" Keeper_tool_name.(to_string Keeper_delegate_list)
+      (* Concurrent: owner-registry reads behind its Eio.Mutex; pure render. *)
+      ~readonly:true
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "clear" Keeper_tool_name.(to_string Keeper_clear)
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_start" Keeper_tool_name.(to_string Keeper_sandbox_start)
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "sandbox_stop" Keeper_tool_name.(to_string Keeper_sandbox_stop)
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "reset" Keeper_tool_name.(to_string Keeper_reset)
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only
+      ~ordinary_execution_mode:Concurrent "audit" Keeper_tool_name.(to_string Keeper_audit)
+      (* Concurrent: keeper file reads plus pure check evaluation; no shared
+         mutable state on the path. *)
+      ~readonly:true
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only
+      ~ordinary_execution_mode:Concurrent "status" Keeper_tool_name.(to_string Keeper_status)
+      (* Concurrent: keeper meta and roster reads; no shared mutable state
+         on the path. *)
+      ~readonly:true
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "down" Keeper_tool_name.(to_string Keeper_down)
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate" Keeper_tool_name.(to_string Keeper_delegate)
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "up" Keeper_tool_name.(to_string Keeper_up)
+      ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "msg" Keeper_tool_name.(to_string Keeper_msg)
+      ~readonly:false
+  ]
+  @ masc_board_descriptors
+  @ masc_wiki_descriptors
+  @ masc_local_runtime_descriptors
+;;
+
+let all_descriptors () = public_descriptors @ internal_descriptors
+
+let find_id id =
+  List.find_opt (fun descriptor -> String.equal descriptor.id id) (all_descriptors ())
+;;
+
+let model_input_schema_errors ~tool_name = function
+  | `Assoc _ as schema -> (Tool_input_validation.schema_shape schema).errors
+  | other ->
+    [ Printf.sprintf
+        "input schema for %s must be an object, got %s"
+        tool_name
+        (Json_util.kind_name other)
+    ]
+;;
+
+let model_schema_errors descriptor =
+  match descriptor.input_schema_source with
+  | Descriptor_owned | Canonical_registry | Keeper_projection ->
+    model_input_schema_errors
+      ~tool_name:descriptor.internal_name
+      descriptor.input_schema
+;;
+
+let keeper_model_names descriptor =
+  match model_schema_errors descriptor, descriptor.keeper_model_projection with
+  | _ :: _, _ -> []
+  | [], Preferred_public_name ->
+    [ descriptor.public_name ]
+  | [], Internal_name ->
+    [ descriptor.internal_name ]
+  | [], (Operator_only | Transport_alias _) -> []
+;;
+
+(* Add-on schemas come from the original retained export, rather than an
+   embedded tool file. Keep them behind the existing loader; dispatch still
+   checks that original owner after the schema has become callable. Static
+   tools keep their own declaration under the internal name. *)
+let declared_loading descriptor =
+  match descriptor.runtime_handler with
+  | Tool_lane_addon _ -> Tool_definition_toml.Deferrable
+  | Tool_execute
+  | Tool_search_files
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_lane_status
+  | Tool_tools_list
+  | Tool_capability_search
+  | Tool_context_status
+  | Tool_peer_artifact
+  | Tool_artifact_read
+  | Tool_skill_validate
+  | Tool_artifact_draft
+  | Tool_artifact_publish
+  | Tool_skill_publish
+  | Tool_workspace_memory_read
+  | Tool_memory_search
+  | Tool_memory_select
+  | Tool_memory_retract
+  | Tool_memory_write
+  | Tool_constitution_write
+  | Tool_constitution_read
+  | Tool_constitution_remove
+  | Tool_wiki_search
+  | Tool_wiki_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
+  | Tool_ide_annotate
+  | Tool_voice_dispatch
+  | Tool_task_dispatch
+  | Tool_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_workspace_dispatch
+  | Tool_masc_misc_dispatch
+  | Tool_web_search
+  | Tool_web_fetch
+  | Tool_browser_tabs
+  | Tool_browser_read
+  | Tool_browser_session
+  | Tool_browser_goto
+  | Tool_browser_act
+  | Tool_browser_instruct
+  | Tool_browser_interact
+  | Tool_masc_control_dispatch
+  | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
+  | Tool_keeper_spawn_dispatch
+  | Tool_keeper_job_dispatch
+  | Tool_keeper_composition_result_dispatch
+  | Tool_keeper_code_query_dispatch
+  | Tool_keeper_webmcp_dispatch
+  | Tool_masc_keeper_dispatch
+  | Tool_masc_fusion_dispatch
+  | Tool_masc_fusion_status
+  | Tool_masc_fusion_decision
+  | Tool_masc_file_dispatch
+  | Tool_masc_wiki_dispatch
+  | Tool_masc_local_runtime_dispatch
+  | Tool_analyze_image
+  | Tool_read_image
+    -> Tool_loading_declarations.loading_of_tool descriptor.internal_name
+;;
+
+(* A name no descriptor offers (a Skill composition tool) is declared under
+   that name itself. *)
+let declared_loading_of_model_name name =
+  match
+    List.find_opt
+      (fun d -> List.exists (String.equal name) (keeper_model_names d))
+      (all_descriptors ())
+  with
+  | Some descriptor -> declared_loading descriptor
+  | None -> Tool_loading_declarations.loading_of_tool name
+;;
+
+let registered_names descriptor =
+  [ descriptor.internal_name; descriptor.public_name ]
+  |> List.sort_uniq String.compare
+;;
+
+let model_visible_descriptors () =
+  all_descriptors ()
+  |> List.filter (fun descriptor ->
+    match model_schema_errors descriptor, keeper_model_names descriptor with
+    | _ :: _, _ | [], [] -> false
+    | [], _ :: _ -> true)
+;;
+
+
+
+let model_visible_schemas () =
+  model_visible_descriptors ()
+  |> List.concat_map (fun descriptor ->
+    keeper_model_names descriptor
+    |> List.map (fun name ->
+      { Masc_domain.name
+      ; description = descriptor.description
+      ; input_schema = descriptor.input_schema
+      }))
+;;
+
+let public_names_of_descriptor d = [ d.public_name ]
+
+let public_names () = List.concat_map public_names_of_descriptor public_descriptors
+
+let internal_names d =
+  [ d.internal_name ]
+;;
+
+let find_public name =
+  List.find_opt
+    (fun d -> List.exists (String.equal name) (public_names_of_descriptor d))
+    public_descriptors
+;;
+
+let public_descriptors_for_internal internal_name =
+  List.filter
+    (fun d -> List.exists (String.equal internal_name) (internal_names d))
+    public_descriptors
+;;
+
+(* Walks [all_descriptors ()]. Used by the runtime dispatcher to resolve any
+   descriptor-backed tool by its internal name, including workspace tools
+   that live in [internal_descriptors]. While [internal_descriptors = []], this
+   returns the same result as [public_descriptors_for_internal]. *)
+let descriptors_for_internal internal_name =
+  List.filter
+    (fun d -> List.exists (String.equal internal_name) (internal_names d))
+    (all_descriptors ())
+;;
+
+let readonly_static_hint d = d.policy.readonly_hint
+let readonly_for_input d ~input = d.policy.readonly_of_input input
+
+let prepared_leaf_admission descriptor =
+  match descriptor.execution with
+  | Terminal -> Direct_only
+  | Ordinary Serial when descriptor.runtime_handler = Tool_edit_file
+      || descriptor.runtime_handler = Tool_write_file -> Owned_file_mutation_leaf
+  | Ordinary (Serial | Concurrent) ->
+    (match readonly_static_hint descriptor with
+     | Some true -> Read_only_ordinary_leaf
+     | None | Some false ->
+       (match descriptor.runtime_handler with
+        | Tool_keeper_job_dispatch ->
+          (match Tool_schemas_owned_job.find_definition descriptor.internal_name with
+           | Some {action=Tool_schemas_owned_job.Start;_} -> Owned_job_launch_leaf
+           | Some {action=(Tool_schemas_owned_job.Status | Cancel | Read_result);_}
+           | None -> Direct_only)
+        | Tool_masc_misc_dispatch
+          when String.equal descriptor.internal_name "masc_ask" ->
+          Owned_ask_leaf
+        | Tool_lane_addon _
+        | Tool_execute
+        | Tool_search_files
+        | Tool_read_file
+        | Tool_edit_file
+        | Tool_write_file
+        | Tool_lane_status
+        | Tool_tools_list
+        | Tool_capability_search
+        | Tool_context_status
+        | Tool_peer_artifact
+        | Tool_artifact_read
+        | Tool_skill_validate
+        | Tool_artifact_draft | Tool_artifact_publish | Tool_skill_publish
+        | Tool_workspace_memory_read
+        | Tool_memory_search
+        | Tool_memory_select
+        | Tool_memory_retract
+        | Tool_memory_write
+        | Tool_constitution_write
+        | Tool_constitution_read
+        | Tool_constitution_remove
+        | Tool_wiki_search
+        | Tool_wiki_read
+        | Tool_surface_read
+        | Tool_surface_post
+        | Tool_person_note_set
+        | Tool_ide_annotate
+        | Tool_voice_dispatch
+        | Tool_task_dispatch
+        | Tool_board_dispatch
+        | Tool_masc_task_dispatch
+        | Tool_masc_plan_dispatch
+        | Tool_masc_run_dispatch
+        | Tool_masc_agent_dispatch
+        | Tool_masc_workspace_dispatch
+        | Tool_masc_misc_dispatch
+        | Tool_web_search
+        | Tool_web_fetch
+        | Tool_browser_tabs
+        | Tool_browser_read
+        | Tool_browser_session
+        | Tool_browser_goto
+        | Tool_browser_act
+        | Tool_browser_instruct
+        | Tool_browser_interact
+        | Tool_masc_control_dispatch
+        | Tool_masc_agent_timeline_dispatch
+        | Tool_masc_schedule_dispatch
+        | Tool_keeper_spawn_dispatch
+        | Tool_keeper_composition_result_dispatch
+        | Tool_keeper_code_query_dispatch
+        | Tool_keeper_webmcp_dispatch
+        | Tool_masc_keeper_dispatch
+        | Tool_masc_fusion_dispatch
+        | Tool_masc_fusion_status
+        | Tool_masc_fusion_decision
+        | Tool_masc_file_dispatch
+        | Tool_masc_wiki_dispatch
+        | Tool_masc_local_runtime_dispatch
+        | Tool_analyze_image | Tool_read_image -> Direct_only))
+;;
+
+let readonly_internal_names () =
+  all_descriptors ()
+  |> List.concat_map (fun d ->
+    match readonly_static_hint d with
+    | Some true -> internal_names d
+    | Some false | None -> [])
+  |> List.sort_uniq String.compare
+;;
+
+let public_name_for_internal internal_name =
+  match public_descriptors_for_internal internal_name with
+  | [] -> None
+  | first :: _ -> Some first.public_name
+;;
+
+let translate_input ~public input =
+  match find_public public with
+  | Some descriptor -> translate_input_for_descriptor descriptor input
+  | None -> input
+;;
+
+
+let receipt_labels_json d =
+  `Assoc (List.map (fun (key, value) -> key, `String value) d.receipt_labels)
+;;
+
+let eval_tags_json d =
+  `List (List.map (fun tag -> `String tag) d.eval_tags)
+;;
+
+let common_policy_json_fields ~readonly_key policy =
+  [ readonly_key, Json_util.bool_opt_to_json policy.readonly_hint
+  ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
+  ; "polling_read", `Bool policy.polling_read
+  ]
+;;
+
+(* Route evidence consumers must read fields by key; object field order is not a
+   compatibility contract. *)
+let route_evidence_json d =
+  let policy = d.policy in
+  `Assoc
+    ([ "descriptor_id", `String d.id
+     ; "capability_id", `String d.capability_id
+     ; ( "keeper_model_projection"
+       , `String (keeper_model_projection_to_string d.keeper_model_projection) )
+     ; "public_name", `String d.public_name
+     ; "canonical_name", `String d.internal_name
+     ; "description", `String d.description
+     ; "executor", `String (executor_to_string d.executor)
+     ; "backend", `String (backend_to_string d.backend)
+     ; "sandbox", `String (sandbox_to_string d.sandbox)
+     ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
+     ; "execution", `String (execution_to_string d.execution)
+     ; "tool_kind", `String (tool_kind_to_string d.tool_kind)
+     ; "composable_output", composable_output_to_json d.composable_output
+     ; "receipt_labels", receipt_labels_json d
+     ; "eval_tags", eval_tags_json d
+     ]
+     @
+     (match d.keeper_model_projection with
+      | Transport_alias { projected_by } ->
+        [ "transport_alias_of", `String projected_by ]
+      | Preferred_public_name | Internal_name | Operator_only -> [])
+     @ common_policy_json_fields ~readonly_key:"readonly" policy)
+;;
+
+let discovery_policy_json policy =
+  `Assoc (common_policy_json_fields ~readonly_key:"readonly_hint" policy)
+;;
+
+let discovery_fields d =
+  let examples_field =
+    match d.examples with
+    | [] -> []
+    | examples -> [ "examples", `List examples ]
+  in
+  ([ "id", `String d.id
+   ; "capability_id", `String d.capability_id
+   ; ( "keeper_model_projection"
+     , `String (keeper_model_projection_to_string d.keeper_model_projection) )
+   ; "input_schema_source", `String (input_schema_source_to_string d.input_schema_source)
+   ; "public_name", `String d.public_name
+   ; "internal_name", `String d.internal_name
+   ; "description", `String d.description
+   ; "executor", `String (executor_to_string d.executor)
+   ; "backend", `String (backend_to_string d.backend)
+   ; "sandbox", `String (sandbox_to_string d.sandbox)
+   ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
+   ; "execution", `String (execution_to_string d.execution)
+   ; "tool_kind", `String (tool_kind_to_string d.tool_kind)
+   ; "composable_output", composable_output_to_json d.composable_output
+   ; "policy", discovery_policy_json d.policy
+   ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema
+   ]
+   @
+   match d.keeper_model_projection with
+   | Transport_alias { projected_by } ->
+     [ "transport_alias_of", `String projected_by ]
+   | Preferred_public_name | Internal_name | Operator_only -> [])
+  @ examples_field
+;;

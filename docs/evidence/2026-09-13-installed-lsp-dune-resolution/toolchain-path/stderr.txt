@@ -1,0 +1,8 @@
+halting /Users/dancer/.opam/5.5.0/bin/dune merlin process
+{ pid = 73212
+; initial_cwd = "/private/tmp/masc-installed-ide-lsp-fixture-20260913"
+}
+closed merlin process
+{ pid = 73212
+; initial_cwd = "/private/tmp/masc-installed-ide-lsp-fixture-20260913"
+}

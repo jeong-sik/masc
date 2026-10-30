@@ -1,0 +1,915 @@
+(** Standalone LLM completion: build -> HTTP -> parse.
+
+    Self-contained in llm_provider -- no agent_core dependency.
+    Consumers can call these functions directly.
+
+    @since 0.46.0  Sync completion
+    @since 0.53.0  Streaming
+    @since 0.54.0  Optional cache + metrics hooks *)
+
+open Complete_common
+open Complete_sync
+open Complete_stream
+
+type latency_counter = Complete_common.latency_counter
+type prepared_request = Prepared_completion_request.t
+type serialized_request = Prepared_completion_request.serialized
+type measured_request = Prepared_completion_request.measured
+type admitted_request = Prepared_completion_request.admitted
+
+type context_fit = Prepared_completion_request.context_fit =
+  { input_tokens : int
+  ; reserved_output_tokens : int
+  ; max_context_tokens : int
+  }
+
+type fit_error = Prepared_completion_request.fit_error =
+  | Context_limit_unknown of { model_id : string }
+  | Invalid_context_limit of
+      { model_id : string
+      ; max_context_tokens : int
+      }
+  | Output_reservation_unknown of { model_id : string }
+  | Context_window_exceeded of context_fit
+  | Serving_constraint_rejected of
+      { constraint_ : Serving_constraint.t
+      ; reason : Serving_constraint.admission_error
+      }
+
+let prepare_request = Prepared_completion_request.prepare
+let admit_request_body = Prepared_completion_request.admit_serialized_body
+let serialized_outcome serialized result =
+  Completion_outcome.after_serialization
+    ~request:(Prepared_completion_request.admitted_body_request
+      (Prepared_completion_request.serialized_admitted_body serialized)) result
+;;
+
+type 'clock measurement_next_stage = 'clock Prepared_completion_request.next_stage =
+  | Completion of { call_window : 'clock Deadline_window.t }
+  | Stream of
+      { admission_window : 'clock Deadline_window.t
+      ; first_event_timeout_s : float option
+      }
+
+let measure_request = Prepared_completion_request.measure
+let count_round_trip_s = Prepared_completion_request.count_round_trip_s
+let with_first_event_timeout_s = Prepared_completion_request.with_first_event_timeout_s
+let resolve_context_limit = Prepared_completion_request.resolve_context_limit
+let requires_token_measurement = Prepared_completion_request.requires_token_measurement
+let serving_constraint = Prepared_completion_request.serving_constraint
+let admit_request = Prepared_completion_request.admit
+let admitted_fit = Prepared_completion_request.admitted_fit
+
+let inspect_serialized_request
+      ~stream
+      ~(config : Provider_config.t)
+      ~(messages : Types.message list)
+      ?(tools = [])
+      ()
+  =
+  Result.bind (validate_all config) (fun () ->
+    Result.map
+      (fun (serialized : Complete_common.serialized_http_request) ->
+         Request_wire_observer.observation
+           ~capture_id:None
+           ~provider:(Provider_registry.provider_name_of_config config)
+           ~model:config.model_id
+           ~http_codec:(Provider_http_codec.fingerprint_tag serialized.http_codec)
+           ~stream
+           ~body:serialized.body)
+      (serialize_final_http_request_unadmitted ~stream ~config ~messages ~tools))
+;;
+
+(* A caller's bound as it arrives: the seconds it declared, which the call
+   resolves once the request is validated and opens there, or a window the
+   caller opened before measuring the request and has been spending from. *)
+type 'clock bound =
+  | Declared of float option
+  | Opened of 'clock Deadline_window.t
+
+let open_bound ~operation ~parameter ~clock = function
+  | Opened window -> Ok window
+  | Declared timeout_s ->
+    Http_client.resolve_explicit_deadline ~operation ~parameter ~clock ~timeout_s
+    |> Result.map Deadline_window.open_
+;;
+
+type model_identity = Reported_model | Configured_model_fallback
+
+(* A prepared body remains serialization evidence across rejection or
+   interruption. Injected transports own a different
+   projection, so the native prepared body cannot certify their request. *)
+let preserve_prepared_body ~transport ~admitted_body ~unobserved result =
+  match transport, admitted_body with
+  | None, Some body ->
+    Completion_outcome.after_serialization
+      ~request:(Prepared_completion_request.admitted_body_request body) result
+  | Some _, _ | None, None -> unobserved result
+;;
+
+let complete_prepared_sync
+      ~sw
+      ~net
+      ?clock
+      ?(transport : Llm_transport.t option)
+      ~(prepared : Prepared_completion_request.t)
+      ?(model_identity = Configured_model_fallback)
+      ?(cache : Cache.t option)
+      ?(connection_cache : Http_client.cache option)
+      ?(metrics : Metrics.t option)
+      ?body_timeout_s
+      ~call_bound
+      ?permit_wait
+      ?request_wire_observer
+      ?admitted_body
+      ()
+  =
+  let cache = match model_identity with Reported_model -> None | Configured_model_fallback -> cache in
+  let request = Prepared_completion_request.request prepared in
+  let request =
+    match request_wire_observer with
+    | None -> request
+    | Some request_wire_observer ->
+      { request with request_wire_observer = Some request_wire_observer }
+  in
+  let config = request.Llm_transport.config in
+  let messages = request.messages in
+  let tools = request.tools in
+  let validation =
+    match admitted_body, transport with
+    | Some _, None -> Ok ()
+    | None, _ | Some _, Some _ -> validate_all config
+  in
+  let preflight =
+    match validation with
+    | Error err -> Error err
+    | Ok () ->
+      (match
+         Http_client.resolve_explicit_deadline
+           ~operation:"Complete.complete"
+           ~parameter:"body_timeout_s"
+           ~clock
+           ~timeout_s:body_timeout_s
+       with
+       | Error err -> Error err
+       | Ok body_deadline ->
+         Result.map
+           (fun call_window -> body_deadline, call_window)
+           (open_bound
+              ~operation:"Complete.complete"
+              ~parameter:"call_timeout_s"
+              ~clock
+              call_bound))
+  in
+  (* An injected transport owns its request projection and has no stable HTTP
+     body identity here. A refreshable credential has no stable account
+     identity in this config. Neither may reuse this response cache. *)
+  let cache =
+    match transport, config.credential_source with
+    | None, Provider_config.Static_credential -> cache
+    | Some _, _ | None, Provider_config.Refreshable_credential _ -> None
+  in
+  let preflight =
+    Result.bind preflight (fun (body_deadline, call_window) ->
+      match cache with
+      | None -> Ok (body_deadline, call_window, admitted_body, None)
+      | Some _ ->
+        let body =
+          match admitted_body with
+          | Some body -> Ok body
+          | None ->
+            Prepared_completion_request.admit_serialized_body ~stream:false prepared
+            |> Result.map Prepared_completion_request.serialized_admitted_body
+        in
+        Result.map (fun (body : Prepared_completion_request.admitted_body) ->
+          let serialized = Prepared_completion_request.admitted_body_request body in
+          let key = Cache.http_request_fingerprint
+              ~config ~messages ~tools
+              ~http_codec:serialized.http_codec ~body:serialized.body () in
+          body_deadline, call_window, Some body, Some key) body)
+  in
+  match preflight with
+  | Error err -> preserve_prepared_body ~transport ~admitted_body
+      ~unobserved:Completion_outcome.before_serialization (Error err)
+  | Ok (body_deadline, call_window, admitted_body, cache_key) ->
+    let m =
+      match metrics with
+      | Some m -> m
+      | None -> Metrics.get_global ()
+    in
+    let model_id = config.model_id in
+    let request_config = config in
+    (* Reuse both the admitted body and its key for lookup, dispatch and store. *)
+    let cached =
+      match cache, cache_key, admitted_body with
+      | Some c, Some key, Some body ->
+        (match c.get ~key with
+         | Some json ->
+           (match Cache.response_of_json json with
+            | Some resp ->
+              m.on_cache_hit ~model_id;
+              (* A hit replays the original call's telemetry, but its
+                 latency fields describe a network round trip this call
+                 never made. Clear them so latency consumers do not bill
+                 the hit as a slow call; the stored entry keeps the
+                 original numbers for provenance. *)
+              let telemetry =
+                Option.map
+                  (fun t ->
+                     { t with
+                       Types.request_latency_ms = None
+                     ; Types.ttfrc_ms = None
+                     ; Types.prefill_ms = None
+                     })
+                  resp.Types.telemetry
+              in
+              Some (Ok { resp with Types.telemetry },
+                Prepared_completion_request.admitted_body_request body)
+            | None ->
+              m.on_cache_miss ~model_id;
+              None)
+         | None ->
+           m.on_cache_miss ~model_id;
+           None)
+      | _, _, _ -> None
+    in
+    (match cached with
+     | Some (result, request) ->
+       Completion_outcome.cache_reused ~request (ensure_nonempty_completion result)
+     | None ->
+       m.on_request_start ~model_id;
+       let dispatch () =
+         match transport with
+         | Some t ->
+           let run_transport () = t.invoke_sync request in
+           (match body_deadline with
+            | Http_client.Unbounded ->
+              Http_client.with_explicit_deadline body_deadline run_transport
+            | Http_client.Bounded (clock, timeout_s) ->
+              (match
+                 Under_deadline.run clock timeout_s run_transport
+               with
+               | Ok result -> result
+               | Error `Timeout ->
+                 Completion_outcome.interrupted_unobserved
+                   { Llm_transport.response =
+                     Error
+                       (Http_client.TimeoutError
+                          { message =
+                              Printf.sprintf
+                                "body_timeout_s deadline exceeded after %.17gs \
+                                 (Complete.complete injected sync transport)"
+                                timeout_s
+                          ; phase = Http_client.Non_streaming_body
+                          })
+                 ; latency_ms = None
+                 }))
+         | None ->
+             complete_http
+               ~sw
+               ~net
+               ?clock
+               ~on_http_status:m.on_http_status
+               ?body_timeout_s
+               ?connection_cache
+               ?capture_id:request.capture_id
+               ?request_wire_observer:request.request_wire_observer
+               ?admitted_body
+               ~config:request_config
+               ~messages
+               ~tools
+               ()
+             |> Completion_outcome.map_result (fun (response, latency_ms) ->
+                  { Llm_transport.response; latency_ms })
+       in
+       let transport_outcome =
+         (* The permit spans the full provider round-trip; cache hits above
+            never take one. Waiting for a permit is queueing, not part of the
+            provider interaction, so body_timeout_s does not cover it.
+            call_timeout_s is the caller's bound on the whole call: it ends a
+            wait for the permit as [Queue], and bounds the round trip with
+            what the wait left, as [Non_streaming_body]. A declared
+            body_timeout_s still arms inside it, so the narrower bound fires
+            and names its own knob. *)
+         match call_window with
+         | Deadline_window.Unbounded ->
+           Provider_admission.with_admission ~config:request_config dispatch
+         | Deadline_window.Bounded
+             { clock = call_clock; timeout_s = call_timeout_s; deadline_at } ->
+           let call_deadline_exceeded ~wrap ~phase ~stage =
+             wrap { Llm_transport.response =
+                 Error
+                   (Http_client.TimeoutError
+                      { message =
+                          Printf.sprintf
+                            "call_timeout_s deadline exceeded after %.17gs %s (Complete.complete)"
+                            call_timeout_s
+                            stage
+                      ; phase
+                      })
+             ; latency_ms = None
+             }
+           in
+           (match
+              Provider_admission.with_admission_and_work_until
+                ?wait:permit_wait
+                ~clock:call_clock
+                ~deadline_at
+                ~config:request_config
+                dispatch
+            with
+            | Ok transport_result -> transport_result
+            | Error Provider_admission.Permit_wait_expired ->
+              call_deadline_exceeded
+                ~wrap:(preserve_prepared_body ~transport ~admitted_body
+                  ~unobserved:Completion_outcome.before_serialization)
+                ~phase:Http_client.Queue
+                ~stage:"before a provider admission permit was granted"
+            | Error Provider_admission.Permit_granted_as_deadline_passed ->
+              (* Nothing was sent, and the permit went straight back. Still
+                 the queue phase, said as what happened. *)
+              call_deadline_exceeded
+                ~wrap:(preserve_prepared_body ~transport ~admitted_body
+                  ~unobserved:Completion_outcome.before_serialization)
+                ~phase:Http_client.Queue
+                ~stage:"with a provider admission permit granted as the deadline passed"
+            | Error Provider_admission.Work_expired ->
+              call_deadline_exceeded
+                ~wrap:(preserve_prepared_body ~transport ~admitted_body
+                  ~unobserved:Completion_outcome.interrupted_unobserved)
+                ~phase:Http_client.Non_streaming_body
+                ~stage:"during the provider round trip")
+       in
+       let { Llm_transport.response = result; latency_ms } =
+         transport_outcome.Completion_outcome.result in
+       (* HTTP-backed transports bypass complete_http, so emit the status
+         here using the transport result. Non-HTTP CLI transports must
+         stay silent because they never observed an HTTP status code. *)
+       if Option.is_some transport && not (requires_non_http_transport config.kind)
+       then (
+         match result with
+         | Ok _ ->
+           m.on_http_status
+             ~provider:(Provider_registry.provider_name_of_config config)
+             ~model_id
+             ~status:200
+         | Error (Http_client.HttpError { code; _ }) ->
+           m.on_http_status
+             ~provider:(Provider_registry.provider_name_of_config config)
+             ~model_id
+             ~status:code
+         | Error (Http_client.NetworkError _) | Error (Http_client.TimeoutError _)
+         | Error (Http_client.AcceptRejected _) | Error (Http_client.ProviderTerminal _)
+         | Error (Http_client.ProviderFailure _) -> ());
+       let result = ensure_nonempty_completion result in
+       Completion_outcome.map_result (fun _ ->
+       match result with
+        | Ok resp ->
+          let resp =
+            Pricing.annotate_response_cost ~provider:(Provider_config.provider_reference config) resp
+          in
+          let reported_model = resp.Types.model in
+          let reasoning_prefix =
+            Backend_anthropic.transmitted_reasoning_prefix
+              ~config
+              ~messages
+              ~tools
+              ~response_content:resp.Types.content
+              ()
+          in
+          let resp = patch_telemetry resp ~config ~reasoning_prefix latency_ms in
+          let resp = match model_identity with
+            | Reported_model -> {resp with model=reported_model}
+            | Configured_model_fallback -> resp in
+          m.on_request_end ~model_id ~latency_ms;
+          emit_tool_call_metrics
+            m
+            ~provider:(Provider_registry.provider_name_of_config config)
+            ~model_id
+            resp;
+          (match resp.usage with
+           | Some u ->
+             m.on_token_usage
+               ~provider:(Provider_registry.provider_name_of_config config)
+               ~model_id
+               ~input_tokens:u.input_tokens
+               ~output_tokens:u.output_tokens
+           | None -> ());
+          (* Cache store — reuse pre-computed key *)
+          (match cache, cache_key with
+           | Some c, Some key ->
+             let json = Cache.response_to_json resp in
+             (try c.set ~key ~ttl_sec:Constants.Cache.default_ttl_sec json with
+              | (Eio.Io _ | Sys_error _) as exn ->
+                Diag.warn
+                  "complete"
+                  "cache set failed for key %s: %s"
+                  key
+                  (Printexc.to_string exn))
+           | _, _ -> ());
+          Ok resp
+        | Error err ->
+          let metric_error_reason =
+            match err with
+            | Http_client.HttpError { code = 429; _ } -> Metrics.Rate_limit
+            | Http_client.TimeoutError _ -> Metrics.Timeout
+            | Http_client.HttpError _
+            | Http_client.AcceptRejected _
+            | Http_client.NetworkError _
+            | Http_client.ProviderTerminal _
+            | Http_client.ProviderFailure _ -> Metrics.Unknown
+          in
+          let err_str =
+            match err with
+            | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
+            | Http_client.AcceptRejected { reason } -> reason
+            | Http_client.NetworkError { message; _ } -> message
+            | Http_client.TimeoutError { message; _ } -> message
+            | Http_client.ProviderTerminal { message; _ } -> message
+            | Http_client.ProviderFailure { kind; message } ->
+              Http_client.provider_failure_to_string ~kind ~message
+          in
+          m.on_error ~model_id ~message:err_str ~reason:metric_error_reason;
+          Error err) transport_outcome)
+;;
+
+let complete
+      ~sw
+      ~net
+      ?clock
+      ?transport
+      ~(config : Provider_config.t)
+      ~(messages : Types.message list)
+      ?(tools = [])
+      ?(trace_context = [])
+      ?model_identity
+      ?cache
+      ?connection_cache
+      ?metrics
+      ?body_timeout_s
+      ?call_timeout_s
+      ?capture_id
+      ?request_wire_observer
+      ()
+  =
+  let prepared = prepare_request ~config ~messages ~tools ~trace_context ?capture_id () in
+  complete_prepared_sync
+    ~sw
+    ~net
+    ?clock
+    ?transport
+    ~prepared
+    ?model_identity
+    ?cache
+    ?connection_cache
+    ?metrics
+    ?body_timeout_s
+    ~call_bound:(Declared call_timeout_s)
+    ?request_wire_observer
+    ()
+;;
+
+let complete_admitted
+      ~sw
+      ~net
+      ?clock
+      ?transport
+      admitted
+      ?cache
+      ?connection_cache
+      ?metrics
+      ?body_timeout_s
+      ~call_window
+      ?permit_wait
+      ?request_wire_observer
+      ()
+  =
+  let admitted_body = Prepared_completion_request.admitted_body admitted in
+  complete_prepared_sync
+    ~sw
+    ~net
+    ?clock
+    ?transport
+    ~prepared:(Prepared_completion_request.admitted_request admitted)
+    ?admitted_body
+    ?cache
+    ?connection_cache
+    ?metrics
+    ?body_timeout_s
+    ~call_bound:(Opened call_window)
+    ?permit_wait
+    ?request_wire_observer
+    ()
+;;
+
+let complete_serialized
+      ~sw
+      ~net
+      ?clock
+      ?transport
+      serialized
+      ?cache
+      ?connection_cache
+      ?metrics
+      ?body_timeout_s
+      ?call_timeout_s
+      ?permit_wait
+      ?request_wire_observer
+      ()
+  =
+  complete_prepared_sync
+    ~sw
+    ~net
+    ?clock
+    ?transport
+    ~prepared:(Prepared_completion_request.serialized_request serialized)
+    ~admitted_body:(Prepared_completion_request.serialized_admitted_body serialized)
+    ?cache
+    ?connection_cache
+    ?metrics
+    ?body_timeout_s
+    ~call_bound:(Declared call_timeout_s)
+    ?permit_wait
+    ?request_wire_observer
+    ()
+;;
+
+(* ── Streaming ───────────────────────────────────────── *)
+
+let complete_prepared_stream
+      ~sw
+      ~net
+      ?clock
+      ~admission_bound
+      ?permit_wait
+      ?(transport : Llm_transport.t option)
+      ?wire_observer
+      ?request_wire_observer
+      ?admitted_body
+      ~(prepared : Prepared_completion_request.t)
+      ~(on_event : Types.sse_event -> unit)
+      ?metrics
+      ?(connection_cache : Http_client.cache option)
+      ?(on_telemetry : (Telemetry_event.t -> unit) option)
+      ()
+  =
+  let request = Prepared_completion_request.request prepared in
+  let config = request.Llm_transport.config in
+  let messages = request.messages in
+  let tools = request.tools in
+  let validation =
+    match admitted_body, transport with
+    | Some _, None -> Ok ()
+    | None, _ | Some _, Some _ -> validate_all config
+  in
+  let preflight =
+    match validation with
+    | Error err -> Error err
+    | Ok () ->
+      open_bound
+        ~operation:"Complete.complete_stream"
+        ~parameter:"admission_timeout_s"
+        ~clock
+        admission_bound
+  in
+  match preflight with
+  | Error err -> preserve_prepared_body ~transport ~admitted_body
+      ~unobserved:Completion_outcome.before_serialization (Error err)
+  | Ok admission_window ->
+    let on_event = emit_stream_event on_event in
+    let request_config = config in
+    let latency_counter = start_latency_counter ?clock () in
+    let metrics_opt = metrics in
+    let metrics = Option.value metrics ~default:(Metrics.get_global ()) in
+    let on_telemetry_with_metrics evt =
+      record_streaming_metrics metrics evt;
+      match on_telemetry with
+      | Some f -> f evt
+      | None -> ()
+    in
+    let transport_on_telemetry =
+      match metrics_opt, on_telemetry with
+      | None, None -> None
+      | Some _, _ | None, Some _ -> Some on_telemetry_with_metrics
+    in
+    let emit_wire_observer_failure failure =
+      let event = Telemetry_event.Wire_observer_failure failure in
+      try
+        record_streaming_metrics metrics event;
+        match on_telemetry with
+        | Some emit -> emit event
+        | None ->
+          Diag.warn
+            "wire_observer"
+            "wire observation was not accepted and no telemetry callback is installed: %s"
+            (Wire_observer.show_failure failure)
+      with
+      | exn ->
+        Reserved_exn.reraise_if_reserved exn;
+        (* Observation diagnostics must not rewrite a completed provider
+           interaction as a provider failure. The original typed failure and
+           telemetry callback exception both remain visible here. *)
+        Diag.warn
+          "wire_observer"
+          "wire observer failure telemetry callback raised: %s; original=%s"
+          (Printexc.to_string exn)
+          (Wire_observer.show_failure failure)
+    in
+    let request =
+      let request =
+        match request_wire_observer with
+        | None -> request
+        | Some request_wire_observer ->
+          { request with request_wire_observer = Some request_wire_observer }
+      in
+      match wire_observer with
+      | None -> request
+      | Some try_observe ->
+        let observe_wire_chunk ~provider ~model ~chunk =
+          match
+            Wire_observer.observe
+              try_observe
+              ~capture_id:request.capture_id
+              ~provider
+              ~model
+              ~chunk
+          with
+          | Ok () -> ()
+          | Error failure -> emit_wire_observer_failure failure
+        in
+        { request with observe_wire_chunk = Some observe_wire_chunk }
+    in
+    (* The transport arm below never reaches [complete_stream_http]'s own
+       status wiring, so the sink travels with the request — the same way
+       [observe_wire_chunk] does. An HTTP-backed transport reports what it
+       observed; a CLI transport ignores the field and stays silent. *)
+    let request = { request with observe_http_status = Some metrics.on_http_status } in
+    let dispatch () =
+      match transport with
+      | Some t -> t.invoke_stream ?on_telemetry:transport_on_telemetry ~on_event request
+      | None ->
+        complete_stream_http
+          ~sw
+          ~net
+          ?clock
+          ?stream_idle_timeout_s:request.stream_idle_timeout_s
+          ?first_event_timeout_s:request.first_event_timeout_s
+          ?body_timeout_s:request.body_timeout_s
+          ?observe_wire_chunk:request.observe_wire_chunk
+          ?capture_id:request.capture_id
+          ?request_wire_observer:request.request_wire_observer
+          ?admitted_body
+          ~on_http_status:metrics.on_http_status
+          ~latency_counter
+          ?on_telemetry
+          ~metrics
+          ?connection_cache
+          ~config:request_config
+          ~messages
+          ~tools
+          ~on_event
+          ()
+    in
+    let transport_outcome =
+      (* The permit spans the entire stream: the provider holds the
+         connection open until the final SSE event, so concurrency
+         accounting must too. The wait for the permit is the one part of
+         the call that is not the stream: a stream's length is its own, and
+         nothing here bounds it, but a caller that says how long it will
+         queue ends the wait as [Queue] with nothing sent. *)
+      match admission_window with
+      | Deadline_window.Unbounded ->
+        Provider_admission.with_admission ~config:request_config dispatch
+      | Deadline_window.Bounded
+          { clock = admission_clock; timeout_s = admission_timeout_s; deadline_at } ->
+        (match
+           Provider_admission.with_admission_until
+             ?wait:permit_wait
+             ~clock:admission_clock
+             ~deadline_at
+             ~config:request_config
+             dispatch
+         with
+         | Ok stream_result -> stream_result
+         | Error `Permit_wait_expired ->
+           (* The waiter has left the queue. These are the endpoint's current
+              process-local counts, not a reconstruction of the expired wait. *)
+           let admission_snapshot =
+             match Provider_admission.snapshot_for ~config:request_config with
+             | None -> " admission_snapshot=unavailable"
+             | Some snapshot ->
+               Printf.sprintf
+                 " admission_snapshot=after_wait max_slots=%d active=%d available=%d queue_length=%d"
+                 snapshot.max_slots snapshot.active snapshot.available snapshot.queue_length
+           in
+           preserve_prepared_body ~transport ~admitted_body
+             ~unobserved:Completion_outcome.before_serialization
+             (Error
+               (Http_client.TimeoutError
+                { message =
+                    Printf.sprintf
+                      "admission_timeout_s deadline exceeded after %.17gs before a \
+                       provider admission permit was granted (Complete.complete_stream)%s"
+                      admission_timeout_s
+                      admission_snapshot
+                ; phase = Http_client.Queue
+                })))
+    in
+    Completion_outcome.map_result (fun result ->
+    Result.map
+      (fun resp ->
+         let latency_ms = latency_ms_int latency_counter in
+         let resp = Pricing.annotate_response_cost ~provider:(Provider_config.provider_reference config) resp in
+         let existing_telemetry = resp.telemetry in
+         let ttfrc_ms = Option.bind existing_telemetry (fun t -> t.ttfrc_ms) in
+         let prefill_ms = Option.bind existing_telemetry (fun t -> t.prefill_ms) in
+         let reasoning_prefix =
+           Backend_anthropic.transmitted_reasoning_prefix
+             ~config
+             ~messages
+             ~tools
+             ~response_content:resp.Types.content
+             ()
+         in
+         let resp =
+           patch_telemetry resp ~config ~ttfrc_ms ~prefill_ms ~reasoning_prefix latency_ms
+         in
+         emit_tool_call_metrics
+           metrics
+           ~provider:(Provider_registry.provider_name_of_config config)
+           ~model_id:config.model_id
+           resp;
+         resp)
+      (ensure_nonempty_completion result)) transport_outcome
+;;
+
+let complete_stream
+      ~sw
+      ~net
+      ?clock
+      ?admission_timeout_s
+      ?stream_idle_timeout_s
+      ?first_event_timeout_s
+      ?body_timeout_s
+      ?transport
+      ?capture_id
+      ?wire_observer
+      ?request_wire_observer
+      ~(config : Provider_config.t)
+      ~(messages : Types.message list)
+      ?(tools = [])
+      ?(trace_context = [])
+      ~on_event
+      ?metrics
+      ?connection_cache
+      ?on_telemetry
+      ()
+  =
+  let prepared =
+    prepare_request
+      ~config
+      ~messages
+      ~tools
+      ~trace_context
+      ?capture_id
+      ?stream_idle_timeout_s
+      ?first_event_timeout_s
+      ?body_timeout_s
+      ()
+  in
+  complete_prepared_stream
+    ~sw
+    ~net
+    ?clock
+    ~admission_bound:(Declared admission_timeout_s)
+    ?transport
+    ?wire_observer
+    ?request_wire_observer
+    ~prepared
+    ~on_event
+    ?metrics
+    ?connection_cache
+    ?on_telemetry
+    ()
+;;
+
+let complete_stream_admitted
+      ~sw
+      ~net
+      ?clock
+      ~admission_window
+      ?permit_wait
+      ?transport
+      ?wire_observer
+      ?request_wire_observer
+      admitted
+      ~on_event
+      ?metrics
+      ?connection_cache
+      ?on_telemetry
+      ()
+  =
+  let admitted_body = Prepared_completion_request.admitted_body admitted in
+  complete_prepared_stream
+    ~sw
+    ~net
+    ?clock
+    ~admission_bound:(Opened admission_window)
+    ?permit_wait
+    ?transport
+    ?wire_observer
+    ?request_wire_observer
+    ~prepared:(Prepared_completion_request.admitted_request admitted)
+    ?admitted_body
+    ~on_event
+    ?metrics
+    ?connection_cache
+    ?on_telemetry
+    ()
+;;
+
+let complete_stream_serialized
+      ~sw
+      ~net
+      ?clock
+      ?admission_timeout_s
+      ?permit_wait
+      ?transport
+      ?wire_observer
+      ?request_wire_observer
+      serialized
+      ~on_event
+      ?metrics
+      ?connection_cache
+      ?on_telemetry
+      ()
+  =
+  complete_prepared_stream
+    ~sw
+    ~net
+    ?clock
+    ~admission_bound:(Declared admission_timeout_s)
+    ?permit_wait
+    ?transport
+    ?wire_observer
+    ?request_wire_observer
+    ~prepared:(Prepared_completion_request.serialized_request serialized)
+    ~admitted_body:(Prepared_completion_request.serialized_admitted_body serialized)
+    ~on_event
+    ?metrics
+    ?connection_cache
+    ?on_telemetry
+    ()
+;;
+
+(* ── HTTP Transport constructor ─────────────────────── *)
+
+let make_http_transport
+      ?clock
+      ?body_timeout_s
+      ?(connection_cache : Http_client.cache option)
+      ?latency_counter
+      ~sw
+      ~net
+      ()
+  : Llm_transport.t
+  =
+  { invoke_sync =
+      (fun (req : Llm_transport.completion_request) ->
+          complete_http
+            ~sw
+            ~net
+            ?clock
+            ?body_timeout_s
+            ?connection_cache
+            ?capture_id:req.capture_id
+            ?request_wire_observer:req.request_wire_observer
+            ~config:req.config
+            ~messages:req.messages
+            ~tools:req.tools
+            ()
+          |> Completion_outcome.map_result (fun (response, latency_ms) ->
+               { Llm_transport.response; latency_ms }))
+  ; invoke_stream =
+      (fun ?on_telemetry ~on_event (req : Llm_transport.completion_request) ->
+        complete_stream_http
+          ~sw
+          ~net
+          ?clock
+          ?on_http_status:req.observe_http_status
+          ?stream_idle_timeout_s:req.stream_idle_timeout_s
+          ?first_event_timeout_s:req.first_event_timeout_s
+          ?body_timeout_s:req.body_timeout_s
+          ?observe_wire_chunk:req.observe_wire_chunk
+          ?capture_id:req.capture_id
+          ?request_wire_observer:req.request_wire_observer
+          ?connection_cache
+          ?latency_counter
+          ~config:req.config
+          ~messages:req.messages
+          ~tools:req.tools
+          ~on_event
+          ?on_telemetry
+          ())
+  }
+;;

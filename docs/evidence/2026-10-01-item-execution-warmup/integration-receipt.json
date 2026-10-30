@@ -1,0 +1,139 @@
+{
+  "source_commit": "03917b4f192094d8c7b097552d4060fc1f853e78",
+  "merge_parents": [
+    "59bc80f584832b2f51d3112ecdefd93a434b27aa",
+    "68db59f7d7ea05fe4f8128c84eebda69788c47f2"
+  ],
+  "result": "PASS",
+  "runs": [
+    {
+      "command": "node e2e/keeper-items.mjs",
+      "manifest_sha256": "0b7d641d9ae70810ef1aefe363e36845f1c2a479881f0280ba6f771426759e68",
+      "account_reads": 5,
+      "portrait_requests": [
+        {
+          "keeper": "rondo",
+          "size": "224",
+          "preview": null
+        },
+        {
+          "keeper": "rondo",
+          "size": "224",
+          "preview": "beanie"
+        },
+        {
+          "keeper": "rondo",
+          "size": "224",
+          "preview": null
+        },
+        {
+          "keeper": "rondo",
+          "size": "224",
+          "preview": null
+        },
+        {
+          "keeper": "rondo",
+          "size": "224",
+          "preview": null
+        },
+        {
+          "keeper": "rondo",
+          "size": "224",
+          "preview": null
+        }
+      ],
+      "captures": [
+        {
+          "name": "keeper-items-desktop",
+          "sha256": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c"
+        },
+        {
+          "name": "keeper-items-preview-unavailable",
+          "sha256": "75fce85f7451b2173bc13c8da824522967bc599d70733f8ba2ba120d86cf2d39"
+        },
+        {
+          "name": "keeper-items-preview-restored",
+          "sha256": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c"
+        },
+        {
+          "name": "keeper-items-mobile",
+          "sha256": "76ade8fb9c4b644bf2b8d3b068ccb601fe1ebdf4203d4c74164524a1d000b55d"
+        },
+        {
+          "name": "keeper-items-loading",
+          "sha256": "274988cfd451958330a81691c9a9d5a673b60fd41b612f010f8d986182408000"
+        },
+        {
+          "name": "keeper-items-free-purchase",
+          "sha256": "841edccc23ee33b059d0b46600bb250ac910f48751cd64ef472f27667d5f13c9"
+        },
+        {
+          "name": "keeper-items-price-change",
+          "sha256": "b7e635786f0ab05b95330db86aeb2a975aa5ff17060a722af0e1933b662acc41"
+        },
+        {
+          "name": "keeper-items-unavailable",
+          "sha256": "d6ec71175cbbf2af2b84b8840d10c9adf63f7998397ac7e635d5febb4ac87872"
+        },
+        {
+          "name": "keeper-items-recovered",
+          "sha256": "9484e31829ca4f02cf4bafc0eb6a8acf8a1916beabde947338e0246bf94107c9"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "command": "node e2e/keeper-items-warmup.mjs",
+      "manifest_sha256": "6c07da06a913caa63c1b424d963d9c551fcadbd3a3cd0790aad7c1d641fa4d99",
+      "execution_reads": [
+        {
+          "recovered": false
+        },
+        {
+          "recovered": true
+        }
+      ],
+      "account_reads": [
+        {
+          "recovered": false
+        },
+        {
+          "recovered": true
+        }
+      ],
+      "captures": [
+        {
+          "name": "item-preview-before-warmup",
+          "sha256": "4d5952ed0c05d211263e2a2cc8c490490578562edfee725657090e57685e2b8a"
+        },
+        {
+          "name": "item-workspace-warmup",
+          "sha256": "92497afdb58d580cb5d1437f392b1968e319ee2c3cb1c8153cc1194baa558dea"
+        },
+        {
+          "name": "item-workspace-recovered",
+          "sha256": "759a701bdcd396eb40660bd0d00e46810d06460ca84f71533c5523710bbdfccf"
+        }
+      ],
+      "errors": []
+    }
+  ],
+  "source_sha256": {
+    "dashboard/e2e/keeper-items.mjs": "064628140a0838a9f04e5527c3683976cba2ff6c041c291531fd8fcc1104281a",
+    "dashboard/e2e/keeper-items-warmup.mjs": "c082742c5516224aa1dd6060bb1260c89603257ff9516bf51133b20370e18bd3",
+    ".github/workflows/dashboard-artifact.yml": "b354b7bc676e0f235b65e02704a9c1eca204ce02c08dbe91097d3bbe33ae6c44"
+  },
+  "artifacts": {
+    "directory": "/private/tmp/40466-integrated-browser-03917",
+    "versioned": false,
+    "manifests": [
+      "manifest.json",
+      "warmup-manifest.json"
+    ],
+    "screen_count": 12
+  },
+  "scope": "Chromium through local Vite with production Item components/store and synthetic account/execution HTTP; mocked PNG503. No native PNG, installed runtime, build or CI execution.",
+  "discarded_attempts": [
+    "First Vite launch omitted required MASC_DASHBOARD_PROXY_TARGET and exited before a browser scenario started."
+  ]
+}

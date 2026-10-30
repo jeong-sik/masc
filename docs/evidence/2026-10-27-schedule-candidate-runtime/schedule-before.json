@@ -1,0 +1,76 @@
+{
+  "schedule_instance_id": "01a17977-885a-7000-99c5-7c7ce0634794",
+  "schedule_id": "audit-retarget-cancel",
+  "requested_by": {
+    "id": "schedule-audit-admin",
+    "kind": "automated_actor",
+    "display_name": null
+  },
+  "scheduled_by": {
+    "id": "schedule-audit-admin",
+    "kind": "automated_actor",
+    "display_name": null
+  },
+  "requested_at": 1793039239.257844,
+  "due_at": 1793042840.257844,
+  "expires_at": null,
+  "payload": {
+    "kind": "masc.keeper_wake",
+    "body": {
+      "result_delivery": {
+        "policy": "none"
+      },
+      "keeper_name": "audit-retarget-a",
+      "message": "Isolated cancelled recurring wake; do not execute."
+    }
+  },
+  "status": "scheduled",
+  "source": "operator_request",
+  "recurrence": {
+    "kind": "interval",
+    "interval_sec": 3600
+  },
+  "cancellation": null,
+  "due_at_iso": "2026-10-26T19:27:20Z",
+  "next_due_at": 1793042840.257844,
+  "next_due_at_iso": "2026-10-26T19:27:20Z",
+  "requested_at_iso": "2026-10-26T18:27:19Z",
+  "recurrence_kind": "interval",
+  "recurrence_summary": "every 3600s",
+  "payload_digest": "18479fc9800a3102ae905fc6ec5a0c99e92176a6acaf3f9f44a5aca1dfd147ac",
+  "payload_kind": "masc.keeper_wake",
+  "payload_support": "supported",
+  "payload_dispatch_tool": "masc.keeper_wake",
+  "payload_target": "keeper:audit-retarget-a",
+  "payload_summary": "Isolated cancelled recurring wake; do not execute.",
+  "last_wake": {
+    "attempt_id": "01a17977-c1f6-7000-961d-b0061d6edfda",
+    "settlement_kind": "accepted",
+    "schedule_instance_id": "01a17977-885a-7000-99c5-7c7ce0634794",
+    "schedule_id": "audit-retarget-cancel",
+    "started_at": 1793039254.004944,
+    "finished_at": 1793039254.015104,
+    "due_at": 1793039240.257844,
+    "payload_digest": "18479fc9800a3102ae905fc6ec5a0c99e92176a6acaf3f9f44a5aca1dfd147ac",
+    "status": "succeeded",
+    "detail": {
+      "kind": "masc.keeper_wake.enqueued",
+      "queue": "keeper_event_queue",
+      "stimulus": "schedule_due",
+      "stimulus_id": "06c5c5c0d1b1c2d99becb4c6842f7c0b3fda30b81a93ff9da85b3c6c6d57dc63",
+      "keeper_name": "audit-retarget-a",
+      "schedule_instance_id": "01a17977-885a-7000-99c5-7c7ce0634794",
+      "schedule_id": "audit-retarget-cancel",
+      "urgency": "normal",
+      "post_id": "06c5c5c0d1b1c2d99becb4c6842f7c0b3fda30b81a93ff9da85b3c6c6d57dc63",
+      "result_delivery_policy": "none",
+      "occurrence_status": "awaiting_ack",
+      "activation_status": "deferred",
+      "activation_reason": "lifecycle_denied",
+      "activation_detail": "paused",
+      "reaction_ledger_status": "recorded",
+      "reaction_ledger_error": null
+    },
+    "error": null
+  }
+}

@@ -1,0 +1,53 @@
+val current_task_id_opt : Keeper_meta_contract.keeper_meta -> string option
+val runtime_observability_contract_json :
+  config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+(** Operator-facing runtime contract with sandbox backend details included. *)
+
+val runtime_contract_json_from_fields :
+  keeper_name:string ->
+  ?trace_id:string ->
+  ?session_id:string ->
+  ?keeper_turn_id:int ->
+  ?task_id:string ->
+  ?goal_ids:string list ->
+  ?sandbox_profile:string ->
+  ?sandbox_root:string ->
+  ?sandbox_roots:string list ->
+  ?network_mode:string ->
+  ?runtime_profile:string ->
+  unit ->
+  Yojson.Safe.t
+(** Build the keeper-visible runtime contract projection from turn-context
+    fields. Backend implementation details are intentionally omitted. *)
+
+val runtime_observability_contract_json_from_fields :
+  keeper_name:string ->
+  ?trace_id:string ->
+  ?session_id:string ->
+  ?keeper_turn_id:int ->
+  ?task_id:string ->
+  ?goal_ids:string list ->
+  ?sandbox_profile:string ->
+  ?sandbox_root:string ->
+  ?sandbox_roots:string list ->
+  ?network_mode:string ->
+  ?runtime_profile:string ->
+  unit ->
+  Yojson.Safe.t
+(** Build an operator-facing runtime contract projection from turn-context
+    fields, including sandbox backend details for status, receipts, and
+    debugging. *)
+
+val action_radius_json :
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  duration_ms:float ->
+  ?error:string ->
+  ?sandbox_target:string ->
+  unit ->
+  Yojson.Safe.t
+(** [action_radius_json] states what a call reached: tool, action, target,
+    and observed paths. It carries no outcome of its own; the enclosing row's
+    typed outcome ([disposition]/[wire_outcome], a receipt's [outcome]) is the
+    only verdict, so the two cannot disagree. [error] is the failure preview
+    the producer attached to a failed call. *)

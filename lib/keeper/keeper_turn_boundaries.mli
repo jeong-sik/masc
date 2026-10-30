@@ -1,0 +1,356 @@
+(** Where each finished keeper turn left the durable history (RFC
+    librarian-lifecycle §4.6).
+
+    A finished turn appends one line to a per-keeper append-only
+    [<keepers_dir>/<keeper>/turn-boundaries.jsonl], after its checkpoint is saved.
+    [keepers_dir] is {!Workspace.keepers_runtime_dir},
+    not the operator's config directory. Path construction and reads create
+    no directories. The line
+    names the turn and the end of the saved history in the atom vocabulary of
+    {!Runtime_model_input_tail_window}: how many atoms the checkpoint holds and
+    the digest of the message that opens the last one. A turn that continued a
+    non-empty history also states the position it started from
+    ({!Continued_history_from}), so a line is self-describing and a reader can
+    answer what an unreadable line before it was (RFC §4.4 row 2c, masc#37061);
+    the end an earlier line states is that start for a line written before this
+    branch existed.
+
+    A history whose atoms are numbered from zero again has no such earlier
+    line, so whoever restarts it says so with a [History_restarted] line. A
+    reader may act on that line as soon as it sees it, so no writer puts it
+    ahead of the restart:
+
+    - [masc_keeper_clear] empties a history, not as part of a turn, and appends
+      the line once the emptied checkpoint is saved. A checkpoint whose bytes
+      do not decode is deleted instead, which leaves the store with none; the
+      next turn then writes the line as below.
+    - A turn that starts from no atom, and knows the saved history holds none
+      (it loaded an empty one, or the store has none), appends the line before
+      it runs. Nothing can be saved ahead of it, so the record is there even
+      if the turn saves and then dies before its own line.
+    - A turn that starts from no atom because its checkpoint was written by an
+      earlier version has not seen the saved history, which may still hold
+      atoms. It appends the line after the first stage save the store accepts,
+      the save that replaces what was there. A checkpoint that cannot be read
+      or parsed does not start a turn at all: the turn fails before it runs.
+
+    {2 What a reader may rely on}
+
+    - A line that cannot be built or written does not fail the turn: the
+      checkpoint is already durable. After a transient append failure the next
+      line's span covers both turns, so nothing is lost.
+    - A crash in the middle of an append can leave the file ending mid-line.
+      The next append cuts that fragment back to the last complete line before
+      it writes ([Fs_compat.append_private_jsonl_durable_locked_result]). The
+      cut line is lost like any failed append, and the next line's span
+      covers its turn.
+    - A reader orders the [Atom_history] lines of one trace by [end_atom], not
+      by their position in the file: a position is a value, and a value does
+      not depend on when a line reached the file. Turns of one keeper do not
+      overlap -- the Keeper Owner runs one child turn at a time and holds that
+      slot until the whole child returns, so the append is inside it
+      ({!Keeper_owner}) -- and the reader rules of RFC §4.4 rely on that.
+      [masc_keeper_clear] runs in the owner's idle maintenance slot
+      ({!Keeper_owner_registry.run_maintenance_if_idle}), so its line never
+      lands inside a turn either. [turn_ref] is not a key: the turn number is read from the
+      keeper's meta when the turn starts, and a trace rotation changes the
+      trace while that count keeps running.
+    - Two lines say that the atoms of a trace are numbered from zero again: a
+      [Turn_ended] line with [Fresh_history], and a [History_restarted] line.
+      Neither is ahead of the restart it states: a [Turn_ended] line, a
+      clear's line and an unread turn's line follow the save that restarted
+      the history, and a turn's start line is written while the saved history
+      is known to hold no atom. So a reader that sees one and then loads the
+      checkpoint loads the restarted history or a later one. What a reader
+      does with these lines is RFC §4.4.
+    - The lines of an earlier history of the same trace stay in the file, and
+      so can a line whose history was never stored (the last bullet). A line is a cut
+      point of the history a reader loaded only when its [end_atom] and
+      [last_atom_digest] match that checkpoint. The content a reader takes is
+      always the checkpoint's, so a line that does not match costs a cut
+      point, never content.
+    - [last_atom_digest] is computed from the checkpoint the turn takes to be
+      stored: the one its final save returned, or, when the final save is
+      skipped because an earlier save of the turn already stored the same
+      checkpoint, that one. Nothing re-reads the disk, so a clear that lands
+      after that earlier save leaves a line for a history that is gone. On
+      the store's payload-encode recovery path the bytes on disk are a recovery
+      copy with the unencodable json dropped, while the save still returns the
+      original (masc #37018). If the message that opens the last atom carried
+      that json, the digest describes bytes that were not stored. Rare.
+
+    The file is never rewritten or trimmed -- not by this module and not by
+    anything else. The one thing that removes it removes it whole: the keeper
+    purge, whose artifact list is fixed in code and not chosen per run
+    ({!Keeper_shutdown_types.dashboard_purge_artifact_plan}). So line [n] of this
+    file is line [n] for as long as the file exists, and a reader that counts
+    lines is counting something that does not shift under it.
+
+    That is the trade this file makes, so the size is worth stating. One line
+    per finished turn, 266 bytes for a line whose digest is a sha256; the live
+    fleet ran 61 turns per keeper per day over 2026-09-18..19, which is 5.9 MB
+    per keeper per year. If that ever has to be bounded, the bound cannot be a
+    trim -- it has to drop the whole file, the way the purge does, together
+    with whatever reads it. *)
+
+type position =
+  | Atom_history of
+      { end_atom : int
+      ; last_atom_digest : string
+      }
+      (** The saved checkpoint holds [end_atom] atoms, so [end_atom] is the
+          exclusive end of its history. [last_atom_digest] is
+          {!Runtime_model_input_tail_window.atom_opening_digest} of atom
+          [end_atom - 1]. *)
+  | Empty_atom_history  (** A checkpoint was saved and holds no atom. *)
+  | No_atom_history
+      (** The runtime keeps no Agent-Core checkpoint (an official client), so
+          the turn has no atom history to end. Atoms an Agent-Core candidate
+          of the same turn saved before the official client answered are in
+          the saved history all the same; the next line's start state names
+          where they end ({!witness_line}). *)
+  | Stale_noop
+      (** An Agent-Core turn whose checkpoint save was a stale no-op: a newer
+          writer owns the canonical checkpoint, and this turn's messages are
+          not in the durable history. The line is kept, with no span of its
+          own, because a reader counts finished turns in lines. *)
+
+(** Whether the atoms this turn saved are numbered from zero, and, when they are
+    not, the position the turn started from. A reader cannot infer it.
+    [Fresh_history] is every way a history is empty when a turn starts, and the
+    turn does not tell them apart: no checkpoint was loaded (a new trace, a
+    purged or superseded checkpoint, one that could not be read), or the loaded
+    one held no atom (the checkpoint a keeper is created with, a history
+    [masc_keeper_clear] emptied).
+
+    [Continued_history_from] carries the start state so that a line is
+    self-describing: a later line can answer what an unreadable line before it
+    was, which is what ends the stall of RFC §4.4 row 2c (masc#37061). The
+    start state is also a position of the saved history: the turns of a keeper
+    do not overlap, so the history a turn loads is where every turn before it
+    left the history, including one that saved atoms and then failed, was
+    cancelled or handed the turn to an official client without an end line
+    of its own ({!witness_line}). It is a
+    new branch of this sum type, not a field added to [Turn_ended], because the
+    line is strictly decoded (RFC §5). [Continued_history] is the bare token a
+    line written before this branch existed carries, and the fallback when the
+    start atom has no opening message; a reader does not treat it as a start
+    state. *)
+type history_at_start =
+  | Fresh_history  (** The history the turn started from held no atom. *)
+  | Continued_history  (** It held atoms, and the turn appended to them. *)
+  | Continued_history_from of
+      { start_atom : int
+            (** The number of atoms the history held when the turn started. *)
+      ; start_atom_digest : string
+            (** {!Runtime_model_input_tail_window.atom_opening_digest} of atom
+                [start_atom - 1]. *)
+      }
+      (** It held atoms, and the turn says which position it started from. *)
+
+(** What a line states. The wire form carries a [kind] tag from the first line
+    ever written, so a kind of line is a constructor rather than a field on a
+    strictly decoded line. *)
+type event =
+  | Turn_ended of
+      { turn_ref : Ids.Turn_ref.t
+            (** The finished turn. Its trace id is the keeper trace id, which
+                is also the session id of the checkpoint. *)
+      ; task_context : Keeper_turn_task_context.t
+          (** Immutable admission observation for this turn reference only.
+              It does not describe earlier turns covered by a history span.
+              Absent observation is [Admission_not_recorded], never [No_task].
+              Position evidence remains readable; present malformed context fails. *)
+      ; history_at_start : history_at_start
+      ; position : position
+      }
+  | History_restarted of { trace_id : string }
+      (** The atoms of this trace are numbered from zero as of this line. It
+          is named for what a reader asks of it, not for who wrote it or what
+          the writer saw: the three writers in the header know different
+          things, and a reader has no use for the difference.
+
+          If the turn that wrote it reaches its end, its own line says
+          [Fresh_history] as well; if it saves and then dies, this is the only
+          line that says its atoms are numbered from zero.
+
+          [masc_keeper_clear] says so at once, so that a reader is not left
+          with a position nothing explains while the keeper sits idle.
+
+          The line does not say the history is still empty: a turn that was
+          running during a clear saves its own, full history over the emptied
+          one (masc #37021). *)
+
+type record =
+  { recorded_at : float (** Unix seconds, when the writer built the line. *)
+  ; event : event
+  }
+
+val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
+
+(** {1 Position} *)
+
+(** {!history_at_start} of the messages a turn started from. Pure. *)
+val history_at_start_of_messages : Agent_core.Types.message list -> history_at_start
+
+(** The position of a saved checkpoint's messages. Pure. No atom is
+    [Empty_atom_history]. [Error] when
+    {!Runtime_model_input_tail_window.annotate} counts atoms and
+    {!Runtime_model_input_tail_window.atom_opening_digest} has no opening
+    message for the last one; no digest is made up for it. *)
+val position_of_messages : Agent_core.Types.message list -> (position, string) result
+
+(** {1 Codec} *)
+
+val record_to_json : record -> Yojson.Safe.t
+
+(** Field-exact for the line's [kind], and [position] is field-exact for its
+    own [kind]: an unknown [kind], an unknown [history_at_start] token, or a
+    field its kind does not carry is rejected, never defaulted. [recorded_at]
+    must be finite, [last_atom_digest] and [trace_id] non-blank, [end_atom] at
+    least one, and [turn_ref] a reference {!Ids.Turn_ref.of_string} reads
+    back. *)
+val record_of_json : Yojson.Safe.t -> (record, Keeper_memory_os_types.wire_error) result
+
+(** {1 Store} *)
+
+type append_error =
+  | Invalid_record of Keeper_memory_os_types.wire_error
+  | Write_failed of
+      { path : string
+      ; message : string
+      }
+
+val append_error_to_string : append_error -> string
+
+(** One record in one durable append -- fsynced, and rolled back when the
+    write fails -- or an error and nothing written. A record {!record_of_json}
+    would reject is not written. A store that ends mid-line holds the remains
+    of an append a crash cut short; the append cuts them back to the last
+    complete line before it writes. *)
+val append
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> record
+  -> (unit, append_error) result
+
+type read_error =
+  | Not_json of string
+  | Malformed of Keeper_memory_os_types.wire_error
+  | Incomplete_line
+      (** The file's last line has no newline: an append that never
+          completed. *)
+
+val read_error_to_string : read_error -> string
+
+(** Every line in file order, numbered as in the file, each decoded or
+    rejected on its own. Read under the writer's lock, so no append is half
+    visible. A missing file is no lines; a file that cannot be read is
+    [Error]. *)
+val read
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> ((int * (record, read_error) result) list, string) result
+
+(** {1 Witness} *)
+
+(** The turn and atom position [record] states for [trace_id]: a turn of that
+    trace that ended with [end_atom] atoms and [last_atom_digest]. A restart
+    line, a turn with no atom position and a turn of another trace state
+    none. Pure. *)
+val atom_position_stated
+  :  trace_id:string
+  -> record
+  -> (Ids.Turn_ref.t * int * string) option
+
+(** The turn and atom position [record]'s start state names for [trace_id]:
+    a turn of that trace that started from a saved history of [start_atom]
+    atoms and [start_atom_digest], returned as [(turn_ref, start_atom,
+    start_atom_digest)]. A bare [Continued_history], a fresh start, a restart
+    line and a turn of another trace name none. Pure. *)
+val start_position_stated
+  :  trace_id:string
+  -> record
+  -> (Ids.Turn_ref.t * int * string) option
+
+(** The turn of [record] when it states the position [end_atom],
+    [last_atom_digest] of [trace_id], as the end of its turn or as the history
+    its turn started from. Pure. *)
+val states_position
+  :  trace_id:string
+  -> end_atom:int
+  -> last_atom_digest:string
+  -> record
+  -> Ids.Turn_ref.t option
+
+(** Whether the log contains a successful restart witness for this trace
+    with no later evidence of atoms, a store no-op, or an unreadable line. *)
+type history_stated =
+  | History_may_hold_atoms
+      (** No successful restart witness, or later evidence of atoms,
+          a store no-op, or an unreadable line. Empty turn-end records alone
+          do not prove that a failed restart append was recovered. *)
+  | History_stated_empty
+      (** A successful [History_restarted] witness remains valid through
+          empty turn-end records. The carried-range reader recognizes that
+          same witness as its generation boundary. *)
+
+(** Pure. Lines of other traces do not move the answer. *)
+val history_stated
+  :  trace_id:string
+  -> (int * (record, read_error) result) list
+  -> history_stated
+
+(** The line says the atoms of [trace_id] are numbered from zero again: a
+    restart line, or a turn of the trace that began from an empty history.
+    Pure. This is the single predicate every consumer of restart semantics
+    shares, so a new kind of restart line updates one place. *)
+val restarts_history : trace_id:string -> record -> bool
+
+(** [history_stated] of the store's lines, for the hot per-turn path. The fold
+    behind {!history_stated} sets its state outright at every deciding line,
+    and the deciding lines are exactly the lines that are not another trace's
+    record, so the answer is carried by the last deciding line in the file.
+    A bounded tail read under the writer's lock finds it whenever the keeper's
+    latest turns were of this trace -- the common case, and the only case an
+    official-client lane ever reaches -- and answers without decoding the
+    whole store. When the window did not reach a deciding line (a long run of
+    another trace's rows, or rows older than the window), the full store is
+    read and folded instead, so the answer never depends on the window. The
+    store is not rewritten. A store that cannot be read is [Error]; a missing
+    store states nothing, like the empty line list. *)
+val history_stated_in_store
+  :  keepers_dir:string
+  -> keeper_id:string
+  -> trace_id:string
+  -> (history_stated, string) result
+
+(** The line that states a read position: the last of [lines] ending a turn of
+    [trace_id] with exactly [end_atom] atoms and [last_atom_digest], as
+    [(line, recorded_at, turn_ref)]. With [through], only lines numbered at
+    most [through] count: the lines a position has taken in, its
+    [boundary_lines_seen] ({!Keeper_librarian_progress}). A line that cannot
+    be decoded, a restart line and a turn with no atom position state none.
+    A restart of [trace_id] discards both end and start witnesses from the
+    preceding history; restarts of another trace do not affect this lookup.
+
+    A position no line ends at is stated by the first line whose turn
+    started from it ({!start_position_stated}) after the last restart of
+    [trace_id] among the lines counted. That is where the atoms a turn saved
+    and then left without an end line end: an Agent-Core candidate whose
+    turn failed, was cancelled or was answered by an official client. The
+    first such line is the earliest one written after those atoms were saved,
+    so a reader orders them before every later turn.
+
+    This is the one test of whether a position stands on the log. The
+    Librarian reads from a position only when this finds its line, and stops
+    otherwise ({!Keeper_librarian_durable_consumer}); a checkpoint purge that
+    moves a position moves it only to where this finds one
+    ({!Keeper_checkpoint_purge.purge_messages}). *)
+val witness_line
+  :  ?through:int
+  -> trace_id:string
+  -> end_atom:int
+  -> last_atom_digest:string
+  -> (int * (record, read_error) result) list
+  -> (int * float * Ids.Turn_ref.t) option

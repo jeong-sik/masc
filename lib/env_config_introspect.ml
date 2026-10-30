@@ -1,0 +1,25 @@
+(** Env_config_introspect — root-level config introspection wrapper.
+
+    The canonical category definitions, masking rules, and source attribution
+    live in [Env_config_snapshot] inside the [masc_config] sub-library. This
+    wrapper adds root-runtime metadata that is only available from the main
+    server library, which already depends on [masc.config] in [lib/dune]. *)
+
+let server_meta () =
+  let git_commit = (Build_identity.current ()).Build_identity.binary_commit in
+  `Assoc
+    [
+      ("version", `String Runtime_build_version.current);
+      ("git_commit", Json_util.string_opt_to_json git_commit);
+      ("ocaml_version", `String Sys.ocaml_version);
+      ("uptime_seconds", `Float (Server_startup_state.elapsed_since_start ()));
+      ("pid", `Int (Unix.getpid ()));
+    ]
+
+let to_json () =
+  Env_config_snapshot.to_json ~server_meta:(server_meta ())
+    ~generated_at:(Masc_domain.now_iso ()) ()
+
+let to_json_filtered ?cat () =
+  Env_config_snapshot.to_json ?cat ~server_meta:(server_meta ())
+    ~generated_at:(Masc_domain.now_iso ()) ()

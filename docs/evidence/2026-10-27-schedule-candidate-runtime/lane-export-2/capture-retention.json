@@ -1,0 +1,85 @@
+{
+  "raw_run": "artifacts/schedule-actual-repair-20261027/runs/lane-export-2",
+  "captures": [
+    {
+      "retained": "summary.json",
+      "source": "http/summary.json",
+      "sha256": "f8d3517f6ae85e9718cfd90f926de322e6518347cc50da7b17e8f247a1dee729",
+      "bytes": 2994,
+      "semantics": "original capture bytes"
+    },
+    {
+      "retained": "export-receipt.json",
+      "source": "http/export-receipt.json",
+      "sha256": "95edeede2fb5ac5342b98814e8fdde1df101cc94485edfa2d615d21b10ce83ad",
+      "bytes": 771,
+      "semantics": "original capture bytes"
+    },
+    {
+      "retained": "selected-signal.json",
+      "source": "http/selected-signal.json",
+      "sha256": "c2b6fc8e033a1e8fef9d803c1f8d0e0fd7f63dc1c8e7310591a6db74ec1b5f0d",
+      "bytes": 612,
+      "semantics": "original capture bytes"
+    },
+    {
+      "retained": "observed-measures-lane.json",
+      "source": "http/observed-measures-lane.json",
+      "sha256": "a5f853875066ce115a47251489876d6ea301c07749ee66da503f25ed3728054b",
+      "bytes": 270,
+      "semantics": "original capture bytes"
+    },
+    {
+      "retained": "control-before.json",
+      "source": "http/control-before.json",
+      "sha256": "628d087fcbe37877728b06de85987966749169e50673aa17a244270a99e46d8f",
+      "bytes": 772,
+      "semantics": "original capture bytes"
+    },
+    {
+      "retained": "control-after-worker.json",
+      "source": "http/control-after-worker.json",
+      "sha256": "628d087fcbe37877728b06de85987966749169e50673aa17a244270a99e46d8f",
+      "bytes": 772,
+      "semantics": "original capture bytes"
+    },
+    {
+      "retained": "control-after-admin.json",
+      "source": "http/control-after-admin.json",
+      "sha256": "225359c37e3377488101e5448f0dfde8d18bf281cc225529fb02e64d15b18bbe",
+      "bytes": 931,
+      "semantics": "original capture bytes"
+    },
+    {
+      "retained": "export-evidence-response.json",
+      "source": "http/00071-response.bin",
+      "sha256": "765a465802a111d0dde86c094c76878d65c23bef29a217d7b9a980efe7b9d73a",
+      "bytes": 2355,
+      "semantics": "original capture bytes"
+    },
+    {
+      "retained": "worker-cancel-response.json",
+      "source": "http/00074-response.bin",
+      "sha256": "1d6573cbe4f85ddd6b245abd1299f553148b1a82a463f2e38d4b55da568b7fd9",
+      "bytes": 659,
+      "semantics": "original capture bytes"
+    },
+    {
+      "retained": "admin-cancel-response.json",
+      "source": "http/00075-response.bin",
+      "sha256": "dacd723289750637d6c157120af955f7ab3a9247fbb1726b72d29368a28894ad",
+      "bytes": 2900,
+      "semantics": "original capture bytes"
+    },
+    {
+      "retained": "export-blob.bin",
+      "source": "export-blob.bin",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "semantics": "original capture bytes"
+    }
+  ],
+  "provenance": "Explicit derivative; raw complete HTTP and provenance remain ignored.",
+  "state_copy": "Successful read-only owned container /state/. copy retained in ignored run; operator-quiz/log.jsonl absent; treated as the package-defined empty log, not a copy failure.",
+  "image_protocol": "Read-only copy retained ignored; its hash is separate from package source attestation."
+}

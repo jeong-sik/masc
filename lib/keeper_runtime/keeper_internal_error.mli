@@ -1,0 +1,324 @@
+(** Structured keeper-internal error envelopes carried through
+    [Agent_core.Error.Internal]. *)
+
+(** Canonical wire kind for structural transcript corruption rejected before
+    provider dispatch. *)
+val incomplete_tool_transcript_kind : string
+
+(** Canonical wire kind for a provider-attempt failure whose effect disposition
+    forbids same-turn replay. *)
+val provider_attempt_effect_fenced_kind : string
+
+(** Canonical wire kind for a fenced provider-attempt failure whose turn also
+    carried typed pre_tool_use rejections: the model's correction round-trip
+    was the visible casualty (masc#28885). Fence semantics are identical to
+    {!provider_attempt_effect_fenced_kind}; only the label differs. *)
+val tool_correction_lost_kind : string
+
+(** Canonical wire kind for a response MASC's own accept contract refused. *)
+val accept_rejected_kind : string
+
+(** Canonical wire kind for a failed turn-closing tool effect, or one that
+    returned no typed receipt for what it did. *)
+val terminal_effect_failed_kind : string
+
+(** Canonical wire kind for a durable official-client session that refuses a
+    local claim until its recovery is explicitly resolved. *)
+val official_client_recovery_required_kind : string
+
+(** Why the durable official-client session refuses a new local claim.
+    This is distinct from the effect disposition of a provider attempt. *)
+type official_client_input_rejection =
+  | Bootstrap_floor_exceeded
+  | Effect_fenced
+
+type official_client_recovery = {
+  runtime_id : string;
+  recovery_id : string;
+  reason : official_client_input_rejection;
+}
+
+val official_client_input_rejection_to_string : official_client_input_rejection -> string
+val official_client_input_rejection_of_string : string -> official_client_input_rejection option
+val official_client_recovery_summary : official_client_recovery -> string
+
+(** What a Gate continuation's session had done in the refused attempt before
+    the vendor refused its resume as full. [Activity_observed] means a response
+    or a tool effect was observed; its evidence stays with the attempt. *)
+type vendor_session_activity =
+  | No_activity_observed
+  | Activity_observed
+
+val vendor_session_activity_to_string : vendor_session_activity -> string
+val vendor_session_activity_of_string : string -> vendor_session_activity option
+
+type provider_rejection = {
+  provider_label : string;
+  reason : string;
+}
+
+type runtime_exhaustion_reason =
+  | Connection_refused
+  | Dns_failure
+  | No_providers_available
+  | All_providers_failed
+  | Candidates_filtered_after_cycles
+  | Session_conflict
+  | Other_detail of string
+
+val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
+
+val runtime_exhaustion_reason_to_label : runtime_exhaustion_reason -> string
+(** Human-readable label carrying the [detail]/[message] payload inline,
+    for {!summary_of_masc_internal_error} and log lines. Distinct from
+    {!runtime_exhaustion_reason_to_json}'s bare wire tags. *)
+
+val runtime_exhaustion_reason_to_json : runtime_exhaustion_reason -> Yojson.Safe.t
+val runtime_exhaustion_reason_of_json : Yojson.Safe.t -> runtime_exhaustion_reason option
+
+type accept_rejection_kind =
+  | Accept_no_usable_progress
+  | Accept_predicate_rejected
+
+type accept_response_shape =
+  | Accept_response_empty
+  | Accept_response_thinking_only
+  | Accept_response_blank_text_only
+  | Accept_response_tool_result_only
+  | Accept_response_media_only
+  | Accept_response_mixed_without_deliverable_content
+  | Accept_response_has_deliverable_content
+
+val accept_response_shape_of_agent_core :
+  Agent_core.Response_shape.content_shape -> accept_response_shape
+
+type transcript_quarantine_reason =
+  | Structurally_invalid
+  | Unresolved_tool_results
+
+(** Which host decision stopped a turn that was already running (RFC-0454 P2).
+
+    These stops end the invocation rather than grant a cooperative resume.
+    In particular, a detected loop is not a request to run the same invocation
+    again. The original session and its effect evidence remain authoritative. *)
+type host_turn_stop =
+  | Host_graceful_shutdown
+      (** MASC entered graceful shutdown while this turn was live. *)
+  | Runtime_reported_interrupt
+      (** The runtime reported the turn's own status as interrupted. *)
+  | Repeated_tool_call
+      (** The host detected repeated tool invocations without progress. *)
+  | Repeated_assistant_text
+      (** The host detected repeated assistant responses without progress. *)
+
+val host_turn_stop_to_string : host_turn_stop -> string
+(** MASC's wire spelling. A new arm is a compile error here. *)
+
+val host_turn_stop_of_string : string -> host_turn_stop option
+(** [None] for any spelling {!host_turn_stop_to_string} does not emit. *)
+
+type gate_replay_repair_stage =
+  | Replay_resolution_lookup
+  | Replay_request_decode
+  | Replay_evidence_storage
+  | Replay_evidence_retrieval
+  | Replay_journal
+  | Replay_stale_grant_retirement
+  | Replay_invalid_resolution_state
+
+(** What failed the provider attempt a fence closed over (RFC-0454 D1).
+
+    A MASC error that arrives on the carrier is kept as the value it is;
+    anything else is agent-core's typed projection. Neither arm holds a
+    rendered error string, so serializing a fence never puts a JSON document
+    inside a JSON string.
+
+    Declared with {!masc_internal_error} because the recursion is real: a
+    fence can carry a terminal effect failure. *)
+type fenced_cause =
+  | Fenced_masc of masc_internal_error
+  | Fenced_core of Keeper_request_failure_core.t
+
+and masc_internal_error =
+  | Official_client_recovery_required of official_client_recovery
+  | Runtime_exhausted of {
+      runtime_id : string;
+      reason : runtime_exhaustion_reason;
+    }
+  | Resumable_cli_session of {
+      runtime_id : string;
+      detail : string;
+      exit_code : int option;
+    }
+  | Accept_rejected of {
+      scope : string;
+      model : string option;
+      reason_kind : accept_rejection_kind option;
+      response_shape : accept_response_shape option;
+      (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
+         [MaxTokens] on an empty/thinking_only shape marks a truncation, distinct
+         from a clean [EndTurn] no-progress terminal. Groundwork slice: threaded
+         and serialized, not yet consumed by classification. *)
+      stop_reason : Agent_core.Types.stop_reason option;
+      reason : string;
+    }
+  | Internal_unhandled_exception of {
+      site : string;
+      exn_repr : string;
+      transport_error_kind : Llm_provider.Http_client.network_error_kind option;
+    }
+  | Internal_bridge_exception of {
+      caller : string;
+      exn_repr : string;
+    }
+  | Internal_contract_rejected of { reason : string }
+  | Incomplete_tool_transcript of {
+      reason : transcript_quarantine_reason;
+      detail : string;
+      tool_use_ids : string list;
+    }
+  | Terminal_effect_failed of {
+      failure_class : Tool_result.tool_failure_class;
+      effect_disposition : Tool_result.failure_effect_disposition;
+      detail : Keeper_terminal_effect_detail.t;
+    }
+  | Provider_attempt_effect_fenced of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      cause : fenced_cause;
+    }
+      (** A provider attempt failed after an effect was attempted or after the
+          runtime lost complete effect observation. The exact source must be
+          terminalized as failed, never replayed automatically. *)
+  | Tool_correction_lost of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      reject_count : int;
+      cause : fenced_cause;
+    }
+      (** The same fence, on a turn that also recorded typed pre_tool_use
+          rejections: the runtime escalated a corrective tool error into the
+          turn's death (masc#28885). Disposition is identical to
+          {!Provider_attempt_effect_fenced} — never replayed in-turn — the
+          label exists so operators can tell a lost correction from an
+          ordinary fenced provider failure. *)
+  | Host_stopped_turn of {
+      runtime_id : string;
+      stop : host_turn_stop;
+    }
+      (** The turn ended because the host stopped it, not because the provider
+          failed. The runtime flattened this into a sentence and the chat pane
+          read the sentence back to decide what to draw (RFC-0454 §1.3); it is
+          the value now, so the screen matches a constructor. *)
+  | Runtime_connection_closed of {
+      runtime_id : string;
+      detail : string;
+      turn_accepted : bool;
+    }
+      (** The runtime's transport closed before the turn finished — the client
+          process exited, or its stdout reached EOF. [turn_accepted] is false
+          when nothing was submitted upstream, which is what tells a lost
+          connection from an ambiguous one. Kept apart from a failed spawn:
+          a spawn that never started the client is a different recovery
+          ([Transient_spawn_failed] rather than [Transport_interrupted]) and
+          the two shared one rendered sentence before this. *)
+  | Receipt_persistence_failed of { detail : string }
+  | Gate_replay_repair_required of {
+      approval_id : string;
+      operation : string;
+      stage : gate_replay_repair_stage;
+      detail : string;
+    }
+
+val runtime_runner_execute_site : string
+
+val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
+(** A JSON object tagged by ["kind"]. A fence writes its [cause] as a nested
+    object, and a terminal effect failure its [detail], so no arm of this
+    codec puts a JSON document inside a JSON string. *)
+
+val summary_of_masc_internal_error : masc_internal_error -> string option
+
+(** The closed set of wire kinds {!kind_of_masc_internal_error} can emit — one
+    per {!masc_internal_error} constructor.
+
+    It exists because the wire is a string and the receipt classifier
+    ([Keeper_terminal_reason.of_wire]) had to guess the string back. It knew
+    five of the thirteen and read the rest as an unrecognised state, so a
+    keeper's own named failures reached the operator as "unmapped runtime
+    state" (#29929). Matching this type instead makes a new constructor a
+    compile obligation at every consumer, which is what
+    [Keeper_turn_terminal_code] already promises for the layer above. *)
+type wire_kind =
+  | Wire_official_client_recovery_required
+  | Wire_runtime_exhausted
+  | Wire_resumable_cli_session
+  | Wire_accept_rejected
+  | Wire_internal_unhandled_exception
+  | Wire_internal_bridge_exception
+  | Wire_internal_contract_rejected
+  | Wire_incomplete_tool_transcript
+  | Wire_terminal_effect_failed
+  | Wire_provider_attempt_effect_fenced
+  | Wire_tool_correction_lost
+  | Wire_host_stopped_turn
+  | Wire_runtime_connection_closed
+  | Wire_receipt_persistence_failed
+  | Wire_gate_replay_repair_required
+
+val wire_kind_to_string : wire_kind -> string
+
+(** [None] for any string this module does not emit, including the agent-core
+    and provider wire families that travel the same receipt field. *)
+val wire_kind_of_string : string -> wire_kind option
+
+val kind_of_masc_internal_error : masc_internal_error -> string
+
+val fenced_attempt_summary : masc_internal_error -> string option
+(** One line for a fenced attempt: the effect disposition, then the failure
+    that ended the attempt. [Some] only for [Provider_attempt_effect_fenced]
+    and [Tool_correction_lost]; every other error keeps its own summary path.
+    The cause is the variable-length part, so it comes last: a surface that
+    clips the line loses the tail of the cause, not the disposition, and shows
+    the cause where {!masc_internal_error_to_json} would have buried it. *)
+
+val fenced_cause_empty_no_progress : fenced_cause -> bool option
+(** Whether the fenced cause is the typed empty assistant turn ([true]) or a
+    typed non-empty rejection ([false]); [None] when this projection cannot
+    vouch for the cause's emptiness — a projected agent-core cause, or a
+    carried MASC error with no empty-turn shape. The fence itself stays: a
+    host or subagent may have run a tool outside MASC's observation, so this
+    is a display fact, never a retry admission. *)
+
+val fenced_cause_of_masc_internal_error : masc_internal_error -> fenced_cause option
+(** The cause of a fenced error ([Provider_attempt_effect_fenced],
+    [Tool_correction_lost]); [None] for every other error. *)
+
+val runtime_id_of_masc_internal_error : masc_internal_error -> string
+
+val accept_no_progress_retry_kind :
+  masc_internal_error ->
+  [ `Empty_no_progress | `Thinking_only_no_progress | `Truncated_no_progress ] option
+
+val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
+
+val core_error_of_masc_internal_error :
+  masc_internal_error -> Agent_core.Error.t
+
+val carried_masc_internal_error : Agent_core.Error.t -> masc_internal_error option
+(** Process-local downcast of this owner's private carrier only. The message is
+    never parsed; plain [Internal] text and foreign carriers return [None], even
+    when their message contains a serialized MASC envelope. Persisted values
+    remain the separate {!classify_masc_internal_error} boundary below. *)
+
+val parse_masc_internal_error_json :
+  Yojson.Safe.t -> masc_internal_error option
+(** Strict: an unknown kind, a missing or extra field, or a field of the wrong
+    shape is [None]. A fence [cause] must be the nested object
+    {!masc_internal_error_to_json} writes; a string is refused. *)
+
+val classify_masc_internal_error_of_string :
+  string -> masc_internal_error option
+
+val classify_masc_internal_error :
+  Agent_core.Error.t -> masc_internal_error option

@@ -1,0 +1,41 @@
+{
+  "scope": "Component fixture, not native server or installed dashboard",
+  "parent_head": "e3fe94f569fa6f51e1afef6fef272c1fe5195ed0",
+  "frontend": {
+    "tests": 24,
+    "files": 2,
+    "result": "passed",
+    "duration_seconds": 2.6
+  },
+  "typescript": "tsc --noEmit passed",
+  "ocaml": "stop-after parsing passed; native build and router test not executed",
+  "ci_dispatches": 0,
+  "screenshot": "Chromium launch refused: bootstrap_check_in KERN permission denied (1100)",
+  "followup_error_recovery": {
+    "source_parent": "758d271c4824e338106ec5e708abcd1e59114f2b",
+    "tests": 25,
+    "files": 2,
+    "duration_seconds": 3.89,
+    "result": "passed",
+    "typescript": "passed",
+    "scope": "Failed preview alert, return to observed portrait, unchanged wallet/ownership; frontend only"
+  },
+  "parent_propagation_check": {
+    "source_head": "72cc41a57d337ae7a8539f92b21111e67c3167c1",
+    "parent_head": "c06b7d01855a130696565543659c82bc2e8f3828",
+    "tests": 31,
+    "files": 4,
+    "duration_seconds": 5.37,
+    "result": "passed",
+    "test_files": [
+      "src/api/keeper-items.test.ts",
+      "src/components/keeper-items-panel.test.ts",
+      "src/components/keeper-portrait.test.ts",
+      "src/components/candle-economy.test.ts"
+    ],
+    "typescript": "tsc --noEmit passed",
+    "ocaml": "stop-after parsing passed for portrait implementation/interface and HTTP test",
+    "scope": "Frontend contracts and component behavior after parent propagation; native HTTP/router/browser/installed TUI remain unverified",
+    "ci_dispatches": 0
+  }
+}

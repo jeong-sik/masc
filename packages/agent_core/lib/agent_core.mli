@@ -1,0 +1,137 @@
+(** MASC Agent Core
+
+    A type-safe, Eio-based single-agent execution engine embedded in MASC.
+
+    This is the top-level module that re-exports all sub-modules
+    in dependency-safe order.
+
+    @stability Evolving
+    @since 0.93.1 *)
+
+(** {1 Core Modules} *)
+
+module Version = Version
+
+(** Wrapped namespaces for the underlying libraries. *)
+module Base = Agent_core_base
+
+module Llm_provider = Llm_provider
+module Result_syntax = Agent_core_base.Result_syntax
+module Types = Agent_core_base.Types
+module History = Agent_core_base.History
+module Util = Agent_core_base.Util
+module Fs_result = Fs_result
+module Fs_atomic_eio = Fs_atomic_eio
+module Context = Agent_core_base.Context
+module Provider_runtime_binding = Provider_runtime_binding
+module Exact_output = Llm_provider.Exact_output
+module Binding_identity = Binding_identity
+module Provider_failure_attribution = Provider_failure_attribution
+module Image_generation = Llm_provider.Image_generation
+module Speech_generation = Llm_provider.Speech_generation
+module Retry = Llm_provider.Retry
+module Error = Agent_core_base.Error
+module Agent_input_request = Agent_core_base.Agent_input_request
+module Error_domain = Error_domain
+module Hooks = Agent_core_base.Hooks
+module Tracing = Tracing
+module Tool_contract = Agent_core_base.Tool_contract
+module Execution_json = Execution_json
+(* Expose the codec signature, not an alias requiring its private CMI. *)
+module Execution_tool_schedule : module type of Execution_tool_schedule
+module Tool = Agent_core_base.Tool
+module Typed_tool = Typed_tool
+module Mcp = Mcp
+module Mcp_http = Mcp_http
+module Mcp_session = Mcp_session
+module Telemetry_event = Llm_provider.Telemetry_event
+module Response_shape = Llm_provider.Response_shape
+module Canonical_tool = Llm_provider.Canonical_tool
+module Tool_set = Tool_set
+module Log = Log
+module Caller_scope = Caller_scope
+module Event_envelope = Event_envelope
+module Event_bus = Event_bus
+module Telemetry_bus = Telemetry_bus
+module Skill_document = Skill_document
+module Skill_registry = Skill_registry
+module Contract = Contract
+module Structured = Structured
+module Checkpoint = Checkpoint
+module Checkpoint_snapshot = Checkpoint_snapshot
+module Checkpoint_objects = Checkpoint_objects
+module Session = Session
+module Raw_trace = Raw_trace
+module Raw_trace_query = Raw_trace_query
+
+(** Typed handoff targets for {!Agent.run_with_handoffs}. Construct
+    [Handoff.handoff_target] records directly; the markdown-driven
+    [Subagent] convenience wrapper was removed in the 2026-07-21
+    test-only surface cut. *)
+module Handoff = Handoff
+
+module Agent_types = Agent_types
+module Agent_lifecycle = Agent_lifecycle
+module Agent_lifecycle_events = Agent_lifecycle_events
+module Agent_turn = Agent_turn
+module Agent_tools = Agent_tools
+
+(** How one [pre_tool_use] decision settles into run / block / reject.
+
+    Exposed because a host that runs tools outside {!Agent_tools} -- a provider
+    with its own tool loop -- has to reach the same verdict for the same
+    decision. Deciding it twice is how the same hook came to mean different
+    things depending on which runtime a caller was bound to. *)
+module Agent_tool_pre_execution_gate : sig
+  type settlement =
+    | Admit
+    | Block of string
+    | Reject of
+        { stage : Hooks.hook_stage
+        ; detail : string
+        }
+
+  (** The host-facing settlement contract. Internal scheduling and durable
+      execution helpers remain private to Agent Core. *)
+  val settle
+    :  ?tool_approval:Hooks.tool_approval_callback
+    -> ?correlation_id:string
+    -> ?run_id:string
+    -> event_bus:Event_bus.t option
+    -> agent_name:string
+    -> invocation:Tool_contract.Invocation.t
+    -> tool_name:string
+    -> input:Yojson.Safe.t
+    -> Hooks.hook_decision
+    -> settlement
+end
+module Agent_checkpoint = Agent_checkpoint
+module Terminal_tool_receipt = Terminal_tool_receipt
+module Agent = Agent
+module Builder = Builder
+module Agent_card = Agent_card
+module Agent_tool = Agent_tool
+module Tool_guidance_text = Tool_guidance_text
+module Otel_tracer = Otel_tracer
+module Otel_export = Otel_export
+module Runtime = Runtime
+module Artifact_service = Artifact_service
+module Sessions = Sessions
+module Sessions_store = Sessions_store
+module Harness = Harness
+module Eval = Eval
+module Trajectory = Trajectory
+module Metrics = Metrics
+module Async_agent = Async_agent
+module Consumer = Consumer
+module Guardrails_async = Guardrails_async
+module Eval_stats = Eval_stats
+module Runtime_store = Runtime_store
+module Plan = Plan
+module Tool_input_validation = Tool_input_validation
+module Tool_middleware = Tool_middleware
+
+(** {1 Version} *)
+
+val version : string
+val name : string

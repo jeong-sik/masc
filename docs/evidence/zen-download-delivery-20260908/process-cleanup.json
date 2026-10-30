@@ -1,0 +1,10 @@
+{
+  "owned_server_driver_fixture_pids_stopped": [
+    35969,
+    35968,
+    20335
+  ],
+  "all_absent": true,
+  "production_server_and_user_browsers_untouched": true,
+  "download_staging_retained": true
+}

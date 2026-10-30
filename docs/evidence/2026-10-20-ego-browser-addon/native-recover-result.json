@@ -1,0 +1,20 @@
+{
+  "request_id": "recover-native-1",
+  "operation": "recover",
+  "status": "observed",
+  "session": {
+    "name": "MASC ego add-on proof 20261020",
+    "epoch": "00794417-5f10-4fc4-8587-ef1c1b4ee73e",
+    "owner_identity": "0b5269c5-7af8-461b-831a-3171a4e5df26",
+    "native_name": "MASC ego add-on proof 20261020 [masc:0b5269c5-7af8-461b-831a-3171a4e5df26]",
+    "space_id": 3,
+    "page": "p1"
+  },
+  "completed_steps": 0,
+  "failed_step": null,
+  "url": "chrome://new-tab-page/",
+  "title": "\uc0c8 \ud0ed",
+  "snapshot": "Omitted initial new-tab contents; recovery result binding retained below",
+  "error": null,
+  "screenshot": null
+}

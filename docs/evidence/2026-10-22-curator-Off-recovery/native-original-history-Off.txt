@@ -1,0 +1,56 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+                                                                                                        │[Recent] Changes · 0 keepers (1 offline)
+  MASC Lanes · Workspace Curator    (2 loaded / 2 retained · end)  HTTP [connected]                     │───────────────────────────────────────────────────────
+ ────────────────────────────────────────────────────────────────────────────────────────────────────── │curator-source-1196 · no events on this feed yet
+   STARTED           ACTOR            STATUS       ELAPSED SLOT
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────
+   10-22 13:35:05    /priv…2-3ksh84lf succeeded          — glm-coding.glm-5.3-flash
+   10-22 13:34:50    /priv…2-3ksh84lf succeeded          — glm-coding.glm-5.3-flash
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:move  Right / Enter:prompt  ]:older  Left / Esc:back  r:refresh  Tab:next  q:quit  ?:help
+ › to curator-source-1196   (i to write)

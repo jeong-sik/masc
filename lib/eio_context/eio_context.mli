@@ -1,0 +1,124 @@
+(** Global Eio context for shared network/clock access.
+    Set during server startup (main_eio.ml). *)
+
+type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
+
+val set_net :
+  [> `Network | `Platform of [> `Generic | `Unix ]] Eio.Resource.t -> unit
+(** Set the global Eio network handle. *)
+
+val set_clock : float Eio.Time.clock_ty Eio.Resource.t -> unit
+(** Set the global Eio clock. *)
+
+val set_mono_clock : Eio.Time.Mono.ty Eio.Resource.t -> unit
+(** Set the global Eio monotonic clock. *)
+
+val get_mono_clock_opt : unit -> Eio.Time.Mono.ty Eio.Resource.t option
+(** Get the global Eio monotonic clock if available. *)
+
+val set_switch : Eio.Switch.t -> unit
+(** Set the global Eio switch (server root_sw). Written once at server
+    bootstrap; survives until process exit. *)
+
+type snapshot
+(** Opaque capture of every global this module owns — net, both clocks,
+    the root-switch binding, and net_initialized — taken by
+    [snapshot_state] and replayed by [restore_state]. A test harness
+    snapshots before a test and restores in a [finally] so a test that
+    installs a global (e.g. [set_switch] from a cross-domain fixture)
+    cannot leak the binding into later tests; the 2026-09-06
+    heartbeat_integration red (#33569) was exactly such a leak. *)
+
+val snapshot_state : unit -> snapshot
+
+val restore_state : snapshot -> unit
+(** Restore a [snapshot_state] capture. Also used by [with_test_env]. *)
+
+val get_root_switch_opt : unit -> Eio.Switch.t option
+(** Get the server root switch without consulting the fiber-local
+    turn-scoped binding. Use only for work that must survive a single
+    keeper turn, such as queued background voice playback. *)
+
+val root_switch_on_current_domain : unit -> bool
+(** [true] iff a root switch is installed and the caller is running on the
+    domain that installed it. Eio root-switch fork sites reachable from worker
+    domains must check this exact ownership boundary before forking. This guard
+    does not transfer work to the owner domain. *)
+
+val run_on_owner_domain : (unit -> 'a) -> 'a
+(** [run_on_owner_domain f] executes [f ()] on the domain that installed the
+    root switch via [set_switch]. If called from the owner domain (or when no
+    root switch is installed, e.g. in test scopes), [f ()] is executed inline.
+    If called from another domain (such as the HTTP serving domain or a domain
+    pool worker), the thunk is dispatched to the owner domain's event loop
+    and the caller suspends until the result is ready. Exceptions raised by
+    [f] on the owner domain are re-raised to the caller. *)
+
+val set_env : Eio_unix.Stdenv.base -> unit
+(** Set the global Eio standard environment.  Required by long-lived
+    consumers that need more than [net]/[clock] (e.g. piaf
+    [Client.create] in [Masc_http_client.Pool]).  Written once at
+    server bootstrap. *)
+
+val get_env_opt : unit -> Eio_unix.Stdenv.base option
+(** Get the Eio standard environment if available.  Returns [None]
+    before [set_env] is called (test setup before [Eio_main.run] or
+    pre-bootstrap helper code).  Callers that need [env] must handle
+    this gracefully — see [Masc_http_client] for the lazy-init
+    pattern. *)
+
+val with_turn_switch : Eio.Switch.t -> (unit -> 'a) -> 'a
+(** [with_turn_switch sw f] binds [sw] as the turn-scoped switch on the
+    *current fiber* and any fibers forked from inside [f]. Reads of
+    [get_switch_opt] / [get_switch] from within that scope return [sw];
+    reads from outside the binding (server, dashboard, bootstrap fibers)
+    fall through to the global atomic set by [set_switch] (= server
+    root_sw).
+
+    Used by [keeper_agent_run.run_turn] to constrain resources opened
+    during a single turn to that turn's lifetime: when the outer
+    [Eio.Switch.run] closes, those resources are released, preventing
+    the FD accumulation observed in the 2026-05-16 ENFILE storm.
+
+    Reference: RFC-0107 §3.3, audit §10.5. *)
+
+val with_test_env :
+  net:[> `Network | `Platform of [> `Generic | `Unix ]] Eio.Resource.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
+  sw:Eio.Switch.t ->
+  (unit -> 'a) -> 'a
+(** Temporarily override the global Eio context for a test scope and restore the
+    previous values afterwards.
+    Callers should keep all spawned work inside the provided structured Eio switch
+    so the override does not outlive the test scope. *)
+
+val get_net_opt : unit -> eio_net option
+val get_clock_opt : unit -> float Eio.Time.clock_ty Eio.Resource.t option
+(** Get the Eio clock if available. *)
+
+val get_switch_opt : unit -> Eio.Switch.t option
+(** Get the Eio network handle.
+    Returns Error if not initialized. *)
+
+val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
+(** Get the Eio clock.
+    Returns Error if not initialized. *)
+
+(** [get_https_connector] removed — use [get_https_connector_result] instead. *)
+
+val get_https_connector_result :
+  unit ->
+  ((Uri.t ->
+    [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
+    [ `Close | `Flow | `R | `Shutdown | `Tls | `W ] Eio.Resource.t),
+   string)
+  result
+(** Non-raising HTTPS connector lookup. *)
+
+module For_testing : sig
+  val clear_root_switch : unit -> unit
+  (** Clear the root switch binding. Test scopes that install a temporary
+      root switch should invoke this in their finalizer to prevent cross-test
+      pollution. *)
+end

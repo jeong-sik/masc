@@ -1,0 +1,1922 @@
+(** Versioned JSON codec and per-operation JSONL journal for
+    [Keeper_chat_events.keeper_chat_event] (RFC-0412 §4.1).
+
+    Persisted codec v2 is a hard boundary. Earlier epochs remain on disk but
+    cannot be decoded, resumed, or appended by this codec. *)
+
+open Keeper_chat_events
+
+let codec_version = 2
+
+(* One page of the journal over the wire (RFC-0412 §3.2): what a read
+   returns when it names no count, and the most it may ask for. The server
+   admits [1..page_max_limit]; the TUI pages at [page_max_limit]. One
+   definition so the two cannot drift into a 400. *)
+let page_default_limit = 500
+let page_max_limit = 2000
+
+let json_opt key value =
+  match value with
+  | None -> []
+  | Some value -> [ key, value ]
+;;
+
+let type_tag tag fields = `Assoc (("type", `String tag) :: fields)
+
+let role_to_json = function
+  | User -> `String "user"
+  | Assistant -> `String "assistant"
+;;
+
+let role_of_json json =
+  match json with
+  | `String "user" -> Ok User
+  | `String "assistant" -> Ok Assistant
+  | other ->
+    Error
+      (Printf.sprintf
+         "role: expected \"user\"|\"assistant\", got %s"
+         (Yojson.Safe.to_string other))
+;;
+
+(* Journal-native occurrence shape (snake_case). Used by the Tool_call_*
+   family. *)
+let occurrence_to_json (o : tool_stream_occurrence) =
+  `Assoc
+    ([ "stream_scope", `Int o.stream_scope
+     ; "block_index", `Int o.block_index
+     ]
+     @ json_opt "provider_message_id"
+         (Option.map (fun value -> `String value) o.provider_message_id))
+;;
+
+let object_fields ~label ?allowed = function
+  | `Assoc fields ->
+      let names = List.map fst fields in
+      if List.length names <> List.length (List.sort_uniq String.compare names)
+      then Error (label ^ ": duplicate field")
+      else (match allowed with
+        | Some names when List.exists (fun (name, _) -> not (List.mem name names)) fields ->
+            Error (label ^ ": unknown field")
+        | None | Some _ -> Ok fields)
+  | _ -> Error (label ^ ": expected object")
+;;
+
+let optional_identity ~label name fields =
+  match List.assoc_opt name fields with
+  | None -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some _ -> Error (label ^ ": " ^ name ^ " must be a non-empty string")
+;;
+
+let occurrence_of_fields ~scope ~index ~provider json =
+  let open Result.Syntax in
+  let label = "tool_stream_occurrence" in
+  let* fields = object_fields ~label ~allowed:[scope; index; provider] json in
+  let nonnegative name =
+    match List.assoc_opt name fields with
+    | None -> Error (label ^ ": missing " ^ name)
+    | Some json ->
+        let* value = Runtime_json_integer.of_json json in
+        if value >= 0 then Ok value else Error (label ^ ": negative " ^ name)
+  in
+  let* stream_scope = nonnegative scope in
+  let* block_index = nonnegative index in
+  let* provider_message_id = optional_identity ~label provider fields in
+  Ok { stream_scope; block_index; provider_message_id }
+;;
+
+let occurrence_of_json =
+  occurrence_of_fields ~scope:"stream_scope" ~index:"block_index" ~provider:"provider_message_id"
+;;
+
+(* Protocol errors use the wire occurrence encoder. Decode its exact names. *)
+let occurrence_of_wire_json =
+  occurrence_of_fields ~scope:"toolStreamScope" ~index:"toolCallBlockIndex" ~provider:"providerMessageId"
+;;
+
+(* [api_usage_to_json] writes a derived [total_tokens]; decoding recomputes it
+   via [Agent_core.Types.total_tokens], so it is intentionally not read back. *)
+let api_usage_of_json json =
+  let open Yojson.Safe.Util in
+  try
+    Ok
+      { Agent_core.Types.input_tokens = json |> member "input_tokens" |> to_int
+      ; output_tokens = json |> member "output_tokens" |> to_int
+      ; cache_creation_input_tokens =
+          json |> member "cache_creation_input_tokens" |> to_int
+      ; cache_read_input_tokens = json |> member "cache_read_input_tokens" |> to_int
+      ; cost_usd = json |> member "cost_usd" |> to_float_option
+      }
+  with
+  | Type_error (message, _) -> Error ("api_usage: " ^ message)
+;;
+
+let delta_usage_of_json json : (Agent_core.Types.delta_usage, string) result =
+  let open Yojson.Safe.Util in
+  try
+    Ok
+      { Agent_core.Types.input_tokens = json |> member "input_tokens" |> to_int_option
+      ; output_tokens = json |> member "output_tokens" |> to_int_option
+      ; cache_creation_input_tokens =
+          json |> member "cache_creation_input_tokens" |> to_int_option
+      ; cache_read_input_tokens =
+          json |> member "cache_read_input_tokens" |> to_int_option
+      ; cost_usd = json |> member "cost_usd" |> to_float_option
+      }
+  with
+  | Type_error (message, _) -> Error ("delta_usage: " ^ message)
+;;
+
+let opt_member json key decode =
+  match Yojson.Safe.Util.member key json with
+  | `Null -> Ok None
+  | value -> Result.map (fun decoded -> Some decoded) (decode value)
+;;
+
+let stream_scope_of_json = function
+  | `Int scope when scope >= 0 -> Ok scope
+  | _ -> Error "stream scope must be a nonnegative integer"
+;;
+
+let optional_stream_scope json field =
+  match json with
+  | `Assoc fields ->
+      (match List.filter (fun (key, _) -> key = field) fields with
+       | [] -> Ok None
+       | [(_, value)] -> Result.map Option.some (stream_scope_of_json value)
+       | _ -> Error ("duplicate " ^ field))
+  | _ -> Error "stream scope requires an event object"
+;;
+
+let stream_protocol_error_of_json json =
+  let open Yojson.Safe.Util in
+  try
+    let kind_raw = json |> member "kind" |> to_string in
+    match stream_protocol_error_kind_of_string kind_raw with
+    | None ->
+      Error (Printf.sprintf "stream_protocol_error: unknown kind %S" kind_raw)
+    | Some kind ->
+      let quarantined_occurrence =
+        match json |> member "quarantined_occurrence" with
+        | `Null -> Ok None
+        | occurrence_json ->
+          Result.map
+            (fun occurrence -> Some occurrence)
+            (occurrence_of_wire_json occurrence_json)
+      in
+      Result.map
+        (fun quarantined_occurrence ->
+           { kind
+           ; quarantined_occurrence
+           ; index = json |> member "index" |> to_int_option
+           ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+           ; event_type = json |> member "event_type" |> to_string_option
+           ; reason = json |> member "reason" |> to_string_option
+           ; raw_bytes = json |> member "raw_bytes" |> to_int_option
+           })
+        quarantined_occurrence
+  with
+  | Type_error (message, _) -> Error ("stream_protocol_error: " ^ message)
+;;
+
+let keeper_chat_event_to_json event =
+  match event with
+  | Batch_bound { operation_id; execution_id } ->
+    type_tag "batch_bound" ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string operation_id);
+      "execution_id", `String (Keeper_chat_operation.Operation_id.to_string execution_id)]
+  | Run_started { run_id; thread_id } ->
+    type_tag "run_started" [ "run_id", `String run_id; "thread_id", `String thread_id ]
+  | Text_message_start { message_id; role } ->
+    type_tag
+      "text_message_start"
+      [ "message_id", `String message_id; "role", role_to_json role ]
+  | Text_delta {text; response} -> type_tag "text_delta"
+      (["delta", `String text] @ (match response with
+       | Unobserved_scope scope -> json_opt "stream_scope" (Option.map (fun scope -> `Int scope) scope)
+       | Observed_response owner -> ["response", response_identity_to_json owner]))
+  | Text_message_end -> type_tag "text_message_end" []
+  | External_effect_completed { target } ->
+    type_tag
+      "external_effect_completed"
+      [ "target", Keeper_surface_post.delivery_target_to_yojson target ]
+  | Run_finished { run_id } -> type_tag "run_finished" [ "run_id", `String run_id ]
+  | Event_error { message } -> type_tag "event_error" [ "message", `String message ]
+  | Reply_details { reply; turn_outcome; turn_ref; terminal_stream_scope } ->
+    type_tag
+      "reply_details"
+      ([ "reply", `String reply
+      ; "turn_outcome", `String (Keeper_turn_outcome.to_label turn_outcome)
+      ; "turn_ref", `String (Ids.Turn_ref.to_string turn_ref)
+      ] @ json_opt "terminal_stream_scope" (Option.map (fun scope -> `Int scope) terminal_stream_scope))
+  | Continuation_checkpoint { message; request_id } ->
+    type_tag
+      "continuation_checkpoint"
+      ([ "message", `String message ]
+       @ json_opt "request_id" (Option.map (fun value -> `String value) request_id))
+  | Agent_core_stream_connected -> type_tag "agent_core_stream_connected" []
+  | Provider_retry_observed {attempt; retry} ->
+    type_tag "provider_retry_observed"
+      ["attempt", Runtime_native_tasks.attempt_to_json attempt;
+       "retry", Runtime_claude_api_retry.to_json retry]
+  | Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
+    type_tag
+      "agent_core_runtime_attempt_started"
+      (json_opt "runtime_id" (Option.map (fun value -> `String value) runtime_id)
+       @ json_opt "attempt_index"
+           (Option.map (fun value -> `Int value) attempt_index))
+  | Agent_core_stream_message_start { content_generation; stream_scope; provider_message_id; model; usage } ->
+    type_tag
+      "agent_core_stream_message_start"
+      ([ "stream_scope", `Int stream_scope; "provider_message_id", `String provider_message_id; "model", `String model ]
+       @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
+       @ json_opt "usage" (Option.map api_usage_to_json usage))
+  | Agent_core_stream_message_delta { content_generation; stream_scope; stop_reason; usage } ->
+    type_tag
+      "agent_core_stream_message_delta"
+      (["stream_scope", `Int stream_scope]
+       @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
+       @ json_opt
+         "stop_reason"
+         (Option.map
+            (fun reason -> `String (Agent_core.Types.stop_reason_to_string reason))
+            stop_reason)
+       @ json_opt "usage" (Option.map delta_usage_to_json usage))
+  | Agent_core_stream_message_stop owner -> type_tag "agent_core_stream_message_stop"
+      (json_opt "response" (Option.map response_identity_to_json owner))
+  | Agent_core_stream_ping -> type_tag "agent_core_stream_ping" []
+  | Agent_core_content_block_start { index; content_type; tool_call_id; tool_call_name }
+    ->
+    type_tag
+      "agent_core_content_block_start"
+      ([ "index", `Int index; "content_type", `String content_type ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id)
+       @ json_opt
+           "tool_call_name"
+           (Option.map (fun value -> `String value) tool_call_name))
+  | Model_content_activity activity ->
+    type_tag "model_content_activity" ["activity", model_content_activity_to_json activity]
+  | Agent_core_content_block_stop { index } ->
+    type_tag "agent_core_content_block_stop" [ "index", `Int index ]
+  | Agent_core_thinking_snapshot {index;snapshot;response} ->
+    type_tag "agent_core_thinking_snapshot" (["index",`Int index;"snapshot",`String snapshot
+       ;"response",response_identity_to_json response])
+  | Agent_core_thinking_delta { index; delta; response } ->
+    type_tag "agent_core_thinking_delta" ([ "index", `Int index; "delta", `String delta ]
+      @ json_opt "response" (Option.map response_identity_to_json response))
+  | Agent_core_thinking_signature_delta { index; signature_bytes } ->
+    (* [signature_bytes] is a byte COUNT (int), not payload bytes. *)
+    type_tag
+      "agent_core_thinking_signature_delta"
+      [ "index", `Int index; "signature_bytes", `Int signature_bytes ]
+  | Agent_core_media_delta media ->
+    type_tag "agent_core_media_delta" (Yojson.Safe.Util.to_assoc (generated_media_to_json media))
+  | Agent_core_stream_protocol_error error ->
+    type_tag
+      "agent_core_stream_protocol_error"
+      [ "error", stream_protocol_error_to_json error ]
+  | Tool_call_start { occurrence; tool_call_id; tool_call_name } ->
+    type_tag
+      "tool_call_start"
+      ([ "occurrence", occurrence_to_json occurrence
+       ; "tool_call_name", `String tool_call_name
+       ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Tool_call_admitted { occurrence; tool_call_id; provider_tool_name; tool_call_name } ->
+    type_tag "tool_call_admitted"
+      ([ "occurrence", occurrence_to_json occurrence
+       ; "provider_tool_name", `String provider_tool_name
+       ; "tool_call_name", `String tool_call_name ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Tool_call_args { occurrence; tool_call_id; delta } ->
+    type_tag
+      "tool_call_args"
+      ([ "occurrence", occurrence_to_json occurrence; "delta", `String delta ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Tool_call_args_snapshot { occurrence; tool_call_id; snapshot } ->
+    type_tag
+      "tool_call_args_snapshot"
+      ([ "occurrence", occurrence_to_json occurrence; "snapshot", `String snapshot ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Tool_call_end { occurrence; tool_call_id } ->
+    type_tag
+      "tool_call_end"
+      ([ "occurrence", occurrence_to_json occurrence ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Native_tool_start tool ->
+    type_tag "native_tool_start"
+      ([ "occurrence", occurrence_to_json tool.occurrence ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
+  | Native_tool_progress (tool, progress) ->
+    type_tag "native_tool_progress"
+      ([ "occurrence", occurrence_to_json tool.occurrence;
+         "progress", Runtime_native_tools.progress_to_json progress ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
+  | Native_tool_end (tool, completion) ->
+    type_tag "native_tool_end"
+      ([ "occurrence", occurrence_to_json tool.occurrence;
+         "completion", Runtime_native_tools.completion_to_json completion ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool.tool_call_id)
+       @ json_opt "tool_call_name" (Option.map (fun value -> `String value) tool.tool_call_name))
+  | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
+    type_tag
+      "tool_approval_requested"
+      [ "tool_call_id", `String tool_call_id
+      ; "tool_call_name", `String tool_call_name
+      ; "args", `String args
+      ; "question", `String question
+      ; "because", `String because
+      ]
+  | Tool_approval_settled { tool_call_id; outcome } ->
+    type_tag
+      "tool_approval_settled"
+      [ "tool_call_id", `String tool_call_id; "outcome", `String outcome ]
+  | Tool_result_ready { occurrence; tool_call_id; execution_id } ->
+    type_tag
+      "tool_result_ready"
+      ([ "occurrence", occurrence_to_json occurrence
+       ; "execution_id", `String (Ids.Execution_id.to_string execution_id)
+       ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id))
+  | Tool_transcript_committed { delivery_key; execution_id; ordinal } ->
+    type_tag "tool_transcript_committed"
+      [ "delivery_key", Keeper_chat_delivery_identity.delivery_key_to_yojson delivery_key
+      ; "execution_id", `String (Ids.Execution_id.to_string execution_id)
+      ; "ordinal", `Int ordinal ]
+  | Link_block { url; title; description; image } ->
+    type_tag
+      "link_block"
+      ([ "url", `String url; "title", `String title ]
+       @ json_opt "description" (Option.map (fun value -> `String value) description)
+       @ json_opt "image" (Option.map (fun value -> `String value) image))
+  | Image_block { url; caption } ->
+    type_tag
+      "image_block"
+      ([ "url", `String url ]
+       @ json_opt "caption" (Option.map (fun value -> `String value) caption))
+  | Status_block { kind } ->
+    type_tag
+      "status_block"
+      [ "kind", `String (Keeper_chat_blocks.status_kind_to_label kind) ]
+  | Audio_block { token; mime; message_text; duration_sec } ->
+    type_tag
+      "audio_block"
+      ([ "token", `String token
+       ; "mime", `String mime
+       ; "message_text", `String message_text
+       ]
+       @ json_opt "duration_sec" (Option.map (fun value -> `Float value) duration_sec))
+  | Tool_context_block { tool_call_id; name; args_summary; result_summary } ->
+    type_tag
+      "tool_context_block"
+      ([ "tool_call_id", `String tool_call_id
+       ; "name", `String name
+       ; "args_summary", `String args_summary
+       ]
+       @ json_opt
+           "result_summary"
+           (Option.map (fun value -> `String value) result_summary))
+;;
+
+let keeper_chat_event_of_json json =
+  let open Yojson.Safe.Util in
+  let open Result.Syntax in
+  (* The members every native tool row carries, plus the one its kind adds. *)
+  let native_tool ~extra =
+    let* fields = object_fields ~label:"native_tool"
+        ~allowed:(["type"; "occurrence"; "tool_call_id"; "tool_call_name"] @ extra) json in
+    let* occurrence = occurrence_of_json (json |> member "occurrence") in
+    let* tool_call_id = optional_identity ~label:"native_tool" "tool_call_id" fields in
+    let* tool_call_name = optional_identity ~label:"native_tool" "tool_call_name" fields in
+    Ok ({ occurrence; tool_call_id; tool_call_name }, fields)
+  in
+  try
+    let* _ = object_fields ~label:"keeper_chat_event" json in
+    let tag = json |> member "type" |> to_string in
+    match tag with
+    | "run_started" ->
+      Ok
+        (Run_started
+           { run_id = json |> member "run_id" |> to_string
+           ; thread_id = json |> member "thread_id" |> to_string
+           })
+    | "text_message_start" ->
+      let* role = role_of_json (json |> member "role") in
+      Ok
+        (Text_message_start
+           { message_id = json |> member "message_id" |> to_string; role })
+    | "text_delta" ->
+        let* response = text_response_of_fields ~owner_field:"response" ~scope_field:"stream_scope" (json |> to_assoc) in
+        Ok (Text_delta {text=json |> member "delta" |> to_string; response})
+    | "text_message_end" -> Ok Text_message_end
+    | "external_effect_completed" ->
+      let* target =
+        Keeper_surface_post.delivery_target_of_yojson (json |> member "target")
+      in
+      Ok (External_effect_completed { target })
+    | "run_finished" ->
+      Ok (Run_finished { run_id = json |> member "run_id" |> to_string })
+    | "event_error" ->
+      Ok (Event_error { message = json |> member "message" |> to_string })
+    | "reply_details" ->
+      let outcome_label = json |> member "turn_outcome" |> to_string in
+      let* turn_outcome =
+        match Keeper_turn_outcome.of_label outcome_label with
+        | Some outcome -> Ok outcome
+        | None ->
+          Error (Printf.sprintf "reply_details: unknown turn_outcome %S" outcome_label)
+      in
+      let turn_ref_raw = json |> member "turn_ref" |> to_string in
+      let* turn_ref =
+        match Ids.Turn_ref.of_string turn_ref_raw with
+        | Some turn_ref -> Ok turn_ref
+        | None ->
+          Error (Printf.sprintf "reply_details: malformed turn_ref %S" turn_ref_raw)
+      in
+      let* terminal_stream_scope = optional_stream_scope json "terminal_stream_scope" in
+      Ok
+        (Reply_details
+           { reply = json |> member "reply" |> to_string; turn_outcome; turn_ref; terminal_stream_scope })
+    | "batch_bound" ->
+      let* operation_id = Keeper_chat_operation.Operation_id.of_string (json |> member "operation_id" |> to_string) in
+      let* execution_id = Keeper_chat_operation.Operation_id.of_string (json |> member "execution_id" |> to_string) in
+      Ok (Batch_bound {operation_id; execution_id})
+    | "continuation_checkpoint" ->
+      Ok
+        (Continuation_checkpoint
+           { message = json |> member "message" |> to_string
+           ; request_id = json |> member "request_id" |> to_string_option
+           })
+    | "agent_core_stream_connected" -> Ok Agent_core_stream_connected
+    | "provider_retry_observed" ->
+      let fields = json |> to_assoc in
+      let* () =
+        if List.exists (fun (key,_) -> not (List.mem key ["type";"attempt";"retry"])) fields
+        then Error "unexpected provider retry event field" else Ok () in
+      let required key = match List.filter_map
+          (fun (name,value) -> if name=key then Some value else None) fields with
+        | [value] -> Ok value
+        | [] -> Error ("missing provider retry event field: " ^ key)
+        | _ :: _ :: _ -> Error ("duplicate provider retry event field: " ^ key) in
+      let* _ = required "type" in
+      let* attempt_json = required "attempt" in
+      let* retry_json = required "retry" in
+      let* attempt = Runtime_native_tasks.attempt_of_json attempt_json in
+      let* retry = Runtime_claude_api_retry.of_json retry_json
+        |> Result.map_error Runtime_claude_api_retry.error_to_string in
+      Ok (Provider_retry_observed {attempt; retry})
+    | "agent_core_runtime_attempt_started" ->
+      let runtime_id = json |> member "runtime_id" |> to_string_option in
+      let attempt_index = json |> member "attempt_index" |> to_int_option in
+      Ok (Agent_core_runtime_attempt_started { runtime_id; attempt_index })
+    | "agent_core_stream_message_start" ->
+      let* content_generation = match List.filter (fun (key,_) -> key="content_generation")
+          (json |> to_assoc) with
+        | [] -> Ok None
+        | [_, value] ->
+            let* generation = Runtime_json_integer.of_json value in
+            if generation < 0 then Error "content generation must be nonnegative"
+            else Ok (Some generation)
+        | _ -> Error "duplicate content generation" in
+      let* usage = opt_member json "usage" api_usage_of_json in
+      Ok
+        (Agent_core_stream_message_start
+           { content_generation
+           ; stream_scope = json |> member "stream_scope" |> to_int
+           ; provider_message_id = json |> member "provider_message_id" |> to_string
+           ; model = json |> member "model" |> to_string
+           ; usage
+           })
+    | "agent_core_stream_message_delta" ->
+      let* content_generation = match List.filter (fun (key,_) -> key="content_generation")
+          (json |> to_assoc) with
+        | [] -> Ok None
+        | [_, value] ->
+            let* generation = Runtime_json_integer.of_json value in
+            if generation < 0 then Error "content generation must be nonnegative"
+            else Ok (Some generation)
+        | _ -> Error "duplicate content generation" in
+      let* stream_scope = match List.filter (fun (key,_) -> key="stream_scope") (json |> to_assoc) with
+        | [(_, value)] ->
+          let* scope = Runtime_json_integer.of_json value in
+          if scope >= 0 then Ok scope else Error "stream scope must be nonnegative"
+        | _ -> Error "message delta requires one stream scope" in
+      let stop_reason_raw = json |> member "stop_reason" |> to_string_option in
+      let* usage = opt_member json "usage" delta_usage_of_json in
+      Ok
+        (Agent_core_stream_message_delta
+           { content_generation
+           ; stream_scope
+           ; stop_reason =
+               Option.map Agent_core.Types.stop_reason_of_string stop_reason_raw
+           ; usage
+           })
+    | "agent_core_stream_message_stop" ->
+      let* owner = match json with
+        | `Assoc fields ->
+          (match List.filter (fun (key, _) -> key = "response") fields with
+           | [] -> Ok None
+           | [(_, value)] -> Result.map (fun owner -> Some owner) (response_identity_of_json value)
+           | _ -> Error "message stop has duplicate response identity")
+        | _ -> Error "message stop must be an object" in
+      Ok (Agent_core_stream_message_stop owner)
+    | "agent_core_stream_ping" -> Ok Agent_core_stream_ping
+    | "agent_core_content_block_start" ->
+      Ok
+        (Agent_core_content_block_start
+           { index = json |> member "index" |> to_int
+           ; content_type = json |> member "content_type" |> to_string
+           ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+           ; tool_call_name = json |> member "tool_call_name" |> to_string_option
+           })
+    | "model_content_activity" ->
+      let* activity = model_content_activity_of_json (json |> member "activity") in
+      Ok (Model_content_activity activity)
+    | "agent_core_content_block_stop" ->
+      Ok (Agent_core_content_block_stop { index = json |> member "index" |> to_int })
+    | "agent_core_thinking_snapshot" ->
+      let* response=optional_response_identity_of_fields(json |> to_assoc) in
+      let* response=match response with Some owner->Ok owner | None->Error "thinking snapshot requires response identity" in
+      Ok(Agent_core_thinking_snapshot {response;index=json |> member "index" |> to_int
+        ;snapshot=json |> member "snapshot" |> to_string})
+    | "agent_core_thinking_delta" ->
+      let* response = optional_response_identity_of_fields (json |> to_assoc) in
+      Ok
+        (Agent_core_thinking_delta
+           { response
+           ; index = json |> member "index" |> to_int
+           ; delta = json |> member "delta" |> to_string
+           })
+    | "agent_core_thinking_signature_delta" ->
+      Ok
+        (Agent_core_thinking_signature_delta
+           { index = json |> member "index" |> to_int
+           ; signature_bytes = json |> member "signature_bytes" |> to_int
+           })
+    | "agent_core_media_delta" ->
+      let value = `Assoc (List.filter (fun (key, _) -> key <> "type") (json |> to_assoc)) in
+      let* media = generated_media_of_json value in
+      Ok (Agent_core_media_delta media)
+    | "agent_core_stream_protocol_error" ->
+      let* error = stream_protocol_error_of_json (json |> member "error") in
+      Ok (Agent_core_stream_protocol_error error)
+    | "tool_call_start" ->
+      let* occurrence = occurrence_of_json (json |> member "occurrence") in
+      Ok
+        (Tool_call_start
+           { occurrence
+           ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+           ; tool_call_name = json |> member "tool_call_name" |> to_string
+           })
+    | "tool_call_admitted" ->
+      let* occurrence = occurrence_of_json (json |> member "occurrence") in
+      let provider_tool_name = json |> member "provider_tool_name" |> to_string in
+      let tool_call_name = json |> member "tool_call_name" |> to_string in
+      if String.trim provider_tool_name = "" || String.trim tool_call_name = ""
+      then Error "admitted tool identity requires nonblank names"
+      else Ok (Tool_call_admitted
+        { occurrence; tool_call_id = json |> member "tool_call_id" |> to_string_option
+        ; provider_tool_name; tool_call_name })
+    | "tool_call_args" ->
+      let* occurrence = occurrence_of_json (json |> member "occurrence") in
+      Ok
+        (Tool_call_args
+           { occurrence
+           ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+           ; delta = json |> member "delta" |> to_string
+           })
+    | "tool_call_args_snapshot" ->
+      let* occurrence = occurrence_of_json (json |> member "occurrence") in
+      Ok
+        (Tool_call_args_snapshot
+           { occurrence
+           ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+           ; snapshot = json |> member "snapshot" |> to_string
+           })
+    | "tool_call_end" ->
+      let* occurrence = occurrence_of_json (json |> member "occurrence") in
+      Ok
+        (Tool_call_end
+           { occurrence
+           ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+           })
+    | "native_tool_start" ->
+      let* tool, _ = native_tool ~extra:[] in
+      Ok (Native_tool_start tool)
+    | "native_tool_progress" ->
+      let* tool, _ = native_tool ~extra:["progress"] in
+      let* progress = Runtime_native_tools.progress_of_json (json |> member "progress") in
+      Ok (Native_tool_progress (tool, progress))
+    | "native_tool_end" ->
+      let* tool, fields = native_tool ~extra:["completion"] in
+      (* Rows written before the writer kept a completion have none.
+         Whether the provider reported a status for them is not known, so
+         they read as completion_unrecorded, not as an end seen with no
+         status. object_fields in native_tool already rejects a duplicate
+         member; a malformed present completion is unreadable. *)
+      let* completion = match List.assoc_opt "completion" fields with
+        | None -> Ok Runtime_native_tools.completion_unrecorded
+        | Some value -> Runtime_native_tools.completion_of_json value in
+      Ok (Native_tool_end (tool, completion))
+    | "tool_approval_requested" ->
+      Ok
+        (Tool_approval_requested
+           { tool_call_id = json |> member "tool_call_id" |> to_string
+           ; tool_call_name = json |> member "tool_call_name" |> to_string
+           ; args = json |> member "args" |> to_string
+           ; question = json |> member "question" |> to_string
+           ; because = json |> member "because" |> to_string
+           })
+    | "tool_approval_settled" ->
+      Ok
+        (Tool_approval_settled
+           { tool_call_id = json |> member "tool_call_id" |> to_string
+           ; outcome = json |> member "outcome" |> to_string
+           })
+    | "tool_result_ready" ->
+      let* occurrence = occurrence_of_json (json |> member "occurrence") in
+      Ok
+        (Tool_result_ready
+           { occurrence
+           ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+           ; execution_id =
+               Ids.Execution_id.of_string (json |> member "execution_id" |> to_string)
+           })
+    | "tool_transcript_committed" ->
+      let* ordinal =
+        match json |> member "ordinal" with
+        | `Int value when value >= 0 -> Ok value
+        | _ -> Error "tool transcript ordinal must be a nonnegative integer"
+      in
+      let* delivery_key = Keeper_chat_delivery_identity.delivery_key_of_yojson (json |> member "delivery_key") in
+      Ok (Tool_transcript_committed
+        { delivery_key
+        ; execution_id = Ids.Execution_id.of_string (json |> member "execution_id" |> to_string)
+        ; ordinal })
+    | "link_block" ->
+      Ok
+        (Link_block
+           { url = json |> member "url" |> to_string
+           ; title = json |> member "title" |> to_string
+           ; description = json |> member "description" |> to_string_option
+           ; image = json |> member "image" |> to_string_option
+           })
+    | "image_block" ->
+      Ok
+        (Image_block
+           { url = json |> member "url" |> to_string
+           ; caption = json |> member "caption" |> to_string_option
+           })
+    | "status_block" ->
+      let kind_raw = json |> member "kind" |> to_string in
+      let* kind =
+        match Keeper_chat_blocks.status_kind_of_label kind_raw with
+        | Some kind -> Ok kind
+        | None ->
+          Error (Printf.sprintf "status_block: unknown kind %S" kind_raw)
+      in
+      Ok (Status_block { kind })
+    | "audio_block" ->
+      Ok
+        (Audio_block
+           { token = json |> member "token" |> to_string
+           ; mime = json |> member "mime" |> to_string
+           ; message_text = json |> member "message_text" |> to_string
+           ; duration_sec = json |> member "duration_sec" |> to_float_option
+           })
+    | "tool_context_block" ->
+      Ok
+        (Tool_context_block
+           { tool_call_id = json |> member "tool_call_id" |> to_string
+           ; name = json |> member "name" |> to_string
+           ; args_summary = json |> member "args_summary" |> to_string
+           ; result_summary = json |> member "result_summary" |> to_string_option
+           })
+    | unknown ->
+      Error (Printf.sprintf "keeper_chat_event: unknown type %S" unknown)
+  with
+  | Type_error (message, _) -> Error ("keeper_chat_event: " ^ message)
+;;
+
+type journaled_event =
+  { seq : int
+  ; ts : float
+  ; event : keeper_chat_event
+  }
+
+type version_mismatch = { expected : int; actual : int }
+[@@deriving show, eq]
+
+type decode_failure =
+  | Unsupported_version of version_mismatch
+  | Malformed of string
+
+let version_mismatch_to_string { expected; actual } =
+  Printf.sprintf "unsupported journal codec version %d (expected %d)" actual expected
+;;
+
+let decode_failure_to_string = function
+  | Unsupported_version mismatch -> version_mismatch_to_string mismatch
+  | Malformed detail -> detail
+;;
+
+(* The epoch owns the payload schema. Do not inspect or reinterpret a foreign
+   epoch's payload, even when it resembles a current event. *)
+let check_codec_version = function
+  | `Assoc fields ->
+      (match List.filter (fun (name, _) -> String.equal name "v") fields with
+       | [(_, `Int actual)] when actual = codec_version -> Ok ()
+       | [(_, `Int actual)] -> Error (Unsupported_version { expected = codec_version; actual })
+       | [] -> Error (Malformed "journaled_event: missing version")
+       | [_] -> Error (Malformed "journaled_event: version is not an integer")
+       | _ -> Error (Malformed "journaled_event: duplicate version"))
+  | _ -> Error (Malformed "journaled_event: expected an object")
+;;
+
+type operation_settlement =
+  { operation_id : Keeper_chat_operation.Operation_id.t
+  ; completed_at : float
+  }
+
+let operation_settlement_to_json settlement =
+  `Assoc ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string settlement.operation_id);
+    "completed_at", `Float settlement.completed_at]
+;;
+
+let operation_settlement_of_json = function
+  | `Assoc fields when List.sort String.compare (List.map fst fields) = ["completed_at";"operation_id"] ->
+      let open Result.Syntax in
+      let* operation_id = match List.assoc "operation_id" fields with
+        | `String id -> Keeper_chat_operation.Operation_id.of_string id
+        | _ -> Error "operation settlement operation_id is not a string" in
+      let* completed_at = match List.assoc "completed_at" fields with
+        | `Float value when Float.is_finite value && value >= 0. -> Ok value
+        | `Int value when value >= 0 -> Ok (float_of_int value)
+        | _ -> Error "operation settlement completed_at is not a finite nonnegative timestamp" in
+      Ok {operation_id;completed_at}
+  | _ -> Error "operation settlement has an invalid shape"
+;;
+
+let journaled_event_to_json { seq; ts; event } =
+  `Assoc
+    [ "v", `Int codec_version
+    ; "seq", `Int seq
+    ; "ts", `Float ts
+    ; "event", keeper_chat_event_to_json event
+    ]
+;;
+
+let journaled_event_payload_of_json json =
+  let open Yojson.Safe.Util in
+  let open Result.Syntax in
+  try
+    let* _ = object_fields ~label:"journaled_event" ~allowed:["v"; "seq"; "ts"; "event"; "operation_settlement"] json in
+    let* seq = Runtime_json_integer.of_json (json |> member "seq") in
+    let* () = if seq >= 0 then Ok () else Error "journaled_event: negative seq" in
+    let ts = json |> member "ts" |> to_float in
+    let* () = if Float.is_finite ts then Ok () else Error "journaled_event: non-finite ts" in
+    Result.map
+      (fun event -> { seq; ts; event })
+      (keeper_chat_event_of_json (json |> member "event"))
+  with
+  | Type_error (message, _) -> Error ("journaled_event: " ^ message)
+;;
+
+let current_journaled_envelope_of_json json =
+  let open Result.Syntax in
+  let* entry = journaled_event_payload_of_json json in
+  let* settlement = match json with
+    | `Assoc fields ->
+        (match List.filter (fun (name, _) -> name = "operation_settlement") fields with
+         | [] -> Ok None
+         | [(_, value)] -> Result.map Option.some (operation_settlement_of_json value)
+         | _ -> Error "duplicate operation settlement")
+    | _ -> Error "journaled event is not an object" in
+  match settlement, entry.event with
+  | Some _, Event_error _ | None, _ -> Ok (entry, settlement)
+  | Some _,
+    ( Run_started _
+    | Batch_bound _
+    | Text_message_start _
+    | Text_delta _
+    | Text_message_end
+    | External_effect_completed _
+    | Run_finished _
+    | Reply_details _
+    | Continuation_checkpoint _
+    | Agent_core_stream_connected
+    | Provider_retry_observed _
+    | Agent_core_runtime_attempt_started _
+    | Agent_core_stream_message_start _
+    | Agent_core_stream_message_delta _
+    | Agent_core_stream_message_stop _
+    | Agent_core_stream_ping
+    | Agent_core_content_block_start _
+    | Agent_core_content_block_stop _
+    | Model_content_activity _
+    | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
+    | Agent_core_thinking_signature_delta _
+    | Agent_core_media_delta _
+    | Agent_core_stream_protocol_error _
+    | Tool_call_start _ | Tool_call_admitted _
+    | Tool_call_args _
+    | Tool_call_args_snapshot _
+    | Tool_call_end _
+    | Native_tool_start _
+    | Native_tool_end _
+    | Native_tool_progress _
+    | Tool_approval_requested _
+    | Tool_approval_settled _
+    | Tool_result_ready _
+    | Tool_transcript_committed _
+    | Link_block _
+    | Image_block _
+    | Status_block _
+    | Audio_block _
+    | Tool_context_block _ ) -> Error "operation settlement must identify an error terminal"
+;;
+
+let journaled_envelope_of_json json =
+  Result.bind (check_codec_version json) (fun () ->
+    Result.map_error (fun detail -> Malformed detail)
+      (current_journaled_envelope_of_json json))
+;;
+
+let journaled_event_of_json json = Result.map fst (journaled_envelope_of_json json)
+
+(* String-level framing: the single place where JSONL line conversion and
+   [Yojson.Json_error] handling live. *)
+let journaled_event_to_string journaled =
+  Yojson.Safe.to_string (journaled_event_to_json journaled)
+;;
+
+(** Strict decode of one journal line. [Yojson.Json_error] is caught and
+    returned as [Error]. *)
+let journaled_event_of_string line =
+  try journaled_event_of_json (Yojson.Safe.from_string line) with
+  | Yojson.Json_error message -> Error (Malformed ("journaled_event: invalid JSON: " ^ message))
+;;
+
+(** {1 Journal} *)
+
+type journal = { path : string }
+
+let sanitize_segment = Workspace_utils_backend_setup.sanitize_namespace_segment
+
+(* The single spelling of the store's directory name: the journal writer, the
+   consistency audit's sweep, and the retention pruner all derive their paths
+   from it. *)
+let events_dirname = "keeper_chat_events"
+let turn_events_dirname = "keeper_turn_events"
+
+let events_dir ~base_dir =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) events_dirname
+;;
+
+let journal_path ~base_dir ~keeper_name ~operation_id =
+  Filename.concat
+    (Filename.concat (events_dir ~base_dir) (sanitize_segment keeper_name))
+    (sanitize_segment operation_id ^ ".jsonl")
+;;
+
+(* Fail-open at construction too: a directory we cannot create must not abort
+   the turn; the per-event append below then logs each failure. *)
+let open_path path =
+  (try Fs_compat.mkdir_p (Filename.dirname path) with
+   | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+   | exn ->
+     Log.Keeper.error
+       "keeper_chat_event_log: journal directory creation failed path=%s: %s"
+       path
+       (Printexc.to_string exn));
+  { path }
+;;
+
+let open_journal ~base_dir ~keeper_name ~operation_id () =
+  open_path (journal_path ~base_dir ~keeper_name ~operation_id)
+;;
+
+let turn_journal_path ~base_dir ~keeper_name ~turn_ref =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) turn_events_dirname)
+       (sanitize_segment keeper_name))
+    (sanitize_segment (Ids.Turn_ref.to_string turn_ref) ^ ".jsonl")
+;;
+
+let open_turn_journal ~base_dir ~keeper_name ~turn_ref () =
+  open_path (turn_journal_path ~base_dir ~keeper_name ~turn_ref)
+;;
+
+(* A non-finite float (NaN/inf) would serialize to a bare NaN/Infinity token —
+   invalid JSON. Reject at the writer boundary: log and skip the line. *)
+let float_is_finite value =
+  match classify_float value with
+  | FP_nan | FP_infinite -> false
+  | FP_normal | FP_subnormal | FP_zero -> true
+;;
+
+let event_floats_are_finite = function
+  | Agent_core_stream_message_start
+      { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
+    float_is_finite cost_usd
+  | Agent_core_stream_message_delta
+      { usage = Some { Agent_core.Types.cost_usd = Some cost_usd; _ }; _ } ->
+    float_is_finite cost_usd
+  | Audio_block { duration_sec = Some duration_sec; _ } ->
+    float_is_finite duration_sec
+  | Run_started _
+  | Batch_bound _
+  | Text_message_start _
+  | Text_delta _
+  | Text_message_end
+  | External_effect_completed _
+  | Run_finished _
+  | Event_error _
+  | Reply_details _
+  | Continuation_checkpoint _
+  | Agent_core_stream_connected
+  | Provider_retry_observed _
+  | Agent_core_runtime_attempt_started _
+  | Agent_core_stream_message_start _
+  | Agent_core_stream_message_delta _
+  | Agent_core_stream_message_stop _
+  | Agent_core_stream_ping
+  | Agent_core_content_block_start _
+  | Agent_core_content_block_stop _
+  | Model_content_activity _
+  | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
+  | Agent_core_thinking_signature_delta _
+  | Agent_core_media_delta _
+  | Agent_core_stream_protocol_error _
+  | Tool_call_start _ | Tool_call_admitted _
+  | Tool_call_args _
+  | Tool_call_args_snapshot _
+  | Tool_call_end _
+  | Native_tool_start _
+  | Native_tool_end _
+  | Native_tool_progress _
+  | Tool_approval_requested _
+  | Tool_approval_settled _
+  | Tool_result_ready _
+  | Tool_transcript_committed _
+  | Link_block _
+  | Image_block _
+  | Status_block _
+  | Audio_block _
+  | Tool_context_block _ -> true
+;;
+
+(* The result covers raw filesystem exceptions too: mkdir/open/lock failures
+   can occur before the Fs_compat transaction produces its typed outcome. *)
+let append_journaled_result ?operation_settlement journal ~seq ~ts event =
+  try
+    if (not (float_is_finite ts)) || not (event_floats_are_finite event)
+    then
+      Error (Printf.sprintf
+        "refusing to journal non-finite float path=%s seq=%d" journal.path seq)
+    else begin
+      let envelope = journaled_event_to_json {seq;ts;event} in
+      let envelope = match operation_settlement, envelope with
+        | Some settlement, `Assoc fields ->
+            `Assoc (fields @ ["operation_settlement", operation_settlement_to_json settlement])
+        | None, _ -> envelope
+        | Some _, _ -> assert false in
+      let line = Yojson.Safe.to_string envelope ^ "\n" in
+      let validate_first_row row =
+        Result.map (fun (_ : journaled_event) -> ()) (journaled_event_of_string row)
+        |> Result.map_error decode_failure_to_string in
+      match Fs_compat.append_private_jsonl_durable_locked_validated_result
+          ~validate_first_row journal.path line with
+      | Fs_compat.Private_file_succeeded () -> Ok ()
+      | Fs_compat.Private_file_succeeded_with_cleanup_failure
+          { value = (); cleanup_failure } ->
+        Log.Keeper.error
+          "keeper_chat_event_log: append succeeded with descriptor settlement failure path=%s: %s"
+          journal.path
+          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+        Ok ()
+      | Fs_compat.Private_file_failed error ->
+        Error (Fs_compat.private_jsonl_append_error_to_string error)
+      | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+        Error (Printf.sprintf "%s; descriptor settlement failed: %s"
+          (Fs_compat.private_jsonl_append_error_to_string error)
+          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+    end
+  with
+  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let append_result journal ~seq ~ts event = append_journaled_result journal ~seq ~ts event
+
+let append journal ~seq ~ts event =
+  match append_result journal ~seq ~ts event with
+  | Ok () -> ()
+  | Error detail ->
+    Log.Keeper.error
+      "keeper_chat_event_log: journal append failed path=%s seq=%d: %s"
+      journal.path
+      seq
+      detail
+;;
+
+type read_failure =
+  | Journal_missing
+  | Journal_unreadable of string
+  | Journal_unsupported_version of version_mismatch
+  | Journal_corrupt of string
+
+(* Strict decode of the complete rows: the first line that is not an envelope
+   makes the whole read [Journal_corrupt]. Blank rows are skipped, as the
+   writer never emits one and a reader must not invent an event for one. *)
+let decode_rows_with decode ~path rows =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | line :: rest ->
+      if String.equal (String.trim line) ""
+      then loop acc rest
+      else begin
+        match decode line with
+        | Ok journaled -> loop (journaled :: acc) rest
+        | Error (Unsupported_version version) -> Error (Journal_unsupported_version version)
+        | Error (Malformed detail) ->
+          Error
+            (Journal_corrupt
+               (Printf.sprintf
+                  "keeper_chat_event_log: corrupt journal line path=%s: %s"
+                  path
+                  detail))
+      end
+  in
+  loop [] (String.split_on_char '\n' rows)
+;;
+
+let decode_rows ~path rows = decode_rows_with journaled_event_of_string ~path rows
+
+let log_settlement_failure ~path cleanup_failure =
+  Log.Keeper.error
+    "keeper_chat_event_log: journal read succeeded with descriptor settlement failure path=%s: %s"
+    path
+    (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+;;
+
+let log_torn_tail ~path ~rows_end ~end_offset =
+  if rows_end < end_offset
+  then
+    Log.Keeper.warn
+      "keeper_chat_event_log: journal has a torn tail path=%s rows_end=%d end_offset=%d: bytes after the last row are an append that never completed; serving the complete rows"
+      path
+      rows_end
+      end_offset
+;;
+
+(* Serving readers (stream replay, and an events page that starts from a held
+   seq without an offset) and the consistency audit read the whole journal
+   through the writer's lock and framing
+   ([Fs_compat.read_private_jsonl_rows_locked_result]); other events pages
+   read windows under the same lock and framing ([read_page_path]): the
+   shared lock waits out an append in progress, so the bytes are never a write
+   in flight, and a fragment after the last '\n' — the rows an append left
+   when the process died between its write and its rollback — is not a row.
+   Such a fragment is logged and the complete rows are served; the next
+   append cuts it before writing, so any later row follows exactly those
+   rows. Missing, unreadable, malformed current rows, and unsupported persisted
+   epochs remain distinct failures. *)
+let read_complete_rows ~allow_torn_tail path =
+  let of_rows = function
+    | Fs_compat.Private_jsonl_rows.Rows_missing -> Error Journal_missing
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset }
+      when rows_end < end_offset && not allow_torn_tail ->
+      (* A foreign epoch remains a version refusal even when its tail is torn. *)
+      (match decode_rows ~path rows with
+       | Error failure -> Error failure
+       | Ok _ -> Error (Journal_corrupt "cannot resume a journal with an incomplete final row"))
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset } ->
+      log_torn_tail ~path ~rows_end ~end_offset;
+      Ok rows
+  in
+  match Fs_compat.read_private_jsonl_rows_locked_result path with
+  | Fs_compat.Private_file_succeeded rows -> of_rows rows
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    log_settlement_failure ~path cleanup_failure;
+    of_rows value
+  | Fs_compat.Private_file_failed error ->
+    Error (Journal_unreadable (Fs_compat.Private_jsonl_rows.error_to_string error))
+  | Fs_compat.Private_file_failed_with_cleanup_failure
+      { error; cleanup_failure } ->
+    log_settlement_failure ~path cleanup_failure;
+    Error (Journal_unreadable (Fs_compat.Private_jsonl_rows.error_to_string error))
+;;
+
+let read_journal_path ~allow_torn_tail path =
+  Result.bind (read_complete_rows ~allow_torn_tail path) (decode_rows ~path)
+;;
+
+let read_journal_rows_path path = read_complete_rows ~allow_torn_tail:true path
+let read_journal_path_result path = read_journal_path ~allow_torn_tail:true path
+let read_journal journal = read_journal_path_result journal.path
+
+let read_journal_envelopes journal =
+  let decode line =
+    try journaled_envelope_of_json (Yojson.Safe.from_string line) with
+    | Yojson.Json_error detail -> Error (Malformed detail) in
+  Result.bind (read_complete_rows ~allow_torn_tail:true journal.path)
+    (decode_rows_with decode ~path:journal.path)
+;;
+
+(* [allow_torn_tail] only changes which bytes count as rows: a fragment after
+   the last newline is not one either way. A producer resuming a segment must
+   refuse it (the cursor may sit past a frame a live reader already holds), so
+   [next_sequence] keeps it false. Recovery that ends the journal after a
+   crash passes true and derives the cursor from the complete rows; the append
+   that follows cuts the fragment. *)
+let sequence_after_complete_rows ~allow_torn_tail ~require_existing journal =
+  match read_journal_path ~allow_torn_tail journal.path with
+  | Error Journal_missing when not require_existing -> Ok 0
+  | Error (Journal_missing | Journal_unreadable _ | Journal_corrupt _ | Journal_unsupported_version _) as error -> error
+  | Ok entries ->
+    let rec last previous = function
+      | [] -> Ok previous
+      | entry :: rest ->
+        (match previous with
+         | Some prior when entry.seq <= prior.seq ->
+           Error (Journal_corrupt "operation journal sequences are not increasing")
+         | Some _ | None -> last (Some entry) rest) in
+    (match last None entries with
+     | Error _ as error -> error
+     | Ok latest ->
+       let complete = match latest with
+         | Some { event = (Keeper_chat_events.Run_finished _ | Event_error _); _ } -> true
+         | Some
+             { event =
+                 ( Run_started _
+                 | Batch_bound _
+                 | Text_message_start _
+                 | Text_delta _
+                 | Text_message_end
+                 | External_effect_completed _
+                 | Reply_details _
+                 | Continuation_checkpoint _
+                 | Agent_core_stream_connected
+                 | Provider_retry_observed _
+                 | Agent_core_runtime_attempt_started _
+                 | Agent_core_stream_message_start _
+                 | Agent_core_stream_message_delta _
+                 | Agent_core_stream_message_stop _
+                 | Agent_core_stream_ping
+                 | Agent_core_content_block_start _
+                 | Agent_core_content_block_stop _
+                 | Model_content_activity _
+                 | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
+                 | Agent_core_thinking_signature_delta _
+                 | Agent_core_media_delta _
+                 | Agent_core_stream_protocol_error _
+                 | Tool_call_start _ | Tool_call_admitted _
+                 | Tool_call_args _
+                 | Tool_call_args_snapshot _
+                 | Tool_call_end _
+                 | Native_tool_start _
+                 | Native_tool_end _
+                 | Native_tool_progress _
+                 | Tool_approval_requested _
+                 | Tool_approval_settled _
+                 | Tool_result_ready _
+                 | Tool_transcript_committed _
+                 | Link_block _
+                 | Image_block _
+                 | Status_block _
+                 | Audio_block _
+                 | Tool_context_block _ )
+             ; _
+             }
+         | None -> false in
+       if require_existing && not complete then
+         Error (Journal_corrupt "continuation journal has no durable terminal segment boundary")
+       else
+         let highest = Option.fold ~none:(-1) ~some:(fun entry -> entry.seq) latest in
+         if highest = max_int then Error (Journal_corrupt "journal sequence space exhausted")
+         else Ok (highest + 1))
+;;
+
+let next_sequence ?(require_existing = false) journal =
+  sequence_after_complete_rows ~allow_torn_tail:false ~require_existing journal
+;;
+
+type terminal_error_receipt =
+  | Recorded_terminal_error of { seq : int; ts : float }
+  | Existing_terminal_error of { seq : int; ts : float; message : string }
+
+type terminal_error_segment = Existing_segment | Operation_settlement of operation_settlement
+
+let same_operation_settlement left right =
+  Keeper_chat_operation.Operation_id.equal left.operation_id right.operation_id
+  && Float.equal left.completed_at right.completed_at
+;;
+
+let existing_operation_terminal settlement = function
+  | ({event=Event_error {message};seq;ts}, Some recorded) :: _
+    when same_operation_settlement settlement recorded -> Some (Existing_terminal_error {seq;ts;message})
+  | []
+  | ( { event =
+          ( Run_started _
+            | Batch_bound _
+            | Text_message_start _
+            | Text_delta _
+            | Text_message_end
+            | External_effect_completed _
+            | Run_finished _
+            | Event_error _
+            | Reply_details _
+            | Continuation_checkpoint _
+            | Agent_core_stream_connected
+            | Provider_retry_observed _
+            | Agent_core_runtime_attempt_started _
+            | Agent_core_stream_message_start _
+            | Agent_core_stream_message_delta _
+            | Agent_core_stream_message_stop _
+            | Agent_core_stream_ping
+            | Agent_core_content_block_start _
+            | Agent_core_content_block_stop _
+            | Model_content_activity _
+            | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
+            | Agent_core_thinking_signature_delta _
+            | Agent_core_media_delta _
+            | Agent_core_stream_protocol_error _
+            | Tool_call_start _ | Tool_call_admitted _
+            | Tool_call_args _
+            | Tool_call_args_snapshot _
+            | Tool_call_end _
+            | Native_tool_start _
+            | Native_tool_end _
+            | Native_tool_progress _
+            | Tool_approval_requested _
+            | Tool_approval_settled _
+            | Tool_result_ready _
+            | Tool_transcript_committed _
+            | Link_block _
+            | Image_block _
+            | Status_block _
+            | Audio_block _
+            | Tool_context_block _ )
+      ; _
+      }
+    , _ )
+    :: _ -> None
+;;
+
+let find_operation_terminal journal ~settlement =
+  match read_journal_envelopes journal with
+  | Ok entries -> Ok (existing_operation_terminal settlement (List.rev entries))
+  | Error Journal_missing -> Ok None
+  | Error (Journal_unreadable detail | Journal_corrupt detail) -> Error detail
+  | Error (Journal_unsupported_version version) -> Error (version_mismatch_to_string version)
+;;
+
+(* A terminal row holds one error message. A final row longer than this
+   window falls back to the full read. *)
+let terminal_tail_bytes = 64 * 1024
+
+(* [existing_operation_terminal] reads only the journal's last row, so a
+   bounded tail answers it without reading the whole journal. Anything the
+   tail cannot settle (a missing or unreadable store, no complete row in the
+   window, a row that does not decode, or a last row that is not this
+   settlement's terminal) falls back to the full read, which reports what it
+   finds. The tail logs only what the full read will not see again: its own
+   read failure, a cleanup failure, and a torn tail it answered past. *)
+let operation_terminal_from_tail settlement journal =
+  let path = journal.path in
+  let of_tail = function
+    | Fs_compat.Private_jsonl_tail.Tail_missing -> None
+    | Fs_compat.Private_jsonl_tail.Tail_present { rows; incomplete_tail; end_offset; _ } ->
+      let last =
+        String.split_on_char '\n' rows
+        |> List.filter (fun line -> not (String.equal (String.trim line) ""))
+        |> List.rev in
+      (match last with
+       | [] -> None
+       | line :: _ ->
+         (match journaled_envelope_of_json (Yojson.Safe.from_string line) with
+          | Ok envelope ->
+            let receipt = existing_operation_terminal settlement [envelope] in
+            if incomplete_tail && Option.is_some receipt
+            then
+              Log.Keeper.warn
+                "keeper_chat_event_log: journal has a torn tail path=%s end_offset=%d: bytes after its settled terminal are an append that never completed; the terminal stands"
+                path
+                end_offset;
+            receipt
+          | Error (Unsupported_version _ | Malformed _) -> None
+          | exception Yojson.Json_error _ -> None)) in
+  let log_tail_failure error =
+    Log.Keeper.warn
+      "keeper_chat_event_log: journal tail read failed path=%s: %s; reading the whole journal"
+      path
+      (Fs_compat.Private_jsonl_tail.error_to_string error) in
+  match Fs_compat.read_private_jsonl_tail_locked_result path ~max_bytes:terminal_tail_bytes with
+  | Fs_compat.Private_file_succeeded tail -> of_tail tail
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    log_settlement_failure ~path cleanup_failure;
+    of_tail value
+  | Fs_compat.Private_file_failed error ->
+    log_tail_failure error;
+    None
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    log_tail_failure error;
+    Log.Keeper.error
+      "keeper_chat_event_log: journal tail read failed and its descriptor settlement failed path=%s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    None
+;;
+
+let record_terminal_error_from_journal ~segment journal ~ts ~message =
+  let open Result.Syntax in
+  let read_error = function
+    | Journal_missing -> "operation journal disappeared during settlement"
+    | Journal_unreadable detail | Journal_corrupt detail -> detail
+    | Journal_unsupported_version version -> version_mismatch_to_string version in
+  let* seq =
+    sequence_after_complete_rows ~allow_torn_tail:true ~require_existing:false journal
+    |> Result.map_error read_error in
+  let* entries = match read_journal_envelopes journal with
+    | Ok entries -> Ok entries
+    | Error Journal_missing -> Ok []
+    | Error (Journal_unreadable _ | Journal_corrupt _ | Journal_unsupported_version _ as error) -> Error (read_error error) in
+  match segment, List.rev entries with
+  | Existing_segment, ({ event = Keeper_chat_events.Event_error { message }; seq; ts }, _) :: _ ->
+    Ok (Existing_terminal_error { seq; ts; message })
+  | Operation_settlement settlement, entries ->
+    (match existing_operation_terminal settlement entries with
+     | Some receipt -> Ok receipt
+     | None ->
+         let* () = append_journaled_result ~operation_settlement:settlement journal ~seq ~ts (Event_error {message}) in
+         Ok (Recorded_terminal_error {seq;ts}))
+  | Existing_segment, []
+  | ( Existing_segment
+    , ( { event =
+            ( Run_started _
+            | Batch_bound _
+            | Text_message_start _
+            | Text_delta _
+            | Text_message_end
+            | External_effect_completed _
+            | Run_finished _
+            | Reply_details _
+            | Continuation_checkpoint _
+            | Agent_core_stream_connected
+            | Provider_retry_observed _
+            | Agent_core_runtime_attempt_started _
+            | Agent_core_stream_message_start _
+            | Agent_core_stream_message_delta _
+            | Agent_core_stream_message_stop _
+            | Agent_core_stream_ping
+            | Agent_core_content_block_start _
+            | Agent_core_content_block_stop _
+            | Model_content_activity _
+            | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
+            | Agent_core_thinking_signature_delta _
+            | Agent_core_media_delta _
+            | Agent_core_stream_protocol_error _
+            | Tool_call_start _ | Tool_call_admitted _
+            | Tool_call_args _
+            | Tool_call_args_snapshot _
+            | Tool_call_end _
+            | Native_tool_start _
+            | Native_tool_end _
+            | Native_tool_progress _
+            | Tool_approval_requested _
+            | Tool_approval_settled _
+            | Tool_result_ready _
+            | Tool_transcript_committed _
+            | Link_block _
+            | Image_block _
+            | Status_block _
+            | Audio_block _
+            | Tool_context_block _ )
+        ; _
+        }
+      , _ )
+      :: _ ) ->
+    let* () = append_result journal ~seq ~ts (Event_error {message}) in
+    Ok (Recorded_terminal_error {seq;ts})
+;;
+
+let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =
+  match segment with
+  | Operation_settlement settlement ->
+    (match operation_terminal_from_tail settlement journal with
+     | Some receipt -> Ok receipt
+     | None -> record_terminal_error_from_journal ~segment journal ~ts ~message)
+  | Existing_segment -> record_terminal_error_from_journal ~segment journal ~ts ~message
+;;
+
+(** {1 Replay position} *)
+
+type replay_position =
+  | Whole_turn
+  | After_seq of int
+
+(* The wire spells the position as an optional non-negative integer: absent
+   is the whole turn, [n >= 0] is the last seq held. A negative integer is no
+   position at all. Decoded here once; the handlers and the fold see only the
+   sum type. *)
+let replay_position_of_wire = function
+  | None -> Some Whole_turn
+  | Some raw -> if raw >= 0 then Some (After_seq raw) else None
+;;
+
+let replay_position_to_wire = function
+  | Whole_turn -> None
+  | After_seq seq -> Some seq
+;;
+
+let replay_position_to_string = function
+  | Whole_turn -> "whole_turn"
+  | After_seq seq -> string_of_int seq
+;;
+
+(* A response field cannot be absent the way a request field can, so a
+   response spells the whole turn as [null]. *)
+let replay_position_to_yojson position : Yojson.Safe.t =
+  match replay_position_to_wire position with
+  | None -> `Null
+  | Some seq -> `Int seq
+;;
+
+let replay_position_of_yojson (json : Yojson.Safe.t) =
+  match json with
+  | `Null -> replay_position_of_wire None
+  | `Int raw -> replay_position_of_wire (Some raw)
+  | `Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `String _ -> None
+;;
+
+let seq_is_after position seq =
+  match position with
+  | Whole_turn -> true
+  | After_seq held -> seq > held
+;;
+
+let replay_position_advance position seq =
+  if seq_is_after position seq then After_seq seq else position
+;;
+
+(** {1 Page} *)
+
+type page_start =
+  | From_first_row
+  | From_offset of int
+
+let first_row = From_first_row
+
+let page_start_of_wire = function
+  | None -> Some From_first_row
+  | Some offset -> if offset >= 0 then Some (From_offset offset) else None
+;;
+
+let page_start_to_wire = function
+  | From_first_row -> None
+  | From_offset offset -> Some offset
+;;
+
+let page_start_offset = function
+  | From_first_row -> 0
+  | From_offset offset -> offset
+;;
+
+type page =
+  { events : journaled_event list
+  ; has_more : bool
+  ; next_offset : int
+  }
+
+type cursor_refusal =
+  | Offset_past_rows
+  | Offset_inside_row
+  | Cursor_pair_mismatch
+[@@deriving enumerate]
+
+let cursor_refusal_to_wire = function
+  | Offset_past_rows -> "since_offset_past_rows"
+  | Offset_inside_row -> "since_offset_inside_row"
+  | Cursor_pair_mismatch -> "cursor_mismatch"
+;;
+
+let cursor_refusal_of_wire s = List.find_opt (fun v -> String.equal (cursor_refusal_to_wire v) s) all_of_cursor_refusal
+;;
+
+type cursor_mismatch =
+  | Offset_without_held_seq of int
+  | Row_before_offset_past_held_seq of
+      { offset : int
+      ; since_seq : int
+      ; row_seq : int
+      }
+  | Row_at_offset_not_past_held_seq of
+      { offset : int
+      ; since_seq : int
+      ; row_seq : int
+      }
+
+type page_failure =
+  | Page_offset_past_rows of
+      { offset : int
+      ; rows_end : int
+      }
+  | Page_offset_inside_row of int
+  | Page_cursor_mismatch of cursor_mismatch
+  | Page_limit_not_positive of int
+  | Page_unsupported_version of version_mismatch
+  | Page_corrupt of string
+
+let cursor_mismatch_to_string = function
+  | Offset_without_held_seq offset ->
+    Printf.sprintf
+      "since_offset %d was sent without a since_seq: an offset only places a page \
+       beside the seq the page before handed back"
+      offset
+  | Row_before_offset_past_held_seq { offset; since_seq; row_seq } ->
+    Printf.sprintf
+      "the row before since_offset %d has seq %d, which is already past since_seq \
+       %d: the two cursors did not come from the same page, and the rows between \
+       them would never be served"
+      offset
+      row_seq
+      since_seq
+  | Row_at_offset_not_past_held_seq { offset; since_seq; row_seq } ->
+    Printf.sprintf
+      "the row at since_offset %d has seq %d, which is not after since_seq %d: the \
+       two cursors did not come from the same page"
+      offset
+      row_seq
+      since_seq
+;;
+
+let page_failure_to_string = function
+  | Page_offset_past_rows { offset; rows_end } ->
+    Printf.sprintf
+      "since_offset %d lies past the journal's complete rows, which end at %d"
+      offset
+      rows_end
+  | Page_offset_inside_row offset ->
+    Printf.sprintf "since_offset %d does not start a row" offset
+  | Page_cursor_mismatch mismatch -> cursor_mismatch_to_string mismatch
+  | Page_limit_not_positive limit ->
+    Printf.sprintf "a page of %d rows serves nothing and never advances" limit
+  | Page_corrupt detail -> detail
+  | Page_unsupported_version version -> version_mismatch_to_string version
+;;
+
+let empty_page start = { events = []; has_more = false; next_offset = page_start_offset start }
+
+(* The row that ends at [row_end], skipping blank ones backwards. [row_end] is
+   always just past a ['\n'], so the row before it starts after the previous
+   one. *)
+let rec row_ending_at rows ~row_end =
+  if row_end <= 0
+  then None
+  else (
+    let line_end = row_end - 1 in
+    let row_start =
+      match String.rindex_from_opt rows (line_end - 1) '\n' with
+      | Some newline -> newline + 1
+      | None -> 0
+    in
+    let line = String.sub rows row_start (line_end - row_start) in
+    if String.equal (String.trim line) ""
+    then row_ending_at rows ~row_end:row_start
+    else Some (row_start, line))
+;;
+
+let decode_row_failure ~path ~offset = function
+  | Unsupported_version version -> Page_unsupported_version version
+  | Malformed detail ->
+    Page_corrupt
+      (Printf.sprintf
+         "keeper_chat_event_log: corrupt journal line path=%s offset=%d: %s"
+         path offset detail)
+;;
+
+(* A held offset and a held seq have to be the two halves of one page's answer.
+   The page that handed them out ended on the row before the offset, and seqs
+   increase down the journal, so the row before the offset is at or before the
+   held seq and the row at the offset is past it. An offset ahead of its seq
+   would silently skip the rows between them, which is why both ends are
+   checked. Offset zero is the first row, which places no pair. [row_before]
+   is the nearest non-blank row before the offset, as its start and bytes. *)
+let cursor_pair_failure ~path ~since_seq ~start ~row_before =
+  match start with
+  | From_first_row -> None
+  | From_offset offset when offset <= 0 -> None
+  | From_offset offset ->
+    (match since_seq with
+     | Whole_turn -> Some (Page_cursor_mismatch (Offset_without_held_seq offset))
+     | After_seq held ->
+       (match row_before () with
+        | None -> None
+        | Some (row_start, line) ->
+          (match journaled_event_of_string line with
+           | Error detail -> Some (decode_row_failure ~path ~offset:row_start detail)
+           | Ok (journaled : journaled_event) ->
+             if journaled.seq > held
+             then
+               Some
+                 (Page_cursor_mismatch
+                    (Row_before_offset_past_held_seq
+                       { offset; since_seq = held; row_seq = journaled.seq }))
+             else None)))
+;;
+
+(* The first row served from a held offset lies past the held seq; from the
+   first row nothing is held to compare. *)
+let first_row_failure ~since_seq ~start (journaled : journaled_event) =
+  match start, since_seq with
+  | From_offset offset, After_seq held when offset > 0 && journaled.seq <= held ->
+    Some
+      (Page_cursor_mismatch
+         (Row_at_offset_not_past_held_seq
+            { offset; since_seq = held; row_seq = journaled.seq }))
+  | From_offset _, (After_seq _ | Whole_turn) | From_first_row, (After_seq _ | Whole_turn)
+    ->
+    None
+;;
+
+(* The first non-blank row that starts at or after [position], which need not
+   be a row boundary, as (row start, line end, row end). *)
+let non_blank_row_from rows ~position =
+  let rows_end = String.length rows in
+  let first_start =
+    if position <= 0 || Char.equal rows.[position - 1] '\n'
+    then position
+    else (
+      match String.index_from_opt rows position '\n' with
+      | Some newline -> newline + 1
+      | None -> rows_end)
+  in
+  let rec from row_start =
+    if row_start >= rows_end
+    then None
+    else (
+      let line_end, row_end =
+        match String.index_from_opt rows row_start '\n' with
+        | Some newline -> newline, newline + 1
+        | None -> rows_end, rows_end
+      in
+      let line = String.sub rows row_start (line_end - row_start) in
+      if String.equal (String.trim line) ""
+      then from row_end
+      else Some (row_start, line, row_end))
+  in
+  from first_start
+;;
+
+(* Where a page from the first row starts reading when a seq is held. Skipping
+   to it one row at a time decoded every row at or before the held seq: the
+   TUI resumes a turn it partly holds that way, with no offset, so resuming
+   near the end of a 43,000-row journal decoded nearly all of it to serve a
+   few rows. Seqs increase down the journal, so the byte range is bisected
+   instead, decoding one row per step.
+
+   Rows starting before [low] are at or before the held seq, and rows
+   starting at or after [high] are past it. When the two meet, [low] is the
+   end of the last row at or before the seq, or 0, which is the offset such a
+   page hands back. A probed row that does not decode cannot say which side
+   of the seq it is on, so the bisection stops there and the page reads on
+   from [low] one row at a time: the corrupt row fails the page only if the
+   page reaches it. The rows skipped below [low] are not decoded, as rows
+   before a held offset are not. *)
+let offset_past_held_seq ~held rows =
+  let rec bisect ~low ~high =
+    if low >= high
+    then low
+    else (
+      let middle = low + ((high - low) / 2) in
+      match non_blank_row_from rows ~position:middle with
+      | None -> bisect ~low ~high:middle
+      | Some (row_start, _, _) when row_start >= high -> bisect ~low ~high:middle
+      | Some (row_start, line, row_end) ->
+        (match journaled_event_of_string line with
+         | Error _ -> low
+         | Ok (journaled : journaled_event) ->
+           if journaled.seq > held
+           then bisect ~low ~high:row_start
+           else bisect ~low:row_end ~high))
+  in
+  bisect ~low:0 ~high:(String.length rows)
+;;
+
+(* Rows are decoded one at a time from [start] (from the first row with a held
+   seq, from where [offset_past_held_seq] puts it), and only until the page is
+   full and one more row past [since_seq] has shown whether another page
+   follows. A request used to decode every row of the journal to serve at most
+   [limit] of them, so reading a whole journal page by page decoded it once
+   per page. A corrupt row is found when a page reaches it. A row skipped for
+   lying at or before [since_seq] moves the offset handed back with it: an
+   empty page's two cursors have to be a pair this same reader accepts once
+   the journal grows. *)
+let page_of_rows ~path ~since_seq ~start ~limit rows =
+  let rows_end = String.length rows in
+  let offset = page_start_offset start in
+  if limit < 1
+  then Error (Page_limit_not_positive limit)
+  else if offset > rows_end
+  then Error (Page_offset_past_rows { offset; rows_end })
+  else if offset > 0 && not (Char.equal rows.[offset - 1] '\n')
+  then Error (Page_offset_inside_row offset)
+  else (
+    match
+      cursor_pair_failure ~path ~since_seq ~start ~row_before:(fun () ->
+        row_ending_at rows ~row_end:offset)
+    with
+    | Some failure -> Error failure
+    | None ->
+      let finish ~served ~has_more ~next_offset =
+        Ok { events = List.rev served; has_more; next_offset }
+      in
+      let rec loop ~row_start ~first ~served ~count ~next_offset =
+        if row_start >= rows_end
+        then finish ~served ~has_more:false ~next_offset
+        else (
+          let line_end, row_end =
+            match String.index_from_opt rows row_start '\n' with
+            | Some newline -> newline, newline + 1
+            | None -> rows_end, rows_end
+          in
+          let line = String.sub rows row_start (line_end - row_start) in
+          if String.equal (String.trim line) ""
+          then loop ~row_start:row_end ~first ~served ~count ~next_offset
+          else (
+            match journaled_event_of_string line with
+            | Error detail -> Error (decode_row_failure ~path ~offset:row_start detail)
+            | Ok journaled ->
+              (match
+                 if first then first_row_failure ~since_seq ~start journaled else None
+               with
+               | Some failure -> Error failure
+               | None ->
+                 if not (seq_is_after since_seq journaled.seq)
+                 then
+                   loop
+                     ~row_start:row_end
+                     ~first:false
+                     ~served
+                     ~count
+                     ~next_offset:row_end
+                 else if count >= limit
+                 then finish ~served ~has_more:true ~next_offset
+                 else
+                   loop
+                     ~row_start:row_end
+                     ~first:false
+                     ~served:(journaled :: served)
+                     ~count:(count + 1)
+                     ~next_offset:row_end)))
+      in
+      (match since_seq, offset with
+       | After_seq held, 0 ->
+         let row_start = offset_past_held_seq ~held rows in
+         loop ~row_start ~first:false ~served:[] ~count:0 ~next_offset:row_start
+       | (After_seq _ | Whole_turn), _ ->
+         loop ~row_start:offset ~first:true ~served:[] ~count:0 ~next_offset:offset))
+;;
+
+(* A row that holds something: pages skip blank rows, and the row before an
+   offset is the nearest one that is not blank. *)
+let row_holds_content line = not (String.equal (String.trim line) "")
+
+(* Part of a journal's complete rows, read under its lock: [rows] covers
+   [[window_end - String.length rows, window_end)] and every row in it ends in
+   '\n'; [rows_end] is where the complete rows ended at that read. *)
+type row_window =
+  { previous_row : (int * string) option
+  ; from_starts_row : bool
+  ; rows : string
+  ; window_end : int
+  ; rows_end : int
+  }
+
+let read_row_window ~path ~from ~max_rows =
+  let of_window = function
+    | Fs_compat.Private_jsonl_window.Window_missing -> Error Journal_missing
+    | Fs_compat.Private_jsonl_window.Window_present
+        { previous_row; from_starts_row; rows; window_end; rows_end; end_offset } ->
+      log_torn_tail ~path ~rows_end ~end_offset;
+      Ok { previous_row; from_starts_row; rows; window_end; rows_end }
+  in
+  match
+    Fs_compat.read_private_jsonl_window_locked_result
+      path
+      ~from
+      ~max_rows
+      ~previous_row_wanted:row_holds_content
+  with
+  | Fs_compat.Private_file_succeeded window -> of_window window
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+    log_settlement_failure ~path cleanup_failure;
+    of_window value
+  | Fs_compat.Private_file_failed error ->
+    Error (Journal_unreadable (Fs_compat.Private_jsonl_rows.error_to_string error))
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    log_settlement_failure ~path cleanup_failure;
+    Error (Journal_unreadable (Fs_compat.Private_jsonl_rows.error_to_string error))
+;;
+
+(* [page_of_rows] for a page that does not need the whole journal. The page
+   reads [limit + 1] rows from its offset, and the row before the offset for
+   the cursor check, and reads on only when blank rows or rows at or before
+   [since_seq] used part of that window. The checks, their order and the rows
+   decoded are those of [page_of_rows]; only the bytes read differ, so paging
+   through a journal reads it once instead of once a page. A window read
+   after the first sees the journal as it is then: its complete rows never
+   change, though it may have gained rows at its end, or been pruned, which
+   fails that page as a read failure where a whole read taken earlier would
+   have served it. The window holds one row more than the page serves, which
+   saturates rather than wraps for the largest [limit]. *)
+let page_of_windows ~path ~since_seq ~start ~limit =
+  let offset = page_start_offset start in
+  let window_rows = Int.max 1 (Int.min limit (max_int - 1)) + 1 in
+  let read ~from = read_row_window ~path ~from ~max_rows:window_rows in
+  match read ~from:offset with
+  | Error _ as error -> error
+  | Ok window ->
+    let page_failed failure = Ok (Error failure) in
+    let finish ~served ~has_more ~next_offset =
+      Ok (Ok { events = List.rev served; has_more; next_offset })
+    in
+    if limit < 1
+    then page_failed (Page_limit_not_positive limit)
+    else if offset > window.rows_end
+    then page_failed (Page_offset_past_rows { offset; rows_end = window.rows_end })
+    else if offset > 0 && not window.from_starts_row
+    then page_failed (Page_offset_inside_row offset)
+    else (
+      match
+        cursor_pair_failure ~path ~since_seq ~start ~row_before:(fun () ->
+          window.previous_row)
+      with
+      | Some failure -> page_failed failure
+      | None ->
+        let rec loop window ~row_start ~first ~served ~count ~next_offset =
+          let base = window.window_end - String.length window.rows in
+          if row_start >= window.window_end
+          then
+            if window.window_end >= window.rows_end
+            then finish ~served ~has_more:false ~next_offset
+            else (
+              match read ~from:window.window_end with
+              | Error _ as error -> error
+              | Ok next when String.equal next.rows "" ->
+                finish ~served ~has_more:false ~next_offset
+              | Ok next -> loop next ~row_start ~first ~served ~count ~next_offset)
+          else (
+            let local = row_start - base in
+            let line_end, row_end =
+              match String.index_from_opt window.rows local '\n' with
+              | Some newline -> base + newline, base + newline + 1
+              | None -> window.window_end, window.window_end
+            in
+            let line = String.sub window.rows local (line_end - row_start) in
+            if not (row_holds_content line)
+            then loop window ~row_start:row_end ~first ~served ~count ~next_offset
+            else (
+              match journaled_event_of_string line with
+              | Error detail -> page_failed (decode_row_failure ~path ~offset:row_start detail)
+              | Ok journaled ->
+                (match
+                   if first then first_row_failure ~since_seq ~start journaled else None
+                 with
+                 | Some failure -> page_failed failure
+                 | None ->
+                   if not (seq_is_after since_seq journaled.seq)
+                   then
+                     loop
+                       window
+                       ~row_start:row_end
+                       ~first:false
+                       ~served
+                       ~count
+                       ~next_offset:row_end
+                   else if count >= limit
+                   then finish ~served ~has_more:true ~next_offset
+                   else
+                     loop
+                       window
+                       ~row_start:row_end
+                       ~first:false
+                       ~served:(journaled :: served)
+                       ~count:(count + 1)
+                       ~next_offset:row_end)))
+        in
+        loop window ~row_start:offset ~first:true ~served:[] ~count:0 ~next_offset:offset)
+;;
+
+(* From the first row with a held seq, [page_of_rows] bisects the whole
+   journal to find where the page starts; every other page reads windows. *)
+let read_page_path ~path ~since_seq ~start ~limit =
+  match since_seq, page_start_offset start with
+  | After_seq _, 0 ->
+    Result.map (page_of_rows ~path ~since_seq ~start ~limit) (read_journal_rows_path path)
+  | (After_seq _ | Whole_turn), _ -> page_of_windows ~path ~since_seq ~start ~limit
+;;

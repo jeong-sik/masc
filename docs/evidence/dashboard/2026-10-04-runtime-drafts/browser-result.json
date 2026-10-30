@@ -1,0 +1,41 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "Actual Status/RuntimePanel/router/editor and API decoding with synthetic HTTP. No native/backend/deployment.",
+  "assertions": [
+    "Status navigation unmounts editor",
+    "dirty unload guard survives navigation",
+    "draft and section restored without raw refetch",
+    "late save settles while unmounted",
+    "edits made during save remain dirty",
+    "identical paths keep separate workspace drafts",
+    "changed file on return requires comparison; draft retained",
+    "revision adoption does not write",
+    "next explicit save uses accepted revision and newer text",
+    "withdrawn authority hides the editor without discarding drafts"
+  ],
+  "writes": [
+    {
+      "workspace": "A",
+      "body": {
+        "source_text": "[runtime]\n# workspace A\n# unsaved A\n",
+        "expected_source_revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "workspace": "A",
+      "body": {
+        "source_text": "[runtime]\n# workspace A\n# unsaved A\n# typed while save is pending\n",
+        "expected_source_revision": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    }
+  ],
+  "reads": [
+    "A",
+    "B",
+    "A",
+    "B"
+  ],
+  "errors": [],
+  "unexpected": []
+}

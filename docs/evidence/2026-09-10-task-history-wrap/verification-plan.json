@@ -1,0 +1,11 @@
+{
+  "preview_commit": "4c33e7ceb83660d5dca98f8c9e17e0eb8002e7f0",
+  "preview_ci_run": 34421618393,
+  "preview_artifact_id": 10131127961,
+  "backend_commit": "81066b198c7e04f9bef03d5f2af8882113fffb30",
+  "backend_origin": "http://127.0.0.1:18948",
+  "decision_id": "08e78fb51a43b06ccaad6ccf13fccd7c57e75519ccacbe904f6244bc0648f06e",
+  "harness_path": "scripts/verify-fusion-decision-live-preview.mjs",
+  "harness_source_sha256": "49e831bee8a3cc7d07cefeb74efaeba158e97c23c73d2d4bcd8937af9d204d67",
+  "acceptance": "390px viewport: dialog.scrollWidth <= dialog.clientWidth + 1; same actual decision rendered; no page errors"
+}

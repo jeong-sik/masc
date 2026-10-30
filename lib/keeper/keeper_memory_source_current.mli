@@ -1,0 +1,181 @@
+(** Current memory claims whose truth is bound to one keeper-visible file.
+
+    This store is separate from the existing LLM-selected Memory OS snapshot:
+    only explicit [keeper_memory_write] calls carrying [source_path] enter it.
+    Before a claim is recalled, the source file is read again and its exact
+    bytes are compared with the recorded SHA-256. Changed or unavailable
+    sources become durable invalidations and their old claims are not returned.
+
+    The persisted shape is current-only and closed. A missing file means fresh
+    empty state; no retired shape or alternate store is read. *)
+
+type file_source =
+  { path : string
+  ; sha256 : string
+  }
+
+type revalidation_scope =
+  | All_sources
+  | Selected_sources of file_source list
+      (** Exact path/digest identities admitted by a retrieval query. Other
+          sources remain stored and unverified, including a selected path
+          whose stored digest changed before the lock was acquired. *)
+
+type fact =
+  { claim : string
+  ; first_seen : float
+  ; source : file_source
+  }
+
+type invalidation_reason =
+  | Source_changed
+  | Source_unavailable
+
+type invalidation =
+  { source_path : string
+  ; invalidated_at : float
+  ; reason : invalidation_reason
+  }
+
+type t =
+  { revision : int
+  ; updated_at : float
+  ; trace_id : string
+  ; facts : fact list
+  ; invalidations : invalidation list
+  }
+
+type projection =
+  { snapshot : t option
+  ; facts : fact list
+  ; invalidations : invalidation list
+  ; unverified_paths : string list
+      (** Facts kept this time without a re-read: each one whose file could
+          not be read ([Source_io_failed]); the one whose endpoint did not
+          answer ([Source_endpoint_unanswered]) and every fact after it in
+          the pass, which is not asked. A recall renders them as
+          unverified. This also includes deliberately unselected identities
+          when [revalidate] is called with [Selected_sources]. *)
+  }
+
+(** Why a source file could not be read. All but [Source_io_failed] and
+    [Source_endpoint_unanswered] are the caller's to fix -- the path, not the
+    store, is wrong. Those two are not answers about the source, and
+    revalidation keeps a fact it could not re-read rather than invalidating
+    it. *)
+type source_read_failure =
+  | Source_path_rejected of string
+      (** Empty, or outside the keeper's read boundary; the boundary's own reason. *)
+  | Source_missing
+  | Source_not_a_regular_file
+  | Source_too_large of
+      { actual_bytes : int
+      ; max_bytes : int
+      }
+  | Source_over_limit of { max_bytes : int }
+      (** Read inside a sandbox, which stops one byte past [max_bytes] and so
+          knows the source is larger without knowing by how much. *)
+  | Source_io_failed of string
+      (** This one file could not be read: a host I/O error, a path the
+          endpoint tree cannot name, or the endpoint's
+          [endpoint_source_unreadable_exit]. Other sources may still read. *)
+  | Source_endpoint_unanswered of string
+      (** The endpoint did not finish the read command with one of its
+          declared exits: transport failure, absent guest, timeout, signal.
+          Every further read in the same pass goes to the same endpoint. *)
+
+val source_read_failure_to_string : source_read_failure -> string
+
+(** The command a source read runs on an endpoint-owned tree (microVM,
+    remote): at most [max_bytes] of [path], exiting
+    [endpoint_source_missing_exit] when the path does not exist,
+    [endpoint_source_not_regular_exit] when it is not a regular file and
+    [endpoint_source_unreadable_exit] when reading it fails. *)
+val endpoint_source_argv : path:string -> max_bytes:int -> string list
+
+val endpoint_source_missing_exit : int
+val endpoint_source_not_regular_exit : int
+val endpoint_source_unreadable_exit : int
+
+(** What one run of [endpoint_source_argv] says about the source. [Error]
+    from the run (no declared exit reached) is [Source_endpoint_unanswered];
+    each declared exit is an answer about this one file. *)
+val endpoint_source_read_of_outcome :
+  (Unix.process_status * string, string) result -> (string, source_read_failure) result
+
+type write_error =
+  | Source_read_failed of source_read_failure
+  | Store_write_failed of string
+
+val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
+
+val keeper_id_of_filename : string -> string option
+(** Parse this store's filename suffix without filesystem access. [None] means
+    another filename kind; [Some id] is the exact stem, which may still require
+    keeper-name validation by the discovery owner. *)
+
+val list_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
+(** Every keeper id this store holds a file for, sorted. Read by the deploy
+    preflight: this module's decoder refuses a row carrying an unknown field,
+    so a deploy that changes the shape has to be told before it switches
+    over, and nothing else reads the whole store. *)
+
+val read_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> (t option, string) result
+
+(** Upsert the single current claim for [source_path]. The exact source bytes
+    are read inside this call; callers cannot supply their own digest. A
+    successful replacement clears the pending invalidation for that path.
+
+    [ordinary_facts] is read under the aggregate lock, then the proposed
+    combined rendered facts are checked against the configured commit budget.
+    Over-budget growth is rejected without changing either snapshot; a strict
+    reduction can commit so an already over-budget store can recover. *)
+val upsert_file_fact :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ordinary_facts:(unit -> (Keeper_memory_os_types.fact list, string) result)
+  -> config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> keepers_dir:string
+  -> now:float
+  -> claim:string
+  -> source_path:string
+  -> unit
+  -> (t, write_error) result
+
+(** Re-read current sources in [scope] (default [All_sources]) under the same sandbox resolver used by the
+    write path. Unchanged facts remain current. A source that answered as
+    changed, missing or unusable is atomically removed and replaced by a
+    pending invalidation. One whose file could not be read
+    ([Source_io_failed]) keeps its fact as last verified, and the pass reads
+    the next source. One whose endpoint did not answer
+    ([Source_endpoint_unanswered], e.g. a stopped guest) keeps its fact the
+    same way, and the pass asks no further source: the facts after it are
+    kept unverified too, instead of each waiting out the read timeout under
+    this store's lock. Invalidations
+    survive subsequent turns until [upsert_file_fact] recreates that path.
+    Revalidation takes only the source-store lock: its invalidation rendering
+    is strictly shorter than the fact it replaces, so it cannot overcommit the
+    aggregate byte reservation. Unselected identities are preserved and
+    reported in [unverified_paths], never read or invalidated by this pass. *)
+val revalidate :
+  ?scope:revalidation_scope
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> keepers_dir:string
+  -> now:float
+  -> unit
+  -> (projection, string) result
+
+val render_fact : ?verified:bool -> fact -> string
+(** [~verified:false] marks a fact whose source could not be re-read this
+    turn. *)
+val render_invalidation : invalidation -> string
+
+val budget_lines : t option -> string list
+(** The lines this store adds to the Memory OS facts payload that the commit
+    budget measures: every fact reserved as unverified, then every pending
+    invalidation. *)
+
+val to_json : t -> Yojson.Safe.t

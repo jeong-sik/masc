@@ -1,0 +1,246 @@
+(** Audit Log Writer for MASC.
+
+    Writes immutable audit events to a date-split JSONL store under
+    [<config.masc_dir>/audit/YYYY-MM/DD.jsonl] for security
+    monitoring and post-incident analysis.
+
+    Public surface covers: typed events ({!action} / {!outcome} /
+    {!audit_entry}), wire-format converters, the per-event
+    [log_*] convenience wrappers (each one composes the right
+    [action] + [details] payload before delegating to {!log_action}),
+    plus reader / pruner / stats helpers.
+
+    Internal helpers ([preview], [outcome_to_json]
+    decoders, the [audit_store_cache] and its mutex,
+    [get_audit_store], [collect_entries], [max_logged_errors],
+    [remove_assoc_keys]) are hidden — callers use the typed log
+    helpers and the read / prune / stats accessors only.
+
+    Security basis:
+      - Open Challenges in MAS Security (arxiv:2505.02077v1)
+      - Immutable audit trails for post-incident analysis
+
+    @since 0.6.0 — MASC Social v4 Tier 1 *)
+
+type config = Workspace_utils.config
+
+(** {1 Event types} *)
+
+type outcome =
+  | Success
+  | Failure of string
+[@@deriving tla]
+
+type gate_audit_decision =
+  | Gate_allow
+  | Gate_require_confirmation
+  | Gate_deny
+  | Gate_confirm
+  | Gate_expired
+  | Gate_unauthorized
+  | Gate_other of string
+[@@deriving tla]
+
+type action =
+  | ClaimTask
+  | StartTask
+  | DoneTask
+  | CancelTask
+  | ReleaseTask
+  | Broadcast
+  | Suspend
+  | ToolCall of string
+  | AuthSuccess
+  | AuthFailure
+  | CircuitOpen
+  | CircuitClose
+  | SearchRefinement
+  | GateDecision of gate_audit_decision
+  | RuntimeConfigWrite
+  | Custom of string
+  | Unknown of string
+[@@deriving tla]
+
+type audit_entry = {
+  timestamp : float;
+  agent_id : string;
+  action : action;
+  workspace_id : string option;
+  details : Yojson.Safe.t;
+  outcome : outcome;
+  cost_estimate : float option;
+  token_count : int option;
+  trace_id : string option;
+}
+
+(** {1 Wire-format} *)
+
+(** The directory this store occupies under [.masc]. Readers of the same
+    store name it from here instead of spelling the literal. *)
+val store_dirname : string
+
+val action_to_string : action -> string
+(** Stable serialisation; round-tripped by {!string_to_action}. The
+    parametric variants ([ToolCall] / [GateDecision] /
+    [Custom]) are encoded as ["<tag>:<arg>"]. Unknown wire strings
+    round-trip through [Unknown] without being coerced to [Custom]. *)
+
+val string_to_action : string -> action
+(** Decode a wire-format action string. Unrecognised tags return
+    [Unknown] so callers can distinguish future action variants from
+    explicit [Custom] events. *)
+
+(** {1 Storage} *)
+
+val audit_entry_matches :
+  ?actor:string ->
+  ?kind:string ->
+  ?severity:string ->
+  ?since:float ->
+  ?until:float ->
+  audit_entry ->
+  bool
+(** The audit query filters as one predicate, so a reader and a
+    projection cannot disagree about what was asked for. *)
+
+val read_entries_matching :
+  ?n:int ->
+  ?since:float ->
+  ?until:float ->
+  keep:(audit_entry -> bool) ->
+  config ->
+  audit_entry list
+(** Most-recent [n] entries satisfying [keep]. [n] counts matches,
+    where {!read_entries} counts rows read: the store holds every
+    agent's actions, so a caller that filters afterwards has no
+    window size that means "the newest [n] of mine". Corrupt rows are
+    reported but do not consume the budget. [since]/[until] additionally bound
+    the day files opened; [keep] still decides exact timestamps on edge days. *)
+
+val read_entries : ?n:int -> config -> audit_entry list
+(** Most-recent [n] (default 10000) parsed entries from the
+    date-split store. Malformed lines are logged (capped) and
+    dropped. *)
+
+val append_entry : config -> audit_entry -> unit
+(** Atomic append to today's day-file; creates the directory and
+    file on first call. *)
+
+(** Dashboard severity for an audit entry: ["info"], ["warn"], or ["error"]. *)
+
+val audit_event_json : audit_entry -> Yojson.Safe.t
+(** Project an audit entry into the global audit ledger event shape used by
+    [/api/v1/audit] and live SSE audit events. *)
+
+val audit_events_response_json :
+  ?actor:string ->
+  ?kind:string ->
+  ?severity:string ->
+  ?since:float ->
+  ?until:float ->
+  limit:int ->
+  audit_entry list ->
+  Yojson.Safe.t
+(** Filter and page chronological audit entries, returning
+    [{entries, count}]. Filters are applied before pagination. *)
+
+(** {1 Logging — generic} *)
+
+val log_action :
+  config ->
+  agent_id:string ->
+  action:action ->
+  ?workspace_id:string ->
+  ?details:Yojson.Safe.t ->
+  ?cost_estimate:float ->
+  ?token_count:int ->
+  ?trace_id:string ->
+  outcome:outcome ->
+  unit ->
+  unit
+(** Build an {!audit_entry} stamped with the current time and
+    persist it via {!append_entry}. The [log_*] helpers below all
+    delegate to this. *)
+
+(** {1 Logging — per-action helpers} *)
+
+val log_broadcast :
+  config ->
+  agent_id:string ->
+  message_preview:string ->
+  ?cost_estimate:float ->
+  ?token_count:int ->
+  unit -> unit
+(** Truncates [message_preview] to 100 chars before logging. *)
+
+val log_tool_call :
+  config ->
+  agent_id:string ->
+  tool_name:string ->
+  success:bool ->
+  error_msg:string option ->
+  ?cost_estimate:float ->
+  ?token_count:int ->
+  ?trace_id:string ->
+  unit -> unit
+
+val log_non_public_tool_call :
+  config ->
+  agent_id:string ->
+  tool_name:string ->
+  success:bool ->
+  error_msg:string option ->
+  ?details:Yojson.Safe.t ->
+  ?cost_estimate:float ->
+  ?token_count:int ->
+  ?trace_id:string ->
+  unit -> unit
+(** Records under action [Custom "non_public_tool_call"] with a
+    [surface=non_public] details envelope so dashboards can distinguish
+    explicitly discovered MCP traffic from other registered calls. *)
+
+val log_client_tool_host_failure :
+  config ->
+  agent_id:string ->
+  reported_agent:string ->
+  client_name:string ->
+  tool_name:string ->
+  transport:string ->
+  message:string ->
+  ?phase:string ->
+  ?request_id:string ->
+  ?session_id:string ->
+  ?trace_id:string ->
+  ?timeout_ms:int ->
+  unit -> unit
+(** [agent_id] is the resolved reporting caller. [reported_agent] identifies
+    the agent whose failure was reported and is retained in [details]. *)
+
+val log_gate_decision :
+  config ->
+  agent_id:string ->
+  trace_id:string ->
+  decision:gate_audit_decision ->
+  action_type:string ->
+  confirmation_state:string ->
+  unit -> unit
+
+val write_result_to_json : (unit, string) result -> Yojson.Safe.t
+(** Render the result of an audit write as a two-field JSON receipt.
+    [Ok ()] becomes [{"recorded": true}]; [Error detail] becomes
+    [{"recorded": false, "error": <detail>}] with the detail passed through
+    {!Observability_redact.redact_text}. *)
+
+(** {1 Maintenance} *)
+
+(** {1 Statistics} *)
+
+type stats = {
+  total_entries : int;
+  file_size_bytes : int;
+  oldest_timestamp : float option;
+  newest_timestamp : float option;
+}
+
+val get_stats : config -> stats
+(** [file_size_bytes] is always [0] under the date-split layout. *)

@@ -1,0 +1,127 @@
+(** TypeSafe AI configuration and opt-in control.
+
+    The lane's settings are the [\[typesafeai\]] table of runtime.toml
+    ({!Runtime_schema.typesafeai}), published on load by {!Runtime.set_loaded}
+    into {!Runtime_typesafeai_policy}. Only the keys are read from the
+    environment, because they are secrets: each destination names the
+    variable holding its own. The lane is off until one of the named
+    variables holds a key. *)
+
+type destinations = Typesafeai_client.destination * Typesafeai_client.destination list
+(** The armed destinations, in the order the table names them: each carries
+    the key its variable held. Never empty. *)
+
+type unavailable_reason =
+  | Lane_disabled  (** [\[typesafeai\] enabled = false] *)
+  | No_armed_destination
+      (** none of the variables the destinations name holds a key *)
+  | Absorb_gate_disabled  (** [\[typesafeai\] absorb_gate = false], the default *)
+  | Board_attention_disabled  (** [\[typesafeai\] board_attention = false] *)
+  | Context_review_disabled
+  | Skill_applicability_disabled
+  | Librarian_preflight_disabled
+  | Workspace_memory_selection_disabled
+  | Memory_recall_disabled
+      (** [\[typesafeai\] memory_recall = false], the default, or the keeper is
+          outside the scope the switch names *)
+  | Keeper_excluded
+      (** the keeper is named in [\[typesafeai\] excluded_keepers]: nothing of
+          it reaches the vendor, whichever gate asks *)
+
+val unavailable_reason_to_string : unavailable_reason -> string
+
+val configured_destinations :
+  unit -> Runtime_schema.typesafeai_destination * Runtime_schema.typesafeai_destination list
+(** [\[typesafeai\] destinations] as loaded, credential-free. *)
+
+val unarmed_destinations : unit -> Runtime_schema.typesafeai_destination list
+(** The configured destinations left out of the walk because the variable
+    each names holds no key, while at least one other destination is armed.
+    A misspelt variable name silently turns a reserve route off, so boot
+    reports each. Empty when no destination is armed at all: the lane is then
+    off, which is not a misconfiguration. *)
+
+val lane_destinations : unit -> (destinations, unavailable_reason) result
+(** The lane switch, then the armed destinations: [Error Lane_disabled] when
+    the table turns the lane off, [Error No_armed_destination] when no named
+    variable holds a key. Used by the continuity measurement CLI,
+    independently of any gate. *)
+
+val absorb_gate_destinations : keeper_id:string -> (destinations, unavailable_reason) result
+(** One snapshot for evaluation or its skip reason, in this precedence: the
+    lane switch, the armed destinations, the absorb gate's own switch, then
+    the keeper's exclusion. The lane defaults to on when a key is present; the
+    absorb gate requires explicit opt-in because it sends the librarian's
+    memories to the vendor. *)
+
+val librarian_preflight_destinations : keeper_id:string -> (destinations, unavailable_reason) result
+(** Explicit opt-in for no-change judgment. Keeper exclusions and lane
+    credentials still apply; disabled by default. *)
+
+val workspace_memory_selection_destinations :
+  keeper_id:string -> (destinations, unavailable_reason) result
+(** Independent opt-in for host selection of shared memory. Disabled by default;
+    may send current input, task context, shared interpretations and source
+    details to the configured destinations. Lane, keys and Keeper exclusions
+    still apply. Board or absorption opt-in does not enable this gate. *)
+
+val memory_recall_destinations : keeper_id:string -> (destinations, unavailable_reason) result
+(** Opt-in recall judgment of a keeper's stored facts against the turn's
+    input. Disabled by default. The switch comes with its scope, [All_keepers]
+    or the keepers listed, so a keeper outside the scope gets
+    [Error Memory_recall_disabled] like a switch that is off. Lane, keys and
+    keeper exclusions still apply. *)
+
+val board_attention_destinations : keeper_id:string -> (destinations, unavailable_reason) result
+(** The same for the Board attention judgment
+    ({!Keeper_board_attention_exact_flow}), whose switch defaults to on. *)
+
+val context_review_destinations : keeper_id:string -> (destinations, unavailable_reason) result
+(** Opt-in preservation review of source Context and its proposed summary.
+    Disabled by default; lane, keys and keeper exclusions still apply. *)
+
+val skill_applicability_destinations :
+  keeper_id:string -> (destinations, unavailable_reason) result
+(** Opt-in applicability advice for an already authorized Skill read.
+    Disabled by default; advice does not grant execution permission. *)
+
+val is_enabled : unit -> bool
+(** Whether [\[typesafeai\].enabled] permits use and a named variable holds a
+    key. *)
+
+val is_board_attention_enabled : unit -> bool
+(** {!is_enabled} and [\[typesafeai\].board_attention] does not say
+    otherwise, before any keeper's exclusion. *)
+
+val is_absorb_gate_enabled : unit -> bool
+(** {!is_enabled} and [\[typesafeai\].absorb_gate] says so, before any
+    keeper's exclusion. *)
+
+val is_excluded : keeper_id:string -> bool
+(** The keeper is named in [\[typesafeai\].excluded_keepers]. *)
+
+val board_attention_confidence_floor : unit -> float
+(** [\[typesafeai\].board_attention_confidence_floor]: the confidence at which
+    Jev's Board attention answer settles a candidate without the LLM lane. *)
+
+val unknown_excluded_keepers : known:string list -> string list
+(** The names in [\[typesafeai\].excluded_keepers] that are not in [known],
+    the keepers of the base path: each excludes nobody and is reported at
+    boot. *)
+
+val unknown_memory_recall_keepers : known:string list -> string list
+(** The names in [\[typesafeai\] memory_recall_keepers] that are not in
+    [known], in the order written and each once: each limits recall to nobody
+    by that name and is reported at boot. Empty when recall is off or covers
+    every keeper. *)
+
+type readiness =
+  | Off
+  | Configured of { destinations : Typesafeai_client.destination_id list }
+
+val readiness : unit -> readiness
+(** Credential-free Board attention readiness for operator projections. [Off]
+    covers a disabled Board gate or lane and no armed destination;
+    [Configured] carries the armed destinations in walk order, each as its
+    observation URL and the model id it is asked for, never a key. Two
+    destinations may share a model id, so the URL is what tells them apart. *)

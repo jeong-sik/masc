@@ -1,0 +1,2454 @@
+open Alcotest
+open Schedule_domain
+open Schedule_store
+
+(* Fixture tick for create and modify: the runner's floor tick, below every
+   interval these fixtures declare, so the runner-tick check never refuses one
+   of them. *)
+let runner_tick_sec = 1.0
+
+let schedules_path config =
+  Filename.concat (Workspace_utils.masc_dir config) "schedules.json"
+;;
+
+let json = testable Yojson.Safe.pp Yojson.Safe.equal
+
+(* Most cases here are about what becomes Due, not about what leaves the
+   ledger, so they pass the library's own window. The retention cases below
+   call [Schedule_store.refresh_due] with the window they mean. *)
+let refresh_due config ~now =
+  Schedule_store.refresh_due config ~now
+    ~retention_days:Schedule_store.terminal_schedule_retention_days
+;;
+
+let with_workspace f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = Filename.temp_dir "schedule_store_test" "" in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  f config
+;;
+
+let schedules_recovery_path config = schedules_path config ^ ".last-good"
+
+let human ?display_name id = { id; kind = Human_operator; display_name }
+
+(* This library holds no Keeper queue, so the cases here withdraw nothing.
+   Withdrawing the queued wake is covered through the cancel tool in
+   test_schedule_consumer_dispatch. *)
+let cancel_request config ~schedule_id =
+  match make_cancellation ~cancelled_by:(human "operator") ~reason:"store test cancel" with
+  | Error msg -> fail ("cancellation fixture rejected: " ^ msg)
+  | Ok cancellation ->
+    Schedule_store.cancel_request
+      config
+      ~authority:Operator_authority
+      ~schedule_id
+      ~cancellation
+      ~withdraw_queued_wakes:(fun _request _cancellation -> Ok ())
+;;
+
+let payload_json () =
+  `Assoc
+    [ "kind", `String "consumer.note"
+    ; "body", `Assoc [ "text", `String "ship later" ]
+    ]
+;;
+
+let make_request
+  ?(schedule_id = "sched-1")
+  ?expires_at
+  ?recurrence
+  ()
+  =
+  match
+    create_request ~schedule_id ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
+      ?expires_at ~payload:(payload_json ()) ~source:Operator_request ?recurrence ()
+  with
+  | Ok request -> request
+  | Error msg -> fail msg
+;;
+
+let insert_ok config request =
+  match insert_request config ~runner_tick_sec request with
+  | Ok stored -> stored
+  | Error err -> fail (store_error_to_string err)
+;;
+
+let store_ok label = function
+  | Ok value -> value
+  | Error err -> fail (label ^ ": " ^ store_error_to_string err)
+;;
+
+let current_candidate config ~schedule_id =
+  match get_schedule config ~schedule_id with
+  | Some request -> request
+  | None -> fail "fixture candidate disappeared"
+;;
+
+let start_request ?started_at config ~now ~schedule_id =
+  start_due_candidate ?started_at config ~now
+    ~candidate:(current_candidate config ~schedule_id)
+;;
+
+let check_error label expected = function
+  | Ok _ -> fail (label ^ ": expected error")
+  | Error actual ->
+    check string label (store_error_to_string expected) (store_error_to_string actual)
+;;
+
+let check_status label expected actual =
+  check string label (schedule_status_to_string expected) (schedule_status_to_string actual)
+;;
+
+let find_wake_for_occurrence
+      state
+      ~schedule_instance_id
+      ~schedule_id
+      ~due_at
+      ~payload_digest
+  =
+  List.find_opt
+    (fun (wake : wake_record) ->
+       String.equal wake.schedule_instance_id schedule_instance_id
+       && String.equal wake.schedule_id schedule_id
+       && Float.equal wake.due_at due_at
+       && String.equal wake.payload_digest payload_digest)
+    state.wakes
+;;
+
+let test_insert_persists_and_bumps_version () =
+  with_workspace
+  @@ fun config ->
+  let before = read_state config in
+  let req = make_request () in
+  (match insert_request config ~runner_tick_sec req with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let after = read_state config in
+  check int "version bumped" (before.version + 1) after.version;
+  check int "one schedule" 1 (List.length after.schedules);
+  check_status "stored scheduled" Scheduled (List.hd after.schedules).status
+;;
+
+let test_duplicate_insert_rejected_without_bump () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request () in
+  ignore (insert_ok config req);
+  let before = read_state config in
+  check_error "duplicate" Schedule_already_exists (insert_request config ~runner_tick_sec req);
+  let after = read_state config in
+  check int "version unchanged" before.version after.version
+;;
+
+let test_update_replaces_active_definition_with_fresh_instance () =
+  with_workspace
+  @@ fun config ->
+  let original = make_request ~schedule_id:"modify-1" () in
+  ignore (insert_ok config original);
+  let replacement =
+    { (make_request ~schedule_id:original.schedule_id ()) with due_at = 350.0 }
+  in
+  let before = read_state config in
+  let updated = store_ok "update" (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:100.0 replacement) in
+  let after = read_state config in
+  check string "stable public id" original.schedule_id updated.schedule_id;
+  check bool "fresh instance" false
+    (String.equal original.schedule_instance_id updated.schedule_instance_id);
+  check (float 0.0) "new due time" 350.0 updated.due_at;
+  check_status "replacement starts scheduled" Scheduled updated.status;
+  check int "one atomic version bump" (before.version + 1) after.version;
+  check int "still one schedule" 1 (List.length after.schedules)
+;;
+
+let test_update_accepts_due_but_refuses_terminal_definition () =
+  with_workspace
+  @@ fun config ->
+  let due = make_request ~schedule_id:"modify-due" () in
+  ignore (insert_ok config due);
+  ignore (store_ok "refresh due" (refresh_due config ~now:201.0));
+  let replacement = make_request ~schedule_id:due.schedule_id () in
+  ignore (store_ok "replace due" (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:201.0 replacement));
+  ignore (store_ok "cancel replacement" (cancel_request config ~schedule_id:due.schedule_id));
+  let before = read_state config in
+  (match update_request config ~authority:Operator_authority ~runner_tick_sec ~now:201.0 (make_request ~schedule_id:due.schedule_id ()) with
+   | Error (Transition_refused { schedule_id; current; attempted; last_wake }) ->
+     check string "the refusal names the schedule" due.schedule_id schedule_id;
+     check_status "the refusal reads the stored status" Cancelled current;
+     check string "the refusal names the transition" "modify"
+       (attempted_transition_to_string attempted);
+     check bool "a schedule that never woke has no last wake" true
+       (Option.is_none last_wake)
+   | Ok _ -> fail "terminal update must be refused"
+   | Error err -> fail (store_error_to_string err));
+  check int "refusal does not bump" before.version (read_state config).version
+;;
+
+(* [Schedule_domain.modify_allowed] is the one written rule for which rows
+   accept a modify; the TUI asks it before opening the editor. This pins that
+   the store's own answer is that function for every status the contract
+   names, so the two cannot drift apart again. *)
+let every_status = [ Scheduled; Due; Running; Succeeded; Failed; Cancelled; Expired ]
+
+let test_update_refuses_exactly_where_modify_allowed_says_no () =
+  check (list string) "the list names every status the contract has"
+    (List.sort compare Schedule_contract_values.schedule_status_strings)
+    (List.sort compare (List.map schedule_status_to_string every_status));
+  with_workspace
+  @@ fun config ->
+  let id_of status = "modify-" ^ schedule_status_to_string status in
+  List.iter
+    (fun status -> ignore (insert_ok config (make_request ~schedule_id:(id_of status) ())))
+    every_status;
+  let state = read_state config in
+  let status_for schedule_id =
+    List.find (fun status -> String.equal (id_of status) schedule_id) every_status
+  in
+  let state_json : Yojson.Safe.t =
+    `Assoc
+      [ "version", `Int state.version
+      ; "updated_at", `Float state.updated_at
+      ; ( "schedules"
+        , `List
+            (List.map
+               (fun (request : schedule_request) ->
+                  schedule_request_to_yojson
+                    { request with status = status_for request.schedule_id })
+               state.schedules) )
+      ; "wakes", `List []
+      ]
+  in
+  Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string state_json);
+  List.iter
+    (fun status ->
+       let label = schedule_status_to_string status in
+       match
+         ( modify_allowed status
+         , update_request config ~authority:Operator_authority ~runner_tick_sec ~now:100.0 (make_request ~schedule_id:(id_of status) ()) )
+       with
+       | true, Ok _ -> ()
+       | false, Error (Transition_refused { current; _ }) ->
+         check_status (label ^ ": the refusal reads the stored status") status current
+       | true, Error err ->
+         fail (label ^ ": modify_allowed says yes, store said " ^ store_error_to_string err)
+       | false, Ok _ -> fail (label ^ ": modify_allowed says no, store modified it")
+       | false, Error err ->
+         fail (label ^ ": expected Transition_refused, got " ^ store_error_to_string err))
+    every_status
+;;
+
+(* The TUI's edit form sends a due row's due time back as it read it, and a
+   Keeper editing only the message does the same: that is not a new due time,
+   and refusing it would make a due row uneditable. Moving the due time
+   behind the clock is a new one, and it would fire at once. *)
+let test_update_refuses_only_a_changed_due_time_behind_the_clock () =
+  with_workspace
+  @@ fun config ->
+  let original = make_request ~schedule_id:"modify-past" () in
+  ignore (insert_ok config original);
+  let unchanged = make_request ~schedule_id:original.schedule_id () in
+  ignore
+    (store_ok "the stored due time sent back is accepted"
+       (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:500.0 unchanged));
+  let moved = { (make_request ~schedule_id:original.schedule_id ()) with due_at = 150.0 } in
+  let before = read_state config in
+  (match update_request config ~authority:Operator_authority ~runner_tick_sec ~now:500.9 moved with
+   | Error (Changed_due_already_past { schedule_id; stored_due_at; due_at; now }) ->
+     check string "the refusal names the schedule" original.schedule_id schedule_id;
+     check (float 0.0) "the stored due time" 200.0 stored_due_at;
+     check (float 0.0) "the refused due time" 150.0 due_at;
+     check (float 0.0) "now is the whole second compared" 500.0 now
+   | Ok _ -> fail "a due time moved into the past was accepted"
+   | Error err -> fail (store_error_to_string err));
+  check int "refusal does not bump" before.version (read_state config).version;
+  let future = { (make_request ~schedule_id:original.schedule_id ()) with due_at = 900.0 } in
+  ignore
+    (store_ok "a due time moved into the future is accepted"
+       (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:500.0 future))
+;;
+
+(* A running schedule with no running wake is one of two facts: the wake was
+   never written, or it already finished. The second means the delivery
+   happened, so the error carries that wake. *)
+let test_running_wake_missing_says_whether_the_wake_finished () =
+  with_workspace
+  @@ fun config ->
+  let settled = make_request ~schedule_id:"running-settled" () in
+  let absent = make_request ~schedule_id:"running-absent" () in
+  ignore (insert_ok config settled);
+  ignore (insert_ok config absent);
+  ignore (store_ok "refresh" (refresh_due config ~now:201.0));
+  let settled_dispatch = store_ok "start settled"
+      (start_request config ~now:202.0 ~schedule_id:settled.schedule_id) in
+  let absent_dispatch = store_ok "start absent"
+      (start_request config ~now:202.0 ~schedule_id:absent.schedule_id) in
+  let state = read_state config in
+  let wakes =
+    List.filter_map
+      (fun (wake : Schedule_domain.wake_record) ->
+         if String.equal wake.schedule_id absent.schedule_id
+         then None
+         else if String.equal wake.schedule_id settled.schedule_id
+         then Some { wake with status = Wake_succeeded; finished_at = Some 203.0 }
+         else Some wake)
+      state.wakes
+  in
+  let state_json : Yojson.Safe.t =
+    `Assoc
+      [ "version", `Int state.version
+      ; "updated_at", `Float state.updated_at
+      ; ( "schedules"
+        , `List (List.map Schedule_domain.schedule_request_to_yojson state.schedules) )
+      ; "wakes", `List (List.map Schedule_domain.wake_record_to_yojson wakes)
+      ]
+  in
+  Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string state_json);
+  (match fail_running config ~now:204.0 ~attempt:settled_dispatch.attempt
+      ~failure_scope:Schedule_failure ~error:"x" with
+   | Error (Running_wake_settled { schedule_id; wake }) ->
+     check string "settled names the schedule" settled.schedule_id schedule_id;
+     check string "settled carries the finished wake" "succeeded"
+       (Schedule_domain.wake_status_to_string wake.status)
+   | Ok _ -> fail "a running schedule without a running wake was failed"
+   | Error err -> fail (store_error_to_string err));
+  (match fail_running config ~now:204.0 ~attempt:absent_dispatch.attempt
+      ~failure_scope:Schedule_failure ~error:"x" with
+   | Error (Running_wake_absent { schedule_id }) ->
+     check string "absent names the schedule" absent.schedule_id schedule_id
+   | Ok _ -> fail "a running schedule without any wake was failed"
+   | Error err -> fail (store_error_to_string err));
+  match cancel_matching config ~should_cancel:(fun _ -> true) with
+  | Error (Transition_refused { current = Running; attempted; _ }) ->
+    check string "retiring a consumer is its own attempted transition"
+      "cancel_for_consumer_retirement"
+      (attempted_transition_to_string attempted)
+  | Ok () -> fail "cancel_matching cancelled around a running schedule"
+  | Error err -> fail (store_error_to_string err)
+;;
+
+(* A recurring request keeps its instance id across occurrences, so the
+   ledger holds the finished wakes of occurrences already delivered. A running
+   occurrence whose own wake is missing is absent, not settled by an older
+   occurrence's wake. *)
+let test_a_recurring_occurrence_is_not_settled_by_an_earlier_wake () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request ~schedule_id:"recurring-missing"
+      ~recurrence:(Interval { interval_sec = 60 }) ()
+  in
+  ignore (insert_ok config request);
+  let schedule_id = request.schedule_id in
+  ignore (store_ok "first refresh" (refresh_due config ~now:201.0));
+  let first = store_ok "first start" (start_request config ~now:202.0 ~schedule_id) in
+  let advanced = store_ok "first accept" (accept_running config ~now:203.0 ~attempt:first.attempt ()) in
+  let second_due = advanced.due_at +. 1.0 in
+  ignore (store_ok "second refresh" (refresh_due config ~now:second_due));
+  let second = store_ok "second start" (start_request config ~now:second_due ~schedule_id) in
+  let state = read_state config in
+  let wakes =
+    List.filter
+      (fun (wake : Schedule_domain.wake_record) ->
+         not
+           (String.equal wake.schedule_id schedule_id
+            && Float.equal wake.due_at advanced.due_at))
+      state.wakes
+  in
+  check int "the earlier occurrence's wake stays" 1
+    (List.length
+       (List.filter
+          (fun (wake : Schedule_domain.wake_record) ->
+             String.equal wake.schedule_id schedule_id)
+          wakes));
+  let state_json : Yojson.Safe.t =
+    `Assoc
+      [ "version", `Int state.version
+      ; "updated_at", `Float state.updated_at
+      ; ( "schedules"
+        , `List (List.map Schedule_domain.schedule_request_to_yojson state.schedules) )
+      ; "wakes", `List (List.map Schedule_domain.wake_record_to_yojson wakes)
+      ]
+  in
+  Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string state_json);
+  match fail_running config ~now:(second_due +. 1.0) ~attempt:second.attempt
+      ~failure_scope:Occurrence_failure ~error:"x" with
+  | Error (Running_wake_absent { schedule_id = refused }) ->
+    check string "absent names the schedule" schedule_id refused
+  | Error (Running_wake_settled _) ->
+    fail "an earlier occurrence's wake was read as this occurrence's"
+  | Ok _ -> fail "a running occurrence without its wake was failed"
+  | Error err -> fail (store_error_to_string err)
+;;
+
+let test_update_requires_an_existing_schedule () =
+  with_workspace
+  @@ fun config ->
+  check_error "missing update" Schedule_not_found
+    (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:100.0 (make_request ~schedule_id:"missing" ()))
+;;
+
+let test_store_rejects_non_scheduled_initial_status () =
+  with_workspace
+  @@ fun config ->
+  let req = { (make_request ()) with status = Due } in
+  match insert_request config ~runner_tick_sec req with
+  | Ok _ -> fail "expected invalid initial status"
+  | Error (Invalid_initial_status _) -> ()
+  | Error err -> fail (store_error_to_string err)
+;;
+
+let test_cancel_request_marks_cancelled () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"cancel-1" () in
+  ignore (insert_ok config req);
+  (match cancel_request config ~schedule_id:req.schedule_id with
+   | Ok updated -> check_status "cancelled status" Cancelled updated.status
+   | Error err -> fail (store_error_to_string err));
+  match get_schedule config ~schedule_id:req.schedule_id with
+  | Some stored -> check_status "stored cancelled" Cancelled stored.status
+  | None -> fail "schedule missing"
+;;
+
+(* task-370 follow-up: the durable store previously treated [Wake_running]
+   rows of a Running schedule as terminal-toward-prune once the schedule
+   itself became Cancelled or any non-{Scheduled,Due,Running} status, so
+   they could not be settled by the runner that owned them. The repair
+   in [prune_wakes] now asks the live schedule set whether the wake still
+   has a runner that can settle it; this regression pins both directions:
+   a Running schedule's in-flight wake is kept live, and a Due-only
+   schedule's cancel still leaves the (empty) wake list clean. *)
+let test_running_wake_is_settleable_so_prune_keeps_it () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"running-stale" () in
+  ignore (insert_ok config req);
+  (match refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match start_request config ~now:202.0 ~schedule_id:req.schedule_id with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let after_start = read_state config in
+  let running_count =
+    List.length
+      (List.filter
+         (fun (w : Schedule_domain.wake_record) ->
+            String.equal w.schedule_id req.schedule_id
+            && Schedule_domain.(match w.status with Wake_running -> true | _ -> false))
+         after_start.wakes)
+  in
+  check int "running wake present" 1 running_count;
+  (* Trying to cancel a Running schedule must refuse -- a runner owns the
+     wake, and the store must not orphan it under the runner. *)
+  (match cancel_request config ~schedule_id:req.schedule_id with
+   | Error
+       (Transition_refused
+          { current = Running
+          ; attempted = Cancel_schedule
+          ; last_wake = Some { status = Wake_running; _ }
+          ; schedule_id = _
+          }) -> ()
+   | Ok _ -> fail "cancel of Running schedule must be refused"
+   | Error err -> fail (store_error_to_string err));
+  let after_cancel_refused = read_state config in
+  let still_running =
+    List.exists
+      (fun (w : Schedule_domain.wake_record) ->
+         String.equal w.schedule_id req.schedule_id
+         && Schedule_domain.(match w.status with Wake_running -> true | _ -> false))
+      after_cancel_refused.wakes
+  in
+  check bool "running wake survived refused cancel" true still_running
+;;
+
+(* Disposition of legacy in-flight rows (task-1198): the live cancel paths
+   never meet a [Wake_running] row, because a Running schedule refuses
+   cancel in both [cancel_request] and [cancel_matching] -- so the retained
+   rows observed live (17 cancelled schedules holding awaiting_ack
+   occurrence receipts up to 22.8 days, all recurring) were written by older
+   builds. This reproduces exactly that ledger shape directly -- a Cancelled
+   schedule with a still-[Wake_running] row -- and checks the next store
+   mutation pass disposes it: [prune_wakes] transitions the row to terminal
+   with the sweep origin, instead of dropping it as the old code did. *)
+let test_legacy_running_wake_against_cancelled_schedule_is_disposed_by_sweep () =
+  with_workspace
+  @@ fun config ->
+  let legacy_id = "legacy-cancelled-with-running-wake" in
+  let req = make_request ~schedule_id:legacy_id ~recurrence:(Interval { interval_sec = 60 }) () in
+  ignore (insert_ok config req);
+  (* Land the schedule in Cancelled the honest way, then rewrite the ledger
+     with an in-flight wake row for it -- the exact shape older builds left
+     behind on this workspace's live ledger. *)
+  (match cancel_request config ~schedule_id:legacy_id with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let state = read_state config in
+  let legacy_wake =
+    { schedule_instance_id = legacy_id ^ ".legacy"
+    ; schedule_id = legacy_id
+    ; attempt_identity = Unidentified
+    ; settlement_kind = None
+    ; started_at = 100.0
+    ; finished_at = None
+    ; due_at = 100.0
+    ; payload_digest = "digest-" ^ legacy_id
+    ; status = Wake_running
+    ; detail = Some (`String "receipt-must-survive-disposition")
+    ; error = None
+    }
+  in
+  let legacy_state = { state with wakes = legacy_wake :: state.wakes } in
+  let legacy_state_json : Yojson.Safe.t =
+    `Assoc
+      [ ("version", `Int legacy_state.version)
+      ; ("updated_at", `Float legacy_state.updated_at)
+      ; ("schedules", `List (List.map Schedule_domain.schedule_request_to_yojson legacy_state.schedules))
+      ; ("wakes", `List (List.map Schedule_domain.wake_record_to_yojson legacy_state.wakes))
+      ]
+  in  Workspace_core.write_text config
+    (schedules_path config)
+    (Yojson.Safe.to_string legacy_state_json);
+  (* A different schedule's cancel forces a store write pass; the sweep in
+     [prune_wakes] must dispose the legacy row (transition, not drop). *)
+  let other_id = "other-schedule-to-force-sweep" in
+  let other = make_request ~schedule_id:other_id () in
+  ignore (insert_ok config other);
+  (match cancel_request config ~schedule_id:other_id with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let after = read_state config in
+  match
+    List.find_opt
+      (fun (w : Schedule_domain.wake_record) ->
+         String.equal w.schedule_id legacy_id)
+      after.wakes
+  with
+  | None -> Alcotest.fail "legacy running wake was dropped instead of disposed"
+  | Some w ->
+    (match w.status with
+     | Wake_running -> Alcotest.fail "legacy wake still running after sweep"
+     | Wake_succeeded | Wake_failed ->
+       check string
+         "sweep disposition origin is asserted verbatim"
+         "schedule left running; wake disposed at store sweep"
+         (Option.value ~default:"" w.error);
+       check bool
+         "receipt detail survives disposition"
+         true
+         (match w.detail with
+          | Some (`String s) -> String.equal s "receipt-must-survive-disposition"
+          | _ -> false))
+;;
+
+let test_due_candidates_dispatch_without_scheduler_authorization_state () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request () in
+  ignore (insert_ok config req);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "scheduled became due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  let candidates = due_wake_candidates (read_state config) in
+  check int "one due candidate" 1 (List.length candidates)
+;;
+
+let test_due_candidate_starts_without_authorization_state () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"due-1" () in
+  ignore (insert_ok config req);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "request due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  check int "due candidate" 1
+    (List.length (due_wake_candidates (read_state config)))
+;;
+
+let test_refresh_due_expires_scheduled_and_due () =
+  with_workspace
+  @@ fun config ->
+  let scheduled =
+    make_request ~schedule_id:"expire-scheduled" ~expires_at:150.0 ()
+  in
+  let due =
+    make_request ~schedule_id:"expire-due" ~expires_at:250.0 ()
+  in
+  ignore (insert_ok config scheduled);
+  ignore (insert_ok config due);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "scheduled expired and due marked" 2 changed
+   | Error err -> fail (store_error_to_string err));
+  (match refresh_due config ~now:251.0 with
+   | Ok (_, changed) -> check int "due expired" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  (match
+     get_schedule config ~schedule_id:"expire-scheduled",
+     get_schedule config ~schedule_id:"expire-due"
+   with
+   | Some scheduled, Some due ->
+     check_status "scheduled expired" Expired scheduled.status;
+     check_status "due expired" Expired due.status;
+     check int "expired schedules are not due candidates" 0
+       (List.length (due_wake_candidates (read_state config)))
+   | _ -> fail "expired schedules missing")
+;;
+
+let test_reschedule_due_recurring_advances_only_matching_recurring_rows () =
+  with_workspace
+  @@ fun config ->
+  let recurring =
+    make_request ~schedule_id:"loop-1"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  let one_shot = make_request ~schedule_id:"once-1" () in
+  ignore (insert_ok config recurring);
+  ignore (insert_ok config one_shot);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "both due" 2 changed
+   | Error err -> fail (store_error_to_string err));
+  (match
+     reschedule_due_recurring config ~now:201.0
+       ~schedule_ids:[ "loop-1"; "once-1"; "missing" ]
+   with
+   | Error err -> fail (store_error_to_string err)
+   | Ok (_, changed) -> check int "one rescheduled" 1 changed);
+  match
+    get_schedule config ~schedule_id:"loop-1",
+    get_schedule config ~schedule_id:"once-1"
+  with
+  | Some loop, Some once ->
+    check_status "loop scheduled" Scheduled loop.status;
+    check (float 0.001) "loop next due" 260.0 loop.due_at;
+    check_status "one-shot left due" Due once.status
+  | _ -> fail "schedules missing"
+;;
+
+let test_reschedule_due_cron_advances_to_next_match () =
+  with_workspace
+  @@ fun config ->
+  let cron =
+    make_request ~schedule_id:"cron-1"
+      ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "UTC" })
+      ()
+  in
+  let cron = { cron with due_at = 32400.0 } in
+  ignore (insert_ok config cron);
+  (match refresh_due config ~now:32401.0 with
+   | Ok (_, changed) -> check int "cron due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  (match reschedule_due_recurring config ~now:32401.0 ~schedule_ids:[ "cron-1" ] with
+   | Error err -> fail (store_error_to_string err)
+   | Ok (_, changed) -> check int "cron rescheduled" 1 changed);
+  match get_schedule config ~schedule_id:"cron-1" with
+  | Some stored ->
+    check_status "cron scheduled" Scheduled stored.status;
+    check (float 0.001) "cron next due" 118800.0 stored.due_at
+  | None -> fail "cron schedule missing"
+;;
+
+let test_recovers_from_last_good () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request () in
+  ignore (insert_ok config req);
+  Workspace_core.write_text config (schedules_path config) "{not json";
+  let recovered = read_state config in
+  check int "recovered schedule" 1 (List.length recovered.schedules)
+;;
+
+let recovery_path config = schedules_path config ^ ".last-good"
+
+(* Corrupt both the primary and the .last-good recovery file. After [insert_ok],
+   [write_state] has produced a parseable .last-good, so we overwrite both files
+   with non-JSON to simulate out-of-band corruption (e.g. partial write / schema
+   evolution). *)
+let corrupt_both config =
+  Workspace_core.write_text config (schedules_path config) "{not json";
+  Workspace_core.write_text config (recovery_path config) "}also not json"
+;;
+
+(* Remove the primary ledger while leaving the .last-good mirror alone, the way an
+   out-of-band deletion does (rm, partial rsync, a cleanup script). *)
+let delete_primary config =
+  Workspace_core.delete_path config (schedules_path config);
+  check bool "primary ledger removed" false
+    (Workspace_utils.path_exists config (schedules_path config))
+;;
+
+let test_startup_recovery_returns_only_running_schedule_to_due () =
+  with_workspace
+  @@ fun config ->
+  let interrupted = make_request ~schedule_id:"interrupted" () in
+  let untouched = make_request ~schedule_id:"untouched" () in
+  ignore (insert_ok config interrupted);
+  ignore (insert_ok config untouched);
+  (match refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  (match start_request config ~now:202.0 ~schedule_id:interrupted.schedule_id with
+   | Ok running -> check_status "interrupted is running" Running running.request.status
+   | Error err -> fail (store_error_to_string err));
+  let reason = Interrupted_by_process_restart in
+  (match recover_running_on_startup config ~now:203.0 with
+   | Ok (_, recovered) -> check int "one interrupted schedule recovered" 1 recovered
+   | Error err -> fail (store_error_to_string err));
+  (match
+     get_schedule config ~schedule_id:interrupted.schedule_id,
+     get_schedule config ~schedule_id:untouched.schedule_id
+   with
+   | Some recovered, Some untouched ->
+     check_status "interrupted returned to due" Due recovered.status;
+     check_status "other due schedule untouched" Due untouched.status
+   | _ -> fail "startup recovery schedules missing");
+  (match last_wake_for_schedule_instance (read_state config)
+           ~schedule_instance_id:interrupted.schedule_instance_id
+           ~schedule_id:interrupted.schedule_id with
+   | Some wake ->
+     check string "interrupted attempt failed" "failed"
+       (wake_status_to_string wake.status);
+     check (option string) "typed restart reason serialized"
+       (Some (running_recovery_reason_to_string reason))
+       wake.error
+   | None -> fail "interrupted wake evidence missing");
+  let before_repeat = read_state config in
+  (match recover_running_on_startup config ~now:204.0 with
+   | Ok (_, recovered) -> check int "recovery is idempotent" 0 recovered
+   | Error err -> fail (store_error_to_string err));
+  check int "idempotent recovery does not rewrite state"
+    before_repeat.version
+    (read_state config).version
+;;
+
+let test_startup_recovery_uses_exact_occurrence_across_clock_rollback () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    make_request
+      ~schedule_id:"clock-rollback"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config request);
+  ignore (refresh_due config ~now:201.0);
+  let first = store_ok "first start" (start_request config ~now:300.0 ~schedule_id:request.schedule_id) in
+  let advanced =
+    match accept_running config ~now:301.0 ~attempt:first.attempt () with
+    | Ok stored -> stored
+    | Error err -> fail (store_error_to_string err)
+  in
+  check_status "older wake was delivered" Scheduled advanced.status;
+  ignore (refresh_due config ~now:advanced.due_at);
+  let current =
+    match start_request config ~now:100.0 ~schedule_id:request.schedule_id with
+    | Ok stored -> stored
+    | Error err -> fail (store_error_to_string err)
+  in
+  check_status "clock-rollback occurrence is running" Running current.request.status;
+  (match recover_running_on_startup config ~now:101.0 with
+   | Ok (_, recovered) ->
+     check int "exact current occurrence recovered" 1 recovered
+   | Error err -> fail (store_error_to_string err));
+  let state = read_state config in
+  (match get_schedule config ~schedule_id:request.schedule_id with
+   | Some stored -> check_status "current occurrence returned to due" Due stored.status
+   | None -> fail "clock-rollback schedule missing");
+  let digest = payload_digest request.payload in
+  (match
+     find_wake_for_occurrence
+       state
+       ~schedule_instance_id:request.schedule_instance_id
+       ~schedule_id:request.schedule_id
+       ~due_at:advanced.due_at
+       ~payload_digest:digest
+   with
+   | Some wake ->
+     check string "newer prepended occurrence failed" "failed"
+       (wake_status_to_string wake.status)
+   | None -> fail "current clock-rollback wake missing");
+  match
+    find_wake_for_occurrence
+      state
+      ~schedule_instance_id:request.schedule_instance_id
+      ~schedule_id:request.schedule_id
+      ~due_at:request.due_at
+      ~payload_digest:digest
+  with
+  | Some wake ->
+    check string "older wake receipt remains succeeded" "succeeded"
+      (wake_status_to_string wake.status)
+  | None -> fail "older wake receipt missing"
+;;
+
+let test_startup_recovery_refuses_corrupt_ledger () =
+  with_workspace
+  @@ fun config ->
+  let request = make_request ~schedule_id:"corrupt-recovery" () in
+  ignore (insert_ok config request);
+  corrupt_both config;
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let recovery_before = Workspace_core.read_text config (recovery_path config) in
+  (match
+     recover_running_on_startup config ~now:203.0
+   with
+   | Error (Corrupt_ledger _) -> ()
+   | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err)
+   | Ok _ -> fail "startup recovery silently replaced corrupt ledger");
+  check string "corrupt primary preserved" primary_before
+    (Workspace_core.read_text config (schedules_path config));
+  check string "corrupt recovery preserved" recovery_before
+    (Workspace_core.read_text config (recovery_path config))
+;;
+
+let test_read_empty_when_file_absent () =
+  with_workspace
+  @@ fun config ->
+  (* A pristine workspace has no schedules.json yet. *)
+  let state =
+    match read_state_result config with
+    | Ok state -> state
+    | Error error -> fail (read_error_to_string error)
+  in
+  check int "fresh store has no schedules" 0 (List.length state.schedules);
+  check int "fresh store has no wakes" 0 (List.length state.wakes)
+;;
+
+let test_read_observation_preserves_source_without_repairing () =
+  with_workspace @@ fun config ->
+  let observe expected_source expected_count =
+    match read_state_observed config with
+    | Ok (state, source) ->
+      check bool "exact read source" true (source = expected_source);
+      check int "observed schedules" expected_count (List.length state.schedules)
+    | Error error -> fail (read_error_to_string error)
+  in
+  observe Uninitialized 0;
+  ignore (insert_ok config (make_request ()));
+  observe Primary_ledger 1;
+  Workspace_core.write_text config (schedules_path config) "{unreadable primary";
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let mirror_before = Workspace_core.read_text config (recovery_path config) in
+  observe (Recovery_mirror Primary_unusable) 1;
+  check string "observation does not repair primary" primary_before
+    (Workspace_core.read_text config (schedules_path config));
+  check string "observation preserves mirror" mirror_before
+    (Workspace_core.read_text config (recovery_path config));
+  delete_primary config;
+  observe (Recovery_mirror Primary_missing) 1;
+  check bool "observation does not recreate primary" false
+    (Workspace_utils.path_exists config (schedules_path config));
+  corrupt_both config;
+  match read_state_observed config with
+  | Error (Corrupt_read_ledger _) -> ()
+  | Ok _ -> fail "unreadable store became an observed empty ledger"
+;;
+
+let test_start_and_accept_persist_wake_record () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"exec-1" () in
+  ignore (insert_ok config req);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "became due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  let started = store_ok "start" (start_request config ~now:202.0 ~schedule_id:req.schedule_id) in
+  check_status "running" Running started.request.status;
+  let running_state = read_state config in
+  check int "one wake" 1 (List.length running_state.wakes);
+  let wake = List.hd running_state.wakes in
+  check string "wake status" "running"
+    (wake_status_to_string wake.status);
+  check string "wake schedule" req.schedule_id wake.schedule_id;
+  check (float 0.001) "started at" 202.0 wake.started_at;
+  check (float 0.001) "wake due" 200.0 wake.due_at;
+  check string "payload digest" (payload_digest req.payload)
+    wake.payload_digest;
+  (match
+     accept_running config ~now:203.0 ~attempt:started.attempt
+       ~detail:(`Assoc [ "kind", `String "test.done" ])
+       ()
+   with
+   | Ok stored -> check_status "succeeded" Succeeded stored.status
+   | Error err -> fail (store_error_to_string err));
+  let completed_state = read_state config in
+  match
+    last_wake_for_schedule_instance completed_state
+      ~schedule_instance_id:req.schedule_instance_id
+      ~schedule_id:req.schedule_id
+  with
+  | None -> fail "missing completed wake"
+  | Some completed ->
+    check string "completed status" "succeeded"
+      (wake_status_to_string completed.status);
+    check (option (float 0.001)) "finished at" (Some 203.0)
+      completed.finished_at;
+    (match completed.detail with
+     | Some (`Assoc fields) ->
+       (match List.assoc_opt "kind" fields with
+        | Some (`String kind) -> check string "detail kind" "test.done" kind
+        | _ -> fail "detail kind missing")
+     | _ -> fail "detail missing")
+;;
+
+let test_accept_running_completes_wake_receipt () =
+  with_workspace
+  @@ fun config ->
+  let request = make_request ~schedule_id:"accepted-1" () in
+  ignore (insert_ok config request);
+  (match refresh_due config ~now:201.0 with
+   | Ok _ -> ()
+   | Error err -> fail (store_error_to_string err));
+  let started = store_ok "start" (start_request config ~now:202.0 ~schedule_id:request.schedule_id) in
+  (match
+     accept_running config ~now:203.0 ~attempt:started.attempt
+       ~detail:(`Assoc [ "kind", `String "consumer.accepted" ])
+       ()
+   with
+   | Ok stored -> check_status "one-shot wake completed" Succeeded stored.status
+   | Error err -> fail (store_error_to_string err));
+  (match
+     last_wake_for_schedule_instance
+       (read_state config)
+       ~schedule_instance_id:request.schedule_instance_id
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "accepted wake missing"
+   | Some wake ->
+     check string "wake delivery succeeded" "succeeded"
+       (wake_status_to_string wake.status);
+     check (option (float 0.001)) "wake receipt is finished" (Some 203.0)
+       wake.finished_at);
+  (match recover_running_on_startup config ~now:204.0 with
+   | Ok (_, recovered) ->
+     check int "accepted work is not redispatched after restart" 0 recovered
+   | Error err -> fail (store_error_to_string err))
+;;
+
+let test_accept_running_keeps_backend_commit_when_local_mirror_fails () =
+  with_workspace
+  @@ fun filesystem ->
+  let memory = { filesystem with Workspace_utils.backend =
+    Workspace_utils.Memory (Backend.Memory.create ()) } in
+  let request = insert_ok memory (make_request ~schedule_id:"accepted-with-stale-local-mirror" ()) in
+  ignore (store_ok "mark due" (refresh_due memory ~now:201.0));
+  let started = store_ok "start due" (start_request memory ~now:202.0
+    ~schedule_id:request.schedule_id) in
+  let local_path = schedules_path memory in
+  let local_before = Fs_compat.load_file local_path in
+  (* The canonical Memory writer commits its backend before trying this local
+     atomic file. A directory rejects that file's rename even for a privileged
+     test process, without blocking the authoritative backend mutation. *)
+  let previous_local = local_path ^ ".before-acceptance" in
+  Unix.rename local_path previous_local;
+  Unix.mkdir local_path 0o755;
+  let detail = `Assoc [ "kind", `String "consumer.accepted" ] in
+  let accepted = accept_running memory ~now:203.0 ~finished_at:204.0
+      ~attempt:started.attempt ~detail () in
+  check bool "the canonical local mirror target still rejects file replacement" true
+    (Sys.is_directory local_path);
+  check string "the pre-acceptance local mirror bytes are preserved"
+    local_before (Fs_compat.load_file previous_local);
+  (* Memory reads bypass the file-version cache and fetch the authoritative
+     backend while the canonical local mirror target is still unreadable. *)
+  let reread = read_state memory in
+  (match List.find_opt (fun (stored : schedule_request) ->
+       String.equal stored.schedule_id request.schedule_id) reread.schedules with
+   | Some stored -> check_status "backend reread retains completion" Succeeded stored.status
+   | None -> fail "authoritative backend lost its accepted schedule");
+  (match last_wake_for_schedule_instance reread
+      ~schedule_instance_id:request.schedule_instance_id ~schedule_id:request.schedule_id with
+   | Some wake ->
+     check bool "backend wake completed" true (wake.status = Wake_succeeded);
+     check (option (float 0.001)) "original finish time remains committed" (Some 204.0)
+       wake.finished_at;
+     check (option json) "acceptance detail remains committed" (Some detail) wake.detail
+   | None -> fail "backend wake disappeared after acceptance");
+  let stored = store_ok "committed acceptance survives the local mirror failure" accepted in
+  check_status "caller observes committed acceptance" Succeeded stored.status
+;;
+
+let write_attempt_fixture config (state : Schedule_store.state) =
+  let json = `Assoc
+    [ "version", `Int state.version; "updated_at", `Float state.updated_at
+    ; "schedules", `List (List.map schedule_request_to_yojson state.schedules)
+    ; "wakes", `List (List.map wake_record_to_yojson state.wakes)
+    ; "notes", `List (List.map schedule_note_to_yojson state.notes) ] in
+  Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string json)
+;;
+
+let attempt_fixture ?recurrence config schedule_id =
+  let candidate = insert_ok config (make_request ~schedule_id ?recurrence ()) in
+  ignore (store_ok "mark due" (refresh_due config ~now:201.0));
+  let started = store_ok "start identified attempt"
+      (start_due_candidate config ~now:202.0 ~candidate) in
+  candidate, started
+;;
+
+let attempt_id_of_latest config (request : schedule_request) =
+  match last_wake_for_schedule_instance (read_state config)
+      ~schedule_instance_id:request.schedule_instance_id ~schedule_id:request.schedule_id with
+  | Some { attempt_identity = Identified id; _ } -> wake_attempt_id_to_string id
+  | Some { attempt_identity = Unidentified; _ } -> fail "new attempt is unidentified"
+  | None -> fail "new attempt has no wake"
+;;
+
+let expect_superseded = function
+  | Error (Running_attempt_superseded _) -> ()
+  | Error error -> fail ("expected supersession, got " ^ store_error_to_string error)
+  | Ok _ -> fail "stale attempt retained settlement authority"
+;;
+
+let test_same_clock_attempts_fence_all_old_settlements () =
+  with_workspace @@ fun config ->
+  let candidate, first = attempt_fixture config "same-clock-attempts" in
+  let first_id = attempt_id_of_latest config candidate in
+  let reason = Retryable_dispatch_failure "first refusal" in
+  ignore (store_ok "settle first as retry"
+    (retry_running config ~now:203.0 ~attempt:first.attempt ~reason));
+  let second = store_ok "start same occurrence at same clock"
+      (start_due_candidate config ~now:202.0 ~candidate) in
+  check bool "same occurrence and same clock still have distinct persisted ids" false
+    (String.equal first_id (attempt_id_of_latest config candidate));
+  let before = Workspace_core.read_text config (schedules_path config) in
+  expect_superseded (accept_running config ~now:203.0 ~attempt:first.attempt ());
+  expect_superseded (fail_running config ~now:203.0 ~attempt:first.attempt
+    ~failure_scope:Schedule_failure ~error:"stale failure");
+  expect_superseded (retry_running config ~now:203.0 ~attempt:first.attempt ~reason);
+  check string "stale accept/fail/retry leave the newer Running attempt untouched"
+    before (Workspace_core.read_text config (schedules_path config));
+  ignore (insert_ok config (make_request ~schedule_id:"unrelated-mutation" ()));
+  let detail = `Assoc [ "accepted", `Bool true ] in
+  ignore (store_ok "unrelated ledger mutation does not revoke the exact attempt"
+    (accept_running config ~now:203.0 ~finished_at:204.0 ~attempt:second.attempt ~detail ()));
+  let settled = Workspace_core.read_text config (schedules_path config) in
+  ignore (store_ok "same accept is idempotent"
+    (accept_running config ~now:203.0 ~finished_at:999.0 ~attempt:second.attempt
+      ~detail ()));
+  check string "repeat accept preserves original timestamp, details and version"
+    settled (Workspace_core.read_text config (schedules_path config));
+  expect_superseded (accept_running config ~now:203.0 ~attempt:second.attempt
+    ~detail:(`String "a different receipt is not the same committed verdict") ());
+  expect_superseded (retry_running config ~now:203.0 ~attempt:second.attempt ~reason)
+;;
+
+let test_repeated_failed_verdicts_preserve_exact_receipts () =
+  List.iter (fun verdict -> with_workspace @@ fun config ->
+    let _, started = attempt_fixture ~recurrence:(Interval { interval_sec = 60 })
+        config "repeat-failed-verdict" in
+    let settle finished_at = match verdict with
+      | `Retry -> retry_running config ~now:203.0 ~finished_at ~attempt:started.attempt
+          ~reason:(Retryable_dispatch_failure "not delivered")
+      | `Occurrence -> fail_running config ~now:203.0 ~finished_at ~attempt:started.attempt
+          ~failure_scope:Occurrence_failure ~error:"occurrence refused"
+      | `Schedule -> fail_running config ~now:203.0 ~finished_at ~attempt:started.attempt
+          ~failure_scope:Schedule_failure ~error:"definition refused" in
+    ignore (store_ok "first verdict" (settle 204.0));
+    let before = Workspace_core.read_text config (schedules_path config) in
+    ignore (store_ok "same exact verdict" (settle 999.0));
+    check string "repeat verdict does not rewrite the old receipt or row" before
+      (Workspace_core.read_text config (schedules_path config)))
+    [ `Retry; `Occurrence; `Schedule ]
+;;
+
+let test_terminal_attempt_requires_typed_exact_verdict () =
+  List.iter (fun kind -> with_workspace @@ fun config ->
+    let _, started = attempt_fixture config "terminal-evidence" in
+    ignore (store_ok "accept" (accept_running config ~now:203.0 ~attempt:started.attempt ()));
+    let state = read_state config in
+    write_attempt_fixture config { state with wakes = List.map
+      (fun (wake : wake_record) -> { wake with settlement_kind = kind }) state.wakes };
+    let before = Workspace_core.read_text config (schedules_path config) in
+    (match accept_running config ~now:203.0 ~attempt:started.attempt () with
+     | Error (Running_attempt_unavailable _) -> ()
+     | Error error -> fail (store_error_to_string error)
+     | Ok _ -> fail "untyped or contradictory receipt approved a fenced replay");
+    check string "missing or contradictory verdict has no write" before
+      (Workspace_core.read_text config (schedules_path config))) [ None; Some Retryable_failure ];
+  with_workspace @@ fun config ->
+  let _, started = attempt_fixture config "different-failure-scope" in
+  ignore (store_ok "reject definition"
+    (fail_running config ~now:203.0 ~attempt:started.attempt
+      ~failure_scope:Schedule_failure ~error:"same text"));
+  let before = Workspace_core.read_text config (schedules_path config) in
+  expect_superseded (fail_running config ~now:203.0 ~attempt:started.attempt
+    ~failure_scope:Occurrence_failure ~error:"same text");
+  check string "identical one-shot status and error do not disguise a different scope"
+    before (Workspace_core.read_text config (schedules_path config))
+;;
+
+let test_stale_candidates_and_later_occurrences_are_fenced () =
+  with_workspace @@ fun config ->
+  let original = insert_ok config (make_request ~schedule_id:"candidate-replaced"
+      ~recurrence:(Interval { interval_sec = 60 }) ()) in
+  ignore (store_ok "original due" (refresh_due config ~now:201.0));
+  let replacement = make_request ~schedule_id:original.schedule_id
+      ~recurrence:(Interval { interval_sec = 60 }) () in
+  let replacement = store_ok "replace definition"
+      (update_request config ~authority:Operator_authority ~runner_tick_sec ~now:201.0 replacement) in
+  ignore (store_ok "replacement due" (refresh_due config ~now:201.0));
+  let before = Workspace_core.read_text config (schedules_path config) in
+  check_error "stale start refuses replacement" Schedule_not_due_candidate
+    (start_due_candidate config ~now:202.0 ~candidate:original);
+  check_error "stale rejection refuses replacement" Schedule_not_due_candidate
+    (fail_due_candidate config ~now:202.0 ~candidate:original ~error:"old payload refusal");
+  check string "stale candidate has no write" before (Workspace_core.read_text config (schedules_path config));
+  let first = store_ok "start replacement" (start_due_candidate config ~now:202.0 ~candidate:replacement) in
+  let next = store_ok "advance replacement"
+      (accept_running config ~now:203.0 ~attempt:first.attempt ()) in
+  ignore (store_ok "next occurrence due" (refresh_due config ~now:next.due_at));
+  check_error "old due snapshot cannot start later occurrence" Schedule_not_due_candidate
+    (start_due_candidate config ~now:next.due_at ~candidate:replacement);
+  check_error "old rejection cannot fail later occurrence" Schedule_not_due_candidate
+    (fail_due_candidate config ~now:next.due_at ~candidate:replacement ~error:"old refusal");
+  let second = store_ok "start later occurrence" (start_due_candidate config ~now:next.due_at ~candidate:next) in
+  let before = Workspace_core.read_text config (schedules_path config) in
+  expect_superseded (accept_running config ~now:203.0 ~attempt:first.attempt ());
+  check string "previous occurrence cannot settle a later Running occurrence" before
+    (Workspace_core.read_text config (schedules_path config));
+  ignore (store_ok "current occurrence still settles"
+    (accept_running config ~now:next.due_at ~attempt:second.attempt ()));
+  (* Pruning history cannot make the old capability a permanent retry that
+     blocks a schedule the authoritative row has advanced beyond. *)
+  let state = read_state config in
+  write_attempt_fixture config { state with wakes = List.filter
+    (fun (wake : wake_record) -> not (Float.equal wake.due_at original.due_at)) state.wakes };
+  expect_superseded (accept_running config ~now:203.0 ~attempt:first.attempt ())
+;;
+
+let test_attempt_authority_refuses_missing_primary_and_duplicate_ids () =
+  List.iter (fun fault -> with_workspace @@ fun config ->
+    let _, started = attempt_fixture config "strict-attempt-authority" in
+    let state = read_state config in
+    let mirror_before = Workspace_core.read_text config (schedules_recovery_path config) in
+    (match fault with
+     | `Missing -> Workspace_core.delete_path config (schedules_path config)
+     | `Duplicate -> write_attempt_fixture config { state with wakes = List.hd state.wakes :: state.wakes });
+    let before = match fault with
+      | `Missing -> None
+      | `Duplicate -> Some (Workspace_core.read_text config (schedules_path config)) in
+    (match accept_running config ~now:203.0 ~attempt:started.attempt () with
+     | Error (Running_attempt_unavailable _) -> ()
+     | Error error -> fail ("authority failure was misclassified: " ^ store_error_to_string error)
+     | Ok _ -> fail "mirror-only or duplicate-id authority approved a settlement");
+    check string "refused settlement preserves the recovery evidence" mirror_before
+      (Workspace_core.read_text config (schedules_recovery_path config));
+    match before with
+    | None -> check bool "refused settlement does not recreate a missing primary" false
+        (Sys.file_exists (schedules_path config))
+    | Some bytes -> check string "refused settlement preserves corrupt primary" bytes
+        (Workspace_core.read_text config (schedules_path config))) [ `Missing; `Duplicate ]
+;;
+
+let test_legacy_recovery_does_not_invent_attempt_authority () =
+  with_workspace @@ fun config ->
+  let candidate, started = attempt_fixture config "legacy-recovery" in
+  let state = read_state config in
+  write_attempt_fixture config { state with wakes = List.map
+    (fun (wake : wake_record) -> { wake with attempt_identity = Unidentified;
+      settlement_kind = None }) state.wakes };
+  (match accept_running config ~now:203.0 ~attempt:started.attempt () with
+   | Error (Running_attempt_unavailable _) -> ()
+   | Error error -> fail (store_error_to_string error)
+   | Ok _ -> fail "unidentified running wake approved a fenced settlement");
+  let _, recovered = store_ok "recover historical running input"
+      (recover_running_on_startup config ~now:204.0) in
+  check int "historical attempt is recovered once" 1 recovered;
+  let fresh = store_ok "new identified attempt after recovery"
+      (start_due_candidate config ~now:202.0 ~candidate) in
+  let wakes = (read_state config).wakes in
+  check bool "historical wake identity remains absent" true
+    (List.exists (fun (wake : wake_record) -> wake.attempt_identity = Unidentified
+      && wake.status = Wake_failed && wake.settlement_kind = Some Process_interrupted) wakes);
+  ignore (attempt_id_of_latest config candidate);
+  expect_superseded (retry_running config ~now:205.0 ~attempt:started.attempt
+    ~reason:(Retryable_dispatch_failure "old capability"));
+  ignore (store_ok "fresh capability settles after historical recovery"
+    (accept_running config ~now:205.0 ~attempt:fresh.attempt ()))
+;;
+
+let test_attempt_capability_survives_primary_failure_but_not_scope_change () =
+  with_workspace @@ fun config ->
+  let _, started = attempt_fixture config "retry-exact-capability" in
+  let other_backend = { config with Workspace_utils.backend =
+    Workspace_utils.Memory (Backend.Memory.create ()) } in
+  (match accept_running other_backend ~now:203.0 ~attempt:started.attempt () with
+   | Error (Running_attempt_unavailable _) -> ()
+   | Error error -> fail (store_error_to_string error)
+   | Ok _ -> fail "another backend accepted the capability");
+  let other_path = Filename.concat config.Workspace_utils.base_path "other-attempt-workspace" in
+  let other_workspace = { config with Workspace_utils.base_path = other_path;
+    workspace_path = other_path } in
+  Workspace_utils.mkdir_p (Workspace_utils.masc_dir other_workspace);
+  (match accept_running other_workspace ~now:203.0 ~attempt:started.attempt () with
+   | Error (Running_attempt_unavailable _) -> ()
+   | Error error -> fail (store_error_to_string error)
+   | Ok _ -> fail "another workspace accepted the capability");
+  let staging = schedules_path config ^ ".tmp-atomic" in
+  Unix.mkdir staging 0o755;
+  let reason = Retryable_dispatch_failure "retry after storage repair" in
+  (match retry_running config ~now:203.0 ~finished_at:204.0 ~attempt:started.attempt ~reason with
+   | Error (Persistence_failed _) -> ()
+   | Error error -> fail (store_error_to_string error)
+   | Ok _ -> fail "true primary write failure unexpectedly settled the attempt");
+  Unix.rmdir staging;
+  ignore (store_ok "same exact capability survives primary failure"
+    (retry_running config ~now:203.0 ~finished_at:204.0 ~attempt:started.attempt ~reason));
+  let before = Workspace_core.read_text config (schedules_path config) in
+  ignore (store_ok "same retry receipt is idempotent"
+    (retry_running config ~now:203.0 ~finished_at:999.0 ~attempt:started.attempt ~reason));
+  check string "repair replay preserves first committed finish time" before
+    (Workspace_core.read_text config (schedules_path config))
+;;
+
+let test_fail_due_candidate_records_failed_wake () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"unsupported-1" () in
+  ignore (insert_ok config req);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "became due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  (match
+     fail_due_candidate config ~now:202.0 ~candidate:req
+       ~error:"unsupported payload"
+   with
+   | Ok stored -> check_status "failed" Failed stored.status
+   | Error err -> fail (store_error_to_string err));
+  (match get_schedule config ~schedule_id:req.schedule_id with
+   | Some stored -> check_status "stored failed" Failed stored.status
+   | None -> fail "schedule missing");
+  (match
+     last_wake_for_schedule_instance
+       (read_state config)
+       ~schedule_instance_id:req.schedule_instance_id
+       ~schedule_id:req.schedule_id
+   with
+   | None -> fail "missing failed wake"
+   | Some wake ->
+     check string "failed wake status" "failed"
+       (wake_status_to_string wake.status);
+     check (option string) "failed wake error" (Some "unsupported payload")
+       wake.error;
+     check (option (float 0.001)) "finished at" (Some 202.0)
+       wake.finished_at)
+;;
+
+(* Terminal wakes are history the runner never reads back, and every mutation
+   rewrites the whole store under its lock. Left unbounded they reached 6,534
+   records / 5.3 MB against 64 schedules (2026-08-29) and two runner ticks died
+   acquiring that lock on 2026-08-28. The bound is per schedule_id: a broken
+   schedule out-writes a healthy one by two orders of magnitude, so a global cap
+   would be spent on the broken one and erase every other schedule's history. *)
+let test_terminal_wakes_are_bounded_per_schedule () =
+  with_workspace
+  @@ fun config ->
+  let run_occurrences ~schedule_id ~count =
+    let req =
+      make_request ~schedule_id ~recurrence:(Interval { interval_sec = 60 }) ()
+    in
+    ignore (insert_ok config req);
+    let rec turn n now =
+      if n <= 0
+      then ()
+      else (
+        (match refresh_due config ~now with
+         | Ok _ -> ()
+         | Error err -> fail (store_error_to_string err));
+        let started = store_ok "start" (start_request config ~now:(now +. 1.0) ~schedule_id) in
+        (match accept_running config ~now:(now +. 2.0) ~attempt:started.attempt () with
+         | Ok _ -> ()
+         | Error err -> fail (store_error_to_string err));
+        turn (n - 1) (now +. 60.0))
+    in
+    turn count 201.0
+  in
+  (* Well past the per-schedule bound, so the trim has to engage. *)
+  run_occurrences ~schedule_id:"noisy-1" ~count:40;
+  (* A quiet schedule whose history must survive the noisy one. *)
+  run_occurrences ~schedule_id:"quiet-1" ~count:3;
+  let wakes = (read_state config).wakes in
+  let for_schedule id =
+    List.length
+      (List.filter
+         (fun (wake : wake_record) -> String.equal wake.schedule_id id)
+         wakes)
+  in
+  check int "noisy schedule is trimmed to the bound" 32 (for_schedule "noisy-1");
+  check int "quiet schedule keeps every wake" 3 (for_schedule "quiet-1")
+;;
+
+(* The dashboard read one wake of the up-to-32 the store keeps, because the
+   only accessor returned one. A reader of a schedule's past needs the list and
+   needs it scoped: a replaced definition gets a fresh instance id, and its
+   wakes are not evidence for the replacement. *)
+let test_wake_list_is_scoped_to_its_instance_and_newest_first () =
+  with_workspace
+  @@ fun config ->
+  let req =
+    make_request ~schedule_id:"loop-2" ~recurrence:(Interval { interval_sec = 60 }) ()
+  in
+  ignore (insert_ok config req);
+  let rec turn n now =
+    if n <= 0
+    then ()
+    else (
+      (match refresh_due config ~now with
+       | Ok _ -> ()
+       | Error err -> fail (store_error_to_string err));
+      let started = store_ok "start" (start_request config ~now:(now +. 1.0) ~schedule_id:"loop-2") in
+      (match accept_running config ~now:(now +. 2.0) ~attempt:started.attempt () with
+       | Ok _ -> ()
+       | Error err -> fail (store_error_to_string err));
+      turn (n - 1) (now +. 60.0))
+  in
+  turn 3 201.0;
+  let state = read_state config in
+  let stored =
+    match
+      List.find_opt
+        (fun (r : Schedule_domain.schedule_request) ->
+           String.equal r.schedule_id "loop-2")
+        state.schedules
+    with
+    | Some r -> r
+    | None -> fail "the schedule under test disappeared"
+  in
+  let wakes =
+    Schedule_store.wakes_for_schedule_instance
+      state
+      ~schedule_instance_id:stored.schedule_instance_id
+      ~schedule_id:"loop-2"
+  in
+  check int "every occurrence of this instance is listed" 3 (List.length wakes);
+  let started = List.map (fun (w : wake_record) -> w.started_at) wakes in
+  check (list (float 0.001)) "newest first"
+    (List.sort (fun a b -> Float.compare b a) started)
+    started;
+  (match
+     ( Schedule_store.last_wake_for_schedule_instance
+         state
+         ~schedule_instance_id:stored.schedule_instance_id
+         ~schedule_id:"loop-2"
+     , wakes )
+   with
+   | Some head, first :: _ ->
+     check (float 0.001) "last_wake is the head of the list" first.started_at
+       head.started_at
+   | Some _, [] | None, _ -> fail "last_wake and the wake list disagree");
+  let other_instance =
+    Schedule_store.wakes_for_schedule_instance
+      state
+      ~schedule_instance_id:"an-instance-that-never-ran"
+      ~schedule_id:"loop-2"
+  in
+  check int "a different instance borrows none of them" 0
+    (List.length other_instance);
+  check bool "the retention ceiling is a number a reader can see" true
+    (Schedule_store.terminal_wakes_retained_per_schedule > 0)
+;;
+
+let test_recurring_occurrences_remain_dispatchable () =
+  with_workspace
+  @@ fun config ->
+  let req =
+    make_request ~schedule_id:"loop-1"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config req);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "first due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  check int "first occurrence candidate" 1
+    (List.length (due_wake_candidates (read_state config)));
+  let started = store_ok "start" (start_request config ~now:202.0 ~schedule_id:req.schedule_id) in
+  check_status "running first occurrence" Running started.request.status;
+  (match accept_running config ~now:203.0 ~attempt:started.attempt () with
+   | Ok stored ->
+     check_status "rescheduled" Scheduled stored.status;
+     check (float 0.001) "next due" 260.0 stored.due_at
+   | Error err -> fail (store_error_to_string err));
+  (match refresh_due config ~now:260.0 with
+   | Ok (_, changed) -> check int "second due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  check int "second occurrence candidate" 1
+    (List.length (due_wake_candidates (read_state config)))
+;;
+
+let test_read_error_when_both_unparseable () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request () in
+  ignore (insert_ok config req);
+  corrupt_both config;
+  match read_state_result config with
+  | Error (Corrupt_read_ledger { primary_err; recovery_err }) ->
+    check bool "primary error is non-empty" true (String.length primary_err > 0);
+    check bool "recovery error reported" true (Option.is_some recovery_err)
+  | Ok _ -> fail "corrupt ledger returned a readable state"
+;;
+
+let test_read_state_raises_on_corrupt () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request () in
+  ignore (insert_ok config req);
+  corrupt_both config;
+  match read_state config with
+  | _ -> fail "read_state silently returned a state for a corrupt ledger"
+  | exception Schedule_store.Corrupt_ledger_exn _ -> ()
+;;
+
+(* [load] decides over two probes — the primary ledger and its [.last-good]
+   mirror — and an absent mirror is the only recovery result whose meaning
+   depends on which way the primary failed: an uninitialised store is [Fresh],
+   a broken primary with no mirror is [Corrupt].
+
+   [corrupt_both] leaves the mirror present-but-unparseable, so neither of
+   these two inputs was covered. Collapsing the primary axis would turn the
+   second into an empty state, which is the silent-data-loss shape
+   [test_mutation_refused_and_preserves_corrupt_ledger] exists to prevent. *)
+let test_absent_mirror_separates_uninitialised_from_corrupt () =
+  with_workspace
+  @@ fun config ->
+  (match Schedule_store.read_state_result config with
+   | Ok state ->
+     check int "an uninitialised store reads as empty" 0
+       (List.length state.Schedule_store.schedules)
+   | Error error ->
+     failf
+       "an uninitialised store must not read as corrupt: %s"
+       (Schedule_store.read_error_to_string error));
+  let req = make_request () in
+  ignore (insert_ok config req);
+  Workspace_core.write_text config (schedules_path config) "{not json";
+  Workspace_core.delete_path config (recovery_path config);
+  check bool "recovery mirror removed" false
+    (Workspace_utils.path_exists config (recovery_path config));
+  match Schedule_store.read_state_result config with
+  | Ok _ -> fail "a broken primary with no mirror must not read as empty"
+  | Error (Schedule_store.Corrupt_read_ledger { recovery_err; _ }) ->
+    check (option string) "no mirror means no recovery detail" None recovery_err
+;;
+
+(* The core silent-failure-to-data-loss regression: a mutation on a corrupt
+   ledger must be refused (typed [Corrupt_ledger]) and must NOT overwrite the
+   present-but-corrupt files with an empty default. *)
+let test_mutation_refused_and_preserves_corrupt_ledger () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request () in
+  ignore (insert_ok config req);
+  corrupt_both config;
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let recovery_before = Workspace_core.read_text config (schedules_recovery_path config) in
+  (match insert_request config ~runner_tick_sec (make_request ~schedule_id:"sched-2" ()) with
+   | Ok _ -> fail "insert on corrupt ledger unexpectedly succeeded"
+   | Error (Corrupt_ledger _) -> ()
+   | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err));
+  let primary_after = Workspace_core.read_text config (schedules_path config) in
+  let recovery_after = Workspace_core.read_text config (schedules_recovery_path config) in
+  check string "corrupt primary preserved" primary_before primary_after;
+  check string "corrupt recovery preserved" recovery_before recovery_after
+;;
+
+let test_insert_surfaces_primary_write_failure () =
+  with_workspace
+  @@ fun config ->
+  (* A directory at schedules_path breaks the *read* load_for_mutation does
+     before ever reaching write_state (Eio.Io reports "Is a directory" on the
+     readv, which load classifies as Corrupt_ledger) - it never exercises the
+     write-failure path this test names. Inject a write-only failure instead:
+     the ledger directory itself is made read-only *after* the (nonexistent-
+     file) read succeeds, so save_file_atomic's temp-file creation for
+     the write is what fails. *)
+  let masc_dir = Workspace_utils.masc_dir config in
+  Unix.chmod masc_dir 0o500;
+  Fun.protect
+    ~finally:(fun () -> Unix.chmod masc_dir 0o755)
+    (fun () ->
+       let request =
+         make_request ~schedule_id:"persist-fail" ()
+       in
+       match insert_request config ~runner_tick_sec request with
+       | Error (Persistence_failed msg) ->
+         check bool "failure detail is surfaced" true (String.length msg > 0)
+       | Error err ->
+         fail ("expected Persistence_failed, got: " ^ store_error_to_string err)
+       | Ok _ -> fail "insert unexpectedly succeeded when the ledger dir is read-only")
+;;
+
+let test_insert_keeps_primary_commit_when_recovery_write_fails () =
+  with_workspace
+  @@ fun config ->
+  (* A directory at the mirror path breaks the mirror *write*. It also breaks the
+     mirror *read*, and load probes the mirror whenever the primary is absent, so
+     the injection needs a parseable primary in place first: load then resolves
+     from the primary and never reaches the probe, leaving write_state's mirror
+     write as the only failing step this test names. *)
+  let committed = make_request ~schedule_id:"recovery-mirror-committed" () in
+  ignore (insert_ok config committed);
+  Workspace_core.delete_path config (schedules_recovery_path config);
+  Unix.mkdir (schedules_recovery_path config) 0o755;
+  let request =
+    make_request ~schedule_id:"recovery-mirror-fail" ()
+  in
+  (match insert_request config ~runner_tick_sec request with
+   | Ok stored -> check string "stored id" request.schedule_id stored.schedule_id
+   | Error err ->
+     fail
+       ("recovery mirror failure should not fail committed primary write: "
+        ^ store_error_to_string err));
+  (match get_schedule config ~schedule_id:request.schedule_id with
+   | Some stored -> check string "primary has schedule" request.schedule_id stored.schedule_id
+   | None -> fail "primary schedule missing after recovery mirror failure");
+  match get_schedule config ~schedule_id:committed.schedule_id with
+  | Some stored ->
+    check string "primary keeps the earlier schedule" committed.schedule_id
+      stored.schedule_id
+  | None -> fail "earlier schedule lost after recovery mirror failure"
+;;
+
+let test_cancel_refused_on_corrupt_ledger () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"cancel-corrupt" () in
+  ignore (insert_ok config req);
+  corrupt_both config;
+  match cancel_request config ~schedule_id:"cancel-corrupt" with
+  | Ok _ -> fail "cancel on corrupt ledger unexpectedly succeeded"
+  | Error (Corrupt_ledger _) -> ()
+  | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err)
+;;
+
+(* [.last-good] must hold a parseable snapshot, never a mirror of corruption. *)
+let test_last_good_is_parseable_after_good_write () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request () in
+  ignore (insert_ok config req);
+  let recovery_json = Workspace_core.read_json config (schedules_recovery_path config) in
+  match Schedule_store.state_of_yojson recovery_json with
+  | Ok state -> check int "last-good holds the schedule" 1 (List.length state.schedules)
+  | Error msg -> fail (".last-good is not parseable: " ^ msg)
+;;
+
+(* The out-of-band-deletion arm of the same silent-failure-to-data-loss
+   regression: [write_state] commits the primary and the .last-good mirror
+   together, so an absent primary next to a parseable mirror is a deletion, not a
+   fresh store. Reading it as an empty state let the next write mirror that empty
+   state over the surviving copy. *)
+let test_absent_primary_recovers_from_last_good () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"vanished-primary" () in
+  ignore (insert_ok config req);
+  delete_primary config;
+  let recovered = read_state config in
+  check int "schedule recovered from last-good" 1 (List.length recovered.schedules);
+  check string "recovered schedule id" req.schedule_id
+    (List.hd recovered.schedules).schedule_id
+;;
+
+let test_absent_primary_write_restores_primary_without_dropping_schedules () =
+  with_workspace
+  @@ fun config ->
+  let before_deletion = make_request ~schedule_id:"vanished-primary-write" () in
+  ignore (insert_ok config before_deletion);
+  delete_primary config;
+  let after_deletion = make_request ~schedule_id:"added-after-deletion" () in
+  ignore (insert_ok config after_deletion);
+  check bool "primary ledger is restored by the next write" true
+    (Workspace_utils.path_exists config (schedules_path config));
+  check int "recovered and new schedule both persist" 2
+    (List.length (read_state config).schedules);
+  let mirror_json = Workspace_core.read_json config (recovery_path config) in
+  match Schedule_store.state_of_yojson mirror_json with
+  | Ok mirror ->
+    check int "last-good keeps both schedules" 2 (List.length mirror.schedules)
+  | Error msg -> fail (".last-good is not parseable: " ^ msg)
+;;
+
+let test_absent_primary_and_absent_mirror_reads_fresh () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ()));
+  delete_primary config;
+  Workspace_core.delete_path config (recovery_path config);
+  match read_state_result config with
+  | Ok state ->
+    check int "no schedules when both files are gone" 0 (List.length state.schedules);
+    check int "no wakes when both files are gone" 0 (List.length state.wakes)
+  | Error error -> fail (read_error_to_string error)
+;;
+
+let test_absent_primary_with_unparseable_mirror_is_corrupt () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ()));
+  Workspace_core.write_text config (recovery_path config) "}also not json";
+  delete_primary config;
+  let mirror_before = Workspace_core.read_text config (recovery_path config) in
+  (match read_state_result config with
+   | Error (Corrupt_read_ledger { primary_err; recovery_err }) ->
+     check bool "absent primary is described" true (String.length primary_err > 0);
+     check bool "mirror error reported" true (Option.is_some recovery_err)
+   | Ok _ ->
+     fail "absent primary with an unparseable mirror returned a readable state");
+  (match insert_request config ~runner_tick_sec (make_request ~schedule_id:"sched-2" ()) with
+   | Ok _ -> fail "insert unexpectedly succeeded against an unparseable mirror"
+   | Error (Corrupt_ledger _) -> ()
+   | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err));
+  check string "unparseable mirror preserved" mirror_before
+    (Workspace_core.read_text config (recovery_path config));
+  check bool "refused mutation did not recreate the primary" false
+    (Workspace_utils.path_exists config (schedules_path config))
+;;
+
+let cancelled_request_with_wake_receipt config ~schedule_id =
+  let request =
+    make_request ~schedule_id ~recurrence:(Interval { interval_sec = 3600 }) ()
+  in
+  let stored = insert_ok config request in
+  ignore (store_ok "refresh_due" (refresh_due config ~now:201.0));
+  let started = store_ok "start_due_candidate"
+      (start_request config ~now:202.0 ~schedule_id:stored.schedule_id) in
+  let advanced =
+    store_ok "accept_running" (accept_running config ~now:203.0 ~attempt:started.attempt ())
+  in
+  check string "recurring request advanced past the occurrence" "scheduled"
+    (schedule_status_to_string advanced.status);
+  let cancelled =
+    store_ok "cancel_request" (cancel_request config ~schedule_id:stored.schedule_id)
+  in
+  check string "request is terminal" "cancelled"
+    (schedule_status_to_string cancelled.status);
+  stored
+;;
+
+let test_prune_deletes_terminal_request_and_wake_receipt () =
+  with_workspace
+  @@ fun config ->
+  ignore
+    (cancelled_request_with_wake_receipt config ~schedule_id:"prune-completed-wake");
+  let state, pruned = store_ok "prune_completed" (prune_completed config) in
+  check int "terminal request is pruned" 1 pruned;
+  check int "request row removed" 0 (List.length state.schedules);
+  check int "wake receipt removed with it" 0 (List.length state.wakes)
+;;
+
+let test_prune_does_not_bind_orphan_receipt_to_reused_public_id () =
+  with_workspace
+  @@ fun config ->
+  let old_request =
+    make_request
+      ~schedule_id:"prune-reused-public-id"
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config old_request);
+  ignore (store_ok "refresh old request" (refresh_due config ~now:201.0));
+  let started = store_ok "start old occurrence"
+      (start_request config ~now:202.0 ~schedule_id:old_request.schedule_id) in
+  ignore
+    (store_ok
+       "dispatch old occurrence"
+       (accept_running config ~now:203.0 ~attempt:started.attempt ()));
+  let old_state = read_state config in
+  Workspace_core.write_text
+    config
+    (schedules_path config)
+    (Yojson.Safe.to_string
+       (`Assoc
+          [ "version", `Int old_state.version
+          ; "updated_at", `Float old_state.updated_at
+          ; "schedules", `List []
+          ; ( "wakes"
+            , `List
+                (List.map
+                   Schedule_domain.wake_record_to_yojson
+                   old_state.wakes) )
+          ]
+       ));
+  let new_request = make_request ~schedule_id:old_request.schedule_id () in
+  check bool "public ID reuse mints a new instance" false
+    (String.equal
+       old_request.schedule_instance_id
+       new_request.schedule_instance_id);
+  ignore (insert_ok config new_request);
+  (match
+     last_wake_for_schedule_instance
+       (read_state config)
+       ~schedule_instance_id:new_request.schedule_instance_id
+       ~schedule_id:new_request.schedule_id
+   with
+   | None -> ()
+   | Some _ -> fail "reused public ID inherited the prior instance wake");
+  ignore
+    (store_ok
+       "cancel replacement request"
+       (cancel_request config ~schedule_id:new_request.schedule_id));
+  let state, pruned = store_ok "prune replacement request" (prune_completed config) in
+  check int "old orphan does not retain replacement request" 1 pruned;
+  check int "replacement request is removed" 0 (List.length state.schedules);
+  check int "orphan wake is removed with its absent owner" 0
+    (List.length state.wakes)
+;;
+
+let rejection_error = function
+  | Ok _ -> None
+  | Error error -> Some error
+;;
+
+let test_contract_vocabularies_own_strings_and_errors () =
+  let cases =
+    [ ("actor_kind",
+       [ "human_operator"; "automated_actor"; "system" ],
+       Schedule_contract_values.actor_kind_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.actor_kind_of_string v)),
+       rejection_error (Schedule_contract_values.actor_kind_of_string "nope"))
+    ; ("schedule_status",
+       [ "scheduled"; "due"; "running"; "succeeded"; "failed"; "cancelled"; "expired" ],
+       Schedule_contract_values.schedule_status_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.schedule_status_of_string v)),
+       rejection_error (Schedule_contract_values.schedule_status_of_string "nope"))
+    ; ("schedule_source",
+       [ "operator_request"; "automated_request"; "system_request" ],
+       Schedule_contract_values.schedule_source_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.schedule_source_of_string v)),
+       rejection_error (Schedule_contract_values.schedule_source_of_string "nope"))
+    ; ("recurrence_kind",
+       [ "one_shot"; "interval"; "daily"; "cron" ],
+       Schedule_contract_values.recurrence_kind_strings,
+       (fun v ->
+          Result.is_ok (Schedule_contract_values.recurrence_kind_of_string v)),
+       rejection_error
+         (Schedule_contract_values.recurrence_kind_of_string "nope"))
+    ; ("wake_status",
+       [ "running"; "succeeded"; "failed" ],
+       Schedule_contract_values.wake_status_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.wake_status_of_string v)),
+       rejection_error (Schedule_contract_values.wake_status_of_string "nope"))
+    ; ("owner",
+       [ "self"; "wake_target"; "scheduled_by"; "all" ],
+       Schedule_contract_values.owner_kind_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.owner_kind_of_string v)),
+       rejection_error (Schedule_contract_values.owner_kind_of_string "nope"))
+    ; ("status",
+       [ "scheduled"; "due"; "running"; "succeeded"; "failed"; "cancelled"; "expired"
+       ; "active"
+       ],
+       Schedule_contract_values.status_selector_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.status_selector_of_string v)),
+       rejection_error (Schedule_contract_values.status_selector_of_string "nope"))
+    ; ("error_kind",
+       [ "due_already_past"
+       ; "transition_refused"
+       ; "due_inputs_conflict"
+       ; "due_input_missing"
+       ; "caller_unidentified"
+       ; "actor_mismatch"
+       ; "argument_out_of_range"
+       ; "cursor_mismatch"
+       ; "not_schedule_owner"
+       ],
+       Schedule_contract_values.refusal_kind_strings,
+       (fun v -> Result.is_ok (Schedule_contract_values.refusal_kind_of_string v)),
+       rejection_error (Schedule_contract_values.refusal_kind_of_string "nope"))
+    ]
+  in
+  List.iter
+    (fun (field, expected, contract_strings, decodes, rejection) ->
+      check (list string)
+        (Printf.sprintf "%s has one canonical wire vocabulary" field)
+        expected
+        contract_strings;
+      match rejection with
+      | None -> Alcotest.failf "%s must reject \"nope\"" field
+      | Some error ->
+        check string
+          (Printf.sprintf "%s names its field" field)
+          field
+          error.Schedule_contract_values.field;
+        check string
+          (Printf.sprintf "%s carries the rejected value" field)
+          "nope"
+          error.rejected;
+        check (list string)
+          (Printf.sprintf "%s carries exactly its accepted set" field)
+          expected
+          error.accepted;
+        check string
+          (Printf.sprintf "%s renders one correction hint" field)
+          (Printf.sprintf
+             "unknown %s: nope; accepted: %s"
+             field
+             (String.concat ", " expected))
+          (Schedule_contract_values.decode_error_to_string error);
+        List.iter
+          (fun value ->
+            check bool
+              (Printf.sprintf "%s offers %s, which decodes" field value)
+              true
+              (decodes value))
+          error.accepted)
+    cases
+;;
+
+(* A mutation encodes the ledger on the domain pool, once for both files: with
+   the pool's one worker busy the write waits for it, and afterwards the primary
+   and the mirror hold the same compact bytes. Encoding the whole ledger on the
+   calling fiber, once per file, held the scheduler domain for 135-151 ms per
+   file on a live root. *)
+let busy_worker_polls = 50
+let busy_worker_poll_interval_s = 0.01
+
+let test_a_mutation_encodes_the_ledger_once_on_the_pool () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = Filename.temp_dir "schedule_store_test" "" in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  (* A read that misses decodes on the pool too. Commit one schedule and read
+     it back before the pool exists, so the insert below finds the ledger it
+     reads already decoded and the only job it submits is the encode. *)
+  ignore (insert_ok config (make_request ~schedule_id:"sched-seed" ()));
+  ignore (read_state config);
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+  @@ fun () ->
+  Domain_pool_ref.set pool;
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  let inserted = ref None in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () -> inserted := Some (insert_request config ~runner_tick_sec (make_request ())))
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && Option.is_none !inserted
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      check bool "the write waits for the busy worker" true (Option.is_none !inserted);
+      Eio.Promise.resolve release_u ());
+  (match !inserted with
+   | Some (Ok _) -> ()
+   | Some (Error err) -> fail (store_error_to_string err)
+   | None -> fail "the insert never finished");
+  let primary = Workspace_core.read_text config (schedules_path config) in
+  let mirror = Workspace_core.read_text config (schedules_recovery_path config) in
+  check string "the mirror holds the primary's bytes" primary mirror;
+  check string "the ledger is compact JSON"
+    (Yojson.Safe.to_string (Yojson.Safe.from_string primary))
+    primary;
+  check int "and it holds both schedules" 2 (List.length (read_state config).schedules)
+;;
+
+(* A reader of an unchanged ledger takes the state the last read decoded. A
+   commit through the store, or a rewrite of the file by anything else, is
+   read and decoded again. *)
+let test_an_unchanged_ledger_is_decoded_once () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ()));
+  let one_schedule = In_channel.with_open_bin (schedules_path config) In_channel.input_all in
+  let first = read_state config in
+  check bool "an unchanged ledger is not decoded again" true (read_state config == first);
+  ignore (insert_ok config (make_request ~schedule_id:"sched-2" ()));
+  let after_commit = read_state config in
+  check int "a commit is read again" 2 (List.length after_commit.schedules);
+  check bool "and what it read is kept in turn" true (read_state config == after_commit);
+  Workspace_core.write_text config (schedules_path config) one_schedule;
+  check int "a rewrite outside the store is read again" 1
+    (List.length (read_state config).schedules)
+;;
+
+let test_primary_cache_respects_backend_authority () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ()));
+  let first = read_state config in
+  check int "filesystem ledger is populated and cached" 1 (List.length first.schedules);
+  let memory = {config with Workspace_utils.backend =
+    Workspace_utils.Memory (Backend.Memory.create ())} in
+  check int "empty backend does not inherit a cached local mirror" 0
+    (List.length (read_state memory).schedules);
+  ignore (insert_ok memory (make_request ~schedule_id:"memory-only" ()));
+  let memory_state = read_state memory in
+  check (list string) "backend mutation does not import filesystem schedules" ["memory-only"]
+    (List.map (fun (request : Schedule_domain.schedule_request) -> request.schedule_id)
+      memory_state.schedules);
+  let other_memory = {config with Workspace_utils.backend =
+    Workspace_utils.Memory (Backend.Memory.create ())} in
+  check int "independent backend cannot reuse another backend's cached mirror" 0
+    (List.length (read_state other_memory).schedules);
+  check (list string) "original backend retains its own ledger" ["memory-only"]
+    (List.map (fun (request : Schedule_domain.schedule_request) -> request.schedule_id)
+      (read_state memory).schedules)
+;;
+
+(* A read that misses decodes on the pool, as a write encodes there: while the
+   pool's one worker is busy, the read waits for it. *)
+let test_a_read_that_misses_decodes_on_the_pool () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = Filename.temp_dir "schedule_store_test" "" in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  ignore (insert_ok config (make_request ()));
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+  @@ fun () ->
+  Domain_pool_ref.set pool;
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release));
+  Eio.Promise.await occupied;
+  let read = ref None in
+  let clock = Eio.Stdenv.clock env in
+  Eio.Fiber.both
+    (fun () -> read := Some (read_state_result config))
+    (fun () ->
+      let rec wait polls =
+        if polls > 0 && Option.is_none !read
+        then (
+          Eio.Time.sleep clock busy_worker_poll_interval_s;
+          wait (polls - 1))
+      in
+      wait busy_worker_polls;
+      check bool "the read waits for the busy worker" true (Option.is_none !read);
+      Eio.Promise.resolve release_u ());
+  match !read with
+  | Some (Ok state) -> check int "and it holds the schedule" 1 (List.length state.schedules)
+  | Some (Error error) -> fail (read_error_to_string error)
+  | None -> fail "the read never finished"
+;;
+
+(* Compact JSON has no spelling for NaN or an infinity, so a schedule time that
+   is not finite is refused where the request is made, not by a later write of
+   the whole ledger. *)
+let test_a_schedule_time_that_is_not_finite_is_refused () =
+  let request ?expires_at ~requested_at ~due_at () =
+    create_request ~schedule_id:"not-finite" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at ~due_at ?expires_at
+      ~payload:(payload_json ()) ~source:Operator_request ()
+  in
+  let refused label = function
+    | Ok _ -> fail (label ^ " was accepted")
+    | Error (_ : string) -> ()
+  in
+  refused "an infinite due time" (request ~requested_at:100.0 ~due_at:Float.infinity ());
+  refused "a NaN request time" (request ~requested_at:Float.nan ~due_at:200.0 ());
+  refused "an infinite expiry"
+    (request ~requested_at:100.0 ~due_at:200.0 ~expires_at:Float.neg_infinity ())
+;;
+
+let rec with_due_at value = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, field) ->
+           if String.equal key "due_at" then key, value else key, with_due_at value field)
+         fields)
+  | `List items -> `List (List.map (with_due_at value) items)
+  | json -> json
+;;
+
+(* A ledger an older build wrote with an infinite time still loads, but it has
+   no compact encoding: the write fails as [Persistence_failed] and leaves both
+   files as they were, instead of raising out of the store. *)
+let test_a_ledger_that_cannot_be_encoded_fails_the_write_as_persistence () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ~schedule_id:"written-before" ()));
+  let ledger = Workspace_core.read_json config (schedules_path config) in
+  Workspace_core.write_text config (schedules_path config)
+    (Yojson.Safe.pretty_to_string (with_due_at (`Float Float.infinity) ledger));
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let mirror_before = Workspace_core.read_text config (schedules_recovery_path config) in
+  (match insert_request config ~runner_tick_sec (make_request ~schedule_id:"written-after" ()) with
+   | Error (Persistence_failed _) -> ()
+   | Error err -> fail ("expected Persistence_failed, got: " ^ store_error_to_string err)
+   | Ok _ -> fail "a ledger with an infinite time was written");
+  check string "the primary is untouched" primary_before
+    (Workspace_core.read_text config (schedules_path config));
+  check string "the mirror is untouched" mirror_before
+    (Workspace_core.read_text config (schedules_recovery_path config))
+;;
+
+(* A schedule that ran and finished leaves the ledger a week after that wake,
+   with its wakes. Its notes stay, and so does anything still being written
+   about, still live, or never run. *)
+let days_to_seconds days = float_of_int days *. 24.0 *. 60.0 *. 60.0
+let retention_s = days_to_seconds Schedule_store.terminal_schedule_retention_days
+
+let run_to_completion config ~schedule_id ~finished_at =
+  ignore (store_ok "refresh" (refresh_due config ~now:201.0));
+  let started = store_ok "start" (start_request config ~now:202.0 ~schedule_id) in
+  ignore
+    (store_ok "accept"
+       (accept_running config ~now:finished_at ~attempt:started.attempt ()))
+;;
+
+let note_on config ~schedule_id ~now =
+  match
+    append_note config ~schedule_id ~author_id:"operator" ~author_kind:Human_operator
+      ~body:"looked at this" ~now
+  with
+  | Ok _ -> ()
+  | Error err -> fail ("note: " ^ store_error_to_string err)
+;;
+
+let schedule_ids state =
+  List.map (fun (r : Schedule_domain.schedule_request) -> r.schedule_id) state.schedules
+  |> List.sort String.compare
+;;
+
+let test_a_finished_schedule_leaves_the_ledger_a_week_after_its_wake () =
+  with_workspace
+  @@ fun config ->
+  List.iter
+    (fun schedule_id -> ignore (insert_ok config (make_request ~schedule_id ())))
+    [ "ran-long-ago"; "ran-but-written-about"; "cancelled-without-running" ];
+  run_to_completion config ~schedule_id:"ran-long-ago" ~finished_at:203.0;
+  run_to_completion config ~schedule_id:"ran-but-written-about" ~finished_at:204.0;
+  (match cancel_request config ~schedule_id:"cancelled-without-running" with
+   | Ok _ -> ()
+   | Error err -> fail ("cancel: " ^ store_error_to_string err));
+  let live = make_request ~schedule_id:"still-scheduled" () in
+  ignore (insert_ok config live);
+  let now = 204.0 +. (retention_s *. 2.0) in
+  note_on config ~schedule_id:"ran-long-ago" ~now:205.0;
+  note_on config ~schedule_id:"ran-but-written-about" ~now:(now -. 3600.0);
+  ignore (store_ok "retention refresh" (refresh_due config ~now));
+  let state = read_state config in
+  check (list string) "only the one whose wake is old and quiet is forgotten"
+    [ "cancelled-without-running"; "ran-but-written-about"; "still-scheduled" ]
+    (schedule_ids state);
+  check (list string) "the forgotten schedule's wakes go with it" []
+    (List.filter_map
+       (fun (wake : Schedule_domain.wake_record) ->
+          if String.equal wake.schedule_id "ran-long-ago" then Some wake.schedule_id else None)
+       state.wakes);
+  check int "and its note stays, because a note is not state" 1
+    (List.length
+       (List.filter
+          (fun (note : Schedule_domain.schedule_note) ->
+             String.equal note.schedule_id "ran-long-ago")
+          state.notes));
+  (* Nothing left to forget: the next tick writes nothing. *)
+  let before = Workspace_core.read_text config (schedules_path config) in
+  ignore (store_ok "quiet refresh" (refresh_due config ~now));
+  check string "a tick with nothing to do leaves the ledger alone" before
+    (Workspace_core.read_text config (schedules_path config))
+;;
+
+(* A clock behind the ledger's own last write judges no ages. *)
+let test_a_clock_behind_the_ledger_forgets_nothing () =
+  with_workspace
+  @@ fun config ->
+  ignore (insert_ok config (make_request ~schedule_id:"ran-long-ago" ()));
+  run_to_completion config ~schedule_id:"ran-long-ago" ~finished_at:203.0;
+  let state = read_state config in
+  ignore
+    (store_ok "refresh behind the ledger"
+       (refresh_due config ~now:(state.updated_at -. (retention_s *. 2.0))));
+  check (list string) "the schedule is still there" [ "ran-long-ago" ]
+    (schedule_ids (read_state config))
+;;
+
+(* The window is the caller's to set, so one ledger read at one moment must
+   give different answers for different windows. Two schedules of different
+   ages make the pair of assertions discriminating: an implementation that
+   ignores [retention_days], or that clamps it to the library's seven from
+   either side, gets one of the two counts wrong.
+
+     window 14, waited 10  -> keep   (a cap at 7 would forget)
+     window  3, waited  5  -> forget (a floor at 7 would keep)
+
+   The times are real ones. [bump_state] stamps [updated_at] with
+   [Unix.gettimeofday ()] whatever the caller's clock says, and [refresh_due]
+   judges no ages when [now] is behind that stamp, so a test on a small
+   made-up timeline never reaches the retention pass at all. *)
+let wide_window_days = 14
+let narrow_window_days = 3
+let days_since_the_older_wake = 10
+let days_since_the_newer_wake = 5
+
+let test_the_retention_window_is_the_callers_to_set () =
+  with_workspace
+  @@ fun config ->
+  let anchor = Unix.gettimeofday () in
+  let finished_days_ago days = anchor -. days_to_seconds days in
+  let older = "wake-ten-days-back" and newer = "wake-five-days-back" in
+  List.iter
+    (fun schedule_id -> ignore (insert_ok config (make_request ~schedule_id ())))
+    [ older; newer ];
+  run_to_completion config ~schedule_id:older
+    ~finished_at:(finished_days_ago days_since_the_older_wake);
+  run_to_completion config ~schedule_id:newer
+    ~finished_at:(finished_days_ago days_since_the_newer_wake);
+  (* Past the ledger's own stamp, or the pass judges nothing. *)
+  let now = Float.max (read_state config).updated_at (Unix.gettimeofday ()) +. 1.0 in
+  let refresh_with retention_days =
+    ignore
+      (store_ok
+         (Printf.sprintf "refresh at %d days" retention_days)
+         (Schedule_store.refresh_due config ~now ~retention_days))
+  in
+  refresh_with wide_window_days;
+  check (list string) "a window wider than both waits keeps both"
+    [ newer; older ]
+    (schedule_ids (read_state config));
+  refresh_with narrow_window_days;
+  check (list string) "a window narrower than both forgets both"
+    []
+    (schedule_ids (read_state config))
+;;
+
+(* A tick that marks nothing still forgets a schedule past the retention
+   when a newer one is not: whether the pass has anything to forget is
+   judged by the oldest finished schedule. *)
+let days_since_the_recent_wake = 1
+
+let test_a_quiet_tick_forgets_only_what_is_past_the_retention () =
+  with_workspace
+  @@ fun config ->
+  let anchor = Unix.gettimeofday () in
+  let finished_days_ago days = anchor -. days_to_seconds days in
+  let older = "wake-ten-days-back" and recent = "wake-one-day-back" in
+  List.iter
+    (fun schedule_id -> ignore (insert_ok config (make_request ~schedule_id ())))
+    [ older; recent ];
+  run_to_completion config ~schedule_id:older
+    ~finished_at:(finished_days_ago days_since_the_older_wake);
+  run_to_completion config ~schedule_id:recent
+    ~finished_at:(finished_days_ago days_since_the_recent_wake);
+  let now = Float.max (read_state config).updated_at (Unix.gettimeofday ()) +. 1.0 in
+  ignore
+    (store_ok "the quiet refresh"
+       (Schedule_store.refresh_due config ~now ~retention_days:narrow_window_days));
+  check (list string) "only the schedule past the retention is forgotten" [ recent ]
+    (schedule_ids (read_state config))
+;;
+
+(* A tick that expires a recurring schedule whose last wake is already past
+   the retention forgets it in that same tick: the pass judges the schedules
+   as the tick marked them, not as the ledger held them before. *)
+let test_a_schedule_expired_past_the_retention_is_forgotten_in_that_tick () =
+  with_workspace
+  @@ fun config ->
+  let anchor = Unix.gettimeofday () in
+  let schedule_id = "expires-after-an-old-wake" in
+  ignore
+    (insert_ok config
+       (make_request ~schedule_id ~expires_at:(anchor +. 1.0)
+          ~recurrence:(Interval { interval_sec = 60 }) ()));
+  run_to_completion config ~schedule_id
+    ~finished_at:(anchor -. days_to_seconds days_since_the_older_wake);
+  check (list string) "the finished run left the schedule waiting for its next time"
+    [ schedule_id ]
+    (schedule_ids (read_state config));
+  let now = Float.max (read_state config).updated_at (Unix.gettimeofday ()) +. 2.0 in
+  ignore
+    (store_ok "the expiring refresh"
+       (Schedule_store.refresh_due config ~now ~retention_days:narrow_window_days));
+  check (list string) "the schedule it expired is forgotten in that tick" []
+    (schedule_ids (read_state config))
+;;
+
+
+(* A full worker fixes the old append's first suspension at encoding. The
+   filesystem backend remains real; only the Fs_compat directory checks use
+   their existing synchronous fallback during the two forks. *)
+let test_concurrent_notes_keep_both_accepted_appends () =
+  Eio_main.run @@ fun env ->
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let restore_fs () =
+    match previous_fs with
+    | None -> Fs_compat.clear_fs ()
+    | Some fs -> Fs_compat.set_fs fs
+  in
+  Fun.protect ~finally:restore_fs @@ fun () ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let dir = Filename.temp_dir "schedule_note_overlap" "" in
+  Eio.Switch.on_release sw (fun () -> Masc_test_deps.cleanup_test_workspace dir);
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+  @@ fun () ->
+  let config = Workspace_core.default_config dir in
+  (match config.Workspace_utils.backend with
+   | Workspace_utils.FileSystem _ -> ()
+   | Workspace_utils.Memory _ -> fail "expected the actual filesystem backend");
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  let request = make_request ~schedule_id:"note-overlap" () in
+  ignore (insert_ok config request);
+  let append body now =
+    append_note config ~schedule_id:request.schedule_id
+      ~author_id:"operator" ~author_kind:Human_operator ~body ~now
+  in
+  ignore (store_ok "seed note" (append "seed" 101.0));
+  let before = read_state config in
+  check bool "the exact ledger is warm" true (read_state config == before);
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let previous_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+  @@ fun () ->
+  Domain_pool_ref.set pool;
+  Eio.Switch.run @@ fun jobs_sw ->
+  let occupied, occupied_u = Eio.Promise.create () in
+  let release, release_u = Eio.Promise.create () in
+  let release_worker () =
+    match Eio.Promise.peek release with
+    | None -> Eio.Promise.resolve release_u ()
+    | Some () -> ()
+  in
+  let blocker =
+    Domain_pool.submit_cpu_async ~name:__FUNCTION__ ~sw:jobs_sw pool (fun () ->
+      Eio.Promise.resolve occupied_u ();
+      Eio.Promise.await release)
+  in
+  Fun.protect ~finally:release_worker @@ fun () ->
+  Eio.Promise.await occupied;
+  let first, second =
+    Fun.protect
+      ~finally:(fun () -> Fs_compat.set_fs (Eio.Stdenv.fs env))
+      (fun () ->
+        Fs_compat.clear_fs ();
+        let first = Eio.Fiber.fork_promise ~sw:jobs_sw (fun () -> append "first" 102.0) in
+        let second = Eio.Fiber.fork_promise ~sw:jobs_sw (fun () -> append "second" 103.0) in
+        first, second)
+  in
+  check bool "first cannot publish while encode is blocked" true
+    (Option.is_none (Eio.Promise.peek first));
+  check bool "second cannot publish while encode is blocked" true
+    (Option.is_none (Eio.Promise.peek second));
+  release_worker ();
+  Eio.Promise.await_exn blocker;
+  let first_note, first_count = store_ok "first append" (Eio.Promise.await_exn first) in
+  let second_note, second_count = store_ok "second append" (Eio.Promise.await_exn second) in
+  let after = read_state config in
+  check (list string) "both accepted notes survive with the earlier note"
+    [ "seed"; "first"; "second" ]
+    (List.map (fun (note : schedule_note) -> note.body)
+       (notes_for_schedule after ~schedule_id:request.schedule_id));
+  check bool "accepted appends receive distinct identities" false
+    (String.equal first_note.note_id second_note.note_id);
+  check (list int) "counts describe successive committed appends" [ 2; 3 ]
+    (List.sort Int.compare [ first_count; second_count ]);
+  check int "both accepted appends advance the ledger" (before.version + 2) after.version
+;;
+
+let test_note_read_failure_is_not_schedule_absence () =
+  with_workspace @@ fun config ->
+  let request = make_request ~schedule_id:"note-corruption" () in
+  ignore (insert_ok config request);
+  corrupt_both config;
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let mirror_before = Workspace_core.read_text config (schedules_recovery_path config) in
+  (match append_note config ~schedule_id:request.schedule_id
+           ~author_id:"operator" ~author_kind:Human_operator ~body:"keep evidence" ~now:102.0 with
+   | Error (Corrupt_ledger _) -> ()
+   | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err)
+   | Ok _ -> fail "note append accepted an unreadable ledger");
+  check string "primary evidence stays" primary_before
+    (Workspace_core.read_text config (schedules_path config));
+  check string "mirror evidence stays" mirror_before
+    (Workspace_core.read_text config (schedules_recovery_path config))
+;;
+
+let () =
+  run "Schedule_store"
+    [
+      ( "state",
+        [
+          test_case "concurrent notes retain accepted appends" `Quick
+            test_concurrent_notes_keep_both_accepted_appends;
+          test_case "note read failure differs from absence" `Quick
+            test_note_read_failure_is_not_schedule_absence;
+          test_case "insert persists and bumps version" `Quick
+            test_insert_persists_and_bumps_version;
+          test_case "duplicate insert rejected without bump" `Quick
+            test_duplicate_insert_rejected_without_bump;
+          test_case "update replaces active definition with fresh instance" `Quick
+            test_update_replaces_active_definition_with_fresh_instance;
+          test_case "update accepts due and refuses terminal" `Quick
+            test_update_accepts_due_but_refuses_terminal_definition;
+          test_case "update refuses exactly where modify_allowed says no" `Quick
+            test_update_refuses_exactly_where_modify_allowed_says_no;
+          test_case "update requires existing schedule" `Quick
+            test_update_requires_an_existing_schedule;
+          test_case "update refuses only a changed due time behind the clock" `Quick
+            test_update_refuses_only_a_changed_due_time_behind_the_clock;
+          test_case "running wake missing says whether the wake finished" `Quick
+            test_running_wake_missing_says_whether_the_wake_finished;
+          test_case "a recurring occurrence is not settled by an earlier wake" `Quick
+            test_a_recurring_occurrence_is_not_settled_by_an_earlier_wake;
+          test_case "corrupt primary recovers from last-good" `Quick
+            test_recovers_from_last_good;
+          test_case "a finished schedule leaves the ledger a week after its wake" `Quick
+            test_a_finished_schedule_leaves_the_ledger_a_week_after_its_wake;
+          test_case "the retention window is the caller's to set" `Quick
+            test_the_retention_window_is_the_callers_to_set;
+          test_case "a clock behind the ledger forgets nothing" `Quick
+            test_a_clock_behind_the_ledger_forgets_nothing;
+          test_case "a quiet tick forgets only what is past the retention" `Quick
+            test_a_quiet_tick_forgets_only_what_is_past_the_retention;
+          test_case "a schedule expired past the retention is forgotten in that tick" `Quick
+            test_a_schedule_expired_past_the_retention_is_forgotten_in_that_tick;
+          test_case "a mutation encodes the ledger once on the pool" `Quick
+            test_a_mutation_encodes_the_ledger_once_on_the_pool;
+          test_case "an unchanged ledger is decoded once" `Quick
+            test_an_unchanged_ledger_is_decoded_once;
+          test_case "primary cache respects backend authority" `Quick
+            test_primary_cache_respects_backend_authority;
+          test_case "a read that misses decodes on the pool" `Quick
+            test_a_read_that_misses_decodes_on_the_pool;
+          test_case "a schedule time that is not finite is refused" `Quick
+            test_a_schedule_time_that_is_not_finite_is_refused;
+          test_case "a ledger that cannot be encoded fails the write" `Quick
+            test_a_ledger_that_cannot_be_encoded_fails_the_write_as_persistence;
+        ] );
+      ( "corruption",
+        [
+          test_case "absent ledger reads empty" `Quick
+            test_read_empty_when_file_absent;
+          test_case "read provenance preserves bytes and source" `Quick
+            test_read_observation_preserves_source_without_repairing;
+          test_case "both unparseable return read error" `Quick
+            test_read_error_when_both_unparseable;
+          test_case "startup recovery refuses corrupt ledger" `Quick
+            test_startup_recovery_refuses_corrupt_ledger;
+          test_case "read_state raises on corrupt ledger" `Quick
+            test_read_state_raises_on_corrupt;
+          test_case "absent mirror separates uninitialised from corrupt" `Quick
+            test_absent_mirror_separates_uninitialised_from_corrupt;
+          test_case "mutation refused and corrupt ledger preserved" `Quick
+            test_mutation_refused_and_preserves_corrupt_ledger;
+          test_case "primary write failure is surfaced" `Quick
+            test_insert_surfaces_primary_write_failure;
+          test_case "recovery mirror write failure preserves primary" `Quick
+            test_insert_keeps_primary_commit_when_recovery_write_fails;
+          test_case "cancel refused on corrupt ledger" `Quick
+            test_cancel_refused_on_corrupt_ledger;
+          test_case "last-good is parseable after good write" `Quick
+            test_last_good_is_parseable_after_good_write;
+          test_case "absent primary recovers from last-good" `Quick
+            test_absent_primary_recovers_from_last_good;
+          test_case "write after absent primary restores it without dropping schedules"
+            `Quick
+            test_absent_primary_write_restores_primary_without_dropping_schedules;
+          test_case "absent primary and absent mirror read fresh" `Quick
+            test_absent_primary_and_absent_mirror_reads_fresh;
+          test_case "absent primary with unparseable mirror is corrupt" `Quick
+            test_absent_primary_with_unparseable_mirror_is_corrupt;
+        ] );
+      ( "lifecycle",
+        [
+          test_case "non-scheduled initial status rejected" `Quick
+            test_store_rejects_non_scheduled_initial_status;
+          test_case "cancel request marks cancelled" `Quick
+            test_cancel_request_marks_cancelled;
+          test_case "running wake stays live across refused cancel" `Quick
+            test_running_wake_is_settleable_so_prune_keeps_it;
+          test_case "legacy running wake against cancelled schedule is disposed by sweep" `Quick
+            test_legacy_running_wake_against_cancelled_schedule_is_disposed_by_sweep;
+        ] );
+      ( "due",
+        [
+          test_case "due candidates dispatch without scheduler authorization state" `Quick
+            test_due_candidates_dispatch_without_scheduler_authorization_state;
+          test_case "due candidate starts without authorization state" `Quick
+            test_due_candidate_starts_without_authorization_state;
+          test_case "refresh_due expires scheduled and due" `Quick
+            test_refresh_due_expires_scheduled_and_due;
+          test_case "reschedule due recurring rows" `Quick
+            test_reschedule_due_recurring_advances_only_matching_recurring_rows;
+          test_case "reschedule due cron rows" `Quick
+            test_reschedule_due_cron_advances_to_next_match;
+          test_case "start and accept persist wake record" `Quick
+            test_start_and_accept_persist_wake_record;
+          test_case "durable acceptance completes wake receipt" `Quick
+            test_accept_running_completes_wake_receipt;
+          test_case "accepted backend commit survives local mirror failure" `Quick
+            test_accept_running_keeps_backend_commit_when_local_mirror_fails;
+          test_case "same-clock attempts fence all old settlements" `Quick
+            test_same_clock_attempts_fence_all_old_settlements;
+          test_case "repeated failed verdicts preserve exact receipts" `Quick
+            test_repeated_failed_verdicts_preserve_exact_receipts;
+          test_case "terminal attempts require typed exact verdicts" `Quick
+            test_terminal_attempt_requires_typed_exact_verdict;
+          test_case "stale candidates and later occurrences are fenced" `Quick
+            test_stale_candidates_and_later_occurrences_are_fenced;
+          test_case "attempt authority refuses mirror-only and duplicate ids" `Quick
+            test_attempt_authority_refuses_missing_primary_and_duplicate_ids;
+          test_case "legacy recovery does not invent attempt authority" `Quick
+            test_legacy_recovery_does_not_invent_attempt_authority;
+          test_case "attempt capability survives primary failure but not scope change" `Quick
+            test_attempt_capability_survives_primary_failure_but_not_scope_change;
+          test_case "startup recovery returns only running schedule to due" `Quick
+            test_startup_recovery_returns_only_running_schedule_to_due;
+          test_case "startup recovery ignores wall-clock rollback" `Quick
+            test_startup_recovery_uses_exact_occurrence_across_clock_rollback;
+          test_case "fail due candidate records failed wake" `Quick
+            test_fail_due_candidate_records_failed_wake;
+          test_case "recurring occurrences remain dispatchable" `Quick
+            test_recurring_occurrences_remain_dispatchable;
+          test_case "terminal wakes are bounded per schedule" `Quick
+            test_terminal_wakes_are_bounded_per_schedule;
+          test_case "wake list is scoped to its instance, newest first" `Quick
+            test_wake_list_is_scoped_to_its_instance_and_newest_first;
+          test_case "prune deletes terminal request and wake receipt"
+            `Quick test_prune_deletes_terminal_request_and_wake_receipt;
+          test_case
+            "prune scopes wake receipt ownership by schedule instance"
+            `Quick
+            test_prune_does_not_bind_orphan_receipt_to_reused_public_id;
+          test_case "contract vocabularies own strings and errors" `Quick
+            test_contract_vocabularies_own_strings_and_errors;
+        ] );
+    ]
+;;

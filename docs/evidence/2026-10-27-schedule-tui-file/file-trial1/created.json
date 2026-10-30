@@ -1,0 +1,46 @@
+{
+  "schedule_instance_id": "01a17a5a-6d77-7000-8310-a034d865237a",
+  "schedule_id": "audit-file-job-950cf3f5d41a4a0b874e5152eadd7d5e",
+  "requested_by": {
+    "id": "schedule-file-observer",
+    "kind": "automated_actor",
+    "display_name": null
+  },
+  "scheduled_by": {
+    "id": "schedule-file-observer",
+    "kind": "automated_actor",
+    "display_name": null
+  },
+  "requested_at": 1793054109.04766,
+  "due_at": 1793054110.04766,
+  "expires_at": null,
+  "payload": {
+    "kind": "masc.keeper_wake",
+    "body": {
+      "result_delivery": {
+        "policy": "none"
+      },
+      "keeper_name": "audit-file-ce44a31266bd45a2b82ba58ce53124d0",
+      "message": "Perform this single authorized scheduled job for schedule_id \"audit-file-job-950cf3f5d41a4a0b874e5152eadd7d5e\". Using the public Write tool exactly once, write the new sandbox-relative file_path \"schedule-file-435677a8cf854257a96bd4e85c80b880.txt\" with exact UTF-8 content represented by this JSON string: \"nonce=cc9a09d397e94d69bcb9f8428158004f\\n예약 파일 결과 확인 🐙\". Decode JSON escapes: the content has exactly one LF, Korean and emoji, exactly 71 UTF-8 bytes and NO final newline. Use Write file_path and content only (the public tool overwrites); do not append or patch. Only after Write succeeds, use the public Read schema on the same file to read its full content (offset defaults to 1; explicit cwd/offset/limit are allowed when they read that same complete file). Compare the complete actual Read content and byte count with this request; do not infer success from your intended content or a final narrative. Only after the complete Read returns exactly those bytes without truncation, call masc_schedule_note_add exactly once on schedule_id \"audit-file-job-950cf3f5d41a4a0b874e5152eadd7d5e\" with exact body \"FILE_EFFECT_VERIFIED_b2644e08924d44ea904cf91c9e24c079\". Then finish this job. Do not write any other file or note, retry Write, use Edit/Patch/Execute/shell, create another schedule/chat/task/Board/external message, or ask for confirmation. Tool discovery is allowed. If the effect cannot be verified, report the failure without adding the marker note."
+    }
+  },
+  "status": "scheduled",
+  "source": "operator_request",
+  "recurrence": {
+    "kind": "one_shot"
+  },
+  "cancellation": null,
+  "due_at_iso": "2026-10-26T22:35:10Z",
+  "next_due_at": 1793054110.04766,
+  "next_due_at_iso": "2026-10-26T22:35:10Z",
+  "requested_at_iso": "2026-10-26T22:35:09Z",
+  "recurrence_kind": "one_shot",
+  "recurrence_summary": "one_shot",
+  "payload_digest": "5466af81443ed0b5a4f4318764c5ffba10169e3310f30751d24303909b9f0162",
+  "payload_kind": "masc.keeper_wake",
+  "payload_support": "supported",
+  "payload_dispatch_tool": "masc.keeper_wake",
+  "payload_target": "keeper:audit-file-ce44a31266bd45a2b82ba58ce53124d0",
+  "payload_summary": "Perform this single authorized scheduled job for schedule_id \"audit-file-job-950cf3f5d41a4a0b874e5152eadd7d5e\". Using the public Write tool exactly once, wri...",
+  "last_wake": null
+}

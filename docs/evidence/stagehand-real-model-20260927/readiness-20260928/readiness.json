@@ -1,0 +1,37 @@
+{
+  "at": "2026-09-28T07:37:09.091998+00:00",
+  "records": [
+    {
+      "slot": "glm-coding.glm-5-3",
+      "model": "glm-5.3",
+      "source": "f8f04e2d553a5be8c7a1253634b97e97a118d508",
+      "requests": 1,
+      "max_output_tokens": 64,
+      "transport_timeout_s": 60,
+      "purpose": "one small account-availability request; not Stagehand semantic evidence",
+      "request_sha256": "11164c97264802c1504d1afba221a56cb5373c901a8810b59b7b837e074b5937",
+      "status": 429,
+      "outcome": "http_refusal",
+      "elapsed_s": 0.6956184579757974
+    },
+    {
+      "slot": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+      "model": "deepseek-v4.1-flash",
+      "source": "f8f04e2d553a5be8c7a1253634b97e97a118d508",
+      "requests": 1,
+      "max_output_tokens": 64,
+      "transport_timeout_s": 60,
+      "purpose": "one small account-availability request; not Stagehand semantic evidence",
+      "request_sha256": "a32eaba7f4f9dfabf93554f9c1753c01a0d9bba58d272a4622680061c90b6d27",
+      "status": 200,
+      "has_choice": true,
+      "nonempty_content": true,
+      "finish_reason": "stop",
+      "outcome": "http_success",
+      "elapsed_s": 1.6463530829641968
+    }
+  ],
+  "live_configuration_changed": false,
+  "raw_response_published": false,
+  "fixture_matrix_run": false
+}

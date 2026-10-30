@@ -1,0 +1,30 @@
+{
+  "revision": 1,
+  "updated_at": 1792642095.557386,
+  "source": { "kind": "librarian", "trace_id": "trace-1792641821776-00000" },
+  "facts": [
+    {
+      "claim": "Curator authority boundary. The Workspace Curator Addon computes classification and briefing, while the MASC host retains durable fact intake, original request identity, memory ledger commits, observer acknowledgements, and effect authority. Disabling the installation must preserve pending original work for reattachment.",
+      "category": "fact",
+      "first_seen": 1792642095.557319,
+      "last_seen": 1792642095.557319,
+      "origin": { "kind": "injected", "trace_id": "" },
+      "basis": { "kind": "observed" }
+    }
+  ],
+  "change": {
+    "added": [
+      {
+        "claim": "Curator authority boundary. The Workspace Curator Addon computes classification and briefing, while the MASC host retains durable fact intake, original request identity, memory ledger commits, observer acknowledgements, and effect authority. Disabling the installation must preserve pending original work for reattachment.",
+        "category": "fact",
+        "first_seen": 1792642095.557319,
+        "last_seen": 1792642095.557319,
+        "origin": { "kind": "injected", "trace_id": "" },
+        "basis": { "kind": "observed" }
+      }
+    ],
+    "removed": [],
+    "retained": 0,
+    "invalidated": []
+  }
+}

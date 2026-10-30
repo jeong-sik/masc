@@ -1,0 +1,108 @@
+{
+  "complete": false,
+  "rows": [
+    {
+      "id": "01a15cf3-691a-7000-887b-ddb8974e8b8f/2/a0fb04d527f1800cb98f5475fed7688c9310cd1c088a8a35083781b30fa7ff16",
+      "lane_id": "01a15cf3-691a-7000-887b-ddb8974e8b8f/phrase",
+      "kind": "value",
+      "title": "SoundFont: player_finished",
+      "observed_at": 1792558800.0,
+      "subject_id": "input-1",
+      "clock": null,
+      "actor": null,
+      "fields": {
+        "source_id": "vst-phrase",
+        "incarnation": "cycle-input",
+        "source_event_id": "input-1",
+        "state": "player_finished",
+        "scope": "latest_local_phrase_state",
+        "playback_evidence": "local player process events; device audibility is not measured",
+        "action_receipt": false
+      },
+      "evidence": [
+        {
+          "uri": "lane-evidence:f336d07eb08a9d791df814f75c5d441a418e39d7cc02aae87d8303dff92780cd",
+          "sha256": "f336d07eb08a9d791df814f75c5d441a418e39d7cc02aae87d8303dff92780cd"
+        }
+      ],
+      "related_ids": []
+    },
+    {
+      "id": "01a15cf6-1580-7000-9c35-86ba0bd1b928/1/86ae96ab8dccb842e241fecabbf5cf60c70d05f73bc725ddd52e5629761e9c4d",
+      "lane_id": "01a15cf6-1580-7000-9c35-86ba0bd1b928/phrase",
+      "kind": "value",
+      "title": "SoundFont: stop_requested",
+      "observed_at": 1792558800.0,
+      "subject_id": "input-2",
+      "clock": null,
+      "actor": null,
+      "fields": {
+        "source_id": "vst-phrase",
+        "incarnation": "cycle-input",
+        "source_event_id": "input-2",
+        "state": "stop_requested",
+        "scope": "latest_local_phrase_state",
+        "playback_evidence": "local player process events; device audibility is not measured",
+        "action_receipt": false
+      },
+      "evidence": [
+        {
+          "uri": "lane-evidence:ce6877bb486a55a398e52261865f5bee8df8dd6aed6028008152199ad63bfad0",
+          "sha256": "ce6877bb486a55a398e52261865f5bee8df8dd6aed6028008152199ad63bfad0"
+        }
+      ],
+      "related_ids": []
+    }
+  ],
+  "coverage": [
+    {
+      "source_id": "vst-phrase",
+      "incarnation": "cycle-input",
+      "cursor": "1",
+      "complete": true,
+      "detail": "Synthetic input for lifecycle qualification only"
+    },
+    {
+      "source_id": "vst-phrase",
+      "incarnation": "unobserved",
+      "cursor": null,
+      "complete": false,
+      "detail": "source_id requires a non-blank string; No native phrase observation supplied"
+    },
+    {
+      "source_id": "retained:01a15cf3-691a-7000-887b-ddb8974e8b8f",
+      "incarnation": "01a15cf3-691a-7000-887b-ddb8974e8b8f",
+      "cursor": "scanned:2/of:2",
+      "complete": true,
+      "detail": "window [unbounded, unbounded]; rows and source coverage inspected through 2/of:2; no matching row records omitted; all inspected source coverage returned; retained observations readable"
+    },
+    {
+      "source_id": "vst-phrase",
+      "incarnation": "cycle-input",
+      "cursor": "2",
+      "complete": true,
+      "detail": "Synthetic input for lifecycle qualification only"
+    },
+    {
+      "source_id": "retained:01a15cf6-1580-7000-9c35-86ba0bd1b928",
+      "incarnation": "01a15cf6-1580-7000-9c35-86ba0bd1b928",
+      "cursor": "scanned:1/of:1",
+      "complete": true,
+      "detail": "window [unbounded, unbounded]; rows and source coverage inspected through 1/of:1; no matching row records omitted; all inspected source coverage returned; retained observations readable"
+    },
+    {
+      "source_id": "01a15cf3-691a-7000-887b-ddb8974e8b8f",
+      "incarnation": "01a15cf3-691a-7000-887b-ddb8974e8b8f",
+      "cursor": "2",
+      "complete": true,
+      "detail": "detached; retained range only"
+    },
+    {
+      "source_id": "01a15cf6-1580-7000-9c35-86ba0bd1b928",
+      "incarnation": "01a15cf6-1580-7000-9c35-86ba0bd1b928",
+      "cursor": "1",
+      "complete": true,
+      "detail": null
+    }
+  ]
+}

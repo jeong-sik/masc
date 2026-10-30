@@ -1,0 +1,10 @@
+{
+  "run_id": 39660035294,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/39660035294",
+  "source_head": "61c6014cc919ab0d6e24531008ac43c7524db657",
+  "conclusion": "failure",
+  "failed_log_sha256": "b74209100d20e0277052b0fd9795305bab135fc57400b56d937c0cc8aa5a1f47",
+  "failure": "test/test_lane_addon_worker.ml:537 missing exact_output.request_schema field; compilation stopped before selected suites executed",
+  "verification_scope": "8 explicit selected suites, minimal=true, eio_backend=posix",
+  "repair": "Explicit request_schema=Types.Package_schema_only on existing worker-port fixture; execution of repaired source requested separately"
+}

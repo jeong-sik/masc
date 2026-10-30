@@ -1,0 +1,44 @@
+{
+  "schema": "masc.tool_metrics_hydration.scale.v1",
+  "product_head": "4dd5fc316520460f5f52795bced68b552744da28",
+  "image_id": "sha256:0ea91a347442b5b8399a379906b5db65b1d93f7b3dae34e3b7f1c81ea00315b4",
+  "input": {
+    "bytes": 8901900,
+    "physical_rows": 100200,
+    "valid_rows": 100000,
+    "malformed_json_rows": 100,
+    "invalid_format_rows": 100,
+    "sha256": "3d690ff78cffb0b3eb2b9ff4aac23e2e0e4a1ffafeb00f68bdeb04fa8c69fb56"
+  },
+  "baseline": {
+    "valid_rows": 0,
+    "container_start_to_hydration_log_s": 0.799874,
+    "memory_mib": 78.22
+  },
+  "first_start": {
+    "container_id": "2afdbaae7430c3afde910b0fd2a9c129bf6f49049f993cccde66e5fc6b75edc3",
+    "container_start_to_hydration_log_s": 0.864464,
+    "memory_before_api_mib": 81.45,
+    "memory_after_two_api_reads_mib": 82.95,
+    "api_time_s": [0.025005, 0.020617],
+    "api_totals": [100000, 100000],
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "replacement_start": {
+    "container_id": "32fe49fd3b3031c3b4dbba9437acdfaf1c0d824b35aa8c1ec4f3cd9bcfc5c15d",
+    "container_start_to_hydration_log_s": 0.880655,
+    "memory_after_api_mib": 82.29,
+    "api_time_s": [0.022785],
+    "api_totals": [100000],
+    "exit_code": 0,
+    "oom_killed": false
+  },
+  "percentiles": {
+    "p50_ms": 51.0,
+    "p95_ms": 95.0,
+    "p99_ms": 99.0
+  },
+  "result": "pass",
+  "verified_at": "2026-08-31T05:49:38+09:00"
+}

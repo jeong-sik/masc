@@ -1,0 +1,19 @@
+{
+ "generated_at_iso": "2026-08-15T18:44:13Z",
+ "runtime_count": 49,
+ "lane_count": 11,
+ "assignment_count": 37,
+ "default_runtime": {
+  "id": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+  "provider": "Ollama Cloud",
+  "model": "deepseek-v4-flash:0731",
+  "effective_max_context": 1048576,
+  "max_context_source": "override",
+  "max_output_tokens": null,
+  "is_local": false,
+  "is_default": false,
+  "keeper_dispatchable": true,
+  "keeper_dispatch_blocked_reason": null
+ },
+ "agentworld_present": false
+}

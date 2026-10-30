@@ -1,0 +1,68 @@
+{
+  "schema": "masc.retained-verification-independent-source-review.v2",
+  "reviewer": "/root/concurrent_probe_review",
+  "reviewed_at_utc": "2026-10-26T13:06:21.479443+00:00",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-retained-verification-buffer-20261026",
+  "baseline_head": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+  "verdict": "PASS_SOURCE_ONLY",
+  "p0_p1_p2_findings": [],
+  "diff": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/retained-verification-review-v2/reviewed.diff",
+    "bytes": 6842,
+    "sha256": "75fa4cdf1d3d30be2487baa56a27442c5efb54a0105fe5de192ae944a1c03432"
+  },
+  "files": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-retained-verification-buffer-20261026/lib/lane_addon/lane_addon_store.ml",
+      "bytes": 73955,
+      "sha256": "0eb3f17cf3c4a0d9fea65c4adb652ab9a4b5174c00eae80d9f99e721ad514388",
+      "git_blob": "508973b21e7d31cbf3ede284206ef3fca6df90f5",
+      "baseline_sha256": "55e00dcbbbc4d2d226760e0df2faa25c5ff07853346ad064f8a78e7489d48b05",
+      "identical_to_v1_reviewed_file": false
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-retained-verification-buffer-20261026/lib/lane_addon/lane_addon_store.mli",
+      "bytes": 21766,
+      "sha256": "af5c2bd840e46bf87b45bbcab90273583d02102824e979200a827471a7c568eb",
+      "git_blob": "20d8b6036e5ed83220f6fa73455995699656c4e3",
+      "baseline_sha256": "8aa4706aa743aa8e5dd2695331c1f14c755b8c08fdf6e114bf8269531d9627d9",
+      "identical_to_v1_reviewed_file": true
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-retained-verification-buffer-20261026/test/test_lane_addon_request_discovery.ml",
+      "bytes": 29881,
+      "sha256": "27699e3f5972a67e4876e566e0987b6bd941a4b2c979112fd7d0c80b0932a5a1",
+      "git_blob": "861b7d7b762f3a2023f27c2c4b97808b5151594b",
+      "baseline_sha256": "6cd24cb7e7d7b1601135adb4ca60e7c53129dc9c7463dd8ee6ef3e04af0f8eee",
+      "identical_to_v1_reviewed_file": true
+    }
+  ],
+  "delta_scope": "Only verify_record_bytes changed after v1; complete final diff reread. mli/test exact bytes match v1 and prior unchanged context is carried within the same baseline.",
+  "prior_review": {
+    "path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/retained-verification-review-v1/review.json",
+    "sha256": "f2df76960d2feb6017b647172abba692a760a390b85f913911cb0dc9ae006573",
+    "prior_diff_sha256": "c0179484bd9b5db53ebf7bc1083777c1caa95d905f2b0fdfc9d16a3837870902",
+    "prior_ml_git_blob": "0f28493ad114a40fc5222563f3f6c8d2d41f134d",
+    "carried_scope": "v1 source-only caller/durability/ownership/republish/serializer/cancellation analysis outside the changed verify_record_bytes return path, same baseline; no execution-result transfer."
+  },
+  "delta_judgment": [
+    "Small-record branch directly returns record_bytes to the original verified-string binding and original common equality/identity checks; no intermediate bool result conversion remains.",
+    "Large-record fill, partial-read/EINTR retry, chunk equality, sticky mismatch and mandatory EOF read are unchanged.",
+    "EOF returns the original immutable first bytes only when every chunk compared equal; mismatch at EOF returns the original sync-change error.",
+    "A grow/shrink read still fails before a remembered mismatch, preserving prior error precedence.",
+    "The common existing string comparison and file identity check remain after branch success; returning original bytes cannot bypass a chunk or EOF.",
+    "No scratch aliases or mutation of first bytes, new exceptions/catches, I/O replay, fsync/order or cancellation changes."
+  ],
+  "execution_by_reviewer": {
+    "git_diff_check": "exit0",
+    "test_or_interpreter": false,
+    "local_build_or_native": false,
+    "network": false,
+    "target_source_edit": false
+  },
+  "evidence_limits": [
+    "No claimed 48B/read saving or other runtime allocation/latency number is certified by source review.",
+    "Root owns source-specific interpreter52 checks and24 rows across r1/r2/r3; reviewer did not run or consume them.",
+    "Full module/CI/native/installed/runtime/fleet/TUI/0.1ms evidence remains separate."
+  ]
+}

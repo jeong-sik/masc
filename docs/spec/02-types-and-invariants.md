@@ -1,0 +1,564 @@
+---
+status: reference
+---
+
+# Types and Invariants
+
+| 항목 | 값 |
+|------|-----|
+| Status | Draft |
+| Team | Foundation |
+| Maps to | `lib/types/`, `lib/tool/tool_dispatch.ml`, `lib/client_identity.ml` |
+| Dependencies | 00-glossary.md |
+
+---
+
+## 1. Newtype Hierarchy
+
+MASC는 ID 타입 간 혼용을 컴파일 타임에 차단하기 위해 추상 newtype 모듈을 사용한다. 모든 ID의 내부 표현은 `string`이지만, 모듈 시그니처가 타입을 불투명(opaque)하게 만들어 `Agent_id.t`와 `Task_id.t`를 직접 비교하거나 대입할 수 없다.
+
+| Module | Type | 생성 방식 | 형식 예시 |
+|--------|------|----------|----------|
+| `Agent_id` | `Agent_id.t` | `of_string` | `"agent-llm-a-swift-fox"` |
+| `Task_id` | `Task_id.t` | `of_string` / `generate()` | `"task-1711234567000-001a"` |
+| `Thread_id` | `Thread_id.t` | `of_string` / `generate()` | `"thread-1711234567000-001a"` |
+| `Turn_id` | `Turn_id.t` | `of_string` / `generate ~thread_id ~seq` | `"thread-...-turn-0003"` |
+
+**소스**: `lib/types/types_core.ml` (lines 7-98)
+
+모든 newtype 모듈은 동일한 시그니처를 공유한다:
+
+```ocaml
+module type ID = sig
+  type t
+  val of_string : string -> t
+  val to_string : t -> string
+  val equal : t -> t -> bool
+  val to_yojson : t -> Yojson.Safe.t
+  val of_yojson : Yojson.Safe.t -> (t, string) result
+end
+```
+
+`Task_id.generate`와 `Thread_id.generate`는 `timestamp-seqhex` 패턴으로 고유 ID를 생성한다. `Turn_id.generate`는 thread_id에 순번을 연결한다.
+
+> 참고: `workspace_info.id`, `task.id`, `message.from_agent` 등 일부 레코드 필드는 아직 `string`을 직접 사용한다. newtype 전환이 완료되지 않은 부분이며, 점진적으로 마이그레이션 대상이다.
+
+---
+
+## 2. Core Domain Types
+
+**소스**: `lib/types/types_core.ml`
+
+### 2.1 Legacy Task Role (removed)
+
+`Writer`/`Reviewer`/`Unassigned` 기반 task assignment role 시스템은 제거되었다. task claim은 더 이상 role 매칭에 의존하지 않고, 상태와 owner 유무만 검사하는 열린 규칙을 사용한다.
+
+### 2.2 Agent Status
+
+```ocaml
+type agent_status =
+  | Active
+  | Busy
+  | Listening
+  | Inactive
+```
+
+JSON 직렬화 시 소문자 문자열(`"active"`, `"busy"`, ...)로 표현된다.
+
+### 2.3 Agent Meta
+
+```ocaml
+type agent_meta = {
+  session_id : string;
+  agent_type : string;        (* "agent-llm-a", "provider-f", "agent-code" *)
+  pid : int option;
+  hostname : string option;
+  tty : string option;
+  worktree : string option;
+  parent_task : string option;
+}
+```
+
+세션 식별과 환경 정보를 담는다. `pid`/`hostname`/`tty`는 디버깅 용도이며 선택 필드다.
+
+### 2.4 Agent
+
+```ocaml
+type agent = {
+  name : string;               (* 룸 내 유일한 이름: agent-llm-a-swift-fox *)
+  agent_type : string;         (* agent-llm-a, provider-f, agent-code *)
+  status : agent_status;
+  capabilities : string list;
+  current_task : string option;
+  joined_at : string;          (* ISO 8601 *)
+  last_seen : string;          (* ISO 8601 *)
+  meta : agent_meta option;
+}
+```
+
+### 2.5 Workspace Info / Workspace Registry
+
+```ocaml
+type workspace_info = {
+  id : string;                 (* slugified name *)
+  name : string;
+  description : string option;
+  created_at : string;
+  created_by : string option;
+  agent_count : int;
+  task_count : int;
+}
+
+type workspace_registry = {
+  workspaces : workspace_info list;
+  default_workspace : string;       (* default: "default" *)
+  current_workspace : string option;
+}
+```
+
+### 2.6 Task Status (상태 기계)
+
+```ocaml
+type task_status =
+  | Todo
+  | Claimed of { assignee: string; claimed_at: string }
+  | InProgress of { assignee: string; started_at: string }
+  | AwaitingVerification of {
+      assignee: string;
+      started_at: string;
+      submitted_at: string;
+      verification_id: string;
+    }
+  | Done of { assignee: string; completed_at: string; notes: string option }
+  | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
+```
+
+각 variant가 메타데이터(who, when)를 직접 보유한다. 이 설계는 "상태와 컨텍스트를 분리하지 않는다"는 원칙을 따른다. 상태 전이 규칙은 [INV-TYPE-003] 참조.
+
+### 2.7 Task
+
+```ocaml
+type task = {
+  id : string;
+  title : string;
+  description : string;
+  task_status : task_status;
+  priority : int;              (* 기본값 3 *)
+  files : string list;
+  created_at : string;
+  worktree : worktree_info option;
+}
+```
+
+### 2.8 Worktree Info
+
+```ocaml
+type worktree_info = {
+  branch : string;
+  path : string;               (* git root 기준 상대 경로 *)
+  git_root : string;           (* .git parent 절대 경로 *)
+  repo_name : string;
+}
+```
+
+### 2.9 Message
+
+```ocaml
+type message = {
+  seq : int;
+  from_agent : string;
+  msg_type : string;           (* "broadcast" | "direct" *)
+  content : string;
+  mention : string option;
+  timestamp : string;
+}
+```
+
+### 2.10 Workspace State
+
+```ocaml
+type workspace_state = {
+  protocol_version : string;
+  project : string;
+  started_at : string;
+  message_seq : int;
+  active_agents : string list;
+  paused : bool;
+  pause_reason : string option;
+  paused_by : string option;
+  paused_at : string option;
+  search_strategy_default : string option;
+  speculation_enabled : bool;
+  speculation_budget : int option;
+}
+```
+
+RFC-0323 및 [03-workspace-state.md](./03-workspace-state.md)에 따라 global pause/resume 및 speculation budget은 retired contract이며, wire 호환성을 위한 레코드 필드로만 보존된다.
+
+### 2.11 Tempo
+
+```ocaml
+type tempo_mode = Normal | Slow | Fast | Paused
+
+type tempo_config = {
+  mode : tempo_mode;
+  delay_ms : int;
+  reason : string option;
+  set_by : string option;
+  set_at : string option;
+}
+```
+
+워크스페이스/서버 실행 속도를 제어한다. `delay_ms`는 작업 간 인위적 지연을 삽입한다.
+
+### 2.12 Backlog
+
+```ocaml
+type backlog = {
+  tasks : task list;
+  last_updated : string;
+  version : int;
+}
+```
+
+### 2.13 A2A Task (Google A2A Protocol)
+
+```ocaml
+type a2a_task_status = A2APending | A2ARunning | A2ACompleted | A2AFailed | A2ACanceled
+
+type a2a_task = {
+  a2a_id : string;
+  from_agent : string;
+  to_agent : string;
+  a2a_message : string;
+  a2a_status : a2a_task_status;
+  a2a_result : string option;
+  created_at : string;
+  updated_at : string;
+}
+```
+
+### 2.14 SSE Session
+
+```ocaml
+type sse_session = {
+  agent_name : string;
+  connected_at : string;
+  last_activity : float;  (* Unix timestamp *)
+  is_listening : bool;
+}
+```
+
+### 2.15 Tool Result (core)
+
+`types_core.ml`에 정의된 기본 tool_result:
+
+```ocaml
+type tool_result = {
+  success : bool;
+  message : string;
+  data : Yojson.Safe.t option;
+}
+```
+
+### 2.16 Claim Next Result
+
+스케줄링 결과를 구조화한 ADT. brittle한 문자열 파싱을 방지한다:
+
+```ocaml
+type claim_next_result =
+  | Claim_next_claimed of {
+      task_id : string; title : string;
+      priority : int;
+      message : string;
+      raw_task_json : Yojson.Safe.t option;
+    }
+  | Claim_next_no_unclaimed
+  | Claim_next_no_eligible of { excluded_count : int }
+  | Claim_next_error of string
+```
+
+---
+
+## 3. Error Hierarchy
+
+MASC 는 비즈니스 로직 에러를 모듈화된 sum type `masc_error` 로 표현한다.
+
+> Historical note: 이전에 별도로 존재하던 `Error.t` 인프라/프로토콜 계층(Workspace / Federation / Mcp 도메인, `is_recoverable` / `severity_of_error` helper)은 #10659 에서 0-caller dead code 로 삭제되었다 (squash 5d18aae8bc). Workspace / Federation / Mcp 도메인 에러는 어떤 호출자에도 도달하지 못한 채 design-aspirational 상태로 남아있던 모듈이며, 실제 코드 경로는 처음부터 `masc_error` 만 사용했다.
+
+### 3 masc_error (Unified)
+
+**소스**: `lib/types/masc_error.mli`, `lib/types/types_auth.ml`
+
+```ocaml
+module Task_error : sig
+  type t =
+    | NotFound of string
+    | AlreadyClaimed of { task_id: string; by: string }
+    | NotClaimed of string
+    | InvalidState of string
+    | InvalidId of string
+    | VerificationSuperseded of {
+        task_id: string;
+        requested: string;
+        current: string;
+      }
+  val to_string : t -> string
+end
+
+module Agent_error : sig
+  type t =
+    | NotFound of string
+    | InvalidName of string
+  val to_string : t -> string
+end
+
+module Auth_error : sig
+  type unauthorized_reason =
+    | Actor_mismatch
+    | Missing_token
+    | Generic
+  type t =
+    | Unauthorized of { reason: unauthorized_reason; message: string }
+    | Forbidden of { agent: string; action: string }
+    | SameOriginBlocked
+    | TokenExpired of string
+    | InvalidToken of string
+  val to_string : t -> string
+end
+
+module System_error : sig
+  type t =
+    | NotInitialized
+    | IoError of string
+    | ValidationError of string
+    | LockContention of { key : string; attempts : int }
+  val to_string : t -> string
+end
+
+type t =
+  | Task of Task_error.t
+  | Agent of Agent_error.t
+  | Auth of Auth_error.t
+  | System of System_error.t
+```
+
+Result alias: `type 'a masc_result = ('a, masc_error) result`
+
+---
+
+## 4. Tool Dispatch Types
+
+**소스**: `lib/tool/tool_dispatch.mli`
+
+### 4.1 Handler
+
+```ocaml
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
+```
+
+모든 MCP 도구 호출은 typed `Tool_result.result` 시그니처로 통일된다. `None`을 반환하면 "이 핸들러가 해당 도구를 모른다"는 의미다.
+
+### 4.2 Hooks
+
+```ocaml
+type pre_hook_action =
+  | Pass
+  | Proceed of Yojson.Safe.t
+  | Reject of Tool_result.result
+
+type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
+(* Pass -> 진행, Proceed -> args 교체 후 진행, Reject -> 즉시 반환 *)
+
+type dispatch_observer = Dispatch_outcome.t -> Tool_result.result option -> unit
+(* typed outcome 관찰 전용. 결과 변환은 result_transformer가 담당한다. *)
+```
+
+실행 순서: telemetry span -> pre_hooks -> handler -> result_transformer -> dispatch_observers.
+
+### 4.3 Module Tag (2-level dispatch)
+
+```ocaml
+type module_tag =
+  | Mod_plan | Mod_operator
+  | Mod_local_runtime
+  | Mod_run
+  | Mod_agent | Mod_task | Mod_state
+  | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_spawn
+  | Mod_code_query | Mod_misc
+  | Mod_wiki | Mod_external
+  | Mod_inline
+  | Mod_keeper_task
+```
+
+Variant SSOT는 `lib/tool/tool_tag_types.mli`다 (`tool_dispatch.mli`는 같은
+타입을 재노출한다). 도구 이름으로 O(1) tag
+lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제거된 모듈
+이름은 tag 목록이나 운영 문서의 기준 목록으로 보존하지 않는다.
+
+### 4.4 Tool_result.result (structured)
+
+**소스**: `lib/tool_types/tool_result.mli`
+
+```ocaml
+type success_payload = {
+  data : Yojson.Safe.t;
+  tool_name : string;
+  duration_ms : float;
+}
+
+type failure_payload = {
+  class_ : tool_failure_class;
+  message : string;
+  data : Yojson.Safe.t;
+  tool_name : string;
+  duration_ms : float;
+}
+
+type result = (success_payload, failure_payload) Stdlib.Result.t
+```
+
+도구 핸들러는 `Tool_result.result`를 직접 반환한다. 기존 `(bool * string)` 튜플과 legacy record 기반 dispatch 계약은 제거됐고, 성공/실패는 `Ok`/`Error` variant로만 표현된다.
+
+---
+
+## 5. Agent Identity Types
+
+**소스**: `lib/client_identity.mli`
+
+### 5.1 Channel
+
+```ocaml
+type channel =
+  | Api
+  | Internal
+  | External of string
+```
+
+접속 경로를 나타낸다. 코어가 connector vendor에 의존하지 않도록 외부 플랫폼 이름은 `External string`으로 불투명하게 유지된다.
+
+### 5.2 Agent Identity Record
+
+```ocaml
+type t = {
+  uuid : string;
+  session_key : string;
+  agent_name : string;
+  channel : channel option;
+  user_id : string option;
+  workspace_id : string option;
+  capabilities : string list;
+  registered_at : float;
+  mutable last_seen : float;   (* 유일한 mutable 필드 *)
+  metadata : (string * string) list;
+}
+```
+
+`last_seen`만 mutable이다. 이유: heartbeat마다 새 레코드를 할당하는 비용을 피하기 위함.
+
+### 5.3 Identity Registry
+
+```ocaml
+module Registry : sig
+  type registry
+  val create : unit -> registry
+  val register : registry -> t -> t
+  val find_by_session : registry -> string -> t option
+  val find_by_name : registry -> string -> t option
+  val touch : registry -> string -> ?workspace_id:string -> unit -> unit
+  val unregister : registry -> string -> unit
+  val list_active : registry -> within_seconds:float -> t list
+  val count : registry -> int
+end
+```
+
+---
+
+## 9. Auth Types
+
+**소스**: `lib/types/types_auth.ml`
+
+### 9.1 Agent Role (auth)
+
+```ocaml
+type agent_role = Worker | Admin | Player
+```
+
+인증/인가 역할은 `Worker`, `Admin`, 그리고 공유 머신 초대용 `Player`로 구성된다. task assignment 전용 role 타입은 제거되었다.
+
+### 9.2 Permission
+
+```ocaml
+type permission =
+  | CanInit
+  | CanReset
+  | CanReadState
+  | CanAddTask
+  | CanClaimTask
+  | CanCompleteTask
+  | CanBroadcast
+  | CanVote
+  | CanAdmin
+  | CanPlayMachine
+```
+
+10개 variant. 각 `agent_role`에 허용된 permission 목록:
+
+| Role | Permissions |
+|------|------------|
+| Player | `CanPlayMachine` |
+| Worker | `CanReadState`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanVote`, `CanPlayMachine` |
+| Admin | Worker + `CanInit`, `CanReset`, `CanAdmin` (전체) |
+
+### 9.3 Agent Credential
+
+```ocaml
+type agent_credential = {
+  agent_name : string;
+  token : string;         (* SHA256 hash -- raw token은 저장하지 않음 *)
+  role : agent_role;
+  created_at : string;
+  expires_at : string option;
+}
+```
+
+직렬화 포맷은 `role` 문자열 대신 `admin: bool`을 사용하고, 런타임에서 `Worker/Admin`으로 복원한다.
+
+### 9.4 Auth Config
+
+```ocaml
+type auth_config = {
+  enabled : bool;
+  workspace_secret_hash : string option;
+  require_token : bool;
+  token_expiry_hours : int;     (* 기본값: 24 *)
+}
+```
+
+### 9.5 Rate Limit
+
+```ocaml
+type rate_limit_config = {
+  per_minute : int;
+  burst_allowed : int;
+  priority_agents : string list;
+  worker_multiplier : float;    (* 1.0x *)
+  admin_multiplier : float;     (* 2.0x *)
+  broadcast_per_minute : int;
+  task_ops_per_minute : int;
+}
+
+type rate_limit_category = GeneralLimit | BroadcastLimit | TaskOpsLimit
+```
+
+---
+
+## 11. Global Invariants
+
+`INV-TYPE-*` ID는 이 문서 안의 앵커다. 코드나 테스트 좌표로 확인할 수 있는 불변식에만 ID를 붙이고, 좌표는 표의 `검증 좌표` 열에 적는다. 좌표는 줄 번호보다 심볼 이름을 우선한다. 형식 스펙이 있으면 파일과 속성 이름을 같이 적는다.
+
+### Evidence-backed invariants
+
+| ID | 불변식 | 검증 좌표 |
+|----|--------|----------|
+| INV-TYPE-003 | `task_status`는 `Todo`, `Claimed`, `InProgress`, `AwaitingVerification`, `Done`, `Cancelled`를 가진다. `Release`는 `Claimed`를 `Todo`로 되돌리고, 검증 거절은 `AwaitingVerification`을 `InProgress`로 되돌릴 수 있으므로 전이는 단방향이 아니다. `Todo`에서, 그리고 맡은 쪽이 취소하면 `Claimed`·`InProgress`·`AwaitingVerification`에서 `Cancelled`로 바로 간다. | `Types_core.task_status` (`lib/types/types_core.ml`); `Workspace_task_lifecycle.decide`, `Workspace_task_lifecycle.decide_verdict` (`lib/workspace/workspace_task_lifecycle.ml`) |

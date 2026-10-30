@@ -1,0 +1,1028 @@
+type actor_kind = Schedule_contract_values.actor_kind =
+  | Human_operator
+  | Automated_actor
+  | System
+
+type actor =
+  { id : string
+  ; kind : actor_kind
+  ; display_name : string option
+  }
+
+type schedule_status = Schedule_contract_values.schedule_status =
+  | Scheduled
+  | Due
+  | Running
+  | Succeeded
+  | Failed
+  | Cancelled
+  | Expired
+
+let all_schedule_statuses = Schedule_contract_values.schedule_statuses
+
+type schedule_source = Schedule_contract_values.schedule_source =
+  | Operator_request
+  | Automated_request
+  | System_request
+
+type recurrence =
+  | One_shot
+  | Interval of { interval_sec : int }
+  | Daily of
+      { hour : int
+      ; minute : int
+      ; second : int
+      ; timezone : string
+      }
+  | Cron of
+      { expression : string
+      ; timezone : string
+      }
+
+type payload =
+  { kind : string
+  ; body : Yojson.Safe.t
+  ; digest : string
+    (* [payload_digest], taken once when the payload is decoded: a decoded
+       payload is never changed, and every schedule runner tick reads the
+       digest of each stored schedule's payload. *)
+  }
+
+type cancellation =
+  { cancelled_by : actor
+  ; reason : string
+  }
+
+type schedule_request =
+  { schedule_instance_id : string
+  ; schedule_id : string
+  ; requested_by : actor
+  ; scheduled_by : actor
+  ; requested_at : float
+  ; due_at : float
+  ; expires_at : float option
+  ; payload : payload
+  ; status : schedule_status
+  ; source : schedule_source
+  ; recurrence : recurrence
+  ; cancellation : cancellation option
+  }
+
+type wake_status = Schedule_contract_values.wake_status =
+  | Wake_running
+  | Wake_succeeded
+  | Wake_failed
+
+type wake_attempt_id = string
+
+let fresh_wake_attempt_id = Random_id.uuid_v7
+let wake_attempt_id_of_string raw =
+  Result.bind (Random_id.parse_uuid_v7 raw) (fun canonical ->
+    if String.equal raw canonical then Ok canonical
+    else Error "attempt_id must use canonical UUIDv7 text")
+let wake_attempt_id_to_string id = id
+
+type wake_attempt_identity = Unidentified | Identified of wake_attempt_id
+
+type wake_settlement_kind =
+  | Accepted | Schedule_rejected | Occurrence_rejected | Retryable_failure
+  | Process_interrupted | Unsupported_payload | Cancelled_schedule | Orphaned_attempt
+[@@deriving enumerate]
+
+type wake_record =
+  { schedule_instance_id : string
+  ; schedule_id : string
+  ; attempt_identity : wake_attempt_identity
+  ; settlement_kind : wake_settlement_kind option
+  ; started_at : float
+  ; finished_at : float option
+  ; due_at : float
+  ; payload_digest : string
+  ; status : wake_status
+  ; detail : Yojson.Safe.t option
+  ; error : string option
+  }
+
+let ( let* ) = Result.bind
+
+
+let nonempty field value =
+  if String.trim value = "" then Error (field ^ " must be non-empty") else Ok value
+;;
+
+(* The ledger is written as compact JSON, which has no spelling for NaN or an
+   infinity: a time that is not finite could be accepted here and then fail
+   every later write of the whole ledger. *)
+let finite_time field value =
+  if Float.is_finite value then Ok value else Error (field ^ " must be a finite time")
+;;
+
+let decode_error_to_string = Schedule_contract_values.decode_error_to_string
+let actor_kind_to_string = Schedule_contract_values.actor_kind_to_string
+
+let actor_kind_of_string value =
+  Schedule_contract_values.actor_kind_of_string value
+  |> Result.map_error decode_error_to_string
+;;
+
+(* Notes (task-381) live at schedule_id granularity, not instance granularity:
+   an update issues a fresh schedule_instance_id and drops the old definition,
+   so instance-scoped prose would not survive the replacement it explains.
+   Appended only -- there is no edit or removal, because a note is evidence
+   about intent and history, not state. *)
+type schedule_note =
+  { note_id : string
+  ; schedule_id : string
+  ; author_id : string
+  ; author_kind : actor_kind
+  ; created_at : float
+  ; body : string
+  }
+
+let schedule_note_to_yojson (note : schedule_note) : Yojson.Safe.t =
+  `Assoc
+    [ "note_id", `String note.note_id
+    ; "schedule_id", `String note.schedule_id
+    ; "author_id", `String note.author_id
+    ; "author_kind", `String (actor_kind_to_string note.author_kind)
+    ; "created_at", `Float note.created_at
+    ; "body", `String note.body
+    ]
+
+let schedule_note_of_yojson (json : Yojson.Safe.t) : (schedule_note, string) result =
+  (* Local option binder: the module-level [let*] is the Result one, and the
+     field lookups here are [option]s until the shape match. *)
+  let ( let* ) = Option.bind in
+  match json with
+  | `Assoc fields ->
+    let field name = List.assoc_opt name fields in
+    let shape =
+      let* note_id = field "note_id" in
+      let* schedule_id = field "schedule_id" in
+      let* author_id = field "author_id" in
+      let* author_kind = field "author_kind" in
+      let* created_at = field "created_at" in
+      let* body = field "body" in
+      Some (note_id, schedule_id, author_id, author_kind, created_at, body)
+    in
+    (match shape with
+     | Some (`String note_id, `String schedule_id, `String author_id, `String kind, `Float created_at, `String body) ->
+       (match actor_kind_of_string kind with
+        | Ok author_kind ->
+          Ok { note_id; schedule_id; author_id; author_kind; created_at; body }
+        | Error msg -> Error msg)
+     | _ ->
+       Error "schedule_note: field type mismatch")
+  | _ -> Error "schedule_note: expected an object"
+;;
+
+let schedule_status_to_string = Schedule_contract_values.schedule_status_to_string
+
+let schedule_status_of_string value =
+  Schedule_contract_values.schedule_status_of_string value
+  |> Result.map_error decode_error_to_string
+;;
+
+let schedule_source_to_string = Schedule_contract_values.schedule_source_to_string
+
+let schedule_source_of_string value =
+  Schedule_contract_values.schedule_source_of_string value
+  |> Result.map_error decode_error_to_string
+;;
+
+let recurrence_kind = function
+  | One_shot -> Schedule_contract_values.One_shot
+  | Interval _ -> Schedule_contract_values.Interval
+  | Daily _ -> Schedule_contract_values.Daily
+  | Cron _ -> Schedule_contract_values.Cron
+;;
+
+let recurrence_kind_to_string recurrence =
+  recurrence
+  |> recurrence_kind
+  |> Schedule_contract_values.recurrence_kind_to_string
+;;
+
+let recurrence_summary = function
+  | One_shot as recurrence -> recurrence_kind_to_string recurrence
+  | Interval { interval_sec } -> Printf.sprintf "every %ds" interval_sec
+  | Daily { hour; minute; second; timezone } ->
+    Printf.sprintf "daily %02d:%02d:%02d %s" hour minute second timezone
+  | Cron { expression; timezone } -> Printf.sprintf "cron %s %s" expression timezone
+;;
+
+let wake_status_to_string = Schedule_contract_values.wake_status_to_string
+
+let wake_status_of_string value =
+  Schedule_contract_values.wake_status_of_string value
+  |> Result.map_error decode_error_to_string
+;;
+
+let is_terminal = function
+  | Succeeded | Failed | Cancelled | Expired -> true
+  | Scheduled | Due | Running -> false
+;;
+
+let modify_allowed = function
+  | Scheduled | Due -> true
+  | Running | Succeeded | Failed | Cancelled | Expired -> false
+;;
+
+let rec canonical_json = function
+  | `Assoc fields ->
+    fields
+    |> List.map (fun (key, value) -> key, canonical_json value)
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+    |> fun fields -> `Assoc fields
+  | `List items -> `List (List.map canonical_json items)
+  | other -> other
+;;
+
+let sha256_json json =
+  json |> canonical_json |> Yojson.Safe.to_string
+  |> Agent_core_sha256.(fun stable -> digest_string stable |> to_hex)
+;;
+
+let option_to_yojson f = function
+  | None -> `Null
+  | Some value -> f value
+;;
+
+let string_option_of_yojson = function
+  | `Null -> Ok None
+  | `String value -> Ok (Some value)
+  | _ -> Error "expected string option"
+;;
+
+let float_to_yojson value = `Float value
+
+let float_of_yojson = function
+  | `Float value -> Ok value
+  | `Int value -> Ok (float_of_int value)
+  | _ -> Error "expected float"
+;;
+
+let int_of_yojson = function
+  | `Int value -> Ok value
+  | _ -> Error "expected int"
+;;
+
+let assoc_field name fields =
+  match List.assoc_opt name fields with
+  | Some value -> Ok value
+  | None -> Error ("missing field: " ^ name)
+;;
+
+let string_field name fields =
+  let* value = assoc_field name fields in
+  match value with
+  | `String value -> Ok value
+  | _ -> Error ("expected string field: " ^ name)
+;;
+
+let float_field name fields =
+  let* value = assoc_field name fields in
+  match float_of_yojson value with
+  | Ok value -> Ok value
+  | Error err -> Error (name ^ ": " ^ err)
+;;
+
+let int_field name fields =
+  let* value = assoc_field name fields in
+  match int_of_yojson value with
+  | Ok value -> Ok value
+  | Error err -> Error (name ^ ": " ^ err)
+;;
+
+(* Structural validity only. The decoder ([recurrence_of_yojson] ->
+   [schedule_request_of_yojson] -> [Schedule_store]) and [create_request]
+   share it, so a stored row loads whenever its interval is positive. Whether
+   the runner can fire an interval as often as it says is a separate question,
+   asked on create and modify by [interval_fires_as_declared]. *)
+let validate_interval interval_sec =
+  if interval_sec <= 0
+  then Error "recurrence.interval_sec must be positive"
+  else Ok interval_sec
+;;
+
+type interval_below_runner_tick =
+  { interval_sec : int
+  ; runner_tick_sec : float
+  }
+
+(* The schedule runner looks for due schedules once per loop pass and fires a
+   due schedule at most once per look ([next_due_after] skips the passes it
+   missed). A pass is the tick's work followed by a sleep of the tick, so it
+   lasts at least one tick. An interval shorter than the tick therefore fires
+   once per pass, not once per interval, and the stored interval would say
+   something the runner never does. An interval at or above the tick is also
+   seen only at pass boundaries, so each firing can land up to one pass late.
+   Create and modify refuse an interval below the tick; the refusal names the
+   tick, so the caller can send an interval the runner can reach. *)
+let interval_fires_as_declared ~runner_tick_sec recurrence =
+  match recurrence with
+  | One_shot | Daily _ | Cron _ -> Ok ()
+  | Interval { interval_sec } ->
+    if Float.compare (float_of_int interval_sec) runner_tick_sec >= 0
+    then Ok ()
+    else Error { interval_sec; runner_tick_sec }
+;;
+
+(* Daily recurrence intentionally uses fixed offsets only. This keeps dispatch
+   deterministic across host timezone changes and avoids pretending to support
+   DST-aware IANA zone rules. *)
+let timezone_offset_seconds timezone =
+  let parse_fixed_offset raw =
+    let len = String.length raw in
+    if len <> 6 || raw.[3] <> ':' then
+      None
+    else (
+      let sign =
+        match raw.[0] with
+        | '+' -> Some 1
+        | '-' -> Some (-1)
+        | _ -> None
+      in
+      match sign with
+      | None -> None
+      | Some sign ->
+        let int_sub start len =
+          try Some (int_of_string (String.sub raw start len)) with
+          | Failure _ -> None
+        in
+        match int_sub 1 2, int_sub 4 2 with
+        | Some hour, Some minute when hour <= 23 && minute <= 59 ->
+          Some (sign * ((hour * 3600) + (minute * 60)))
+        | _ -> None)
+  in
+  match String.trim timezone with
+  | "UTC" | "Etc/UTC" | "Z" -> Some 0
+  | "Asia/Seoul" | "KST" -> Some (9 * 3600)
+  | raw ->
+    if String.length raw > 3 && String.sub raw 0 3 = "UTC" then
+      parse_fixed_offset (String.sub raw 3 (String.length raw - 3))
+    else
+      parse_fixed_offset raw
+;;
+
+let validate_daily ~hour ~minute ~second ~timezone =
+  let* timezone = nonempty "recurrence.timezone" timezone in
+  if hour < 0 || hour > 23 then Error "recurrence.hour must be in 0..23"
+  else if minute < 0 || minute > 59 then
+    Error "recurrence.minute must be in 0..59"
+  else if second < 0 || second > 59 then
+    Error "recurrence.second must be in 0..59"
+  else (
+    match timezone_offset_seconds timezone with
+    | Some _ -> Ok (Daily { hour; minute; second; timezone })
+    | None ->
+      Error
+        "recurrence.timezone must be UTC, Asia/Seoul, KST, or a fixed offset like +09:00; DST-aware IANA zones are not supported")
+;;
+
+type cron_field =
+  { starts_with_wildcard : bool
+  ; values : int list
+  }
+
+type cron_spec =
+  { minute : cron_field
+  ; hour : cron_field
+  ; dom : cron_field
+  ; month : cron_field
+  ; dow : cron_field
+  }
+
+let split_char sep value =
+  let rec loop acc start idx =
+    if idx >= String.length value
+    then List.rev (String.sub value start (idx - start) :: acc)
+    else if Char.equal value.[idx] sep
+    then loop (String.sub value start (idx - start) :: acc) (idx + 1) (idx + 1)
+    else loop acc start (idx + 1)
+  in
+  loop [] 0 0
+;;
+
+let int_of_token ~field token =
+  try Ok (int_of_string token) with
+  | Failure _ -> Error (Printf.sprintf "recurrence.cron.%s has non-numeric token: %s" field token)
+;;
+
+let dedupe_sorted values =
+  values
+  |> List.sort_uniq Int.compare
+;;
+
+let range_values ~field ~min_v ~max_v ~map_value start stop step =
+  if step <= 0
+  then Error (Printf.sprintf "recurrence.cron.%s step must be positive" field)
+  else if start > stop
+  then Error (Printf.sprintf "recurrence.cron.%s range start must be <= end" field)
+  else if start < min_v || stop > max_v
+  then
+    Error
+      (Printf.sprintf
+         "recurrence.cron.%s value must be in %d..%d"
+         field
+         min_v
+         max_v)
+  else (
+    let rec loop acc value =
+      if value > stop
+      then Ok (List.rev acc)
+      else
+        let* mapped = map_value value in
+        let acc = mapped :: acc in
+        (* Compare against the remaining bounded field before adding, so a
+           valid large step cannot overflow into negative calendar values. *)
+        if step > stop - value then Ok (List.rev acc)
+        else loop acc (value + step)
+    in
+    loop [] start)
+;;
+
+let parse_cron_atom ~field ~min_v ~max_v ~map_value atom =
+  let atom = String.trim atom in
+  if String.equal atom ""
+  then Error (Printf.sprintf "recurrence.cron.%s contains an empty token" field)
+  else (
+    let* base, explicit_step =
+      match split_char '/' atom with
+      | [ base ] -> Ok (base, None)
+      | [ base; step_s ] ->
+          let* step = int_of_token ~field step_s in
+          Ok (base, Some step)
+      | _ -> Error (Printf.sprintf "recurrence.cron.%s has invalid step syntax: %s" field atom)
+    in
+    let step = Option.value explicit_step ~default:1 in
+    if step <= 0
+    then Error (Printf.sprintf "recurrence.cron.%s step must be positive" field)
+    else if String.equal base "*"
+    then (
+      let* values = range_values ~field ~min_v ~max_v ~map_value min_v max_v step in
+      Ok { starts_with_wildcard = true; values })
+    else (
+      let* values = match split_char '-' base with
+      | [ one ] ->
+        (match explicit_step with
+         | Some _ -> Error (Printf.sprintf
+             "recurrence.cron.%s single-value steps are unsupported; use */s or n-m/s: %s"
+             field atom)
+         | None ->
+             let* value = int_of_token ~field one in
+             range_values ~field ~min_v ~max_v ~map_value value value step)
+      | [ start_s; stop_s ] ->
+        let* start = int_of_token ~field start_s in
+        let* stop = int_of_token ~field stop_s in
+        range_values ~field ~min_v ~max_v ~map_value start stop step
+      | _ ->
+        Error
+          (Printf.sprintf
+             "recurrence.cron.%s token must be *, n, n-m, */s, or n-m/s: %s"
+             field
+             atom)
+      in
+      Ok { starts_with_wildcard = false; values }))
+;;
+
+let parse_cron_field ~field ~min_v ~max_v ?(map_value = fun value -> Ok value) raw =
+  let raw = String.trim raw in
+  if String.equal raw ""
+  then Error (Printf.sprintf "recurrence.cron.%s must be non-empty" field)
+  else (
+    match split_char ',' raw with
+    | [] -> Error (Printf.sprintf "recurrence.cron.%s must be non-empty" field)
+    | first :: rest ->
+      let* first = parse_cron_atom ~field ~min_v ~max_v ~map_value first in
+      let rec loop acc = function
+        | [] -> Ok { first with values = dedupe_sorted acc }
+        | atom :: rest ->
+          let* parsed = parse_cron_atom ~field ~min_v ~max_v ~map_value atom in
+          loop (List.rev_append parsed.values acc) rest
+      in
+      loop first.values rest)
+;;
+
+let parse_cron_expression expression =
+  let fields =
+    expression
+    |> String.trim
+    |> String.split_on_char ' '
+    |> List.filter (fun part -> not (String.equal part ""))
+  in
+  match fields with
+  | [ minute_s; hour_s; dom_s; month_s; dow_s ] ->
+    let dow_map value =
+      match value with
+      | 7 -> Ok 0
+      | value -> Ok value
+    in
+    let* minute = parse_cron_field ~field:"minute" ~min_v:0 ~max_v:59 minute_s in
+    let* hour = parse_cron_field ~field:"hour" ~min_v:0 ~max_v:23 hour_s in
+    let* dom = parse_cron_field ~field:"day_of_month" ~min_v:1 ~max_v:31 dom_s in
+    let* month = parse_cron_field ~field:"month" ~min_v:1 ~max_v:12 month_s in
+    let* dow = parse_cron_field ~field:"day_of_week" ~min_v:0 ~max_v:7 ~map_value:dow_map dow_s in
+    Ok { minute; hour; dom; month; dow }
+  | _ ->
+    Error
+      "recurrence.cron.expression must be a 5-field cron expression: minute hour day-of-month month day-of-week"
+;;
+
+let max_possible_day_of_month = function
+  | 2 -> Some 29
+  | 4 | 6 | 9 | 11 -> Some 30
+  | 1 | 3 | 5 | 7 | 8 | 10 | 12 -> Some 31
+  | _ -> None
+;;
+
+let cron_has_possible_date spec =
+  (* With no leading wildcard, DOM/DOW use OR, so the non-empty DOW supplies
+     future dates. Otherwise they use AND: a selected month must admit a
+     selected DOM. That date eventually occurs on every weekday in the
+     Gregorian cycle, including February 29. *)
+  (not spec.dom.starts_with_wildcard && not spec.dow.starts_with_wildcard)
+  || List.exists
+       (fun month ->
+          match max_possible_day_of_month month with
+          | None -> false
+          | Some max_day -> List.exists (fun day -> day <= max_day) spec.dom.values)
+       spec.month.values
+;;
+
+let validate_cron ~expression ~timezone =
+  let* expression = nonempty "recurrence.cron.expression" expression in
+  let* timezone = nonempty "recurrence.timezone" timezone in
+  match timezone_offset_seconds timezone with
+  | None ->
+    Error
+      "recurrence.timezone must be UTC, Asia/Seoul, KST, or a fixed offset like +09:00; DST-aware IANA zones are not supported"
+  | Some _ ->
+    let* spec = parse_cron_expression expression in
+    if cron_has_possible_date spec
+    then Ok (Cron { expression; timezone })
+    else Error "recurrence.cron has no possible calendar date"
+;;
+
+let validate_recurrence = function
+  | One_shot -> Ok One_shot
+  | Interval { interval_sec } ->
+    let* interval_sec = validate_interval interval_sec in
+    Ok (Interval { interval_sec })
+  | Daily { hour; minute; second; timezone } ->
+    validate_daily ~hour ~minute ~second ~timezone
+  | Cron { expression; timezone } -> validate_cron ~expression ~timezone
+;;
+
+let recurrence_to_yojson recurrence =
+  let kind = recurrence_kind_to_string recurrence in
+  match recurrence with
+  | One_shot -> `Assoc [ "kind", `String kind ]
+  | Interval { interval_sec } ->
+    `Assoc [ "kind", `String kind; "interval_sec", `Int interval_sec ]
+  | Daily { hour; minute; second; timezone } ->
+    `Assoc
+      [ "kind", `String kind
+      ; "hour", `Int hour
+      ; "minute", `Int minute
+      ; "second", `Int second
+      ; "timezone", `String timezone
+      ]
+  | Cron { expression; timezone } ->
+    `Assoc
+      [ "kind", `String kind
+      ; "expression", `String expression
+      ; "timezone", `String timezone
+      ]
+;;
+
+let recurrence_of_yojson = function
+  | `Assoc fields ->
+    let* kind_wire_value = string_field "kind" fields in
+    let* kind =
+      Schedule_contract_values.recurrence_kind_of_string kind_wire_value
+      |> Result.map_error decode_error_to_string
+    in
+    (match kind with
+     | Schedule_contract_values.One_shot -> Ok One_shot
+     | Schedule_contract_values.Interval ->
+       let* interval_sec = int_field "interval_sec" fields in
+       validate_recurrence (Interval { interval_sec })
+     | Schedule_contract_values.Daily ->
+       let* hour = int_field "hour" fields in
+       let* minute = int_field "minute" fields in
+       let* second =
+         match List.assoc_opt "second" fields with
+         | None -> Ok 0
+         | Some value ->
+           (match int_of_yojson value with
+            | Ok value -> Ok value
+            | Error err -> Error ("second: " ^ err))
+       in
+       let* timezone = string_field "timezone" fields in
+       validate_recurrence (Daily { hour; minute; second; timezone })
+     | Schedule_contract_values.Cron ->
+       let* expression = string_field "expression" fields in
+       let* timezone = string_field "timezone" fields in
+       validate_recurrence (Cron { expression; timezone }))
+  | _ -> Error "expected recurrence object"
+;;
+
+let actor_to_yojson (actor : actor) =
+  `Assoc
+    [ "id", `String actor.id
+    ; "kind", `String (actor_kind_to_string actor.kind)
+    ; "display_name", option_to_yojson (fun value -> `String value) actor.display_name
+    ]
+;;
+
+let actor_of_yojson = function
+  | `Assoc fields ->
+    let* id = string_field "id" fields in
+    let* kind_name = string_field "kind" fields in
+    let* kind = actor_kind_of_string kind_name in
+    let* display_name =
+      match List.assoc_opt "display_name" fields with
+      | None -> Ok None
+      | Some value -> string_option_of_yojson value
+    in
+    Ok { id; kind; display_name }
+  | _ -> Error "expected actor object"
+;;
+
+let cancellation_to_yojson (cancellation : cancellation) =
+  `Assoc
+    [ "cancelled_by", actor_to_yojson cancellation.cancelled_by
+    ; "reason", `String cancellation.reason
+    ]
+;;
+
+(* The same rule for a new cancellation and a stored one: a row that could
+   be written but not read back would fail the whole ledger's next load. *)
+let make_cancellation ~cancelled_by ~reason =
+  let* _ = nonempty "cancelled_by.id" cancelled_by.id in
+  let* reason = nonempty "reason" reason in
+  Ok { cancelled_by; reason }
+;;
+
+let cancellation_of_yojson = function
+  | `Assoc fields ->
+    let* cancelled_by_json = assoc_field "cancelled_by" fields in
+    let* cancelled_by = actor_of_yojson cancelled_by_json in
+    let* reason = string_field "reason" fields in
+    make_cancellation ~cancelled_by ~reason
+  | _ -> Error "expected cancellation object"
+;;
+
+let payload_json ~kind ~body = `Assoc [ "kind", `String kind; "body", body ]
+let payload_to_yojson payload = payload_json ~kind:payload.kind ~body:payload.body
+
+let payload_of_yojson = function
+  | `Assoc fields ->
+    let* () =
+      Json_util.reject_unknown_fields
+        ~surface:"schedule payload"
+        ~allowed:[ "kind"; "body" ]
+        fields
+    in
+    let* kind = string_field "kind" fields in
+    let* kind = nonempty "payload.kind" kind in
+    let* body = assoc_field "body" fields in
+    (match body with
+     | `Assoc _ -> Ok { kind; body; digest = sha256_json (payload_json ~kind ~body) }
+     | _ -> Error "payload.body must be a JSON object")
+  | _ -> Error "payload must be a JSON object"
+;;
+
+let payload_digest payload = payload.digest
+
+let seconds_per_day = 86400.0
+
+let next_periodic_due_after ~period ~now ~anchor =
+  if period <= 0.0 then
+    None
+  else if anchor > now then
+    Some anchor
+  else
+    let missed = floor ((now -. anchor) /. period) +. 1.0 in
+    Some (anchor +. (missed *. period))
+;;
+
+let next_daily_due_after ~hour ~minute ~second ~timezone ~now =
+  match timezone_offset_seconds timezone with
+  | None -> None
+  | Some offset ->
+    let local_now = now +. float_of_int offset in
+    let day_start = floor (local_now /. seconds_per_day) *. seconds_per_day in
+    let target_second =
+      float_of_int ((hour * 3600) + (minute * 60) + second)
+    in
+    let target_utc = day_start +. target_second -. float_of_int offset in
+    if target_utc > now then Some target_utc else Some (target_utc +. seconds_per_day)
+;;
+
+let field_matches field value = List.mem value field.values
+
+let cron_day_matches spec tm =
+  let dom_matches = field_matches spec.dom tm.Unix.tm_mday in
+  let dow_matches = field_matches spec.dow tm.Unix.tm_wday in
+  if spec.dom.starts_with_wildcard || spec.dow.starts_with_wildcard
+  then dom_matches && dow_matches
+  else dom_matches || dow_matches
+;;
+
+let cron_date_matches spec tm =
+  field_matches spec.month (tm.Unix.tm_mon + 1) && cron_day_matches spec tm
+;;
+
+let cron_slots spec =
+  List.concat_map
+    (fun hour -> List.map (fun minute -> (hour * 60) + minute) spec.minute.values)
+    spec.hour.values
+;;
+
+let next_cron_due_after ~expression ~timezone ~now =
+  match parse_cron_expression expression, timezone_offset_seconds timezone with
+  | Error _, _ | _, None -> None
+  | Ok spec, Some offset ->
+    if not (cron_has_possible_date spec) || not (Float.is_finite now)
+    then None
+    else (
+      let offset = float_of_int offset in
+      let first_local = (floor (now /. 60.0) *. 60.0) +. 60.0 +. offset in
+      let first_day = floor (first_local /. seconds_per_day) *. seconds_per_day in
+      let first_slot = int_of_float ((first_local -. first_day) /. 60.0) in
+      let slots = cron_slots spec in
+      (* [cron_has_possible_date] plus non-empty parsed hour/minute fields
+         proves that some future day and slot exists. Search advances by
+         calendar day, so a sparse valid recurrence has no arbitrary time
+         horizon and cannot be confused with no occurrence. *)
+      let rec loop local_day not_before_slot =
+        let tm = Unix.gmtime local_day in
+        let slot =
+          if cron_date_matches spec tm
+          then List.find_opt (fun slot -> slot >= not_before_slot) slots
+          else None
+        in
+        match slot with
+        | Some slot ->
+          let candidate = local_day +. float_of_int (slot * 60) -. offset in
+          if candidate > now then Some candidate else None
+        | None ->
+          let next_day = local_day +. seconds_per_day in
+          if Float.is_finite next_day && next_day > local_day
+          then loop next_day 0
+          else None
+      in
+      loop first_day first_slot)
+;;
+
+let first_due_after ~now = function
+  | One_shot | Interval _ -> None
+  | Daily { hour; minute; second; timezone } ->
+    next_daily_due_after ~hour ~minute ~second ~timezone ~now
+  | Cron { expression; timezone } -> next_cron_due_after ~expression ~timezone ~now
+;;
+
+let next_due_after ~now (request : schedule_request) =
+  match request.recurrence with
+  | One_shot -> None
+  | Interval { interval_sec } ->
+    next_periodic_due_after
+      ~period:(float_of_int interval_sec)
+      ~now
+      ~anchor:request.due_at
+  | Daily { hour; minute; second; timezone } ->
+    next_daily_due_after ~hour ~minute ~second ~timezone ~now
+  | Cron { expression; timezone } -> next_cron_due_after ~expression ~timezone ~now
+;;
+
+let reschedule_after_due_signal ~now (request : schedule_request) =
+  match request.status with
+  | Due ->
+    (match next_due_after ~now request with
+     | None -> None
+     | Some due_at -> Some { request with status = Scheduled; due_at })
+  | Scheduled | Running | Succeeded | Failed | Cancelled | Expired ->
+    None
+;;
+
+let wake_settlement_kind_to_string = function
+  | Accepted -> "accepted"
+  | Schedule_rejected -> "schedule_rejected"
+  | Occurrence_rejected -> "occurrence_rejected"
+  | Retryable_failure -> "retryable_failure"
+  | Process_interrupted -> "process_interrupted"
+  | Unsupported_payload -> "unsupported_payload"
+  | Cancelled_schedule -> "cancelled_schedule"
+  | Orphaned_attempt -> "orphaned_attempt"
+;;
+
+let wake_settlement_kind_of_string word =
+  match List.find_opt (fun v -> String.equal (wake_settlement_kind_to_string v) word) all_of_wake_settlement_kind with
+  | Some v -> Ok v
+  | None -> Error ("unknown wake settlement_kind: " ^ word)
+;;
+
+let wake_record_to_yojson (wake : wake_record) =
+  `Assoc
+    ((match wake.attempt_identity with
+      | Unidentified -> []
+      | Identified id -> [ "attempt_id", `String (wake_attempt_id_to_string id) ])
+     @ (match wake.settlement_kind with
+        | None -> []
+        | Some kind -> [ "settlement_kind", `String (wake_settlement_kind_to_string kind) ])
+     @ [ "schedule_instance_id", `String wake.schedule_instance_id
+    ; "schedule_id", `String wake.schedule_id
+    ; "started_at", float_to_yojson wake.started_at
+    ; "finished_at", option_to_yojson float_to_yojson wake.finished_at
+    ; "due_at", float_to_yojson wake.due_at
+    ; "payload_digest", `String wake.payload_digest
+    ; "status", `String (wake_status_to_string wake.status)
+    ; "detail", option_to_yojson (fun value -> value) wake.detail
+    ; "error", option_to_yojson (fun value -> `String value) wake.error
+    ])
+;;
+
+let wake_record_of_yojson = function
+  | `Assoc fields ->
+    let* attempt_identity =
+      match List.filter (fun (key, _) -> String.equal key "attempt_id") fields with
+      | [] -> Ok Unidentified
+      | [ (_, `String raw) ] ->
+        wake_attempt_id_of_string raw |> Result.map (fun id -> Identified id)
+      | [ (_, _) ] -> Error "attempt_id must be a canonical UUIDv7 string"
+      | _ :: _ :: _ -> Error "duplicate attempt_id field"
+    in
+    let* settlement_kind =
+      match List.filter (fun (key, _) -> String.equal key "settlement_kind") fields with
+      | [] -> Ok None
+      | [ (_, `String raw) ] -> wake_settlement_kind_of_string raw |> Result.map Option.some
+      | [ (_, _) ] -> Error "settlement_kind must be a known string"
+      | _ :: _ :: _ -> Error "duplicate settlement_kind field"
+    in
+    let* schedule_instance_id = string_field "schedule_instance_id" fields in
+    let* schedule_id = string_field "schedule_id" fields in
+    let* started_at = float_field "started_at" fields in
+    let* finished_at =
+      match List.assoc_opt "finished_at" fields with
+      | None | Some `Null -> Ok None
+      | Some value ->
+        let* value = float_of_yojson value in
+        Ok (Some value)
+    in
+    let* due_at = float_field "due_at" fields in
+    let* payload_digest = string_field "payload_digest" fields in
+    let* status_name = string_field "status" fields in
+    let* status = wake_status_of_string status_name in
+    let detail =
+      match List.assoc_opt "detail" fields with
+      | None | Some `Null -> None
+      | Some value -> Some value
+    in
+    let* error =
+      match List.assoc_opt "error" fields with
+      | None -> Ok None
+      | Some value -> string_option_of_yojson value
+    in
+    Ok
+      { schedule_instance_id
+      ; schedule_id
+      ; attempt_identity
+      ; settlement_kind
+      ; started_at
+      ; finished_at
+      ; due_at
+      ; payload_digest
+      ; status
+      ; detail
+      ; error
+      }
+  | _ -> Error "expected wake_record object"
+;;
+
+let schedule_request_to_yojson (request : schedule_request) =
+  `Assoc
+    [ "schedule_instance_id", `String request.schedule_instance_id
+    ; "schedule_id", `String request.schedule_id
+    ; "requested_by", actor_to_yojson request.requested_by
+    ; "scheduled_by", actor_to_yojson request.scheduled_by
+    ; "requested_at", float_to_yojson request.requested_at
+    ; "due_at", float_to_yojson request.due_at
+    ; "expires_at", option_to_yojson float_to_yojson request.expires_at
+    ; "payload", payload_to_yojson request.payload
+    ; "status", `String (schedule_status_to_string request.status)
+    ; "source", `String (schedule_source_to_string request.source)
+    ; "recurrence", recurrence_to_yojson request.recurrence
+    ; "cancellation", option_to_yojson cancellation_to_yojson request.cancellation
+    ]
+;;
+
+let schedule_request_of_yojson = function
+  | `Assoc fields ->
+    let* schedule_instance_id = string_field "schedule_instance_id" fields in
+    let* schedule_id = string_field "schedule_id" fields in
+    let* requested_by_json = assoc_field "requested_by" fields in
+    let* requested_by = actor_of_yojson requested_by_json in
+    let* scheduled_by_json = assoc_field "scheduled_by" fields in
+    let* scheduled_by = actor_of_yojson scheduled_by_json in
+    let* requested_at = float_field "requested_at" fields in
+    let* due_at = float_field "due_at" fields in
+    let* expires_at =
+      match List.assoc_opt "expires_at" fields with
+      | None | Some `Null -> Ok None
+      | Some value ->
+        let* value = float_of_yojson value in
+        Ok (Some value)
+    in
+    let* payload_json = assoc_field "payload" fields in
+    let* payload = payload_of_yojson payload_json in
+    let* status_name = string_field "status" fields in
+    let* status = schedule_status_of_string status_name in
+    let* source_name = string_field "source" fields in
+    let* source = schedule_source_of_string source_name in
+    let* recurrence_json = assoc_field "recurrence" fields in
+    let* recurrence = recurrence_of_yojson recurrence_json in
+    (* Absent or null is no cancellation, the same rule as [expires_at]: only
+       [Schedule_store.cancel_request] writes one. *)
+    let* cancellation =
+      match List.assoc_opt "cancellation" fields with
+      | None | Some `Null -> Ok None
+      | Some value ->
+        let* value = cancellation_of_yojson value in
+        Ok (Some value)
+    in
+    Ok
+      { schedule_instance_id
+      ; schedule_id
+      ; requested_by
+      ; scheduled_by
+      ; requested_at
+      ; due_at
+      ; expires_at
+      ; payload
+      ; status
+      ; source
+      ; recurrence
+      ; cancellation
+      }
+  | _ -> Error "expected schedule_request object"
+;;
+
+let create_request
+  ~schedule_id
+  ~requested_by
+  ~scheduled_by
+  ~requested_at
+  ~due_at
+  ?expires_at
+  ~payload
+  ~source
+  ?(recurrence = One_shot)
+  ()
+  =
+  let* schedule_id = nonempty "schedule_id" schedule_id in
+  let* _ = nonempty "requested_by.id" requested_by.id in
+  let* _ = nonempty "scheduled_by.id" scheduled_by.id in
+  let* requested_at = finite_time "requested_at" requested_at in
+  let* due_at = finite_time "due_at" due_at in
+  let* expires_at =
+    match expires_at with
+    | None -> Ok None
+    | Some expires_at -> Result.map Option.some (finite_time "expires_at" expires_at)
+  in
+  let* payload = payload_of_yojson payload in
+  let* recurrence = validate_recurrence recurrence in
+  Ok
+    { schedule_instance_id = Random_id.uuid_v7 ()
+    ; schedule_id
+    ; requested_by
+    ; scheduled_by
+    ; requested_at
+    ; due_at
+    ; expires_at
+    ; payload
+    ; status = Scheduled
+    ; source
+    ; recurrence
+    ; cancellation = None
+    }
+;;
+
+let expired_at ~now (request : schedule_request) =
+  match request.expires_at with
+  | Some expires_at when expires_at <= now -> true
+  | None | Some _ -> false
+;;
+
+let mark_due ~now (request : schedule_request) =
+  match request.status with
+  | Scheduled | Due when expired_at ~now request ->
+    { request with status = Expired }
+  | Scheduled when request.due_at <= now -> { request with status = Due }
+  (* Not yet due, or already Due and not yet expired. *)
+  | Scheduled | Due -> request
+  (* Running is the executor's to move; the four terminal states never
+     transition again. *)
+  | Running | Succeeded | Failed | Cancelled | Expired -> request
+;;

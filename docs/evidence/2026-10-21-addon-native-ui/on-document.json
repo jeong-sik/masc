@@ -1,0 +1,11 @@
+{
+  "file_name": "native-ui.toml",
+  "source_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn/.masc/config/lane-addons/native-ui.toml",
+  "source_text": "id = \"native-ui-proof\"\nenabled = true\nrun_id = \"native-ui-proof\"\nmanifest_path = \"/private/tmp/masc-addon-inventory-application-20261021/addons/vst-phrase/lane.toml\"\n\n[[binding.sources]]\nsource_id = \"vst-phrase\"\nkind = \"snapshot_file\"\npath = \"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn/source.json\"\n",
+  "source_revision": "f9b8bb08731a0b9aa141d6ad42d035bdd2c9d644926d6bea35697489acf02916",
+  "desired_revision": "230da07a548ac327c4d9c5339b35909cc90bf6629b5f52cc25df1c360967f2ca",
+  "validation": {
+    "valid": true,
+    "messages": []
+  }
+}

@@ -1,0 +1,177 @@
+(** Tool_schemas_misc — Tool schemas for [Tool_misc],
+    separated to break the [Config] dependency cycle.
+
+    Each vocabulary here derives its list with [@@deriving enumerate] and its
+    parse function from that list, so a constructor added to one of them cannot
+    stay out of the list its consumers walk.
+
+    The [masc_config] category enum is declared in
+    [config/tools/masc_config.toml]; [test/test_operator_surface_toml_parity.ml ::
+    the config category enum matches its owner] checks it against
+    [Env_config_snapshot.valid_config_category_strings]. *)
+
+(** {1 Enum string mirrors (SSOT)} *)
+
+(** {1 Tool schema list} *)
+
+type control_operation =
+  | Pause
+  | Resume
+  | Pause_status
+[@@deriving enumerate]
+(** Closed set of operator control tools. *)
+
+val control_operations : control_operation list
+(** Exhaustive typed projection of operator control operations. *)
+
+val control_operation_id : control_operation -> string
+(** Stable descriptor identifier suffix for a control operation. *)
+
+val control_schema : control_operation -> Masc_domain.tool_schema
+(** Canonical generated schema for a control operation. *)
+
+val control_schemas : Masc_domain.tool_schema list
+(** Canonical control schemas used by registration. *)
+
+val web_search_schema : Masc_domain.tool_schema
+val web_fetch_schema : Masc_domain.tool_schema
+val web_schemas : Masc_domain.tool_schema list
+val browser_tabs_schema : Masc_domain.tool_schema
+val browser_read_schema : Masc_domain.tool_schema
+val browser_session_schema : Masc_domain.tool_schema
+val browser_goto_schema : Masc_domain.tool_schema
+val browser_act_schema : Masc_domain.tool_schema
+val browser_interact_schema : Masc_domain.tool_schema
+val browser_instruct_schema : Masc_domain.tool_schema
+val browser_lane_schemas : Masc_domain.tool_schema list
+(** Browser-lane reader tools (docs/design/browser-lane.md). *)
+(** Canonical input schemas owned by the Tool_misc web handlers. *)
+
+val schemas : Masc_domain.tool_schema list
+(** [schemas] is the generated [Masc_domain.tool_schema list] for misc tools.
+    Operator controls are available through {!control_schemas}. Public-surface
+    exclusion is enforced downstream by {!Tool_catalog.is_public_mcp} and
+    [public_mcp_surface_tools]. *)
+
+type mcp_runtime_operation =
+  | Start
+  | Broadcast
+  | Messages
+  | Ask
+  | Ask_status
+  | Ask_withdraw
+[@@deriving enumerate]
+(** Closed vocabulary dispatched by [Mcp_tool_runtime]. *)
+
+val mcp_runtime_operations : mcp_runtime_operation list
+(** Exhaustive stable-order projection of MCP runtime operations. *)
+
+val mcp_runtime_tool_name : mcp_runtime_operation -> string
+(** Canonical wire name for an MCP runtime operation. *)
+
+val mcp_runtime_operation_of_tool_name : string -> mcp_runtime_operation option
+(** Parse a canonical MCP runtime wire name at the dispatch boundary. *)
+
+val mcp_runtime_schema : mcp_runtime_operation -> Masc_domain.tool_schema
+(** Canonical generated schema for an MCP runtime operation. *)
+
+val mcp_runtime_schemas : Masc_domain.tool_schema list
+(** Canonical schemas projected from {!mcp_runtime_operations}. *)
+
+type misc_operation =
+  | Misc_lane_declaration_read
+  | Misc_lane_declaration_save
+  | Misc_lane_updates
+  | Misc_lane_attach
+  | Misc_lane_inspect
+  | Misc_lane_observe
+  | Misc_lane_slice
+  | Misc_lane_detach
+  | Misc_lane_evidence
+  | Misc_lane_act
+  | Misc_lane_action_status
+  | Misc_ask
+  | Misc_ask_status
+  | Misc_ask_withdraw
+  | Misc_config
+  | Misc_dashboard
+  | Misc_gc
+  | Misc_keeper_waiting_inventory
+  | Misc_tool_help
+  | Misc_web_fetch
+  | Misc_web_search
+  | Misc_browser_tabs
+  | Misc_browser_read
+  | Misc_browser_session
+  | Misc_browser_goto
+  | Misc_browser_act
+  | Misc_browser_interact
+  | Misc_browser_instruct
+  | Misc_msx of Msx_tool.t
+  | Misc_portrait_read
+  | Misc_candle_balance
+  | Misc_candle_catalog
+  | Misc_candle_purchase
+  | Misc_candle_equip
+  | Misc_candle_gift
+  | Misc_dos_load
+  | Misc_dos_meta
+  | Misc_dos_inventory
+  | Misc_dos_eject
+  | Misc_dos_screen
+  | Misc_dos_step
+  | Misc_dos_press
+  | Misc_dos_click
+  | Misc_dos_type
+  | Misc_dos_peek
+  | Misc_play_room
+  | Misc_dos_pass
+  | Misc_dos_save
+  | Misc_dos_restore
+[@@deriving enumerate]
+(** Closed vocabulary routed by [Tool_misc.dispatch]. *)
+
+val misc_operations : misc_operation list
+(** Exhaustive stable-order projection of the misc facade's operations. *)
+
+val misc_tool_name : misc_operation -> string
+(** Canonical wire name for a misc facade operation. *)
+
+val misc_operation_of_tool_name : string -> misc_operation option
+(** Parse a canonical misc wire name at the dispatch boundary. *)
+
+(** What a call does with the shared DOS machine's controller (RFC
+    play-link-for-the-shared-machine §2.8): the
+    {!Machine_controller_contract.controller_need} of the DOS tool the
+    operation runs, [No_controller] for an operation that runs none. *)
+type dos_controller_need = Machine_controller_contract.controller_need =
+  | Takes_controller
+  | Hands_controller
+  | No_controller
+
+val dos_controller_need : misc_operation -> dos_controller_need
+
+val misc_registered_schema : misc_operation -> Masc_domain.tool_schema option
+(** The schema [Tool_misc] registers for an operation, or [None] for the two web
+    tools, which are advertised through [Config.raw_all_tool_schemas] and tagged
+    from their keeper descriptor instead. *)
+
+type plan_operation =
+  | Plan_clear_task
+  | Plan_get_task
+  | Plan_set_task
+[@@deriving enumerate]
+(** Closed vocabulary routed and registered by [Tool_plan]. *)
+
+val plan_operations : plan_operation list
+(** Exhaustive stable-order projection of the plan operations. *)
+
+val plan_tool_name : plan_operation -> string
+(** Canonical wire name for a plan operation. *)
+
+val plan_operation_of_tool_name : string -> plan_operation option
+(** Parse a canonical plan wire name at the dispatch boundary. *)
+
+val plan_schema : plan_operation -> Masc_domain.tool_schema
+(** The declaration [Tool_plan] registers for an operation. A name whose
+    declaration is missing refuses the boot. *)

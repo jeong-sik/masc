@@ -1,0 +1,14 @@
+{
+  "provenance": "existing installed TUI binary against isolated HTTP fixtures in a real PTY; no live Keeper messages sent",
+  "binary_version": "0.49.0",
+  "binary_sha256": "0ba80256daabb703cdcfbed4097a31b0c5a2cb136a424d59015da1d919951f44",
+  "binary_source_commit": "not verified",
+  "installed_binary_sha256_matches": true,
+  "terminal": {
+    "columns": 120,
+    "rows": 40
+  },
+  "result": "FAIL: two messages accepted as Queued but Queue summary disappeared",
+  "image_rendering": "recorded PTY text rendered with Pillow; colours illustrative",
+  "patch_runtime_validation": "not run; no new TUI build or CI dispatch performed"
+}

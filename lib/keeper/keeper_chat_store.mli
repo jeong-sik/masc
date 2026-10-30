@@ -1,0 +1,740 @@
+(** Keeper_chat_store — JSONL-based persistence for keeper direct
+    messages.
+
+    Each keeper owns an append-only file at
+    [<base_dir>/.masc/keeper_chat/<sanitized-name>.jsonl]. Lines are
+    JSON objects of the form
+    {v {"id":"msg-...","role":"user","content":"hello","ts":1774000000.0} v}
+
+    Tool-call lines persisted between a turn's user and assistant lines
+    additionally carry provider [tool_call_id], canonical [execution_id], and
+    [tool_call_name] when each identity is available; every line of a turn may
+    carry the originating connector as a typed [surface].
+    Connector rows may also carry [conversation_id] /
+    [external_message_id], opaque route
+    coordinates used by dashboards to group platform channels/threads
+    without giving this store platform-specific knowledge.
+
+    @since 2.145.0 *)
+
+(** {1 Types} *)
+
+type attachment = Keeper_chat_types.attachment = {
+  id : string;
+  att_type : string;
+  name : string;
+  size : int;
+  mime_type : string;
+  data : string;
+  (** Pixel dimensions measured before externalizing the attachment payload.
+      [None] when the supported image headers do not provide dimensions.
+      Persisted [data] is a canonical blob marker; the retained blob contains
+      the original wire payload (base64 or data URI). *)
+  width : int option;
+  height : int option;
+}
+
+(** One executed tool call within a turn. [args] holds the accumulated
+    argument JSON; empty arguments are persisted as ["{}"]. *)
+type tool_call = Keeper_chat_types.tool_call = {
+  call_id : string;
+  execution_id : Ids.Execution_id.t option;
+      (** Canonical execution identity after the tool-call log commit. [None]
+          when the producer cannot prove an exact join, including malformed or
+          ambiguous provider streams. Distinct from provider [call_id]. *)
+  call_name : string;
+  args : string;
+}
+
+(** Assign transcript slots to the exact, already filtered tool list supplied
+    to the chat append boundary. Streaming observers must not reconstruct these
+    ordinals from START counts, provider IDs, or presentation traces. The
+    resulting bindings describe the append input; durability requires a
+    successful append acknowledgement. *)
+val tool_transcript_bindings :
+  tool_call list -> (tool_call * Keeper_chat_delivery_identity.transcript_slot) list
+
+(** A tool call whose canonical execution identity is proven, with the position
+    its row takes in the append input. Calls without an execution identity
+    have a delivery slot only and no ownership. *)
+type tool_ownership =
+  { execution_id : Ids.Execution_id.t
+  ; ordinal : int
+  }
+
+(** Ownership of the calls that have an execution identity. [ordinal] counts
+    the whole supplied list, so it equals the ordinal of the call's
+    {!tool_transcript_bindings} slot. *)
+val tool_ownerships : tool_call list -> tool_ownership list
+
+(** Closed transcript row classification. Assistant is Keeper speech;
+    Request_failure is a server-owned request result and cannot acknowledge
+    input or enter conversation memory. Unknown labels are refused. *)
+module Role = Keeper_chat_types.Role
+
+(** Closed, durable names for AG-UI lifecycle events recorded by the direct
+    Keeper chat stream. This is server lifecycle provenance, not a
+    client-delivery receipt. *)
+type stream_lifecycle_event = Keeper_chat_types.stream_lifecycle_event =
+  | Run_started
+  | Text_message_start
+  | Text_message_end
+  | Run_finished
+  | Run_error
+
+(** One durable row of an approval's lifecycle
+    ({!Keeper_approval_lifecycle.approval_lifecycle_phase}). The store keeps
+    and reads these rows; the phase vocabulary and its labels live in the
+    HITL contract. *)
+type approval_lifecycle = Keeper_chat_types.approval_lifecycle =
+  { approval_id : string
+  ; tool_name : string option
+  ; phase : Keeper_approval_lifecycle.approval_lifecycle_phase
+  ; artifact_ref : Tool_output.artifact_ref option
+  ; call_summary : string option
+        (** The one line the producing tool stated for its call, from its
+            typed input ({!Keeper_gate.request.call_summary}), whole: fitting
+            it to a pane is the renderer's decision. About the approval, not
+            the phase, so the request row carries the statement and every
+            later phase row copies it ({!approval_request_call_summary}); a
+            row then reads on its own when the pane loads a history window
+            that does not include the request. [None] when the tool stated
+            nothing or no request row exists to copy from. *)
+  }
+
+type append_once_result = Keeper_chat_types.append_once_result =
+  | Appended of { row_id : string }
+  | Already_present of { row_id : string }
+
+(** Exact ownership of the accepted user transcript row. This provenance is
+    shared by direct and queued delivery, while lifecycle authority remains in
+    the owning request or queue store. *)
+type user_row_origin = Keeper_chat_types.user_row_origin =
+  | Needs_append
+  | Already_persisted_upstream
+
+(** Authority class of the human (or agent) whose message opened a
+    turn. Derived structurally from the arrival route, never from
+    message content: the authenticated dashboard route is [Owner];
+    anything carrying connector context is [External]; a sender that the
+    producing site matched exactly against the Keeper registry is [Keeper],
+    with the Keeper's id in [speaker_id] (RFC-0468 §3.2). Persisted as
+    ["owner"] / ["external"] / ["keeper"] in [speaker_authority]
+    (RFC-0223 §3). *)
+type speaker_authority = Keeper_chat_types.speaker_authority =
+  | Owner
+  | External
+  | Keeper
+
+val authority_label : speaker_authority -> string
+val authority_of_label : string -> speaker_authority option
+
+(** Rich chat block produced by the backend parser. Mirrors the dashboard's
+    [ChatBlock] union so the server can own parsing and the dashboard can
+    render server-provided blocks verbatim. *)
+type chat_block = Keeper_chat_types.chat_block
+
+(** Identity of the user-line author. [speaker_id] / [speaker_name] are
+    absent when the route supplies none (the dashboard is a single
+    authenticated operator and carries no per-user identity). *)
+type audio_clip = Keeper_chat_types.audio_clip = {
+  token : string;
+  audio_url : string option;
+  mime : string;
+  duration_sec : float option;
+  message_text : string;
+  device_id : string option;
+  expired : bool;
+}
+(** Persistable audio clip (RFC-0235 P1). Written on an assistant line
+    when the keeper synthesized a voice utterance; [token] is the
+    [/api/v1/voice/audio/:token] capability, [message_text] doubles as
+    the caption. [audio_url] and [device_id] carry transport routing hints
+    so the dashboard can fetch and route the clip. [expired] is true when
+    the clip has been reaped; the history endpoint stamps it by
+    checking the audio directory. Same shape as
+    {!Keeper_chat_broadcast}'s SSE payload so the two never drift. *)
+
+val audio_clip_of_synthesized_file :
+  audio_file:string ->
+  message_text:string ->
+  device_id:string option ->
+  audio_clip option
+(** The clip record announcing a file the synthesis side has just written.
+    [None], with a line in the log, when the path is not one masc serves --
+    the reply is still recorded, without audio.
+
+    Both [token] and [mime] are read off the same path, which is the point:
+    taking them separately is how every [say] reply came to be announced as
+    MP3 while being WAVE. [expired] is [false] by construction; a clip is
+    only reaped later. *)
+
+type speaker = Keeper_chat_types.speaker = {
+  speaker_id : string option;
+  speaker_name : string option;
+  speaker_authority : speaker_authority;
+}
+
+val keeper_speaker : Keeper_identity.Keeper_id.t -> speaker
+(** The speaker of a line another registered Keeper sent. The caller has
+    already matched the sender against the Keeper registry; the id is not
+    read back from the shape of any string here. [speaker_id] and
+    [speaker_name] both carry the Keeper id, since a Keeper has exactly one
+    name (RFC-0393). *)
+
+type chat_message = Keeper_chat_types.chat_message = {
+  id : string;
+      (** R3: producer-assigned stable message id, minted once at append by
+          the sole writer ({!encode_line}) and read back verbatim, so the
+          dashboard keys off a server identity rather than synthesising an
+          index-derived id at render. Rows without a nonblank persisted id
+          are rejected at the read boundary. *)
+  role : Role.t;
+  content : string;
+  ts : float;
+  attachments : attachment list option;
+  tool_call_id : string option;
+  execution_id : Ids.Execution_id.t option;
+  tool_call_name : string option;
+  surface : Surface_ref.t option;
+      (** The typed surface (RFC-0232 §3.6).  [None] on rows written
+          before P5 and on rows whose persisted surface payload fails
+          to decode (reported as a persistence read drop, row kept). *)
+  conversation_id : string option;
+  external_message_id : string option;
+  workspace_id : string option;
+      (** The connector workspace (guild/team) identity from the typed
+          delivery. Written on connector-intake user lines; [None] on
+          workspace-less deliveries (e.g. Discord DM), rows written before
+          this field existed, and non-connector lines. *)
+  speaker : speaker option;
+      (** Present on user lines written since RFC-0223 P1; [None] on
+          older lines, tool/assistant lines, and lines whose persisted
+          [speaker_authority] label fails to parse (reported as a
+          persistence read drop, row otherwise kept). *)
+  audio : audio_clip option;
+      (** RFC-0235 P1: present when this assistant line was a synthesized
+          voice utterance (keeper_voice_speak). [None] on every other
+          line and on rows written before voice transport; the dashboard
+          renders a play button when present. *)
+  blocks : chat_block list option;
+      (** RFC-0235 P3: rich chat blocks parsed from assistant reply text.
+          Persisted server-side so the dashboard can prefer backend blocks
+          over its local parser. [None] on rows written before this field
+          and on non-assistant rows. *)
+  mentions : Keeper_identity.Keeper_id.t list;
+      (** RFC-0232 §3.3: mention ids parsed once at append from the
+          persisted user content (plus connector-supplied explicit
+          mentions), unless the writer explicitly selected passive context.
+          [[]] on passive context, tool/assistant lines, mention-free lines,
+          and rows written before P4 (the offline backfill tool stamps
+          those).  Malformed persisted entries are reported as
+          persistence read drops and skipped; the row stays valid. *)
+  turn_ref : Ids.Turn_ref.t option;
+      (** RFC-0233 §7: ["<trace_id>#<absolute_turn>"] join key for the turn
+          that produced this row.  Stamped by {!append_turn} /
+          {!append_assistant_message} when the caller supplies it; [None]
+          on inbound user lines (no turn yet) and rows written before §7.
+          A malformed persisted value is reported as a persistence read
+          drop and reads as [None]; the row stays valid. *)
+  stream_lifecycle : stream_lifecycle_event list option;
+      (** K1f: durable server lifecycle replay for the chat stream response
+          represented by this row. [None] means the row predates this field or
+          the writer could not prove lifecycle events. Malformed persisted
+          values are reported as persistence read drops and read as [None];
+          the row stays valid. *)
+  approval_lifecycle : approval_lifecycle option;
+      (** Present only on system-owned Gate lifecycle rows. The typed phase
+          keeps "approved" separate from "effect applied" and carries the
+          exact replay artifact reference when an effect has settled. *)
+  delivery_provenance :
+    Keeper_chat_delivery_identity.delivery_provenance option;
+      (** The exact delivery identity and transcript slot persisted atomically
+          by the idempotent append-once paths ({!append_user_message_once} /
+          {!append_assistant_message_once}).  [None] on rows written by the
+          plain append paths and on rows written before this pair existed.
+
+          A malformed persisted value is reported as a persistence read drop
+          and reads as [None] here; the row stays valid. That leniency is
+          local to reading rows out. The append-once paths decode the same
+          persisted pair to answer "is this delivery already on disk?", and
+          there an undecodable row fails the whole append instead — skipping
+          it would append a duplicate. So a row this field cannot decode is
+          not merely cosmetic: it blocks every later append to that keeper's
+          file until the row is repaired or removed. *)
+}
+
+(** Append one system-owned approval lifecycle row exactly once. The delivery
+    identity is [approval_id + phase family] so retries and restart recovery
+    converge without turning the row into Keeper speech. *)
+val append_approval_lifecycle_once :
+  base_dir:string ->
+  keeper_name:string ->
+  lifecycle:approval_lifecycle ->
+  (append_once_result, string) result
+
+(** Reconcile the canonical durable replay outcome with its append-only chat
+    receipt. An identical original row remains idempotent. If an older replay
+    row conflicts, the canonical outcome is appended once in a distinct typed
+    correction slot; neither historical evidence nor the original row is
+    overwritten. Resolution and continuation phases are rejected. *)
+val reconcile_approval_replay_lifecycle_once :
+  base_dir:string ->
+  keeper_name:string ->
+  lifecycle:approval_lifecycle ->
+  (append_once_result, string) result
+
+val approval_lifecycle_phase_present :
+  base_dir:string ->
+  keeper_name:string ->
+  approval_id:string ->
+  phase:Keeper_approval_lifecycle.approval_lifecycle_phase ->
+  bool
+
+val approval_lifecycle_is_continuation :
+  Keeper_approval_lifecycle.approval_lifecycle_phase -> bool
+(** The two settlements of the continuation slot,
+    [Approval_continuation_recorded] and [Approval_continuation_failed]. *)
+
+val approval_continuation_settled :
+  base_dir:string ->
+  keeper_name:string ->
+  approval_id:string ->
+  bool
+(** Whether a continuation settlement row exists for the approval, in
+    either phase. One scan of the store. *)
+
+val approval_request_call_summary :
+  base_dir:string ->
+  keeper_name:string ->
+  approval_id:string ->
+  string option
+(** The [call_summary] the approval's request row carries, as stored
+    (redacted). The request row is the one row written with the producer's
+    statement in hand; every later phase row of the same approval copies
+    this so each reads the same line on its own. [None] when no request row
+    exists for the approval or the producer stated nothing. *)
+
+(** {1 I/O} *)
+
+(** [append_turn ~base_dir ~keeper_name ~user_content ~user_attachments
+    ?tool_calls ?surface ?conversation_id ?external_message_id ?speaker
+    ~assistant_content ()] appends one
+    completed turn as consecutive lines — user, one line per tool call,
+    assistant — sharing a single timestamp, in one write. [speaker]
+    identifies the user-line author and is written on the user line
+    only. [conversation_id] identifies the external conversation/thread
+    coordinate and is written on all lines of the turn; [external_message_id]
+    belongs to the inbound user line only. The assistant line is Keeper
+    speech. Server-owned failures use {!append_request_failure_once}.
+    Write failures are logged but
+    never raised except for {!Eio.Cancel.Cancelled}. *)
+
+val append_turn :
+  base_dir:string ->
+  keeper_name:string ->
+  user_content:string ->
+  user_attachments:attachment list ->
+  ?tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?external_message_id:string ->
+  ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
+  assistant_content:string ->
+  unit ->
+  unit
+
+(** Persist a user row followed by one or more tool rows, with no invented
+    assistant terminal. Used when a turn reached a tool-only continuation. *)
+val append_user_and_tool_calls_result :
+  base_dir:string ->
+  keeper_name:string ->
+  user_content:string ->
+  user_attachments:attachment list ->
+  tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?external_message_id:string ->
+  ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  unit ->
+  (unit, string) result
+
+(** Persist one or more tool rows with no assistant terminal. *)
+val append_tool_calls_result :
+  base_dir:string ->
+  keeper_name:string ->
+  tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  unit ->
+  (unit, string) result
+
+(** [append_assistant_message_result] is {!append_assistant_message} that
+    returns [Error msg] on a write failure instead of swallowing it (the failure
+    is still counted + warn-logged). For callers whose own contract requires
+    surfacing a chat-append failure — e.g. {!Fusion_sink.emit}. *)
+val append_assistant_message_result :
+  base_dir:string ->
+  keeper_name:string ->
+  content:string ->
+  ?tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?audio:audio_clip ->
+  ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
+  unit ->
+  (unit, string) result
+
+(** Idempotent terminal assistant append. The per-Keeper lookup and append are
+    serialized, so callback re-entry and restart recovery converge on one row
+    for the exact typed delivery slot. A malformed persisted provenance row is
+    an explicit [Error], never treated as absence. Duplicate provenance/tool
+    ordinals quarantine their whole delivery key, and one canonical
+    [execution_id] cannot authorize a different delivery or tool ordinal. *)
+val append_assistant_message_once :
+  base_dir:string ->
+  keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  content:string ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?tool_calls:tool_call list ->
+  ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
+  unit ->
+  (append_once_result, string) result
+
+(** The connector surface and conversation coordinate written on a row. *)
+module Row_route : sig
+  type t =
+    { surface : Surface_ref.t option
+    ; conversation_id : string option
+    }
+
+  val none : t
+  (** No surface and no conversation coordinate. *)
+end
+
+(** Append a server-owned failed-request result exactly once. It shares the
+    terminal result slot with an assistant reply, preserves completed output,
+    and never acknowledges an input or becomes Keeper conversation memory.
+    [route] (default {!Row_route.none}) is forced under the store lock only
+    when the row is written, so a caller that derives it from a stored record
+    does no work for a row that is already present. It is forced in a system
+    thread while the chat file's lock is held, so it must be a pure
+    computation: no Eio effect and no I/O on this keeper's chat store. *)
+val append_request_failure_once :
+  base_dir:string -> keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->
+  ?route:Row_route.t Lazy.t -> ?tool_calls:tool_call list ->
+  ?blocks:chat_block list -> ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list -> unit ->
+  (append_once_result, string) result
+
+val append_settled_failure_once :
+  base_dir:string -> keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key -> content:string ->
+  route:Row_route.t Lazy.t -> unit -> (append_once_result, string) result
+(** Append the Owner's immutable failure under [Settled_failure]. This does
+    not replace an earlier assistant result: a host rejection after output
+    was delivered is a distinct fact, and cannot reuse that result's slot. *)
+
+module Settled_failure : sig
+  type t =
+    { delivery_key : Keeper_chat_delivery_identity.delivery_key
+    ; content : string
+    ; route : Row_route.t Lazy.t
+          (** Forced under the transcript lock in a systhread, so it must
+              belong to this one append and never be forced concurrently. *)
+    }
+end
+
+val append_settled_failures_once :
+  base_dir:string -> keeper_name:string -> ('tag * Settled_failure.t) list ->
+  (('tag * (append_once_result, string) result) list, string) result
+(** {!append_settled_failure_once} for each failure, in order, against one
+    read of the transcript under one lock, with every missing row appended in
+    one durable write. Each failure is answered beside its caller's tag, so a
+    quarantined key refuses only that failure. A key that appears twice answers
+    the second time with the row the first added. Each row takes its own
+    time, as the single append does. The outer [Error] is a transcript that
+    could not be read, indexed or written, or an exception while building a
+    row; then nothing was appended, unless rolling back a failed write also
+    failed. *)
+
+(** Idempotently append the ordered tool-call rows for a durable request that
+    has no assistant message. This is the only valid representation of a
+    tool-only continuation; callers must not write an empty assistant row.
+    The same delivery-key quarantine and canonical [execution_id] uniqueness
+    checks as {!append_assistant_message_once} apply. *)
+val append_tool_calls_once :
+  base_dir:string ->
+  keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  unit ->
+  (append_once_result, string) result
+
+(** [append_assistant_message ~base_dir ~keeper_name ~content ?surface
+    ?conversation_id ()]
+    appends one keeper-initiated assistant line with no paired user
+    turn (RFC-0223 P4 [keeper_surface_post]). Same failure policy as
+    {!append_turn} (failure is counted + logged, not raised). *)
+val append_assistant_message :
+  base_dir:string ->
+  keeper_name:string ->
+  content:string ->
+  ?tool_calls:tool_call list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?audio:audio_clip ->
+  ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
+  ?stream_lifecycle:stream_lifecycle_event list ->
+  unit ->
+  unit
+
+(** [append_user_message ~base_dir ~keeper_name ~content ?attachments
+    ?surface ?conversation_id ?external_message_id ?speaker ()] appends one
+    inbound user line with no paired assistant turn (RFC-0226). Written at delivery time by the inbound
+    recorder — the Discord gateway's ambient arm and the gate dispatch
+    boundary — so the line lands whether or not a turn starts or
+    replies. Same failure policy as {!append_turn}. *)
+val append_user_message :
+  base_dir:string ->
+  keeper_name:string ->
+  content:string ->
+  ?attachments:attachment list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?external_message_id:string ->
+  ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  unit ->
+  unit
+
+type mention_policy = Parse_mentions | Passive_context
+(** [Parse_mentions] parses persisted content and includes explicit mentions.
+    [Passive_context] persists an empty mention list, even for literal @names or
+    supplied extra mentions. An already-present row keeps its original metadata. *)
+
+(** Idempotent accepted-user append for a direct/queued delivery identity. *)
+val append_user_message_once :
+  base_dir:string ->
+  keeper_name:string ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  content:string ->
+  ?attachments:attachment list ->
+  ?surface:Surface_ref.t ->
+  ?conversation_id:string ->
+  ?external_message_id:string ->
+  ?workspace_id:string ->
+  ?speaker:speaker ->
+  ?mention_policy:mention_policy ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  unit ->
+  (append_once_result, string) result
+
+(** [chat_dir base_dir] is the directory holding one transcript file per
+    keeper. *)
+val chat_dir : string -> string
+
+(** [transcript_provenance_readable contents] runs the read that every
+    append-once delivery makes over a transcript before it writes. [Error]
+    names the first line that read refuses; a transcript with such a line
+    rejects every later delivery to its keeper. Reads only. *)
+val transcript_provenance_readable : string -> (unit, string) result
+
+(** [chat_path ~base_dir ~keeper_name] is the on-disk JSONL path backing
+    this keeper's chat history. Read-side cache freshness must include file
+    identity and absence as well as its size/timestamps; a retained transcript
+    can be replaced independently of its normal append writer. *)
+val chat_path : base_dir:string -> keeper_name:string -> string
+
+(** [load ~base_dir ~keeper_name] returns the most recent messages in
+    chronological order: the last 100 user/assistant messages plus the
+    newest 300 tool lines and receipts among them, so the window never
+    exceeds 400 lines and a tool-heavy turn trims older tool lines, never
+    the conversation. Missing files return [[]]. Unparseable lines are
+    skipped. *)
+val load :
+  base_dir:string -> keeper_name:string -> chat_message list
+
+val load_result :
+  base_dir:string -> keeper_name:string ->
+  (chat_message list, Keeper_chat_history_page.error) result
+(** Strict version of the same 100-primary/300-secondary tail selection.
+    Reuses the descriptor-bound 4 MiB physical reader. Missing files are empty;
+    unreadable, malformed, incomplete or replaced files are errors. No cursor
+    or exact-snapshot claim is made for this transcript projection. *)
+
+(** [load_all ~base_dir ~keeper_name] returns every valid persisted row in
+    source order. It is intentionally uncapped and is reserved for durable
+    acknowledgement scans whose correctness cannot tolerate a tail window. *)
+val load_all :
+  base_dir:string -> keeper_name:string -> chat_message list
+
+type strict_decode_cause =
+  | Invalid_surface of string
+  | Unknown_speaker_authority of string
+  | Missing_speaker_authority
+  | Invalid_row_contract of string
+  | Unreadable_file of string
+
+(** A strict read failure. [location] is the [path:line] (or byte offset) of
+    the offending row, or the file path for file-level failures. *)
+type strict_decode_error =
+  { location : string
+  ; cause : strict_decode_cause
+  }
+
+(** Renders with the same wording the strict reader has always used,
+    e.g. ["<path>:2 unreadable chat row"]. *)
+val strict_decode_error_to_string : strict_decode_error -> string
+
+(** Original complete row bytes and the typed projection from that same strict
+    read, including its then-current redaction. No current secret lookup occurs
+    on codec restoration. Raw bytes may contain private source data; this is an
+    internal capture, not a Dashboard projection or an effect capability. Every
+    source row is strictly read; only [select]ed rows are captured. *)
+type captured_row
+val load_captured_result : select:(chat_message -> bool) -> base_dir:string -> keeper_name:string ->
+  (captured_row list, strict_decode_error) result
+val captured_row_message : captured_row -> chat_message
+val captured_row_same_source : captured_row -> captured_row -> bool
+(** Exact original row bytes, independent of later redaction changes. *)
+val captured_row_to_json : captured_row -> Yojson.Safe.t
+val captured_row_of_json : Yojson.Safe.t -> (captured_row, string) result
+
+val load_all_result :
+  base_dir:string -> keeper_name:string ->
+  (chat_message list, strict_decode_error) result
+(** Fail-closed whole-transcript reader for consumers whose durable cursor
+    advances past the returned rows. Unlike {!load_all}, one unreadable row,
+    a [surface] that does not decode, an invalid row contract, an unknown typed [speaker_authority],
+    speaker identity without its authority, an incomplete final row, or a
+    store read failure is an error rather than a silently shorter history.
+    Row decode failures carry [Invalid_row_contract]; an incomplete tail or a
+    store read failure carries [Unreadable_file]. Missing authority remains
+    valid only for rows written without any speaker provenance. *)
+
+type page = { messages : chat_message list; has_more : bool }
+
+(** [load_page ~base_dir ~keeper_name ?before ()] is the paged form of
+    {!load} (RFC-0228 P1): with [before] (a message [ts]) it returns
+    the window of messages strictly older than that stamp; without it,
+    the tail window. [has_more] reports whether rows older than the
+    returned window remain — walk backward by passing the oldest
+    returned [ts] as the next [before]. Bounded I/O per call:
+    binary-search probes plus one window slice, never a full scan.
+    Legacy rows without [ts] are unreachable through paging (the tail
+    window still serves them).
+
+    [max_total] caps the window's rows, at most the default of 400. It scales
+    only the user/assistant share (a quarter of it); the budget for tool rows
+    and receipts stays at the default's, so a smaller page never drops a tool
+    row that no later page reads. The same history takes more, smaller pages;
+    [has_more] and the cursor are unchanged. *)
+val load_page :
+  base_dir:string -> keeper_name:string -> ?before:float -> ?max_total:int ->
+  unit -> page
+
+type history_page =
+  { history_messages : chat_message list
+  ; next_cursor : Keeper_chat_history_page.cursor option
+  }
+
+val load_history_page_result :
+  base_dir:string -> keeper_name:string ->
+  ?cursor:Keeper_chat_history_page.cursor -> ?max_total:int -> unit ->
+  (history_page, Keeper_chat_history_page.error) result
+(** Exact direct-conversation paging in file append order. Unlike the role-based
+    memory/tail window, this returns a consecutive prefix slice and never filters
+    by timestamp. Every returned row is strictly decoded before its next cursor
+    can be published; malformed rows fail the whole page. *)
+
+(** {1 Serialisation} *)
+
+(** JSON array of messages. Every entry carries [ts];
+    [tool_call_id] / [tool_call_name] /
+    [conversation_id] / [external_message_id] / [workspace_id] /
+    [speaker_id] / [speaker_name] / [speaker_authority] appear only
+    when present. [surface] is the sole lane identity. [delivery_key] appears
+    only on rows persisted by the idempotent append-once paths, verbatim as the
+    typed delivery identity object. When [base_dir] is supplied, the history
+    endpoint marks audio clips as [expired] when the underlying MP3 file is
+    gone. [omit_stream_contract] drops the per-row [stream_contract] object
+    compact page readers do not require. *)
+val to_json_array :
+  ?base_dir:string ->
+  ?trace_block_by_turn_ref:(Ids.Turn_ref.t -> chat_block option) ->
+  ?omit_stream_contract:bool ->
+  chat_message list ->
+  Yojson.Safe.t
+
+(** {1 Turn transcript (RFC-0233 §7)} *)
+
+(** A keeper turn's transcript. The terminal assistant row is selected by
+    exact persisted [turn_ref]; an accepted-user row may join either by that
+    same [turn_ref] or by the assistant's exact typed delivery provenance.
+    [assistant] includes utterances and typed transport-failure markers. Tool
+    rows are excluded — their full I/O is surfaced by the tool-call store keyed
+    on [execution_id]. Both lists are empty when the supplied messages select
+    no user/assistant lines. The strict reader below establishes retained
+    history coverage; the pure projection alone does not. *)
+type turn_transcript = Keeper_chat_projection.turn_transcript = {
+  user : chat_message list;
+  assistant : chat_message list;
+}
+
+val transcript_of_messages :
+  chat_message list -> turn_ref:Ids.Turn_ref.t -> turn_transcript
+(** [transcript_of_messages msgs ~turn_ref] selects keeper [assistant] lines
+    whose persisted [turn_ref] equals [turn_ref], then includes operator [user]
+    lines carrying either that [turn_ref] or the same typed delivery key in an
+    [Accepted_user] provenance slot. Input order is preserved. There is no
+    timestamp/text fallback (RFC-0233 §7 "no fuzzy attribution"). Pass
+    {!load}-produced messages so the content is already the redacted view
+    (RFC-0132); this function does not re-redact. *)
+
+val turn_transcript_to_json :
+  keeper:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  turn_transcript ->
+  Yojson.Safe.t
+(** [turn_transcript_to_json ~keeper ~turn_ref t] renders the dashboard
+    versioned turn-transcript payload: [schema], [keeper], [turn_ref], [found] (false when
+    both line lists are empty), [source], and the [user]/[assistant]
+    line arrays. Each line carries [role]/[content]/[ts]; failed requests
+    have the server-owned [request_failure] role. *)
+
+val load_turn_transcript_result :
+  base_dir:string ->
+  keeper_name:string ->
+  turn_ref:Ids.Turn_ref.t ->
+  (turn_transcript, Keeper_chat_history_page.error) result
+(** Strictly scan the retained direct transcript without a recent-row cutoff.
+    Keep only target rows and accepted-user rows joined by canonical delivery
+    provenance, reusing the captured first page/cursor boundary for a second
+    pass. Append after that boundary does not extend the reading; replacement,
+    truncation, malformed rows and unavailable storage remain errors.
+
+    Raw slices use the existing history-reader byte window. Memory retains
+    the first page, one current page and selected turn rows, not all history.
+    Page boundaries yield in Eio so cancellation can settle the entered read.
+    A single row exceeding the existing page window remains an explicit error.
+    Two passes may read the whole transcript; no latency improvement is implied.
+    Redaction is captured once for both passes. *)

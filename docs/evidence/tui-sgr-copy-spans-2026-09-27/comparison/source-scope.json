@@ -1,0 +1,19 @@
+{
+  "baseline": "14c9e1f6488557047e4d77e302fa069e2a88b214",
+  "candidate": "c7bdc04f78e3b6c09abae94e28852b37f8274da7",
+  "PR_source_head": "4cb314c5ceee920b4f0d344b4e166ccc58d80d2c",
+  "changed_paths": [
+    "bin/masc_tui_theme.ml",
+    "bin/masc_tui_theme.mli",
+    "docs/evidence/tui-sgr-copy-spans-2026-09-27/README.md",
+    "docs/evidence/tui-sgr-copy-spans-2026-09-27/files.json",
+    "docs/evidence/tui-sgr-copy-spans-2026-09-27/observation.json",
+    "test/test_tui_theme.ml"
+  ],
+  "candidate_and_PR_sha256": {
+    "bin/masc_tui_theme.ml": "081bee32d278e4cea5225c60f004bc8dbc46e2eeca8cbfe542f9bb6f487727fc",
+    "bin/masc_tui_theme.mli": "6f55a2dbe9b81e11846f8ffb2e5726a0a28e1a7029fe5453c9d30a9f8f193fcd",
+    "test/test_tui_theme.ml": "8f1aa5346dec2f0a9e66cc471eb54dc84c509da119aba4f7d200243d86bc96d9"
+  },
+  "scope": "Only two theme product files differ; probe source/interface/test match the PR. Product trees otherwise differ between PR base and probe base; isolated comparison does not prove latency on current main."
+}

@@ -1,0 +1,119 @@
+(** Exact, path-free identity of one immutable Agent Skill document. *)
+
+type package_id = private string
+
+type package_id_error =
+  | Empty_package_id
+  | Current_directory_package_id
+  | Parent_directory_package_id
+  | Package_id_contains_separator
+  | Package_id_contains_nul
+
+type content_revision = private string
+
+type revision_error =
+  | Invalid_revision_length of { actual : int }
+  | Invalid_revision_character of
+      { index : int
+      ; found : char
+      }
+
+type identity = private
+  { source_id : Skill_source_config.source_id
+  ; package_id : package_id
+  ; name : string
+  }
+
+type t = private
+  { identity : identity
+  ; content_revision : content_revision
+  }
+
+type request =
+  | Pinned of t
+  | By_identity of identity
+      (** A caller that named a Skill without pinning its revision. Resolving
+          it needs the frozen turn snapshot, which this module does not hold —
+          see {!request_of_yojson}. *)
+
+type decode_error =
+  | Expected_object of { field : string }
+  | Expected_list of { field : string }
+  | Missing_field of
+      { object_name : string
+      ; field : string
+      }
+  | Expected_string of
+      { object_name : string
+      ; field : string
+      }
+  | Duplicate_field of
+      { object_name : string
+      ; field : string
+      }
+  | Unexpected_field of
+      { object_name : string
+      ; field : string
+      }
+  | Invalid_source_id of string
+  | Invalid_package_id of package_id_error
+  | Invalid_content_revision of revision_error
+  | Duplicate_reference of t
+
+val package_id_of_directory : string -> (package_id, package_id_error) result
+val package_id_to_string : package_id -> string
+val package_id_error_to_string : package_id_error -> string
+
+val validate_revision_string : string -> (unit, revision_error) result
+val content_revision_of_string : string -> (content_revision, revision_error) result
+val content_revision_of_source_text : string -> content_revision
+val content_revision_to_string : content_revision -> string
+val equal_content_revision : content_revision -> content_revision -> bool
+
+val make_identity :
+  source_id:Skill_source_config.source_id ->
+  package_id:package_id ->
+  name:string ->
+  identity
+
+val make : identity:identity -> content_revision:content_revision -> t
+val identity_source_id_to_string : identity -> string
+val identity_package_id_to_string : identity -> string
+val equal_identity : identity -> identity -> bool
+val equal : t -> t -> bool
+
+module Identity_map : Map.S with type key = identity
+(** Immutable exact-identity index. Key ordering uses the same canonical
+    source id, package id and name as {!equal_identity}; it grants no
+    snapshot resolution or execution authority. *)
+
+module Exact_map : Map.S with type key = t
+(** Immutable exact-reference index, including content revision. Key equality
+    agrees with {!equal}; references with the same identity and different
+    pinned revisions remain distinct. No resolution or execution authority. *)
+
+val identity_to_yojson : identity -> Yojson.Safe.t
+
+val identity_of_yojson : Yojson.Safe.t -> (identity, decode_error) result
+(** The strict inverse of {!identity_to_yojson}: exactly [source_id],
+    [package_id] and [name], with the source id and package id validated as
+    {!of_yojson} validates them inside a reference. *)
+
+val to_yojson : t -> Yojson.Safe.t
+val pp : Format.formatter -> t -> unit
+(** Canonical exact JSON printer used by enclosing derived domain printers. *)
+val list_to_yojson : t list -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (t, decode_error) result
+
+val request_of_yojson : Yojson.Safe.t -> (request, decode_error) result
+(** The same object as {!of_yojson} with [content_revision] optional. Absent, the
+    caller named a Skill and left the revision to whoever holds the frozen turn
+    snapshot; present, it is decoded and validated exactly as before, so a
+    revision that was spelled out is still honoured or refused rather than
+    quietly replaced. RFC-0411 §4.2. *)
+val list_of_yojson : Yojson.Safe.t -> (t list, decode_error) result
+(** Decoders are strict: objects reject unknown and duplicate fields, lists
+    reject duplicate exact references, and the former string-only Task shape is
+    not accepted. Skill-name conformance remains the catalog document parser's
+    authority; an externally decoded identity becomes usable only after exact
+    snapshot resolution. *)

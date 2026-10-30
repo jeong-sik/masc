@@ -1,0 +1,24 @@
+{
+  "source_sha": "d35d2559c56814b38615545a5f4f081304bccc05",
+  "workflow_run": 39624635082,
+  "result": "success",
+  "selected_suites": [
+    {
+      "name": "test_candle_appraiser_contract",
+      "passed": 2,
+      "seconds": 0.527
+    },
+    {
+      "name": "test_candle_appraisal_flow",
+      "passed": 24,
+      "seconds": 1.45
+    }
+  ],
+  "total_passed": 26,
+  "minimal": true,
+  "eio_backend": "posix",
+  "original_full_log_sha256": "592c4c821057c4a45db3f261b10708824603e36ba75d95391a26801e5caac6dc",
+  "excerpt_sha256": "9d2f36d7c337a751ae4395210a695c3fc793e602705f9f59909f82423d3b2e0c",
+  "excerpt_policy": "Original timestamped suite lines, exact checkout and selected input fields; dependency setup and unrelated environment omitted. Full log remains available at the immutable workflow run.",
+  "scope": "Compiled existing real worker/host contract plus production payout worker with scripted Addon/model port; actual runtime Off/On, real provider, two UI and operator install not proven."
+}

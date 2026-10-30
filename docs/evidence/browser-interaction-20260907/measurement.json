@@ -1,0 +1,57 @@
+{
+  "result": "passed",
+  "proof_scope": "actual Firefox extension capture and interaction code; not new MASC OCaml binary or TUI",
+  "source_commit": "f08847bafe7c0c4cc5f05fda9baf011968da5875",
+  "browser_version": "155.0.1",
+  "extension_source_sha256": "7e42258294bfa4ddc09be18c7fb2cd60663ddbeb142f958dd0b646fd847fb46a",
+  "source_worktree_dirty": true,
+  "controls": {
+    "filled": {
+      "tabId": 1,
+      "action": "fill",
+      "urlBefore": "http://127.0.0.1:65107/fixture",
+      "url": "http://127.0.0.1:65107/fixture",
+      "title": "MASC browser visual proof",
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "clicked": {
+      "tabId": 1,
+      "action": "click",
+      "urlBefore": "http://127.0.0.1:65107/fixture",
+      "url": "http://127.0.0.1:65107/fixture",
+      "title": "MASC browser visual proof",
+      "scrollX": 0,
+      "scrollY": 0
+    },
+    "observed": {
+      "value": "Hello from MASC",
+      "button": "Clicked",
+      "disabled": "unchanged"
+    },
+    "scrolled": {
+      "tabId": 1,
+      "action": "scroll",
+      "urlBefore": "http://127.0.0.1:65107/fixture",
+      "url": "http://127.0.0.1:65107/fixture",
+      "title": "MASC browser visual proof",
+      "scrollX": 0,
+      "scrollY": 640
+    },
+    "errors": {
+      "wrong_url": "page_url_changed",
+      "ambiguous": "selector_is_ambiguous",
+      "disabled": "element_disabled",
+      "invalid_number": "input_rejected_value"
+    },
+    "numberAfter": "42"
+  },
+  "open_load_interact_capture_ms": 173,
+  "tab_id": 1,
+  "png_bytes": 40045,
+  "png_sha256": "2053991c7fd4109b7e32c6e87943b17c1ddc5bfbdaf1cc420ad6b7d34d4e9bb8",
+  "title": "MASC browser visual proof",
+  "viewport_only": true,
+  "extension_connected_to_production": false,
+  "verified_committed_extension_source": "47e99c445aafc175e0242fe8f07251b74a46dbad"
+}

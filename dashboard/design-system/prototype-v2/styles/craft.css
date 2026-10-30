@@ -1,0 +1,306 @@
+/* ══════════════════════════════════════════════════════════════
+   MASC v2 — Craft layer
+   Loaded LAST. A polish pass over the existing skin: one breathing
+   rhythm (density), one motion system (press / lift / focus / entrance),
+   and consistency fixes across every surface. Purely additive —
+   nothing here invents new color or type, it only refines spacing,
+   interaction and finish on top of v2.css / surfaces.css.
+
+   Three taste axes are exposed as Tweaks and driven by attributes on
+   .v2-app:  data-density (spacious|regular|compact),
+             data-motion  (lively|subtle|off),
+             data-bubble  (card|flat).
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Motion + lift tokens ─────────────────────────────────────── */
+[data-skin="v2"] {
+  --ease-out:    cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.32, 0.5, 1);
+  --dur-fast: 110ms;
+  --dur:      170ms;
+  --dur-slow: 260ms;
+  --lift:  -2px;   /* card hover rise */
+  --press:  1px;   /* button press sink */
+}
+
+/* ══════════════════════════════════════════════════════════════
+   1 · DENSITY — one breathing rhythm, three steps
+   The semantic spacing tokens already feed most surfaces; override
+   them per density, then top up the spots that still carry literals.
+   ══════════════════════════════════════════════════════════════ */
+.v2-app[data-density="spacious"] {
+  --pad-surface: 32px 42px 60px;
+  --pad-card:    16px 18px;
+  --gap-card:    18px;
+  --gap-row:     11px;
+}
+.v2-app[data-density="regular"] {
+  --pad-surface: 22px 26px 40px;
+  --pad-card:    12px 14px;
+  --gap-card:    14px;
+  --gap-row:     8px;
+}
+.v2-app[data-density="compact"] {
+  --pad-surface: 15px 18px 30px;
+  --pad-card:    9px 11px;
+  --gap-card:    10px;
+  --gap-row:     6px;
+}
+
+/* ── Chat console — spacious (the headline surface) ── */
+.v2-app[data-density="spacious"] .chat-head   { padding: 18px 28px 16px; gap: 16px; }
+.v2-app[data-density="spacious"] .thread      { padding: 34px 0 14px; }
+.v2-app[data-density="spacious"] .thread-inner{ gap: 30px; padding: 0 40px; }
+.v2-app[data-density="spacious"] .msg         { gap: 15px; }
+.v2-app[data-density="spacious"] .bubble      { padding: 17px 21px; line-height: 1.7; }
+.v2-app[data-density="spacious"] .composer    { padding: 16px 30px 22px; }
+.v2-app[data-density="spacious"] .ctx-scroll  { padding: 20px; gap: 22px; }
+.v2-app[data-density="spacious"] .ctx-card,
+.v2-app[data-density="spacious"] .tps-card    { padding: 14px 15px; }
+.v2-app[data-density="spacious"] .roster-head { padding: 15px 14px; }
+.v2-app[data-density="spacious"] .roster-list { padding: 9px 8px; }
+.v2-app[data-density="spacious"] .kp-row      { padding: 11px 11px; }
+.v2-app[data-density="spacious"] .roster-filters { padding: 12px 14px; }
+
+/* ── Board — spacious ── */
+.v2-app[data-density="spacious"] .bd-feed-head    { padding: 15px 24px; }
+.v2-app[data-density="spacious"] .bd-list         { padding: 20px 24px; gap: 14px; }
+.v2-app[data-density="spacious"] .bd-rail         { padding: 18px 12px; }
+.v2-app[data-density="spacious"] .bd-composer     { padding: 14px 24px 18px; }
+.v2-app[data-density="spacious"] .bd-detail-h     { padding: 16px 18px; }
+.v2-app[data-density="spacious"] .bd-detail-scroll{ padding: 18px; gap: 14px; }
+
+/* ── Settings — spacious ── */
+.v2-app[data-density="spacious"] .settings-surf .set-card-b { padding: 12px 40px 56px; }
+.v2-app[data-density="spacious"] .set-content-h { padding: 26px 40px 18px; }
+.v2-app[data-density="spacious"] .set-row       { padding: 16px 0; }
+.v2-app[data-density="spacious"] .set-nav-item  { padding: 11px 13px; }
+
+/* ── Chat console — compact (tighten what regular leaves) ── */
+.v2-app[data-density="compact"] .thread        { padding: 14px 0 6px; }
+.v2-app[data-density="compact"] .thread-inner  { gap: 14px; padding: 0 22px; }
+.v2-app[data-density="compact"] .chat-head     { padding: 10px 16px 9px; }
+.v2-app[data-density="compact"] .composer      { padding: 9px 18px 12px; }
+.v2-app[data-density="compact"] .ctx-scroll    { padding: 11px; gap: 12px; }
+.v2-app[data-density="compact"] .bd-list       { padding: 11px 14px; gap: 8px; }
+.v2-app[data-density="compact"] .set-row       { padding: 10px 0; }
+
+/* ══════════════════════════════════════════════════════════════
+   2 · MOTION — press, hover lift, focus ring, entrance
+   Base rules below are the "subtle" tier. [data-motion="lively"]
+   amplifies; [data-motion="off"] removes all of it (and is implied
+   for reduced-motion users).
+   ══════════════════════════════════════════════════════════════ */
+
+/* Consistent transitions on every interactive control. */
+.v2-app .act, .v2-app .send, .v2-app .rfilter, .v2-app .bd-filter,
+.v2-app .bd-sub, .v2-app .log-f, .v2-app .set-verify, .v2-app .set-seg-b,
+.v2-app .cp-mode, .v2-app .fbk-btn, .v2-app .chip, .v2-app .tps-range,
+.v2-app .set-add, .v2-app .ctool, .v2-app .nav-item, .v2-app .turn-tab,
+.v2-app .bd-react, .v2-app .bd-comp-tab, .v2-app .cn-config,
+.v2-app .set-stepper button, .v2-app .turn-close, .v2-app .rail-toggle,
+.v2-app .topbar-copilot, .v2-app .dock-fab {
+  transition: background var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out),
+              color var(--dur) var(--ease-out),
+              box-shadow var(--dur) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+
+/* Press — every button sinks 1px on active (brand: translateY press). */
+.v2-app[data-motion]:not([data-motion="off"]) .act:active,
+.v2-app[data-motion]:not([data-motion="off"]) .send:not(:disabled):active,
+.v2-app[data-motion]:not([data-motion="off"]) .rfilter:active,
+.v2-app[data-motion]:not([data-motion="off"]) .bd-filter:active,
+.v2-app[data-motion]:not([data-motion="off"]) .bd-sub:active,
+.v2-app[data-motion]:not([data-motion="off"]) .log-f:active,
+.v2-app[data-motion]:not([data-motion="off"]) .set-verify:active,
+.v2-app[data-motion]:not([data-motion="off"]) .set-seg-b:active,
+.v2-app[data-motion]:not([data-motion="off"]) .cp-mode:active,
+.v2-app[data-motion]:not([data-motion="off"]) .fbk-btn:active,
+.v2-app[data-motion]:not([data-motion="off"]) .chip:active,
+.v2-app[data-motion]:not([data-motion="off"]) .tps-range:active,
+.v2-app[data-motion]:not([data-motion="off"]) .set-add:active,
+.v2-app[data-motion]:not([data-motion="off"]) .ctool:active,
+.v2-app[data-motion]:not([data-motion="off"]) .bd-react:active,
+.v2-app[data-motion]:not([data-motion="off"]) .turn-tab:active,
+.v2-app[data-motion]:not([data-motion="off"]) .cn-config:active,
+.v2-app[data-motion]:not([data-motion="off"]) .topbar-copilot:active,
+.v2-app[data-motion]:not([data-motion="off"]) .set-nav-item:active {
+  transform: translateY(var(--press));
+}
+
+/* Hover lift on genuine cards (not list rows). */
+.v2-app .ov-keeper, .v2-app .cp-route, .v2-app .cp-mode,
+.v2-app .cn-card, .v2-app .bd-post {
+  transition: background var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out),
+              box-shadow var(--dur) var(--ease-out),
+              transform var(--dur) var(--ease-out);
+}
+.v2-app[data-motion]:not([data-motion="off"]) .ov-keeper:hover,
+.v2-app[data-motion]:not([data-motion="off"]) .cp-route:hover,
+.v2-app[data-motion]:not([data-motion="off"]) .cn-card:hover {
+  transform: translateY(var(--lift));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--volt-wash);
+}
+.v2-app[data-motion]:not([data-motion="off"]) .bd-post:hover {
+  transform: translateY(var(--lift));
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.38);
+}
+
+/* Avatar / sigil micro-zoom on the keeper rows + board authors. */
+.v2-app .kp-av, .v2-app .roster .sigil { transition: transform var(--dur) var(--ease-out); }
+.v2-app[data-motion="lively"] .kp-row:hover .kp-av,
+.v2-app[data-motion="lively"] .kp-row:hover .sigil { transform: scale(1.06); }
+
+/* Keyboard focus ring — one brass halo everywhere, mouse clicks stay clean. */
+.v2-app a:focus-visible,
+.v2-app button:focus-visible,
+.v2-app [role="button"]:focus-visible,
+.v2-app [tabindex]:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-deep), 0 0 0 4px var(--volt-dim);
+  border-radius: var(--radius-sm);
+}
+.v2-app textarea:focus-visible,
+.v2-app input:focus-visible { outline: none; }
+
+/* Message entrance is intentionally omitted: a backgrounded iframe freezes
+   the animation clock on frame 0, so any keyframe that starts at opacity:0
+   would hold content hidden. Content visibility must never depend on an
+   animation running — the press/hover/focus polish below carries the craft. */
+
+/* Trace / tool body reveal a touch smoother (render on click → foreground). */
+.v2-app .reason-detail, .v2-app .tool-body2 {
+  animation: fade-soft var(--dur) var(--ease-out);
+}
+@keyframes fade-soft { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── LIVELY tier — bolder lifts, glow on the primary action, sheen ── */
+.v2-app[data-motion="lively"] { --lift: -3px; }
+.v2-app[data-motion="lively"] .ov-keeper:hover,
+.v2-app[data-motion="lively"] .cp-route:hover,
+.v2-app[data-motion="lively"] .cn-card:hover,
+.v2-app[data-motion="lively"] .bd-post:hover {
+  transition-timing-function: var(--ease-spring);
+}
+.v2-app[data-motion="lively"] .send:not(:disabled):hover {
+  box-shadow: 0 0 22px var(--volt-glow), 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.v2-app[data-motion="lively"] .nav-item:hover { transform: translateY(-1px); }
+.v2-app[data-motion="lively"] .chip:hover { transform: translateY(-2px); }
+
+/* ── OFF tier — kill every transition & animation (also reduced-motion) ── */
+.v2-app[data-motion="off"] *,
+.v2-app[data-motion="off"] *::before,
+.v2-app[data-motion="off"] *::after {
+  transition: none !important;
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .v2-app *, .v2-app *::before, .v2-app *::after {
+    transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   3 · MESSAGE STYLE — card (default) vs flat (document-like)
+   Flat strips the assistant bubble chrome so long answers read as
+   a clean document; the user message keeps a quiet brass spine so
+   the conversation still has two clear voices.
+   ══════════════════════════════════════════════════════════════ */
+.v2-app[data-bubble="flat"] .bubble {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  padding: 2px 0 0;
+}
+.v2-app[data-bubble="flat"] .bubble.user {
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--volt-dim);
+  border-radius: 0;
+  padding: 2px 0 2px 16px;
+}
+.v2-app[data-bubble="flat"] .bubble code,
+.v2-app[data-bubble="flat"] .bubble .md-table,
+.v2-app[data-bubble="flat"] .bubble .callout {
+  /* nested chrome stays — only the outer shell flattens */
+}
+.v2-app[data-bubble="flat"] .msg.from-user .bubble.user {
+  border-left: 0;
+  border-right: 2px solid var(--volt-dim);
+  padding: 2px 16px 2px 0;
+  text-align: left;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   4 · CONSISTENCY — scrollbars, hairlines, small finish fixes
+   ══════════════════════════════════════════════════════════════ */
+
+/* One scrollbar treatment across every scroll region. */
+.v2-app .thread::-webkit-scrollbar,
+.v2-app .ctx-scroll::-webkit-scrollbar,
+.v2-app .roster-list::-webkit-scrollbar,
+.v2-app .set-content::-webkit-scrollbar,
+.v2-app .set-nav::-webkit-scrollbar,
+.v2-app .bd-list::-webkit-scrollbar,
+.v2-app .bd-detail-scroll::-webkit-scrollbar,
+.v2-app .bd-rail::-webkit-scrollbar,
+.v2-app .log-stream::-webkit-scrollbar,
+.v2-app .turn-body::-webkit-scrollbar {
+  width: 10px;
+}
+.v2-app .thread::-webkit-scrollbar-thumb,
+.v2-app .ctx-scroll::-webkit-scrollbar-thumb,
+.v2-app .roster-list::-webkit-scrollbar-thumb,
+.v2-app .set-content::-webkit-scrollbar-thumb,
+.v2-app .set-nav::-webkit-scrollbar-thumb,
+.v2-app .bd-list::-webkit-scrollbar-thumb,
+.v2-app .bd-detail-scroll::-webkit-scrollbar-thumb,
+.v2-app .bd-rail::-webkit-scrollbar-thumb,
+.v2-app .log-stream::-webkit-scrollbar-thumb,
+.v2-app .turn-body::-webkit-scrollbar-thumb {
+  background: var(--border-main);
+  border-radius: var(--radius-md);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background var(--dur);
+}
+.v2-app .thread::-webkit-scrollbar-thumb:hover,
+.v2-app .ctx-scroll::-webkit-scrollbar-thumb:hover,
+.v2-app .roster-list::-webkit-scrollbar-thumb:hover,
+.v2-app .set-content::-webkit-scrollbar-thumb:hover,
+.v2-app .bd-list::-webkit-scrollbar-thumb:hover,
+.v2-app .bd-detail-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--border-highlight);
+  background-clip: padding-box;
+}
+.v2-app * { scrollbar-width: thin; scrollbar-color: var(--border-main) transparent; }
+
+/* Composer hairline lifts to brass on focus (matches board composer). */
+.v2-app .composer-box.focus { box-shadow: 0 0 0 3px var(--volt-wash); }
+
+/* Roster search + every text input share the same focus halo. */
+.v2-app .set-input:focus,
+.v2-app .roster-search:focus,
+.v2-app .cn-be-chn:focus,
+.v2-app .kc-text:focus {
+  box-shadow: 0 0 0 2px var(--volt-wash);
+}
+
+/* Section headers keep an even baseline rhythm in the context rail. */
+.v2-app .ctx-sec + .ctx-sec { margin-top: 2px; }
+
+/* Top-bar stat chips: quiet hover so they don't look dead next to live data. */
+.v2-app .v2-statchip { transition: border-color var(--dur), color var(--dur); }
+
+/* Disabled send reads clearly inert. */
+.v2-app .send:disabled { transform: none; }
+
+/* Compaction-snapshot trigger: let the "before/after 보기" sub-label drop to
+   its own right-aligned line instead of crushing the label into a wrap. */
+.v2-app .cmp-open { flex-wrap: wrap; align-items: baseline; row-gap: 3px; }
+.v2-app .cmp-open-sub { margin-left: auto; }

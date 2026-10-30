@@ -1,0 +1,20 @@
+{
+  "source_ref": "2bd58f3cc4",
+  "results": {
+    "test_goal_notification_contract": 1
+  },
+  "scope": "complete current workspace ID, broadcast, Goal store and chat store; exact server projection function; registered suite with aliases; cached lower dependencies; not whole server or reactive Keeper runtime",
+  "cache": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41053-parent-outbox-20261004",
+  "source_sha256": {
+    "masc__Keeper_chat_store.mli": "75dab98b28c27beebc0218f9b1c260dc1299875c7fd4b33f09ae5a193c2afae3",
+    "goal_store.mli": "18341b0bac796a56be1850f4fc6cd0daccdc107227244bec6360095eabe62001",
+    "goal_store.ml": "e55d1f9f0ef7ee88fe6a4063cafaa7d16a86b0003ee5500c9787850e4919ff6d",
+    "projection.ml": "50516c108335ca906644b824461ad6d869a0c57d340a8ece539611126877f32e",
+    "workspace_broadcast.mli": "f4692663bc8bd403943ff5a102092a170913b9edf23edefa8071a149107d6521",
+    "test_goal_notification_contract.ml": "258f0c207fbc527ff0ccd56e099aa87ab97ffb4ebb444566d0a4f6b6164eba5a",
+    "workspace_request_id.ml": "99445ff328cf90a3155ade4132405298fd74021dcd701569cbf1e75b4bca4e16",
+    "masc__Keeper_chat_store.ml": "3b8f0020ee0b9082d4c6dbf999db373439cb7325085b48946fb106a7f5918fbc",
+    "workspace_broadcast.ml": "5430160cbde7c954ce0626073794370e553720d4bd7eed15c3c8a4b655276857",
+    "workspace_request_id.mli": "430c872adc63fb3ffb15cf00f11c0125f024f2663c324feae6609f995265d096"
+  }
+}

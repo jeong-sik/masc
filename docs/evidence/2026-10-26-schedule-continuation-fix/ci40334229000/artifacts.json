@@ -1,0 +1,25 @@
+{
+  "total_count": 1,
+  "artifacts": [
+    {
+      "id": 12657725824,
+      "node_id": "MDg6QXJ0aWZhY3QxMjY1NzcyNTgyNA==",
+      "name": "suite-runner-log",
+      "size_in_bytes": 14467,
+      "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12657725824",
+      "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/12657725824/zip",
+      "expired": false,
+      "digest": "sha256:37150afa66660a76c6ba7ff34deb9225a931cbcd83b69a9a69ffa5671253fa60",
+      "created_at": "2026-10-26T14:11:35Z",
+      "updated_at": "2026-10-26T14:11:35Z",
+      "expires_at": "2026-11-09T14:11:35Z",
+      "workflow_run": {
+        "id": 40334229000,
+        "repository_id": 1136640865,
+        "head_repository_id": 1136640865,
+        "head_branch": "fix/schedule-work-continuation-20261026",
+        "head_sha": "94b2df25abcdfe20c658322f4156ad63f5546c34"
+      }
+    }
+  ]
+}

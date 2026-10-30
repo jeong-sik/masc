@@ -1,0 +1,11 @@
+{
+  "scope": "Actual production Tool_definition_toml.mli/ml compiled with the exact tool_schema record from types_core.ml; not full server startup",
+  "before_exit": 2,
+  "after_exit": 0,
+  "sha256": {
+    "config/tools/masc_browser_interact.toml": "719f6768ead16e30d8aee711996046ee12cd216e746533dbbaeb81410cfb361f",
+    "config/tools/masc_browser_act.toml": "e6eb70e568876d3305039aa692422c9033fc8b7dc76c53845b7fdb304318969a",
+    "lib/tool_surface/tool_definition_toml.ml": "3a761548267077fafb7ba825798b87ab193bea290947059846cd309bbdd2c941",
+    "lib/tool_surface/tool_definition_toml.mli": "dbede22f74a63817c3ce96001e17432d6c2e9ebb926481e00340d37d108046a5"
+  }
+}

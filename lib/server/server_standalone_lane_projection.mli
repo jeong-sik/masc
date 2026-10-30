@@ -1,0 +1,108 @@
+(** Read-only projection of every standalone LLM lane.
+
+    This module never starts, stops, retries, reorders, or otherwise acquires a
+    lane. It joins immutable lane admission with existing durable observation
+    registries so operator surfaces can distinguish idle, running, degraded,
+    and lanes with no retained observation without inventing another lifecycle
+    authority. Latest terminal selection uses measured finish when available,
+    otherwise the original registration as an ordering anchor, with source/id
+    ties. The anchor is not an inferred finish or execution chronology. A
+    selected unmeasured terminal has no finish timestamp or latency sample. *)
+
+type lane_configuration =
+  | Configured of
+      { admitted_slots : string list
+      ; cli_slots : string list
+            (** Official-client runtime ids the lane walks as one-shot
+                fallbacks after catalog exhaustion (declaration order). *)
+      ; dropped_slots : string list
+            (** Slot ids the lane DECLARED that publication could not admit —
+                absent from the frozen catalog (a typo, a removed model, or a
+                credential-unbound target the resolver excluded). The one
+                boot-time WARN was the only signal before this field, so an
+                operator could not tell "configured single" from "configured
+                double, one silently dropped" (lane audit W4). *)
+      ; declared_slots : string list
+            (** [slots] in the order the file writes them, admitted or not.
+                The two lists above are an admission reading: once a sibling
+                was rejected they cannot be put back in file order, and the
+                slot editor moves and drops by position. *)
+      ; declared_cli_slots : string list
+            (** [cli_slots] in declaration order, including rejected clients. *)
+      ; admission_error : string option
+      }
+  | Disabled of { declared_slots : string list; declared_cli_slots : string list }
+  | Unconfigured of string
+  | Registry_unavailable of string
+
+val snapshot_json : unit -> Yojson.Safe.t
+type observation
+val observe : unit -> observation
+val configuration : observation -> Standalone_lane.t -> lane_configuration
+val addon_configuration : observation -> Runtime_schema.addon_lane -> lane_configuration
+(** A Lane Add-on exact output's lane, read from the same capture as the
+    built-in lanes: [Unconfigured] when runtime.toml has no table for it. *)
+
+val addon_tables : observation -> declaration_id:string -> string list
+(** The outputs runtime.toml has a [runtime.addon_exact_lanes] table for under
+    [declaration_id], in file order. When the registry cannot be read no
+    table is listed, and each output's {!addon_configuration} says why. *)
+val observation_to_json : observation -> Yojson.Safe.t
+(** A single immutable admission/run capture shared by the standalone detail
+    snapshot and the common inventory; never reparse rendered JSON. *)
+
+type detail_lookup =
+  | Detail_found of Yojson.Safe.t
+  | Detail_not_found
+  | Detail_ambiguous
+
+type run_kind = Exact_output | Task_verification | Goal_verification
+
+val run_kind_of_string : string -> (run_kind, string) result
+(** The closed [run_kind] HTTP query vocabulary. An omitted query selects all
+    retained kinds; an unknown or empty value is a request error. *)
+
+val recent_run_page_json
+  :  limit:int
+  -> before:(float * string) option
+  -> lane:string option
+  -> run_kind:run_kind option
+  -> (Yojson.Safe.t, string) result
+(** A cursor page over the same durable registries as {!snapshot_json}.
+    Filtering happens before pagination, so a quiet lane is not hidden behind
+    a busier lane's bounded page. Both lane and kind filters apply to [total]
+    and the cursor page. Omitting both preserves the mixed admin listing. *)
+
+val run_detail_json : run_id:string -> detail_lookup
+(** Exact payload/result evidence for one retained run. Verifier results keep
+    their task/Goal subject, verdict reason, evaluator runtime, and durable
+    tool observations. Duplicate ids across registries fail explicitly. *)
+
+module For_testing : sig
+  val snapshot_json_with
+    :  now:float
+    -> resolve_lane:(string -> lane_configuration)
+    -> jev_readiness:Typesafeai_config.readiness
+    -> exact_runs_total:int
+    -> exact_runs:Exact_lane_run_registry.run list
+    -> verification_runs:Verification_run_registry.run list
+    -> goal_verification_runs:Goal_verification_run_registry.run list
+    -> Yojson.Safe.t
+
+  val recent_run_page_json_with
+    :  limit:int
+    -> before:(float * string) option
+    -> lane:string option
+    -> run_kind:run_kind option
+    -> exact_runs:Exact_lane_run_registry.run list
+    -> verification_runs:Verification_run_registry.run list
+    -> goal_verification_runs:Goal_verification_run_registry.run list
+    -> (Yojson.Safe.t, string) result
+
+  val run_detail_json_with
+    :  run_id:string
+    -> exact_runs:Exact_lane_run_registry.run list
+    -> verification_runs:Verification_run_registry.run list
+    -> goal_verification_runs:Goal_verification_run_registry.run list
+    -> detail_lookup
+end

@@ -1,0 +1,34 @@
+{
+  "early_observed": true,
+  "before_resource_release": [
+    {
+      "kind": "early",
+      "value": [
+        {
+          "ready": "interactive",
+          "text": "Visible channel context"
+        }
+      ]
+    }
+  ],
+  "after_resource_release": [
+    {
+      "kind": "early",
+      "value": [
+        {
+          "ready": "interactive",
+          "text": "Visible channel context"
+        }
+      ]
+    },
+    {
+      "kind": "default",
+      "value": [
+        {
+          "ready": "complete",
+          "text": "Visible channel context"
+        }
+      ]
+    }
+  ]
+}

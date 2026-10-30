@@ -1,0 +1,35 @@
+{
+  "started_at_unix": 1788799726.669993,
+  "scope": "Only task-owned fixture, pinned MASC server and private geckodriver",
+  "processes": [
+    {
+      "name": "fixture",
+      "pid": 82433,
+      "port": 63804,
+      "listener_owner_verified": true,
+      "signal": "SIGTERM",
+      "signal_at_unix": 1788799726.826016,
+      "pid_absent": true
+    },
+    {
+      "name": "server",
+      "pid": 82590,
+      "port": 54085,
+      "listener_owner_verified": true,
+      "signal": "SIGTERM",
+      "signal_at_unix": 1788799726.8260238,
+      "pid_absent": true
+    },
+    {
+      "name": "driver",
+      "pid": 82589,
+      "port": 54084,
+      "listener_owner_verified": true,
+      "signal": "SIGTERM",
+      "signal_at_unix": 1788799726.826028,
+      "pid_absent": true
+    }
+  ],
+  "finished_at_unix": 1788799727.2602081,
+  "all_owned_processes_absent": true
+}

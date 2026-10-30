@@ -1,0 +1,1447 @@
+(** Test suite for Http_server_eio module
+
+    Tests the Eio-native HTTP server infrastructure using httpun-eio.
+*)
+
+open Masc.Http_server_eio
+
+let request_trust_policy =
+  match
+    Server_request_authority.make_trust_policy
+      ~bind_host:"127.0.0.1"
+      ~bind_port:8935
+      ~explicit_base_url:None
+  with
+  | Ok policy -> policy
+  | Error error ->
+    Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+;;
+
+let request_authority_exn request =
+  match
+    Server_request_authority.classify_http1_request
+      ~trust_policy:request_trust_policy
+      request
+  with
+  | Server_request_authority.Single authority -> authority
+  | ( Server_request_authority.Missing
+    | Server_request_authority.Multiple
+    | Server_request_authority.Malformed
+    | Server_request_authority.Untrusted ) ->
+    Alcotest.fail "expected one valid request authority"
+;;
+
+(* ===== Unit Tests for Router ===== *)
+
+let test_router_empty () =
+  let routes = Router.create () in
+  Alcotest.(check int) "empty router" 0 (Router.route_count routes)
+;;
+
+let test_router_add_get () =
+  let handler _req _reqd = () in
+  let routes = Router.create () |> Server_route.get Server_route.Always_public "/test" handler in
+  Alcotest.(check int) "one route" 1 (Router.route_count routes)
+;;
+
+let test_router_add_post () =
+  let handler _req _reqd = () in
+  let routes = Router.create () |> Server_route.post Server_route.Always_public "/api" handler in
+  Alcotest.(check int) "one route" 1 (Router.route_count routes)
+;;
+
+let test_router_add_multiple () =
+  let handler _req _reqd = () in
+  let routes =
+    Router.create ()
+    |> Server_route.get Server_route.Always_public "/health" handler
+    |> Server_route.post Server_route.Always_public "/api/call" handler
+    |> Server_route.add Server_route.Always_public ~path:"/any" ~methods:[ `GET; `POST; `PUT; `DELETE; `OPTIONS ] handler
+  in
+  Alcotest.(check int) "three routes" 3 (Router.route_count routes)
+;;
+
+let test_router_prefix_specificity () =
+  let generic_handler _req _reqd = () in
+  let asset_handler _req _reqd = () in
+  let routes =
+    Router.create ()
+    |> Server_route.prefix_get Server_route.Always_public "/dashboard/assets/" asset_handler
+    |> Server_route.prefix_get Server_route.Always_public "/dashboard/" generic_handler
+  in
+  let request = Httpun.Request.create `GET "/dashboard/assets/index.css" in
+  match Router.resolve routes request with
+  | `Matched route ->
+    Alcotest.(check string)
+      "longest prefix route should win"
+      "/dashboard/assets/"
+      route.path
+  | `Method_not_allowed ->
+    Alcotest.fail "expected a matched prefix route, got method_not_allowed"
+  | `Not_found -> Alcotest.fail "expected a matched prefix route, got not_found"
+;;
+
+let test_router_prefix_trie_preserves_specificity () =
+  let dashboard_handler _req _reqd = () in
+  let board_handler _req _reqd = () in
+  let sub_board_handler _req _reqd = () in
+  let routes =
+    Router.create ()
+    |> Server_route.prefix_get Server_route.Always_public "/dashboard/" dashboard_handler
+    |> Server_route.prefix_get Server_route.Always_public "/api/v1/board/" board_handler
+    |> Server_route.prefix_get Server_route.Always_public "/api/v1/board/sub-boards/" sub_board_handler
+  in
+  let request = Httpun.Request.create `GET "/api/v1/board/sub-boards/main" in
+  match Router.resolve routes request with
+  | `Matched route ->
+    Alcotest.(check string)
+      "longest prefix on the trie path should win"
+      "/api/v1/board/sub-boards/"
+      route.path
+  | `Method_not_allowed ->
+    Alcotest.fail "expected trie prefix match, got method_not_allowed"
+  | `Not_found -> Alcotest.fail "expected trie prefix match, got not_found"
+;;
+
+let test_router_prefix_trie_preserves_root_prefix () =
+  let root_handler _req _reqd = () in
+  let api_handler _req _reqd = () in
+  let routes =
+    Router.create ()
+    |> Server_route.prefix_get Server_route.Always_public "/" root_handler
+    |> Server_route.prefix_get Server_route.Always_public "/api/v1/" api_handler
+  in
+  let request = Httpun.Request.create `GET "/unknown/path" in
+  match Router.resolve routes request with
+  | `Matched route ->
+    Alcotest.(check string) "root prefix remains a fallback" "/" route.path
+  | `Method_not_allowed ->
+    Alcotest.fail "expected root prefix fallback, got method_not_allowed"
+  | `Not_found -> Alcotest.fail "expected root prefix fallback, got not_found"
+;;
+
+let test_router_indexed_prefix_fallback_after_exact_method_miss () =
+  let exact_handler _req _reqd = () in
+  let prefix_handler _req _reqd = () in
+  let routes =
+    Router.create ()
+    |> Server_route.get Server_route.Always_public "/api/v1/items/42" exact_handler
+    |> Server_route.prefix_post Server_route.Always_public "/api/v1/items/" prefix_handler
+  in
+  let request = Httpun.Request.create `POST "/api/v1/items/42" in
+  match Router.resolve routes request with
+  | `Matched route ->
+    Alcotest.(check string)
+      "indexed router preserves prefix fallback"
+      "/api/v1/items/"
+      route.path
+  | `Method_not_allowed ->
+    Alcotest.fail "expected prefix fallback, got method_not_allowed"
+  | `Not_found -> Alcotest.fail "expected prefix fallback, got not_found"
+;;
+
+let test_router_method_index_preserves_exact_405 () =
+  let handler _req _reqd = () in
+  let routes = Router.create () |> Server_route.get Server_route.Always_public "/api/v1/exact-only" handler in
+  let request = Httpun.Request.create `POST "/api/v1/exact-only" in
+  match Router.resolve routes request with
+  | `Method_not_allowed -> ()
+  | `Matched route ->
+    Alcotest.failf "expected method_not_allowed, got matched route %s" route.path
+  | `Not_found -> Alcotest.fail "expected method_not_allowed, got not_found"
+;;
+
+let test_frontend_transport_routes_present () =
+  let routes =
+    Server_routes_http_routes_frontend.add_routes
+      ~port:8935
+      (Router.create ())
+  in
+  let has_route meth path =
+    List.exists
+      (fun (route : Router.route) ->
+         String.equal route.path path && List.mem meth route.methods)
+      (Router.routes routes)
+  in
+  Alcotest.(check bool) "GET /ws route" true (has_route `GET "/ws");
+  List.iter
+    (fun meth ->
+       Alcotest.(check bool)
+         "operator MCP route"
+         true
+         (has_route meth "/mcp/operator"))
+    [ `GET; `POST; `DELETE ];
+  (* RFC-0281: /ws must be a typed WebSocket-upgrade route ([Router.Ws]),
+     not a plain route.  Only a Ws route receives the Gluten [upgrade]
+     capability and thus actually drives the post-101 connection.  A
+     regression to [Router.Plain] (or to a main_eio special-case that
+     bypasses the router) silently reintroduces the undriven-socket
+     flicker bug — this assertion guards the consolidation. *)
+  (match Router.resolve routes (Httpun.Request.create `GET "/ws") with
+   | `Matched route ->
+     (match route.handler with
+      | Router.Ws _ -> ()
+      | Router.Plain _ -> Alcotest.fail "/ws must be a Router.Ws route, not Plain")
+   | `Method_not_allowed | `Not_found -> Alcotest.fail "/ws route must resolve");
+  Alcotest.(check bool)
+    "GET /api/v1/voice/config route"
+    true
+    (has_route `GET "/api/v1/voice/config")
+;;
+
+(* RFC-0281: typed WebSocket-upgrade routes.  [ws_get] registers a
+   [Router.Ws] route (carrying the Gluten upgrade capability); [get]
+   registers a [Router.Plain] route.  The variant is what lets
+   [Router.dispatch] thread [upgrade] to WS routes and reject WS routes
+   on non-upgrade transports with 426. *)
+let test_router_ws_get_registers_ws_route () =
+  let handler ~upgrade:_ _req _reqd = () in
+  let routes = Router.create () |> Server_route.ws_get "/ws" handler in
+  match Router.resolve routes (Httpun.Request.create `GET "/ws") with
+  | `Matched route ->
+    (match route.handler with
+     | Router.Ws _ -> ()
+     | Router.Plain _ -> Alcotest.fail "ws_get must register a Router.Ws route")
+  | `Method_not_allowed | `Not_found -> Alcotest.fail "ws_get route must resolve"
+;;
+
+let test_router_get_registers_plain_route () =
+  let handler _req _reqd = () in
+  let routes = Router.create () |> Server_route.get Server_route.Always_public "/plain" handler in
+  match Router.resolve routes (Httpun.Request.create `GET "/plain") with
+  | `Matched route ->
+    (match route.handler with
+     | Router.Plain _ -> ()
+     | Router.Ws _ -> Alcotest.fail "get must register a Router.Plain route")
+  | `Method_not_allowed | `Not_found -> Alcotest.fail "get route must resolve"
+;;
+
+let with_env name value_opt f =
+  let original = Sys.getenv_opt name in
+  let restore () =
+    match original with
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+       (match value_opt with
+        | Some value -> Unix.putenv name value
+        | None -> Unix.putenv name "");
+       f ())
+;;
+
+let with_ws_same_origin_ready ready f =
+  Masc.Transport_metrics.set_ws_same_origin_runtime_ready ready;
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Transport_metrics.set_ws_same_origin_runtime_ready false)
+    f
+;;
+
+let test_frontend_websocket_upgrade_waits_for_dispatcher () =
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+    with_ws_same_origin_ready false (fun () ->
+      Alcotest.(check (option string))
+        "dispatcher-not-ready upgrades are rejected"
+        (Some "WebSocket transport not ready")
+        (Server_routes_http_routes_frontend.websocket_upgrade_unavailable_reason ())))
+;;
+
+let test_frontend_websocket_upgrade_allows_ready_dispatcher () =
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+    with_ws_same_origin_ready true (fun () ->
+      Alcotest.(check (option string))
+        "ready dispatcher admits upgrades"
+        None
+        (Server_routes_http_routes_frontend.websocket_upgrade_unavailable_reason ())))
+;;
+
+let test_voice_routes_present () =
+  let routes = Server_routes_http_routes_voice.add_routes (Router.create ()) in
+  let has_route meth path =
+    List.exists
+      (fun (route : Router.route) ->
+         String.equal route.path path && List.mem meth route.methods)
+      (Router.routes routes)
+  in
+  Alcotest.(check bool)
+    "GET /api/v1/voice/audio/ capability route"
+    true
+    (has_route `GET "/api/v1/voice/audio/");
+  Alcotest.(check bool)
+    "POST /api/v1/voice/transcribe route"
+    true
+    (has_route `POST "/api/v1/voice/transcribe");
+  (* The probes are how a dashboard or a wizard asks which endpoints answer.
+     A chain that serves from the first endpoint that works reports nothing
+     about the ones behind it, so these ask all of them -- and a route that is
+     written but never registered answers 404 with no sign anything is
+     missing. *)
+  Alcotest.(check bool)
+    "POST /api/v1/voice/probe/tts route"
+    true
+    (has_route `POST "/api/v1/voice/probe/tts");
+  Alcotest.(check bool)
+    "POST /api/v1/voice/probe/stt route"
+    true
+    (has_route `POST "/api/v1/voice/probe/stt");
+  (* A voice id is provider vocabulary, and say does not fail on one it does
+     not have. The catalogue is how a surface offers real ids instead of
+     asking someone to type one. *)
+  Alcotest.(check bool)
+    "POST /api/v1/voice/voices route"
+    true
+    (has_route `POST "/api/v1/voice/voices")
+;;
+
+(* A browser's <audio> element cannot put a bearer token in its request
+   headers, so the unguessable filename token is the capability. That only
+   works while the route registered above is one [Server_auth] answers without
+   one. The two used to spell the prefix independently in different files.
+
+   Spelled as a literal here on purpose. Together with the route assertion
+   above it makes two independent witnesses that the wire path is the one the
+   browser asks for; reading it from the shared constant would let a rename
+   move both and prove nothing. *)
+let test_the_voice_clip_route_needs_no_bearer_token () =
+  Alcotest.(check bool)
+    "the clip route is on the public-read list"
+    true
+    (Server_auth.is_public_read_path "/api/v1/voice/audio/abc123");
+  Alcotest.(check bool)
+    "a sibling voice route still needs a token"
+    false
+    (Server_auth.is_public_read_path "/api/v1/voice/config")
+;;
+
+let test_frontend_canonical_loopback_location_localhost () =
+  let headers = Httpun.Headers.of_list [ "host", "localhost:8935" ] in
+  let request = Httpun.Request.create ~headers `GET "/dashboard?agent=codex" in
+  let location =
+    Server_routes_http_routes_frontend.canonical_loopback_location
+      ~default_port:8935
+      ~request_authority:(request_authority_exn request)
+      request
+  in
+  Alcotest.(check (option string))
+    "localhost redirects to canonical loopback"
+    (Some "http://127.0.0.1:8935/dashboard?agent=codex")
+    location
+;;
+
+let test_frontend_canonical_loopback_location_ipv6 () =
+  let headers = Httpun.Headers.of_list [ "host", "[::1]:8935" ] in
+  let request = Httpun.Request.create ~headers `GET "/dashboard" in
+  let location =
+    Server_routes_http_routes_frontend.canonical_loopback_location
+      ~default_port:8935
+      ~request_authority:(request_authority_exn request)
+      request
+  in
+  Alcotest.(check (option string))
+    "::1 redirects to canonical loopback"
+    (Some "http://127.0.0.1:8935/dashboard")
+    location
+;;
+
+let test_frontend_canonical_loopback_location_canonical_host () =
+  let headers = Httpun.Headers.of_list [ "host", "127.0.0.1:8935" ] in
+  let request = Httpun.Request.create ~headers `GET "/dashboard" in
+  let location =
+    Server_routes_http_routes_frontend.canonical_loopback_location
+      ~default_port:8935
+      ~request_authority:(request_authority_exn request)
+      request
+  in
+  Alcotest.(check (option string))
+    "canonical loopback host does not redirect"
+    None
+    location
+;;
+
+let test_frontend_canonical_root_dashboard_location_localhost () =
+  let headers = Httpun.Headers.of_list [ "host", "localhost:8935" ] in
+  let request = Httpun.Request.create ~headers `GET "/" in
+  let location =
+    Server_routes_http_routes_frontend.canonical_root_dashboard_location
+      ~default_port:8935
+      ~request_authority:(request_authority_exn request)
+  in
+  Alcotest.(check (option string))
+    "localhost root redirects directly to dashboard"
+    (Some "http://127.0.0.1:8935/dashboard")
+    location
+;;
+
+(* ===== Unit Tests for Config ===== *)
+
+let test_default_config () =
+  Alcotest.(check int) "default port" 8935 default_config.port;
+  Alcotest.(check string) "default host" "127.0.0.1" default_config.host;
+  Alcotest.(check int) "default max_connections" 512 default_config.max_connections
+;;
+
+let test_custom_config () =
+  let config =
+    { port = 9000; host = "0.0.0.0"; max_connections = 64; listen_backlog = 32 }
+  in
+  Alcotest.(check int) "custom port" 9000 config.port;
+  Alcotest.(check string) "custom host" "0.0.0.0" config.host
+;;
+
+(* ===== Unit Tests for Request helpers ===== *)
+
+let test_request_path_simple () =
+  let request = Httpun.Request.create `GET "/health" in
+  Alcotest.(check string) "simple path" "/health" (Request.path request)
+;;
+
+let test_request_path_with_query () =
+  let request = Httpun.Request.create `GET "/api?key=value" in
+  Alcotest.(check string) "path without query" "/api" (Request.path request)
+;;
+
+let test_request_method () =
+  let get_req = Httpun.Request.create `GET "/" in
+  let post_req = Httpun.Request.create `POST "/" in
+  Alcotest.(check bool) "GET method" true (Request.method_ get_req = `GET);
+  Alcotest.(check bool) "POST method" true (Request.method_ post_req = `POST)
+;;
+
+let test_request_header () =
+  let headers = Httpun.Headers.of_list [ "content-type", "application/json" ] in
+  let request = Httpun.Request.create ~headers `GET "/" in
+  Alcotest.(check (option string))
+    "header found"
+    (Some "application/json")
+    (Request.header request "content-type");
+  Alcotest.(check (option string))
+    "header not found"
+    None
+    (Request.header request "x-custom")
+;;
+
+let test_response_content_headers_preserve_all_segments () =
+  let headers =
+    Response.content_headers
+      ~before_headers:[ "vary", "accept-encoding" ]
+      ~after_headers:[ "etag", "\"abc\"" ]
+      ~tail_headers:[ "content-encoding", "zstd" ]
+      ~content_type:Response.json_content_type
+      "{}"
+  in
+  Alcotest.(check (list (pair string string)))
+    "header order"
+    [ "vary", "accept-encoding"
+    ; "content-type", Response.json_content_type
+    ; "content-length", "2"
+    ; "etag", "\"abc\""
+    ; "content-encoding", "zstd"
+    ]
+    (Httpun.Headers.to_list headers);
+  Alcotest.(check (option string))
+    "before header"
+    (Some "accept-encoding")
+    (Httpun.Headers.get headers "vary");
+  Alcotest.(check (option string))
+    "content-type"
+    (Some Response.json_content_type)
+    (Httpun.Headers.get headers "content-type");
+  Alcotest.(check (option string))
+    "content-length"
+    (Some "2")
+    (Httpun.Headers.get headers "content-length");
+  Alcotest.(check (option string))
+    "after header"
+    (Some "\"abc\"")
+    (Httpun.Headers.get headers "etag");
+  Alcotest.(check (option string))
+    "tail header"
+    (Some "zstd")
+    (Httpun.Headers.get headers "content-encoding")
+;;
+
+(* ===== Test Suites ===== *)
+
+let router_tests =
+  [ "empty router", `Quick, test_router_empty
+  ; "add GET route", `Quick, test_router_add_get
+  ; "add POST route", `Quick, test_router_add_post
+  ; "add multiple routes", `Quick, test_router_add_multiple
+  ; "prefix specificity", `Quick, test_router_prefix_specificity
+  ; ( "prefix trie preserves specificity"
+    , `Quick
+    , test_router_prefix_trie_preserves_specificity )
+  ; ( "prefix trie preserves root prefix"
+    , `Quick
+    , test_router_prefix_trie_preserves_root_prefix )
+  ; ( "indexed prefix fallback after exact method miss"
+    , `Quick
+    , test_router_indexed_prefix_fallback_after_exact_method_miss )
+  ; ( "method index preserves exact 405"
+    , `Quick
+    , test_router_method_index_preserves_exact_405 )
+  ; "frontend transport routes present", `Quick, test_frontend_transport_routes_present
+  ; "ws_get registers a Ws route", `Quick, test_router_ws_get_registers_ws_route
+  ; "get registers a Plain route", `Quick, test_router_get_registers_plain_route
+  ; ( "frontend websocket upgrade waits for dispatcher"
+    , `Quick
+    , test_frontend_websocket_upgrade_waits_for_dispatcher )
+  ; ( "frontend websocket upgrade allows ready dispatcher"
+    , `Quick
+    , test_frontend_websocket_upgrade_allows_ready_dispatcher )
+  ; "voice routes present", `Quick, test_voice_routes_present
+  ; ( "the voice clip route needs no bearer token"
+    , `Quick
+    , test_the_voice_clip_route_needs_no_bearer_token )
+  ; ( "frontend canonical localhost redirect"
+    , `Quick
+    , test_frontend_canonical_loopback_location_localhost )
+  ; ( "frontend canonical ipv6 redirect"
+    , `Quick
+    , test_frontend_canonical_loopback_location_ipv6 )
+  ; ( "frontend canonical host stays put"
+    , `Quick
+    , test_frontend_canonical_loopback_location_canonical_host )
+  ; ( "frontend canonical root goes direct to dashboard"
+    , `Quick
+    , test_frontend_canonical_root_dashboard_location_localhost )
+  ]
+;;
+
+let config_tests =
+  [ "default config", `Quick, test_default_config
+  ; "custom config", `Quick, test_custom_config
+  ]
+;;
+
+let request_tests =
+  [ "path simple", `Quick, test_request_path_simple
+  ; "path with query", `Quick, test_request_path_with_query
+  ; "method", `Quick, test_request_method
+  ; "header", `Quick, test_request_header
+  ]
+;;
+
+(* RFC 7230 §3.3.2: a 204 response with no payload should still carry
+   an explicit [Content-Length: 0] so keep-alive clients and proxies
+   know the body is empty. *)
+;;
+
+let test_response_empty_includes_content_length_zero () =
+  let reqd_ref = ref None in
+  let conn =
+    Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd)
+  in
+  let request = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n" in
+  let len = String.length request in
+  let bs = Bigstringaf.of_string request ~off:0 ~len in
+  ignore (Httpun.Server_connection.read conn bs ~off:0 ~len);
+  let reqd = Option.get !reqd_ref in
+  Response.empty reqd;
+  let response =
+    match Httpun.Server_connection.next_write_operation conn with
+    | `Write iovecs ->
+      String.concat
+        ""
+        (List.map
+           (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len)
+           iovecs)
+    | `Yield | `Close _ -> ""
+  in
+  Alcotest.(check bool)
+    "204 Response.empty includes Content-Length: 0"
+    true
+    (String_util.contains_substring response "content-length: 0")
+;;
+
+(* ===== JSON conditional-request rule ===== *)
+
+(* [Response.json] offers a validator so a polling client can be told "still
+   the same" instead of being sent the body again. Measured on the live
+   server, 11 of 12 polled dashboard routes return byte-identical bodies
+   across repeated polls, ~1.86 MB per full cycle.
+
+   The rule is exercised here rather than through a live server because what
+   can go wrong is the decision, not the socket write: tagging a response that
+   must not be reused, or answering 304 to a client that never claimed to hold
+   the body. *)
+
+let conditional_body = {|{"keepers":[],"generated_at":1.0}|}
+
+let tag_of body =
+  match
+    Response.json_conditional ~status:`OK ~meth:`GET ~if_none_match:None ~body
+  with
+  | Response.Tagged etag -> etag
+  | Response.Untagged -> Alcotest.fail "a 200 GET should carry a tag"
+  | Response.Not_modified _ ->
+    Alcotest.fail "no If-None-Match cannot be a match"
+
+let outcome_label = function
+  | Response.Untagged -> "untagged"
+  | Response.Tagged _ -> "tagged"
+  | Response.Not_modified _ -> "not_modified"
+
+let check_outcome name expected actual =
+  Alcotest.(check string) name expected (outcome_label actual)
+
+let test_json_conditional_matching_tag_is_not_modified () =
+  let etag = tag_of conditional_body in
+  check_outcome
+    "a client presenting the current tag is told nothing changed"
+    "not_modified"
+    (Response.json_conditional ~status:`OK ~meth:`GET
+       ~if_none_match:(Some etag) ~body:conditional_body)
+
+let test_json_conditional_stale_tag_sends_the_body () =
+  let stale = tag_of {|{"keepers":[],"generated_at":0.0}|} in
+  check_outcome
+    "a tag from an older body does not suppress the new one"
+    "tagged"
+    (Response.json_conditional ~status:`OK ~meth:`GET
+       ~if_none_match:(Some stale) ~body:conditional_body)
+
+(* If-None-Match compares weakly (RFC 9110 section 13.1.2): the W/ prefix on
+   either side does not decide a match, the opaque part does. *)
+let test_client_tag_matches_weakly () =
+  let matches ~etag client_tag = Response.client_tag_matches ~etag ~client_tag in
+  let yes name etag client_tag = Alcotest.(check bool) name true (matches ~etag client_tag) in
+  let no name etag client_tag = Alcotest.(check bool) name false (matches ~etag client_tag) in
+  yes "strong against strong" {|"a1"|} {|"a1"|};
+  yes "weak client against a strong tag" {|"a1"|} {|W/"a1"|};
+  yes "strong client against a weak tag" {|W/"a1"|} {|"a1"|};
+  yes "weak against weak" {|W/"a1"|} {|W/"a1"|};
+  yes "any tag" {|"a1"|} "*";
+  yes "in a list with spaces" {|"a1"|} {| W/"old" ,  W/"a1" |};
+  no "another tag" {|"a1"|} {|"a2"|};
+  no "another weak tag" {|"a1"|} {|W/"a2"|};
+  no "the opaque part is compared whole" {|"a1"|} {|"a"|}
+
+let test_json_conditional_absent_header_sends_the_body () =
+  check_outcome
+    "a client that claims no copy always receives the body"
+    "tagged"
+    (Response.json_conditional ~status:`OK ~meth:`GET ~if_none_match:None
+       ~body:conditional_body)
+
+(* A tag on an error would invite a client to revalidate it and be told the
+   failure is unchanged, so failures carry none — even if the client happens
+   to present a matching tag. *)
+let test_json_conditional_error_status_carries_no_tag () =
+  let etag = tag_of conditional_body in
+  List.iter
+    (fun status ->
+      check_outcome
+        "an unsuccessful response carries no validator"
+        "untagged"
+        (Response.json_conditional ~status ~meth:`GET
+           ~if_none_match:(Some etag) ~body:conditional_body))
+    [ `Bad_request; `Not_found; `Internal_server_error; `Accepted ]
+
+(* Mutations answer with the result of the mutation. Tagging one would let a
+   client be told its stale copy still stands after it changed something. *)
+let test_json_conditional_unsafe_method_carries_no_tag () =
+  let etag = tag_of conditional_body in
+  List.iter
+    (fun meth ->
+      check_outcome
+        "an unsafe method carries no validator"
+        "untagged"
+        (Response.json_conditional ~status:`OK ~meth
+           ~if_none_match:(Some etag) ~body:conditional_body))
+    [ `POST; `PUT; `DELETE ]
+
+let test_json_conditional_tag_is_weak_and_body_derived () =
+  let etag = tag_of conditional_body in
+  Alcotest.(check bool)
+    "the tag is weak, because one payload goes out under several encodings"
+    true
+    (String.starts_with ~prefix:"W/\"" etag);
+  Alcotest.(check bool)
+    "a different body produces a different tag"
+    false
+    (String.equal etag (tag_of {|{"keepers":[],"generated_at":2.0}|}));
+  Alcotest.(check string)
+    "the same body produces the same tag"
+    etag
+    (tag_of conditional_body)
+
+(* [json_conditional] is a pure function, which is what lets the cases above
+   cover every combination of method, status, and If-None-Match. It also means
+   none of them touches a response, so the step that turns a [Tagged] decision
+   into bytes stayed unverified: whether the validator headers reach the client
+   at all, and whether a matching tag produces a bodiless 304.
+
+   A client cannot revalidate on a decision it never sees, so that step is
+   exercised here against a real [Server_connection] rather than inferred from
+   the branch that builds it. *)
+
+let with_http_worker_pool env sw f =
+  let previous = Domain_pool_ref.get () in
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Eio.Switch.on_release sw (fun () ->
+    match previous with
+    | None -> Domain_pool_ref.clear_for_tests ()
+    | Some pool -> Domain_pool_ref.set pool);
+  Domain_pool_ref.set pool;
+  Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool pool) f
+;;
+
+let serve_json_over_wire ?(worker_pool = false) ?if_none_match ?(headers = []) ?(respond = fun ~request body reqd -> Response.json ~request body reqd) body =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    let run () =
+      let response_buf = Buffer.create 1024 in
+      let conn =
+        Httpun.Server_connection.create (fun reqd ->
+          respond ~request:(Httpun.Reqd.request reqd) body reqd)
+      in
+      let headers =
+        let base = ("host", "127.0.0.1") :: headers in
+        match if_none_match with
+        | None -> base
+        | Some tag -> ("if-none-match", tag) :: base
+      in
+      let request =
+        Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/probe"
+      in
+      let request_head =
+        Printf.sprintf
+          "%s %s HTTP/1.1\r\n%s"
+          (Httpun.Method.to_string request.Httpun.Request.meth)
+          request.Httpun.Request.target
+          (Httpun.Headers.to_string request.Httpun.Request.headers)
+      in
+      let bytes =
+        Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
+      in
+      let rec feed off =
+        let remaining = Bigstringaf.length bytes - off in
+        if remaining > 0
+        then (
+          let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+          if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+          feed (off + consumed))
+      in
+      feed 0;
+      let rec flush () =
+        match Httpun.Server_connection.next_write_operation conn with
+        | `Write iovecs ->
+          List.iter
+            (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+               Buffer.add_string
+                 response_buf
+                 (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+            iovecs;
+          let written =
+            List.fold_left
+              (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+              0
+              iovecs
+          in
+          Httpun.Server_connection.report_write_result conn (`Ok written);
+          flush ()
+        | `Yield | `Close _ -> ()
+      in
+      flush ();
+      Buffer.contents response_buf
+    in
+    if worker_pool then with_http_worker_pool env sw run else run ()))
+;;
+
+let response_header response name =
+  let field = String.lowercase_ascii name ^ ":" in
+  String.split_on_char '\n' response
+  |> List.filter_map (fun line ->
+       let line = String.trim line in
+       if String.starts_with ~prefix:field (String.lowercase_ascii line)
+       then
+         Some
+           (String.trim
+              (String.sub
+                 line
+                 (String.length field)
+                 (String.length line - String.length field)))
+       else None)
+  |> function
+  | value :: _ -> Some value
+  | [] -> None
+;;
+
+let response_status_line response =
+  match String.index_opt response '\r' with
+  | Some idx -> String.sub response 0 idx
+  | None -> response
+;;
+
+let test_json_response_puts_the_validator_on_the_wire () =
+  let response = serve_json_over_wire conditional_body in
+  Alcotest.(check string)
+    "a plain read is answered in full"
+    "HTTP/1.1 200 OK"
+    (response_status_line response);
+  Alcotest.(check (option string))
+    "the client receives the tag it must present to revalidate"
+    (Some (tag_of conditional_body))
+    (response_header response "etag");
+  Alcotest.(check (option string))
+    "and is told to revalidate rather than invent a freshness window"
+    (Some "no-cache")
+    (response_header response "cache-control")
+;;
+
+let test_json_response_matching_tag_sends_no_body () =
+  let response =
+    serve_json_over_wire ~if_none_match:(tag_of conditional_body) conditional_body
+  in
+  Alcotest.(check string)
+    "a client holding the current body is told so"
+    "HTTP/1.1 304 Not Modified"
+    (response_status_line response);
+  Alcotest.(check (option string))
+    "304 omits the selected representation length"
+    None
+    (response_header response "content-length");
+  Alcotest.(check bool)
+    "and the body itself never reaches the socket"
+    false
+    (List.exists
+       (fun line -> String.equal (String.trim line) conditional_body)
+       (String.split_on_char '\n' response))
+;;
+
+let test_json_lazy_matching_tag_skips_body_evaluation () =
+  Eio_main.run (fun _env ->
+    let response_buf = Buffer.create 1024 in
+    let body_called = ref false in
+    let test_body = "{\"lazy\":\"evaluated\"}" in
+    let etag = Response.weak_etag_value test_body in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Response.json_lazy
+          ~request:(Httpun.Reqd.request reqd)
+          ~etag
+          (fun () -> body_called := true; test_body)
+          reqd)
+    in
+    let headers = [ ("host", "127.0.0.1"); ("if-none-match", etag) ] in
+    let request =
+      Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/lazy-probe"
+    in
+    let request_head =
+      Printf.sprintf
+        "%s %s HTTP/1.1\r\n%s"
+        (Httpun.Method.to_string request.Httpun.Request.meth)
+        request.Httpun.Request.target
+        (Httpun.Headers.to_string request.Httpun.Request.headers)
+    in
+    let bytes =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
+    in
+    let rec feed off =
+      let remaining = Bigstringaf.length bytes - off in
+      if remaining > 0
+      then (
+        let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+        if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+        feed (off + consumed))
+    in
+    feed 0;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        List.iter
+          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string
+               response_buf
+               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+          iovecs;
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    let response = Buffer.contents response_buf in
+    Alcotest.(check string)
+      "status is 304 Not Modified"
+      "HTTP/1.1 304 Not Modified"
+      (response_status_line response);
+    Alcotest.(check bool)
+      "lazy body generator closure was NEVER called"
+      false
+      !body_called;
+    Alcotest.(check (option string))
+      "etag matches in 304 response"
+      (Some etag)
+      (response_header response "etag"))
+;;
+
+let test_json_lazy_unmatched_tag_evaluates_body () =
+  Eio_main.run (fun _env ->
+    let response_buf = Buffer.create 1024 in
+    let body_called = ref false in
+    let test_body = "{\"lazy\":\"evaluated\"}" in
+    let etag = Response.weak_etag_value test_body in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Response.json_lazy
+          ~request:(Httpun.Reqd.request reqd)
+          ~etag
+          (fun () -> body_called := true; test_body)
+          reqd)
+    in
+    let headers = [ ("host", "127.0.0.1"); ("if-none-match", "W/\"mismatched\"") ] in
+    let request =
+      Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/lazy-probe"
+    in
+    let request_head =
+      Printf.sprintf
+        "%s %s HTTP/1.1\r\n%s"
+        (Httpun.Method.to_string request.Httpun.Request.meth)
+        request.Httpun.Request.target
+        (Httpun.Headers.to_string request.Httpun.Request.headers)
+    in
+    let bytes =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
+    in
+    let rec feed off =
+      let remaining = Bigstringaf.length bytes - off in
+      if remaining > 0
+      then (
+        let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+        if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+        feed (off + consumed))
+    in
+    feed 0;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        List.iter
+          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string
+               response_buf
+               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+          iovecs;
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    let response = Buffer.contents response_buf in
+    Alcotest.(check string)
+      "status is 200 OK"
+      "HTTP/1.1 200 OK"
+      (response_status_line response);
+    Alcotest.(check bool)
+      "lazy body generator closure was called on miss"
+      true
+      !body_called;
+    Alcotest.(check (option string))
+      "etag is returned"
+      (Some etag)
+      (response_header response "etag"))
+;;
+
+let test_json_lazy_preserves_extra_headers_and_matches_wildcard () =
+  Eio_main.run (fun _env ->
+    let response_buf = Buffer.create 1024 in
+    let body_called = ref false in
+    let test_body = "{\"lazy\":\"evaluated\"}" in
+    let etag = Response.weak_etag_value test_body in
+    let extra_headers = [ ("access-control-allow-origin", "*"); ("x-custom", "preserved") ] in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Response.json_lazy
+          ~extra_headers
+          ~request:(Httpun.Reqd.request reqd)
+          ~etag
+          (fun () -> body_called := true; test_body)
+          reqd)
+    in
+    let headers = [ ("host", "127.0.0.1"); ("if-none-match", Printf.sprintf "W/\"old\", %s, W/\"other\"" etag) ] in
+    let request =
+      Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/lazy-probe"
+    in
+    let request_head =
+      Printf.sprintf
+        "%s %s HTTP/1.1\r\n%s"
+        (Httpun.Method.to_string request.Httpun.Request.meth)
+        request.Httpun.Request.target
+        (Httpun.Headers.to_string request.Httpun.Request.headers)
+    in
+    let bytes =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
+    in
+    let rec feed off =
+      let remaining = Bigstringaf.length bytes - off in
+      if remaining > 0
+      then (
+        let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+        if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+        feed (off + consumed))
+    in
+    feed 0;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        List.iter
+          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string
+               response_buf
+               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+          iovecs;
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    let response = Buffer.contents response_buf in
+    Alcotest.(check string)
+      "status is 304 Not Modified"
+      "HTTP/1.1 304 Not Modified"
+      (response_status_line response);
+    Alcotest.(check bool)
+      "lazy body generator closure was NEVER called"
+      false
+      !body_called;
+    Alcotest.(check (option string))
+      "access-control-allow-origin header preserved on 304"
+      (Some "*")
+      (response_header response "access-control-allow-origin");
+    Alcotest.(check (option string))
+      "x-custom header preserved on 304"
+      (Some "preserved")
+      (response_header response "x-custom"))
+;;
+
+let test_json_worker_yields_to_caller ~queued respond () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    with_http_worker_pool env sw (fun () ->
+      let occupied, occupied_u = Eio.Promise.create () in
+      let release, release_u = Eio.Promise.create () in
+      let blocker_done, blocker_done_u = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+          Eio.Promise.resolve occupied_u ();
+          Eio.Promise.await release);
+        Eio.Promise.resolve blocker_done_u ());
+      let release_blocker () =
+        if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u () in
+      Eio.Switch.on_release sw release_blocker;
+      begin
+      Eio.Promise.await occupied;
+      let reqd_ref = ref None in
+      let conn = Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd) in
+      let head = "GET / HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: gzip\r\n\r\n" in
+      let bytes = Bigstringaf.of_string head ~off:0 ~len:(String.length head) in
+      let consumed = Httpun.Server_connection.read conn bytes ~off:0 ~len:(String.length head) in
+      Alcotest.(check int) "request accepted" (String.length head) consumed;
+      let reqd = Option.get !reqd_ref in
+      let started, started_u = Eio.Promise.create () in
+      let completed, completed_u = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve started_u ();
+        respond reqd;
+        Eio.Promise.resolve completed_u ());
+      Eio.Promise.await started;
+      Eio.Fiber.yield ();
+      Alcotest.(check bool) "only codec work waits for the occupied worker" (not queued)
+        (Eio.Promise.is_resolved completed);
+      Eio.Promise.resolve release_u ();
+      Eio.Promise.await completed;
+      Eio.Promise.await blocker_done;
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write _ -> ()
+      | `Yield | `Close _ -> Alcotest.fail "worker response was not written"
+      end)))
+;;
+
+let test_json_worker_cancelled_before_write respond () =
+  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+    with_http_worker_pool env sw (fun () ->
+      let occupied, occupied_u = Eio.Promise.create () in
+      let release, release_u = Eio.Promise.create () in
+      let blocker_done, blocker_done_u = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+          Eio.Promise.resolve occupied_u ();
+          Eio.Promise.await release);
+        Eio.Promise.resolve blocker_done_u ());
+      let release_blocker () =
+        if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve release_u () in
+      Eio.Switch.on_release sw release_blocker;
+      begin
+        Eio.Promise.await occupied;
+        let reqd_ref = ref None in
+        let conn = Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd) in
+        let head = "GET / HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: gzip\r\n\r\n" in
+        let bytes = Bigstringaf.of_string head ~off:0 ~len:(String.length head) in
+        let consumed = Httpun.Server_connection.read conn bytes ~off:0 ~len:(String.length head) in
+        Alcotest.(check int) "request accepted" (String.length head) consumed;
+        let reqd = Option.get !reqd_ref in
+        let context, context_u = Eio.Promise.create () in
+        let outcome, outcome_u = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          let cancelled =
+            try
+              Eio.Cancel.sub (fun cancellation ->
+                Eio.Promise.resolve context_u cancellation;
+                respond reqd);
+              false
+            with Eio.Cancel.Cancelled _ -> true
+          in
+          Eio.Promise.resolve outcome_u cancelled);
+        let cancellation = Eio.Promise.await context in
+        Eio.Fiber.yield ();
+        Alcotest.(check bool) "response is queued behind occupied worker" false
+          (Eio.Promise.is_resolved outcome);
+        Eio.Cancel.cancel cancellation Exit;
+        Alcotest.(check bool) "queued response propagates cancellation" true
+          (Eio.Promise.await outcome);
+        let check_no_write () =
+          match Httpun.Server_connection.next_write_operation conn with
+          | `Write _ -> Alcotest.fail "cancelled response wrote HTTP bytes"
+          | `Yield | `Close _ -> () in
+        check_no_write ();
+        release_blocker ();
+        Eio.Promise.await blocker_done;
+        (* Pass a worker barrier before checking that cancellation did not
+           defer a response write until the occupied executor was released. *)
+        Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () -> ());
+        Eio.Fiber.yield ();
+        check_no_write ()
+      end)))
+;;
+
+let worker_json_body = Yojson.Safe.to_string
+  (`Assoc ["data", `String (String.make 20000 'x' ^ " 끝단")])
+
+let worker_json_responders =
+  [ "value", (fun reqd ->
+      Response.json_value_on_cpu (Yojson.Safe.from_string worker_json_body) reqd)
+  ; "string", (fun reqd -> Response.json worker_json_body reqd)
+  ; "lazy", (fun reqd ->
+      let owner = Domain.self () in
+      Response.json_lazy ~etag:(Response.weak_etag_value worker_json_body)
+        (fun () ->
+          Alcotest.(check bool) "lazy body stays on owner domain" true
+            (owner = Domain.self ());
+          worker_json_body) reqd)
+  ; "HTML", (fun reqd ->
+      Response.html_cached ~etag:"snapshot"
+        ~request:(Httpun.Reqd.request reqd) worker_json_body reqd)
+  ]
+
+let test_json_worker_wire_parity () =
+  let responders =
+    [ (fun ~request body reqd -> Response.json ~request body reqd)
+    ; (fun ~request body reqd ->
+        Response.json_lazy ~request ~etag:(Response.weak_etag_value body)
+          (fun () -> body) reqd)
+    ; (fun ~request body reqd ->
+        Response.json_value_on_cpu ~request (Yojson.Safe.from_string body) reqd)
+    ] in
+  List.iter (fun respond ->
+    List.iter (fun encoding ->
+      let headers = ["accept-encoding", encoding; "origin", "http://localhost"] in
+      let body = worker_json_body in
+      let direct = serve_json_over_wire ~headers body in
+      let worker = serve_json_over_wire ~worker_pool:true ~headers ~respond body in
+      Alcotest.(check string) (encoding ^ " complete wire response") direct worker;
+      let etag = Response.weak_etag_value body in
+      Alcotest.(check string) (encoding ^ " conditional response")
+        (serve_json_over_wire ~headers ~if_none_match:etag body)
+        (serve_json_over_wire ~worker_pool:true ~headers ~if_none_match:etag ~respond body))
+      ["identity"; "gzip"; "zstd"];
+    let changed = {|{"auth":"viewer","served_at":"next"}|} in
+    Alcotest.(check bool) "new request is not a cached operator response" false
+      (String.equal (serve_json_over_wire ~worker_pool:true ~respond worker_json_body)
+         (serve_json_over_wire ~worker_pool:true ~respond changed))) responders
+;;
+
+let test_workspace_read_receipt_reaches_json_and_conditional_wire () =
+  let header_name, header_value = Masc.Workspace.read_precondition_admission_header in
+  let responders =
+    [ (fun ~request body reqd -> Response.json ~request body reqd)
+    ; (fun ~request body reqd ->
+        Response.json_lazy ~request ~etag:(Response.weak_etag_value body)
+          (fun () -> body) reqd)
+    ; (fun ~request body reqd ->
+        Response.json_value_on_cpu ~request (Yojson.Safe.from_string body) reqd)
+    ] in
+  List.iter (fun respond ->
+    let attested ~request body reqd =
+      Response.with_scoped_headers [header_name,header_value]
+        (fun () -> respond ~request body reqd) in
+    let response = serve_json_over_wire ~worker_pool:true ~respond:attested worker_json_body in
+    Alcotest.(check (option string)) "the admitted request puts its receipt on the wire"
+      (Some header_value) (response_header response header_name);
+    let unchanged = serve_json_over_wire ~worker_pool:true ~respond:attested
+        ~if_none_match:(Response.weak_etag_value worker_json_body) worker_json_body in
+    Alcotest.(check string) "the conditional request remains a bodyless 304"
+      "HTTP/1.1 304 Not Modified" (response_status_line unchanged);
+    Alcotest.(check (option string)) "304 carries its own current admission receipt"
+      (Some header_value) (response_header unchanged header_name);
+    let unbound = serve_json_over_wire ~worker_pool:true ~respond
+        ~headers:[header_name,header_value] worker_json_body in
+    Alcotest.(check (option string)) "another request cannot inherit or forge the response receipt"
+      None (response_header unbound header_name)) responders
+;;
+
+let worker_bypass_responders =
+  [ "tiny body", (fun reqd -> Response.json "{}" reqd)
+  ; "compression disabled", (fun reqd -> Response.json ~compress:false worker_json_body reqd)
+  ; "identity client", (fun reqd ->
+      let request = Httpun.Request.create `GET "/" in
+      Response.json ~request worker_json_body reqd)
+  ; "matching JSON validator", (fun reqd ->
+      let etag = Response.weak_etag_value worker_json_body in
+      let headers = Httpun.Headers.of_list
+        ["accept-encoding", "gzip"; "if-none-match", etag] in
+      let request = Httpun.Request.create ~headers `GET "/" in
+      Response.json ~request worker_json_body reqd)
+  ; "matching lazy validator", (fun reqd ->
+      let etag = Response.weak_etag_value worker_json_body in
+      let headers = Httpun.Headers.of_list
+        ["accept-encoding", "gzip"; "if-none-match", etag] in
+      let request = Httpun.Request.create ~headers `GET "/" in
+      Response.json_lazy ~request ~etag
+        (fun () -> Alcotest.fail "matching lazy response evaluated body") reqd)
+  ]
+;;
+
+let response_tests =
+  List.concat_map (fun (name, respond) ->
+    [ name ^ " compression yields to caller", `Quick,
+        test_json_worker_yields_to_caller ~queued:true respond
+    ; name ^ " cancelled compression never writes", `Quick,
+        test_json_worker_cancelled_before_write respond
+    ]) worker_json_responders
+  @ List.map (fun (name, respond) ->
+      name ^ " bypasses occupied worker", `Quick,
+      test_json_worker_yields_to_caller ~queued:false respond) worker_bypass_responders
+  @ [ "workspace read receipt reaches JSON and conditional wire", `Quick,
+      test_workspace_read_receipt_reaches_json_and_conditional_wire
+  ; "worker JSON wire parity", `Quick, test_json_worker_wire_parity
+  ; ( "content_headers preserve all header segments"
+    , `Quick
+    , test_response_content_headers_preserve_all_segments )
+  ; ( "empty response includes Content-Length: 0"
+    , `Quick
+    , test_response_empty_includes_content_length_zero )
+  ; ( "matching If-None-Match is 304"
+    , `Quick
+    , test_json_conditional_matching_tag_is_not_modified )
+  ; ( "json_lazy matching If-None-Match skips body closure"
+    , `Quick
+    , test_json_lazy_matching_tag_skips_body_evaluation )
+  ; ( "json_lazy unmatched If-None-Match evaluates body closure"
+    , `Quick
+    , test_json_lazy_unmatched_tag_evaluates_body )
+  ; ( "json_lazy preserves extra headers and matches wildcard/list"
+    , `Quick
+    , test_json_lazy_preserves_extra_headers_and_matches_wildcard )
+  ; ( "stale If-None-Match sends the body"
+    , `Quick
+    , test_json_conditional_stale_tag_sends_the_body )
+  ; ( "absent If-None-Match sends the body"
+    , `Quick
+    , test_json_conditional_absent_header_sends_the_body )
+  ; ( "If-None-Match compares weakly"
+    , `Quick
+    , test_client_tag_matches_weakly )
+  ; ( "error statuses carry no validator"
+    , `Quick
+    , test_json_conditional_error_status_carries_no_tag )
+  ; ( "unsafe methods carry no validator"
+    , `Quick
+    , test_json_conditional_unsafe_method_carries_no_tag )
+  ; ( "the tag is weak and body-derived"
+    , `Quick
+    , test_json_conditional_tag_is_weak_and_body_derived )
+  ; ( "a JSON response puts the validator on the wire"
+    , `Quick
+    , test_json_response_puts_the_validator_on_the_wire )
+  ; ( "a matching tag sends no body"
+    , `Quick
+    , test_json_response_matching_tag_sends_no_body )
+  ]
+;;
+
+(* ===== Late_response classifier (#13059) ===== *)
+
+(* Behavioural regression for the cancellation-vs-late-write race.
+   Before #13059 a top-level handler [exception] arm caught
+   [Eio.Cancel.Cancelled] and converted it into a 500 — that 500
+   write itself would fail because the underlying writer was already
+   in "invalid state" / "closed", and the *secondary* failure shadowed
+   the original cancellation.  The fix re-raises [Cancelled] and
+   downgrades the two well-known late-response failure shapes to a
+   warning.  The classifier below is the SSOT for "what counts as a
+   recognised late-response failure" — these tests pin its truth
+   table so a future refactor cannot silently widen or narrow it. *)
+
+let test_late_response_classifies_invalid_state_failure () =
+  let exn =
+    Failure "httpun.Reqd.respond_with_string: invalid state, response already written"
+  in
+  match Late_response.classify_write_failure exn with
+  | Some msg ->
+    Alcotest.(check bool) "preserves the original message" true (String.length msg > 0);
+    Alcotest.(check bool)
+      "message is the failure payload"
+      true
+      (String.starts_with msg ~prefix:"httpun.Reqd.respond_with_string: invalid state")
+  | None -> Alcotest.fail "expected Some _ for httpun invalid state failure"
+;;
+
+let test_late_response_classifies_closed_writer_failure () =
+  match
+    Late_response.classify_write_failure (Failure "cannot write to closed writer")
+  with
+  | Some msg ->
+    Alcotest.(check string)
+      "stable closed-writer label"
+      "cannot write to closed writer"
+      msg
+  | None -> Alcotest.fail "expected Some _ for closed-writer failure"
+;;
+
+let test_late_response_does_not_classify_cancellation () =
+  (* Cancellation MUST NOT be classified as a late-response failure —
+     callers re-raise [Cancelled] before invoking the classifier so
+     that the cancellation propagates out of the request handler. *)
+  let cancelled = Eio.Cancel.Cancelled (Failure "test cancellation") in
+  Alcotest.(check (option string))
+    "Cancelled is not a late-response failure"
+    None
+    (Late_response.classify_write_failure cancelled)
+;;
+
+let test_late_response_ignores_unrelated_failures () =
+  let cases =
+    [ "Failure with unrelated message", Failure "boom"
+    ; "Failure with empty message", Failure ""
+    ; "Not_found", Not_found
+    ; "Division_by_zero", Division_by_zero
+    ; ( "Failure mentioning httpun without invalid state prefix"
+      , Failure "httpun.Reqd: nothing to do" )
+    ]
+  in
+  List.iter
+    (fun (label, exn) ->
+       Alcotest.(check (option string))
+         label
+         None
+         (Late_response.classify_write_failure exn))
+    cases
+;;
+
+(* [#28400] Timeout envelopes must travel out-of-band: a JSON value that the
+   registered dashboard recognizer identifies as a timeout envelope is
+   reclassified to 504 Gateway_timeout at the shared responder boundary,
+   instead of reaching the client as HTTP 200 data. *)
+let test_timeout_envelope_status_override () =
+  let envelope =
+    `Assoc
+      [ ("error", `String "computation_timeout")
+      ; ("message", `String "Dashboard Gate timed out after 30s")
+      ; ("key", `String "test-key")
+      ]
+  in
+  let data = `Assoc [ ("items", `List []) ] in
+  (* Save/restore the recognizer around the check so the test cannot leak
+     registration state into other suites. *)
+  let saved = !Response.timeout_envelope_recognizer in
+  (try
+     (* Unregistered: every value stays on its caller-supplied status. *)
+     Response.register_timeout_envelope_recognizer (fun _ -> false);
+     Alcotest.(check string)
+       "unregistered + envelope-like value keeps default"
+       "200"
+       (Httpun.Status.to_string
+          (Response.timeout_envelope_status_override envelope));
+     (* Registered: envelope values are reclassified, data values are not. *)
+     Response.register_timeout_envelope_recognizer Dashboard_cache.is_timeout_envelope;
+     Alcotest.(check string)
+       "registered recognizer reclassifies an envelope to 504"
+       "504"
+       (Httpun.Status.to_string
+          (Response.timeout_envelope_status_override envelope));
+     Alcotest.(check string)
+       "registered recognizer keeps ordinary data at 200"
+       "200"
+       (Httpun.Status.to_string
+          (Response.timeout_envelope_status_override data));
+     (* An explicit non-OK status always wins over reclassification: error
+        paths must not be silently rewritten. *)
+     Alcotest.(check string)
+       "explicit error status wins over the envelope override"
+       "400"
+       (Httpun.Status.to_string
+          (Response.timeout_envelope_status_override ~status:`Bad_request envelope));
+     Alcotest.(check string)
+       "explicit OK status still reclassifies an envelope"
+       "504"
+       (Httpun.Status.to_string
+          (Response.timeout_envelope_status_override ~status:`OK envelope))
+   with exn -> Response.timeout_envelope_recognizer := saved; raise exn);
+  Response.timeout_envelope_recognizer := saved
+;;
+
+let late_response_tests =
+  [ ( "invalid state failure -> Some msg"
+    , `Quick
+    , test_late_response_classifies_invalid_state_failure )
+  ; ( "closed writer failure -> Some 'cannot write to closed writer'"
+    , `Quick
+    , test_late_response_classifies_closed_writer_failure )
+  ; ( "Eio.Cancel.Cancelled -> None (caller re-raises)"
+    , `Quick
+    , test_late_response_does_not_classify_cancellation )
+  ; "unrelated exceptions -> None", `Quick, test_late_response_ignores_unrelated_failures
+  ]
+
+let timeout_envelope_tests =
+  [ ( "unregistered recognizer leaves responses untouched"
+    , `Quick
+    , test_timeout_envelope_status_override )
+  ]
+;;
+
+let () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio_guard.enable ();
+  Alcotest.run
+    "Http_server_eio"
+    [ "router", router_tests
+    ; "config", config_tests
+    ; "request", request_tests
+    ; "response", response_tests
+    ; "late_response", late_response_tests
+    ; "timeout_envelope", timeout_envelope_tests
+    ]
+;;

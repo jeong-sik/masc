@@ -1,0 +1,31 @@
+{
+  "is_derivative": true,
+  "source_head": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+  "test_source": {
+    "path": "test/test_tui_loading_notice.ml",
+    "sha256": "3802a9182c340ff62f039e8ef19c4c460184c63e8bd09116a0e3ee55191d07f9",
+    "bytes": 14368
+  },
+  "workflow": "Test",
+  "run_id": 40409087814,
+  "suite": "test_tui_loading_notice",
+  "pass": 8,
+  "fail": 0,
+  "skip": 0,
+  "artifact_id": 12692432822,
+  "artifact_zip_sha256": "1e5679636c51b481662f9f4de409afaf457de53758fbb93bdc77d47b2ad20c7f",
+  "relevant_schedule_case": "a read in flight / 0, schedule responses follow target and generation",
+  "rows": {
+    "53": "Production state-decision evidence: selected chat target vs roster, off-target completion/error rejected, correct target retains page.",
+    "56": "Production state-decision evidence: old generation cannot regress current page; refresh failure preserves last snapshot."
+  },
+  "other_cases": "Seven existing generic in-flight/wait timing decisions, not seven additional scheduled user scenarios.",
+  "not_proven": [
+    "actual PTY/key interaction",
+    "actual transport failure/interleaving",
+    "visible UI/paint",
+    "all audit rows52-57",
+    "full CI"
+  ],
+  "retained_next": "Select into next evidence child after actual PTY/file experiments; approved cece files remain unchanged."
+}

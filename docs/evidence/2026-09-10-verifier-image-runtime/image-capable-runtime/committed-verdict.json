@@ -1,0 +1,13 @@
+{
+  "type": "task_completion_verdict",
+  "from_status": "awaiting_verification",
+  "to_status": "done",
+  "ts": "2026-09-10T00:04:00Z",
+  "task_id": "task-001",
+  "authority_kind": "system_llm_agent",
+  "authority_actor": "verifier_exact",
+  "producer": "image-producer",
+  "verification_id": "vrf-f6d6abf55bf11a14f0c45026db305558",
+  "evaluator_runtime": "image_fixture.vision",
+  "verdict": "approved"
+}

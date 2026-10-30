@@ -1,0 +1,267 @@
+type declaration = {
+  id : string;
+  enabled : bool;
+  run_id : string;
+  manifest_path : string;
+  package : Lane_addon_types.package;
+  binding : Yojson.Safe.t;
+  revision : string;
+  source_revision : string;
+  source_path : string;
+}
+
+type issue = { source_path : string; id : string option; message : string }
+type snapshot = {
+  declarations : declaration list;
+  issues : issue list;
+  paths : string list;
+  complete : bool;
+}
+
+type failure = { issue : issue; unreadable : bool }
+open Result.Syntax
+
+let absolute_from ~directory path =
+  if Filename.is_relative path then Filename.concat directory path else path
+
+let absolute path = absolute_from ~directory:(Sys.getcwd ()) path
+
+let io_message = function
+  | Sys_error message -> message
+  | Unix.Unix_error (error, call, arg) ->
+      call ^ " " ^ arg ^ ": " ^ Unix.error_message error
+  | End_of_file -> "declaration changed while reading"
+  | exn -> raise exn
+
+let read_document path =
+  try
+    let fd = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC] 0 in
+    let channel = Unix.in_channel_of_descr fd in
+    Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
+      let before = Unix.fstat fd in
+      if before.Unix.st_kind <> Unix.S_REG then
+        Error "declaration must be a regular file"
+      else
+        let bytes = really_input_string channel before.Unix.st_size in
+        let after = Unix.fstat fd in
+        if before.Unix.st_size <> after.Unix.st_size
+           || before.Unix.st_mtime <> after.Unix.st_mtime
+           || before.Unix.st_ctime <> after.Unix.st_ctime
+        then Error "declaration changed while reading"
+        else Ok bytes)
+  with (Sys_error _ | Unix.Unix_error _ | End_of_file) as exn -> Error (io_message exn)
+
+let rec json_of_toml ~path : Otoml.t -> (Yojson.Safe.t, string) result = function
+  | Otoml.TomlString value -> Ok (`String value)
+  | Otoml.TomlInteger value -> Ok (`Int value)
+  | Otoml.TomlBoolean value -> Ok (`Bool value)
+  | Otoml.TomlFloat value when Float.is_finite value -> Ok (`Float value)
+  | Otoml.TomlFloat _ -> Error (path ^ ": non-finite numbers are not supported")
+  | Otoml.TomlArray values | Otoml.TomlTableArray values ->
+      let rec loop index acc = function
+        | [] -> Ok (`List (List.rev acc))
+        | value :: rest ->
+            let* value = json_of_toml ~path:(Printf.sprintf "%s[%d]" path index) value in
+            loop (index + 1) (value :: acc) rest
+      in
+      loop 0 [] values
+  | Otoml.TomlTable fields | Otoml.TomlInlineTable fields ->
+      let rec loop acc = function
+        | [] -> Ok (`Assoc (List.rev acc))
+        | (key, value) :: rest ->
+            let* value = json_of_toml ~path:(path ^ "." ^ key) value in
+            loop ((key, value) :: acc) rest
+      in
+      loop [] fields
+  | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
+  | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ ->
+      Error (path ^ ": TOML date/time values are unsupported; use an explicit string")
+
+let text fields key =
+  match List.assoc_opt key fields with
+  | Some (Otoml.TomlString value) when String.trim value <> "" -> Ok value
+  | Some (Otoml.TomlInteger _ | (Otoml.TomlFloat _ | (Otoml.TomlBoolean _ | (Otoml.TomlOffsetDateTime _ | (Otoml.TomlLocalDateTime _ | (Otoml.TomlLocalDate _ | (Otoml.TomlLocalTime _ | (Otoml.TomlArray _ | (Otoml.TomlTable _ | (Otoml.TomlInlineTable _ | Otoml.TomlTableArray _))))))))))
+  | None | Some (TomlString _) -> Error (key ^ " requires a non-blank string")
+
+let resolve_snapshot_paths ~directory = function
+  | `Assoc fields ->
+      let resolve = function
+        | `Assoc source ->
+            (match List.assoc_opt "kind" source, List.assoc_opt "path" source with
+             | Some (`String "snapshot_file"), Some (`String path)
+               when String.trim path <> "" ->
+                 `Assoc (("path", `String (absolute_from ~directory path))
+                   :: List.remove_assoc "path" source)
+             | _ -> `Assoc source)
+        | value -> value
+      in
+      (match List.assoc_opt "sources" fields with
+       | Some (`List sources) ->
+           `Assoc (("sources", `List (List.map resolve sources))
+             :: List.remove_assoc "sources" fields)
+       | _ -> `Assoc fields)
+  | value -> value
+
+let select_exact_outputs declared = function
+  | `List values ->
+      let rec names selected = function
+        | [] -> Ok selected
+        | `String name :: rest ->
+            if List.mem name selected then Error ("duplicate exact output selection: " ^ name)
+            else if not (List.exists (fun (output:Lane_addon_types.exact_output) ->
+              String.equal output.name name) declared) then
+              Error ("exact_outputs selects an undeclared package output: " ^ name)
+            else names (name::selected) rest
+        | _::_ -> Error "exact_outputs requires an array of declared output names" in
+      let* selected = names [] values in
+      Ok (List.filter (fun (output:Lane_addon_types.exact_output) ->
+        List.mem output.name selected) declared)
+  | _ -> Error "exact_outputs requires an array of declared output names"
+
+let decode ~source_path ~source_revision ~id fields =
+  let allowed = ["id"; "enabled"; "run_id"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs"] in
+  let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+    | None -> Ok () | Some (key, _) -> Error ("unknown declaration field: " ^ key) in
+  let* enabled = match List.assoc_opt "enabled" fields with
+    | None -> Ok true (* Accepting deployment stage; existing declarations still run. *)
+    | Some (Otoml.TomlBoolean enabled) -> Ok enabled
+    | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+    | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+    | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+    | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> Error "enabled requires a boolean" in
+  let* run_id = text fields "run_id" in
+  let* manifest_path = text fields "manifest_path" in
+  let directory = Filename.dirname source_path in
+  let manifest_path = absolute_from ~directory manifest_path in
+  let* package = Lane_addon_manifest.load ~path:manifest_path
+    |> Result.map_error Lane_addon_manifest.error_to_string in
+  let* package = match List.assoc_opt "tool_hooks" fields with
+    | None -> Ok package
+    | Some value ->
+        let* json = json_of_toml ~path:"tool_hooks" value in
+        let* tool_hooks = Lane_addon_tool_hooks.selection_of_json json in
+        Ok {package with tool_hooks} in
+  let* package = match List.assoc_opt "exact_outputs" fields with
+    | None -> Ok package
+    | Some value ->
+        let* json = json_of_toml ~path:"exact_outputs" value in
+        let* exact_outputs = select_exact_outputs package.exact_outputs json in
+        Ok {package with exact_outputs} in
+  let* binding = match List.assoc_opt "binding" fields with
+    | Some (Otoml.TomlTable _ | Otoml.TomlInlineTable _ as value) ->
+        json_of_toml ~path:"binding" value
+    | Some (Otoml.TomlString _ | (Otoml.TomlInteger _ | (Otoml.TomlFloat _ | (Otoml.TomlBoolean _ | (Otoml.TomlOffsetDateTime _ | (Otoml.TomlLocalDateTime _ | (Otoml.TomlLocalDate _ | (Otoml.TomlLocalTime _ | (Otoml.TomlArray _ | Otoml.TomlTableArray _)))))))))
+    | None -> Error "binding requires a table" in
+  let binding = resolve_snapshot_paths ~directory binding in
+  let* () = Lane_addon_sources.validate binding in
+  let* () = match package.binding_schema with
+    | None -> Ok ()
+    | Some schema -> Lane_addon_action.validate_value ~schema ~name:"lane binding" binding |> Result.map (fun _ -> ()) in
+  let manifest_path = Unix.realpath manifest_path in
+  (* This revision names worker inputs. Desired activity is separate, so an
+     accepting deployment does not replace unchanged workers and on/off does
+     not change the identity of preserved inputs or their document owner.
+     Navigation category is also separate: changing it updates declaration
+     metadata without replacing a worker or its immutable package snapshot. *)
+  let canonical =
+    `Assoc ["id", `String id; "run_id", `String run_id;
+      "manifest_path", `String manifest_path;
+      "package", Lane_addon_types.package_to_json {package with ui_category=None}; "binding", binding]
+    |> Yojson.Safe.sort |> Yojson.Safe.to_string
+  in
+  let revision = Agent_core_sha256.(to_hex (digest_string canonical)) in
+  Ok { id; enabled; run_id; manifest_path; package; binding; revision; source_revision; source_path }
+
+let parse_declaration ~source_path bytes =
+  let failure ?id ~unreadable message =
+    Error { issue = {source_path; id; message}; unreadable } in
+  try
+      (match Otoml.Parser.from_string_result bytes with
+       | Error message -> failure ~unreadable:false message
+       | Ok (Otoml.TomlTable fields) ->
+           (match text fields "id" with
+            | Error message -> failure ~unreadable:false message
+            | Ok id ->
+                try
+                  let source_revision = Agent_core_sha256.(to_hex (digest_string bytes)) in
+                  match decode ~source_path ~source_revision ~id fields with
+                  | Ok declaration -> Ok declaration
+                  | Error message -> failure ~id ~unreadable:false message
+                with (Sys_error _ | Unix.Unix_error _) as exn ->
+                  failure ~id ~unreadable:true (io_message exn))
+       | Ok (Otoml.TomlString _) | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
+       | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
+       | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
+       | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> failure ~unreadable:false "declaration requires a TOML table")
+  with Otoml.Duplicate_key message -> failure ~unreadable:false message
+
+let load_source ~source_path ~source_text =
+  parse_declaration ~source_path:(absolute source_path) source_text
+  |> Result.map_error (fun failure -> failure.issue.message)
+
+let read_declaration ~path =
+  let source_path = absolute path in
+  match read_document source_path with
+  | Error message -> Error {issue={source_path;id=None;message};unreadable=true}
+  | Ok bytes -> parse_declaration ~source_path bytes
+
+let load_file ~path =
+  read_declaration ~path |> Result.map_error (fun failure -> failure.issue.message)
+
+let load ~directory =
+  let directory = absolute directory in
+  let listing = try
+    Ok (Sys.readdir directory |> Array.to_list
+      |> List.filter (fun name -> Filename.check_suffix name Declaration_file.suffix)
+      |> List.sort String.compare
+      |> List.map (Filename.concat directory))
+  with
+  | Sys_error message ->
+      (* [Sys.readdir] loses the errno. [stat] distinguishes a missing directory
+         from a failed directory read; neither an empty default nor a string
+         match may authorize removal of an existing installation. *)
+      (match (Unix.stat directory).Unix.st_kind with
+       | Unix.S_DIR -> Error message
+       | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> Error "configuration path is not a directory"
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+       | exception Unix.Unix_error _ -> Error message)
+  in
+  match listing with
+  | Error message ->
+      { declarations = []; issues = [{source_path = directory; id = None; message}];
+        paths = []; complete = false }
+  | Ok paths ->
+      let results = List.map (fun path -> path, read_declaration ~path) paths in
+      let id_of_result = function
+        | Ok (declaration : declaration) -> Some declaration.id
+        | Error failure -> failure.issue.id in
+      let ids = List.filter_map (fun (_, result) -> id_of_result result) results in
+      let duplicates = ids |> List.sort String.compare |> List.fold_left
+        (fun (previous, duplicates) id ->
+           if previous = Some id then Some id, id :: duplicates
+           else Some id, duplicates) (None, []) |> snd |> List.sort_uniq String.compare in
+      let declarations, issues, complete = List.fold_left
+        (fun (declarations, issues, complete) (source_path, result) ->
+           let id = id_of_result result in
+           let duplicate = Option.exists (fun id -> List.mem id duplicates) id in
+           let issues = if duplicate then
+               {source_path; id; message = "duplicate declaration id"} :: issues else issues in
+           match result with
+           | Ok declaration when not duplicate -> declaration :: declarations, issues, complete
+           | Ok _ -> declarations, issues, complete
+           | Error failure -> declarations, failure.issue :: issues,
+               complete && not failure.unreadable)
+        ([], [], true) results in
+      {declarations = List.rev declarations; issues = List.rev issues; paths; complete}
+
+let browser_source (d : declaration) = match d.package.worker_service with
+  | Lane_addon_types.Browser_service served -> Some served
+  | Lane_addon_types.Mcp_tools -> None
+
+let browser_source_on snapshot backend =
+  let runs (d : declaration) = d.enabled && browser_source d = Some backend in
+  if List.exists runs snapshot.declarations then Some true
+  else if snapshot.complete then Some false
+  else None
+
+let directory ~config_root = Filename.concat config_root "lane-addons"

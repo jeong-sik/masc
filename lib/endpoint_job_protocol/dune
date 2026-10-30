@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name endpoint_job_protocol)
+ (public_name masc.endpoint_job_protocol)
+ (modules endpoint_job_protocol)
+ (libraries exec_ssh_protocol yojson base64 masc.agent_core.digest))

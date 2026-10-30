@@ -1,0 +1,137 @@
+{
+  "schema": "masc.public-keeper-scale-doc-audit.v2",
+  "verdict": "PASS_DOCUMENT_NUMBERS_AND_SCOPE",
+  "candidate_numeric_derivative_entire_cohorts_equal_reconstruction": true,
+  "before_after_all_six_rows_equal_original_reconstruction": true,
+  "native_batch_all_selected_fields_and_raw_hashes_match": true,
+  "candidate_v1_original_receipt_hashes_still_match": true,
+  "candidate_then_baseline_sequential_wall_anchor_order": [
+    {
+      "packet": "owned-concurrent-c3cb371-2-v3",
+      "started_wall_ns": 1793025593991577000
+    },
+    {
+      "packet": "owned-concurrent-c3cb371-30-v3",
+      "started_wall_ns": 1793025663492400000
+    },
+    {
+      "packet": "owned-concurrent-c3cb371-300-v3",
+      "started_wall_ns": 1793025725325632000
+    },
+    {
+      "packet": "owned-concurrent-1ce158-2-v3",
+      "started_wall_ns": 1793026027068448000
+    },
+    {
+      "packet": "owned-concurrent-1ce158-30-v3",
+      "started_wall_ns": 1793026121639429000
+    },
+    {
+      "packet": "owned-concurrent-1ce158-300-v3",
+      "started_wall_ns": 1793026400839339000
+    }
+  ],
+  "comparison": {
+    "baseline300_allocation_bytes": 67548205824.0,
+    "candidate300_allocation_bytes": 67544518400.0,
+    "candidate_minus_baseline_allocation_bytes": -3687424.0,
+    "candidate_minus_baseline_allocation_percent": -0.0054589518034053874,
+    "no_established_native_performance_gain": true,
+    "causal_or_repeated_comparison": false
+  },
+  "full_health_new_packet_boundaries": [
+    {
+      "packet": "owned-concurrent-1ce158-2-v3",
+      "snapshot": "model-held",
+      "overall_status": "degraded",
+      "operator_action_required": true,
+      "operator_action_reasons": [
+        "keeper_memory_execution:addon_unattached"
+      ]
+    },
+    {
+      "packet": "owned-concurrent-1ce158-2-v3",
+      "snapshot": "after",
+      "overall_status": "degraded",
+      "operator_action_required": true,
+      "operator_action_reasons": [
+        "keeper_memory_execution:addon_unattached"
+      ]
+    },
+    {
+      "packet": "owned-concurrent-1ce158-30-v3",
+      "snapshot": "model-held",
+      "overall_status": "degraded",
+      "operator_action_required": true,
+      "operator_action_reasons": [
+        "keeper_memory_execution:addon_unattached"
+      ]
+    },
+    {
+      "packet": "owned-concurrent-1ce158-30-v3",
+      "snapshot": "after",
+      "overall_status": "degraded",
+      "operator_action_required": true,
+      "operator_action_reasons": [
+        "keeper_memory_execution:addon_unattached"
+      ]
+    },
+    {
+      "packet": "owned-concurrent-1ce158-300-v3",
+      "snapshot": "model-held",
+      "overall_status": "degraded",
+      "operator_action_required": true,
+      "operator_action_reasons": [
+        "keeper_memory_execution:addon_unattached"
+      ]
+    },
+    {
+      "packet": "owned-concurrent-1ce158-300-v3",
+      "snapshot": "after",
+      "overall_status": "degraded",
+      "operator_action_required": true,
+      "operator_action_reasons": [
+        "keeper_memory_execution:addon_unattached"
+      ]
+    },
+    {
+      "packet": "owned-concurrent-c3cb371-2x3-v3",
+      "snapshot": "model-held",
+      "overall_status": "degraded",
+      "operator_action_required": true,
+      "operator_action_reasons": [
+        "keeper_memory_execution:addon_unattached"
+      ]
+    },
+    {
+      "packet": "owned-concurrent-c3cb371-2x3-v3",
+      "snapshot": "after",
+      "overall_status": "degraded",
+      "operator_action_required": true,
+      "operator_action_reasons": [
+        "keeper_memory_execution:addon_unattached"
+      ]
+    }
+  ],
+  "batch_model_sequence_groups_verified": true,
+  "batch_held_member_count": 0,
+  "batch_terminal_member_count": 4,
+  "linked_claim_receipts": [
+    {
+      "public_file": "faults.json",
+      "sha256": "ae0b562f2d7bf2f3156b717338b085b9a929e8b309ac99641cf4b523d091165a",
+      "exact_copy_of_original": true
+    },
+    {
+      "public_file": "canonical-subset/receipt.json",
+      "sha256": "a7404aae164a0ccf7a7a03d8e44e63a902c0dc4ec8783d620d97e2f847ea012c",
+      "exact_copy_of_original": true
+    },
+    {
+      "public_file": "qualified-native-pair.json",
+      "sha256": "dd462bd785f3b8c202f4ea710f43da4e8b8a7aab6be929ee7fe5a39658ef6ad7",
+      "exact_copy_of_original": true
+    }
+  ],
+  "scope": "Frozen four public document bytes; no new native runs, source edits, raw/verdict mutation, credentials or executable copies."
+}

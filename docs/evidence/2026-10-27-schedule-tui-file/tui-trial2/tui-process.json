@@ -1,0 +1,18 @@
+{
+  "pid": 52750,
+  "argv": [
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc-tui",
+    "--base-path",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-2/workspace",
+    "--port",
+    "61922",
+    "--workspace",
+    "owned-tui-fabb16b1cc264820935d793620fd793d",
+    "--refresh",
+    "2",
+    "--reasoning",
+    "hidden"
+  ],
+  "relay_port": 61922,
+  "pty_output": "drained without storing/parsing text; byte/hash diagnostic only"
+}

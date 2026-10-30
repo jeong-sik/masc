@@ -1,0 +1,6 @@
+candidates 73; in one request: body 197.7 KB (state 159.7 KB, questions 37.9 KB)
+pieces of at most 400 KB of candidates: 1 ([73] candidates)
+run 1: judged 73 of 73 in 1.18 s wall time
+  73 candidates, body 197.7 KB (state 159.7 KB, questions 37.9 KB): HTTP 400, 0.28 s, input tokens -, answered by -
+  36 candidates, body 96.6 KB (state 77.9 KB, questions 18.7 KB): HTTP 200, 0.35 s, input tokens 31752, answered by jev-1.14.0
+  37 candidates, body 101.4 KB (state 82.1 KB, questions 19.2 KB): HTTP 200, 0.52 s, input tokens 32980, answered by jev-1.14.0

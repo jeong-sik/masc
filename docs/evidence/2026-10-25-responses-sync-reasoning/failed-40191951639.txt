@@ -1,0 +1,12 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40191951639
+Head: a3a855674fdc345294b5e8adff6e55f61d13f59f
+Result: compile failure before selected suites
+Full raw log SHA256: 8d9abf87c04bb9ee8991627ac341c2d163f6359e176d987b60702efaeb9bace1
+Trailing whitespace normalized.
+test suite	Checkout	2026-10-25T12:10:32.1683410Z   ref: a3a855674fdc345294b5e8adff6e55f61d13f59f
+test suite	Test	2026-10-25T12:11:56.8387842Z [targeted] @@packages/agent_core/test/runtest-test_backend_openai_codec: start 2026-10-25T12:11:56Z (dune alias)
+test suite	Test	2026-10-25T12:12:16.2258099Z 38 | let non_blank_json_string json =
+test suite	Test	2026-10-25T12:12:16.2258928Z Error (warning 32 [unused-value-declaration]): unused value non_blank_json_string.
+test suite	Test	2026-10-25T12:12:29.6145169Z [targeted] @@packages/agent_core/test/runtest-test_backend_openai_codec: FAIL exit 1 in 33s
+test suite	Test	2026-10-25T12:12:30.3521687Z 38 | let non_blank_json_string json =
+test suite	Test	2026-10-25T12:12:30.3522499Z Error (warning 32 [unused-value-declaration]): unused value non_blank_json_string.

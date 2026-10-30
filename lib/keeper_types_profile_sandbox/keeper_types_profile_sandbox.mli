@@ -1,0 +1,127 @@
+type sandbox_profile = Keeper_sandbox_config.sandbox_profile =
+  | Docker
+  | Micro_vm
+  | Remote_ssh
+(** The profiles a keeper may run under.  There is no host arm. The config
+    layer's type, so a profile places the keeper's playground bundle
+    ({!Keeper_sandbox_config.host_root_rel_of_profile}) as it is. *)
+
+module Sandbox_profile_tla : sig
+  type t = sandbox_profile =
+    | Docker [@tla.symbol "Docker"]
+    | Micro_vm [@tla.symbol "Micro_vm"]
+    | Remote_ssh [@tla.symbol "Remote_ssh"]
+  [@@deriving tla]
+end
+
+type network_mode =
+  | Network_none [@tla.symbol "Network_none"]
+  | Network_inherit [@tla.symbol "Network_inherit"]
+  | Network_policy [@tla.symbol "Network_policy"]
+      (** Outbound traffic reaches a proxy the MASC server owns and nothing
+          else; the proxy judges each destination against the keeper's
+          allowlist (RFC-0415). The enforcement point is the backend's own
+          network boundary rather than an environment variable, because
+          [HTTPS_PROXY] is advice and a subprocess carrying its own socket
+          ignores advice. *)
+[@@deriving tla]
+
+(** Which box the executor builds around a [tool_execute] the observation
+    tables did not answer, before the judge is asked (RFC-0422 §3.4).
+
+    [Observe] refuses every write outside a scratch and every socket, so a
+    run that exits 0 is proven effect-free. [Guest_local] refuses sockets
+    only and permits endpoint writes. MicroVM may hold this setting, but its
+    observation route does not run that box while named-volume ownership is
+    unverified; the request keeps the judge. A remote_ssh observation route
+    uses [Guest_local] only when its operator declared the
+    account home private ({!Exec_ssh_endpoint.t.private_home}). *)
+type observation_run =
+  | Observe
+  | Guest_local
+
+val observation_run_to_string : observation_run -> string
+val observation_run_of_string : string -> observation_run option
+val all_observation_runs : observation_run list
+val valid_observation_run_strings : string list
+
+val default_observation_run : observation_run
+(** [Observe]: the box that proves the most. *)
+
+val observation_run_rejection : sandbox_profile -> observation_run -> string option
+(** [None] when a keeper may hold that profile and that box together, and
+    [Some message] naming the refusal when it may not. A Docker guest runs no
+    shim, so it has no box to choose and refuses both. MicroVM may retain a
+    [Guest_local] declaration even while its observation route refuses to run
+    that box. Whether a remote_ssh endpoint may take [Guest_local] is the
+    endpoint's declaration, not the profile's, and is answered where the route
+    is built. *)
+
+val sandbox_profile_to_string : sandbox_profile -> string
+val sandbox_profile_of_string : string -> sandbox_profile option
+val all_sandbox_profiles : sandbox_profile list
+val valid_sandbox_profile_strings : string list
+val network_mode_to_string : network_mode -> string
+val network_mode_of_string : string -> network_mode option
+val all_network_modes : network_mode list
+val valid_network_mode_strings : string list
+val default_network_mode_for_profile : sandbox_profile -> network_mode
+
+val network_mode_rejection : sandbox_profile -> network_mode -> string option
+(** [None] when a keeper may hold that profile and that network mode together,
+    and [Some message] naming the refusal when it may not.
+
+    Three pairs are refused. [Remote_ssh] accepts only [Network_inherit]: the
+    SSH lane is transport-only, so it can neither cut the guest off from the
+    network ([Network_none]) nor route it through a proxy masc owns
+    ([Network_policy]), and it says so rather than accepting the setting and
+    ignoring it. [Docker] refuses [Network_policy] because the Docker egress
+    boundary is unmeasured (RFC-0415). Every other pair is accepted.
+
+    Both the keeper TOML loader and the keeper_up argument resolver call this,
+    so a declaration is refused before it is written as well as when it is
+    read back. Only the loader checked before: a create wrote the pair
+    unexamined, and the keeper TOML it produced was rejected by the next load
+    of that same file. *)
+
+(** Where a keeper's working tree lives, which decides how the host reaches
+    a file in it.
+
+    - [Shared_mount]: the tree is a host directory the sandbox mounts, so a
+      host-side file operation on the playground reaches the same bytes the
+      keeper's commands see.
+    - [Endpoint_owned]: the tree lives on the endpoint (an OpenSSH host, or an
+      Apple [container] guest's work volume). The host keeps only a
+      bookkeeping bundle under the playground; every read and write of the
+      tree goes through the remote lane ([Keeper_sandbox_remote]), and a
+      host-side file operation on the bundle would silently miss the tree. *)
+type tree_location =
+  | Shared_mount
+  | Endpoint_owned
+
+val tree_location_of_profile : sandbox_profile -> tree_location
+(** Docker: [Shared_mount]. Micro_vm and Remote_ssh: [Endpoint_owned]. *)
+
+val runs_in_disposable_guest : sandbox_profile -> bool
+(** Whether the profile executes the payload inside a per-keeper disposable
+    guest whose isolation is at least docker-grade: a hardened container
+    ([Docker]) or a VM behind the hypervisor with its own kernel
+    ([Micro_vm]). The payload reaches the guest as argv with no shell at any
+    layer (docker exec takes argv; the microvm exec shim spawns with
+    [Unix.execvpe] after jailing cwd under the work volume).
+
+    [Remote_ssh] is excluded on purpose: it is transport-only — the
+    container knobs are not reproduced and the network is inherited — so its
+    requests keep paying the configured judgment path.
+
+    This is the typed authority the observation-only gate classification
+    ([Keeper_gate_readonly]) branches on; gate decisions never compare the
+    profile's wire string. Adding a [sandbox_profile] constructor fails the
+    build here until the new profile's answer is decided. *)
+
+val backend_unimplemented_message : sandbox_profile -> string
+(** The refusal a caller must surface when the declared profile has no
+    runtime in this build. One sentence, shared by every dispatch surface,
+    so an operator greps one string regardless of which entrypoint refused
+    (typed Shell IR target, docker shell entrypoints, factory consumers). *)
+

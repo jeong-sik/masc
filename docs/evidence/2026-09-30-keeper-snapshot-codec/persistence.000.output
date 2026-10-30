@@ -1,0 +1,4 @@
+[33mASSERT[0m reader ran on the shared worker
+[33mASSERT[0m reader sees the committed input
+[33mASSERT[0m one durable queue revision
+[33mASSERT[0m the changed queue reached the snapshot file

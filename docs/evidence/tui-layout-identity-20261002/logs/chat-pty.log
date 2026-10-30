@@ -1,0 +1,3 @@
+portrait during 10 typed characters: 0 PNG transfers without a clear, 0 after one, 0 puts; frames beside it: 0
+portrait during a running turn: {"frames_beside_in_turn": 4, "frames_beside_while_spinning": 1, "full_redraw": false, "motion_steps": 8, "portrait_rows": [3, 4, 5, 6], "progress_rows": [26], "puts": 4, "resent_without_clear": 0, "transfers_after_clear": 0}
+tui chat portrait: PASS (6 scenarios)

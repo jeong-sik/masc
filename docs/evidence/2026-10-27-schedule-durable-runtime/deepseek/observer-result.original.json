@@ -1,0 +1,9 @@
+{
+  "verdict": "FAIL",
+  "error_type": "BehaviorFailure",
+  "detail": "A2 executes only after exact A readmission, separately from the B Keeper turn",
+  "producer_terminal": false,
+  "producer_returncode": null,
+  "owned_pid": 4757,
+  "scope": "No automatic retry, provider switch, resume, cancellation or forced kill."
+}

@@ -1,0 +1,57 @@
+{
+  "scope": "Parsing only; actual selected guard execution separately scoped in official-blank-check.json. Native Host and repetition-scope suites, full SDK sessions and actual vendor transport unrun.",
+  "checks": [
+    {
+      "path": "lib/keeper/keeper_antigravity_runtime.ml",
+      "sha256": "ad980e2746ec9c91465fe271bf09321bce3c87ab7dbfb21141ef66b9f1fae486",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_claude_code_runtime.ml",
+      "sha256": "7f70f515256514ead3bd83331d59c5fc6212dc537f1b0c57c05484a3b2c86fa7",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_codex_runtime.ml",
+      "sha256": "26d43f2f381419f401582584b9d2527d133bd2de481e98fd081c6f42a36eef8f",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_muse_runtime.ml",
+      "sha256": "3f7a9b00bc069f8032178e4fa625edb340b1157e629ae344c502bfb2f58fd795",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_official_client_host.ml",
+      "sha256": "ff5e8032f8bb979558e1090b8588d2b07a1eb519d7fcec24a281e3dcbe686e8c",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "lib/keeper/keeper_official_client_host.mli",
+      "sha256": "3d0f9a4d08f876a453f47cc49ce5b038bf57a06fb0b3d5e38a2a89be97573e54",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_official_client_host.ml",
+      "sha256": "801f96459d66bae765fd46f986bfeffc2c373c35a65444b2b051da354ea59247",
+      "exit": 0,
+      "stderr": ""
+    },
+    {
+      "path": "test/test_keeper_repetition_scope.ml",
+      "sha256": "7d4d46c4420ce76959caea4660bcebd88f415022944c9f7001d6ea7c579fea52",
+      "exit": 0,
+      "stderr": ""
+    }
+  ],
+  "diff_check": {
+    "exit": 0,
+    "stderr": ""
+  }
+}

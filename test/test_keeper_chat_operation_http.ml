@@ -1,0 +1,1045 @@
+open Alcotest
+open Masc
+
+module Api = Server_dashboard_http_keeper_chat_operations
+
+let test_dashboard_worker_permissions () =
+  check bool
+    "operation list reads use read-state authority"
+    true
+    (Api.get_permission (Api.Operation_list { keeper_name = "alpha" })
+     = Masc_domain.CanReadState);
+  check bool
+    "exact operation reads use read-state authority"
+    true
+    (Api.get_permission
+       (Api.Operation_exact { keeper_name = "alpha"; raw_operation_id = "kmsg-1" })
+     = Masc_domain.CanReadState);
+  (* The journal carries reasoning in full: same data as /raw-trace, same
+     gate. A Worker token that reads operations must not read events. *)
+  check bool
+    "chat events read requires admin authority"
+    true
+    (Api.get_permission (Api.Chat_events { keeper_name = "alpha" })
+     = Masc_domain.CanAdmin);
+  check bool
+    "worker cannot read chat events"
+    false
+    (Masc_domain.has_permission
+       Masc_domain.Worker
+       (Api.get_permission (Api.Chat_events { keeper_name = "alpha" })));
+  check bool "autonomous reasoning journal requires admin authority" true
+    (Api.get_permission (Api.Turn_events {keeper_name="alpha";raw_turn_ref="trace#1"})
+     = Masc_domain.CanAdmin);
+  check bool
+    "queued mutations use chat broadcast authority"
+    true
+    (Api.mutation_permission = Masc_domain.CanBroadcast)
+;;
+
+let test_exact_routes () =
+  (match Api.get_route "/api/v1/keepers/alpha/chat/operations" with
+   | Some (Api.Operation_list { keeper_name }) ->
+     check string "list keeper" "alpha" keeper_name
+   | Some _ | None -> fail "operation list route did not match");
+  (match Api.get_route "/api/v1/keepers/alpha/chat/operations/kmsg-1" with
+   | Some (Api.Operation_exact { keeper_name; raw_operation_id }) ->
+     check string "exact keeper" "alpha" keeper_name;
+     check string "exact operation" "kmsg-1" raw_operation_id
+   | Some _ | None -> fail "exact operation route did not match");
+  (match Api.get_route "/api/v1/keepers/alpha/chat/events" with
+   | Some (Api.Chat_events { keeper_name }) ->
+     check string "events keeper" "alpha" keeper_name
+   | Some _ | None -> fail "chat events route did not match");
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace" ~absolute_turn:1 in
+  (match Api.get_route ("/api/v1/keepers/alpha/turns/" ^ Uri.pct_encode (Ids.Turn_ref.to_string turn_ref) ^ "/events") with
+   | Some (Api.Turn_events {keeper_name;raw_turn_ref}) ->
+       check string "turn journal keeper" "alpha" keeper_name;
+       check string "turn journal exact identity" (Ids.Turn_ref.to_string turn_ref) raw_turn_ref
+   | Some _ | None -> fail "autonomous turn events route did not match");
+  List.iter
+    (fun (action, expected) ->
+       match
+         Api.mutation_route
+           ("/api/v1/keepers/alpha/chat/operations/kmsg-1/" ^ action)
+       with
+       | Some { Api.mutation; _ } ->
+         check bool "mutation kind" true (mutation = expected)
+       | None -> fail ("mutation route did not match: " ^ action))
+    [ "edit", Api.Edit; "move-to-end", Api.Move_to_end; "cancel", Api.Cancel ]
+;;
+
+let test_unknown_routes_do_not_match () =
+  List.iter
+    (fun path ->
+       check bool
+         ("unknown route rejected: " ^ path)
+         true
+         (Option.is_none (Api.get_route path)
+          && Option.is_none (Api.mutation_route path)))
+    [ "/api/v1/keepers/alpha/chat/operations/kmsg-1/retry"
+    ; "/api/v1/keepers/alpha/chat/tasks/kmsg-1"
+    ; "/api/v1/keepers/alpha/chat/events/kmsg-1"
+    ; "/api/v1/keepers/chat/events"
+    ]
+;;
+
+module E = Keeper_chat_events
+module L = Keeper_chat_event_log
+
+(* Seven journaled entries, seq 0..6, ts strictly increasing. *)
+let journal : L.journaled_event list =
+  [ E.Run_started { run_id = "run-events"; thread_id = "keeper:alpha" }
+  ; E.Text_message_start { message_id = "msg-events"; role = E.Assistant }
+  ; E.Text_delta {text="one "; response=Unobserved_scope (None)}
+  ; E.Agent_core_thinking_delta {response=None; index = 0; delta = "private reasoning" }
+  ; E.Text_delta {text="two"; response=Unobserved_scope (None)}
+  ; E.Text_message_end
+  ; E.Run_finished { run_id = "run-events" }
+  ]
+  |> List.mapi (fun seq event ->
+    { L.seq; ts = 1_762_300_000.0 +. (float_of_int seq *. 0.5); event })
+;;
+
+(* The journal as the store holds it: one encoded row per line. *)
+let rows_of entries =
+  String.concat "" (List.map (fun entry -> L.journaled_event_to_string entry ^ "\n") entries)
+;;
+
+let rows = rows_of journal
+let journal_file = "kmsg-events.jsonl"
+
+(* The only way to build a cursor: the wire spelling the client sends. *)
+let at_offset offset =
+  match L.page_start_of_wire (Some offset) with
+  | Some start -> start
+  | None -> failf "offset %d is not a cursor" offset
+;;
+
+let served_page ?(start = L.first_row) ~since_seq ~limit rows =
+  match L.page_of_rows ~path:journal_file ~since_seq ~start ~limit rows with
+  | Ok page -> page
+  | Error failure -> fail ("page refused: " ^ L.page_failure_to_string failure)
+;;
+
+let page ?(redact_text = Fun.id) ?start ~since_seq ~limit () =
+  Api.chat_events_page
+    ~operation_id:"kmsg-events"
+    ~since_seq
+    ~redact_text
+    (served_page ?start ~since_seq ~limit rows)
+;;
+
+let field name = function
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some value -> value
+     | None -> fail ("missing field " ^ name))
+  | _ -> fail "body is not an object"
+;;
+
+let seqs body =
+  match field "events" body with
+  | `List events ->
+    List.map
+      (fun event ->
+         match field "seq" event with
+         | `Int seq -> seq
+         | _ -> fail "event seq is not an int")
+      events
+  | _ -> fail "events is not a list"
+;;
+
+let int_field name body =
+  match field name body with
+  | `Int value -> value
+  | _ -> fail (name ^ " is not an int")
+;;
+
+let bool_field name body =
+  match field name body with
+  | `Bool value -> value
+  | _ -> fail (name ^ " is not a bool")
+;;
+
+(* A page asked for from the first row with a held seq finds where to start
+   by bisecting the rows rather than decoding each one it skips. It must
+   serve exactly what a row-by-row skip serves, for every held seq and
+   limit, blank rows included: rows past the seq up to the limit, whether
+   more follow, and the offset of the last row served or, on an empty page,
+   of the last row skipped. *)
+let test_a_held_seq_without_an_offset_serves_what_a_row_by_row_skip_serves () =
+  let pieces =
+    List.mapi
+      (fun index entry ->
+         let blanks = if index mod 3 = 1 then "\n   \n" else "" in
+         blanks, L.journaled_event_to_string entry ^ "\n")
+      journal
+  in
+  let rows = String.concat "" (List.map (fun (blanks, row) -> blanks ^ row) pieces) in
+  let row_ends =
+    List.fold_left
+      (fun (offset, ends) (blanks, row) ->
+         let row_end = offset + String.length blanks + String.length row in
+         row_end, row_end :: ends)
+      (0, [])
+      pieces
+    |> snd
+    |> List.rev
+    |> Array.of_list
+  in
+  let journal_length = List.length journal in
+  List.iter
+    (fun held ->
+       List.iter
+         (fun limit ->
+            let page = served_page ~since_seq:(L.After_seq held) ~limit rows in
+            let past = List.filter (fun seq -> seq > held) (List.init journal_length Fun.id) in
+            let served = List.filteri (fun index _ -> index < limit) past in
+            let expected_offset =
+              match List.rev served with
+              | last :: _ -> row_ends.(last)
+              | [] -> if held >= 0 then row_ends.(min held (journal_length - 1)) else 0
+            in
+            let label what = Printf.sprintf "held %d, limit %d: %s" held limit what in
+            check (list int) (label "seqs")
+              served
+              (List.map (fun (entry : L.journaled_event) -> entry.seq) page.L.events);
+            check bool (label "has more") (List.length past > limit) page.L.has_more;
+            check int (label "next offset") expected_offset page.L.next_offset)
+         (List.init (journal_length + 1) (fun index -> index + 1)))
+    (List.init (journal_length + 2) (fun index -> index - 1))
+;;
+
+(* A corrupt row fails only a page that reads it. A probe that lands on it
+   cannot say which side of the held seq it is on, so the page reads on row by
+   row from what the bisection had settled: a page whose last row, and the
+   row after it that decides [has_more], come before the corrupt row is
+   served, and a page that reaches it fails. *)
+let test_a_corrupt_row_fails_only_a_first_row_page_that_reads_it () =
+  let upto_four, past_four =
+    List.partition (fun (entry : L.journaled_event) -> entry.seq <= 4) journal
+  in
+  let rows = rows_of upto_four ^ "this complete row is not an envelope\n" ^ rows_of past_four in
+  List.iter
+    (fun held ->
+       let page = served_page ~since_seq:(L.After_seq held) ~limit:(3 - held) rows in
+       check (list int)
+         (Printf.sprintf "held %d: the rows up to seq 3" held)
+         (List.init (3 - held) (fun index -> held + 1 + index))
+         (List.map (fun (entry : L.journaled_event) -> entry.seq) page.L.events);
+       check bool (Printf.sprintf "held %d: seq 4 says more follow" held) true page.L.has_more)
+    [ 0; 1; 2 ];
+  match L.page_of_rows ~path:journal_file ~since_seq:(L.After_seq 3) ~start:L.first_row ~limit:1 rows with
+  | Error (L.Page_corrupt _) -> ()
+  | Error failure -> fail ("wrong refusal: " ^ L.page_failure_to_string failure)
+  | Ok _ -> fail "a page that reads the corrupt row was served"
+;;
+
+(* The skip is bisected, so a page near the end of a long journal decodes a
+   handful of rows, not the journal. Decoding every row allocates many times
+   the journal's length; the budget is its length once. *)
+let test_a_held_seq_near_the_end_of_a_long_journal_decodes_a_handful_of_rows () =
+  let length = 20_000 in
+  let rows =
+    rows_of
+      (List.init length (fun seq ->
+         { L.seq; ts = 1_762_300_000.0 +. float_of_int seq; event = E.Text_delta {text="x"; response=Unobserved_scope (None)} }))
+  in
+  let held = length - 5 in
+  let before = Gc.allocated_bytes () in
+  let page = served_page ~since_seq:(L.After_seq held) ~limit:L.page_max_limit rows in
+  let allocated = Gc.allocated_bytes () -. before in
+  check (list int) "the rows past the held seq" [ held + 1; held + 2; held + 3; held + 4 ]
+    (List.map (fun (entry : L.journaled_event) -> entry.seq) page.L.events);
+  let budget = float_of_int (String.length rows) in
+  if allocated > budget
+  then
+    failf "a page past seq %d allocated %.0f bytes, over the %.0f byte budget" held
+      allocated budget
+;;
+
+let test_chat_events_page_walks_by_seq () =
+  let first = page ~since_seq:L.Whole_turn ~limit:3 () in
+  check string
+    "schema"
+    "masc.keeper_chat_events.v2"
+    (match field "schema" first with `String s -> s | _ -> "");
+  check string
+    "operation id"
+    "kmsg-events"
+    (match field "operation_id" first with `String s -> s | _ -> "");
+  check (list int) "first page seqs" [ 0; 1; 2 ] (seqs first);
+  check bool "first page has more" true (bool_field "has_more" first);
+  check int "cursor is the last seq served" 2 (int_field "next_since_seq" first);
+  let second = page ~since_seq:(L.After_seq (int_field "next_since_seq" first)) ~limit:3 () in
+  check (list int) "second page continues without gap or repeat" [ 3; 4; 5 ] (seqs second);
+  check bool "second page has more" true (bool_field "has_more" second);
+  let third = page ~since_seq:(L.After_seq (int_field "next_since_seq" second)) ~limit:3 () in
+  check (list int) "third page is the tail" [ 6 ] (seqs third);
+  check bool "tail has no more" false (bool_field "has_more" third);
+  check int "tail cursor" 6 (int_field "next_since_seq" third);
+  let empty = page ~since_seq:(L.After_seq 6) ~limit:3 () in
+  check (list int) "past the end is empty" [] (seqs empty);
+  check bool "empty page has no more" false (bool_field "has_more" empty);
+  check int
+    "an empty page hands the caller's cursor back unchanged"
+    6
+    (int_field "next_since_seq" empty);
+  let nothing = page ~since_seq:L.Whole_turn ~limit:3 () in
+  check (list int) "a whole-turn page starts at seq 0" [ 0; 1; 2 ] (seqs nothing);
+  (* An empty page for the whole journal has no seq to hand back, and a
+     response field cannot be absent the way the request's was: it is null,
+     which a client reads as the whole journal again. *)
+  check bool
+    "an empty whole-journal page hands back null"
+    true
+    (field
+       "next_since_seq"
+       (Api.chat_events_page
+          ~operation_id:"kmsg-events"
+          ~since_seq:L.Whole_turn
+          ~redact_text:Fun.id
+          (L.empty_page L.first_row))
+     = `Null);
+  check int
+    "an empty page from the first row hands back offset 0"
+    0
+    (int_field
+       "next_since_offset"
+       (Api.chat_events_page
+          ~operation_id:"kmsg-events"
+          ~since_seq:L.Whole_turn
+          ~redact_text:Fun.id
+          (L.empty_page L.first_row)))
+;;
+
+(* The pages a client reads by feeding both cursors back are the journal
+   filtered past the position it started from: no row twice, none missing,
+   and each page starts where the page before ended in the bytes. *)
+let test_chat_events_page_walks_by_offset () =
+  let seqs_of entries = List.map (fun (entry : L.journaled_event) -> entry.seq) entries in
+  let walk ~since_seq =
+    let rec next ~since_seq ~start acc =
+      let body = page ~start ~since_seq ~limit:3 () in
+      let acc = List.rev_append (seqs body) acc in
+      let next_since_seq =
+        match field "next_since_seq" body with
+        | `Int seq -> L.After_seq seq
+        | `Null -> L.Whole_turn
+        | _ -> fail "next_since_seq is neither an int nor null"
+      in
+      let start = at_offset (int_field "next_since_offset" body) in
+      if bool_field "has_more" body
+      then next ~since_seq:next_since_seq ~start acc
+      else List.rev acc
+    in
+    next ~since_seq ~start:L.first_row []
+  in
+  check (list int)
+    "a walk from the whole journal serves every row once"
+    (seqs_of journal)
+    (walk ~since_seq:L.Whole_turn);
+  check (list int)
+    "a walk from a held seq serves the rows past it once"
+    (seqs_of (List.filter (fun (entry : L.journaled_event) -> entry.seq > 1) journal))
+    (walk ~since_seq:(L.After_seq 1));
+  let first = page ~since_seq:L.Whole_turn ~limit:3 () in
+  check int
+    "the first page ends in the bytes after its last row"
+    (String.length (rows_of (List.filteri (fun index _ -> index < 3) journal)))
+    (int_field "next_since_offset" first);
+  let last = page ~since_seq:L.Whole_turn ~limit:L.page_max_limit () in
+  check int
+    "a page to the end hands back the end of the rows"
+    (String.length rows)
+    (int_field "next_since_offset" last);
+  check bool
+    "the wire spells the first row as an absent offset"
+    true
+    (L.page_start_of_wire None = Some L.first_row
+     && L.page_start_to_wire (at_offset 0) = Some 0
+     && Option.is_none (L.page_start_of_wire (Some (-1))))
+;;
+
+(* A page decodes the rows it serves and the one after, not the rest: a
+   corrupt row further down fails only the page that reaches it. A cursor the
+   rows cannot place is refused by its own name. *)
+let test_chat_events_page_refuses_what_it_cannot_place () =
+  let with_corrupt_tail = rows ^ "this complete row is not an envelope\n" in
+  check (list int)
+    "a page before the corrupt row is served"
+    [ 0; 1; 2 ]
+    (List.map
+       (fun (entry : L.journaled_event) -> entry.seq)
+       (served_page ~since_seq:L.Whole_turn ~limit:3 with_corrupt_tail).events);
+  let refused ~since_seq ~start ~limit rows =
+    match L.page_of_rows ~path:journal_file ~since_seq ~start ~limit rows with
+    | Ok page ->
+      failf "a page was served with %d events" (List.length page.L.events)
+    | Error failure -> failure
+  in
+  check bool
+    "the page that reaches the corrupt row is corrupt"
+    true
+    (match
+       refused
+         ~since_seq:(L.After_seq 5)
+         ~start:(at_offset (String.length (rows_of (List.filteri (fun index _ -> index < 6) journal))))
+         ~limit:3
+         with_corrupt_tail
+     with
+     | L.Page_corrupt _ -> true
+     | L.Page_offset_past_rows _ | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _
+     | L.Page_limit_not_positive _ | L.Page_unsupported_version _ ->
+       false);
+  check bool
+    "an offset inside a row is refused"
+    true
+    (match refused ~since_seq:L.Whole_turn ~start:(at_offset 1) ~limit:3 rows with
+     | L.Page_offset_inside_row 1 -> true
+     | L.Page_offset_inside_row _ | L.Page_offset_past_rows _ | L.Page_cursor_mismatch _
+     | L.Page_limit_not_positive _ | L.Page_corrupt _ | L.Page_unsupported_version _ -> false);
+  check bool
+    "an offset past the rows is refused"
+    true
+    (match
+       refused
+         ~since_seq:L.Whole_turn
+         ~start:(at_offset (String.length rows + 1))
+         ~limit:3
+         rows
+     with
+     | L.Page_offset_past_rows { offset; rows_end } ->
+       offset = String.length rows + 1 && rows_end = String.length rows
+     | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ | L.Page_limit_not_positive _
+     | L.Page_corrupt _ | L.Page_unsupported_version _ -> false);
+  let first = page ~since_seq:L.Whole_turn ~limit:3 () in
+  let mismatch ~since_seq ~start =
+    match refused ~since_seq ~start ~limit:3 rows with
+    | L.Page_cursor_mismatch mismatch -> mismatch
+    | L.Page_offset_past_rows _ | L.Page_offset_inside_row _ | L.Page_limit_not_positive _
+    | L.Page_corrupt _ | L.Page_unsupported_version _ ->
+      fail "a cursor pair was not refused as a mismatch"
+  in
+  (* The offset is behind its seq: the rows between them are ones the client
+     already holds, so the page would serve them twice. *)
+  check bool
+    "an offset paired with a seq from a later page is refused"
+    true
+    (match
+       mismatch
+         ~since_seq:(L.After_seq 5)
+         ~start:(at_offset (int_field "next_since_offset" first))
+     with
+     | L.Row_at_offset_not_past_held_seq { since_seq; row_seq; _ } ->
+       since_seq = 5 && row_seq = 3
+     | L.Row_before_offset_past_held_seq _ | L.Offset_without_held_seq _ -> false);
+  (* The offset is ahead of its seq: rows 3, 4 and 5 lie between the two and
+     nothing would ever serve them. Refused, not served from seq 6. *)
+  check bool
+    "an offset ahead of its seq is refused instead of skipping the rows between"
+    true
+    (match
+       mismatch
+         ~since_seq:(L.After_seq 2)
+         ~start:
+           (at_offset
+              (String.length (rows_of (List.filteri (fun index _ -> index < 6) journal))))
+     with
+     | L.Row_before_offset_past_held_seq { offset; since_seq; row_seq } ->
+       offset
+       = String.length (rows_of (List.filteri (fun index _ -> index < 6) journal))
+       && since_seq = 2
+       && row_seq = 5
+     | L.Row_at_offset_not_past_held_seq _ | L.Offset_without_held_seq _ -> false);
+  (* The whole journal starts at the first row; an offset beside it places
+     nothing, and would silently skip whatever lies before it. *)
+  check bool
+    "an offset with no held seq is refused"
+    true
+    (match
+       mismatch
+         ~since_seq:L.Whole_turn
+         ~start:(at_offset (int_field "next_since_offset" first))
+     with
+     | L.Offset_without_held_seq offset ->
+       offset = int_field "next_since_offset" first
+     | L.Row_before_offset_past_held_seq _ | L.Row_at_offset_not_past_held_seq _ -> false);
+  check bool
+    "a page of no rows is refused rather than never advancing"
+    true
+    (match refused ~since_seq:L.Whole_turn ~start:L.first_row ~limit:0 rows with
+     | L.Page_limit_not_positive 0 -> true
+     | L.Page_limit_not_positive _ | L.Page_offset_past_rows _
+     | L.Page_offset_inside_row _ | L.Page_cursor_mismatch _ | L.Page_corrupt _ | L.Page_unsupported_version _ -> false)
+;;
+
+(* An empty page still hands back a pair: the offset moves past every row it
+   skipped, so feeding both cursors back reads what the journal grew. Before,
+   a page that skipped the whole journal handed back offset 0 beside the held
+   seq, and the same reader refused that pair as a mismatch. *)
+let test_an_empty_page_hands_back_a_pair_it_accepts () =
+  let held = List.length journal - 1 in
+  let empty = page ~since_seq:(L.After_seq held) ~limit:3 () in
+  check (list int) "the page is empty" [] (seqs empty);
+  check int
+    "the offset moved past every row it skipped"
+    (String.length rows)
+    (int_field "next_since_offset" empty);
+  let appended =
+    { L.seq = held + 1
+    ; ts = 1_762_400_000.0
+    ; event = E.Text_delta {text="after the empty page"; response=Unobserved_scope (None)}
+    }
+  in
+  let grown = rows ^ L.journaled_event_to_string appended ^ "\n" in
+  let next =
+    Api.chat_events_page
+      ~operation_id:"kmsg-events"
+      ~since_seq:(L.After_seq held)
+      ~redact_text:Fun.id
+      (served_page
+         ~start:(at_offset (int_field "next_since_offset" empty))
+         ~since_seq:(L.After_seq held)
+         ~limit:3
+         grown)
+  in
+  check (list int) "the pair reads the row appended after it" [ held + 1 ] (seqs next)
+;;
+
+(* The route's own path: the query is read once and the whole of it reaches
+   the page, so a cursor cannot be parsed and then left out. *)
+let test_the_route_reads_both_cursors_from_the_query () =
+  let request query =
+    Httpun.Request.create `GET ("/api/v1/keepers/alpha/chat/events?" ^ query)
+  in
+  let served query rows =
+    match
+      Api.For_testing.events_page_of_request ~path:journal_file (request query) rows
+    with
+    | Ok body -> body
+    | Error (_status, code) -> failf "the route refused the query: %s" code
+  in
+  let after_two =
+    String.length (rows_of (List.filteri (fun index _ -> index < 3) journal))
+  in
+  check (list int)
+    "a query with both cursors serves the rows after them"
+    [ 3; 4 ]
+    (seqs
+       (served
+          (Printf.sprintf
+             "operation_id=kmsg-events&since_seq=2&since_offset=%d&limit=2"
+             after_two)
+          rows));
+  check (list int)
+    "the same seq without the offset serves the same rows"
+    [ 3; 4 ]
+    (seqs (served "operation_id=kmsg-events&since_seq=2&limit=2" rows));
+  let refused query rows =
+    match
+      Api.For_testing.events_page_of_request ~path:journal_file (request query) rows
+    with
+    | Ok _ -> fail "a page was served for a query that cannot be placed"
+    | Error (status, code) -> status, code
+  in
+  check bool
+    "a mismatched pair is a 400 naming the cursor"
+    true
+    (refused
+       (Printf.sprintf
+          "operation_id=kmsg-events&since_seq=5&since_offset=%d&limit=2"
+          after_two)
+       rows
+     = (`Bad_request, "cursor_mismatch"));
+  check bool
+    "an offset inside a row is a 400 naming the cursor"
+    true
+    (refused "operation_id=kmsg-events&since_seq=0&since_offset=1&limit=2" rows
+     = (`Bad_request, "since_offset_inside_row"));
+  check bool
+    "an offset past the rows is a 400 naming the cursor"
+    true
+    (refused
+       (Printf.sprintf
+          "operation_id=kmsg-events&since_seq=0&since_offset=%d&limit=2"
+          (String.length rows + 1))
+       rows
+     = (`Bad_request, "since_offset_past_rows"));
+  check bool
+    "a held offset against a journal with no rows yet is refused, not echoed"
+    true
+    (refused "operation_id=kmsg-events&since_seq=0&since_offset=40&limit=2" ""
+     = (`Bad_request, "since_offset_past_rows"))
+;;
+
+(* The response is the journal as written: each element is the stage-1
+   envelope, reasoning delta included -- which is why the route is CanAdmin. *)
+let test_chat_events_are_the_journal_lines () =
+  let body = page ~since_seq:L.Whole_turn ~limit:Keeper_chat_event_log.page_default_limit () in
+  (match field "events" body with
+   | `List events ->
+     check int "every entry served" (List.length journal) (List.length events);
+     List.iter2
+       (fun served (entry : L.journaled_event) ->
+          check bool
+            (Printf.sprintf "seq %d served exactly as journaled" entry.seq)
+            true
+            (Yojson.Safe.equal served (L.journaled_event_to_json entry)))
+       events
+       journal
+   | _ -> fail "events is not a list");
+  (match field "events" body with
+   | `List events ->
+     let thinking =
+       List.find_opt (fun event -> int_field "seq" event = 3) events
+       |> Option.map (fun event -> field "delta" (field "event" event))
+     in
+     check bool
+       "the reasoning delta is served verbatim"
+       true
+       (match thinking with
+        | Some (`String delta) -> String.equal delta "private reasoning"
+        | Some _ | None -> false)
+   | _ -> fail "events is not a list");
+  check bool
+    "limit ceiling is above the default"
+    true
+    (Keeper_chat_event_log.page_max_limit > Keeper_chat_event_log.page_default_limit)
+;;
+
+(* The served lines pass through the caller's redaction; the journal line
+   itself is untouched. *)
+let mask_private text =
+  if Astring.String.is_infix ~affix:"private" text then "[REDACTED]" else text
+;;
+
+let test_chat_events_are_redacted_per_line () =
+  let body =
+    page
+      ~redact_text:mask_private
+      ~since_seq:L.Whole_turn
+      ~limit:Keeper_chat_event_log.page_default_limit
+      ()
+  in
+  match field "events" body with
+  | `List events ->
+    let served =
+      List.find_opt (fun event -> int_field "seq" event = 3) events
+      |> Option.map (fun event -> field "delta" (field "event" event))
+    in
+    check bool
+      "the reasoning delta is served redacted"
+      true
+      (match served with
+       | Some (`String delta) -> String.equal delta "[REDACTED]"
+       | Some _ | None -> false);
+    check bool
+      "redaction is at serving, not in the journal line"
+      true
+      (Yojson.Safe.to_string (L.journaled_event_to_json (List.nth journal 3))
+       |> Astring.String.is_infix ~affix:"private reasoning")
+  | _ -> fail "events is not a list"
+;;
+
+let test_missing_journal_is_classified_by_the_row () =
+  let classify = Api.classify_missing_journal in
+  check bool "no row is an unknown operation" true (classify None = Api.Unknown_operation);
+  check bool
+    "a queued row has nothing journaled yet"
+    true
+    (classify (Some Keeper_owner.Chat_operation.Queued) = Api.Nothing_journaled_yet);
+  check bool
+    "a running row has nothing journaled yet"
+    true
+    (classify (Some (Keeper_owner.Chat_operation.Running { started_at = 1.0 }))
+     = Api.Nothing_journaled_yet);
+  check bool
+    "a succeeded row with no journal is a settled operation without one"
+    true
+    (classify
+       (Some
+          (Keeper_owner.Chat_operation.Succeeded
+             { completed_at = 2.0; outcome_ref = "outcome-1" }))
+     = Api.No_journal_for_settled_operation);
+  check bool
+    "a cancelled row with no journal is a settled operation without one"
+    true
+    (classify (Some (Keeper_owner.Chat_operation.Cancelled { completed_at = 2.0 }))
+     = Api.No_journal_for_settled_operation);
+  (* The server cannot tell a retention prune from an append that never
+     created the file, so the message names the operation and its ended
+     state and claims no cause. *)
+  let message =
+    Api.For_testing.no_journal_for_settled_operation_message ~operation_id:"kmsg-gone"
+  in
+  check bool
+    "the message names the operation"
+    true
+    (Astring.String.is_infix ~affix:"kmsg-gone" message);
+  List.iter
+    (fun claim ->
+       check bool
+         ("the message does not claim a cause: " ^ claim)
+         false
+         (Astring.String.is_infix ~affix:claim message))
+    [ "retention"; "aged"; "prune" ]
+;;
+
+(* F3 from the adversarial review: pin the permission through the same
+   authorizer the router runs, not only the table. Worker holds CanReadState,
+   which reads operations; the events log is CanAdmin. *)
+let temp_base prefix =
+  let path =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
+  in
+  Unix.mkdir path 0o700;
+  path
+;;
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then begin
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
+;;
+
+let test_http_journal_redacts_content_without_rewriting_native_identity () =
+  let base_path = temp_base "keeper-http-redaction" in
+  Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
+    let keeper_name = "alpha" in
+    let call_id = "native-call-secret-ownership" in
+    let provider_id = "provider-message-secret-id" in
+    let secrets = ["heartbeat_reported"; "elapsed_seconds"; call_id; provider_id] in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out (String.concat "\n" secrets));
+    let snapshot = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+    let redact_text = Keeper_secret_redaction.redact_text snapshot in
+    List.iter (fun secret -> check string "fixture captures the exact collision" "[REDACTED]"
+      (redact_text secret)) secrets;
+    let body = "payload " ^ String.concat " / " secrets in
+    let redacted_body = "payload [REDACTED] / [REDACTED] / [REDACTED] / [REDACTED]" in
+    let native : E.native_tool =
+      {occurrence={stream_scope=2;block_index=7;provider_message_id=Some provider_id};
+       tool_call_id=Some call_id;tool_call_name=Some "Read"} in
+    let entries = [E.Native_tool_start native;
+      E.Native_tool_progress (native,Runtime_native_tools.Heartbeat_reported {elapsed_seconds=30});
+      E.Text_delta {text=body; response=Unobserved_scope (None)};
+      E.Agent_core_thinking_delta {response=None;index=0;delta=body};
+      E.Native_tool_progress (native,Runtime_native_tools.Message_reported {message=body});
+      E.Native_tool_end (native,Runtime_native_tools.end_observed)]
+      |> List.mapi (fun seq event -> {L.seq;ts=1_762_300_000. +. float_of_int seq;event}) in
+    let rows = rows_of entries in
+    let page = served_page ~since_seq:L.Whole_turn ~limit:L.page_default_limit rows in
+    let turn_ref = Ids.Turn_ref.make ~trace_id:provider_id ~absolute_turn:1 in
+    List.iter (fun (label,serve) ->
+      let response = serve page in
+      let served = match field "events" response with
+        | `List values -> List.map (fun value -> match L.journaled_event_of_json value with
+          | Ok entry -> entry | Error error -> fail (label ^ ": " ^ L.decode_failure_to_string error)) values
+        | _ -> fail "events is not a list" in
+      List.iter2 (fun (before:L.journaled_event) (after:L.journaled_event) ->
+        check int (label ^ ": sequence unchanged") before.seq after.seq;
+        check (float 0.) (label ^ ": publish time unchanged") before.ts after.ts) entries served;
+      let check_native observed =
+        check bool (label ^ ": literal call and provider identities unchanged") true (observed=native) in
+      (match List.map (fun (entry:L.journaled_event) -> entry.event) served with
+       | [E.Native_tool_start start;
+          E.Native_tool_progress (progress,Runtime_native_tools.Heartbeat_reported {elapsed_seconds});
+          E.Text_delta {text=text; response=Unobserved_scope (None)}; E.Agent_core_thinking_delta {response=None;index=0;delta=thinking};
+          E.Native_tool_progress (message,Runtime_native_tools.Message_reported {message=reported});
+          E.Native_tool_end (ended,completion)] ->
+           List.iter check_native [start;progress;message;ended];
+           check int (label ^ ": heartbeat remains decodable") 30 elapsed_seconds;
+           List.iter (fun content -> check string (label ^ ": content still redacted") redacted_body content)
+             [text;thinking;reported];
+           check bool (label ^ ": no success or receipt inference") true
+             (completion=Runtime_native_tools.end_observed)
+       | _ -> fail (label ^ ": typed event structure changed"));
+      check int (label ^ ": cursor follows original source bytes") (String.length rows)
+        (int_field "next_since_offset" response))
+      ["operation", Api.chat_events_page ~operation_id:call_id ~since_seq:L.Whole_turn ~redact_text;
+       "autonomous", Api.turn_events_page ~turn_ref ~since_seq:L.Whole_turn ~redact_text];
+    check string "serving leaves original durable content untouched" rows (rows_of entries))
+;;
+
+let test_chat_events_route_needs_admin_through_the_authorizer () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_base "keeper-chat-events-auth" in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf base_path);
+  let config = Workspace_core.default_config base_path in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
+  Auth.save_auth_config
+    base_path
+    { Masc_domain.default_auth_config with enabled = true; require_token = true };
+  let token ~agent_name ~role =
+    match Auth.create_token base_path ~agent_name ~role with
+    | Ok (token, _) -> token
+    | Error error -> fail (Masc_domain.masc_error_to_string error)
+  in
+  let worker = token ~agent_name:"worker" ~role:Masc_domain.Worker in
+  let admin = token ~agent_name:"admin" ~role:Masc_domain.Admin in
+  let path = "/api/v1/keepers/alpha/chat/events" in
+  let permission =
+    match Api.get_route path with
+    | Some route -> Api.get_permission route
+    | None -> fail "events route did not resolve"
+  in
+  let authorize request =
+    Server_auth.authorize_token_bound_permission_request ~base_path ~permission request
+  in
+  let bearer token =
+    Httpun.Request.create
+      ~headers:(Httpun.Headers.of_list [ "authorization", "Bearer " ^ token ])
+      `GET
+      path
+  in
+  (match authorize (Httpun.Request.create `GET path) with
+   | Error error ->
+     check bool
+       "anonymous is unauthorized"
+       true
+       (Server_auth.http_status_of_auth_error error = `Unauthorized)
+   | Ok actor -> fail ("anonymous resolved actor " ^ actor));
+  (match authorize (bearer worker) with
+   | Error error ->
+     check bool
+       "Worker is forbidden"
+       true
+       (Server_auth.http_status_of_auth_error error = `Forbidden)
+   | Ok actor -> fail ("Worker resolved actor " ^ actor));
+  check (result string string)
+    "Admin reads the events log"
+    (Ok "admin")
+    (authorize (bearer admin) |> Result.map_error Masc_domain.masc_error_to_string)
+;;
+
+let test_mutation_bodies_are_closed () =
+  let input =
+    `Assoc
+      [ "schema", `String "masc.keeper_chat_operation.input.v1"
+      ; "message", `String "edited"
+      ; "user_blocks", `List []
+      ; "turn_instructions", `Null
+      ; "surface_context", `Null
+      ; "attachments", `List []
+      ]
+  in
+  let body = `Assoc [ "input", input ] |> Yojson.Safe.to_string in
+  (match Api.For_testing.parse_mutation_body Api.Edit body with
+   | Ok (Some observed) when Yojson.Safe.equal input observed -> ()
+   | Ok _ -> fail "edit input projection changed"
+   | Error code -> fail ("valid edit rejected: " ^ code));
+  List.iter
+    (fun body ->
+       match Api.For_testing.parse_mutation_body Api.Edit body with
+       | Error "invalid_input" -> ()
+       | Error code -> fail ("wrong edit error: " ^ code)
+       | Ok _ -> fail ("invalid edit body accepted: " ^ body))
+    [ {|{"input":{"message":"edited"},"obsolete_authority":"old"}|}
+    ; {|{"input":{"message":"edited"}}|}
+    ; {|{"input":{},"input":{}}|}
+    ; {|{"message":"flattened body"}|}
+    ];
+  List.iter
+    (fun mutation ->
+       (match Api.For_testing.parse_mutation_body mutation "{}" with
+        | Ok None -> ()
+        | Ok (Some _) -> fail "empty mutation unexpectedly returned input"
+        | Error code -> fail ("empty mutation rejected: " ^ code));
+       List.iter
+         (fun body ->
+            match Api.For_testing.parse_mutation_body mutation body with
+            | Error "invalid_input" -> ()
+            | Error code -> fail ("wrong closed mutation error: " ^ code)
+            | Ok _ -> fail ("unknown mutation field accepted: " ^ body))
+         [ {|{"obsolete_authority":"old"}|}; {|{"input":null}|} ])
+    [ Api.Move_to_end; Api.Cancel ]
+;;
+
+
+let error_contains text needle =
+  let n = String.length needle in
+  let rec loop i = i+n <= String.length text &&
+    (String.sub text i n = needle || loop (i+1)) in
+  loop 0
+;;
+
+let assert_private_error_absent body =
+  let wire = Yojson.Safe.to_string body in
+  List.iter (fun value -> check bool "private error value stays internal" false
+    (error_contains wire value))
+    ["orchid river seventy nine";"/private/example/.masc/keepers/alpha"];
+  let incident = Yojson.Safe.Util.(body |> member "incident_id" |> to_string) in
+  check bool "server incident joins operator diagnostics" true (String.length incident > 0)
+;;
+
+let test_owner_error_has_safe_public_response () =
+  let detail = "orchid river seventy nine at /private/example/.masc/keepers/alpha" in
+  let cause = Keeper_owner_registry.Command_rejected (Keeper_owner.Store_unavailable detail) in
+  let status,body = Api.For_testing.command_error_response cause in
+  check bool "store refusal keeps its HTTP status" true (status=`Service_unavailable);
+  check string "typed store code" "store_unavailable"
+    Yojson.Safe.Util.(body |> member "error" |> to_string);
+  assert_private_error_absent body;
+  check bool "the original typed diagnostic still renders internally" true
+    (error_contains (Keeper_owner_registry.command_error_to_string cause) detail)
+;;
+
+let test_journal_error_has_safe_public_response () =
+  let cause = L.Page_corrupt
+    "orchid river seventy nine at /private/example/.masc/keepers/alpha/events" in
+  let status,body = Api.For_testing.page_failure_response cause in
+  check bool "corruption keeps its HTTP status" true (status=`Service_unavailable);
+  check string "typed journal code" "journal_corrupt"
+    Yojson.Safe.Util.(body |> member "error" |> to_string);
+  assert_private_error_absent body;
+  check bool "operator retains the private journal diagnostic" true
+    (error_contains (L.page_failure_to_string cause) "orchid river seventy nine")
+;;
+
+
+let test_unsupported_journal_epoch_has_owned_public_error () =
+  let rows = "{\"v\":1,\"seq\":0,\"ts\":1,\"event\":{\"type\":\"agent_core_stream_message_start\"}}\n" in
+  let failure = match L.page_of_rows ~path:"preserved-v1" ~since_seq:L.Whole_turn
+      ~start:L.first_row ~limit:1 rows with
+    | Error failure -> failure
+    | Ok _ -> fail "old journal was served as current events" in
+  let status, body = Api.For_testing.page_failure_response failure in
+  check bool "persisted epoch conflict is stable, not transient corruption" true (status = `Conflict);
+  check string "explicit unsupported codec code" "journal_unsupported_version"
+    Yojson.Safe.Util.(body |> member "error" |> to_string);
+  check bool "shared client vocabulary recognizes the same fact" true
+    (Keeper_chat_public_error.of_code "journal_unsupported_version"
+      = Some Keeper_chat_public_error.Journal_unsupported_version);
+  check string "public message names the unsupported stored version"
+    "This server does not support the stored event journal version."
+    Yojson.Safe.Util.(body |> member "message" |> to_string)
+;;
+
+let test_parser_error_has_safe_public_response () =
+  let status,body = Api.For_testing.invalid_input_response
+    "invalid json: orchid river seventy nine at /private/example/.masc/keepers/alpha" in
+  check bool "parser rejection keeps HTTP status" true (status=`Bad_request);
+  check string "typed invalid input code" "invalid_input"
+    Yojson.Safe.Util.(body |> member "error" |> to_string);
+  assert_private_error_absent body
+;;
+
+let test_cursor_error_keeps_its_owned_code () =
+  let status,body = Api.For_testing.page_failure_response (L.Page_offset_inside_row 3) in
+  check bool "cursor refusal stays a bad request" true (status=`Bad_request);
+  check string "journal owns the cursor wire spelling"
+    (L.cursor_refusal_to_wire L.Offset_inside_row)
+    Yojson.Safe.Util.(body |> member "error" |> to_string)
+;;
+
+let test_valid_event_cursors_do_not_log_errors () =
+  List.iter
+    (fun query ->
+      let request = Httpun.Request.create `GET
+          ("/api/v1/keepers/alpha/chat/events?operation_id=kmsg-cursor&" ^ query) in
+      let before = (Log.Ring.bounds ()).total in
+      (match Api.For_testing.events_page_of_request ~path:"unused-empty-journal" request "" with
+       | Ok _ -> ()
+       | Error (_, code) -> failf "healthy cursor was rejected: %s" code);
+      check int "healthy query emits no error incident" before (Log.Ring.bounds ()).total)
+    [""; "since_seq=0"; "since_offset=0"]
+;;
+
+let test_invalid_event_cursor_logs_only_its_actual_error () =
+  List.iter
+    (fun query ->
+      let request = Httpun.Request.create `GET
+          ("/api/v1/keepers/alpha/chat/events?operation_id=kmsg-cursor&" ^ query) in
+      let before = (Log.Ring.bounds ()).total in
+      (match Api.For_testing.events_page_of_request ~path:"unused-empty-journal" request "" with
+       | Error (`Bad_request, "invalid_input") -> ()
+       | Error (_, code) -> failf "wrong cursor error: %s" code
+       | Ok _ -> fail "invalid cursor was accepted");
+      check int "only the rejected cursor emits an incident" (before + 1)
+        (Log.Ring.bounds ()).total)
+    ["since_seq=bad"; "since_offset=bad"; "since_seq=-1"; "since_offset=-1"]
+;;
+
+let () =
+  run
+    "keeper chat operation http"
+    [ ( "routes"
+      , [ test_case
+            "dashboard Worker permissions"
+            `Quick
+            test_dashboard_worker_permissions
+        ; test_case "exact operation routes" `Quick test_exact_routes
+        ; test_case "unknown routes do not match" `Quick test_unknown_routes_do_not_match
+        ; test_case "mutation bodies are closed" `Quick test_mutation_bodies_are_closed
+        ; test_case "owner errors preserve only public facts" `Quick test_owner_error_has_safe_public_response
+        ; test_case "journal errors preserve only public facts" `Quick test_journal_error_has_safe_public_response
+        ; test_case "unsupported journal epoch has its own public error" `Quick test_unsupported_journal_epoch_has_owned_public_error
+        ; test_case "parser errors preserve only public facts" `Quick test_parser_error_has_safe_public_response
+        ; test_case "cursor errors preserve their owned code" `Quick test_cursor_error_keeps_its_owned_code
+        ; test_case "healthy event cursors produce no error incidents" `Quick test_valid_event_cursors_do_not_log_errors
+        ; test_case "invalid event cursor produces only its actual incident" `Quick test_invalid_event_cursor_logs_only_its_actual_error
+        ] )
+    ; ( "chat events"
+      , [ test_case "page walks by seq" `Quick test_chat_events_page_walks_by_seq
+        ; test_case "page walks by offset" `Quick test_chat_events_page_walks_by_offset
+        ; test_case
+            "a held seq without an offset serves what a row-by-row skip serves"
+            `Quick
+            test_a_held_seq_without_an_offset_serves_what_a_row_by_row_skip_serves
+        ; test_case
+            "a held seq near the end of a long journal decodes a handful of rows"
+            `Quick
+            test_a_held_seq_near_the_end_of_a_long_journal_decodes_a_handful_of_rows
+        ; test_case
+            "a corrupt row fails only a first-row page that reads it"
+            `Quick
+            test_a_corrupt_row_fails_only_a_first_row_page_that_reads_it
+        ; test_case
+            "page refuses what it cannot place"
+            `Quick
+            test_chat_events_page_refuses_what_it_cannot_place
+        ; test_case
+            "an empty page hands back a pair it accepts"
+            `Quick
+            test_an_empty_page_hands_back_a_pair_it_accepts
+        ; test_case
+            "the route reads both cursors from the query"
+            `Quick
+            test_the_route_reads_both_cursors_from_the_query
+        ; test_case
+            "events are the journal lines"
+            `Quick
+            test_chat_events_are_the_journal_lines
+        ; test_case
+            "events are redacted per line"
+            `Quick
+            test_chat_events_are_redacted_per_line
+        ; test_case
+            "HTTP journal preserves native identity while redacting content"
+            `Quick
+            test_http_journal_redacts_content_without_rewriting_native_identity
+        ; test_case
+            "missing journal is classified by the row"
+            `Quick
+            test_missing_journal_is_classified_by_the_row
+        ; test_case
+            "route needs admin through the authorizer"
+            `Quick
+            test_chat_events_route_needs_admin_through_the_authorizer
+        ] )
+    ]
+;;

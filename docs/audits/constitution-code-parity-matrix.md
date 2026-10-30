@@ -1,0 +1,60 @@
+# Constitution ↔ Code 정합성 매트릭스
+
+- 생성: 2026-08-20 (14개 영역 스웜 검증 기반)
+- Goal verifier 갱신: 2026-08-21 (#29221, #29240 병합 기준)
+- 상태 값: `대기` / `진행중` / `완료` / `보류`
+- 방향: `문서←코드` (코드에 있고 문서에 없음, 문서 보충) / `코드←문서` (문서에 있고 코드에 없음, 코드 구현) / `코드 정리` (헌법 위반 잔여 제거)
+
+## A. 문서 보충 (코드가 앞서 나감)
+
+| ID | 항목 | 근거 | 상태 |
+|---|---|---|---|
+| A1 | reclaim claim gate 폐지 (RFC-0323). reclaim_policy는 claim을 막지 않고 release/cancel 데이터 파이프라이닝 용도 | `workspace_task_claim.ml:103-104`, `types_core.ml:654-659` | PR #29140 |
+| A2 | karma 예외: 자기투표·삭제 콘텐츠는 이벤트 미생성. "upvote 1건당 1건" → "타인 콘텐츠 upvote당 1건"으로 정정 | `board_votes.ml:904-907,921` | PR #29140 |
+| A3 | karma ledger는 비영속, vote_log에서 재구축. delta 보존은 wire 계약 수준 | `board_votes.ml:924-932` | PR #29140 |
+| A4 | AwaitingVerification 재시도: 지수 backoff가 아니라 고정 간격 + `retryable` boolean + 전역 동시성 세마포어 | `completion_authority_agent.ml:296-319,619-626,658` | PR #29140 |
+| A5 | Fusion 구현 확장: `Bridge_error`/`Invalid_max_output_tokens`/`Invalid_timeout_s` variant, `web_tools` 필드, topology 확장(RFC-0283/0284) | `fusion_types.ml:64-71,329-338` | PR #29140 |
+| A6 | RFC 경로 표기: `docs/rfc/` (설계서의 `docs/rfcs`는 오기) | — | PR #29140 |
+| A7 | keeper.env는 OCaml 런타임이 읽지 않음. `scripts/deploy.sh` 전용 API 키 env 파일 | `deploy.sh:125`, lib/ 참조 0건 | PR #29140 |
+| A8 | 명칭 매핑 정리: Cross-Verification→`verifier_exact` exact-output lane, GithubCredential→`keeper_github_identity`, CoT→thinking trajectory, MultiTurn→stream bridge | `runtime_toml.ml:1314`, `keeper_github_identity.ml` | PR #29140 |
+| A9 | Goal drop 사유는 전용 필드 없이 공용 `note` | `workspace_goals.ml:399` | PR #29140 |
+| A10 | visibility 시맨틱은 타입 강제가 아니라 docstring 선언 ("enforced by callers") | `board_types.mli:7,72-76` | PR #29140 |
+
+## B. 코드 보충 (문서가 앞서 나감 — 미구현 주장)
+
+| ID | 항목 | 근거 | 상태 |
+|---|---|---|---|
+| B1 | Goal 생성 시 정량 성공조건 필수화 — 생성 경로가 non-blank `metric`+`target_value` 요구 | `goal_store.mli`, `workspace_goals.ml` | PR #29152 |
+| B2 | Goal Verifier 검증 게이트 — 생성 시 `Criterion_pending` durable 기록, `request_complete` 시 `Proof_pending` 기록과 `Verifying` 진입 | `lib/goal/goal_verification.ml`, `lib/workspace_goals.ml` | #29152, #29221 병합 |
+| B3 | Goal 완료 = 독립 Verifier의 proof proven + 사람 최종 확인 — 공개 lifecycle API에서 verifier verdict 제거, 고정 `verifier_exact` typed authority만 proof를 commit. `Record_proof_proven → Awaiting_confirmation → Confirm_completion → Completed` 전이와 operator 최종 확인(`workspace_goals.ml confirm_completion`, human_operator 권한)이 현행 계약 | `lib/goal/goal_phase.mli`, `lib/workspace_goals.ml`, RFC-0387 | #29240, #34976 병합 |
+| B4 | ParallelTool — 선언된 Concurrent 호출은 병렬 실행한다. producer 가 확정한 자원 충돌은 개별 선행 호출의 settlement 를 기다리며, opaque Concurrent·Serial 구간은 경계로 남는다. 실행 좌표와 실제 대기는 구분한다. | `packages/agent_core/lib/agent/agent_tool_batch_plan.ml`, `packages/agent_core/lib/agent/agent_tools.ml`, [실행·측정 범위](../guides/keeper-tool-ready-scheduling.md) | PR #43498 소스 구현; 이 변경의 실행·실측은 미검증 |
+| B5 | 스트리밍 문자열 의미 — 일반 `TextDelta`는 append-only이며, producer가 명시한 `TextSnapshot`만 canonical state에서 suffix/replay를 정규화한다. 실제 비준수 endpoint capability 연결은 #30782에서 추적한다. | `packages/agent_core/lib/llm_provider/complete_stream_state.ml` | PR #29149, #30782 |
+| B6 | tool_kind 닫힌 합타입 선언 (실행 기계는 기존 plan IR/executor가 커버) | RFC-0386, `keeper_tool_descriptor.mli:69-82` | PR #29148 |
+| B7 | Goal Verifier standalone worker — durable criterion/proof pending ledger를 `verifier_exact` lane으로 drain하고 typed verifier boundary에 verdict를 commit. artifact lookup surface와 live 동일-run 증거는 후속 | `lib/goal_verification_agent.ml`, `lib/workspace_goals.ml`, RFC-0387 | #29221, #29240 병합; live 증거 대기 |
+| B8 | Goal `Paused`/`Blocked` phase와 `Pause`/`Resume`/`Block`/`Unblock` action — constitution `<goal>` lifecycle이 목표 지점으로 선언하지만 `Goal_phase` ADT에는 없음. 공개 phase 문자열은 `Goal_phase.all`에서 유도하므로 문서상의 이 phase들로는 필터/전이 불가 | `lib/goal/goal_phase.mli`, `lib/workspace_goals.ml:56` | 미구현 — 구현하거나 계약서에서 정리하는 결정 필요 |
+
+## C. 코드 정리 (헌법 금지 패턴 잔여)
+
+| ID | 항목 | 근거 | 상태 |
+|---|---|---|---|
+| C1 | 연속 실패 예산 숫자 게이트 (3, 5) — crash accounting 전환 | `keeper_unified_turn_failure.ml` 에 threshold 없음 (2026-09-02 재확인, RFC turn-failure-visible-stop #32105) | 완료 |
+| C2 | 도구·입력·응답·문장 반복 횟수로 진행 정체를 단정하던 자동 중단을 제거한다. 명시적 종단 효과·실패·큐 요청의 경계와 외부 효과 재실행 방지는 유지한다. 같은 키 입력/응답 반복은 화면 상태 불변의 증거가 아니다 | `keeper_agent_run.ml`의 `native_tool_boundary`, `official_client_tool_boundary`; `keeper_official_client_host.ml`의 `dynamic_tools` | 소스 수정; native 실행·설치와 자율 루프 종료 보장은 미검증 |
+| C3 | `"SKIP:"` 접두사 문자열 매칭으로 turn_mode 분류 | `keeper_unified_metrics_support.ml` 에 `"SKIP` 리터럴 없음 (2026-09-02 재확인) | 완료 |
+| C4 | provider 에러 detail 자유 텍스트 접두사 검사 — 뿌리는 agent_core 가 typed `stop_reason` 을 문자열로 납작하게 만든 것 | `Llm_provider.Error.EmptyCompletion` variant 로 재타입, `keeper_error_classify.ml` 은 variant 매치 | PR (empty-completion-is-a-variant) |
+
+## D. SSOT 문서 stale (RFC-0252 갱신)
+
+| ID | 항목 | 근거 | 상태 |
+|---|---|---|---|
+| D1 | `per_hour_budget`/`Over_hourly_budget` 제거 미반영 (PR #22051) | `fusion_types.ml:340-344` | PR #29142 |
+| D2 | `Budget_exhausted` variant, `confidence` 필드, `max_fibers` 다이어그램 잔재 | `docs/rfc/RFC-0252` §4-5 | PR #29142 |
+
+## 요약
+
+| 구분 | 건수 | 상태 |
+|---|---|---|
+| A. 문서 보충 | 10 | PR #29140 |
+| B. 코드 보충 | 7 | B1-B3 및 B7 source 구현 병합; B4 #29146 / B5 #29149 / B6 #29148. Goal verifier artifact lookup·배포·동일-run 증거는 대기 |
+| C. 코드 정리 | 4 | C1·C3 완료, C4 typed PR, C2 는 반복 오탐 수정의 소스 리뷰만 완료; 실행·설치·자율 루프 종료는 미검증 |
+| D. RFC stale | 2 | PR #29142 |
+| 후속 검증 | — | Goal verifier artifact lookup surface, 실제 배포, ledger/event/browser 동일-run 증거는 living matrix의 미완료 셀로 추적 |

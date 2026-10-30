@@ -1,0 +1,89 @@
+{
+  "baseline": "45d51bce1e971795c04bd2b8f5ba928aea8251b0",
+  "red": {
+    "same_content_different_path": "HTTP200 instead409, actual handler",
+    "live_guidance": "unsupported status/close promise visible"
+  },
+  "native": {
+    "http": 2,
+    "browser": 16,
+    "exact": 15,
+    "runtime_config": 148,
+    "total": 181
+  },
+  "web": {
+    "files": 4,
+    "passed": 406
+  },
+  "pty": "full Browser activity script: normal/conflict/save/Help and compact quit flows PASS; every posted save asserts observed path",
+  "tsc_errors": 0,
+  "ruff_errors": 0,
+  "pyright": {
+    "baseline": 1,
+    "current": 1,
+    "new": 0,
+    "rule": "reportIndexIssue"
+  },
+  "eslint": {
+    "baseline": 2,
+    "current": 2,
+    "new": 0,
+    "other_changed_files": 0,
+    "existing_issue": 37199
+  },
+  "source_sha256": {
+    "bin/masc_tui.ml": "b0013fabdd52d3121fba1e1b281c5f1b463d62c8383e17dae8b0b18b6a898999",
+    "bin/masc_tui_browser_activity.ml": "01d9564d3c2e9e8553d0d6bc06d66078e68e677d84bc9f8569f4bafbe29b7ce2",
+    "bin/masc_tui_browser_activity.mli": "477ff3cd686d96c1a76db2f2abddc877b88c7e852a748f43c5509945f821dbce",
+    "bin/masc_tui_exact_activity.ml": "743092a3c63e0c28fa2d51378883099f12e0c594c607b74a618b83cc8b0620c0",
+    "bin/masc_tui_exact_activity.mli": "bc19e6c414f45721350139584f06b625fa709e7e0ba05ef2cf2dc70db6a35145",
+    "bin/masc_tui_http.ml": "62bb6bc9a92e10c1195a4205062458d0963638c2ac024306e71cfcfd08d162bd",
+    "dashboard/src/api/dashboard-runtime-raw-save.test.ts": "9a030c98bbcf951f92ad0b2a54a2d4ba6d358c29f75638ce9df0c7a6d2297cb8",
+    "dashboard/src/api/dashboard-runtime.ts": "05deefb6c38efde8948fb76de02d714731eabe4a136b567e1a43884c92ee53b3",
+    "dashboard/src/api/dashboard.test.ts": "b57ae6808195b7e35b459b305091b84ef3432ed03c9d93ac6aa3aee21204c0d3",
+    "dashboard/src/components/runtime-toml-editor.test.ts": "22c03feb3e1ea033fb4809eb34501637c04b00c0c0dfdd4d7dffecdd0d942a2c",
+    "dashboard/src/components/runtime-toml-editor.ts": "3a3fc7abcb6598296053d5a0aeb876d2cd7408d8c793ace33a95854eb1960aa1",
+    "dashboard/src/lib/exact-lane-activity-session.ts": "d969a912ac4db6a2099243e4efc1673e7b842ae02891bee75e351587ab053ec7",
+    "lib/runtime/runtime.ml": "a5af7e05a3a36a1dd41589001297286d1655fbae70b9b9b1996d9bc7c610916b",
+    "lib/runtime/runtime.mli": "b2e01c537dab552111e6c7bb46c556816e37eaaa5c7ebee3b0b29fe9cc8a8100",
+    "lib/server/server_routes_http_routes_dashboard.ml": "5ce9c1a2e7358e042cd987d6ce40e5b6cbdf57e9dfd93f1c9db0becbab3f256c",
+    "test/test_dashboard_http_core.ml": "973cafa5f4d41813738afcc206e068c22b113c8ff7e187e163249762165af1bd",
+    "test/test_runtime_config_validity.ml": "c62e215e6516f70a568b72b0ec8122ceaa3a53067851fef97a98f4252a822aa8",
+    "test/test_tui_browser_activity.ml": "85bb0ac3736068581cc8b2df492c36e9ce03c69bbdd9122fab866db3de2b8f0c",
+    "test/test_tui_browser_activity_pty.py": "64a944e0766a4e4f3c5c8dd469a169a71c8f3cbdf5316f0a31f0b293b9901a8c",
+    "test/test_tui_exact_activity.ml": "2f73302b415517b36a1cb6cb64dcac45db5f3ba09d922a888d770c09e8524bd7"
+  },
+  "binary_sha256": {
+    "bin/masc_tui.exe": "cf4adc06a5aeeb819531da82682c94c35f7e0c8d5906f292ca2fe7b9b9e86ed9",
+    "test/test_dashboard_http_core.exe": "3fa4191ff1fab0cc21eaa8300afeaf019b913975e3833e0dac674577e5a9af97",
+    "test/test_tui_browser_activity.exe": "d51d00a8de302f9a35c032f5fb3634eba389dd95f942dec99623fadcb8cd51e8",
+    "test/test_tui_exact_activity.exe": "b5d194cc30426d2b05ed8b88b762ce36c12f2cc77e4ee4359c6847784c2d6362",
+    "test/test_runtime_config_validity.exe": "1a4fb0cd74ac5d0fdfa85bcbdd35e2fe919dea4e8da2cf52d10cee3c3def50bc"
+  },
+  "raw_sha256": {
+    "pr41187-path-eslint-other.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41187-path-comment.json": "8bee6bb9be882c12f03b0907a4778f4114e55bebae6459ec67e0bb1f7acd873b",
+    "pr41187-path-eslint-baseline.log": "e13547504b238755704f4c6faebaa9684753730d7aa6667117efde076bc6a88f",
+    "pr41187-path-http-green.log": "f60eccd0e7b44a3a95c195aa7ab50529c613bfb6dee8294781c4d9daaa0f7108",
+    "pr41187-path-tsc.log": "f8fbf4c2b311d1146e731cef50a2671ce3758e781a35d1601d189e2111ef0980",
+    "pr41187-path-red-build2.log": "60432f55ee39e5dff84edd550fd7de04ae811f0cf8862e81d8942c7b7d7ee6de",
+    "pr41187-path-ruff.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "pr41187-path-pyright.json": "7e7ff8e7a6e68decae9ea2579eb05ca620f6ab7233395d135f901acd81d1d7ee",
+    "pr41187-path-pyright-baseline.json": "36abf0b2f3a8ea21ded7b4bda353a247e231f1a396c08aafb9f81f6cf605b6f9",
+    "pr41187-path-http-red.log": "b9a881452be3f7599d40d0d4991e7f972e35e0e86a0ab0129f9661cbc4a2fbba",
+    "pr41187-path-runtime-native.log": "ae324972d6695b2010b8c5d30099cd5572291615354459057a73d5ffbbe3d368",
+    "pr41187-path-tsc-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pr41187-path-web.log": "88cc887ab1120d4f15949cf068452a1cb223b9496d315adc75837542674328ac",
+    "pr41187-path-green-build.log": "8403ce9c74be562584508cbacd1fadbc157b82eda59255d1593f7154863e80ee",
+    "pr41187-path-web-final.log": "d6c25783c43fefe1b30c48c44e6bb9b49d2468936c581a97c5140e92954a9a11",
+    "pr41187-path-browser-pty.log": "ffcd219df6bf4a954eba9d04bad42865d90387d02647bb648651357f60ad44a9",
+    "pr41187-path-browser-native.log": "088eda4c8db436ad92c0ceb393d2f5f1d94559714b36f142874eb5a36f50f38b",
+    "pr41187-path-red-build.log": "d026630ca939f461b8aad4ede1ef84cea87200bdd471b5b9d18d80b14c261a1f",
+    "pr41187-path-eslint.log": "e8a4594528f8e9b13413ec5553c305bb1b132be54707a5a1ce604abbf9b83bd1",
+    "pr41187-path-exact-native.log": "f4dcbdf6772d0def5686faa175d6072e23659a34e28a5c5813cc8e3d11c0bd40",
+    "pr41187-path-eslint-baseline-final.log": "e8a4594528f8e9b13413ec5553c305bb1b132be54707a5a1ce604abbf9b83bd1",
+    "pr41187-path-preflight.json": "5815fc99e97b50bb8748de4f23774a2f34aadb3d21de2e4387958865a70673b8",
+    "pr41187-path-red-binaries.sha256": "bd638bf6738a714f34e97a1012c5c59a2fb95a752a88f56b3de7e6a9c2cd2a91",
+    "pr41187-live-guidance-red.log": "57b59c18071ff748e3a14ea33a5940022de99f5442485ea1789b919856ef55d3"
+  }
+}

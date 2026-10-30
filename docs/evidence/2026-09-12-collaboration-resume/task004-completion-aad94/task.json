@@ -1,0 +1,170 @@
+{
+  "id": "task-004",
+  "title": "연작의 선택과 반론을 관객 참여형 PPTX·MP4로 옮기기",
+  "description": "완성된 세 편의 연작 소설을 초등 고학년과 보호자가 함께 보는 짧은 도서관 체험으로 확장한다. 관객에게 줄거리를 빠르게 알려주는 것과 각 인물의 선택을 관객 자신의 판단으로 남기는 것은 충돌할 수 있다. 고정된 영상의 속도와 진행자가 조절할 수 있는 발표도 서로 다르다. 팀이 기존 작품과 독자 관점에서 중요한 표현 방식을 결정하고 반론을 다룬 뒤 PPTX와 MP4 두 실물을 만든다. 최종 파일은 exhibit-editor의 adaptation/에 모으고, 분담과 창작 방식은 팀이 정한다. 외부 사람에게 연락하거나 공개 게시하지 않고 허구의 준비용 시제품으로 다룬다. 이전 두 Goal의 사람 확인 대기는 이번 조사·제작의 착수 조건이 아니다.",
+  "priority": 3,
+  "files": [],
+  "created_at": "2026-09-12T12:56:05Z",
+  "created_by": "admin",
+  "contract": {
+    "strict": true,
+    "completion_contract": [
+      "adaptation/decision.md에 기존 serial/story.md의 실제 장면과 독자 조건을 근거로 서로 다른 체험 방식 3가지를 비교한다. 빠른 설명과 독자 선택권, 시청각 접근성과 표현의 밀도 사이의 상충을 분석하고 선택한 방식·버린 대안·불확실성을 기록한다. 서로 독립적인 두 관점의 구체적 반론과 응답을 실제 실행 또는 동료 대화 식별자로 연결한다.",
+      "adaptation/experience.pptx는 실제로 열 수 있는 4~8슬라이드 발표 파일이며 한국어 이야기·선택 질문·질문 후 결과 또는 성찰·허구 고지를 포함한다. 슬라이드에는 관객이 생각할 수 있는 구간과 진행자 노트가 있고, 기존 세 편의 인물 관계와 선택의 인과를 뒤집지 않는다. 실제 렌더 또는 열람으로 글리프 누락·겹침·잘림을 확인한다.",
+      "adaptation/experience.mp4는 같은 체험을 전달하는 실제 디코딩 가능한 60~180초 영상이다. 서로 다른 장면, 읽을 수 있는 한국어 제목·선택 질문·허구 고지가 있으며 무음으로 보아도 핵심 사건과 질문을 이해할 수 있다. 음향을 쓰면 자체 제작 또는 사용 근거를 기록한다. 코덱·화면 크기·길이·대표 장면의 실제 디코딩 검증과 PPTX 내용 대조를 수행한다.",
+      "adaptation/evidence.json과 adaptation/review.md에 실제 PPTX/MP4 및 검수 이미지의 파일명·바이트·SHA256, 실행한 열람/디코딩·동료 검토의 결과와 한계를 기록한다. 긴 글 읽기가 어려운 독자와 소리를 듣지 못하는 상황의 두 시나리오를 검토하고, 관객의 선택권이나 이해를 개선한 실제 수정 전후를 한 건 이상 남긴다. 실제 사용자 조사를 하지 않았다면 사용자 검증으로 주장하지 않는다. 기존 전시와 연작 원본·Goal 증거는 보존한다."
+    ],
+    "required_evidence": [
+      "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/decision.md",
+      "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/experience.pptx",
+      "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/experience.mp4",
+      "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/review.md",
+      "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/.masc/playground/docker/exhibit-editor/adaptation/evidence.json"
+    ]
+  },
+  "execution_links": {
+    "operation_id": "trace-1789042595401-00001",
+    "session_id": "trace-1789042595401-00001"
+  },
+  "status": "done",
+  "assignee": "exhibit-editor",
+  "completed_at": "2026-09-12T15:23:06Z",
+  "notes": {
+    "verification_request": {
+      "id": "vrf-c77fc80f7268210060b16693b4620730",
+      "task_id": "task-004",
+      "worker": "exhibit-editor",
+      "created_at": 1789226356.278077
+    },
+    "submitted_evidence_metadata": {
+      "access": "available",
+      "request_id": "vrf-c77fc80f7268210060b16693b4620730",
+      "task_id": "task-004",
+      "worker": "exhibit-editor",
+      "created_at": 1789226356.278077,
+      "items": [
+        {
+          "kind": "artifact_binary",
+          "reference": "artifact:adaptation/check_Q3c.png",
+          "bytes": 60107,
+          "sha256": "49150e0a117f5fc42dec60a3d41b305c42c46abb9faf8ce779a25baebe4c5b8a",
+          "format": "png",
+          "body": "evidence/vrf-c77fc80f7268210060b16693b4620730/0.bin"
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:adaptation/decision.md",
+          "bytes": 11419,
+          "truncated": false
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:adaptation/evidence.json",
+          "bytes": 12280,
+          "truncated": false
+        },
+        {
+          "kind": "artifact_binary",
+          "reference": "artifact:adaptation/experience.mp4",
+          "bytes": 345612,
+          "sha256": "e9f26dde92b0b4120546d617c5cb89e420a3bc43943e5587b04c746bcd7f1283",
+          "format": "mp4",
+          "body": "evidence/vrf-c77fc80f7268210060b16693b4620730/3.bin"
+        },
+        {
+          "kind": "artifact_binary",
+          "reference": "artifact:adaptation/experience.pdf",
+          "bytes": 56688,
+          "sha256": "83c3ba38ff2b0646ce3db1f16adf28324913d58972cc4a109feb06dcaa538897",
+          "format": "pdf",
+          "body": "evidence/vrf-c77fc80f7268210060b16693b4620730/4.bin"
+        },
+        {
+          "kind": "artifact_unreadable",
+          "reference": "artifact:adaptation/experience.pptx",
+          "reason": "invalid_utf8"
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:adaptation/ffmpeg_decode.log",
+          "bytes": 3280,
+          "truncated": false
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:adaptation/ffprobe_raw.json",
+          "bytes": 2600,
+          "truncated": false
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:adaptation/identity_check.log",
+          "bytes": 3786,
+          "truncated": false
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:adaptation/identity_report.json",
+          "bytes": 3056,
+          "truncated": false
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:adaptation/manifest.json",
+          "bytes": 5676,
+          "truncated": false
+        },
+        {
+          "kind": "artifact_binary",
+          "reference": "artifact:adaptation/pdf_p-6.png",
+          "bytes": 32931,
+          "sha256": "d42cb21da668b712e63e9cfecea3f555a6f11277562d2833ee475352b8ef51c3",
+          "format": "png",
+          "body": "evidence/vrf-c77fc80f7268210060b16693b4620730/11.bin"
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:adaptation/peer-review-evidence.md",
+          "bytes": 11794,
+          "truncated": false
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:adaptation/pptx_relmap.txt",
+          "bytes": 2729,
+          "truncated": false
+        },
+        {
+          "kind": "artifact",
+          "reference": "artifact:adaptation/review.md",
+          "bytes": 14018,
+          "truncated": false
+        },
+        {
+          "kind": "note",
+          "bytes": 2159
+        },
+        {
+          "kind": "note",
+          "bytes": 674
+        },
+        {
+          "kind": "note",
+          "bytes": 1025
+        },
+        {
+          "kind": "artifact_unreadable",
+          "reason": "invalid_reference"
+        }
+      ]
+    },
+    "review": {
+      "evaluator_runtime": "codex_subscription.gpt-5.6-sol",
+      "generator_runtime": null,
+      "gate": "structured_tool",
+      "verdict": "approve",
+      "authority_kind": "system_llm_agent",
+      "authority_actor": "verifier_exact"
+    }
+  }
+}

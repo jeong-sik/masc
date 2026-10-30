@@ -1,0 +1,9 @@
+HEAD=c152356f05701315857f6df6c2aa94966ea13a03
+UTC=2026-09-16T23:05:29Z
+## Author-identity rewrite (rejection round-3 item 2)
+before: eede0c0d (commits bdbd33c0+eede0c0d authored Docker <docker@example.com> = clone default)
+after : c152356f (commits 3d01a2e0+c152356f authored polisher <polisher@keepers.local>)
+tree diff between pre- and post-rewrite heads: [ 2 files changed, 32 insertions(+)]
+receipts 01-04 record the session runs on the pre-rewrite hashes;
+their trees are identical to the landed commits (author/metadata-only rewrite).
+push: eede0c0d...c152356f forced update, lease-checked; ls-remote confirms c152356f

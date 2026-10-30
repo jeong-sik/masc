@@ -1,0 +1,71 @@
+{
+  "source_commit": "d688917369e608765472b63f6a2c307b42a66b90",
+  "source_kind": "Vite development server, production components and CSS, synthetic HTTP account responses; portrait endpoint deliberately 503",
+  "account_browser_result": "PASS: seven screenshots, five reads",
+  "workspace_browser_result": "PASS: eight screenshots, four scoped reads",
+  "first_attempt": {
+    "result": "historically reported failed attempt; raw failure output was not retained",
+    "cause": "unverified; prior Vite optimization/reload diagnosis withdrawn",
+    "scope": "The successful manifests do not establish why the earlier attempts failed."
+  },
+  "installed_runtime": {
+    "server_commit": "4f3f70f7909bc440e3c305c0941250ef39ac0245",
+    "version": "0.49.0",
+    "ready": true,
+    "actual_keeper_items_http_status": 404,
+    "observed_keeper": "code-reviewer",
+    "scope": "read-only observation; no credentials captured, no purchase/config/runtime changes",
+    "route_gap_proven": false,
+    "keeper_presence_proven": false
+  },
+  "native_current_head": false,
+  "installed_item_completion": false,
+  "build_or_ci_started": false,
+  "files_sha256": {
+    "account/keeper-items-desktop.png": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c",
+    "account/keeper-items-free-purchase.png": "841edccc23ee33b059d0b46600bb250ac910f48751cd64ef472f27667d5f13c9",
+    "account/keeper-items-loading.png": "b892b6b066965884ddde04c982bacc7bc304859c74d43ef74283b3a9b53eab90",
+    "account/keeper-items-mobile.png": "76ade8fb9c4b644bf2b8d3b068ccb601fe1ebdf4203d4c74164524a1d000b55d",
+    "account/keeper-items-price-change.png": "b7e635786f0ab05b95330db86aeb2a975aa5ff17060a722af0e1933b662acc41",
+    "account/keeper-items-recovered.png": "9484e31829ca4f02cf4bafc0eb6a8acf8a1916beabde947338e0246bf94107c9",
+    "account/keeper-items-unavailable.png": "d6ec71175cbbf2af2b84b8840d10c9adf63f7998397ac7e635d5febb4ac87872",
+    "account/manifest.json": "4202f327a491395bdfb930ac39cdc3f76009bb750e1242d664c1eab25369deb5",
+    "workspace/keeper-items-workspace-a-current-desktop.png": "d03e66c2305d51ac39c4aea6b1b02d5ad9c48b86b5cb79e84604a9626bf37c4d",
+    "workspace/keeper-items-workspace-a-current-mobile.png": "52138d745d80b05c5c6ae33fe677b20be6a0d7a581c3570d7bc1e6cd325e0bd3",
+    "workspace/keeper-items-workspace-a-desktop.png": "679ede7a9558d2b022ac6648c78a0bd84d4ed65f1c2f7edfb696befe9edca999",
+    "workspace/keeper-items-workspace-a-mobile.png": "8565ebb4f7b514f67b7d705c91f604eed37301306c9e7c0752b933128d72c71d",
+    "workspace/keeper-items-workspace-a-return-loading.png": "73302faff478d84c924a391b032a9c9dc33aea022672be90a852279775d02eb2",
+    "workspace/keeper-items-workspace-b-desktop.png": "155f537237cafc9eaa4636dda0852c397e6fc027277ccc09363f13c247bff89d",
+    "workspace/keeper-items-workspace-b-mobile.png": "bd93524112a20f0bcd4dc9dd4ce163c857bc12f3fc1a5b04aa02ca46a6a962a0",
+    "workspace/keeper-items-workspace-unknown-mobile.png": "632aae2861665cdaa38f84a0b54feae25e2b0f08db51e16906157f0bdabfd66f",
+    "workspace/workspace-manifest.json": "938f68fa5829b7cac9f2791c230c837a5188a38f9ff9c7c6c8b12abaa0c77a36",
+    "installed-http-observation.json": "fed5b0a11f0addcf141d8ddca188e8da313471c72f21c9507a2bfa64c4074df2",
+    "preview/keeper-items-desktop.png": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c",
+    "preview/keeper-items-free-purchase.png": "841edccc23ee33b059d0b46600bb250ac910f48751cd64ef472f27667d5f13c9",
+    "preview/keeper-items-loading.png": "deea1bba289ba814c5f9e7d18cbf4e3c573fc9034b2d3b3808aadd4c586626f1",
+    "preview/keeper-items-mobile.png": "76ade8fb9c4b644bf2b8d3b068ccb601fe1ebdf4203d4c74164524a1d000b55d",
+    "preview/keeper-items-preview-restored.png": "5d8edb9ea420577260846231c32ca69ab3dc996c13f00a6820865d26bfe16a0c",
+    "preview/keeper-items-preview-unavailable.png": "75fce85f7451b2173bc13c8da824522967bc599d70733f8ba2ba120d86cf2d39",
+    "preview/keeper-items-price-change.png": "b7e635786f0ab05b95330db86aeb2a975aa5ff17060a722af0e1933b662acc41",
+    "preview/keeper-items-recovered.png": "9484e31829ca4f02cf4bafc0eb6a8acf8a1916beabde947338e0246bf94107c9",
+    "preview/keeper-items-unavailable.png": "d6ec71175cbbf2af2b84b8840d10c9adf63f7998397ac7e635d5febb4ac87872",
+    "preview/manifest.json": "4d9e65a4801d7b68c28d3bc54a59b59e39f40ec5e31d3877ab2e711240d01257",
+    "source-snapshot.json": "9fce2f6e4f686ffacd7bc430b91cdfea146325524539b4bab09e258180e9c692",
+    "source-snapshot/a0d5e3bdee58627dff2f9584ff7de6cda9ca5db3e48be90bd1fc76207ea12ca3": "a0d5e3bdee58627dff2f9584ff7de6cda9ca5db3e48be90bd1fc76207ea12ca3",
+    "source-snapshot/c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88": "c9e03f3adef8e2cf42c40023afc7c924a8f4341aa9bc4a226cb0b31b69e9cb88",
+    "source-snapshot/7bc48c1a41db6d8ad53c48a4c26ca0df592f4e8626fa75e77d82e47a9dba404e": "7bc48c1a41db6d8ad53c48a4c26ca0df592f4e8626fa75e77d82e47a9dba404e",
+    "source-snapshot/443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8": "443c04d6ecd27fa9f64f4dfc6d0d3092f9d9b334ef407498bf56a4699f3285c8",
+    "source-snapshot/e4d2525a462d30964ca959cdbe8113bdc193c3973d772ef724b5c68e9244c781": "e4d2525a462d30964ca959cdbe8113bdc193c3973d772ef724b5c68e9244c781",
+    "source-snapshot/51f4278b80da798781683c063493e1fb306221dcbb4c77c7b8d80d130ee50d7e": "51f4278b80da798781683c063493e1fb306221dcbb4c77c7b8d80d130ee50d7e"
+  },
+  "installed_repeat_observation": {
+    "server_commit": "4f3f70f7909bc440e3c305c0941250ef39ac0245",
+    "item_http_status": 404,
+    "evidence": "installed-http-observation.json"
+  },
+  "preview_browser": {
+    "source_commit": "05044d48a75b1e3036e14210990fe4ec04362edf",
+    "result": "PASS: nine screenshots, five account reads",
+    "scope": "production component source unchanged from d688; added actual browser assertions for failed preview and restoration; mocked portrait 503"
+  }
+}

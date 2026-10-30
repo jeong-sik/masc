@@ -1,0 +1,5 @@
+(include_subdirs no)
+(library
+ (name msx_tool)
+ (public_name masc.msx_tool)
+ (preprocess (pps ppx_enumerate)))

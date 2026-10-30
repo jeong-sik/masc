@@ -1,0 +1,23 @@
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:bin/masc_tui_evidence_link.ml:78:  | Some (Workspace_verification_store.Board_source, id) ->
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:bin/masc_tui_evidence_link.ml:80:  | Some (Workspace_verification_store.Fusion_source, id) ->
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:11:  | Board_source
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:12:  | Fusion_source
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:19:  | Board_source -> "masc_board_post_get"
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:20:  | Fusion_source -> "masc_fusion_status"
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:29:       | Some ((Workspace_verification_store.Board_source | Workspace_verification_store.Fusion_source), _) | None -> false)
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:32:  [Board_source; Fusion_source] @ if has_task_source then [Task_source] else []
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:98:     | Fusion_source ->
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:101:     | Board_source ->
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:413:       | Board_source ->
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:415:       | Fusion_source ->
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:526:  | (Keeper_producer _ | Workspace_producer), Board_source ->
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:528:  | (Keeper_producer _ | Workspace_producer), Fusion_source ->
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_authority_tools.ml:667:  | (Read_file | Search_files | Web_fetch | Board_source | Fusion_source | Task_source), _ -> None
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_collaboration_evidence.ml:161:      | Some ((Store.Board_source | Store.Fusion_source), _) | None -> false) references
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_collaboration_evidence.ml:169:      | Some (Store.Board_source, post_id) -> capture_board ~config ~authority ~post_id
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/verification_collaboration_evidence.ml:170:      | Some (Store.Fusion_source, run_id) -> capture_fusion ~config ~authority ~run_id
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/workspace/workspace_verification_snapshot.ml:20:type collaboration_kind = Board_source | Fusion_source | Task_source
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/workspace/workspace_verification_snapshot.ml:111:  match parse "board:" Board_source with
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/workspace/workspace_verification_snapshot.ml:114:    (match parse "fusion:" Fusion_source with
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/workspace/workspace_verification_snapshot.mli:20:type collaboration_kind = Board_source | Fusion_source | Task_source
+3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6:lib/workspace/workspace_verification_store.mli:17:type collaboration_kind = Board_source | Fusion_source | Task_source

@@ -1,0 +1,46 @@
+module EC = Keeper_error_classify
+
+let handle ~observation_token ~config ~keeper_name ~runtime_id err =
+  if EC.is_runtime_exhausted_error err
+  then (
+    Keeper_registry.mark_turn_runtime_exhausted
+      ~observation_token:(Some observation_token)
+      ~base_path:config.Workspace.base_path
+      keeper_name;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string FsmEdgeTransitions)
+      ~labels:[ "edge", "kcl_to_ktc_exhaustion" ]
+      ();
+    Log.Keeper.warn
+      ~keeper_name
+      "%s: all runtimes exhausted (terminal) — last_err=%s runtime=%s"
+      keeper_name
+      (Agent_core.Error.to_string err)
+      runtime_id;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string Agent_coreExecutionErrors)
+      ~labels:
+        [ "keeper", keeper_name
+        ; "phase", Keeper_agent_core_execution_error_phase.(to_label Runtime_exhausted)
+        ]
+      ())
+  else (
+    Keeper_registry.set_turn_phase
+      ~observation_token:(Some observation_token)
+      ~base_path:config.Workspace.base_path
+      keeper_name
+      Keeper_registry.(Packed Turn_finalizing);
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string Agent_coreExecutionErrors)
+      ~labels:
+        [ "keeper", keeper_name
+        ; "phase"
+        , Keeper_agent_core_execution_error_phase.(to_label Terminal_non_exhaustion)
+        ]
+      ();
+    Log.Keeper.warn
+      ~keeper_name
+      "%s: turn terminal (non-exhaustion error) — err=%s runtime=%s"
+      keeper_name
+      (Agent_core.Error.to_string err)
+      runtime_id)

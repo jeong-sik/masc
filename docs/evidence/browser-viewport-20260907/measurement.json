@@ -1,0 +1,13 @@
+{
+  "result": "passed",
+  "proof_scope": "actual Firefox extension capture code; not new MASC OCaml binary or TUI",
+  "source_commit": "f08847bafe7c0c4cc5f05fda9baf011968da5875",
+  "browser_version": "155.0.1",
+  "tab_id": 1,
+  "png_bytes": 37237,
+  "png_sha256": "d08644b8b76435964cc771fb69ed1dd2efdaf57822fdade4872b130a18616957",
+  "title": "MASC browser visual proof",
+  "viewport_only": true,
+  "extension_connected_to_production": false,
+  "open_load_capture_ms": 191
+}

@@ -1,0 +1,5 @@
+{
+  "request_id": "ego-native-proof-14c9-marker-2",
+  "name": "ego-native-proof",
+  "message": "같은 Ego 공간 25의 기존 p1에서 제가 소유한 로컬 검증 앱 http://127.0.0.1:9451/ 을 여세요. 이 검증은 신청을 다시 제출하는 일이 아닙니다. 화면에 이미 보이는 대기 표식은 대기 검증 시작 버튼을 누른 때부터 130초가 지나야 사라지고 SDK 대기 검증 완료 안내가 나타납니다. 시작은 한 번만 하세요. 실제 UI와 표시의 selector를 관측한 뒤 시작 버튼 클릭과 그 대기 표식의 hidden 조건 대기를 하나의 native workflow로 실행하고 최종 snapshot을 받으세요. 조건 대기의 SDK timeout은 130초를 충분히 포함하도록 지정하세요. fixed sleep이나 별도 반복 관측으로 대기를 대신하지 마세요. 관측한 같은 clientId/tabId를 사용하고 새 탭이나 공간을 만들지 마세요. API나 서버 파일로 UI를 대신 조작하지 마세요. 최종 완료 문구를 알려주세요."
+}

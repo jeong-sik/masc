@@ -1,0 +1,20 @@
+{
+  "number": 45357,
+  "html_url": "https://github.com/jeong-sik/masc/pull/45357",
+  "state": "closed",
+  "merged": true,
+  "merged_at": "2026-10-23T07:00:59Z",
+  "merge_commit_sha": "3931736b436de0a143b95ca0dd54618c983a6d71",
+  "stack": {
+    "base": {
+      "ref": "main",
+      "sha": null
+    },
+    "id": 2462415,
+    "number": 45095,
+    "position": 16,
+    "size": 16
+  },
+  "head": "444ce2d57c7a2a74353fb3e8189cdde04d8f94b9",
+  "base": "76e6a04f69f5d3b810501ed4a43e67c6bff0a32a"
+}

@@ -1,0 +1,50 @@
+{
+  "at": "2026-10-21T17:12:47.190677+00:00",
+  "identity": "local-admin",
+  "method": "GET",
+  "path": "/api/v1/goals/confirmation?goal_id=goal-candle-host-eb484-source-qualification",
+  "request": null,
+  "http_status": 200,
+  "response": {
+    "goal": {
+      "id": "goal-candle-host-eb484-source-qualification",
+      "criterion_revision": "06bdfd581567682dfb71d92acbe501de",
+      "title": "Verify exact Candle host consumer source bytes and retain the measurement",
+      "metric": "Read candle-host-qualifier/measurement.json under the shared playground. The measurable value is verified_count. The file records a comparison of the complete checkout bytes with the exact eb484b0aabe699b46740bcb787a935fb67bbfa8e Git blob for lib/server/server_candle_appraiser.ml.",
+      "target_value": "1",
+      "due_date": null,
+      "priority": 3,
+      "phase": "awaiting_confirmation",
+      "last_review_note": null,
+      "last_review_at": "2026-10-21T17:12:39Z",
+      "created_at": "2026-10-21T16:57:38Z",
+      "updated_at": "2026-10-21T17:12:39Z"
+    },
+    "verification": {
+      "goal_id": "goal-candle-host-eb484-source-qualification",
+      "completion": {
+        "state": "proof_proven",
+        "verdict": {
+          "outcome": "proven",
+          "reason": null,
+          "request_id": "eb1b31232bf66ae2d1e677472024cfa6",
+          "criterion": {
+            "revision": "06bdfd581567682dfb71d92acbe501de",
+            "title": "Verify exact Candle host consumer source bytes and retain the measurement",
+            "metric": "Read candle-host-qualifier/measurement.json under the shared playground. The measurable value is verified_count. The file records a comparison of the complete checkout bytes with the exact eb484b0aabe699b46740bcb787a935fb67bbfa8e Git blob for lib/server/server_candle_appraiser.ml.",
+            "target_value": "1"
+          },
+          "verification_run_id": "01a15f73-38a3-7000-8e6d-41546e05b642",
+          "authority": {
+            "kind": "system_llm_agent",
+            "actor": "verifier_exact"
+          },
+          "evidence": "candle-host-qualifier/measurement.json\uc744 \uc77d\uc5c8\uc73c\uba70 verified_count=1\uc774 target 1\uc5d0 \ub3c4\ub2ec\ud569\ub2c8\ub2e4. \ud30c\uc77c\uc740 commit eb484b0aabe699b46740bcb787a935fb67bbfa8e\uc758 lib/server/server_candle_appraiser.ml \uc804\uccb4 \uccb4\ud06c\uc544\uc6c3 \ubc14\uc774\ud2b8\uc640 Git blob \ube44\uad50\ub97c SHA-256\uacfc \ud568\uaed8 \uae30\ub85d\ud558\uace0 \uc788\uc2b5\ub2c8\ub2e4.",
+          "recorded_at": "2026-10-21T17:12:39Z"
+        }
+      },
+      "submitted_evidence": [],
+      "updated_at": "2026-10-21T17:12:39Z"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+Testing `artifacts_upload'.
+This run has ID `LLD8LUCI'.
+
+  [OK]          upload route          0   requires an operator credential.
+  [OK]          upload route          1   stores the exact bytes.
+  [OK]          upload route          2   re-upload is idempotent.
+  [OK]          upload route          3   above the artifact limit is 413.
+  [OK]          upload route          4   not held to the general request cap.
+  [OK]          upload route          5   an empty upload is refused.
+  [OK]          upload route          6   a truncated upload is not stored.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/artifacts_upload'.
+Test Successful in 0.265s. 7 tests run.
+exit=0

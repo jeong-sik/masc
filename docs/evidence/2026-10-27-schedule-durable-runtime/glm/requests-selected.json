@@ -1,0 +1,59 @@
+{
+  "is_derivative": true,
+  "requests": [
+    {
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba",
+      "schedule_instance_id": "01a179fd-6a9b-7000-8661-5fe342eeab00",
+      "requested_by": {
+        "id": "schedule-audit-observer",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "scheduled_by": {
+        "id": "schedule-audit-observer",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "requested_at": 1793048013.467253,
+      "due_at": 1793048014.467253,
+      "payload": {
+        "kind": "masc.keeper_wake",
+        "body": {
+          "result_delivery": {
+            "policy": "none"
+          },
+          "keeper_name": "audit-live-glm",
+          "message": "This authorized scheduled job has TWO required effects on schedule_id \"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba\". First append exactly one note with body \"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9\" using masc_schedule_note_add. Then observe schedule_id \"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second\" with masc_schedule_notes_list until its note with exact body \"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND\" and author_id \"audit-live-glm\" is available. A missing schedule or missing note means the dependency has not arrived yet, not completion. Only AFTER observing that exact B note, append exactly one note to your original schedule_id \"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba\" with body \"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_AFTER_B\". Both effects belong to this original job. Do not write B's note yourself, create another schedule, send a message, invoke shell tools, or ask for confirmation. Preserve this unfinished request when another scheduled job arrives. Do not finish this job until both of its required notes have been written and read back."
+        }
+      },
+      "payload_digest": "3b41de06f4099ce221586d3f0f3100c3f58954ed3ebe417a6f06eaef296df64b"
+    },
+    {
+      "schedule_id": "audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second",
+      "schedule_instance_id": "01a179fd-bbaf-7000-9acd-cc2e0b2d3c73",
+      "requested_by": {
+        "id": "schedule-audit-observer",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "scheduled_by": {
+        "id": "schedule-audit-observer",
+        "kind": "automated_actor",
+        "display_name": null
+      },
+      "requested_at": 1793048034.223111,
+      "due_at": 1793048035.223111,
+      "payload": {
+        "kind": "masc.keeper_wake",
+        "body": {
+          "result_delivery": {
+            "policy": "none"
+          },
+          "keeper_name": "audit-live-glm",
+          "message": "Append exactly one durable note to your own schedule_id \"audit-real-model-8f9be1b94dc648e1b39d0c4c8398bfba-second\" with body \"SCHEDULE_EFFECT_5428f9e26ad04f32a832b2a49e98fec9_SECOND\" using masc_schedule_note_add, read it back, then finish this job. Do not perform the first scheduled job's remaining steps or write any note on its schedule. Do not create other work, send messages, invoke shell tools, or ask for confirmation."
+        }
+      },
+      "payload_digest": "dc440684f6d7aa65ce86b1eee58dd2d66c0f61a73bfb09cb2151c0a1fab017d9"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "qualified_commit": "253806288eecd560e9d932b6938265a843794fd2",
+  "cases": 9,
+  "focused_build_exit": 0,
+  "test_exit": 0,
+  "source_sha256": {
+    "lib/server/server_h2_gateway.ml": "71355738fc9d3f22508755574256d768cd87db7945f1ffcab5221010d9f2a846",
+    "lib/server/server_routes_http_routes_lane_addons.ml": "466cf6116e777b2dc25851832dc0da9122edbeed09f0bce3f34b36af2b294ce2",
+    "lib/server/server_routes_http_routes_lane_addons.mli": "fcdd9c353fd667ca67a08dfcf07efc18570a26719792fc1e947ebf35d35bb889",
+    "test/test_h2_request_body_admission.ml": "6c091d08406d5d58e929d1d67c1385b0fc06124da856f741a070af25d7c2763e"
+  },
+  "raw_sha256": {
+    "build.log": "bfc81d5e761c78d94e41c62f782a23c072692720d0e5379c95fedcd629aecbcc",
+    "tests.log": "f5cb2c693437f5e34a8d93fe3c379a8ee67f907599f962fab64c48ec57bd401f"
+  },
+  "binary_sha256": "f39598ec76f19fbadd9e9bf6ec8e50059795dc0308df819b664fd35889e4381c"
+}

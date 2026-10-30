@@ -1,0 +1,23 @@
+{
+  "attention_reasons": [
+    "approval_queue_unavailable",
+    "approval_pending",
+    "paused",
+    "runtime_attempts_exhausted",
+    "provider_runtime_error",
+    "fiber_unresolved",
+    "runtime_blocked",
+    "keepalive_stopped"
+  ],
+  "next_human_actions": [
+    "reset_runtime_state",
+    "resolve_approval",
+    "inspect_blocker_before_resume",
+    "inspect_runtime_attempts",
+    "inspect_provider_runtime_cause",
+    "inspect_turn_finalization",
+    "inspect_runtime_blocker",
+    "resume_or_review",
+    "inspect_latest_error"
+  ]
+}

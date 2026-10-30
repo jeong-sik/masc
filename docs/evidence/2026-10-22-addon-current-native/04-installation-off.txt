@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Lane Add-ons                                                                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│Installation details · native-current-ui-proof                                                                                                                │
+│Esc:back  E:edit TOML  r:refresh                                                                                                                              │
+│                                                                                                                                                              │
+│TOML installations · /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons · inventory│
+│ complete                                                                                                                                                     │
+│> native-current-ui-proof · /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons/nati│
+│ve-ui.toml                                                                                                                                                    │
+│   Configured off                                                                                                                                             │
+│   Off · worker cleanup confirmed                                                                                                                             │
+│   desired 55bcb1596678a58131f7bf0c223123f0ad88e464447ba6d48145cf5fcdb82931                                                                                   │
+│   applied none                                                                                                                                               │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Esc:back  E:edit TOML  Colon:palette  A:command  r:refresh
+ Choose a Keeper before writing · i:choose

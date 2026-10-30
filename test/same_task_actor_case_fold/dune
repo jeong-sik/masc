@@ -1,0 +1,9 @@
+; Current-law pin for Workspace_task_classify.same_task_actor (byte
+; equality; config ignored). Kept in its own directory so the shared
+; test/dune stays untouched — same layout as test/deps, test/jsonl_writer,
+; and test/sse_event, which dune discovers without an include line in
+; test/dune.
+(test
+ (name test_same_task_actor_case_fold)
+ (modules test_same_task_actor_case_fold)
+ (libraries masc_workspace unix))

@@ -1,0 +1,10 @@
+Raw workflow log SHA256: d8d7d22d7f155a5637245d49a2b709ea164433f924c77b94d3a36347d5dc27b4
+Source: https://github.com/jeong-sik/masc/actions/runs/40195195854
+
+test suite	Test	2026-10-25T12:58:34.6214714Z File "bin/masc_tui_keeper_chat_log.ml", lines 196-204, characters 4-28:
+test suite	Test	2026-10-25T12:58:34.6223242Z Error (warning 8 [partial-match]): this pattern-matching is not exhaustive.
+test suite	Test	2026-10-25T12:58:34.6224071Z   Here is an example of a case that is not matched: Thinking_snapshot _
+test suite	Test	2026-10-25T12:58:56.8850889Z File "bin/masc_tui_types.ml", lines 4899-4924, characters 2-82:
+test suite	Test	2026-10-25T12:58:56.8856068Z Error (warning 8 [partial-match]): this pattern-matching is not exhaustive.
+test suite	Test	2026-10-25T12:58:56.8856536Z   Here is an example of a case that is not matched: Thinking_snapshot _
+test suite	Test	2026-10-25T12:58:56.9774895Z ##[error]Process completed with exit code 1.

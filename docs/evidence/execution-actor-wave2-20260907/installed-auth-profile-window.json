@@ -1,0 +1,262 @@
+{
+  "before": {
+    "release_version": "0.33.0",
+    "binary_version": "0.33.0",
+    "repo_version": "0.33.0",
+    "commit": "01ef94a84037f1aff6cf57d3f3919131e24a4f6f",
+    "commit_source": "embedded",
+    "binary_commit": "01ef94a84037f1aff6cf57d3f3919131e24a4f6f",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "3682cafbe7ffa434bf2707528cdc396ab8654626387f06ffa3f45dc96c2eb188",
+    "binary_commit_unix_ts": 1788773692.0,
+    "binary_commit_age_seconds": 1248,
+    "repo_head_commit": "01ef94a840",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1788773692.0,
+    "repo_head_commit_age_seconds": 1248,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "runtime_instance_id": "01a07b40-e313-7000-83b5-9f81102689ad",
+    "started_at": "2026-09-07T09:44:05Z",
+    "uptime_seconds": 695
+  },
+  "after": {
+    "release_version": "0.33.0",
+    "binary_version": "0.33.0",
+    "repo_version": "0.33.0",
+    "commit": "01ef94a84037f1aff6cf57d3f3919131e24a4f6f",
+    "commit_source": "embedded",
+    "binary_commit": "01ef94a84037f1aff6cf57d3f3919131e24a4f6f",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "3682cafbe7ffa434bf2707528cdc396ab8654626387f06ffa3f45dc96c2eb188",
+    "binary_commit_unix_ts": 1788773692.0,
+    "binary_commit_age_seconds": 1258,
+    "repo_head_commit": "01ef94a840",
+    "repo_head_commit_source": "runtime_repo_head",
+    "repo_head_commit_unix_ts": 1788773692.0,
+    "repo_head_commit_age_seconds": 1258,
+    "executable_path": "/Users/dancer/.local/bin/masc",
+    "executable_dir": "/Users/dancer/.local/bin",
+    "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "runtime_instance_id": "01a07b40-e313-7000-83b5-9f81102689ad",
+    "started_at": "2026-09-07T09:44:05Z",
+    "uptime_seconds": 705
+  },
+  "sampled_pid": 11228,
+  "profiler_returncode": 0,
+  "samples": [
+    {
+      "i": 0,
+      "ms": 444.426083,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.188, cache_compute;dur=437.718"
+    },
+    {
+      "i": 1,
+      "ms": 6.983792,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.253, cache_compute;dur=0.151"
+    },
+    {
+      "i": 2,
+      "ms": 6.727583,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.314, cache_compute;dur=0.209"
+    },
+    {
+      "i": 3,
+      "ms": 7.17825,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.268, cache_compute;dur=0.133"
+    },
+    {
+      "i": 4,
+      "ms": 7.171875,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.261, cache_compute;dur=0.196"
+    },
+    {
+      "i": 5,
+      "ms": 6.825375,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.301, cache_compute;dur=0.231"
+    },
+    {
+      "i": 6,
+      "ms": 7.609125,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.276, cache_compute;dur=0.151"
+    },
+    {
+      "i": 7,
+      "ms": 7.246417,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.253, cache_compute;dur=0.150"
+    },
+    {
+      "i": 8,
+      "ms": 7.233291,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.288, cache_compute;dur=0.247"
+    },
+    {
+      "i": 9,
+      "ms": 7.005334,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.397, cache_compute;dur=0.294"
+    },
+    {
+      "i": 10,
+      "ms": 6.750875,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.255, cache_compute;dur=0.300"
+    },
+    {
+      "i": 11,
+      "ms": 7.030916,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.300, cache_compute;dur=0.225"
+    },
+    {
+      "i": 12,
+      "ms": 7.488625,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.199, cache_compute;dur=0.161"
+    },
+    {
+      "i": 13,
+      "ms": 12.20675,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.847, cache_compute;dur=0.889"
+    },
+    {
+      "i": 14,
+      "ms": 268.782208,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=34.799, cache_compute;dur=5.418"
+    },
+    {
+      "i": 15,
+      "ms": 15.057292,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.875, cache_compute;dur=0.647"
+    },
+    {
+      "i": 16,
+      "ms": 8.9005,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.454, cache_compute;dur=0.311"
+    },
+    {
+      "i": 17,
+      "ms": 10.670208,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=1.254, cache_compute;dur=0.443"
+    },
+    {
+      "i": 18,
+      "ms": 8.411833,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.395, cache_compute;dur=0.364"
+    },
+    {
+      "i": 19,
+      "ms": 8.887417,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.373, cache_compute;dur=0.514"
+    },
+    {
+      "i": 20,
+      "ms": 8.2955,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.630, cache_compute;dur=0.186"
+    },
+    {
+      "i": 21,
+      "ms": 48.067209,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=26.018, cache_compute;dur=2.306"
+    },
+    {
+      "i": 22,
+      "ms": 9.444,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.393, cache_compute;dur=0.288"
+    },
+    {
+      "i": 23,
+      "ms": 8.694084,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.570, cache_compute;dur=0.341"
+    },
+    {
+      "i": 24,
+      "ms": 8.447125,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.615, cache_compute;dur=0.280"
+    },
+    {
+      "i": 25,
+      "ms": 8.733458,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.356, cache_compute;dur=0.329"
+    },
+    {
+      "i": 26,
+      "ms": 9.165,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.346, cache_compute;dur=0.534"
+    },
+    {
+      "i": 27,
+      "ms": 8.341792,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.333, cache_compute;dur=0.299"
+    },
+    {
+      "i": 28,
+      "ms": 10.199125,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.472, cache_compute;dur=0.573"
+    },
+    {
+      "i": 29,
+      "ms": 8.61875,
+      "status": 200,
+      "bytes": 1414110,
+      "timing": "cache_lookup;dur=0.494, cache_compute;dur=0.288"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+ Dashboard  ▸Work  Keepers  Usage  Board  Workspace  System                                                             
+                                                                                                                        
+   MASC Approvals (0)  03:32:32  HTTP [connected] · reading dashboard +2                                                
+    [w] Workspace: Let Auto Judge decide  |  [e] Outside services: Ask me for each decision                             
+    Always-allow rules: none                                                                                            
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    (no pending approvals)                                                                                              
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+    [?] Questions waiting on you (0) · a:open answers                                                                   
+    none -- no Keeper is waiting on a decision                                                                          
+  TUI f7632e7 ≠ server 1b5479e (restart masc)  j/k:move  y / n:decide  w:Workspace mode  e:Outside mode  [ / ]:ask  …?  
+ › to imp   (i to write)                                                                                                

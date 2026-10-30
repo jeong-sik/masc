@@ -1,0 +1,32 @@
+ Dashboard  Work  Keepers  Usage  Board  ▸Workspace  System
+
+   MASC Workspace (1)  15:32:06  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ┌ Repositories · j/k select                                                ┐  ┌ masc                               ┐
+  │ NAME               BRANCH       STATUS    SYNC   PATH                    │  │ Path: /srv/masc/workspace/masc     │
+  │ masc               main         ready     auto   /srv/ma…/workspace/masc │  │ Stored as: workspace/masc          │
+  │                                                                          │  │ Keepers: alpha                     │
+  │                                                                          │  └────────────────────────────────────┘
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  │                                                                          │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  j/k:scroll  H:recent activity  PgUp/PgDn:page  Home/End:top/bottom  Enter:browse  Left / Esc:back  q:quit  …?
+ › to alpha   (i to write)

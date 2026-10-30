@@ -1,0 +1,11 @@
+Focused TUI build: PASS
+Ruff touched Python fixtures: PASS
+Pyright:63 pre-existing errors; normalized diagnostic deltaNONE after line mapping; tracked#40984
+Dashboard complete overview PTY suite: PASS
+Known held/gate cards beside confirmqueue failure: PASS
+Keepers rosters PTY audit: PASS on final candidate
+BROWSER_PTY_FRAME_MATCH=PASS dashboard-loading-120
+BROWSER_PTY_FRAME_MATCH=PASS dashboard-unread-80
+BROWSER_PTY_FRAME_MATCH=PASS dashboard-empty-80
+All-source isolated partial failure scenario: FAIL (held-only fixture also confirmqueue unread); same failure reproduced with original fixture and earlier candidate; tracked#40989
+Accepted-but-pending receipt scenario: FAIL before action, initial operator card absent; tracked#40989

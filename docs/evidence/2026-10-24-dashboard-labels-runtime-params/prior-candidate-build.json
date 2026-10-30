@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "tested_head": "46b60f3352fb0cd009324620bc0b207d582af0b7",
+  "four_product_run": {
+    "run_id": 40070267421,
+    "workflow_head": "902f3fe2701efdc4537b67ad6d22868c7167c1a4",
+    "actual_checkout": "46b60f3352fb0cd009324620bc0b207d582af0b7",
+    "compile_job": 120801997741,
+    "settle_job": 120802847319,
+    "conclusion": "success",
+    "build_step": "success, executed not skipped",
+    "targets": [
+      "bin/main_eio.exe",
+      "bin/masc_tui.exe",
+      "bin/masc_browser_host.exe",
+      "bin/deployment_preflight_helper.exe"
+    ],
+    "source_receipt_cache": "MISS",
+    "source_input_digest": "9740a23bbdf89d5736013cfacf64c6d996dbef1a9f457f3fcecbb0dc0d77a6fb",
+    "dune_artifact_cache_restored_from": "main-dune-v1-ubuntu24-20261012.334.1-3c0946eac3e406876c24d8601c2dfd5ec2fc3298",
+    "toolchain_identity_step": "success; no override",
+    "artifact": {
+      "artifact_id": 12550189445,
+      "zip_bytes": 370,
+      "zip_sha256": "575cf24513b56b7383fa86b7964a350a2742ad32ebcb0477f597dad4879b02b3",
+      "receipt_bytes": 309,
+      "receipt_sha256": "b3d1636306d763cda7c1854aca5dede5d04e82f61994222a31eaee70cebd38b0",
+      "receipt": {
+        "schema_version": 1,
+        "sha": "46b60f3352fb0cd009324620bc0b207d582af0b7",
+        "pr": "45719",
+        "actor": "jeong-sik",
+        "compile": "success",
+        "checks_passed": true,
+        "run_id": "40070267421",
+        "run_attempt": "1",
+        "toolchain_override": false,
+        "proof_only": false,
+        "workflow_ref": "refs/heads/main"
+      }
+    }
+  },
+  "whole_tree_check_run": {
+    "run_id": 40070270792,
+    "job_id": 120802006720,
+    "actual_checkout": "46b60f3352fb0cd009324620bc0b207d582af0b7",
+    "command": "dune build @check",
+    "conclusion": "failure",
+    "step": "executed, not skipped",
+    "compiler_error": "test/test_dashboard_labels.ml:36: Lib.Runtime_params.set param value -> Unbound module Lib.Runtime_params",
+    "test_suites_executed": false,
+    "original_firefox_error_reported": false,
+    "generated_firefox_individual_compilation_success_claim": false,
+    "limit": "No whole-tree success. The absence of the old Firefox diagnostic is not a separate successful probe execution."
+  },
+  "decoded_log_receipts": [
+    {
+      "scope": "four-products",
+      "job_id": 120801997741,
+      "decoded_log": "job-120801997741.log",
+      "decoded_log_bytes": 77683,
+      "decoded_log_sha256": "3158792e9d4a2666f2387aea44973ad2e4b729e53c380c0519b6cf4a9f96ee48"
+    },
+    {
+      "scope": "settle",
+      "job_id": 120802847319,
+      "decoded_log": "job-120802847319.log",
+      "decoded_log_bytes": 8979,
+      "decoded_log_sha256": "7d6d2771609eb0a355020aa3b8c2fb1b0604d7cdef96157a1be7cb0813b35cd1"
+    },
+    {
+      "scope": "whole-tree-check",
+      "job_id": 120802006720,
+      "decoded_log": "job-120802006720.log",
+      "decoded_log_bytes": 82657,
+      "decoded_log_sha256": "140e11a5c73c6428ad080f34a7039b5e377b2275372fac16f5bcf1546920689c"
+    }
+  ],
+  "public_readback": "https://github.com/jeong-sik/masc/pull/45719#issuecomment-6381054558",
+  "limits": [
+    "These executions tested the prior published 46b60f source, not this new namespace repair.",
+    "Four products actually built; full-tree @check failed. Receipt hashes are not executable binary hashes.",
+    "No test suite, install or live runtime effect was measured."
+  ]
+}

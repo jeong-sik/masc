@@ -1,0 +1,29 @@
+{
+  "recorded_at": "2026-10-25T01:17:00.789746+00:00",
+  "candidate_code_sha": "17583b006eaf0823587ba07a27ad50889ef8d498",
+  "candidate_base_sha": "b31260ebda2134c3c4b2527ee5f9455ddfd600f1",
+  "pr": 45874,
+  "stack": 45750,
+  "latest_full_regression": {
+    "run_id": null,
+    "head": null,
+    "TARGET_SUITES": null,
+    "state": "not observed in this campaign; not run on this candidate"
+  },
+  "selected_native": {
+    "run_id": 40149490208,
+    "head": "17583b006eaf0823587ba07a27ad50889ef8d498",
+    "TARGET_SUITES": [
+      "test_verification",
+      "test_completion_repair_delivery",
+      "test_keeper_claude_code_runtime"
+    ],
+    "state": "completed PASS: three suites239tests, no FAIL/timeout",
+    "result": "followup-17583b00-native-result.json"
+  },
+  "source_review_scope": "Independent code PASS at17583/baseb312 and full PR source/doc PASS atce4a458e1ef5703a5bd7b0ac97f2b2f828a2b297/baseb312. Later native-result documentation delta requires its own final source review. These are not GitHub approval or whole-stack approval.",
+  "main_goal": "verifying/proof_pending; no human confirmation",
+  "installation": "not performed",
+  "updated_at": "2026-10-25T01:25:20.426726+00:00",
+  "github_approval": "approve-guard --check refused current authenticated PR author; no approval posted or override attempted"
+}

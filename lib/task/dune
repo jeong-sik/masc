@@ -1,0 +1,64 @@
+(include_subdirs no)
+
+(library
+ (name masc_task_handlers)
+ (public_name masc.task_handlers)
+ (wrapped true)
+ (modules
+  anti_rationalization
+  planning_eio
+  task_goal_assignment
+  task_history_page
+  tool_task
+  tool_task_args
+  tool_task_completion_review
+  tool_task_contract_gate
+  tool_task_handlers
+  tool_task_no_eligible
+  tool_task_payloads
+  tool_task_schemas
+  tool_task_schemas_toml
+  tool_task_transition_rejection
+  workflow_rejection_payload)
+ (flags
+  (:standard -w -4 -w +37))
+ (libraries
+  yojson
+  unix
+  eio
+  time_compat
+  fs_compat
+  masc.dated_jsonl
+  masc.activity_graph
+   masc.agent_core.digest
+  base64
+  masc_random_id
+  masc.config
+  masc_types
+  masc_core
+  masc_log
+  masc_workspace
+  masc.masc_tool_dispatch
+  ; tool_task_schemas_toml reads config/tools/masc_*.toml from the
+  ; binary-embedded config tree.
+  masc.embedded_config
+  masc.masc_tool_surface
+  masc.tool_types
+  ; anti_rationalization projects verifier lookup results through the shared
+  ; leaf; the root masc library cannot be a dependency here because it
+  ; depends on this library.
+  masc.tool_projection
+  masc.masc_tool_blob_store
+  masc.config_dir_resolver
+  masc.prompt_registry
+  masc.skill_reference
+  masc.skill_snapshot
+  masc.skill_snapshot_service
+  masc_goal
+  masc.agent_core.llm_provider
+  masc.agent_core
+  ; anti_rationalization reads the Domain A model-absence classifier
+  ; (Keeper_runtime_failure_route.core_error_is_model_absent).
+  masc.keeper_runtime)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_tla)))

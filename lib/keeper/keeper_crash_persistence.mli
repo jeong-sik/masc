@@ -1,0 +1,39 @@
+(** Keeper_crash_persistence -- Durable crash event store.
+
+    Non-yielding enqueue + background drain fiber.
+    Dated_jsonl under [<base>/.masc/keepers/<name>/crash-events/].
+    Callers pass the workspace's state root
+    ([Workspace.dated_store_root config]).
+    Separate from Keeper_registry to preserve its non-yielding contract.
+
+    @since 3.0.0 *)
+
+(** Non-yielding: Queue.push only. Safe to call from keeper_registry
+    or keeper_supervisor catch blocks without breaking fiber atomicity.
+    [store_root] is the workspace's state root. *)
+val enqueue_record :
+  store_root:Dated_jsonl.Store.root ->
+  name:string ->
+  ts:float ->
+  reason:string ->
+  restart_count:int ->
+  unit
+
+(** Start the background drain fiber and the flush that runs when [sw] closes.
+    Call once from server bootstrap.
+
+    The fiber drains the queue on its own interval and writes to Dated_jsonl.
+    It is a daemon, so the switch cancels it; the switch's release hook writes
+    whatever is still queued at that point. Both write one event per
+    cancellation-protected step, so a record is never taken from the queue
+    without reaching the store. *)
+val start_drain_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
+
+(** Read recent crash events from disk. Performs I/O -- call from
+    dashboard handlers, not from keeper_registry context.
+    [store_root] is the workspace's state root. *)
+val recent_crashes :
+  store_root:Dated_jsonl.Store.root ->
+  name:string ->
+  max_entries:int ->
+  Yojson.Safe.t list

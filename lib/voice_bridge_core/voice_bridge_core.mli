@@ -1,0 +1,185 @@
+(** Voice_bridge_core — voice config, request timeout, local playback,
+    and TTS helper utilities shared by {!Voice_bridge}.
+
+    Internal helpers ([log_prefix], [split_path_env],
+    [find_executable_in_path], [local_playback_argvs],
+    the dedup [last_playback] state, the playback
+    mutex,
+    [resolved_base_path_opt], [strip_provider_metadata], and
+    [provider_metadata_keys]) are hidden — callers consume the
+    public configuration / URI / playback / metadata-projection
+    surface plus the [log_*] helpers (used by {!Voice_bridge}'s
+    higher-level handlers to keep tag prefixes consistent).
+
+    @since voice extraction (issue cluster #voice-bridge-split). *)
+
+(** {1 Request timeout} *)
+
+val playback_dedup_window_sec : float
+
+val request_timeout_seconds : unit -> float
+
+(** {1 Voice config} *)
+
+val default_agent_voices : unit -> (string * string) list
+(** [agent_id -> voice_id] pairs from {!Voice_runtime_overlay}, used as a
+    fallback when the JSON config is missing. *)
+
+val agent_voices : unit -> (string * string) list
+(** Effective [agent_id -> voice_id] pairs from the loaded config,
+    falling back to {!default_agent_voices}. *)
+
+val tuning_for_agent : string -> Voice_config.voice_tuning
+(** Per-agent TTS tuning ([stability] / [similarity_boost] /
+    [style]); falls back to the [Voice_config] defaults when the
+    config fails to load. *)
+
+val local_playback_enabled_for_agent : string -> bool
+(** [true] iff the loaded config enables local audio playback for
+    [agent_id]. *)
+
+val get_voice_for_agent : string -> string
+(** Resolve the [agent_id]'s voice via {!agent_voices}, defaulting
+    to ["Sarah"] when no mapping is registered. *)
+
+(** {1 URI / endpoint resolution} *)
+
+val voice_mcp_uri : unit -> Uri.t
+(** MCP voice URL from the configured endpoint, falling back to
+    [default_voice_uri "/mcp"] on any resolution failure. *)
+
+(** {1 Playback timeout} *)
+
+val playback_timeout_margin_sec : float
+(** Extra seconds granted on top of the probed audio duration before the
+    player subprocess is killed. *)
+
+val unknown_duration_playback_timeout_sec : float
+(** Player subprocess timeout when the audio duration cannot be probed.
+    Generous on purpose: killing a player mid-play used to cascade into the
+    fallback chain replaying the same file from 0:00. *)
+
+val parse_afinfo_duration : string -> float option
+(** Parse the ["estimated duration: 12.345 sec"] line from [afinfo] output. *)
+
+val parse_ffprobe_duration : string -> float option
+(** Parse the bare-seconds stdout of
+    [ffprobe -show_entries format=duration -of default=noprint_wrappers=1:nokey=1]. *)
+
+val playback_timeout_sec_for : duration_sec:float option -> float
+(** [duration +. playback_timeout_margin_sec] when the duration is known,
+    {!unknown_duration_playback_timeout_sec} otherwise. *)
+
+val audio_duration_seconds : audio_file:string -> float option
+(** Probe the audio duration via [afinfo] (macOS) or [ffprobe]. [None] when
+    neither tool is available or parsing fails. *)
+
+(** {1 Local playback} *)
+
+val with_voice_output_turn : agent_id:string -> (unit -> 'a) -> 'a
+(** Serialize a speaking turn for transports whose call includes audible output.
+    Uses the same distributed playback lock as {!run_local_playback} so a voice
+    MCP session and direct TTS do not overlap across processes. *)
+
+val is_dedup_hit : agent_id:string -> message:string -> bool
+(** [true] iff [agent_id] and [message] are both exactly equal
+    ([String.equal]) to the most recent recorded playback and that
+    playback is within {!playback_dedup_window_sec}. The text is
+    compared, not its hash: two different lines that share a
+    [Hashtbl.hash] are two lines. Exposed so {!Voice_bridge} can
+    short-circuit before the playback mutex is acquired (the mutex'd
+    recheck inside {!run_local_playback} closes the residual
+    check-then-act race). *)
+
+val record_playback : agent_id:string -> message:string -> unit
+(** Remember [(agent_id, message)] as the most recent playback, opening a
+    {!playback_dedup_window_sec} window in which {!is_dedup_hit} answers
+    [true] for exactly that pair. {!run_local_playback} calls it inside the
+    playback lock before playing; exposed so the dedup decision can be
+    tested without audio. *)
+
+val run_local_playback :
+  sw:Eio.Switch.t ->
+  agent_id:string ->
+  message:string ->
+  audio_file:string ->
+  unit ->
+  [ `Dedup_hit | `Opened of float | `Played of float | `Skipped of string | `Failed of string ]
+(** Distributed-lock-protected local audio playback with a 30s dedup window
+    keyed on [(agent_id, hash message)]. The lock is backed by an OS-level
+    flock on the host runtime directory so multiple MASC processes on the same
+    host cannot talk over each other. Returns:
+
+    - [`Dedup_hit] — another fiber already played this same message
+      recently (check happens inside the playback mutex to close the
+      check-then-act race);
+    - [`Skipped reason] — playback was intentionally skipped, for example
+      because local playback is disabled for the agent;
+    - [`Failed reason] — local playback was requested but no candidate player
+      succeeded, or the player was killed by the playback timeout. A timeout
+      kill is terminal: the fallback chain is NOT tried, because partial audio
+      has likely played and a fallback player would replay the same file from
+      0:00 (the audible-repeat amplifier in the 2026-06-10 voice incident);
+    - [`Opened duration_seconds] — the file was handed to macOS [open(1)] after
+      all blocking players failed. This is a GUI handoff fallback; playback
+      completion is not observable from the runtime;
+    - [`Played duration_seconds] — playback succeeded. *)
+
+(** {1 Filesystem layout} *)
+
+val masc_base_dir : unit -> string
+(** [<base_path>/.masc/]. Resolves [base_path] through the canonical workspace
+    resolver. Raises [Invalid_argument] when no workspace can be resolved. *)
+
+val ensure_audio_dir : unit -> unit
+(** [mkdir -p <masc_base_dir>/audio]. *)
+
+type clip_format =
+  | Mp3
+  | Wav
+(** The container a synthesized clip is written in.
+
+    The filename is [<token><extension>] and that extension is what the
+    writer hands to its encoder, so it has to be true. Measured 2026-09-13
+    on macOS 26: [say -o clip.mp3] exits 0 and writes a 16-byte empty MP3
+    tag frame -- silence with no error and no log -- while [say -o clip.wav]
+    with no format flag fails loudly instead. Say writes WAVE; the HTTP
+    providers answer MP3. *)
+
+val clip_formats : clip_format list
+(** Every format a clip can be stored in, so a reader resolving a token
+    covers all of them rather than assuming one. *)
+
+val clip_extension : clip_format -> string
+val clip_content_type : clip_format -> string
+
+val audio_dir : unit -> string
+(** [<masc_base_dir>/audio] -- where clips are written and served from. *)
+
+val find_clip : dir:string -> token:string -> (string * clip_format) option
+(** The clip [token] names under [dir], and the format it is stored in.
+    [None] when no format has it: never synthesized, or reaped. *)
+
+val clip_of_path : string -> (string * clip_format) option
+(** The token a clip path carries and the format its extension names -- the
+    reverse of {!find_clip}. [None] when the path is not a clip.
+
+    Both halves come back together because a caller that has the token also
+    has to say what the bytes are, and the extension it just matched is the
+    answer. Handing back the token alone left that to a guess, and the guess
+    was wrong for every [say] clip. *)
+
+(** {1 Structured logging helpers} *)
+
+val log_info : string -> unit
+val log_error : string -> unit
+(** {1 TTS payload projection} *)
+
+val append_provider_metadata :
+  Yojson.Safe.t -> Voice_config.endpoint -> Yojson.Safe.t
+(** Drop provider-specific metadata fields ([provider_name] /
+    [provider_kind] / [provider_family] / [provider_auth] /
+    [endpoint_id] / [endpoint_url]) from a TTS response so the
+    public voice APIs stay vendor-neutral. The [endpoint] argument
+    is currently unused but kept in the signature for forward
+    compatibility. *)

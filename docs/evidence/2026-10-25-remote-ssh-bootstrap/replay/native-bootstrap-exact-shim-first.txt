@@ -1,0 +1,11 @@
+Endpoint bootstrap_proof (127.0.0.1:65479) ED25519 host-key fingerprint:
+SHA256:MlAet0f4elnlFVGg4/vxQqtfvzMkecAITbrQUI8Z8yo
+
+Verify it out-of-band, then retype exactly: /usr/bin/ssh-copy-id: INFO: Source of key(s) to be installed: "/tmp/mssh-bootstrap-native-20261025/workspace/.masc/ssh/bootstrap.key.pub"
+/usr/bin/ssh-copy-id: INFO: attempting to log in with the new key(s), to filter out any that are already installed
+
+/usr/bin/ssh-copy-id: WARNING: All keys were skipped because they already exist on the remote system.
+		(if you think this is a mistake, you may want to use -f option)
+
+[2026-10-25 23:45:00] [INFO] [Keeper] remote SSH dispatch enabled endpoint=bootstrap_proof host=127.0.0.1 port=65479
+SSH endpoint bootstrap_proof provisioned. shim=/private/tmp/mssh-static-shim-327fd90/masc-exec-shim-linux-arm64 keepers=1

@@ -1,0 +1,67 @@
+(** Startup removal of retained continuations no durable Owner relation names.
+
+    Semantic executions and trace-scoped input checkpoint owners retain exact
+    payloads under [<session>/accepted-checkpoints/<sha256>.json]. An input
+    owner survives operation settlement even when pending_input is None.
+
+    The file is written before the execution naming it commits. The pass is
+    therefore run only by the server process that holds the BasePath writer
+    lease, before its scheduler starts and before any keeper runs, when no
+    retention can be in flight.
+
+    The Owner removes a file as soon as a confirmed journal commit stops
+    naming it ({!Keeper_chat_operation_store.take_released_checkpoints}). This
+    pass removes what a crash between such a commit and its removal, an
+    uncertain commit, or a failed removal left. *)
+
+type report =
+  { live_references : int  (** distinct checkpoints named by semantic or input owners *)
+  ; removed : int
+  ; removed_bytes : int
+  ; failures : string list  (** files that could not be removed, with the cause *)
+  }
+
+type error =
+  | Prior_input_history_unavailable of { path : string }
+  | Store_missing of { path : string }
+      (** A keeper with metadata has no operation store, with or without its
+          directory, so what that keeper names is unknown and nothing was
+          removed. An owner that has not started yet and a store that was
+          moved aside look the same here; read as naming nothing, moved stores
+          cost every retained file they named (#45076). A keeper whose owner
+          never starts keeps the pass skipped, and the startup log names that
+          store. A directory with neither metadata nor a store names
+          nothing. *)
+  | Store_unreadable of { path : string; detail : string }
+      (** A keeper's operation store could not be read, so the live set is
+          unknown and nothing was removed. One unreadable store stops the
+          whole pass, including a store whose last transaction left a hot
+          journal that a read-only open cannot roll back; the next startup
+          after that store opens tries again. *)
+  | Metadata_unreadable of { path : string; detail : string }
+      (** Whether a candidate's metadata entry exists could not be told, so
+          whether a keeper of that name is registered is unknown and nothing
+          was removed. Every entry under [keepers/] is such a candidate. *)
+  | Keeper_shares_store_directory of { keeper_name : string }
+      (** A keeper is named like a store kept directly under [keepers/]
+          ([Common.Keepers_root_scoped]), so its directory cannot be told
+          apart from that store's and nothing was removed. Without such a
+          keeper, those directories are skipped as stores. *)
+
+val error_to_string : error -> string
+
+(** What the keepers' operation stores hold outstanding. *)
+type owner_records =
+  { input_checkpoints : Keeper_checkpoint_ref.t list
+  ; semantic_executions : Keeper_semantic_execution.t list
+  }
+
+(** Every keeper's operation store under [<runtime_root>/keepers], read as
+    {!run} reads them, with the same failures. *)
+val owner_records : runtime_root:string -> (owner_records, error) result
+
+(** [run ~runtime_root] reads every keeper's operation store under
+    [<runtime_root>/keepers], following symlinks as the runtime does, and
+    removes the retained files under [<runtime_root>/traces] that none of them
+    names. The session tree is walked without following symlinks. *)
+val run : runtime_root:string -> (report, error) result

@@ -1,0 +1,12 @@
+Testing `Librarian runtime store scope'.
+This run has ID `F36WM4ZX'.
+
+  [OK]          store scope          0   progress is not Keeper metadata.
+  [OK]          store scope          1   purge stops the running Librarian un...
+  [OK]          store scope          2   purge removes memory events.
+  [OK]          store scope          3   whole Keeper purge removes only its ...
+  [OK]          store scope          4   reading absent stores creates no dir...
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/Librarian runtime store scope'.
+Test Successful in 0.111s. 5 tests run.
+exit=0

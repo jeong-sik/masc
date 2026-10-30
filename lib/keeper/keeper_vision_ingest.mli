@@ -1,0 +1,125 @@
+(** RFC-keeper-vision-delegation-tool §2.3 — write-boundary image eviction.
+
+    Replaces an [Agent_core.Types.Image] content block with a text placeholder
+    whose handle keys the raw bytes in the per-keeper
+    {!Multimodal.Vision_artifact_store}. Enforced at BOTH ingestion entry sites
+    for lanes that cannot carry inline images:
+
+    - Site 1 (fresh input, [Eager]): the turn caller validates and stores every
+      image, then runs at most one bounded [analyze_image] vision sub-call for
+      the first valid image and embeds the reading in the placeholder.
+    - Site 2 (checkpoint write, [Store_only]): the persistence boundary evicts
+      with a handle-only placeholder (no provider call on the turn fiber); also
+      migrates images already persisted in pre-existing checkpoints.
+
+    Gated by {!delegates_media} on the assigned lane, not by a stored setting:
+    a lane with a candidate that takes provider content blocks and declares
+    image input keeps its images (RFC-0265 reroutes there, and seeing the pixels
+    beats any reading); a lane with no such candidate evicts instead of letting
+    RFC-0265 drop the image. Claude Code and Codex carry images; Antigravity
+    carries text only. Per-candidate fallback projection handles a later
+    text-only candidate after a native image candidate fails. Idempotent: a [Text]
+    placeholder is not an [Image], so re-running is a no-op. *)
+
+type mode =
+  | Eager  (** site 1: run the vision sub-call now, embed the reading *)
+  | Store_only  (** site 2: store + handle-only placeholder, no provider call *)
+
+val eager_read_eviction_reason_of_outcome
+  :  Keeper_vision_tool.vision_outcome
+  -> string option
+(** Metric reason projection for failed [Eager] vision sub-calls. [Vo_ok] has
+    no error reason; every non-ok outcome maps to a finite eviction reason so
+    provider failures, timeouts, invalid requests, and invalid structured
+    responses do not collapse into one counter bucket. *)
+
+val delegates_media : runtime_id:string -> bool
+(** Whether the lane [runtime_id] resolves to needs its images read for it.
+    [false] as soon as one candidate takes an [Image] itself — RFC-0265 then
+    reroutes the turn to that candidate and the answering model sees the pixels.
+    A candidate takes one when its transport carries images (Agent Core content
+    blocks, the Claude Code stream-json array, or the Codex turn/start input
+    list) AND its model declares image input; Antigravity sends prompt text
+    only, so an [Image] cannot reach it whatever the model declares. [true] when no candidate qualifies,
+    and for an id that resolves to no lane — evicting keeps the image, and the
+    alternative (RFC-0265 [No_capable_runtime]) drops it. *)
+
+val evict_blocks
+  :  ?base_path:string
+  -> media_store:Agent_core.History.media_store
+  -> mode:mode
+  -> delegate:bool
+  -> keeper_name:string
+  -> Agent_core.Types.content_block list
+  -> Agent_core.Types.content_block list
+(** Site 1. Evict every [Image] in the list when [delegate]; return the list
+    unchanged otherwise. A [Stored] image is read from [media_store]; images
+    are fail-closed before the kept store on unavailable bytes, size, and
+    media type. An [Image] whose source is a
+    {!Agent_core.Types.media_source} [Url] or [File_id] is a reference,
+    not a payload: it passes through unchanged (counted [ok] under reason
+    [reference_passthrough]), because the serializers put the reference on the
+    wire natively and there are no inline pixels to trade for a handle.
+    [Eager] consults the
+    fiber-local Eio context for one bounded sub-call; with none present (tests)
+    it falls back to an unread placeholder, so eviction still holds. *)
+
+val evict_message
+  :  ?base_path:string
+  -> media_store:Agent_core.History.media_store
+  -> mode:mode
+  -> delegate:bool
+  -> keeper_name:string
+  -> Agent_core.Types.message
+  -> Agent_core.Types.message
+(** Site 2. Same transform applied to a message's content blocks at the
+    checkpoint write boundary. Use [Store_only] here — checkpoint writes must
+    not block the turn fiber on a provider call. *)
+
+type image_projection =
+  { blocks : Agent_core.Types.content_block list
+  ; delegated_images : int
+  }
+
+val fallback_projector
+  : ?base_path:string
+  -> ?exclude_runtime_ids:string list
+  -> media_store:Agent_core.History.media_store
+  -> keeper_name:string
+  -> unit
+  -> mode:mode
+  -> Agent_core.Types.content_block list
+  -> image_projection
+(** One projector per lane walk. Unsupported inline images become durable
+    artifact/read placeholders, including images nested in tool results.
+    Repeated candidates reuse the same result instead of calling vision again.
+    URL and file-id carriers become explicit unread reference text; this does
+    not fetch them or claim that the artifact-only analyze_image tool can.
+    Project the current goal with [Eager] before historical [Store_only] input.
+    The original blocks remain available to later image-capable candidates.
+
+    [exclude_runtime_ids] reaches {!Keeper_vision_tool.run_vision} unchanged.
+    One projector serves one lane walk, so the set is the walk's own candidates
+    and is fixed when the projector is built: every one of them has either
+    already been dispatched to or is about to be by this same walk, and a
+    delegation to either is work the walk is doing anyway (#34829). *)
+
+val error_reasons : string list
+(** Every reason an image eviction can fail with. Closed by construction —
+    the only producers are the store-path validations and the eager-read
+    outcome mapping in this module. Health surfaces aggregate per-keeper
+    vision errors by walking this list. *)
+
+module For_testing : sig
+  val fallback_projector :
+    ?base_path:string -> ?exclude_runtime_ids:string list ->
+    media_store:Agent_core.History.media_store ->
+    read:
+      (exclude_runtime_ids:string list ->
+       media_type:string -> bytes:string -> (string, string) result option) ->
+    keeper_name:string -> unit -> mode:mode ->
+    Agent_core.Types.content_block list -> image_projection
+  (** Replace only the vision provider boundary; artifact storage and cache
+      publication use the production path. Cancellation must propagate and
+      leave the unfinished reading eligible for retry. *)
+end

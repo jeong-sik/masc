@@ -1,0 +1,36 @@
+name = "keeper_broadcast"
+description = """
+Send a message visible to all agents in the MASC workspace.
+
+Use for status \
+updates, announcements, or warnings."""
+
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 10 turns needed it across 6317 provider requests, and its
+# 624 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 10 turns and saves the 624 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
+defer_loading = true
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = "Broadcast body text Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
+min_length = 1
+
+[[params]]
+name = "task_cache_subject_agent"
+type = "string"
+description = """
+Agent whose current-task cache was observed; supply together with \
+task_cache_task_id"""
+min_length = 1
+
+[[params]]
+name = "task_cache_task_id"
+type = "string"
+description = """
+Task ID observed in the subject agent cache; supply together with \
+task_cache_subject_agent"""
+min_length = 1

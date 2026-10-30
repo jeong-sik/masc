@@ -1,0 +1,20 @@
+name = "norton"
+light = false
+
+[palette]
+base00 = "000080"
+base01 = "0000a8"
+base02 = "0055aa"
+base03 = "555555"
+base04 = "aaaaaa"
+base05 = "ffffff"
+base06 = "ffff55"
+base07 = "ffffff"
+base08 = "aa0000"
+base09 = "ff5555"
+base0a = "ffff55"
+base0b = "00aa00"
+base0c = "00aaaa"
+base0d = "55ffff"
+base0e = "aa00aa"
+base0f = "ff55ff"

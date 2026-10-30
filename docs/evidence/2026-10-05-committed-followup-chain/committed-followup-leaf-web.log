@@ -1,0 +1,108 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41204-browser-parser-integration-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/lib/browser-lane-activity.test.ts src/lib/machine-lane-activity.test.ts src/components/exact-lane-activity-panel.test.ts src/components/runtime-toml-editor.test.ts src/components/browser-lane-activity-panel.test.ts src/components/machine-lane-activity-panel.test.ts src/components/settings-surface.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41204-browser-parser-integration-20261005/dashboard
+
+ ❯ src/components/settings-surface.test.ts (83 tests | 3 failed) 667ms
+   ❯ SettingsSurface (72)
+     × refreshes mounted Settings from a verified Browser receipt before follow-up: unmount=false failure=false 22ms
+     × refreshes mounted Settings from a verified Browser receipt before follow-up: unmount=true failure=false 19ms
+     × refreshes mounted Settings from a verified Browser receipt before follow-up: unmount=true failure=true 14ms
+AggregateError: 
+    at internalConnectMultiple (node:net:1193:18)
+    at afterConnectMultiple (node:net:1783:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1746:14)
+        at afterConnectMultiple (node:net:1776:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1746:14)
+        at afterConnectMultiple (node:net:1776:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    }
+  ]
+}
+AggregateError: 
+    at internalConnectMultiple (node:net:1193:18)
+    at afterConnectMultiple (node:net:1783:7) {
+  code: 'ECONNREFUSED',
+  [errors]: [
+    Error: connect ECONNREFUSED ::1:3000
+        at createConnectionError (node:net:1746:14)
+        at afterConnectMultiple (node:net:1776:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '::1',
+      port: 3000
+    },
+    Error: connect ECONNREFUSED 127.0.0.1:3000
+        at createConnectionError (node:net:1746:14)
+        at afterConnectMultiple (node:net:1776:16) {
+      errno: -61,
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '127.0.0.1',
+      port: 3000
+    }
+  ]
+}
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/settings-surface.test.ts > SettingsSurface > refreshes mounted Settings from a verified Browser receipt before follow-up: unmount=false failure=false
+ FAIL  src/components/settings-surface.test.ts > SettingsSurface > refreshes mounted Settings from a verified Browser receipt before follow-up: unmount=true failure=false
+AssertionError: expected 'followup' to be 'saving' // Object.is equality
+
+Expected: "saving"
+Received: "followup"
+
+ ❯ src/components/settings-surface.test.ts:2636:42
+    2634|       expect(apiMock.fetchRuntimeDefaults.mock.calls.length).toBeGreat…
+    2635|       expect(apiMock.fetchRuntimeProviders.mock.calls.length).toBeGrea…
+    2636|       expect(session.state.peek().phase).toBe('saving')
+       |                                          ^
+    2637|       expect(resume).not.toHaveBeenCalled()
+    2638|       expect(coreApi.post).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/components/settings-surface.test.ts > SettingsSurface > refreshes mounted Settings from a verified Browser receipt before follow-up: unmount=true failure=true
+AssertionError: expected 'followup' to be 'saving' // Object.is equality
+
+Expected: "saving"
+Received: "followup"
+
+ ❯ src/components/settings-surface.test.ts:2636:42
+    2634|       expect(apiMock.fetchRuntimeDefaults.mock.calls.length).toBeGreat…
+    2635|       expect(apiMock.fetchRuntimeProviders.mock.calls.length).toBeGrea…
+    2636|       expect(session.state.peek().phase).toBe('saving')
+       |                                          ^
+    2637|       expect(resume).not.toHaveBeenCalled()
+    2638|       expect(coreApi.post).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed | 6 passed (7)
+      Tests  3 failed | 376 passed (379)
+   Start at  04:50:33
+   Duration  11.64s (tests 58%, import 18%, transform 10%, environment 8%, setup 6%)
+
+    Isolate  7 workers spawned · ~218ms startup each (spawn + environment, per file)
+             at least ~1.31s faster with isolate: false — reuses workers across files instead of one per file
+
+ ELIFECYCLE  Test failed. See above for more details.

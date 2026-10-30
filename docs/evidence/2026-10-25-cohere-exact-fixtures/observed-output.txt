@@ -1,0 +1,15 @@
+BEFORE_REJECT original TOML json_object_schema: model entry missing required "model_id" field
+BEFORE_REJECT original manifest json_object_schema: unsupported capability manifest schema_version: 1 (expected 2)
+PASS fixed TOML typed row json_object_schema
+PASS fixed manifest typed row json_object_schema
+BEFORE_REJECT original TOML openai_json_schema: model entry missing required "model_id" field
+BEFORE_REJECT original manifest openai_json_schema: unsupported capability manifest schema_version: 1 (expected 2)
+PASS fixed TOML typed row openai_json_schema
+PASS fixed manifest typed row openai_json_schema
+PASS unknown TOML dialect "unknown": model entry "same-model" field "json_schema_dialect" has unknown value "unknown" (canonical: openai_json_schema, json_object_schema)
+PASS unknown manifest dialect "unknown": entry field "json_schema_dialect" has unknown value "unknown" (canonical: openai_json_schema, json_object_schema)
+PASS unknown TOML dialect "": model entry "same-model" field "json_schema_dialect" has unknown value "" (canonical: openai_json_schema, json_object_schema)
+PASS unknown manifest dialect "": entry field "json_schema_dialect" has unknown value "" (canonical: openai_json_schema, json_object_schema)
+PASS actual candidate embedded catalog remains parseable
+PASS provider helper v1 preserved
+COMPONENT_PROBES 14 PASS

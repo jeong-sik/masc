@@ -1,0 +1,42 @@
+{
+  "source": "14c9f0c701768ed3242e3fcde219b3dfaf9a80ce",
+  "run_id": 40106834542,
+  "conclusion": "success",
+  "scope": "selected eight suites, not full regression",
+  "suites": {
+    "test_browser_native_workflow": {
+      "tests": 5,
+      "seconds": 0.0
+    },
+    "test_browser_ego_peer": {
+      "tests": 31,
+      "seconds": 3.077
+    },
+    "test_browser_addon_live_ego": {
+      "tests": 11,
+      "seconds": 21.713
+    },
+    "test_browser_lane": {
+      "tests": 14,
+      "seconds": 0.036
+    },
+    "test_browser_addon_client": {
+      "tests": 1,
+      "seconds": 0.132
+    },
+    "test_browser_lane_watched_work": {
+      "tests": 8,
+      "seconds": 0.001
+    },
+    "test_browser_selection": {
+      "tests": 9,
+      "seconds": 0.001
+    },
+    "test_browser_addon_reply_policy": {
+      "tests": 1,
+      "seconds": 0.001
+    }
+  },
+  "total_tests": 80,
+  "downloaded_log_sha256": "73aba51121bf741cb3cb2f632b0a43ef6764501aa47484bd3c508de60e4bc1f6"
+}

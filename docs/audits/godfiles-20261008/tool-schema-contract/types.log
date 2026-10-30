@@ -1,0 +1,66 @@
+Testing `Types'.
+This run has ID `XRNDWO4Q'.
+
+  [OK]          stop_reason                     0   known stop reasons.
+  [OK]          stop_reason                     1   unknown stop reason.
+  [OK]          stop_reason                     2   empty stop reason.
+  [OK]          model                           0   model_to_string.
+  [OK]          role                            0   role_to_string.
+  [OK]          role                            1   role_of_string.
+  [OK]          role                            2   system/tool strings.
+  [OK]          param_type                      0   param_type_to_string.
+  [OK]          tool_choice                     0   auto.
+  [OK]          tool_choice                     1   any.
+  [OK]          tool_choice                     2   tool.
+  [OK]          tool_choice                     3   none roundtrip.
+  [OK]          response_format                 0   json.
+  [OK]          response_shape                  0   thinking-only is not deli...
+  [OK]          response_shape                  1   empty end_turn is not del...
+  [OK]          response_shape                  2   unknown stop reason is es...
+  [OK]          response_shape                  3   thinking plus text is del...
+  [OK]          response_shape                  4   media-only is deliverable.
+  [OK]          response_shape                  5   thinking plus tool use is...
+  [OK]          usage                           0   add_usage.
+  [OK]          usage                           1   accumulates.
+  [OK]          usage                           2   usage and telemetry yojson.
+  [OK]          usage                           3   default inference telemetry.
+  [OK]          config                          0   default_config.
+  [OK]          yojson_roundtrip                0   model.
+  [OK]          yojson_roundtrip                1   role.
+  [OK]          yojson_roundtrip                2   param_type.
+  [OK]          yojson_roundtrip                3   tool_choice all.
+  [OK]          tool_choice_errors              0   bogus type.
+  [OK]          tool_choice_errors              1   non-object.
+  [OK]          show_functions                  0   content_block variants.
+  [OK]          show_functions                  1   message.
+  [OK]          show_functions                  2   agent_config.
+  [OK]          show_functions                  3   agent_state.
+  [OK]          show_functions                  4   api_response.
+  [OK]          show_functions                  5   audio block.
+  [OK]          message_constructors            0   text_message.
+  [OK]          message_constructors            1   system_msg.
+  [OK]          message_constructors            2   user_msg.
+  [OK]          message_constructors            3   assistant_msg.
+  [OK]          message_constructors            4   tool_result_msg.
+  [OK]          message_constructors            5   tool_result_msg error.
+  [OK]          tool_schema_yojson              0   roundtrip.
+  [OK]          tool_schema_yojson              1   tool_param roundtrip.
+  [OK]          tool_schema_yojson              2   manual json helpers.
+  [OK]          tool_schema_yojson              3   result_all.
+  [OK]          tool_schema_yojson              4   tool_schema_of_json bad p...
+  [OK]          tool_schema_yojson              5   tool_error_class yojson.
+  [OK]          text_extraction                 0   text only.
+  [OK]          text_extraction                 1   mixed.
+  [OK]          text_extraction                 2   tool result.
+  [OK]          text_extraction                 3   visible text excludes non...
+  [OK]          text_extraction                 4   reasoning details text pr...
+  [OK]          text_extraction                 5   reasoning details text pr...
+  [OK]          text_extraction                 6   reasoning details text ig...
+  [OK]          text_extraction                 7   empty.
+  [OK]          text_extraction                 8   text_of_message.
+  [OK]          text_extraction                 9   text_of_response and usage.
+  [OK]          tool_result_validation          0   shape checks.
+  [OK]          tool_result_validation          1   json detection.
+
+Full test results in `~/me/workspace/yousleepwhen/masc-godfile-refactor-20261008/_build/_tests/Types'.
+Test Successful in 0.010s. 60 tests run.

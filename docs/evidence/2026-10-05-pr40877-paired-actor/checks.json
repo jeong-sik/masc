@@ -1,0 +1,21 @@
+{
+  "parent": "2de0a03049a1895592b4aa94ef0f5d0317d4d064",
+  "source_sha256": {
+    "test/test_librarian_preflight_report.py": "7226824728fba1d68821bd40886eb395f7372a90d9ad77a631792f54dcc79b6a",
+    "scripts/librarian/compare-preflight.py": "6a1ce0b2865096c579f4df06018eb2acb5ad1d41c2f21f61afe513086d1b13d4"
+  },
+  "raw_logs_sha256": {
+    "initial-import-error.log": "76ecca9f07e1267ce8477601867158787a5c5d599ab9f0017f58bda3002c69c0",
+    "red.log": "b42710f0c8a322e58354fe2f916b1cee9a9b0ddf75e1587e1547a094a27257e7",
+    "green.log": "395fdfed25de5232128df9af32d02a5d716d5615ee12e83dc5202596301f2999",
+    "mutation.log": "0fed2187e14026df42afd364e62d10a08bdb078fed5438a0f76bdcd4e22ce7ec",
+    "ruff.json": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "pyright.json": "3ebeccc08d2c90f50b003afd0eb7d6468e7bed9c2061013fe8031b3be37acada"
+  },
+  "results": {
+    "public_cli_tests": 46,
+    "ruff_errors": 0,
+    "pyright_errors": 0,
+    "pair_guard_mutation_detected": true
+  }
+}

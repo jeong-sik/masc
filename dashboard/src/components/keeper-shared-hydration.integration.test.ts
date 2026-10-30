@@ -1,0 +1,874 @@
+// @vitest-environment jsdom
+
+import { html } from 'htm/preact'
+import { render } from 'preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ToolCallEntry } from '../api/dashboard'
+
+const {
+  cancelQueuedKeeperMessage,
+  fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
+  fetchQueuedKeeperMessageResult,
+  isTerminalQueuedKeeperMessage,
+  queuedKeeperMessageError,
+  queuedKeeperMessageToReply,
+  streamKeeperMessage,
+} = vi.hoisted(() => ({
+  cancelQueuedKeeperMessage: vi.fn(async () => undefined),
+  fetchKeeperChatHistory: vi.fn(),
+  fetchKeeperChatHistoryPage: vi.fn(),
+  fetchQueuedKeeperMessageResult: vi.fn(),
+  isTerminalQueuedKeeperMessage: vi.fn((result: { status: string }) => result.status === 'done'),
+  queuedKeeperMessageError: vi.fn((result: { status: string }) => `request ${result.status}`),
+  queuedKeeperMessageToReply: vi.fn((result: { result?: { reply?: string } }) => ({
+    text: result.result?.reply ?? '(empty reply)',
+    details: null,
+  })),
+  streamKeeperMessage: vi.fn(),
+}))
+
+const { fetchKeeperToolCalls, fetchKeeperWaitingInventory } = vi.hoisted(() => ({
+  fetchKeeperToolCalls: vi.fn(async (): Promise<{ entries: ToolCallEntry[] }> => ({ entries: [] })),
+  fetchKeeperWaitingInventory: vi.fn(async () => ({ keepers: [] })),
+}))
+
+// #35924: a linked trace step renders ok only after the exact per-execution
+// endpoint verifies the output — the bulk tool_calls hydration alone does not.
+// This registry stands in for that endpoint, keyed `${keeper}:${execution_id}`.
+const { exactToolCallLookup } = vi.hoisted(() => ({
+  exactToolCallLookup: new Map<string, { keeper: string; execution_id: string; entry: ToolCallEntry }>(),
+}))
+
+vi.mock('../api/keeper', () => ({
+  cancelQueuedKeeperMessage,
+  fetchKeeperChatHistory,
+  fetchKeeperChatHistoryPage,
+  fetchQueuedKeeperMessageResult,
+  isTerminalQueuedKeeperMessage,
+  queuedKeeperMessageError,
+  queuedKeeperMessageToReply,
+  streamKeeperMessage,
+}))
+
+vi.mock('../api/dashboard', () => ({
+  fetchKeeperToolCalls,
+  fetchKeeperWaitingInventory,
+}))
+vi.mock('../api/mcp', () => ({ callMcpTool: vi.fn() }))
+vi.mock('../api/core', async importOriginal => ({
+  ...await importOriginal<typeof import('../api/core')>(),
+  runOperatorAction: vi.fn(),
+  get: vi.fn(async (path: string) => {
+    const [, keeper, executionId] = /^\/api\/v1\/keepers\/([^/]+)\/tool-calls\?execution_id=([^&]+)$/.exec(path) ?? []
+    const response = keeper !== undefined && executionId !== undefined
+      ? exactToolCallLookup.get(`${decodeURIComponent(keeper)}:${decodeURIComponent(executionId)}`)
+      : undefined
+    if (response) return response
+    throw new Error('Historical output not provided by this fixture')
+  }),
+}))
+vi.mock('../store', async () => {
+  const { signal } = await import('@preact/signals')
+  return {
+    invalidateDashboardCache: vi.fn(),
+    refreshDashboard: vi.fn(async () => undefined),
+    shellAuthSummary: signal(null),
+  }
+})
+vi.mock('./common/toast', () => ({ showToast: vi.fn() }))
+
+import { KeeperConversationPanel } from './keeper-shared'
+import {
+  _resetChatHydrationForTests,
+  hydrateKeeperChatHistory,
+  refreshKnownKeeperChatHistories,
+} from '../keeper-actions'
+import {
+  activeKeeperName,
+  keeperActionErrors,
+  keeperHydrating,
+  keeperProbing,
+  keeperRecovering,
+  keeperSending,
+  keeperStatusDetails,
+  keeperStreamLastEventAt,
+  keeperStreamStartedAt,
+  keeperThreads,
+} from '../keeper-state'
+import {
+  lookupToolCallOutput,
+  resetToolCallOutputs,
+  toolCallOutputHydrationFailureReason,
+  toolCallOutputHydrationStatus,
+  toolCallOutputsCoveredSinceMs,
+  toolCallOutputsCoveredThroughMs,
+} from '../tool-call-output-store'
+import { _clearTrackedKeeperChatOperationsForTests } from '../keeper-chat-operations-local'
+import { _resetChatStoreForTests } from '../keeper-chat-store'
+
+// Serve one execution through the exact tool-calls endpoint, mirroring the row
+// the bulk endpoint already returned for it.
+function stubExactToolCallLookup(entry: ToolCallEntry & { keeper: string; execution_id: string }): void {
+  exactToolCallLookup.set(`${entry.keeper}:${entry.execution_id}`, {
+    keeper: entry.keeper,
+    execution_id: entry.execution_id,
+    entry,
+  })
+}
+
+describe('KeeperConversationPanel hydration wiring', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
+    })
+    fetchKeeperChatHistory.mockReset()
+    fetchKeeperChatHistoryPage.mockReset().mockResolvedValue({ messages: [], nextCursor: null, hasMore: false })
+    fetchKeeperToolCalls.mockReset()
+    fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
+    keeperThreads.value = {}
+    keeperActionErrors.value = {}
+    keeperHydrating.value = {}
+    keeperProbing.value = {}
+    keeperRecovering.value = {}
+    keeperSending.value = {}
+    keeperStatusDetails.value = {}
+    keeperStreamStartedAt.value = {}
+    keeperStreamLastEventAt.value = {}
+    activeKeeperName.value = ''
+    _resetChatHydrationForTests()
+    _clearTrackedKeeperChatOperationsForTests()
+    _resetChatStoreForTests()
+    resetToolCallOutputs()
+    exactToolCallLookup.clear()
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.unstubAllGlobals()
+    _resetChatHydrationForTests()
+    _clearTrackedKeeperChatOperationsForTests()
+    _resetChatStoreForTests()
+    resetToolCallOutputs()
+  })
+
+  it('walks earlier server pages from the visible transcript and keeps retry available', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([{ id: 'new', role: 'user', content: 'Newest dialogue', ts: 1000 }])
+    fetchKeeperChatHistoryPage
+      .mockResolvedValueOnce({ messages: [], nextCursor: null, hasMore: false })
+      .mockRejectedValueOnce(new Error('Page temporarily unavailable'))
+      .mockResolvedValueOnce({
+        messages: [{ id: 'middle', role: 'user', content: 'Earlier dialogue', ts: 500 }],
+        nextCursor: 'position-500', hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [{ id: 'old', role: 'user', content: 'Oldest dialogue', ts: 100 }],
+        nextCursor: null, hasMore: false,
+      })
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`, container)
+    const olderButton = () => Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('이전 대화 불러오기'))
+    await waitFor(() => expect(container.textContent).toContain('Newest dialogue'))
+    fireEvent.click(olderButton()!)
+    await waitFor(() => expect(container.textContent).toContain('Page temporarily unavailable'))
+    expect(olderButton()?.disabled).toBe(false)
+    fireEvent.click(olderButton()!)
+    await waitFor(() => expect(container.textContent).toContain('Earlier dialogue'))
+    fireEvent.click(olderButton()!)
+    await waitFor(() => expect(container.textContent).toContain('Oldest dialogue'))
+    expect(container.textContent).toContain('Newest dialogue')
+    expect(container.textContent).toContain('Earlier dialogue')
+    expect(olderButton()).toBeUndefined()
+    expect(fetchKeeperChatHistoryPage.mock.calls).toEqual([
+      ['sangsu'], ['sangsu', undefined], ['sangsu', undefined], ['sangsu', 'position-500'],
+    ])
+  })
+
+  it.each(['workspace', 'primary', 'default'] as const)('marks the direct conversation partial while enrichment remains pending (%s)', async layout => {
+    let finish!: (rows: unknown[]) => void
+    fetchKeeperChatHistory.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    fetchKeeperChatHistoryPage.mockResolvedValueOnce({
+      messages: [{ id: 'direct-first', role: 'user', content: 'Recent direct question', ts: 100 }],
+      nextCursor: 'older', hasMore: true,
+    })
+    render(html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout=${layout === 'default' ? undefined : layout} />`, container)
+    await waitFor(() => expect(container.textContent).toContain('Recent direct question'))
+    expect(container.querySelector('[data-chat-transcript-loading]')).toBeNull()
+    expect(container.querySelector('[data-chat-history-partial]')?.textContent).toContain('나머지 대화를 불러오는 중')
+    finish([{ id: 'direct-first', role: 'user', content: 'Recent direct question', ts: 100 },
+      { id: 'autonomous-later', role: 'assistant', content: 'Autonomous context', ts: 101 }])
+    await waitFor(() => expect(container.textContent).toContain('Autonomous context'))
+    expect(container.textContent).toContain('Recent direct question')
+    expect(container.querySelector('[data-chat-history-partial]')).toBeNull()
+  })
+
+  // #26276: a hard refresh starts with an empty in-memory thread. Until the
+  // first REST history hydration settles, the transcript must show a loading
+  // state, never the semantic "no messages" empty card.
+  it('shows loading instead of the empty card on hard refresh, then the hydrated transcript', async () => {
+    let resolveHistory: (rows: unknown[]) => void = () => undefined
+    fetchKeeperChatHistory.mockImplementationOnce(
+      () => new Promise(resolve => { resolveHistory = resolve }),
+    )
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+
+    // First synchronous render, before the mount effect starts hydration.
+    expect(container.querySelector('[data-chat-transcript-loading]')).not.toBeNull()
+    expect(container.querySelector('[data-chat-transcript-empty]')).toBeNull()
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('sangsu')
+    })
+    expect(container.querySelector('[data-chat-transcript-loading]')).not.toBeNull()
+    expect(container.querySelector('[data-chat-transcript-empty]')).toBeNull()
+
+    resolveHistory([
+      {
+        id: 'user-history-hard-refresh',
+        role: 'user',
+        content: '새로고침 전 질문',
+        ts: 1_783_267_301,
+        source: 'dashboard',
+      },
+      {
+        id: 'assistant-history-hard-refresh',
+        role: 'assistant',
+        content: '새로고침 전 답변',
+        ts: 1_783_267_302,
+        source: 'dashboard',
+      },
+    ])
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('새로고침 전 답변')
+    })
+    expect(container.querySelector('[data-chat-transcript-loading]')).toBeNull()
+    expect(container.querySelector('[data-chat-transcript-empty]')).toBeNull()
+  })
+
+  it('renders the empty card only after hydration returns zero rows', async () => {
+    let resolveHistory: (rows: unknown[]) => void = () => undefined
+    fetchKeeperChatHistory.mockImplementationOnce(
+      () => new Promise(resolve => { resolveHistory = resolve }),
+    )
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('sangsu')
+    })
+    expect(container.querySelector('[data-chat-transcript-empty]')).toBeNull()
+
+    resolveHistory([])
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-chat-transcript-empty]')).not.toBeNull()
+    })
+    expect(container.querySelector('[data-chat-transcript-loading]')).toBeNull()
+  })
+
+  it('drives live transcript hydration-failed DOM from a real tool-call endpoint failure', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    fetchKeeperChatHistory.mockResolvedValueOnce([
+      {
+        id: 'tool-history-api-hydration',
+        role: 'tool',
+        content: '{}',
+        ts: 1_783_267_201,
+        tool_call_id: 'tc-api-hydration',
+        tool_call_name: 'keeper_context_status',
+        source: 'dashboard',
+        turn_ref: 'trace-api-hydration#1',
+      },
+      {
+        id: 'assistant-history-api-hydration',
+        role: 'assistant',
+        content: '도구 출력을 확인했습니다.',
+        ts: 1_783_267_202,
+        source: 'dashboard',
+        turn_ref: 'trace-api-hydration#1',
+        stream_contract: {
+          source: 'sse_event',
+          status: 'backend_terminal_event',
+          event_name: 'RUN_FINISHED',
+        },
+      },
+    ])
+    fetchKeeperToolCalls.mockRejectedValueOnce(new Error('HTTP 502'))
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('sangsu')
+      expect(fetchKeeperToolCalls).toHaveBeenCalledWith('sangsu', 200)
+    })
+    await waitFor(() => {
+      expect(toolCallOutputHydrationStatus('sangsu')).toBe('failed')
+      expect(toolCallOutputHydrationFailureReason('sangsu')).toBe('HTTP 502')
+    })
+
+    const traceSelector =
+      '[data-chat-work-trace][data-chat-tool-output-hydration-source="tool_calls_endpoint"]'
+    await waitFor(() => {
+      const trace = container.querySelector(traceSelector)
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('failed')
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-failure')).toBe('HTTP 502')
+      expect(trace?.getAttribute('data-chat-turn-stream-contract-source')).toBe('sse_event')
+      expect(trace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+
+      const step = container.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-api-hydration"]',
+      ) as HTMLElement
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('unlinked')
+      expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
+      expect(container.textContent).toContain('출력 hydration 실패 1')
+    })
+
+    const failedStep = container.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-api-hydration"]',
+    ) as HTMLElement
+    fireEvent.click(failedStep.querySelector('.chat-block-tstep-row') as HTMLElement)
+
+    await waitFor(() => {
+      expect(failedStep.textContent).toContain('실행 ID 없음 — 출력 조인 불가')
+    })
+
+    consoleWarn.mockRestore()
+  })
+
+  it('joins successful tool-call endpoint output into the live transcript DOM', async () => {
+    fetchKeeperChatHistory.mockResolvedValueOnce([
+      {
+        id: 'tool-history-api-success',
+        role: 'tool',
+        content: '{}',
+        ts: 1_783_267_211,
+        tool_call_id: 'tc-api-success',
+        execution_id: 'exec-api-success',
+        tool_call_name: 'keeper_context_status',
+        source: 'dashboard',
+        turn_ref: 'trace-api-success#1',
+      },
+      {
+        id: 'assistant-history-api-success',
+        role: 'assistant',
+        content: '도구 출력 조인이 완료되었습니다.',
+        ts: 1_783_267_212,
+        source: 'dashboard',
+        turn_ref: 'trace-api-success#1',
+        stream_contract: {
+          source: 'sse_event',
+          status: 'backend_terminal_event',
+          event_name: 'RUN_FINISHED',
+        },
+      },
+    ])
+    const toolCallEntry = {
+      ts: 1_783_267_211,
+      keeper: 'sangsu',
+      tool: 'keeper_context_status',
+      input: {},
+      output: 'context status joined from tool_calls_endpoint',
+      wire_outcome: 'ok',
+      duration_ms: 42,
+      tool_use_id: 'tc-api-success',
+      execution_id: 'exec-api-success',
+    } satisfies ToolCallEntry
+    fetchKeeperToolCalls.mockResolvedValueOnce({ entries: [{ ...toolCallEntry, output: 'unverified bulk output' }] })
+    stubExactToolCallLookup(toolCallEntry)
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('sangsu')
+      expect(fetchKeeperToolCalls).toHaveBeenCalledWith('sangsu', 200)
+    })
+    await waitFor(() => {
+      expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
+      expect(toolCallOutputHydrationFailureReason('sangsu')).toBeNull()
+      expect(lookupToolCallOutput('sangsu', 'exec-api-success')?.output).toBe(
+        'context status joined from tool_calls_endpoint',
+      )
+      expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_783_267_211_000)
+      expect(toolCallOutputsCoveredThroughMs('sangsu')).not.toBeNull()
+    })
+
+    const coveredThrough = toolCallOutputsCoveredThroughMs('sangsu')
+    const traceSelector =
+      '[data-chat-work-trace][data-chat-tool-output-hydration-source="tool_calls_endpoint"]'
+    await waitFor(() => {
+      const trace = container.querySelector(traceSelector)
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('hydrated')
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-failure')).toBeNull()
+      expect(trace?.getAttribute('data-chat-tool-output-covered-since')).toBe('1783267211000')
+      expect(trace?.getAttribute('data-chat-tool-output-covered-through')).toBe(String(coveredThrough))
+      expect(trace?.getAttribute('data-chat-turn-stream-contract-source')).toBe('sse_event')
+      expect(trace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+
+      const step = container.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-api-success"]',
+      ) as HTMLElement
+      expect(step.getAttribute('data-chat-trace-link-state')).toBe('joined')
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('ok')
+      expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
+      expect(step.querySelector('.chat-block-tstep-status.ok')).not.toBeNull()
+      expect(step.querySelector('.chat-block-tstep-status.missing')).toBeNull()
+      expect(step.querySelector('.chat-block-tstep-status.unavailable')).toBeNull()
+      expect(container.textContent).not.toContain('결과 누락 1')
+      expect(container.textContent).not.toContain('출력 범위 밖 1')
+      expect(container.textContent).not.toContain('출력 hydration 실패 1')
+    })
+
+    const joinedStep = container.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-api-success"]',
+    ) as HTMLElement
+    fireEvent.click(joinedStep.querySelector('.chat-block-tstep-row') as HTMLElement)
+
+    await waitFor(() => {
+      expect(joinedStep.textContent).toContain('result')
+      expect(joinedStep.textContent).toContain('context status joined from tool_calls_endpoint')
+      expect(joinedStep.textContent).not.toContain('출력 대기 중')
+      expect(joinedStep.textContent).not.toContain('결과 없음')
+      expect(joinedStep.textContent).not.toContain('출력 hydration 실패')
+      expect(joinedStep.textContent).not.toContain('출력 tail 범위 밖')
+    })
+  })
+
+  it('keeps simultaneous live panel hydration isolated by keeper', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    fetchKeeperChatHistory.mockImplementation(async (keeperName: string) => {
+      if (keeperName === 'alpha') {
+        return [
+          {
+            id: 'tool-history-alpha-scope',
+            role: 'tool',
+            content: '{}',
+            ts: 1_783_267_221,
+            tool_call_id: 'tc-alpha-scope',
+            execution_id: 'exec-alpha-scope',
+            tool_call_name: 'keeper_context_status',
+            source: 'dashboard',
+            turn_ref: 'trace-alpha-scope#1',
+          },
+          {
+            id: 'assistant-history-alpha-scope',
+            role: 'assistant',
+            content: 'alpha 도구 출력 조인이 완료되었습니다.',
+            ts: 1_783_267_222,
+            source: 'dashboard',
+            turn_ref: 'trace-alpha-scope#1',
+            stream_contract: {
+              source: 'sse_event',
+              status: 'backend_terminal_event',
+              event_name: 'RUN_FINISHED',
+            },
+          },
+        ]
+      }
+      if (keeperName === 'beta') {
+        return [
+          {
+            id: 'tool-history-beta-scope',
+            role: 'tool',
+            content: '{}',
+            ts: 1_783_267_231,
+            tool_call_id: 'tc-beta-scope',
+            execution_id: 'exec-beta-scope',
+            tool_call_name: 'keeper_context_status',
+            source: 'dashboard',
+            turn_ref: 'trace-beta-scope#1',
+          },
+          {
+            id: 'assistant-history-beta-scope',
+            role: 'assistant',
+            content: 'beta 도구 출력은 아직 조인되지 않았습니다.',
+            ts: 1_783_267_232,
+            source: 'dashboard',
+            turn_ref: 'trace-beta-scope#1',
+            stream_contract: {
+              source: 'sse_event',
+              status: 'backend_terminal_event',
+              event_name: 'RUN_FINISHED',
+            },
+          },
+        ]
+      }
+      throw new Error(`unexpected keeper ${keeperName}`)
+    })
+    const alphaToolCallEntry = {
+      ts: 1_783_267_221,
+      keeper: 'alpha',
+      tool: 'keeper_context_status',
+      input: {},
+      output: 'alpha output joined from tool_calls_endpoint',
+      wire_outcome: 'ok',
+      duration_ms: 31,
+      tool_use_id: 'tc-alpha-scope',
+      execution_id: 'exec-alpha-scope',
+    } satisfies ToolCallEntry
+    fetchKeeperToolCalls.mockImplementation(async (keeperName?: string) => {
+      if (keeperName === 'alpha') {
+        return { entries: [alphaToolCallEntry] }
+      }
+      if (keeperName === 'beta') {
+        throw new Error('HTTP 503 beta')
+      }
+      throw new Error(`unexpected keeper ${keeperName}`)
+    })
+    stubExactToolCallLookup(alphaToolCallEntry)
+
+    render(
+      html`
+        <div>
+          <section data-testid="alpha-panel">
+            <${KeeperConversationPanel} keeperName="alpha" placeholder="alpha message" layout="workspace" />
+          </section>
+          <section data-testid="beta-panel">
+            <${KeeperConversationPanel} keeperName="beta" placeholder="beta message" layout="workspace" />
+          </section>
+        </div>
+      `,
+      container,
+    )
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('alpha')
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('beta')
+      expect(fetchKeeperToolCalls).toHaveBeenCalledWith('alpha', 200)
+      expect(fetchKeeperToolCalls).toHaveBeenCalledWith('beta', 200)
+    })
+    await waitFor(() => {
+      expect(toolCallOutputHydrationStatus('alpha')).toBe('hydrated')
+      expect(toolCallOutputHydrationFailureReason('alpha')).toBeNull()
+      expect(toolCallOutputHydrationStatus('beta')).toBe('failed')
+      expect(toolCallOutputHydrationFailureReason('beta')).toBe('HTTP 503 beta')
+      expect(lookupToolCallOutput('alpha', 'exec-alpha-scope')?.output).toBe(
+        'alpha output joined from tool_calls_endpoint',
+      )
+      expect(lookupToolCallOutput('beta', 'exec-beta-scope')).toBeNull()
+    })
+
+    const alphaPanel = container.querySelector('[data-testid="alpha-panel"]') as HTMLElement
+    const betaPanel = container.querySelector('[data-testid="beta-panel"]') as HTMLElement
+    const alphaCoveredThrough = toolCallOutputsCoveredThroughMs('alpha')
+
+    await waitFor(() => {
+      const alphaTrace = alphaPanel.querySelector('[data-chat-work-trace]')
+      expect(alphaTrace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('hydrated')
+      expect(alphaTrace?.getAttribute('data-chat-tool-output-hydration-failure')).toBeNull()
+      expect(alphaTrace?.getAttribute('data-chat-tool-output-covered-since')).toBe('1783267221000')
+      expect(alphaTrace?.getAttribute('data-chat-tool-output-covered-through')).toBe(String(alphaCoveredThrough))
+      expect(alphaTrace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+
+      const betaTrace = betaPanel.querySelector('[data-chat-work-trace]')
+      expect(betaTrace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('failed')
+      expect(betaTrace?.getAttribute('data-chat-tool-output-hydration-failure')).toBe('HTTP 503 beta')
+      expect(betaTrace?.getAttribute('data-chat-tool-output-covered-since')).toBeNull()
+      expect(betaTrace?.getAttribute('data-chat-tool-output-covered-through')).toBeNull()
+      expect(betaTrace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+
+      const alphaStep = alphaPanel.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-alpha-scope"]',
+      ) as HTMLElement
+      expect(alphaStep.getAttribute('data-chat-trace-link-state')).toBe('joined')
+      expect(alphaStep.getAttribute('data-chat-trace-output-state')).toBe('ok')
+      expect(alphaStep.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
+      expect(alphaStep.querySelector('.chat-block-tstep-status.ok')).not.toBeNull()
+
+      const betaStep = betaPanel.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-beta-scope"]',
+      ) as HTMLElement
+      expect(betaStep.getAttribute('data-chat-trace-link-state')).toBe('joined')
+      expect(betaStep.getAttribute('data-chat-trace-output-state')).toBe('unavailable')
+      expect(betaStep.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
+      expect(betaStep.querySelector('.chat-block-tstep-status.unavailable')).not.toBeNull()
+      expect(betaStep.querySelector('.chat-block-tstep-status.ok')).toBeNull()
+      expect(betaPanel.textContent).toContain('출력 hydration 실패 1')
+      expect(betaPanel.textContent).not.toContain('alpha output joined from tool_calls_endpoint')
+    })
+
+    const alphaStep = alphaPanel.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-alpha-scope"]',
+    ) as HTMLElement
+    const betaStep = betaPanel.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-beta-scope"]',
+    ) as HTMLElement
+
+    fireEvent.click(alphaStep.querySelector('.chat-block-tstep-row') as HTMLElement)
+    fireEvent.click(betaStep.querySelector('.chat-block-tstep-row') as HTMLElement)
+
+    await waitFor(() => {
+      expect(alphaStep.textContent).toContain('alpha output joined from tool_calls_endpoint')
+      expect(alphaStep.textContent).not.toContain('HTTP 503 beta')
+      expect(betaStep.textContent).toContain('결과 확인 불가')
+      expect(betaStep.textContent).not.toContain('alpha output joined from tool_calls_endpoint')
+      expect(betaStep.textContent).not.toContain('result')
+    })
+
+    consoleWarn.mockRestore()
+  })
+
+  it('recovers stale hydration-failed DOM after a forced live refresh succeeds', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const recoveryHistory = [
+      {
+        id: 'tool-history-refresh-recovery',
+        role: 'tool',
+        content: '{}',
+        ts: 1_783_267_241,
+        tool_call_id: 'tc-refresh-recovery',
+        execution_id: 'exec-refresh-recovery',
+        tool_call_name: 'keeper_context_status',
+        source: 'dashboard',
+        turn_ref: 'trace-refresh-recovery#1',
+      },
+      {
+        id: 'assistant-history-refresh-recovery',
+        role: 'assistant',
+        content: 'force refresh 이후 도구 출력 조인이 복구되었습니다.',
+        ts: 1_783_267_242,
+        source: 'dashboard',
+        turn_ref: 'trace-refresh-recovery#1',
+        stream_contract: {
+          source: 'sse_event',
+          status: 'backend_terminal_event',
+          event_name: 'RUN_FINISHED',
+        },
+      },
+    ]
+    fetchKeeperChatHistory.mockResolvedValueOnce(recoveryHistory)
+    fetchKeeperToolCalls.mockRejectedValueOnce(new Error('HTTP 504 first refresh'))
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('sangsu')
+      expect(fetchKeeperToolCalls).toHaveBeenCalledWith('sangsu', 200)
+    })
+    await waitFor(() => {
+      expect(toolCallOutputHydrationStatus('sangsu')).toBe('failed')
+      expect(toolCallOutputHydrationFailureReason('sangsu')).toBe('HTTP 504 first refresh')
+    })
+
+    let step = container.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-refresh-recovery"]',
+    ) as HTMLElement
+    fireEvent.click(step.querySelector('.chat-block-tstep-row') as HTMLElement)
+    await waitFor(() => {
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('unavailable')
+      expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
+      expect(step.textContent).toContain('결과 확인 불가')
+      expect(container.textContent).toContain('출력 hydration 실패 1')
+    })
+
+    const recoveredEntry: ToolCallEntry & { keeper: string; execution_id: string } = {
+      ts: 1_783_267_241,
+      keeper: 'sangsu',
+      tool: 'keeper_context_status',
+      input: {},
+      output: 'recovered output joined from forced refresh',
+      wire_outcome: 'ok',
+      duration_ms: 37,
+      tool_use_id: 'tc-refresh-recovery',
+      execution_id: 'exec-refresh-recovery',
+    }
+    fetchKeeperChatHistory.mockResolvedValueOnce(recoveryHistory)
+    fetchKeeperToolCalls.mockResolvedValueOnce({ entries: [recoveredEntry] })
+    // #35924: the bulk refresh restores coverage, but the row reads ok only
+    // after the exact per-execution endpoint verifies that same output.
+    stubExactToolCallLookup(recoveredEntry)
+
+    await hydrateKeeperChatHistory('sangsu', { force: true })
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+      expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(2)
+      expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
+      expect(toolCallOutputHydrationFailureReason('sangsu')).toBeNull()
+      expect(lookupToolCallOutput('sangsu', 'exec-refresh-recovery')?.output).toBe(
+        'recovered output joined from forced refresh',
+      )
+      expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_783_267_241_000)
+      expect(toolCallOutputsCoveredThroughMs('sangsu')).not.toBeNull()
+    })
+
+    const coveredThrough = toolCallOutputsCoveredThroughMs('sangsu')
+    await waitFor(() => {
+      const trace = container.querySelector('[data-chat-work-trace]')
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('hydrated')
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-failure')).toBeNull()
+      expect(trace?.getAttribute('data-chat-tool-output-covered-since')).toBe('1783267241000')
+      expect(trace?.getAttribute('data-chat-tool-output-covered-through')).toBe(String(coveredThrough))
+      expect(trace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+
+      step = container.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-refresh-recovery"]',
+      ) as HTMLElement
+      expect(step.getAttribute('data-chat-trace-link-state')).toBe('joined')
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('ok')
+      expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
+      expect(step.querySelector('.chat-block-tstep-status.ok')).not.toBeNull()
+      expect(step.querySelector('.chat-block-tstep-status.unavailable')).toBeNull()
+      expect(container.textContent).not.toContain('출력 hydration 실패 1')
+      expect(container.textContent).not.toContain('HTTP 504 first refresh')
+      expect(container.textContent).not.toContain('출력 대기 중')
+      expect(container.textContent).not.toContain('결과 없음')
+    })
+
+    await waitFor(() => {
+      expect(step.textContent).toContain('result')
+      expect(step.textContent).toContain('recovered output joined from forced refresh')
+      expect(step.textContent).not.toContain('출력 hydration 실패')
+      expect(step.textContent).not.toContain('HTTP 504 first refresh')
+      expect(step.textContent).not.toContain('출력 tail 범위 밖')
+    })
+
+    consoleWarn.mockRestore()
+  })
+
+  it('recovers stale hydration-failed DOM through the active-keeper reconnect refresh path', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const reconnectHistory = [
+      {
+        id: 'tool-history-reconnect-recovery',
+        role: 'tool',
+        content: '{}',
+        ts: 1_783_267_251,
+        tool_call_id: 'tc-reconnect-recovery',
+        execution_id: 'exec-reconnect-recovery',
+        tool_call_name: 'keeper_context_status',
+        source: 'dashboard',
+        turn_ref: 'trace-reconnect-recovery#1',
+      },
+      {
+        id: 'assistant-history-reconnect-recovery',
+        role: 'assistant',
+        content: 'SSE reconnect 이후 도구 출력 조인이 복구되었습니다.',
+        ts: 1_783_267_252,
+        source: 'dashboard',
+        turn_ref: 'trace-reconnect-recovery#1',
+        stream_contract: {
+          source: 'sse_event',
+          status: 'backend_terminal_event',
+          event_name: 'RUN_FINISHED',
+        },
+      },
+    ]
+    activeKeeperName.value = 'sangsu'
+    fetchKeeperChatHistory.mockResolvedValueOnce(reconnectHistory)
+    fetchKeeperToolCalls.mockRejectedValueOnce(new Error('HTTP 504 reconnect gap'))
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." layout="workspace" />`,
+      container,
+    )
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledWith('sangsu')
+      expect(fetchKeeperToolCalls).toHaveBeenCalledWith('sangsu', 200)
+    })
+    await waitFor(() => {
+      expect(toolCallOutputHydrationStatus('sangsu')).toBe('failed')
+      expect(toolCallOutputHydrationFailureReason('sangsu')).toBe('HTTP 504 reconnect gap')
+    })
+
+    let step = container.querySelector(
+      '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-reconnect-recovery"]',
+    ) as HTMLElement
+    fireEvent.click(step.querySelector('.chat-block-tstep-row') as HTMLElement)
+    await waitFor(() => {
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('unavailable')
+      expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('hydration-failed')
+      expect(step.textContent).toContain('결과 확인 불가')
+      expect(container.textContent).toContain('출력 hydration 실패 1')
+    })
+
+    const reconnectRecoveredEntry: ToolCallEntry & { keeper: string; execution_id: string } = {
+      ts: 1_783_267_251,
+      keeper: 'sangsu',
+      tool: 'keeper_context_status',
+      input: {},
+      output: 'recovered output joined from active reconnect refresh',
+      wire_outcome: 'ok',
+      duration_ms: 39,
+      tool_use_id: 'tc-reconnect-recovery',
+      execution_id: 'exec-reconnect-recovery',
+    }
+    fetchKeeperChatHistory.mockResolvedValueOnce(reconnectHistory)
+    fetchKeeperToolCalls.mockResolvedValueOnce({ entries: [reconnectRecoveredEntry] })
+    // #35924: the reconnect refresh restores coverage, but the row reads ok
+    // only after the exact per-execution endpoint verifies that same output.
+    stubExactToolCallLookup(reconnectRecoveredEntry)
+
+    void refreshKnownKeeperChatHistories()
+
+    await waitFor(() => {
+      expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+      expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(2)
+      expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
+      expect(toolCallOutputHydrationFailureReason('sangsu')).toBeNull()
+      expect(lookupToolCallOutput('sangsu', 'exec-reconnect-recovery')?.output).toBe(
+        'recovered output joined from active reconnect refresh',
+      )
+      expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_783_267_251_000)
+      expect(toolCallOutputsCoveredThroughMs('sangsu')).not.toBeNull()
+    })
+
+    const coveredThrough = toolCallOutputsCoveredThroughMs('sangsu')
+    await waitFor(() => {
+      const trace = container.querySelector('[data-chat-work-trace]')
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-status')).toBe('hydrated')
+      expect(trace?.getAttribute('data-chat-tool-output-hydration-failure')).toBeNull()
+      expect(trace?.getAttribute('data-chat-tool-output-covered-since')).toBe('1783267251000')
+      expect(trace?.getAttribute('data-chat-tool-output-covered-through')).toBe(String(coveredThrough))
+      expect(trace?.getAttribute('data-chat-turn-stream-contract-event')).toBe('RUN_FINISHED')
+
+      step = container.querySelector(
+        '[data-chat-trace-step="tool"][data-chat-trace-tool-call-id="tc-reconnect-recovery"]',
+      ) as HTMLElement
+      expect(step.getAttribute('data-chat-trace-link-state')).toBe('joined')
+      expect(step.getAttribute('data-chat-trace-output-state')).toBe('ok')
+      expect(step.getAttribute('data-chat-trace-output-coverage')).toBe('covered')
+      expect(step.querySelector('.chat-block-tstep-status.ok')).not.toBeNull()
+      expect(step.querySelector('.chat-block-tstep-status.unavailable')).toBeNull()
+      expect(container.textContent).not.toContain('출력 hydration 실패 1')
+      expect(container.textContent).not.toContain('HTTP 504 reconnect gap')
+      expect(container.textContent).not.toContain('출력 대기 중')
+      expect(container.textContent).not.toContain('결과 없음')
+    })
+
+    await waitFor(() => {
+      expect(step.textContent).toContain('result')
+      expect(step.textContent).toContain('recovered output joined from active reconnect refresh')
+      expect(step.textContent).not.toContain('출력 hydration 실패')
+      expect(step.textContent).not.toContain('HTTP 504 reconnect gap')
+      expect(step.textContent).not.toContain('출력 tail 범위 밖')
+    })
+
+    consoleWarn.mockRestore()
+  })
+})

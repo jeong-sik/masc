@@ -1,0 +1,36 @@
+{
+  "plan_sha256": "45ef9d025bea7f3140730459bd36469a0759acc3e528dfb280f848d3aeaa767a",
+  "started_ns": 227293336510875,
+  "compile": {
+    "argv": [
+      "/Users/dancer/.opam/5.5.1/bin/ocamlopt",
+      "-I",
+      "+unix",
+      "unix.cmxa",
+      "carrier.ml",
+      "-o",
+      "carrier"
+    ],
+    "requested_ns": 227293336620166,
+    "pid": 27108,
+    "returncode": 0,
+    "reaped": true,
+    "returned_ns": 227294126162250,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "run": {
+    "argv": [
+      "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/runs/extreme-perf-20261026/tui-frame-lines-reverse-scan-native-carrier-v1/carrier"
+    ],
+    "requested_ns": 227294126764416,
+    "pid": 27349,
+    "returncode": 0,
+    "reaped": true,
+    "returned_ns": 227294674640916,
+    "stdout_sha256": "d58139fb1112a9d8488c2aae44c2b5dce633189c2b9888649de47cd5e00e1616",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "returned_ns": 227294675051791,
+  "executable_sha256": "90e5719eefffc87c0a043a0d2ca4439f79cc70385dd6abed674242bf4f4870db"
+}

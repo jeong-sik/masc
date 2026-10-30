@@ -1,0 +1,126 @@
+{
+  "schema": "masc.runtime_readonly_refresh.v1",
+  "assembled_at": "2026-09-07T09:40:39.508586+00:00",
+  "observations": {
+    "live-health-dashboard-refresh.json": {
+      "observed_at": "2026-09-07T09:37:34.630568+00:00",
+      "health_capture_at": "2026-09-07T09:35:16Z",
+      "paths": {
+        "effective_base_path": "/Users/dancer/me",
+        "effective_masc_root": "/Users/dancer/me/.masc",
+        "cwd": "/Users/dancer/me/workspace/yousleepwhen/masc",
+        "resolution_source": "explicit_env"
+      },
+      "build": {
+        "binary_commit": "a4e66033110f6b3909e364045e3f4e2f8c3e8965",
+        "binary_commit_source": "embedded",
+        "provenance_source": "self_observed",
+        "executable_path": "/Users/dancer/.local/bin/masc",
+        "executable_sha256": "63029d8f876e2fe25d478024e90ea716cd3b0ccc4d6e7ac828d775b4d301722d",
+        "started_at": "2026-09-07T08:37:36Z",
+        "runtime_instance_id": "01a07b04-0631-7000-99d7-0051266ea6fe"
+      },
+      "dashboard": {
+        "status": "stale",
+        "installed_release": null,
+        "assets_root": "/Users/dancer/me/workspace/yousleepwhen/masc/assets",
+        "dashboard_asset_root": "/Users/dancer/me/workspace/yousleepwhen/masc/assets/dashboard",
+        "index_sha256": "a0d3037ff9d3e0e6d8b09219d54aeb9691ebee1fe2a75d076946a30f14de48c6",
+        "build_source_commit": null,
+        "build_stamp_at": "2026-09-07T08:26:59Z",
+        "binary_built_at": "2026-09-07T09:30:53Z",
+        "recovery": {
+          "kind": "build_in_place",
+          "reason": "unbound_assets_stale",
+          "restart_required": false
+        }
+      },
+      "binary_on_disk_sha256": "ca4948ee2d88753c1ff838a941a375a1633369eb2723c0f04ef8cec3474e082d",
+      "binary_on_disk_matches_health_sha256": false,
+      "index_on_disk_sha256": "a0d3037ff9d3e0e6d8b09219d54aeb9691ebee1fe2a75d076946a30f14de48c6",
+      "served_index_sha256": "a0d3037ff9d3e0e6d8b09219d54aeb9691ebee1fe2a75d076946a30f14de48c6",
+      "served_index_matches_disk_and_health": true,
+      "binary_assets_source_binding_measured": false,
+      "live_mutations_performed": false
+    },
+    "live-browser-host-process-refresh.json": {
+      "observed_at": "2026-09-07T09:38:22.467517+00:00",
+      "processes": [
+        {
+          "pid": 23538,
+          "ppid": 70838,
+          "executable_name": "masc-browser-host",
+          "established_server_connections": 1
+        },
+        {
+          "pid": 70838,
+          "ppid": 1,
+          "executable_name": "firefox",
+          "headless_flag_present": false
+        },
+        {
+          "pid": 66780,
+          "ppid": 66775,
+          "executable_name": "firefox",
+          "headless_flag_present": false
+        },
+        {
+          "pid": 66854,
+          "ppid": 66780,
+          "executable_name": "masc-browser-host-macos-arm64",
+          "established_server_connections": 0
+        }
+      ],
+      "connection_semantics": "process presence alone does not prove extension connection or roundtrip",
+      "connection_observed_at": "2026-09-07T09:40:03.834260+00:00"
+    },
+    "live-browser-roundtrip-refresh.json": {
+      "observed_start_at": "2026-09-07T09:40:03.100736+00:00",
+      "route": "/api/v1/dashboard/browser-lane/read",
+      "request": {
+        "lane": "live",
+        "app": "browser"
+      },
+      "content_redacted": true,
+      "authentication": "existing dashboard credential; value not retained",
+      "http_status": 200,
+      "ok": true,
+      "source": "live",
+      "app": "browser",
+      "elapsed_ms": 26.959375,
+      "tab_count": 9,
+      "page_present": true,
+      "actual_extension_roundtrip": true,
+      "page": {
+        "chars": 515,
+        "truncated": false,
+        "text_sha256": "b8efb4da7fb458e9598066138388dcfd69807ff29a8568f0865077981777a2d3",
+        "title_present": true
+      },
+      "observed_end_at": "2026-09-07T09:40:03.382478+00:00"
+    },
+    "new-keeper-shutdown-refresh.json": {
+      "observed_at": "2026-09-07T09:39:25.158484+00:00",
+      "records": [
+        {
+          "path": "/Users/dancer/me/.masc/keepers/.shutdown-operations/_new-keeper/shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7.json",
+          "record": {
+            "operation_id": "shutdown-15ad5365-6cf0-4880-b6d5-6b57e26441a7",
+            "keeper_name": "new-keeper",
+            "phase": "operator_absence_acknowledged",
+            "acknowledged_at": "2026-09-07T08:27:04Z",
+            "updated_at": "2026-09-07T08:27:04Z",
+            "prior_revision": 4,
+            "prior_operation_sha256": "b9251dd70b7a8873032ef660e63981d4ea359b3782993150aef90758b5ff51a0"
+          }
+        }
+      ]
+    }
+  },
+  "limits": [
+    "No service restart, install, configuration change, navigation, or external message was performed.",
+    "Browser tab titles, URLs, page text and credential values are omitted.",
+    "Live-lane result proves tabs.list plus page.read roundtrip; protocol does not identify the exact responding host PID.",
+    "Disk binary hash differs from the running health identity, and no dashboard receipt/source binding exists; matched served index bytes do not prove a matched binary/assets release."
+  ]
+}

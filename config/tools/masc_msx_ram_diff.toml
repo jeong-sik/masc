@@ -1,0 +1,8 @@
+name = "masc_msx_ram_diff"
+description = """
+Compare memory with the last masc_msx_peek snapshot.
+
+Returns runs of address (four hex digits, the spelling masc_msx_peek takes), length in bytes and before/after hex, plus total changed bytes. At most 64 runs; truncated marks overflow. Machine swaps retain the snapshot."""
+additional_properties = false
+
+defer_loading = true

@@ -1,0 +1,11 @@
+(include_subdirs no)
+
+(library
+ (name masc_dashboard_utils)
+ (public_name masc.dashboard_utils)
+ (modules dashboard_utils dashboard_cache_wire)
+ (wrapped false)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (libraries masc_types masc_core yojson))

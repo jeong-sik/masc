@@ -1,0 +1,81 @@
+name = "keeper_composition_prepare"
+description = """
+Inspect a composition before execution. For immediate execution, use \
+keeper_composition_run.recipe with this same input instead. \
+Ordinary Tool nodes use tool with fixed args as an object, for example \
+{"id":"lane","tool":"keeper_lane_status","args":{}}, or tagged input \
+for literal/output/object/array templates. Never supply args and input together. Omit optional after or provide \
+an array of node ids (including []); null is invalid. Child nodes use id, \
+skill_reference, after? and exactly one \
+of args (fixed object) or input (tagged upstream template). Copy the exact admitted \
+reference and declared exports from Skill inventory; arguments must match the \
+child's parameter object schema. A Skill's callable tool name is not an ordinary \
+node tool; use skill_reference. Resolved child input must be an object. \
+Inline children share the parent's failure policy. \
+A child exposes only named exports, not its raw internal tool result. For child \
+alias child with declared export report, a parent output template is \
+{"kind":"output","node":"child","pointer":"/report"}; a final export is \
+{"name":"result","node":"child","pointer":"/report"}. Copy the canonical pointer from \
+available_exports in an export rejection; do not guess fields. Dependencies wait \
+for the whole child. Returns a durable draft reference \
+bound to this Keeper, execution mode, inputs and frozen tool/Skill contracts; pass \
+its sha256 to keeper_composition_run. To execute immediately, pass this same input \
+as keeper_composition_run.recipe instead of a separate prepare call. No node executes or activates during prepare. \
+Inline drafts also admit canonical Edit/Write Tools through their original Serial \
+file producer, Gate and publication recovery. Write may create missing parents safely. \
+Durable async scopes admit static read-only leaves and keeper_job_start. A job launch retains \
+durable isolated ownership and Serial execution. Feed its /job_id output into \
+keeper_job_result, then use the complete original artifacts in dependent nodes. \
+Child definitions require inline mode; the enclosing draft may be inline or async. \
+Nested drafts omit publication metadata. Choose async \
+for independent work or an original result wait while the Keeper continues \
+other work. A named async submission returns result_wait: copy that binding into \
+a keeper_composition_result leaf, then read its /result_artifact/_blob/sha256 \
+with keeper_artifact_read after completion. Optional skill metadata freezes the \
+reusable SKILL.md in this same draft. Validate and publish it by draft_sha256 \
+after checking execution evidence; omit skill for a task-only composition."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "execution"
+type = "string"
+enum = ["inline", "async"]
+required = true
+description = "Execution mode bound into the prepared draft."
+
+[[params]]
+name = "nodes"
+type = "array"
+items = { type = "object" }
+min_items = 1
+required = true
+description = "Ordinary Tool nodes or exact admitted inline Skill child nodes. A node input is a tagged template: {kind:literal,value}, {kind:output,node,pointer}, {kind:object,fields:[{name,value}]} or {kind:array,items:[template]}; each value and item is itself a template. The advertised schema is not recursive; the grammar and exact child references are validated when the plan is prepared."
+
+[[params]]
+name = "exports"
+type = "array"
+items = { type = "object" }
+description = "Optional named node-output JSON pointers, checked against producer schemas."
+
+[[params]]
+name = "branch_failure_policy"
+type = "string"
+enum = ["fail_fast", "continue_independent"]
+description = "Explicit failure policy; absent means fail_fast."
+
+[[params]]
+name = "skill"
+type = "object"
+additional_properties = false
+description = "Optional reusable Skill identity and description, frozen with the exact plan. No package is published during prepare."
+
+[[params.params]]
+name = "package_id"
+type = "string"
+required = true
+
+[[params.params]]
+name = "description"
+type = "string"
+required = true

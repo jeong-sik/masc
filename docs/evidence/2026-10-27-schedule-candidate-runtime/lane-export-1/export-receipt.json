@@ -1,0 +1,20 @@
+{
+  "instance_id": "01a17977-8fdd-7000-81ef-e3acaf537c1e",
+  "incarnation": "01a17977-8fdd-7000-81ef-e3acaf537c1e",
+  "request_id": "c42ce1779baddbd0d4ba0d93a7c8b191641b850a3c8a73a8820c4f23718654e1",
+  "requester": "schedule:audit-export-2eecf26cff984ebb86a9f15b0c0ce586:audit-lane-admin",
+  "executor": {
+    "kind": "container",
+    "id": "b59603bd340d6e216949d4eeea04918492b0db3503b30ad5eb4dae55f4b5c54e"
+  },
+  "input_sha256": "6e4cac9791f49a0cb12fda50ff715159d21160661bc60e97def9dba157e68d45",
+  "action": {
+    "kind": "export"
+  },
+  "state": "confirmed",
+  "result": {
+    "bytes": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "detail": "outcome reported by the package; interpret its result and retained evidence"
+}

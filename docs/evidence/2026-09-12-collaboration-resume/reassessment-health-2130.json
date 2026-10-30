@@ -1,0 +1,105 @@
+{
+  "observed_at": "2026-09-12T12:34:11.028314+00:00",
+  "status": "ok",
+  "build": {
+    "release_version": "0.35.13",
+    "binary_version": "0.35.13",
+    "commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+    "commit_source": "embedded",
+    "binary_commit": "2578d7fec3061b0a8a05301eb465ae0521ce5461",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "ec8e45b98440645b975959060e81a1cb69495f78835d7e42c400ffd4c793e2ef",
+    "binary_commit_unix_ts": 1789210878.0,
+    "binary_commit_age_seconds": 5422,
+    "executable_path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/installed-runtime/.masc-releases/31fcd62eddffa0ee6a75eae5781bc7e8ce417276a545936880f6280f0b9f4183/masc",
+    "executable_dir": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668/installed-runtime/.masc-releases/31fcd62eddffa0ee6a75eae5781bc7e8ce417276a545936880f6280f0b9f4183",
+    "runtime_instance_id": "01a0955f-9536-7000-b3ef-639e00e0d2bb",
+    "started_at": "2026-09-12T11:27:44Z",
+    "uptime_seconds": 3836
+  },
+  "http_listener": {
+    "mode": "auto",
+    "status": "listening",
+    "active_connections": 1,
+    "accepted_total": 304,
+    "accept_errors_total": 0,
+    "rate_limit_responses_total": 16,
+    "rate_limit_responses": [
+      {
+        "protocol": "h1",
+        "scope": "client_ip",
+        "total": 0
+      },
+      {
+        "protocol": "h1",
+        "scope": "agent",
+        "total": 16
+      },
+      {
+        "protocol": "h1",
+        "scope": "sse_connection",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "client_ip",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "agent",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "sse_connection",
+        "total": 0
+      }
+    ],
+    "last_accept_unix": 1789216300.482163,
+    "last_accept_age_seconds": 0.025185108184814453,
+    "last_error": null
+  },
+  "keeper_owner": {
+    "schema": "masc.keeper_owner.v1",
+    "status": "ok",
+    "operator_action_required": false,
+    "status_reasons": [],
+    "keeper_count": 2,
+    "keeper_names": [
+      "exhibit-designer",
+      "exhibit-editor"
+    ],
+    "in_flight_keeper_count": 0,
+    "shutdown_keeper_count": 0,
+    "queued_operation_count": 2,
+    "running_operation_count": 0,
+    "terminal_operation_count": 23,
+    "interrupted_operation_count": 0,
+    "keepers": [
+      {
+        "keeper_name": "exhibit-designer",
+        "status": "ok",
+        "turn": null,
+        "shutdown_operation_id": null,
+        "queued_operation_count": 2,
+        "running_operation_count": 0,
+        "terminal_operation_count": 11,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      },
+      {
+        "keeper_name": "exhibit-editor",
+        "status": "ok",
+        "turn": null,
+        "shutdown_operation_id": null,
+        "queued_operation_count": 0,
+        "running_operation_count": 0,
+        "terminal_operation_count": 12,
+        "interrupted_operation_count": 0,
+        "operation_store_unavailable": false
+      }
+    ]
+  }
+}

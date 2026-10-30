@@ -1,0 +1,67 @@
+name = "keeper_composition_run"
+description = """
+Execute a composition from recipe or an exact prepared sha256. Use recipe with \
+the same execution/nodes/exports grammar as keeper_composition_prepare to validate, \
+freeze and run in one call. Use prepare first when you need to inspect the plan. \
+Inline Read/Edit plans may overlap independent file leaves through their original \
+Keeper-owned producers. Output-dependent inputs and exact inline Skill arguments \
+bind file resources when ready. Conflicting files retain topological order; \
+unsupported resource bindings use their ordinary handler alone. The outer run remains Serial. \
+Ordinary Tool nodes use tool with fixed args as an object, for example \
+{"id":"lane","tool":"keeper_lane_status","args":{}}, or tagged input \
+for output-dependent arguments. Supply only one of args or input. \
+Omit optional after or pass an array such as []; never null. \
+Inline recipes may use original file Write through its Serial handler, Gate and \
+publication recovery. Write has no resource-scoped admission or durable async replay. \
+Skill nodes use exact skill_reference, not the Skill's callable tool name in tool. \
+Their args or resolved tagged input must match the child's parameter object schema. \
+The server records the frozen draft and original invocation before effects; \
+prepared sha256 rechecks its Keeper and contracts. Inline drafts return \
+execution results, including child scope/admission/disposition/exports in nested_scopes; \
+only children reaching an actual ready leaf activate. Blocked or refused children \
+remain visible, and independent exports may be available while the whole run fails. \
+Async drafts bind each inline child's original trace, Task, selected runtime \
+and Skill revision before worker admission, then return a durable request id and deliver completion \
+later. Use valid selected exports from the completion projection. When results \
+are referenced or required detail is missing, read keeper_composition_status \
+with the exact request_id in result_reference. Do not repeatedly poll while \
+other useful work is available. Server maintenance and durable producer completion \
+continue eligible original ready waits without a new Keeper model turn. A job-completion \
+notification alone does not require resubmitting this Tool. For an explicit continuation \
+after the previous request has canonically settled, supply its original composition_run_id as \
+resume_run_id together with the same draft sha256. Completed nodes reuse their \
+recorded result and occurrence. A producer-owned keeper_job_result wait rechecks \
+the same job after its producer has committed complete outputs. A completed \
+job-start node retains its original result and occurrence. Unavailable evidence or unproven effects do not \
+authorize replay. Shared Skill publication is optional and separate."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "sha256"
+type = "string"
+min_length = 64
+max_length = 64
+description = "Exact sha256 from the durable draft reference returned by prepare."
+
+[[params]]
+name = "recipe"
+type = "object"
+description = "Fresh composition using the public prepare grammar, including execution. Validates and freezes before running; replaces sha256. Cannot resume a previous run."
+
+[[params]]
+name = "resume_run_id"
+type = "string"
+min_length = 36
+max_length = 36
+description = "For explicit continuation only: original composition_run_id of a prepared async run whose previous request has canonically settled. Eligible recorded waits also resume through server maintenance. Omit for a fresh run."
+
+[[one_of]]
+required = ["sha256"]
+forbidden = ["recipe"]
+description = "Run or explicitly continue the exact frozen draft."
+
+[[one_of]]
+required = ["recipe"]
+forbidden = ["sha256", "resume_run_id"]
+description = "Validate, freeze and execute one fresh recipe."

@@ -1,0 +1,1 @@
+{"schema": "masc.presentation-inspection.v1", "ok": false, "kind": "policy", "detail": "external loading relationship is unsupported: ppt/slides/_rels/slide1.xml.rels (http://schemas.openxmlformats.org/officeDocument/2006/relationships/image)"}

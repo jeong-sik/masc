@@ -1,0 +1,28 @@
+{
+  "base": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+  "checks": {
+    "ocaml_parse": "PASS",
+    "whitespace": "PASS",
+    "typecheck": "NOT_RUN",
+    "execution": "NOT_RUN"
+  },
+  "source_sha256": {
+    "lib/fusion/fusion_metrics.mli": "f682a9bf6c82eae185aa4b909da4cd4c35fc3d8dea0f7558fefd260d8c7a4158",
+    "lib/fusion/fusion_metrics.ml": "2a67393c533d4cbf60e45f4d733a133b9cad66caf74796219c4a69f540b628ea",
+    "lib/fusion/fusion_orchestrator.ml": "6e81d38531e1fd51a9f5f021400693607d9dcf1614c76d6bffe03faa122a18b9",
+    "test/test_fusion_metrics.ml": "efa4dc28a7234a15b548dfa2775437b58337395552f78ef340e50818ad58b38e",
+    "test/test_fusion_wake.ml": "bcacab8c851ee7e6d7d6e9f34bbca4ba3831717aa3532071e67d9f28056964c0"
+  },
+  "requested_suites": [
+    "test/test_fusion_metrics",
+    "test/test_fusion_wake"
+  ],
+  "full_regression": "NOT_RUN",
+  "prior_failed_run": {
+    "run": 40161691391,
+    "head": "3d64d9d0327df2d360b444745f3acd381053dbe7",
+    "stage": "compile before selected test execution",
+    "error": "Panels_unavailable requires skip_reason; new test supplied string",
+    "repair": "No_panel_answers {total=0}, matching empty controlled panel"
+  }
+}

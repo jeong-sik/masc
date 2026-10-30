@@ -1,0 +1,13 @@
+{
+  "parent": "1f482a08922981a9148e3a3de5f16e69e1ede1a0",
+  "checks": {
+    "wire_equals_original_codec_and_ledger_parse_after_header_and_eof": true,
+    "remaining_root_after_framed_equals_parent": true,
+    "public_mli_byte_identical": true,
+    "pure_epoch_parse_format_equal_definitions_byte_identical": true,
+    "canonical_type_declarations_byte_identical": true,
+    "entropy_mutex_and_generator_byte_identical_at_root": true
+  },
+  "limits": "Source comparisons only; public nominal/private boundaries additionally checked through compiler probes, codec and durable semantics through existing real-store scenarios.",
+  "initial_parent": "a5492cf76875b885386181a23069dd73ff1acd7f"
+}

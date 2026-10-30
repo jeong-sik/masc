@@ -1,0 +1,164 @@
+[
+  {
+    "case": {
+      "id": "wikipedia-1",
+      "site": "wikipedia",
+      "url": "https://www.wikipedia.org/",
+      "task": "Use the real Wikipedia portal search. Read text and elements; use BrowserAct select on its language control to choose English if available. Use BrowserInteract fill to enter \"OCaml\" in the observed search field, then BrowserAct press Enter on that field. Verify the English article title and final /wiki/ URL by reading the page. Use BrowserInteract scroll x=0,y=450, then capture a screenshot and actually call keeper_analyze_image to describe the visible article section. Report the observed title and one short fact, not a long quotation.",
+      "expected": "OCaml"
+    },
+    "result": "destination_verified",
+    "started_at_unix": 1788796689.280642,
+    "operation_id": "kmsg-7dd7007b8d01dc4c0df824fb4334383e",
+    "operation_state": "Succeeded",
+    "final_url": "https://en.wikipedia.org/wiki/OCaml",
+    "final_title": "OCaml - Wikipedia",
+    "tab_id": 1,
+    "chars": 31364,
+    "destination_verified": true,
+    "image": {
+      "sha256": "23ca2627b1936b6dee0109d8289db3c9261579ce68ccfcda42c1de20d4f01fa1",
+      "bytes": 271352
+    },
+    "observed_at_unix": 1788796798.1020129,
+    "close_operation_id": "kmsg-f863eb21e9317753bf12c02906029192",
+    "close_operation_state": "Succeeded",
+    "driver_ready_after_close": true,
+    "finished_at_unix": 1788796804.139169
+  },
+  {
+    "case": {
+      "id": "mdn-1",
+      "site": "mdn",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver",
+      "task": "Read text/elements of the real MDN WebDriver article. Click an observed documentation link in this article (same developer.mozilla.org /docs/ domain; no login or advertising). Read the linked page and record its heading/URL. Actually use BrowserAct back and read the original URL, forward and read the linked URL, reload and read again. Use BrowserAct scroll x=0,y=400; capture a screenshot and actually call keeper_analyze_image to describe the visible documentation. All selectors must come from observed elements. If no appropriate link is in a truncated inventory, report that exact limitation.",
+      "expected": null
+    },
+    "result": "destination_verified",
+    "started_at_unix": 1788796804.139359,
+    "operation_id": "kmsg-ba5fb5266302ce80a3cebee226c1b1ed",
+    "operation_state": "Succeeded",
+    "final_url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference",
+    "final_title": "WebDriver reference - WebDriver | MDN",
+    "tab_id": 2,
+    "chars": 1998,
+    "destination_verified": true,
+    "image": {
+      "sha256": "b87b8ab0ebb74bda627820521c4eca4e31def487675827259455d685b4c0377b",
+      "bytes": 140657
+    },
+    "observed_at_unix": 1788796870.4702332,
+    "close_operation_id": "kmsg-1fdc2327856e24e8ee440da28b43dd86",
+    "close_operation_state": "Succeeded",
+    "driver_ready_after_close": true,
+    "finished_at_unix": 1788796878.516343
+  },
+  {
+    "case": {
+      "id": "github-1",
+      "site": "github",
+      "url": "https://github.com/ocaml/ocaml/releases",
+      "task": "Read text/elements of the real OCaml release index. Locate an observed release tag link with /ocaml/ocaml/releases/tag/ in its href. Use BrowserAct open_tab with that exact observed URL; call BrowserTabs and verify BOTH index and newly opened release tabs, without assuming tabId=1. Read the new release page and report its actual tag/title. Use BrowserAct close_tab on the ORIGINAL index tab, then BrowserTabs to verify the release tab remains. Reload the release tab and read it. Capture its screenshot and actually call keeper_analyze_image to describe the visible release page. No downloading, reacting, login or repository writes.",
+      "expected": null
+    },
+    "result": "destination_verified",
+    "started_at_unix": 1788796878.516811,
+    "operation_id": "kmsg-16202343af649191bc1bfe9101a8a814",
+    "operation_state": "Succeeded",
+    "final_url": "https://github.com/ocaml/ocaml/releases/tag/5.5.1",
+    "final_title": "Release OCaml 5.5.1 · ocaml/ocaml · GitHub",
+    "tab_id": 4,
+    "chars": 917,
+    "destination_verified": true,
+    "image": {
+      "sha256": "87c2d209c34af384460736b5f7ed6b9f61ed50715488b330a50c7315b1540548",
+      "bytes": 107230
+    },
+    "observed_at_unix": 1788796964.21898,
+    "close_operation_id": "kmsg-23cc3a02091ccb6849eb82877774271f",
+    "close_operation_state": "Succeeded",
+    "driver_ready_after_close": true,
+    "finished_at_unix": 1788797034.63985
+  },
+  {
+    "case": {
+      "id": "wikipedia-2",
+      "site": "wikipedia",
+      "url": "https://www.wikipedia.org/",
+      "task": "Use the real Wikipedia portal search. Read text and elements; use BrowserAct select on its language control to choose English if available. Use BrowserInteract fill to enter \"Type inference\" in the observed search field, then BrowserAct press Enter on that field. Verify the English article title and final /wiki/ URL by reading the page. Use BrowserInteract scroll x=0,y=450, then capture a screenshot and actually call keeper_analyze_image to describe the visible article section. Report the observed title and one short fact, not a long quotation.",
+      "expected": "Type_inference"
+    },
+    "result": "destination_verified",
+    "started_at_unix": 1788797034.6404648,
+    "operation_id": "kmsg-0157c253150fe3073b2acf1e3615e092",
+    "operation_state": "Succeeded",
+    "final_url": "https://en.wikipedia.org/wiki/Type_inference",
+    "final_title": "Type inference - Wikipedia",
+    "tab_id": 5,
+    "chars": 25020,
+    "destination_verified": true,
+    "image": {
+      "sha256": "c6851b2de3519f5c07492b7f222eb1b2a0a91f7dbc6958270ef90a94614d2f59",
+      "bytes": 231688
+    },
+    "observed_at_unix": 1788797082.91638,
+    "close_operation_id": "kmsg-7a343eb2d4721adde14d6e33020578a3",
+    "close_operation_state": "Succeeded",
+    "driver_ready_after_close": true,
+    "finished_at_unix": 1788797086.948461
+  },
+  {
+    "case": {
+      "id": "mdn-2",
+      "site": "mdn",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver",
+      "task": "Read text/elements of the real MDN WebDriver article. Click an observed documentation link in this article (same developer.mozilla.org /docs/ domain; no login or advertising). Read the linked page and record its heading/URL. Actually use BrowserAct back and read the original URL, forward and read the linked URL, reload and read again. Use BrowserAct scroll x=0,y=400; capture a screenshot and actually call keeper_analyze_image to describe the visible documentation. All selectors must come from observed elements. If no appropriate link is in a truncated inventory, report that exact limitation.",
+      "expected": null
+    },
+    "result": "destination_verified",
+    "started_at_unix": 1788797086.9490051,
+    "operation_id": "kmsg-346b4f28800e50d48b39222dd1ad7db7",
+    "operation_state": "Succeeded",
+    "final_url": "https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi",
+    "final_title": "WebDriver BiDi reference - WebDriver | MDN",
+    "tab_id": 6,
+    "chars": 1814,
+    "destination_verified": true,
+    "image": {
+      "sha256": "deb013d8f195448a1d57b10c174f7c58150852b538fac965a0fbff222a8dceb7",
+      "bytes": 141374
+    },
+    "observed_at_unix": 1788797123.146657,
+    "close_operation_id": "kmsg-6506fefff9c9ab8a302a221ca016157c",
+    "close_operation_state": "Succeeded",
+    "driver_ready_after_close": true,
+    "finished_at_unix": 1788797129.2522938
+  },
+  {
+    "case": {
+      "id": "github-2",
+      "site": "github",
+      "url": "https://github.com/ocaml/ocaml/releases",
+      "task": "Read text/elements of the real OCaml release index. Locate an observed release tag link with /ocaml/ocaml/releases/tag/ in its href. Use BrowserAct open_tab with that exact observed URL; call BrowserTabs and verify BOTH index and newly opened release tabs, without assuming tabId=1. Read the new release page and report its actual tag/title. Use BrowserAct close_tab on the ORIGINAL index tab, then BrowserTabs to verify the release tab remains. Reload the release tab and read it. Capture its screenshot and actually call keeper_analyze_image to describe the visible release page. No downloading, reacting, login or repository writes.",
+      "expected": null
+    },
+    "result": "destination_verified",
+    "started_at_unix": 1788797129.2529302,
+    "operation_id": "kmsg-9a2772f00be205838fa12695f34370ac",
+    "operation_state": "Succeeded",
+    "final_url": "https://github.com/ocaml/ocaml/releases/tag/5.5.0",
+    "final_title": "Release OCaml 5.5.0 · ocaml/ocaml · GitHub",
+    "tab_id": 8,
+    "chars": 999,
+    "destination_verified": true,
+    "image": {
+      "sha256": "a8026527028fa33f2cffcbd3764a1ddf4d3c94c2cddb317e686c41db53418c0c",
+      "bytes": 103134
+    },
+    "observed_at_unix": 1788797195.6200871,
+    "close_operation_id": "kmsg-a4cdba3c21a21abf52704f16c55d7866",
+    "close_operation_state": "Succeeded",
+    "driver_ready_after_close": true,
+    "finished_at_unix": 1788797271.166023
+  }
+]

@@ -1,0 +1,21 @@
+name = "masc_board_reopen"
+description = """
+Reopen a Board post you authored or moderate.
+Operators use the dashboard. No-op when already open.
+"""
+
+defer_loading = true
+
+identity_fields = ["reopened_by"]
+
+[[params]]
+name = "post_id"
+type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
+required = true
+description = "ID of the post to reopen"
+
+[[params]]
+name = "reopened_by"
+type = "string"
+description = "Caller identity, filled automatically. Must be the author or a configured Board moderator."

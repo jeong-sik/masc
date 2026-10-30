@@ -1,0 +1,297 @@
+(** HTTP routes for invites to the shared machine (RFC
+    play-link-for-the-shared-machine §2.4).
+
+    - [POST /api/v1/play/invites] [{name, hours}] issues a [Player]
+      credential and answers [{name, expires_at, link}]. The link carries the
+      raw token after [#]; this answer is its only copy.
+    - [GET /api/v1/play/invites] lists them, and says once who holds the DOS
+      controller, including when no machine is loaded or it cannot be asked.
+    - [DELETE /api/v1/play/invites/<name>] deletes the credential and frees the
+      controller the name still holds. Asked again for a name with no
+      credential and no keeper, it frees a controller the name took back.
+
+    All three need [CanAdmin] from a bearer, and name the operator who acted.
+    A field of the wrong type is a 400 naming the field, never a default. *)
+
+open Server_auth
+module Http = Http_server_eio
+
+let invites_path = "/api/v1/play/invites"
+let invite_prefix = invites_path ^ "/"
+
+let decode_issue body =
+  let open Result.Syntax in
+  let* json =
+    try Ok (Yojson.Safe.from_string body) with
+    | Yojson.Json_error message -> Error ("body is not JSON: " ^ message)
+  in
+  let field name =
+    match json with
+    | `Assoc fields -> List.assoc_opt name fields
+    | _ -> None
+  in
+  let* name =
+    match field "name" with
+    | Some (`String raw) -> Play_invite.Name.of_string raw
+    | None -> Error "name is required"
+    | Some (`Int _ | `Intlit _ | `Float _ | `Bool _ | `Null | `List _ | `Assoc _) ->
+      Error "name must be a string"
+  in
+  let* hours =
+    match field "hours" with
+    | Some (`Int hours) -> Ok hours
+    | None -> Error "hours is required: an invite always expires"
+    | Some (`Intlit _ | `Float _ | `String _ | `Bool _ | `Null | `List _ | `Assoc _) ->
+      Error "hours must be an integer"
+  in
+  Ok (name, hours)
+
+let workspace_precondition ~config json =
+  match Workspace.validate_expected_workspace ~config json with
+  | Ok args -> Ok args
+  | Error Workspace.Invalid_workspace_precondition ->
+    Error (`Bad_request, Server_refusal.json ~code:"invalid_workspace_precondition"
+      "invalid expected_workspace precondition")
+  | Error Workspace.Workspace_precondition_failed ->
+    Error (`Conflict, Server_refusal.json ~code:"workspace_precondition_failed"
+      "workspace precondition failed")
+
+let issue_response ~config ~body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error detail ->
+    `Bad_request, Server_refusal.json ~code:"invalid_request" detail
+  | json -> match workspace_precondition ~config json with
+  | Error refusal -> refusal
+  | Ok args -> match decode_issue (Yojson.Safe.to_string args) with
+  | Error message -> `Bad_request, Server_refusal.json ~code:"invalid_request" message
+  | Ok (name, hours) ->
+    (match
+       Play_invite.issue ~base_path:config.Workspace.base_path
+         ~public_base_url:(Env_config_core.masc_http_base_url_opt ())
+         ~keeper_names:(Play_seat.keeper_names config) ~name ~hours
+     with
+     | Ok { Play_invite.name; expires_at; link } ->
+       ( `Created
+       , `Assoc
+           [ ("name", `String (Play_invite.Name.to_string name))
+           ; ("expires_at", `String expires_at)
+           ; ("link", `String link)
+           ] )
+     | Error (Play_invite.Not_ready gaps) ->
+       ( `Conflict
+       , Server_refusal.json ~code:"not_ready"
+           ~fields:
+             [ ( "missing"
+               , `List (List.map (fun gap -> `String (Play_invite.readiness_gap_to_string gap)) gaps) )
+             ]
+           "an invite needs auth enabled with require_token, and MASC_HTTP_BASE_URL set to an http(s) base URL" )
+     | Error (Play_invite.Name_taken by) ->
+       ( `Conflict
+       , Server_refusal.json ~code:"name_taken"
+           ~fields:[ ("taken_by", `String (Play_invite.taken_by_to_string by)) ]
+           "another participant already has this name" )
+     | Error (Play_invite.Keeper_names_unreadable detail) ->
+       `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
+     | Error (Play_invite.Hours_out_of_range hours) ->
+       ( `Bad_request
+       , Server_refusal.json ~code:"invalid_request"
+           (Printf.sprintf "hours must be between %d and %d, got %d"
+              Masc_domain.min_token_expiry_hours Masc_domain.max_token_expiry_hours hours) )
+     | Error (Play_invite.Credential_not_saved err) ->
+       `Internal_server_error, Server_refusal.json ~code:"not_saved" (Masc_domain.masc_error_to_string err))
+
+(* Listing and revoking name the workspace in query fields: both or neither. *)
+let query_workspace_precondition ~config request =
+  let fields = Uri.query (Uri.of_string request.Httpun.Request.target) in
+  let expected = List.filter (fun (key, _) ->
+      key = "expected_base_path" || key = "expected_masc_root") fields in
+  match expected with
+  | [] -> workspace_precondition ~config (`Assoc [])
+  | _ ->
+    match List.assoc_opt "expected_base_path" expected, List.assoc_opt "expected_masc_root" expected with
+    | Some [base], Some [root] when List.length expected = 2 ->
+      workspace_precondition ~config (`Assoc ["expected_workspace",
+        `Assoc ["base_path", `String base; "masc_root", `String root]])
+    | _ -> Error (`Bad_request, Server_refusal.json ~code:"invalid_workspace_precondition"
+        "expected_base_path and expected_masc_root must each occur once")
+
+(* Who holds the shared DOS controller, read once for the whole invite list.
+   No loaded program is a known answer: nobody holds it. [Unobserved] is left
+   for a machine that could not be asked, and the invites, which are
+   credentials, stay listed either way. *)
+type controller_observation =
+  | Held_by of string
+  | Free
+  | No_machine
+  | Unobserved of string
+
+let current_controller ~config =
+  match Machine_addon_host.call_shared ~config ~principal:Lane_addon_call_context.Anonymous
+      ~name:"masc_dos_screen" ~arguments:(`Assoc ["include_frame", `Bool false]) with
+  | Ok result when result.Mcp_protocol.Mcp_types.is_error <> Some true ->
+      (match result.structured_content with
+       | Some (`Assoc fields) -> (match List.assoc_opt "controller" fields with
+           | Some (`String name) -> Held_by name
+           | Some `Null -> Free
+           | _ -> Unobserved "worker controller observation is malformed")
+       | _ -> Unobserved "worker controller observation is unavailable")
+  | Ok result ->
+      (match Machine_controller_contract.screen_error_of_meta result._meta with
+       | Some Machine_controller_contract.Screen_no_machine -> No_machine
+       | Some (Machine_controller_contract.Screen_capture_failed
+              | Machine_controller_contract.Screen_encode_failed) | None ->
+           Unobserved (Agent_core.Mcp.text_of_tool_result result))
+  | Error (Lane_addon_runtime.Unavailable message | Lane_addon_runtime.Outcome_unknown message
+      | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message
+        | Activity_disabled message | Activity_unobserved message)) -> Unobserved message
+
+let controller_json = function
+  | Held_by name -> `Assoc [ ("state", `String "held"); ("name", `String name) ]
+  | Free -> `Assoc [ ("state", `String "free") ]
+  | No_machine -> `Assoc [ ("state", `String "no_machine") ]
+  | Unobserved reason -> `Assoc [ ("state", `String "unobserved"); ("reason", `String reason) ]
+
+let list_json ~config =
+  match Play_invite.list ~base_path:config.Workspace.base_path ~now:(Time_compat.now ()) with
+  | Error (Play_invite.Credentials_unavailable error) ->
+    `Service_unavailable, Server_refusal.json ~code:"credentials_unreadable" (Masc_domain.masc_error_to_string error)
+  | Error (Play_invite.Invalid_expiry (Masc_domain.Credential_expiry.Invalid_timestamp stamp)) ->
+    `Service_unavailable, Server_refusal.json ~code:"invalid_credential_expiry" ("invalid credential expiry: " ^ stamp)
+  | Ok invites ->
+    let controller = current_controller ~config in
+    (match controller with
+     | Unobserved reason ->
+       Log.DosLog.warn "play invites listed without a controller observation: %s" reason
+     | Held_by _ | Free | No_machine -> ());
+    `OK, `Assoc
+    [ ( "invites"
+      , `List
+          (List.map
+             (fun { Play_invite.invite_name; expires_at; expired } ->
+               `Assoc
+                 [ ("name", `String invite_name)
+                 ; ("expires_at", Json_util.string_opt_to_json expires_at)
+                 ; ("expired", `Bool expired)
+                 ])
+             invites) )
+    ; ("controller", controller_json controller)
+    ]
+
+type release =
+  | Released
+  | Not_held
+  | Release_failed of string
+
+let release_controller ~config ~events ~holder ~by =
+  match Machine_addon_host.release_shared_controller ~events ~config ~holder ~by
+      ~reason:Machine_controller_contract.No_credential with
+  | Error (Lane_addon_runtime.Unavailable message | Lane_addon_runtime.Outcome_unknown message
+      | Lane_addon_runtime.Host_refusal (Lane_addon_call_context.Rejected message | Unavailable message | Activity_disabled message | Activity_unobserved message)) ->
+      Release_failed message
+  | Ok None -> Not_held
+  | Ok (Some result) ->
+      if result.Mcp_protocol.Mcp_types.is_error = Some true then
+        Release_failed (Agent_core.Mcp.text_of_tool_result result)
+      else match result.structured_content with
+        | Some (`Assoc [("released", `Bool true)]) -> Released
+        | Some (`Assoc [("released", `Bool false)]) -> Not_held
+        | _ -> Release_failed "invalid worker controller-release result"
+
+let release_fields = function
+  | Released -> [ ("released_controller", `Bool true) ]
+  | Not_held -> [ ("released_controller", `Bool false) ]
+  | Release_failed message ->
+    [ ("released_controller", `Bool false); ("release_error", `String message) ]
+
+let revoke_response ~config ~by ~raw_name =
+  match Play_invite.Name.of_string raw_name with
+  | Error message -> `Bad_request, Server_refusal.json ~code:"invalid_request" message
+  | Ok name ->
+    let holder = Play_invite.Name.to_string name in
+    let events = Machine_addon_host.dos_event_batch ~author:by in
+    let no_such_invite () = `Not_found, Server_refusal.json ~code:"no_such_invite" ("no invite is named " ^ raw_name) in
+    let after_revoke = function
+     | Play_invite.Deleted ->
+       ( `OK
+       , `Assoc
+           (("name", `String holder) :: ("revoked", `Bool true)
+            :: release_fields (release_controller ~config ~events ~holder ~by)) )
+     (* Revoked before, or never issued. A request the invitee sent before
+        the delete can take the freed controller after it, and a release can
+        fail; revoking again frees it then. A keeper's name is left alone:
+        its controller is the keeper's, and [Keeper_dos_controller] decides
+        when that one is let go. *)
+     | Play_invite.Already_gone ->
+       (match Play_seat.keeper_names config with
+        | Error detail -> `Service_unavailable, Server_refusal.json ~code:"keepers_unreadable" detail
+        | Ok keepers when Play_invite.is_keeper_name ~keepers name -> no_such_invite ()
+        | Ok _ ->
+          (match release_controller ~config ~events ~holder ~by with
+           | Released ->
+             ( `OK
+             , `Assoc
+                 (("name", `String holder) :: ("revoked", `Bool false) :: release_fields Released) )
+           | Not_held -> no_such_invite ()
+           | Release_failed message as failed ->
+             ( `Internal_server_error
+             , Server_refusal.json ~code:"release_failed"
+                 ~fields:(("name", `String holder) :: release_fields failed)
+                 (Printf.sprintf "%s holds the DOS controller and it could not be released: %s"
+                    holder message) )))
+    in
+    let revoked =
+      Fun.protect ~finally:(fun () -> Machine_addon_events.ready events) (fun () ->
+        Play_invite.revoke ~base_path:config.Workspace.base_path ~name ~after_revoke)
+    in
+    Machine_addon_events.drain ();
+    (match revoked with
+     | Ok response -> response
+     | Error (Play_invite.Not_an_invite role) ->
+       ( `Conflict
+       , Server_refusal.json ~code:"not_an_invite"
+           (Printf.sprintf "%s is a %s credential, not an invite" raw_name
+              (Masc_domain.agent_role_to_string role)) )
+     | Error (Play_invite.Credential_not_deleted error) ->
+       `Service_unavailable,
+       Server_refusal.json ~code:"not_deleted" (Masc_domain.masc_error_to_string error)
+     | Error Play_invite.Credential_unreadable ->
+       `Service_unavailable, Server_refusal.json ~code:"credential_unreadable"
+         ("the credential for " ^ raw_name ^ " could not be read")
+     | Error (Play_invite.Credential_identity_mismatch owner) ->
+       `Service_unavailable, Server_refusal.json ~code:"credential_identity_mismatch"
+         (Printf.sprintf "the credential for %s resolves to %s" raw_name owner))
+
+module For_testing = struct
+  let revoke_response = revoke_response
+end
+
+(* Serialize invite routes. Auth's credential transaction owns the name-file
+   check and publication, also excluding credential writers outside these routes. *)
+let invites_lock = Eio.Mutex.create ()
+let one_at_a_time f = Eio.Mutex.use_rw ~protect:true invites_lock f
+
+let add_routes router =
+  router
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) invites_path (fun state _by request reqd ->
+           let config = Mcp_server.workspace_config state in
+           Http.Request.read_body_async reqd (fun body ->
+             let status, json = one_at_a_time (fun () -> issue_response ~config ~body) in
+             respond_json_value_with_cors ~status request reqd json))
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) invites_path (fun state _by request reqd ->
+           let config = Mcp_server.workspace_config state in
+           let status, json = match query_workspace_precondition ~config request with
+             | Error refusal -> refusal
+             | Ok _ -> list_json ~config in
+           respond_json_value_with_cors ~status request reqd json)
+  |> Server_route.prefix_delete (Server_route.Token_permission Masc_domain.CanAdmin) invite_prefix (fun state by request reqd ->
+           let status, json =
+             match Server_utils.extract_path_param ~prefix:invite_prefix (Http.Request.path request) with
+             | None -> `Bad_request, Server_refusal.json ~code:"invalid_request" "an invite name is required"
+             | Some raw_name ->
+               one_at_a_time (fun () ->
+                 let config = Mcp_server.workspace_config state in
+                 match query_workspace_precondition ~config request with
+                 | Error refusal -> refusal
+                 | Ok _ -> revoke_response ~config ~by ~raw_name)
+           in
+           respond_json_value_with_cors ~status request reqd json)

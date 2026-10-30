@@ -1,0 +1,213 @@
+(* One fetched thing, and what is known about it right now.
+
+   The panes model this as two independent options -- a snapshot and an
+   error -- and two options cannot say "asked, still waiting": [None, None]
+   means both "never asked" and "in flight". Measured 2026-09-05, that is why
+   the TUI has 71 places that can report a failure and five that can report a
+   fetch in progress. A pane before its first answer draws an empty list,
+   which is what a pane with no rows draws.
+
+   The states are a closed sum instead, so a renderer cannot leave one out.
+   Lifted from [Masc_tui_board_detail], which had already worked this out for
+   one pane; the key is a parameter now, and a pane with nothing to key on
+   uses [unit].
+
+   The value is immutable and every transition returns a new one. A pane
+   holds it in the mutable cell it already has, and a later move to a fully
+   immutable state record inherits this unchanged. *)
+
+type 'k request =
+  { key : 'k
+  ; generation : int64
+  }
+
+type ('k, 'a, 'error) status =
+  | Status_absent
+  | Status_loading of 'k request
+  | Status_retrying of 'k request * 'error
+      (** Explicit retry with no successful value. The known failure remains
+          observed while this new request owns settlement. *)
+  | Status_ready of 'k request * 'a
+  | Status_refreshing of 'k request * 'a * 'error option
+      (** A revalidation of what is already on screen: the request is in
+          flight and ['a] is the last good value, which keeps rendering until
+          the completion lands. Without this state every periodic refresh
+          flips Ready back to Loading and the pane collapses to its
+          placeholder for a frame. The error is the failure of the
+          revalidation before this one, when that one failed: a retry does
+          not make the value fresh, so it keeps reading as stale. *)
+  | Status_stale of 'k request * 'a * 'error
+      (** A revalidation failed. ['a] is the last good value and stays on
+          screen with the reason beside it, rather than a failed refresh
+          reading as a pane with nothing in it. *)
+  | Status_failed of 'k request * 'error
+
+type ('k, 'a, 'error) source =
+  { latest_generation : int64
+  ; status : ('k, 'a, 'error) status
+  }
+
+type ('k, 'a) t = ('k, 'a, string) source
+
+type ('a, 'error) observation =
+  | Absent  (** Never asked. *)
+  | Loading  (** Asked, no answer yet, nothing to show meanwhile. *)
+  | Ready of 'a
+  | Stale of 'a * 'error
+      (** The last good value, and why the refresh after it failed. *)
+  | Failed of 'error  (** Known failure without a value; a retry may be pending. *)
+
+type 'a view = ('a, string) observation
+
+let value = function
+  | Ready value | Stale (value, _) -> Some value
+  | Absent | Loading | Failed _ -> None
+;;
+
+type ('k, 'a, 'error) reading =
+  | Already_loading
+  | Started of ('k, 'a, 'error) source * 'k request
+
+type ('k, 'a) start_result = ('k, 'a, string) reading
+
+let initial = { latest_generation = 0L; status = Status_absent }
+let request_key request = request.key
+let request_id request = request.generation
+
+let same_request ~equal left right =
+  equal left.key right.key && Int64.equal left.generation right.generation
+;;
+
+let is_current ~equal state request =
+  match state.status with
+  | Status_loading current | Status_retrying (current, _) -> same_request ~equal current request
+  | Status_refreshing (current, _, _) -> same_request ~equal current request
+  | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> false
+;;
+
+let in_flight state = match state.status with
+  | Status_loading _ | Status_retrying _ | Status_refreshing _ -> true
+  | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> false
+
+type intent = Poll | Refresh
+
+let start_with intent ~equal state ~key =
+  let fresh status =
+    let generation = Int64.succ state.latest_generation in
+    let request = { key; generation } in
+    Started ({ latest_generation = generation; status = status request }, request)
+  in
+  match intent, state.status with
+  | Poll, Status_loading request when equal request.key key -> Already_loading
+  | Poll, Status_retrying (request, _) when equal request.key key -> Already_loading
+  | Poll, Status_refreshing (request, _, _) when equal request.key key -> Already_loading
+  | Refresh, Status_refreshing (current, value, error) when equal current.key key ->
+    fresh (fun request -> Status_refreshing (request, value, error))
+  | Refresh, (Status_failed (current, error) | Status_retrying (current, error))
+      when equal current.key key ->
+    fresh (fun request -> Status_retrying (request, error))
+  | (Poll | Refresh), Status_ready (current, value) when equal current.key key ->
+    (* Revalidating what is already shown: keep the last good value on screen
+       under a fresh generation. *)
+    fresh (fun request -> Status_refreshing (request, value, None))
+  | (Poll | Refresh), Status_stale (current, value, error) when equal current.key key ->
+    fresh (fun request -> Status_refreshing (request, value, Some error))
+  | (Poll | Refresh), (Status_absent | Status_loading _ | Status_retrying _ | Status_ready _ | Status_refreshing _
+       | Status_stale _ | Status_failed _) -> fresh (fun request -> Status_loading request)
+;;
+
+let start ~equal state ~key = start_with Poll ~equal state ~key
+let refresh ~equal state ~key = start_with Refresh ~equal state ~key
+
+let clear state = { state with status = Status_absent }
+
+let cancel_pending ~reason state =
+  match state.status with
+  | Status_loading request ->
+      { state with status = Status_failed (request, reason) }
+  | Status_retrying (request, error) ->
+      { state with status = Status_failed (request, error) }
+  | Status_refreshing (request, value, None) ->
+      { state with status = Status_ready (request, value) }
+  | Status_refreshing (request, value, Some error) ->
+      { state with status = Status_stale (request, value, error) }
+  | Status_absent | Status_ready _ | Status_stale _ | Status_failed _ -> state
+
+let suspend_with ~reason state =
+  let status = match state.status with
+    | Status_loading request ->
+        Status_failed (request, reason)
+    | Status_retrying (request, error) -> Status_failed (request, error)
+    | Status_refreshing (request, value, _) ->
+        Status_stale (request, value, reason)
+    | (Status_absent | Status_ready _ | Status_stale _ | Status_failed _) as status -> status
+  in
+  { state with status }
+
+let suspend state =
+  suspend_with ~reason:"Reading suspended; waiting for workspace identity." state
+
+let complete ~equal state request result =
+  if not (is_current ~equal state request)
+  then
+    (* An answer for a request the pane has moved past. Dropping it is the
+       point: showing it beside a different key reads as that key's value. *)
+    state
+  else (
+    let status =
+      match result, state.status with
+      | Ok value, _ -> Status_ready (request, value)
+      | Error error, Status_refreshing (_, value, _) -> Status_stale (request, value, error)
+      | Error error, (Status_absent | Status_loading _ | Status_retrying _ | Status_ready _ | Status_stale _ | Status_failed _)
+        -> Status_failed (request, error)
+    in
+    { state with status })
+;;
+
+(* What this pane is about right now, and what is known about it. A pane
+   whose key comes from the fetch itself -- an open file, a selected post --
+   cannot call [view_for] without first knowing the key, and the key is what
+   it is asking for. *)
+let current state =
+  let about request view = Some (request.key, view) in
+  match state.status with
+  | Status_absent -> None
+  | Status_loading request -> about request Loading
+  | Status_ready (request, value) -> about request (Ready value)
+  | Status_refreshing (request, value, None) -> about request (Ready value)
+  | Status_refreshing (request, value, Some error) | Status_stale (request, value, error) ->
+    about request (Stale (value, error))
+  | Status_retrying (request, error) | Status_failed (request, error) -> about request (Failed error)
+;;
+
+let current_key state = Option.map fst (current state)
+
+let current_request state =
+  match state.status with
+  | Status_absent -> None
+  | Status_loading request | Status_ready (request, _)
+  | Status_retrying (request, _)
+  | Status_refreshing (request, _, _) | Status_stale (request, _, _)
+  | Status_failed (request, _) -> Some request
+;;
+
+let view_for ~equal state ~key =
+  let matches request = equal request.key key in
+  match state.status with
+  | Status_loading request when matches request -> Loading
+  | Status_ready (request, value) when matches request -> Ready value
+  | Status_refreshing (request, value, None) when matches request ->
+    (* The revalidation is in flight; the reader keeps the last good value
+       until the completion swaps it. *)
+    Ready value
+  | Status_refreshing (request, value, Some error) when matches request -> Stale (value, error)
+  | Status_stale (request, value, error) when matches request -> Stale (value, error)
+  | Status_retrying (request, error) | Status_failed (request, error) when matches request -> Failed error
+  | Status_absent
+  | Status_loading _
+  | Status_retrying _
+  | Status_ready _
+  | Status_refreshing _
+  | Status_stale _
+  | Status_failed _ -> Absent
+;;

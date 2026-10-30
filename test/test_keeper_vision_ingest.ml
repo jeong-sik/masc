@@ -1,0 +1,95 @@
+(* Closed-set invariant for the vision-ingest error surface (#32126).
+
+   [Masc.Keeper_vision_ingest.error_reasons] is what health endpoints aggregate by;
+   a reason produced anywhere in the ingest path but missing from the list
+   would count in the pipeline counter and vanish from every health surface —
+   the exact silence this list exists to end. *)
+
+let in_set reason =
+  List.mem reason Masc.Keeper_vision_ingest.error_reasons
+;;
+
+(* The eager-path mapping is exported and total; every error outcome it can
+   produce must be declared. *)
+let test_every_eager_outcome_reason_is_declared () =
+  let module KVT = Masc.Keeper_vision_tool in
+  let outcomes =
+    [ KVT.Vo_empty
+    ; KVT.Vo_truncated
+    ; KVT.Vo_timeout
+    ; KVT.Vo_no_runtime "no image-capable runtime configured"
+    ; KVT.Vo_invalid_request "bad request"
+    ; KVT.Vo_invalid_structured_response "{}"
+    ; KVT.Vo_official_failure
+        { runtime_id = "official.vision"
+        ; failure = Masc.Fusion_official_client.Codex_failure Runtime_codex_app_server.Turn_interrupted
+        }
+    ; KVT.Vo_provider
+        { failure_class = Tool_result.Runtime_failure
+        ; detail = "provider said no"
+        }
+    ]
+  in
+  List.iter
+    (fun outcome ->
+       match Masc.Keeper_vision_ingest.eager_read_eviction_reason_of_outcome outcome with
+       | Some reason ->
+           if not (in_set reason) then
+             Alcotest.failf "undeclared eager eviction reason: %s" reason
+       | None -> ())
+    outcomes
+;;
+
+(* The store-path reasons are call-site literals; pinning them here makes the
+   coupling explicit — renaming one means updating the list and the health
+   surface together, and forgetting shows up as this test failing. *)
+let test_store_path_reasons_are_declared () =
+  List.iter
+    (fun reason ->
+       if not (in_set reason) then
+         Alcotest.failf "undeclared store-path eviction reason: %s" reason)
+    [ "media_unavailable"
+    ; "image_too_large"
+    ; "invalid_media_type"
+    ; "store_failed"
+    ; "eager_read_failed"
+    ]
+;;
+
+(* A reference whose bytes the store cannot read. A checkpoint write keeps
+   it, since a placeholder written there would replace the image for good;
+   only a request reads the failure as text. *)
+let test_unreadable_media_is_kept_on_persist_and_text_on_request () =
+  let module Vi = Masc.Keeper_vision_ingest in
+  let missing =
+    Agent_core.Types.Image
+      { media_type = "image/png"
+      ; source = Agent_core.Types.Stored (Agent_core.History.stored_of_raw "never put")
+      }
+  in
+  let evict mode =
+    Vi.evict_blocks ~media_store:(Agent_core.History.Memory_store.create ()) ~mode
+      ~delegate:true ~keeper_name:"vision-ingest-missing-bytes" [ missing ]
+  in
+  (match evict Vi.Store_only with
+   | [ kept ] when kept = missing -> ()
+   | _ -> Alcotest.fail "a checkpoint write must keep a reference it cannot read");
+  match evict Vi.Eager with
+  | [ Agent_core.Types.Text _ ] -> ()
+  | _ -> Alcotest.fail "a request must read missing bytes as a text placeholder"
+;;
+
+let () =
+  Alcotest.run "keeper_vision_ingest"
+    [ ( "closed reason set"
+      , [ Alcotest.test_case "every eager outcome reason is declared" `Quick
+            test_every_eager_outcome_reason_is_declared
+        ; Alcotest.test_case "store-path reasons are declared" `Quick
+            test_store_path_reasons_are_declared
+        ] )
+    ; ( "unreadable media"
+      , [ Alcotest.test_case "kept on persist, text on request" `Quick
+            test_unreadable_media_is_kept_on_persist_and_text_on_request
+        ] )
+    ]
+;;

@@ -1,0 +1,782 @@
+(** Tests for Tool_result — structured tool result type *)
+
+module Tool_result = Tool_result
+module Tool_dispatch = Tool_dispatch
+module Time_compat = Time_compat
+module Keeper_tool_execution = Masc.Keeper_tool_execution
+module Keeper_tools_agent_core = Masc.Keeper_tools_agent_core
+
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:(Tool_timing.start ()) ~data:(`String message) ()
+;;
+
+let test_schema tool =
+  { Masc_domain.name = tool
+  ; description = "test tool " ^ tool
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"; "properties", `Assoc []; "required", `List [] ]
+  }
+;;
+
+let register_test_tool ~tool_name ~handler =
+  Tool_dispatch.register ~tool_name ~handler;
+  Tool_dispatch.register_module_tag ~schemas:[ test_schema tool_name ] ~tag:Mod_misc
+;;
+
+let test_ok_json_looking_text_is_opaque () =
+  let start = Tool_timing.start () in
+  let r =
+    Tool_result.ok
+      ~tool_name:"masc_status"
+      ~start_time:start
+      {|{"status":"ok","count":42}|}
+  in
+  Alcotest.(check bool) "success" true (Tool_result.is_success r);
+  Alcotest.(check string) "tool_name" "masc_status" (Tool_result.tool_name r);
+  (match Tool_result.data r with
+   | `String text ->
+     Alcotest.(check string)
+       "JSON-looking text preserved"
+       {|{"status":"ok","count":42}|}
+       text
+   | _ -> Alcotest.fail "expected opaque String");
+  Alcotest.(check bool) "duration >= 0" true (Tool_result.duration_ms r >= 0.0)
+;;
+
+let test_error_plain_string () =
+  let start = Tool_timing.start () in
+  let r =
+    Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
+      ~tool_name:"masc_transition"
+      ~start_time:start
+      "Something went wrong"
+  in
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
+  Alcotest.(check string) "tool_name" "masc_transition" (Tool_result.tool_name r);
+  (* Non-JSON string should be wrapped as `String *)
+  match (Tool_result.data r) with
+  | `String s -> Alcotest.(check string) "plain string preserved" "Something went wrong" s
+  | _ -> Alcotest.fail "expected String for non-JSON input"
+;;
+
+let test_failure_data_keeps_one_source_and_the_wire_contract () =
+  let start = Tool_timing.start () in
+  let opaque =
+    [ Tool_result.error
+        ~failure_class:Tool_result.Runtime_failure
+        ~tool_name:"fixture" ~start_time:start "rejected"
+    ; Tool_result.of_exn ~tool_name:"fixture" ~start_time:start (Failure "rejected")
+    ; Tool_result.make_err_of_exn ~tool_name:"fixture" ~start_time:start
+        (Failure "rejected")
+    ; Tool_result.make_err ~tool_name:"fixture"
+        ~class_:Tool_result.Runtime_failure ~start_time:start
+        ~data:(`String "rejected") "rejected"
+    ]
+  in
+  List.iter
+    (fun result ->
+       match result with
+       | Tool_result.Failed
+           ({ message; data_source = Tool_result.Message_as_data; _ }
+             : Tool_result.failure_payload) ->
+         let expected_data = `String message in
+         Alcotest.(check bool) "data accessor derives the opaque message" true
+           (Tool_result.data result = expected_data);
+         let wire = Tool_result.to_json result in
+         Alcotest.(check bool) "wire retains both fields" true
+           (Yojson.Safe.Util.member "data" wire = expected_data
+            && Yojson.Safe.Util.member "message" wire = expected_data)
+       | Tool_result.Failed
+           ({ data_source = Tool_result.Explicit_data _; _ }
+             : Tool_result.failure_payload) ->
+         Alcotest.fail "opaque message was stored twice"
+       | Tool_result.Completed _ | Tool_result.Deferred _ ->
+         Alcotest.fail "opaque failure succeeded")
+    opaque;
+  let independent = `Assoc [ "reason", `String "quota" ] in
+  let structured =
+    Tool_result.make_err ~tool_name:"fixture"
+      ~class_:Tool_result.Dependency_unavailable ~start_time:start
+      ~data:independent "retry later"
+  in
+  match structured with
+  | Tool_result.Failed
+      ({ data_source = Tool_result.Explicit_data data; _ }
+        : Tool_result.failure_payload) ->
+    Alcotest.(check bool) "independent data stays independent" true
+      (data = independent && Tool_result.data structured = independent);
+    let wire = Tool_result.to_json structured in
+    Alcotest.(check bool) "structured wire keeps both facts" true
+      (Yojson.Safe.Util.member "data" wire = independent
+       && Yojson.Safe.Util.member "message" wire = `String "retry later")
+  | Tool_result.Failed
+      ({ data_source = Tool_result.Message_as_data; _ }
+        : Tool_result.failure_payload) ->
+    Alcotest.fail "structured data was replaced by message"
+  | Tool_result.Completed _ | Tool_result.Deferred _ ->
+    Alcotest.fail "structured failure succeeded"
+;;
+
+let test_plain_dispatch_failure_does_not_infer_from_message () =
+  let r =
+    Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
+      ~tool_name:"masc_transition"
+      ~start_time:(Tool_timing.start ())
+      "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)"
+  in
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
+  Alcotest.(check string)
+    "failure class"
+    "runtime_failure"
+    (match (Tool_result.failure_class r) with
+     | Some cls -> Tool_result.tool_failure_class_to_string cls
+     | None -> "none")
+;;
+
+let test_plain_dispatch_failure_honors_explicit_failure_class () =
+  let r =
+    Tool_result.error
+      ~failure_class:Tool_result.Dependency_unavailable
+      ~tool_name:"masc_transition"
+      ~start_time:(Tool_timing.start ())
+      "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog"
+  in
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
+  Alcotest.(check string)
+    "failure class"
+    "dependency_unavailable"
+    (match (Tool_result.failure_class r) with
+     | Some cls -> Tool_result.tool_failure_class_to_string cls
+     | None -> "none")
+;;
+
+let test_persisted_terminal_effect_keeps_its_failure_class () =
+  let persisted =
+    `Assoc
+      [ "kind", `String "terminal_effect_failed"
+      ; "failure_class", `String "dependency_unavailable"
+      ; "effect_disposition", `String "effect_outcome_unknown"
+      ; ( "detail"
+        , `Assoc
+            [ "kind", `String "tool_failed"
+            ; "internal_tool_name", `String "fixture"
+            ; "message", `String "persisted receipt"
+            ] )
+      ]
+  in
+  match Keeper_internal_error.parse_masc_internal_error_json persisted with
+  | Some
+      (Keeper_internal_error.Terminal_effect_failed
+        { failure_class = Tool_result.Dependency_unavailable
+        ; detail =
+            Keeper_terminal_effect_detail.Tool_failed
+              { internal_tool_name = "fixture"; message = "persisted receipt" }
+        ; _
+        }) ->
+    ()
+  | Some _ -> Alcotest.fail "persisted receipt decoded to the wrong internal error"
+  | None -> Alcotest.fail "persisted terminal effect was dropped"
+;;
+
+let test_exception_message_does_not_infer_failure_class () =
+  let r =
+    Tool_result.of_exn
+      ~tool_name:"masc_transition"
+      ~start_time:(Tool_timing.start ())
+      (Invalid_argument
+         "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
+  in
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
+  Alcotest.(check string)
+    "failure class"
+    "runtime_failure"
+    (match (Tool_result.failure_class r) with
+     | Some cls -> Tool_result.tool_failure_class_to_string cls
+     | None -> "none")
+;;
+
+let test_exception_boundary_honors_explicit_failure_class () =
+  let r =
+    Tool_result.of_exn
+      ~failure_class:Tool_result.Dependency_unavailable
+      ~tool_name:"masc_transition"
+      ~start_time:(Tool_timing.start ())
+      (Invalid_argument
+         "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
+  in
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
+  Alcotest.(check string)
+    "failure class"
+    "dependency_unavailable"
+    (match (Tool_result.failure_class r) with
+     | Some cls -> Tool_result.tool_failure_class_to_string cls
+     | None -> "none")
+;;
+
+let test_error_message_cannot_override_failure_class () =
+  let message =
+    {|{"ok":false,"error":"evidence is required","failure_class":"workflow_rejection"}|}
+  in
+  let r =
+    Tool_result.error
+      ~failure_class:Tool_result.Runtime_failure
+      ~tool_name:"keeper_task_done"
+      ~start_time:(Tool_timing.start ())
+      message
+  in
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
+  Alcotest.(check string)
+    "failure class"
+    "runtime_failure"
+    (match (Tool_result.failure_class r) with
+     | Some cls -> Tool_result.tool_failure_class_to_string cls
+     | None -> "none");
+  match Tool_result.data r with
+  | `String text -> Alcotest.(check string) "message remains opaque" message text
+  | _ -> Alcotest.fail "expected opaque String"
+;;
+
+let test_ok_newline_json_suffix_is_opaque () =
+  let start = Tool_timing.start () in
+  let message =
+    "✅ Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}"
+  in
+  let r =
+    Tool_result.ok
+      ~tool_name:"masc_board_post"
+      ~start_time:start
+      message
+  in
+  match Tool_result.data r with
+  | `String text -> Alcotest.(check string) "suffix preserved" message text
+  | _ -> Alcotest.fail "expected opaque String"
+;;
+
+let test_keeper_execution_json_looking_string_is_opaque () =
+  let raw = {|{"ok":true,"result":{"secret":"not typed"}}|} in
+  let execution =
+    Tool_result.ok ~tool_name:"probe" ~start_time:(Tool_timing.start ()) raw
+    |> Keeper_tool_execution.of_tool_result
+  in
+  Alcotest.(check string) "raw text preserved" raw execution.raw_output;
+  Alcotest.(check bool)
+    "opaque string preserved as producer data"
+    true
+    (match execution.data with
+     | Some (`String actual) -> String.equal raw actual
+     | Some _ | None -> false)
+;;
+
+let test_keeper_execution_preserves_explicit_typed_data () =
+  let data = `Assoc [ "result", `Assoc [ "typed", `Bool true ] ] in
+  let execution =
+    Tool_result.make_ok ~tool_name:"probe" ~start_time:(Tool_timing.start ()) ~data ()
+    |> Keeper_tool_execution.of_tool_result
+  in
+  Alcotest.(check bool)
+    "typed data preserved"
+    true
+    (match execution.data with
+     | Some actual -> Yojson.Safe.equal data actual
+     | None -> false)
+;;
+
+let test_keeper_execution_defer_kind_is_producer_typed () =
+  let data = `Assoc [ "approval_id", `String "approval-1" ] in
+  let generic = Keeper_tool_execution.deferred_data data in
+  let external_effect =
+    Keeper_tool_execution.deferred_external_effect_data data
+  in
+  Alcotest.(check bool)
+    "ordinary deferred execution remains generic"
+    true
+    (generic.deferred_kind = Some Keeper_tool_execution.Generic_deferred);
+  Alcotest.(check bool)
+    "external deferred execution is explicit"
+    true
+    (external_effect.deferred_kind
+     = Some (Keeper_tool_execution.External_effect_deferred {approval_id=None}))
+;;
+
+let test_to_json () =
+  let start = Tool_timing.start () in
+  let r = Tool_result.ok ~tool_name:"masc_transition" ~start_time:start "done" in
+  let json = Tool_result.to_json r in
+  match json with
+  | `Assoc fields ->
+    let has key = List.exists (fun (k, _) -> k = key) fields in
+    Alcotest.(check bool) "has disposition" true (has "disposition");
+    Alcotest.(check bool) "has no legacy success bool" false (has "success");
+    Alcotest.(check bool) "has data" true (has "data");
+    Alcotest.(check bool) "has tool_name" true (has "tool_name");
+    Alcotest.(check bool) "has duration_ms" true (has "duration_ms")
+  | _ -> Alcotest.fail "to_json should return Assoc"
+;;
+
+let test_message_roundtrip () =
+  let start = Tool_timing.start () in
+  let r = Tool_result.ok ~tool_name:"test" ~start_time:start "hello world" in
+  let success = (Tool_result.is_success r) in
+  let message = (Tool_result.message r) in
+  Alcotest.(check bool) "success preserved" true success;
+  Alcotest.(check string) "message preserved" "hello world" message
+;;
+
+let test_message_json_roundtrip () =
+  let start = Tool_timing.start () in
+  let json_str = {|{"key":"value"}|} in
+  let r = Tool_result.ok ~tool_name:"test" ~start_time:start json_str in
+  let message = (Tool_result.message r) in
+  Alcotest.(check string) "JSON-looking message is unchanged" json_str message;
+  match Tool_result.data r with
+  | `String text -> Alcotest.(check string) "data remains text" json_str text
+  | _ -> Alcotest.fail "expected opaque String"
+;;
+
+let test_dispatch_structured () =
+  (* Register a test handler *)
+  register_test_tool ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
+    tool_ok ~tool_name:name {|{"result":"ok"}|});
+  let token =
+    match Tool_dispatch.mint_token ~name:"__test_tool" with
+    | Ok t -> t
+    | Error e -> Alcotest.fail e
+  in
+  match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
+  | Some r ->
+    Alcotest.(check bool) "success" true (Tool_result.is_success r);
+    Alcotest.(check string) "tool_name" "__test_tool" (Tool_result.tool_name r);
+    Alcotest.(check bool) "duration >= 0" true (Tool_result.duration_ms r >= 0.0)
+  | None -> Alcotest.fail "dispatch_structured returned None for registered tool"
+;;
+
+let test_dispatch_structured_unknown () =
+  match Tool_dispatch.mint_token ~name:"__nonexistent" with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "mint_token should return Error for unknown tool"
+;;
+
+(* ─── RFC-0189 — typed result variant ──────────────────────────────────── *)
+
+let test_make_ok_roundtrip () =
+  let r =
+    Tool_result.make_ok
+      ~tool_name:"masc_test"
+      ~start_time:(Tool_timing.start ())
+      ~data:(`Assoc [ "k", `String "v" ])
+      ()
+  in
+  match r with
+  | Tool_result.Completed s ->
+    Alcotest.(check string) "tool_name preserved" "masc_test" s.tool_name;
+    Alcotest.(check bool) "duration_ms >= 0" true (s.duration_ms >= 0.0);
+    Alcotest.(check (option string))
+      "typed Assoc remains structured"
+      (Some "v")
+      Yojson.Safe.Util.(s.data |> member "k" |> to_string_option)
+  | Tool_result.Deferred _ -> Alcotest.fail "make_ok produced Deferred"
+  | Tool_result.Failed _ -> Alcotest.fail "make_ok produced Failed"
+;;
+
+let test_make_err_required_class () =
+  (* This test exists to document the API: ~class_ is required, not optional.
+     The compiler enforces this at every call site of make_err — there's no
+     [?class_:tool_failure_class option] pattern to defer to. *)
+  let r =
+    Tool_result.make_err
+      ~tool_name:"masc_test"
+      ~class_:Tool_result.Policy_rejection
+      ~start_time:(Tool_timing.start ())
+      "rejected"
+  in
+  match r with
+  | Tool_result.Failed f ->
+    Alcotest.(check string) "tool_name" "masc_test" f.tool_name;
+    Alcotest.(check string) "message" "rejected" f.message;
+    Alcotest.(check string)
+      "class_"
+      "policy_rejection"
+      (Tool_result.tool_failure_class_to_string f.class_)
+  | Tool_result.Completed _ -> Alcotest.fail "make_err produced Completed"
+  | Tool_result.Deferred _ -> Alcotest.fail "make_err produced Deferred"
+;;
+
+let test_make_err_of_exn_classifies_constructor () =
+  let r =
+    Tool_result.make_err_of_exn
+      ~tool_name:"test_tool"
+      ~start_time:(Tool_timing.start ())
+      Eio.Time.Timeout
+  in
+  match r with
+  | Tool_result.Failed f ->
+    Alcotest.(check string)
+      "Timeout classified as transient"
+      "dependency_unavailable"
+      (Tool_result.tool_failure_class_to_string f.class_)
+  | Tool_result.Completed _ -> Alcotest.fail "make_err_of_exn returned Completed"
+  | Tool_result.Deferred _ -> Alcotest.fail "make_err_of_exn returned Deferred"
+;;
+
+let test_cancelled_timeout_classifies_as_dependency_unavailable () =
+  Alcotest.(check string)
+    "wrapped timeout is not an operator cancellation"
+    "dependency_unavailable"
+    (Eio.Cancel.Cancelled Eio.Time.Timeout
+     |> Tool_result.classify_from_exception
+     |> Tool_result.tool_failure_class_to_string)
+;;
+
+let test_disposition_preserves_typed_payload () =
+  let r =
+    Tool_result.make_ok ~tool_name:"x" ~start_time:(Tool_timing.start ()) ~data:(`Int 1) ()
+  in
+  let mapped =
+    match r with
+    | Tool_result.Completed output ->
+      Tool_result.Completed { output with tool_name = "y" }
+    | Tool_result.Deferred output -> Tool_result.Deferred output
+    | Tool_result.Failed failure -> Tool_result.Failed failure
+  in
+  match mapped with
+  | Tool_result.Completed output ->
+    Alcotest.(check string) "payload update composes" "y" output.tool_name
+  | Tool_result.Deferred _ | Tool_result.Failed _ ->
+    Alcotest.fail "completed disposition was not preserved"
+;;
+
+let test_deferred_is_distinct_and_projects_one_way () =
+  let data = `Assoc [ "approval_id", `String "approval-1" ] in
+  let metadata = `Assoc [ "receipt", data ] in
+  let result =
+    Tool_result.make_deferred
+      ~tool_name:"keeper_file_write"
+      ~start_time:(Tool_timing.start ())
+      ~data
+      ~metadata
+      ()
+  in
+  Alcotest.(check bool) "not completed" false (Tool_result.is_success result);
+  Alcotest.(check bool) "deferred" true (Tool_result.is_deferred result);
+  Alcotest.(check bool) "not failed" false (Tool_result.is_failed result);
+  match Masc.Tool_bridge.to_agent_core_typed_result result with
+  | Ok { Agent_core.Types._meta = Some (`Assoc fields); _ } ->
+    Alcotest.(check (option string))
+      "opaque AGENT_CORE marker"
+      (Some "deferred")
+      (match List.assoc_opt "masc.tool_disposition" fields with
+       | Some (`String value) -> Some value
+       | Some _ | None -> None)
+  | Ok _ -> Alcotest.fail "deferred AGENT_CORE projection omitted metadata"
+  | Error _ -> Alcotest.fail "deferred AGENT_CORE projection became an error"
+;;
+
+let test_disposition_wire_decoder_is_strict () =
+  let expect label expected =
+    match Tool_result.unit_disposition_of_string label with
+    | Ok actual ->
+      Alcotest.(check string)
+        label
+        expected
+        (Tool_result.string_of_disposition actual)
+    | Error error -> Alcotest.fail error
+  in
+  expect "completed" "completed";
+  expect "deferred" "deferred";
+  expect "failed" "failed";
+  match Tool_result.unit_disposition_of_string "success" with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "legacy success label must not be migrated"
+;;
+
+let test_wire_outcome_decoder_is_strict () =
+  List.iter
+    (fun outcome ->
+       let label = Tool_result.string_of_tool_call_outcome outcome in
+       match Tool_result.tool_call_outcome_of_string label with
+       | Ok decoded ->
+         Alcotest.(check string) label label (Tool_result.string_of_tool_call_outcome decoded)
+       | Error error -> Alcotest.fail error)
+    [ Tool_result.Ok; Tool_result.Error; Tool_result.Unknown ];
+  match Tool_result.tool_call_outcome_of_string "success" with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unknown wire outcome must not decode"
+;;
+
+(* The disposition decides; the wire outcome speaks only for a record without
+   one. A deferred call is its own case, and a record whose fields do not decode
+   is malformed rather than read as either outcome. *)
+let test_recorded_call_outcome_reads_the_disposition_first () =
+  let name = function
+    | Tool_result.Recorded_succeeded -> "succeeded"
+    | Tool_result.Recorded_deferred -> "deferred"
+    | Tool_result.Recorded_failed -> "failed"
+    | Tool_result.Recorded_unsettled -> "unsettled"
+    | Tool_result.Recorded_malformed -> "malformed"
+  in
+  let expect label fields expected =
+    Alcotest.(check string)
+      label
+      expected
+      (name (Tool_result.recorded_call_outcome (`Assoc fields)))
+  in
+  let disposition value = "disposition", `String value in
+  let wire value = "wire_outcome", `String value in
+  expect "completed" [ disposition "completed" ] "succeeded";
+  expect "a deferred call has not taken effect" [ disposition "deferred" ] "deferred";
+  expect "failed" [ disposition "failed" ] "failed";
+  expect
+    "a committed effect whose result was not delivered"
+    [ disposition "completed"; wire "error" ]
+    "succeeded";
+  expect
+    "the disposition outranks a delivered response"
+    [ disposition "failed"; wire "ok" ]
+    "failed";
+  expect
+    "an undecodable disposition is not read as either outcome"
+    [ disposition "success"; wire "ok" ]
+    "malformed";
+  expect "a disposition of the wrong type" [ "disposition", `Bool true ] "malformed";
+  expect "no disposition: the response speaks" [ wire "ok" ] "succeeded";
+  expect "no disposition: a response error" [ wire "error" ] "failed";
+  expect "no disposition: an unknown response" [ wire "unknown" ] "unsettled";
+  expect "no disposition: an undecodable response" [ wire "maybe" ] "malformed";
+  expect "a response of the wrong type" [ "wire_outcome", `Int 1 ] "malformed";
+  expect "a record naming neither" [] "unsettled";
+  expect "a success flag is not an outcome" [ "success", `Bool true ] "unsettled";
+  Alcotest.(check string)
+    "a record that is not an object"
+    "malformed"
+    (name (Tool_result.recorded_call_outcome (`String "completed")))
+;;
+
+(* A tool that binds the same key twice in its payload used to succeed and
+   then fail the turn: the checkpoint encoder refuses the repeat once the
+   result is already in the transcript (#31701). The producers resolve it now,
+   the same way the inbound argument boundary does. *)
+let test_repeated_result_keys_resolve_to_the_first_binding () =
+  let repeated = `Assoc [ "cwd", `String "first"; "cwd", `String "second" ] in
+  let completed = Keeper_tool_execution.success_data repeated in
+  Alcotest.(check bool)
+    "a completed result keeps one binding, the first"
+    true
+    (match completed.Keeper_tool_execution.data with
+     | Some (`Assoc [ ("cwd", `String "first") ]) -> true
+     | Some _ | None -> false);
+  Alcotest.(check string)
+    "the rendered output carries no repeat either"
+    {|{"cwd":"first"}|}
+    completed.Keeper_tool_execution.raw_output;
+  let failed =
+    Keeper_tool_execution.failure_data
+      ~class_:Tool_result.Runtime_failure
+      ~message:"boom"
+      repeated
+  in
+  Alcotest.(check bool)
+    "a failed result resolves it too"
+    true
+    (match failed.Keeper_tool_execution.data with
+     | Some (`Assoc [ ("cwd", `String "first") ]) -> true
+     | Some _ | None -> false)
+;;
+
+let test_gate_causal_context_preserves_deferred () =
+  let context =
+    Masc.Keeper_gate_causal_context.create ~origin:Keeper_approval_origin.unavailable
+      ~turn_id:(Some 7)
+      ~initial:(`Assoc [])
+  in
+  let result =
+    Tool_result.make_deferred
+      ~tool_name:"keeper_file_write"
+      ~start_time:(Tool_timing.start ())
+      ~data:(`Assoc [ "approval_id", `String "approval-1" ])
+      ()
+  in
+  Masc.Keeper_gate_causal_context.record_tool_result
+    context
+    ~operation:"keeper_file_write"
+    ~input:(`Assoc [])
+    result;
+  let call =
+    (Masc.Keeper_gate_causal_context.snapshot context).snapshot
+    |> Yojson.Safe.Util.member "completed_tool_calls"
+    |> Yojson.Safe.Util.index 0
+  in
+  Alcotest.(check string)
+    "deferred stays distinct"
+    "deferred"
+    Yojson.Safe.Util.(call |> member "disposition" |> to_string);
+  Alcotest.(check bool)
+    "legacy succeeded bool is absent"
+    true
+    Yojson.Safe.Util.(call |> member "succeeded" = `Null)
+;;
+
+let keeper_taskboard_schema name =
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) ->
+         String.equal schema.name name)
+      Tool_shard_types.taskboard_tools
+  with
+  | Some schema -> schema.input_schema
+  | None -> Alcotest.failf "%s schema missing" name
+;;
+
+let object_member name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+;;
+
+let string_list_member name json =
+  match object_member name json with
+  | Some (`List items) ->
+    List.filter_map
+      (function
+        | `String value -> Some value
+        | _ -> None)
+      items
+  | _ -> []
+;;
+
+let test_keeper_done_schema_uses_result_and_evidence_refs () =
+  let schema = keeper_taskboard_schema "keeper_task_done" in
+  let properties =
+    match object_member "properties" schema with
+    | Some (`Assoc fields) -> fields
+    | _ -> Alcotest.fail "schema properties missing"
+  in
+  let has_property name = List.exists (fun (key, _) -> String.equal key name) properties in
+  let required = string_list_member "required" schema in
+  Alcotest.(check bool) "result property present" true (has_property "result");
+  Alcotest.(check bool) "evidence_refs is a keeper done field" true
+    (has_property "evidence_refs");
+  Alcotest.(check bool) "pr_url is not a keeper done field" false
+    (has_property "pr_url");
+  Alcotest.(check (list string))
+    "task_id, result, and evidence_refs are required"
+    [ "task_id"; "result"; "evidence_refs" ]
+    required
+;;
+
+let () =
+  Alcotest.run
+    "Tool_result"
+    [ ( "ok/error"
+      , [ Alcotest.test_case
+            "JSON-looking success text stays opaque"
+            `Quick
+            test_ok_json_looking_text_is_opaque
+        ; Alcotest.test_case "plain string" `Quick test_error_plain_string
+        ; Alcotest.test_case
+            "plain dispatch failure does not infer from message"
+            `Quick
+            test_plain_dispatch_failure_does_not_infer_from_message
+        ; Alcotest.test_case
+            "plain dispatch failure honors explicit failure_class"
+            `Quick
+            test_plain_dispatch_failure_honors_explicit_failure_class
+
+        ; Alcotest.test_case
+            "persisted terminal effect keeps its failure class"
+            `Quick
+            test_persisted_terminal_effect_keeps_its_failure_class
+        ; Alcotest.test_case
+            "exception message does not infer failure_class"
+            `Quick
+            test_exception_message_does_not_infer_failure_class
+        ; Alcotest.test_case
+            "exception boundary honors explicit failure_class"
+            `Quick
+            test_exception_boundary_honors_explicit_failure_class
+        ; Alcotest.test_case
+            "failure message cannot override class"
+            `Quick
+            test_error_message_cannot_override_failure_class
+        ; Alcotest.test_case
+            "newline JSON suffix stays opaque"
+            `Quick
+            test_ok_newline_json_suffix_is_opaque
+        ; Alcotest.test_case
+            "keeper execution keeps JSON-looking string opaque"
+            `Quick
+            test_keeper_execution_json_looking_string_is_opaque
+        ; Alcotest.test_case
+            "keeper execution preserves typed data"
+            `Quick
+            test_keeper_execution_preserves_explicit_typed_data
+        ; Alcotest.test_case
+            "keeper execution defer kind is producer typed"
+            `Quick
+            test_keeper_execution_defer_kind_is_producer_typed
+        ] )
+    ; ( "to_json"
+      , [ Alcotest.test_case "fields present" `Quick test_to_json
+        ; Alcotest.test_case "failure stores one source and keeps wire fields"
+            `Quick test_failure_data_keeps_one_source_and_the_wire_contract
+        ] )
+    ; ( "message"
+      , [ Alcotest.test_case "roundtrip string" `Quick test_message_roundtrip
+        ; Alcotest.test_case "roundtrip json" `Quick test_message_json_roundtrip
+        ] )
+    ; ( "dispatch_structured"
+      , [ Alcotest.test_case "registered tool" `Quick test_dispatch_structured
+        ; Alcotest.test_case "unknown tool" `Quick test_dispatch_structured_unknown
+        ] )
+    ; ( "rfc-0189 typed result"
+      , [ Alcotest.test_case "make_ok round-trip" `Quick test_make_ok_roundtrip
+        ; Alcotest.test_case "make_err required class" `Quick test_make_err_required_class
+        ; Alcotest.test_case
+            "make_err_of_exn classifies by constructor"
+            `Quick
+            test_make_err_of_exn_classifies_constructor
+        ; Alcotest.test_case
+            "cancelled timeout remains dependency unavailable"
+            `Quick
+            test_cancelled_timeout_classifies_as_dependency_unavailable
+
+        ; Alcotest.test_case
+            "disposition preserves typed payload"
+            `Quick
+            test_disposition_preserves_typed_payload
+        ; Alcotest.test_case
+            "deferred is distinct and projects one-way"
+            `Quick
+            test_deferred_is_distinct_and_projects_one_way
+        ; Alcotest.test_case
+            "disposition wire decoder is strict"
+            `Quick
+            test_disposition_wire_decoder_is_strict
+        ; Alcotest.test_case
+            "wire outcome decoder is strict"
+            `Quick
+            test_wire_outcome_decoder_is_strict
+        ; Alcotest.test_case
+            "recorded call outcome reads the disposition first"
+            `Quick
+            test_recorded_call_outcome_reads_the_disposition_first
+        ; Alcotest.test_case
+            "Gate causal context preserves deferred"
+            `Quick
+            test_gate_causal_context_preserves_deferred
+        ] )
+    ; ( "keeper verification evidence schema"
+      , [ Alcotest.test_case
+            "done schema uses result and evidence refs"
+            `Quick
+            test_keeper_done_schema_uses_result_and_evidence_refs
+        ] )
+    ; ( "repeated result keys"
+      , [ Alcotest.test_case
+            "resolve to the first binding at the producer"
+            `Quick
+            test_repeated_result_keys_resolve_to_the_first_binding
+        ] )
+    ]
+;;

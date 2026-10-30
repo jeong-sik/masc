@@ -1,0 +1,1917 @@
+[targeted] EIO_BACKEND=posix timeout=600s per suite
+[targeted] dune build test/test_lane_addon_exact.exe test/test_lane_addon_exact_runner.exe test/test_keeper_librarian_capacity_callback.exe test/test_keeper_librarian_admission_mode.exe test/test_keeper_memory_admission_queue.exe test/test_lane_addon_host_cycle.exe test/test_workspace_curator_addon_commit.exe config/prompts/workspace_memory_curator.md config/prompts/workspace_memory_briefing.md addons/workspace-curator/lane.toml addons/workspace-curator/schemas/classification.json addons/workspace-curator/schemas/briefing.json
+(cd _build/default/lib/sse_event && /home/runner/.opam/ci-5-5-1/bin/atdgen -j -j-std ./sse_event.atd)
+Warning: option "-j-std" is deprecated.
+[targeted] test/test_lane_addon_exact: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_lane_addon_exact: start 2026-10-22T06:52:33Z
+::group::{lane add-on exact requests}
+Testing `lane add-on exact requests'.
+This run has ID `294KR6Q5'.
+
+ASSERT first run answers
+ASSERT the call runs on the installation's add-on lane
+ASSERT the request was retained with a started attempt before the call
+ASSERT after a restart the retained result is delivered
+ASSERT and the call is not sent again
+  [OK]          retention          0   retained before the call and replayed ...
+ASSERT an off lane does not end the request
+ASSERT nothing was sent
+ASSERT its attempt is retained and not marked as started
+ASSERT after a restart the request is tried again, not unknown
+ASSERT both attempts are retained
+  [OK]          retention          1   an unavailable lane sends nothing and ...
+ASSERT a rate limit does not end the request
+ASSERT the next run sends again and ends it
+ASSERT two sends
+ASSERT two attempts
+  [OK]          retention          2   a provider refusal that may pass is tr...
+[2026-10-22 06:52:33] [INFO] [ToolValidation] tool_input_validation rejected author: Tool 'author' received unsupported field(s): extra; accepted: question
+  [OK]          retention          3   an answer outside the schema is not an...
+ASSERT the same id with another body is refused
+ASSERT without a send
+ASSERT and the original result stands
+  [OK]          retention          4   a reused request id is refused.
+ASSERT the host cannot tell whether the provider got it
+ASSERT so it does not send again
+ASSERT and the verdict is retained
+  [OK]          retention          5   a started attempt without outcome is u...
+ASSERT an exception is Outcome_unknown
+ASSERT its text stays in the attempt
+  [OK]          retention          6   an exception ends the request as unknown.
+ASSERT a denied id cannot be reused for a permitted output
+ASSERT the same denied request retains its final after permission changes
+ASSERT without a send
+  [OK]          retention          7   an undeclared output is not allowed.
+ASSERT permission does not mask a changed identity
+ASSERT disabled output does not disclose the original answer
+ASSERT the delivery refusal is retained alongside the original attempt
+ASSERT reenabling replays the original answer
+ASSERT one provider call across selection changes
+  [OK]          retention          8   selection hides but preserves a retain...
+ASSERT the second run waits
+ASSERT and leaves the started attempt alone
+ASSERT the first run answers
+ASSERT the same ids under another root run
+  [OK]          retention          9   a request in flight is not run twice.
+ASSERT the started attempt stays
+ASSERT disabled output refuses delivery of an unresolved attempt
+ASSERT the next run reads it as unknown, so the claim was released
+ASSERT without a send
+  [OK]          retention         10   a cancelled call leaves its attempt st...
+[2026-10-22 06:52:33] [INFO] [ToolValidation] tool_input_validation rejected author: Your call to "author":\x0A{"value":{"question":"Q?"}}\x0A\x0AErrors (fix these and call again):\x0A  "value/question": wrong type — expected: integer, got: string("Q?")
+ASSERT and the provider is not called again
+ASSERT the record keeps the answer as it came
+  [OK]          retention         11   a retained answer is checked against t...
+ASSERT the run reports the failed write
+ASSERT the original answer is published without another send
+ASSERT without a send
+  [OK]          retention         12   confirmed proof recovers lost outcome ...
+ASSERT first original refusal is retained
+ASSERT a future attempt cannot borrow the first proof
+ASSERT second trigger can answer
+ASSERT second original answer has its own proof
+ASSERT only the two explicit triggers send
+ASSERT read refuses a rebound request
+ASSERT read refuses a schema from another original
+ASSERT read refuses a zero ordinal
+  [OK]          retention         13   original execution binds request schem...
+ASSERT failed proof publication is an Error
+ASSERT answer is not exposed as final before proof confirmation
+ASSERT missing proof preserves unknown without replay
+ASSERT an old generic unknown grants no execution proof
+ASSERT the original call ran once
+  [OK]          retention         14   proof failure leaves uncertainty witho...
+ASSERT actual final publication failed
+ASSERT malformed original refuses rather than becoming absence
+ASSERT trusted original read refuses the malformed evidence
+ASSERT refusal neither publishes final nor erases started uncertainty
+ASSERT actual final publication failed
+ASSERT malformed original refuses rather than becoming absence
+ASSERT trusted original read refuses the malformed evidence
+ASSERT refusal neither publishes final nor erases started uncertainty
+ASSERT actual final publication failed
+ASSERT malformed original refuses rather than becoming absence
+ASSERT trusted original read refuses the malformed evidence
+ASSERT refusal neither publishes final nor erases started uncertainty
+ASSERT actual final publication failed
+ASSERT malformed original refuses rather than becoming absence
+ASSERT trusted original read refuses the malformed evidence
+ASSERT refusal neither publishes final nor erases started uncertainty
+ASSERT actual final publication failed
+ASSERT malformed original refuses rather than becoming absence
+ASSERT trusted original read refuses the malformed evidence
+ASSERT refusal neither publishes final nor erases started uncertainty
+ASSERT actual final publication failed
+ASSERT malformed original refuses rather than becoming absence
+ASSERT trusted original read refuses the malformed evidence
+ASSERT refusal neither publishes final nor erases started uncertainty
+ASSERT actual final publication failed
+ASSERT malformed original refuses rather than becoming absence
+ASSERT trusted original read refuses the malformed evidence
+ASSERT refusal neither publishes final nor erases started uncertainty
+  [OK]          retention         15   malformed proof refuses local recovery...
+ASSERT second final publication failed after its proof
+ASSERT completed second proof cannot bypass malformed prior history
+ASSERT failed recovery preserves the original record bytes
+  [OK]          retention         16   recovery validates the complete origin...
+ASSERT orphan proof is not permission to run the original again
+ASSERT trusted read also refuses proof without its original record
+ASSERT the completed original was dispatched once
+ASSERT orphan proof is not permission to run the original again
+ASSERT trusted read also refuses proof without its original record
+ASSERT the completed original was dispatched once
+  [OK]          retention         17   orphan original proof prevents a dupli...
+ASSERT original not-final outcome publication failed
+ASSERT recovery returns that original refusal without a new trigger
+ASSERT only the original call ran before recovery
+ASSERT a separate later trigger can run the next attempt
+ASSERT later trigger starts its own one call
+ASSERT later success does not replace the original refusal proof
+  [OK]          retention         18   recovered refusal returns before a lat...
+ASSERT a terminal attempt with a lost final refuses instead of dispatching
+ASSERT original proof read also rejects contradictory final state
+ASSERT only the actual original was sent
+  [OK]          retention         19   completed terminal without final canno...
+ASSERT another kind
+ASSERT no message
+ASSERT a blank id
+ASSERT an unknown key
+  [OK]          retention         20   request decoding is strict.
+ASSERT roles survive canonical encoding
+ASSERT the conversation answers
+ASSERT relisting reuses the original answer
+ASSERT a role change changes request identity
+ASSERT the same id cannot change a prior speaker
+ASSERT no additional provider call
+  [OK]          retention         21   conversation retention binds speaker r...
+ASSERT untyped strings
+ASSERT system turn
+ASSERT tool turn
+ASSERT extra message field
+ASSERT duplicate speaker
+ASSERT duplicate text
+ASSERT non-text content
+ASSERT duplicate request fields are refused before identity is computed
+  [OK]          retention         22   conversation wire refuses ambiguous ro...
+ASSERT permitted request answers
+ASSERT restoring the grant restores the original answer
+ASSERT schema participates in request identity
+ASSERT no extra provider dispatch
+  [OK]          retention         23   request schema authority preserves ret...
+[2026-10-22 06:52:33] [INFO] [ToolValidation] tool_input_validation rejected author: Your call to "author":\x0A{"value":{"question":null}}\x0A\x0AErrors (fix these and call again):\x0A  "value/question": wrong type — expected: string, got: null
+ASSERT the requested dialect goes to the provider
+ASSERT one call
+  [OK]          retention         24   provider schema cannot weaken the pack...
+ASSERT schema object order does not change retained identity
+ASSERT schema must be an unambiguous JSON object
+ASSERT schema must be an unambiguous JSON object
+ASSERT schema must be an unambiguous JSON object
+ASSERT schema must be an unambiguous JSON object
+  [OK]          retention         25   request schema wire is canonical.
+ASSERT grant restoration cannot replay an uncertain call
+ASSERT provider never re-entered
+  [OK]          retention         26   unknown outcome survives schema grant ...
+ASSERT strict missing record stays absent
+ASSERT absence does not create a store
+ASSERT original answer is observed
+ASSERT original answer is observed
+ASSERT read never invokes the provider
+ASSERT terminal record is unchanged
+ASSERT same ID with another original input refuses
+  [OK]          retention         27   host observes original terminal withou...
+ASSERT actual provider's started record remains open
+ASSERT read cannot infer terminal uncertainty or rewrite started history
+ASSERT the actual in-flight call can still answer
+  [OK]          retention         28   started provider remains open during a...
+ASSERT exception evidence and denial audit do not replace the original unknown
+ASSERT host observation is the original answer, not package redelivery
+  [OK]          retention         29   exception and denial audit preserve th...
+ASSERT read alone leaves the interrupted attempt open
+ASSERT existing producer can retain unknown with a later denial after the null attempt
+ASSERT observing recovery never sends again
+  [OK]          retention         30   interrupted started marker and denial ...
+ASSERT malformed stored evidence is neither absent nor terminal authority
+ASSERT malformed stored evidence is neither absent nor terminal authority
+ASSERT malformed stored evidence is neither absent nor terminal authority
+ASSERT malformed stored evidence is neither absent nor terminal authority
+ASSERT malformed stored evidence is neither absent nor terminal authority
+ASSERT malformed stored evidence is neither absent nor terminal authority
+[2026-10-22 06:52:33] [INFO] [ToolValidation] tool_input_validation rejected model result: Your call to "model result":\x0A{"value":"wrong shape"}\x0A\x0AErrors (fix these and call again):\x0A  "value": wrong type — expected: object, got: string("wrong shape")
+ASSERT malformed stored evidence is neither absent nor terminal authority
+ASSERT malformed stored evidence is neither absent nor terminal authority
+ASSERT a supplied schema cannot weaken the original request grant
+  [OK]          retention         31   strict original identity attempt and s...
+ASSERT host-authorized request answers
+ASSERT the broker forwards the host's exact typed class
+ASSERT host policy does not change the retained worker request
+ASSERT host policy does not change the retained request digest
+  [OK]          retention         32   trusted Background reaches the runner.
+ASSERT host-authorized request answers
+ASSERT the broker forwards the host's exact typed class
+ASSERT host policy does not change the retained worker request
+ASSERT host policy does not change the retained request digest
+  [OK]          retention         33   trusted Standard reaches the runner.
+ASSERT original answers
+ASSERT reopened retained delivery needs fresh host authority
+ASSERT authority refusal preserves the complete original result
+ASSERT restored authority delivers the original answer
+ASSERT authority is read on every new and retained request
+ASSERT retained delivery never resolves or runs another provider
+ASSERT successful replay preserves the original record too
+  [OK]          retention         34   retained delivery rechecks authority w...
+ASSERT new request preserves host refusal
+ASSERT no admission or started record was published
+  [OK]          retention         35   host refusal prevents a new admission ...
+ASSERT worker policy field is not accepted as permission
+ASSERT worker policy field is not accepted as permission
+  [OK]          retention         36   worker wire cannot select admission po...
+
+Test Successful in 0.307s. 37 tests run.
+::endgroup::
+[targeted] test/test_lane_addon_exact: OK in 0s
+[targeted] test/test_lane_addon_exact_runner: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_lane_addon_exact_runner: start 2026-10-22T06:52:33Z
+::group::{lane add-on exact runner}
+Testing `lane add-on exact runner'.
+This run has ID `9UAUGZXT'.
+
+ASSERT actual visits may differ from configured order without inventing dispatch
+ASSERT an exhausted declaration set cannot hide reordered original failures
+  [OK]          runner          0   undispatched CLI failures preserve actual...
+[llm_provider] [WARN] [backend_openai] clamping max_tokens 4096 to the output ceiling 1024 (declared capability override) for model masc-exact-fixture-model-0: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+[llm_provider] [WARN] [backend_openai] clamping max_tokens 4096 to the output ceiling 1024 (declared capability override) for model masc-exact-fixture-model-1: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+ASSERT the original named capacity survives the quota
+ASSERT quota still vetoes recursive whole-input partition
+ASSERT the separate actually exhausted API-only proof retains named causes
+ASSERT a missing actual predecessor outcome cannot become exhaustion
+ASSERT a contradictory original generation state refuses
+ASSERT a contradictory original generation state refuses
+ASSERT a contradictory original generation state refuses
+ASSERT receipt consumption did not replay size provider
+ASSERT receipt consumption did not replay quota provider
+  [OK]          runner          1   actual mixed failure proof survives Store...
+[2026-10-22 06:52:33] [INFO] [ToolValidation] tool_input_validation rejected author: Your call to "author":\x0A{"value":{"wrong":"value"}}\x0A\x0AErrors (fix these and call again):\x0A  "value/question": MISSING (required: string)
+ASSERT an earlier actual domain rejection remains an invalid-output veto
+ASSERT that veto prevents partitioning despite later named capacity
+ASSERT semantic moves outside advances still disqualify unread authority
+  [OK]          runner          2   actual semantic predecessor veto survives...
+ASSERT the actual later official client answered
+ASSERT actual official-client visits retain failed predecessor
+ASSERT the failed earlier CLI JSON remains visible after success
+ASSERT reversed original CLI visit or dispatch prefix refuses
+ASSERT reversed original CLI visit or dispatch prefix refuses
+ASSERT declared CLI participation never becomes API-only unread authority
+  [OK]          runner          3   actual CLI success retains prior failure.
+ASSERT the answer is delivered
+ASSERT from the slot that gave it
+ASSERT with the provider's usage
+ASSERT the package's system text is sent
+ASSERT and its message
+  [OK]          runner          4   an answer that matches the schema is answ...
+[2026-10-22 06:52:33] [INFO] [ToolValidation] tool_input_validation rejected author: Your call to "author":\x0A{"value":{"title":"x"}}\x0A\x0AErrors (fix these and call again):\x0A  "value/question": MISSING (required: string)
+ASSERT the next slot answers
+ASSERT the first slot was asked once
+ASSERT earlier semantic generation cannot authorize an unsent accepted visit
+  [OK]          runner          5   an answer outside the schema advances.
+[2026-10-22 06:52:33] [INFO] [ToolValidation] tool_input_validation rejected author: Your call to "author":\x0A{"value":{"title":"x"}}\x0A\x0AErrors (fix these and call again):\x0A  "value/question": MISSING (required: string)
+ASSERT and it is final: the next run does not call again
+ASSERT one call
+  [OK]          runner          6   every answer outside the schema is invali...
+ASSERT strict original result codec round trips the terminal
+ASSERT unknown terminal fields are refused
+ASSERT blank output-limit detail is not a valid shared terminal
+ASSERT reopened original retains the terminal
+ASSERT recovery never redispatches that original request
+  [OK]          runner          7   output limit retains its original strict ...
+ASSERT the original walk advances
+ASSERT the limited candidate ran once
+  [OK]          runner          8   output limit advances to the later HTTP c...
+ASSERT the original refusal priority is preserved
+  [OK]          runner          9   transient outranks output limit.
+ASSERT the original refusal priority is preserved
+  [OK]          runner         10   authentication outranks output limit.
+ASSERT the original refusal priority is preserved
+  [OK]          runner         11   configuration outranks output limit.
+ASSERT the original refusal priority is preserved
+  [OK]          runner         12   input refusal outranks output limit.
+ASSERT measurement never grants a generation fact
+ASSERT measurement-only candidate rejection cannot authorize unread
+ASSERT only token measurement was dispatched
+  [OK]          runner         13   missing measurement does not prove oversi...
+ASSERT the later official client can still answer
+ASSERT the declared official-client candidate runs once
+  [OK]          runner         14   output limit still allows the original CL...
+ASSERT an invalid later answer does not erase the actual output limit
+ASSERT the declared official-client candidate runs once
+  [OK]          runner         15   an unusable CLI answer retains original o...
+ASSERT only an actual input rejection is terminal
+ASSERT only valid evidence can reach measurement; generation never starts
+  [OK]          runner         16   expired evidence is not a terminal input ...
+ASSERT only an actual input rejection is terminal
+ASSERT only valid evidence can reach measurement; generation never starts
+  [OK]          runner         17   future evidence is not a terminal input r...
+ASSERT only an actual input rejection is terminal
+ASSERT only valid evidence can reach measurement; generation never starts
+  [OK]          runner         18   unknown capacity boundary is not a termin...
+ASSERT only an actual input rejection is terminal
+ASSERT only valid evidence can reach measurement; generation never starts
+  [OK]          runner         19   measured input rejection stays terminal.
+  [OK]          runner         20   a refused input is final.
+ASSERT the next trigger sends again and answers
+ASSERT two calls
+  [OK]          runner         21   a rate limit is not final and is sent again.
+  [OK]          runner         22   an auth refusal is not final.
+  [OK]          runner         23   a slot that may pass keeps the request open.
+ASSERT a declared output without a lane table is unconfigured
+ASSERT and nothing was sent
+  [OK]          runner         24   an unconfigured lane sends nothing.
+ASSERT an off lane is not final
+ASSERT and nothing was sent
+  [OK]          runner         25   an off lane sends nothing.
+[2026-10-22 06:52:33] [INFO] [ToolValidation] tool_input_validation rejected author: Your call to "author":\x0A{"value":{"title":"x"}}\x0A\x0AErrors (fix these and call again):\x0A  "value/question": MISSING (required: string)
+ASSERT the official client answers
+ASSERT the client gets the package's system text
+ASSERT and its message first
+  [OK]          runner         26   the cli tail answers after the http slots.
+ASSERT the conversation answers
+ASSERT HTTP preserves original roles before the common schema instruction
+ASSERT original conversation text is unchanged
+ASSERT the only appended turn is the common schema instruction
+ASSERT the assistant's text belongs to the assistant turn
+  [OK]          runner         27   HTTP preserves conversation roles.
+[2026-10-22 06:52:33] [INFO] [ToolValidation] tool_input_validation rejected author: Your call to "author":\x0A{"value":{"wrong":"shape"}}\x0A\x0AErrors (fix these and call again):\x0A  "value/question": MISSING (required: string)
+ASSERT the HTTP path was attempted
+ASSERT the CLI process was never entered
+ASSERT the original request answers after configuration changes
+ASSERT one capable call
+  [OK]          runner         28   CLI refuses assistant history before disp...
+ASSERT partial request-shape rejection advances the HTTP walk
+ASSERT first candidate dispatched once
+ASSERT second candidate dispatched once
+  [OK]          runner         29   request shape advances HTTP without repla...
+ASSERT only a complete original fact decision is accepted
+ASSERT domain rejection advances inside the same HTTP walk
+ASSERT reopened original capture and final answer are reused
+ASSERT invalid candidate was sent once
+ASSERT accepted candidate is not dispatched again
+ASSERT validation has no host commit authority
+  [OK]          runner         30   original Curator facts advance HTTP and s...
+ASSERT CLI semantic rejection reaches the next admitted client
+ASSERT original CLI order remains within one request
+ASSERT both clients receive the complete captured prompt and common schema instruction
+ASSERT the HTTP candidate was attempted once
+  [OK]          runner         31   original Curator semantics advance CLI tail.
+ASSERT a package name cannot grant missing host authority
+ASSERT missing capture sends nothing
+ASSERT worker cannot replace captured prompt bytes
+ASSERT worker cannot transfer this capture to another installation
+ASSERT relabeling the package does not bypass an original Curator capture
+ASSERT refusals do not enter the provider
+ASSERT retained answers require the original physical workspace too
+ASSERT authority restoration reuses the original terminal
+ASSERT no provider replay follows authority refusal
+  [OK]          runner         32   Curator authority precedes dispatch and r...
+ASSERT schema-only seed really retained the domain-invalid answer
+ASSERT invalid retained terminal is not retried
+  [OK]          runner         33   schema-only retained Curator answer has n...
+ASSERT briefing full-domain validation advances
+  [OK]          runner         34   Curator briefing rejects blank before acc...
+ASSERT one permit remains held
+ASSERT the real Exact flow queued before release
+ASSERT a queued flow has not sent HTTP
+ASSERT the actual flow proof names its accepted transport
+ASSERT the real HTTP response is accepted
+ASSERT provider admission saw the host's actual class
+ASSERT the original bound model reached admission
+ASSERT the queued request was granted
+ASSERT one actual HTTP request
+  [OK]          runner         35   real HTTP admission preserves trusted Bac...
+ASSERT one permit remains held
+ASSERT the real Exact flow queued before release
+ASSERT a queued flow has not sent HTTP
+ASSERT the actual flow proof names its accepted transport
+ASSERT the real HTTP response is accepted
+ASSERT provider admission saw the host's actual class
+ASSERT the original bound model reached admission
+ASSERT the queued request was granted
+ASSERT one actual HTTP request
+  [OK]          runner         36   real HTTP admission preserves trusted Sta...
+ASSERT worker package and installation names are no Background grant
+  [OK]          runner         37   worker names cannot select Background.
+
+Test Successful in 0.376s. 38 tests run.
+::endgroup::
+[targeted] test/test_lane_addon_exact_runner: OK in 1s
+[targeted] test/test_keeper_librarian_capacity_callback: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_keeper_librarian_capacity_callback: start 2026-10-22T06:52:34Z
+::group::{Librarian capacity callbacks}
+Testing `Librarian capacity callbacks'.
+This run has ID `FJ56ZZ1W'.
+
+ASSERT named context overflow
+ASSERT named input capacity
+ASSERT named request body refusal
+ASSERT unknown invalid request cannot become a named size refusal
+ASSERT missing refusal body cannot become a named size refusal
+ASSERT timeout cannot become a named size refusal
+ASSERT quota cannot become a named size refusal
+ASSERT invalid answer cannot become a named size refusal
+ASSERT an unsent context failure is not a provider refusal
+ASSERT named actual causes survive the strict shared receipt source codec
+ASSERT named actual causes survive the strict shared receipt source codec
+ASSERT named actual causes survive the strict shared receipt source codec
+ASSERT named actual causes survive the strict shared receipt source codec
+ASSERT named actual causes survive the strict shared receipt source codec
+ASSERT named actual causes survive the strict shared receipt source codec
+  [OK]          size verdict                  0   named input refusal is sepa...
+ASSERT restored native flags decide admission
+ASSERT unsafe native context cannot permit a smaller range
+ASSERT context refusal is not a measured character limit
+ASSERT original typed context flags and reason survive roundtrip
+ASSERT missing safety evidence refuses instead of granting admission
+ASSERT restored native flags decide admission
+ASSERT unsafe native context cannot permit a smaller range
+ASSERT context refusal is not a measured character limit
+ASSERT original typed context flags and reason survive roundtrip
+ASSERT missing safety evidence refuses instead of granting admission
+ASSERT restored native flags decide admission
+ASSERT unsafe native context cannot permit a smaller range
+ASSERT context refusal is not a measured character limit
+ASSERT original typed context flags and reason survive roundtrip
+ASSERT missing safety evidence refuses instead of granting admission
+ASSERT restored native flags decide admission
+ASSERT unsafe native context cannot permit a smaller range
+ASSERT context refusal is not a measured character limit
+ASSERT original typed context flags and reason survive roundtrip
+ASSERT missing safety evidence refuses instead of granting admission
+ASSERT restored native flags decide admission
+ASSERT unsafe native context cannot permit a smaller range
+ASSERT context refusal is not a measured character limit
+ASSERT original typed context flags and reason survive roundtrip
+ASSERT missing safety evidence refuses instead of granting admission
+ASSERT restored native flags decide admission
+ASSERT unsafe native context cannot permit a smaller range
+ASSERT context refusal is not a measured character limit
+ASSERT original typed context flags and reason survive roundtrip
+ASSERT missing safety evidence refuses instead of granting admission
+  [OK]          size verdict                  1   original native context fla...
+ASSERT context overflow
+ASSERT input capacity
+ASSERT request body refused
+ASSERT timeout
+ASSERT invalid request, reason unknown
+ASSERT refusal body not received
+ASSERT rate limited
+ASSERT overloaded
+ASSERT server error
+ASSERT network error
+ASSERT authentication failed
+ASSERT authorization refused
+ASSERT payment required
+ASSERT model not found
+ASSERT completion failed, context overflow
+ASSERT completion failed, response too large
+ASSERT completion failed, empty at the context window
+ASSERT completion failed, empty at the output budget
+ASSERT completion failed, empty at end of turn
+ASSERT completion failed, empty for a reason not named
+ASSERT completion failed, hard quota
+ASSERT completion failed, capacity exhausted
+ASSERT completion failed, unclassified provider failure
+ASSERT completion failed, dns failure
+ASSERT completion failed, connection refused
+ASSERT completion failed, tls failure
+ASSERT completion failed, peer reset
+ASSERT completion failed, peer closed
+ASSERT completion failed, unclassified network failure
+ASSERT completion failed, sent, whole-call deadline
+ASSERT completion failed, sent, awaiting headers
+ASSERT completion failed, sent, awaiting first token
+ASSERT completion failed, sent, idle stream
+ASSERT completion failed, sent, deadline not named
+ASSERT completion failed, queued past its deadline
+ASSERT completion failed, capacity backpressure
+ASSERT completion failed, connect deadline, not sent
+ASSERT completion failed, context overflow, not sent
+ASSERT completion failed, provider terminal
+ASSERT completion failed, wiring rejected
+ASSERT output limit
+ASSERT incomplete output
+ASSERT missing output
+ASSERT ambiguous output
+ASSERT unexpected output content
+ASSERT invalid json output
+ASSERT response body deadline exceeded
+  [OK]          size verdict                  2   every provider cause, one r...
+ASSERT an answer that is not JSON
+ASSERT an answer the domain refused
+ASSERT an id this module cannot run
+ASSERT an id this module cannot find
+ASSERT a client that failed without saying why
+  [OK]          size verdict                  3   every official-client failu...
+ASSERT a projection over the slot's window
+ASSERT a slot that is unavailable
+ASSERT a runtime contract that refused
+ASSERT an input contract that refused
+ASSERT an output requirement that refused
+ASSERT a request that could not be prepared
+  [OK]          size verdict                  4   every pre-dispatch rejectio...
+[2026-10-22 06:52:34] [INFO] [Workspace] MASC base: /tmp/librarian-capacity-e0087d (no git root found)
+[2026-10-22 06:52:34] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/librarian-capacity-e0087d for test executable test_keeper_librarian_capacity_callback.exe
+ASSERT CLI schema matches this pass's working-state obligation
+ASSERT continuity requires nonempty text
+[2026-10-22 06:52:34] [WARN] [Keeper/prefit-real-continuity] librarian fallback: cli lane slot claude_code.claude-sonnet-5 answered invalid domain output: working_state_invalid: working_state must be nonblank text
+ASSERT CLI schema matches this pass's working-state obligation
+ASSERT continuity requires nonempty text
+[2026-10-22 06:52:34] [WARN] [Keeper/prefit-real-continuity] librarian fallback: cli lane slot claude_code.claude-opus-5-5 answered invalid domain output: working_state_invalid: continuity requires a nonblank working_state
+[2026-10-22 06:52:34] [ERROR] [Keeper/prefit-real-continuity] memory os librarian lane=librarian_exact: official-client fallback exhausted: cli lane slot claude_code.claude-sonnet-5 answered invalid domain output: working_state_invalid: working_state must be nonblank text; cli lane slot claude_code.claude-opus-5-5 answered invalid domain output: working_state_invalid: continuity requires a nonblank working_state current_snapshot=absent
+ASSERT missing working states advance through declared slots once
+ASSERT schema failure stops partition traversal
+ASSERT missing working state never publishes Memory
+ASSERT missing working state leaves no Memory snapshot
+ASSERT missing working state leaves no range receipt
+ASSERT missing working state leaves no continuity frontier
+ASSERT CLI schema matches this pass's working-state obligation
+ASSERT ordinary Memory accepts a null working state and carries no continuity answer
+ASSERT CLI schema matches this pass's working-state obligation
+ASSERT ordinary Memory accepts a blank working state and carries no continuity answer
+[llm_provider] [WARN] [backend_openai] clamping max_tokens 4096 to the output ceiling 1024 (declared capability override) for model masc-exact-fixture-model-0: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+[llm_provider] [WARN] [backend_openai] clamping max_tokens 4096 to the output ceiling 1024 (declared capability override) for model masc-exact-fixture-model-1: the request asked above what the capability record admits, and the ceiling is what reaches the wire.
+ASSERT API validation advances to declared successor
+ASSERT API successor supplies working state
+ASSERT null-state API candidate ran exactly once
+ASSERT valid API successor ran exactly once
+ASSERT measured bound selects first two whole atoms
+ASSERT CLI schema matches this pass's working-state obligation
+ASSERT continuity requires nonempty text
+ASSERT prefit and dispatch use identical full text
+ASSERT no oversized CLI probe after learning the bound
+ASSERT null response belongs to first declared candidate
+[2026-10-22 06:52:34] [WARN] [Keeper/prefit-real-continuity] librarian fallback: cli lane slot claude_code.claude-sonnet-5 answered invalid domain output: working_state_invalid: working_state must be nonblank text
+ASSERT CLI schema matches this pass's working-state obligation
+ASSERT continuity requires nonempty text
+ASSERT prefit and dispatch use identical full text
+ASSERT no oversized CLI probe after learning the bound
+ASSERT valid successor handles the same source
+[2026-10-22 06:52:34] [INFO] [Keeper/prefit-real-continuity] memory os librarian committed current snapshot revision=1 facts=0 added=0 removed=0
+ASSERT actual Memory publication completed
+ASSERT actual continuity publication completed
+ASSERT the commit names the CLI runtime that answered
+ASSERT stored frontier advances to the selected atom group
+ASSERT stored Memory receipt covers the selected atom group
+ASSERT continuity leaves pending context bytes unchanged
+ASSERT new state and Memory overhead make former atom count exceed limit
+ASSERT second pass accounts for growing overhead
+ASSERT CLI schema matches this pass's working-state obligation
+ASSERT continuity requires nonempty text
+ASSERT prefit and dispatch use identical full text
+ASSERT no oversized CLI probe after learning the bound
+[2026-10-22 06:52:34] [INFO] [Keeper/prefit-real-continuity] memory os librarian kept current snapshot revision=2 facts=1: the pass changed no fact
+ASSERT actual Memory publication completed
+ASSERT actual continuity publication completed
+ASSERT the commit names the CLI runtime that answered
+ASSERT stored frontier advances to the selected atom group
+ASSERT stored Memory receipt covers the selected atom group
+ASSERT continuity leaves pending context bytes unchanged
+ASSERT final selected group reaches the completed boundary
+ASSERT CLI schema matches this pass's working-state obligation
+ASSERT continuity requires nonempty text
+ASSERT prefit and dispatch use identical full text
+ASSERT no oversized CLI probe after learning the bound
+[2026-10-22 06:52:34] [INFO] [Keeper/prefit-real-continuity] memory os librarian kept current snapshot revision=2 facts=1: the pass changed no fact
+ASSERT actual Memory publication completed
+ASSERT actual continuity publication completed
+ASSERT the commit names the CLI runtime that answered
+ASSERT stored frontier advances to the selected atom group
+ASSERT stored Memory receipt covers the selected atom group
+ASSERT continuity leaves pending context bytes unchanged
+ASSERT three fitted groups plus one rejected candidate were dispatched
+ASSERT no completed work remains; unfinished work is not selected
+ASSERT next request contains exactly one saved working state
+ASSERT next request preserves unfinished user and tool exchange exactly
+ASSERT source checkpoint is unchanged
+  [OK]          continuity prefit             0   atom groups commit and prod...
+[2026-10-22 06:52:34] [WARN] [Keeper/continuity-only-refused] continuity state not committed: Memory has not committed this continuity source
+ASSERT no snapshot was committed
+ASSERT the caller is told once, with the store's reason
+ASSERT no snapshot file exists
+ASSERT the run names the failure
+ASSERT and carries the reason the log line carries
+  [OK]          continuity prefit             1   a continuity-only run whose...
+[2026-10-22 06:52:34] [ERROR] [Keeper/durable-refusal-report] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=durable-quota call_id=927c7c3ded87f122d2d58379ccc7f914 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture refusal","type":"invalid_request_error"}}; flow=[slot=durable-size call_id=d7d72912e9506f9c7707953d5435ee62; slot=durable-quota call_id=927c7c3ded87f122d2d58379ccc7f914; advance=durable-size->durable-quota kind=execution_failed cause=provider refused (http_status=413 refusal=request_body_refused) raw_response_sha256=107833807672f06f5fa50ad159d82bab1dbc4bbfd0c0982b993e0bc188a04ba9] current_snapshot=absent
+ASSERT the adapter retains classified reports
+ASSERT provider size refusal and later quota both reach the durable edge
+ASSERT body-refusing provider called once
+ASSERT quota provider called once
+[2026-10-22 06:52:34] [WARN] [Keeper/durable-refusal-report] librarian inference failed source_trace=durable-refusal-report; memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=durable-quota call_id=e5a332ae26f238c45b919397528ae794 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture refusal","type":"invalid_request_error"}}; flow=[slot=durable-size call_id=923dbd6f7d069630895a9fddbaddb279; slot=durable-quota call_id=e5a332ae26f238c45b919397528ae794; advance=durable-size->durable-quota kind=execution_failed cause=provider refused (http_status=413 refusal=request_body_refused) raw_response_sha256=107833807672f06f5fa50ad159d82bab1dbc4bbfd0c0982b993e0bc188a04ba9]
+ASSERT actual API-only exhaustion retains named source-refusal authority
+ASSERT actual inference retains a classified mixed walk
+ASSERT the inference producer made its own original body-refused call
+ASSERT the inference producer made its own original quota call
+  [OK]          actual HTTP outcomes          0   durable runtime preserves r...
+[2026-10-22 06:52:34] [INFO] [Keeper/absorb-evidence-capacity] librarian absorb gate reverse: 1 claim(s) without accepted absorptions; 0 copy proposals excluded, 0 proposals carry a new statement, 1 proposals not judged; 0 request(s); these are gate decisions, not store commits
+[2026-10-22 06:52:34] [INFO] [Keeper/absorb-evidence-capacity] librarian absorb gate reverse: claim sha256:82db285cc6d6f911b333828da1292ea7fa58ed5b97875fe1b7fbc78ba6a39bf5 remains a proposal, unjudged (gate_judgment_failed)
+[2026-10-22 06:52:34] [WARN] [Keeper/absorb-evidence-capacity] memory os librarian lane=librarian_exact: absorb judgment failed; current memory unchanged: source observations and memory exceed the provider request boundary; 0 of 1 absorption(s) confirmed (1 kept current, including unconfirmed sources: 1 too large to judge, 0 context-preservation judgments refused); requests= current_snapshot=present
+ASSERT real runtime reports capacity to source narrowing
+ASSERT capacity failure cannot commit candidate
+ASSERT source snapshot unchanged
+ASSERT oversized evidence never dispatched
+[2026-10-22 06:52:34] [WARN] [Keeper/absorb-evidence-capacity] working context not committed; original intake continues: working context version changed
+[2026-10-22 06:52:34] [INFO] [Keeper/absorb-evidence-capacity] librarian absorb gate: 1 source absorptions accepted for commit, 0 refused (context preservation not established), 0 unjudged, 0 too large to judge, 1 request(s) f76b22ec8f0520e7f69e1cc754aeb0321f88fcbd3e826a9122fe51ab40f67f1d; current snapshot changes only after store commit
+[2026-10-22 06:52:34] [INFO] [Keeper/absorb-evidence-capacity] memory os librarian committed current snapshot revision=2 facts=1 added=1 removed=1
+ASSERT smaller range commits once
+ASSERT smaller evidence reaches the judge
+ASSERT actual memory snapshot advances
+  [OK]          actual HTTP outcomes          1   absorb evidence capacity pr...
+[2026-10-22 06:52:34] [ERROR] [Keeper/capacity-final] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=cbdf62e708418a80ee1df720dc3a0a69 cause=provider refused (http_status=413 refusal=request_body_refused) raw_response={"error":{"message":"fixture body limit","type":"invalid_request_error"}}; flow=[slot=capacity-terminal call_id=cbdf62e708418a80ee1df720dc3a0a69] current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT the walk's size verdict
+ASSERT the walk also met a size-independent failure
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          actual HTTP outcomes          2   capacity-final.
+[2026-10-22 06:52:34] [ERROR] [Keeper/quota-final] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=9e62febd7981056b495680662ee5be18 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-terminal call_id=9e62febd7981056b495680662ee5be18] current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT the walk's size verdict
+ASSERT the walk also met a size-independent failure
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          actual HTTP outcomes          3   quota-final.
+[2026-10-22 06:52:34] [ERROR] [Keeper/capacity-then-quota] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=f4871ed0015ee9fcfbffba04626bccc9 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-first call_id=266b977ba933b02319307995ae8157b1; slot=capacity-terminal call_id=f4871ed0015ee9fcfbffba04626bccc9; advance=capacity-first->capacity-terminal kind=execution_failed cause=provider refused (http_status=413 refusal=request_body_refused) raw_response_sha256=34ba7dbe2804751f6d09cc22ae613b466c828cde0c14f809292e7dff2f56892a] current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT the walk's size verdict
+ASSERT the walk also met a size-independent failure
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT body-refused first provider really ran
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          actual HTTP outcomes          4   capacity-then-quota.
+[2026-10-22 06:52:34] [ERROR] [Keeper/capacity-then-auth] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=e83d1eaf0b8e7a832bee6bb3f6a26d49 cause=provider refused (http_status=401 refusal=auth_failed) raw_response={"error":{"message":"fixture authorization","type":"authentication_error"}}; flow=[slot=capacity-first call_id=d2341e08184f2a69f58078cc2fdd885b; slot=capacity-terminal call_id=e83d1eaf0b8e7a832bee6bb3f6a26d49; advance=capacity-first->capacity-terminal kind=execution_failed cause=provider refused (http_status=413 refusal=request_body_refused) raw_response_sha256=34ba7dbe2804751f6d09cc22ae613b466c828cde0c14f809292e7dff2f56892a] current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT the walk's size verdict
+ASSERT the walk also met a size-independent failure
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT body-refused first provider really ran
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          actual HTTP outcomes          5   capacity-then-auth.
+[2026-10-22 06:52:34] [ERROR] [Keeper/capacity-then-capacity] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=aeefb287bb8fd0a3fb3856be17277eb6 cause=provider refused (http_status=413 refusal=request_body_refused) raw_response={"error":{"message":"fixture body limit","type":"invalid_request_error"}}; flow=[slot=capacity-first call_id=98d54afd9e65959e231c015d89869582; slot=capacity-terminal call_id=aeefb287bb8fd0a3fb3856be17277eb6; advance=capacity-first->capacity-terminal kind=execution_failed cause=provider refused (http_status=413 refusal=request_body_refused) raw_response_sha256=34ba7dbe2804751f6d09cc22ae613b466c828cde0c14f809292e7dff2f56892a] current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT the walk's size verdict
+ASSERT the walk also met a size-independent failure
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT body-refused first provider really ran
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          actual HTTP outcomes          6   capacity-then-capacity.
+[2026-10-22 06:52:34] [ERROR] [Keeper/empty-completion-final] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=691915e0b14635b0c77898cbc556f764 cause=completion failed (empty_completion:end_turn, sent) raw_response={"id":"fixture","object":"chat.completion","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":0,"total_tokens":1}}; flow=[slot=capacity-terminal call_id=691915e0b14635b0c77898cbc556f764] current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          actual HTTP outcomes          7   empty-completion-final.
+[2026-10-22 06:52:34] [WARN] [Keeper/quota-then-cli-capacity] librarian fallback: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [ERROR] [Keeper/quota-then-cli-capacity] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=0ce1a82c03474b5752b68bb2929c613f cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-terminal call_id=0ce1a82c03474b5752b68bb2929c613f]; official-client fallback exhausted: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters. current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          HTTP to CLI outcomes          0   quota-then-cli-capacity.
+[2026-10-22 06:52:34] [WARN] [Keeper/quota-then-cli-generic-rpc] librarian fallback: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [ERROR] [Keeper/quota-then-cli-generic-rpc] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=0a541a798344d7ea2eb8e3c91610c179 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-terminal call_id=0a541a798344d7ea2eb8e3c91610c179]; official-client fallback exhausted: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters. current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          HTTP to CLI outcomes          1   quota-then-cli-generic-rpc.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-capacity-then-quota] librarian fallback: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-capacity-then-quota] librarian fallback: cli lane slot failed to answer: claude_code.claude-opus-5-5: quota
+[2026-10-22 06:52:34] [ERROR] [Keeper/cli-capacity-then-quota] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=f8d6439a3489ff0be881aaed7d277d4d cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-terminal call_id=f8d6439a3489ff0be881aaed7d277d4d]; official-client fallback exhausted: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.; cli lane slot failed to answer: claude_code.claude-opus-5-5: quota current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT limit retains the actual refusing runtime
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          HTTP to CLI outcomes          2   cli-capacity-then-quota.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-capacity-then-generic-rpc] librarian fallback: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-capacity-then-generic-rpc] librarian fallback: cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [ERROR] [Keeper/cli-capacity-then-generic-rpc] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=7d8915111d36d9d0f2c73518a07bfe29 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-terminal call_id=7d8915111d36d9d0f2c73518a07bfe29]; official-client fallback exhausted: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.; cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters. current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT limit retains the actual refusing runtime
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          HTTP to CLI outcomes          3   cli-capacity-then-generic-rpc.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-quota-then-capacity] librarian fallback: cli lane slot failed to answer: claude_code.claude-sonnet-5: quota
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-quota-then-capacity] librarian fallback: cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [ERROR] [Keeper/cli-quota-then-capacity] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=dc79f5f1e513b7033c43ff958af36ce0 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-terminal call_id=dc79f5f1e513b7033c43ff958af36ce0]; official-client fallback exhausted: cli lane slot failed to answer: claude_code.claude-sonnet-5: quota; cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters. current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT limit retains the actual refusing runtime
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          HTTP to CLI outcomes          4   cli-quota-then-capacity.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-two-capacities] librarian fallback: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-two-capacities] librarian fallback: cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [ERROR] [Keeper/cli-two-capacities] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=ab091d18f3cf41500d624ca2391859c2 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-terminal call_id=ab091d18f3cf41500d624ca2391859c2]; official-client fallback exhausted: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.; cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters. current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT limit retains the actual refusing runtime
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          HTTP to CLI outcomes          5   cli-two-capacities.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-two-capacities-reversed] librarian fallback: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-two-capacities-reversed] librarian fallback: cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [ERROR] [Keeper/cli-two-capacities-reversed] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=5a339e8f0f961856f704210ec210afbf cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-terminal call_id=5a339e8f0f961856f704210ec210afbf]; official-client fallback exhausted: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.; cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters. current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT limit retains the actual refusing runtime
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          HTTP to CLI outcomes          6   cli-two-capacities-reversed.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-equal-capacities-keep-first] librarian fallback: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-equal-capacities-keep-first] librarian fallback: cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [ERROR] [Keeper/cli-equal-capacities-keep-first] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=bb0307fec9ccfd7a3e52ba9604e645a3 cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-terminal call_id=bb0307fec9ccfd7a3e52ba9604e645a3]; official-client fallback exhausted: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.; cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters. current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT limit retains the actual refusing runtime
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          HTTP to CLI outcomes          7   cli-equal-capacities-keep-f...
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-equal-capacities-reversed] librarian fallback: cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [WARN] [Keeper/cli-equal-capacities-reversed] librarian fallback: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [ERROR] [Keeper/cli-equal-capacities-reversed] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=756e52a3f15155e205d6384504f3cabf cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-terminal call_id=756e52a3f15155e205d6384504f3cabf]; official-client fallback exhausted: cli lane slot failed to answer: claude_code.claude-opus-5-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.; cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters. current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT limit retains the actual refusing runtime
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          HTTP to CLI outcomes          8   cli-equal-capacities-reversed.
+[2026-10-22 06:52:34] [WARN] [Keeper/capacity-then-quota-then-cli-generic-rpc] librarian fallback: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters.
+[2026-10-22 06:52:34] [ERROR] [Keeper/capacity-then-quota-then-cli-generic-rpc] memory os librarian lane=librarian_exact: exact execution failed outward_effect=started cause=execution_failed: slot=capacity-terminal call_id=1f29d05096450a8fc26cc0c8ea8c6d4b cause=provider refused (http_status=429 refusal=rate_limited) raw_response={"error":{"message":"fixture quota","type":"rate_limit_error"}}; flow=[slot=capacity-first call_id=6436fdb53e19d0cb9c740f32f76aeeb9; slot=capacity-terminal call_id=1f29d05096450a8fc26cc0c8ea8c6d4b; advance=capacity-first->capacity-terminal kind=execution_failed cause=provider refused (http_status=413 refusal=request_body_refused) raw_response_sha256=34ba7dbe2804751f6d09cc22ae613b466c828cde0c14f809292e7dff2f56892a]; official-client fallback exhausted: cli lane slot failed to answer: claude_code.claude-sonnet-5: Codex app-server RPC turn/start failed (code -32602): Input exceeds the maximum length of 1048576 characters. current_snapshot=absent
+ASSERT only a CLI slot reports an input limit
+ASSERT the walk's size verdict
+ASSERT CLI candidates ran in order
+ASSERT terminal provider really received the request
+ASSERT body-refused first provider really ran
+ASSERT refused request never commits Memory
+ASSERT named HTTP body refusal survives subsequent slots and CLI fallback
+ASSERT terminal failure remains observable
+  [OK]          HTTP to CLI outcomes          9   capacity-then-quota-then-cl...
+
+Test Successful in 0.359s. 25 tests run.
+::endgroup::
+[targeted] test/test_keeper_librarian_capacity_callback: OK in 0s
+[targeted] test/test_keeper_librarian_admission_mode: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_keeper_librarian_admission_mode: start 2026-10-22T06:52:34Z
+ASSERT an explicit batch rides a standalone maintenance pass
+ASSERT an explicit batch with a context-only scope is rejected
+ASSERT an explicit batch with a context-and-memory scope is rejected
+ASSERT an explicit batch bound to continuity is rejected
+ASSERT an explicit batch bound to a durable range is rejected
+ASSERT an explicit batch bound to an official range is rejected
+ASSERT without an explicit batch every scope is admitted
+[targeted] test/test_keeper_librarian_admission_mode: OK in 0s
+[targeted] test/test_keeper_memory_admission_queue: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_keeper_memory_admission_queue: start 2026-10-22T06:52:34Z
+::group::{durable explicit admission queue}
+Testing `durable explicit admission queue'.
+This run has ID `7WDFK0Z9'.
+
+ASSERT sparse original positions are not compacted
+ASSERT restore neither rewrites nor acknowledges queue
+ASSERT commit leaves the queue pending before ACK
+ASSERT only the later tail survives original receipt ACK
+ASSERT a repeated ACK cannot consume the later tail
+ASSERT all original facts remain in real Memory
+  [OK]          storage boundaries          0   restored sparse originals com...
+ASSERT restored children concatenate to original receipt identities
+ASSERT right commit leaves the original left pending
+ASSERT left original ACK preserves appended tail
+  [OK]          storage boundaries          1   restored whole-input partitio...
+ASSERT refused restoration leaves real queue intact
+  [OK]          storage boundaries          2   restore rejects changed origi...
+ASSERT malformed captured input rewrites no pending byte
+  [OK]          storage boundaries          3   restore refuses malformed com...
+ASSERT outer acknowledgement preserves queue bytes
+ASSERT deferred A stays pending
+ASSERT outer acknowledgement preserves queue bytes
+ASSERT deferred A stays pending
+  [OK]          storage boundaries          4   concurrently consumed tail is...
+ASSERT receipt loss rewrites no queue byte
+ASSERT another acknowledgement removes only committed B
+ASSERT receipt loss rewrites no queue byte
+ASSERT another acknowledgement removes only committed B
+  [OK]          storage boundaries          5   concurrent receipt loss leave...
+ASSERT another acknowledgement removes only committed B
+  [OK]          storage boundaries          6   concurrent acknowledgement pr...
+ASSERT the unacknowledged commit reaches judgment again
+ASSERT diagnostic performs no consumption or reconstruction
+ASSERT missing receipt is not fabricated
+ASSERT the unacknowledged commit reaches judgment again
+ASSERT diagnostic performs no consumption or reconstruction
+ASSERT missing receipt is not fabricated
+  [OK]          storage boundaries          7   a lost receipt of an unacknow...
+[2026-10-22 06:52:34] [WARN] [Keeper/keeper] range receipt check cannot decode the current snapshot; treating its receipts as unverifiable: /tmp/admission-queue-c4fb97/keeper.memory-current.json: invalid JSON: Line 1, bytes 8-16:\x0AExpected ':' but found 'snapshot'
+[2026-10-22 06:52:34] [WARN] [Keeper/keeper] memory os snapshot quarantined rejected_path=/tmp/admission-queue-c4fb97/keeper.memory-current.json.rejected-200 rejection=/tmp/admission-queue-c4fb97/keeper.memory-current.json: invalid JSON: Line 1, bytes 8-16:\x0AExpected ':' but found 'snapshot'
+ASSERT contiguous pending input reaches judgment once
+ASSERT recovery settles the queue
+ASSERT ordinary commit replaces undecodable snapshot
+[2026-10-22 06:52:34] [WARN] [Keeper/keeper] range receipt check cannot decode the current snapshot; treating its receipts as unverifiable: /tmp/admission-queue-0447e6/keeper.memory-current.json: invalid JSON: Line 1, bytes 8-16:\x0AExpected ':' but found 'snapshot'
+[2026-10-22 06:52:34] [WARN] [Keeper/keeper] memory os snapshot quarantined rejected_path=/tmp/admission-queue-0447e6/keeper.memory-current.json.rejected-200 rejection=/tmp/admission-queue-0447e6/keeper.memory-current.json: invalid JSON: Line 1, bytes 8-16:\x0AExpected ':' but found 'snapshot'
+ASSERT contiguous pending input reaches judgment once
+ASSERT recovery settles the queue
+ASSERT ordinary commit replaces undecodable snapshot
+  [OK]          storage boundaries          8   contiguous pending recovers w...
+ASSERT B settled while A remains deferred
+ASSERT missing authority never reaches semantic judgment
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT B settled while A remains deferred
+[2026-10-22 06:52:34] [WARN] [Keeper/keeper] range receipt check cannot decode the current snapshot; treating its receipts as unverifiable: /tmp/admission-queue-f616de/keeper.memory-current.json: invalid JSON: Line 1, bytes 8-16:\x0AExpected ':' but found 'snapshot'
+ASSERT missing authority never reaches semantic judgment
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT B settled while A remains deferred
+ASSERT missing authority never reaches semantic judgment
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT B settled while A remains deferred
+ASSERT missing authority never reaches semantic judgment
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+ASSERT failed authority check preserves every surviving store byte
+  [OK]          storage boundaries          9   unverifiable Memory authority...
+ASSERT only original input is evaluated
+ASSERT new input schedules another pass instead of immediate retry
+ASSERT no commit is reported when only new input arrived
+ASSERT uncertain original and new input remain durable
+ASSERT no candidate receipt was minted
+ASSERT semantic waiting did not create a Memory snapshot
+  [OK]          storage boundaries         10   new input during semantic def...
+ASSERT deferred left is not retried and right still runs
+ASSERT only concurrently appended tail requests another wake
+ASSERT deferred left and new tail remain durable
+ASSERT deferred left is not retried and right still runs
+ASSERT only concurrently appended tail requests another wake
+ASSERT deferred left and new tail remain durable
+  [OK]          storage boundaries         11   capacity siblings continue pa...
+ASSERT outage stops traversal
+ASSERT outage cause remains explicit
+ASSERT outage preserves all pending bytes
+  [OK]          storage boundaries         12   capacity sibling traversal st...
+ASSERT deferred sibling still stops the pass after a commit
+ASSERT earlier commit is reported settled, not pending
+ASSERT deferred sibling remains durable
+  [OK]          storage boundaries         13   deferred sibling after a comm...
+ASSERT a capacity refusal alone splits
+ASSERT a capacity refusal with a quota in the same walk is deferred whole
+ASSERT no capacity refusal defers
+ASSERT a quota without a capacity refusal defers
+  [OK]          storage boundaries         14   size with a same failure is d...
+ASSERT nested traversal preserves original sibling order
+ASSERT indivisible leftover does not cause immediate retry
+ASSERT only oversized original remains
+  [OK]          storage boundaries         15   nested capacity split retains...
+ASSERT each deferred sibling is visited once
+ASSERT all uncertain inputs remain byte-exact
+  [OK]          storage boundaries         16   all deferred capacity sibling...
+ASSERT a lost receipt rewrites no pending byte
+ASSERT only the remaining row is judged
+ASSERT the remaining row settles
+ASSERT the queue drains
+ASSERT Memory keeps the consumed and the new facts
+ASSERT append never reuses a consumed sequence
+ASSERT a lost receipt rewrites no pending byte
+ASSERT only the remaining row is judged
+ASSERT the remaining row settles
+ASSERT the queue drains
+ASSERT Memory keeps the consumed and the new facts
+ASSERT append never reuses a consumed sequence
+  [OK]          storage boundaries         17   lost receipts do not block th...
+ASSERT the committed row is judged again
+ASSERT the re-judged row settles
+ASSERT Memory holds the claim once
+  [OK]          storage boundaries         18   a re-judged commit keeps one ...
+[2026-10-22 06:52:35] [WARN] [Keeper/keeper] durable Librarian range receipts quarantined path=/tmp/admission-queue-baa577/keeper.librarian-range-commit.json rejected_path=/tmp/admission-queue-baa577/keeper.librarian-range-commit.json.rejected-1792651955 skipped=0:receipt lacks a matching Memory snapshot proof;1:receipt lacks a matching Memory snapshot proof
+ASSERT only the remaining row is judged
+ASSERT the remaining row settles
+ASSERT the new Memory holds what reached it after the loss
+  [OK]          storage boundaries         19   snapshot loss admits remainin...
+ASSERT a and b hold committed explicit receipts
+ASSERT the committed receipts name a and b
+ASSERT admission keeps the receipt file
+ASSERT admission moves no receipt aside
+[2026-10-22 06:52:35] [WARN] [Keeper/keeper] durable Librarian range receipts quarantined path=/tmp/admission-queue-395dea/keeper.librarian-range-commit.json rejected_path=/tmp/admission-queue-395dea/keeper.librarian-range-commit.json.rejected-1792651955 skipped=0:receipt lacks a matching Memory snapshot proof;1:receipt lacks a matching Memory snapshot proof
+ASSERT the ordinary read removes the emptied receipt file
+ASSERT the rejected file holds the committed receipts of a and b
+ASSERT every moved receipt names a reason
+ASSERT only the remaining row is judged
+ASSERT the remaining row settles
+ASSERT a later ordinary read moves nothing else aside
+ASSERT the receipt file now proves only the new commit
+  [OK]          storage boundaries         20   snapshot loss moves explicit ...
+ASSERT only committed B is removed across retirement and append
+ASSERT sparse original sequences survive
+ASSERT append never reuses consumed sequence
+ASSERT recovery did not restore retired claim
+  [OK]          storage boundaries         21   sparse receipt recovery prese...
+ASSERT one partial judgment does not retry deferred gap
+ASSERT only input not evaluated yet schedules another wake
+ASSERT deferred A stays pending without blocking B
+ASSERT one partial judgment does not retry deferred gap
+ASSERT only input not evaluated yet schedules another wake
+ASSERT deferred A stays pending without blocking B
+  [OK]          storage boundaries         22   partial worker wakes only new...
+ASSERT pending retry returns same candidate
+ASSERT one pending candidate
+ASSERT no current Memory before judgment
+ASSERT no receipt cannot consume candidate
+  [OK]          storage boundaries         23   pending is distinct from curr...
+ASSERT new tail survives committed prefix
+ASSERT remaining sequence stays original
+ASSERT repeat recovery does not consume tail
+ASSERT no-change decision consumes its input
+ASSERT sequence continues after queue empties
+  [OK]          storage boundaries         24   commit then retirement recove...
+ASSERT candidate retained
+  [OK]          storage boundaries         25   input digest mismatch retains...
+ASSERT candidate remains pending for a fresh judgment
+  [OK]          storage boundaries         26   retired destination refuses c...
+ASSERT reobservation is a new durable revision
+ASSERT the exact reobserved source is current before the stale decision
+ASSERT only the successful publication invokes its callback
+ASSERT the unmentioned fact retains every stored field and basis
+ASSERT the published snapshot is the cold read authority
+ASSERT retirement does not invent revision or absorption edges
+ASSERT the journal removes the exact restored fields and basis
+ASSERT the original retirement reason remains attached
+ASSERT retirement creates no absorbed rows
+ASSERT the decision receipt is durable before acknowledgement
+ASSERT only committed input is acknowledged
+  [OK]          storage boundaries         27   stale retirement follows with...
+ASSERT refusal never invokes the commit observer
+ASSERT snapshot, journal, receipts, publication, absorbed rows and queue are byte-exact
+ASSERT the original fields and support basis remain authoritative
+ASSERT no consumption receipt can acknowledge the refused input
+  [OK]          storage boundaries         28   same-settle support loss pres...
+ASSERT restart acknowledges before dispatch
+ASSERT pending input recovered
+  [OK]          storage boundaries         29   worker restores committed inp...
+ASSERT both disjoint halves execute after capacity refusal
+ASSERT completed siblings need no retry wake
+ASSERT both sibling receipts consumed their input
+  [OK]          storage boundaries         30   worker retries size refusal w...
+ASSERT uncertainty does not privately retry
+ASSERT uncertain input retained
+ASSERT callback cannot authorize consumption
+  [OK]          storage boundaries         31   worker retains uncertainty an...
+ASSERT rejected bytes preserved
+  [OK]          storage boundaries         32   corruption cannot reset pendi...
+ASSERT every bulk append is retained
+ASSERT sequences stay ascending from 1
+ASSERT retry keeps its original sequence
+ASSERT retry adds no row
+  [OK]          storage boundaries         33   bulk append retains every row...
+ASSERT declared cap
+ASSERT candidate exceeds actual serialized capacity
+ASSERT refusal rewrote no pending bytes
+ASSERT refused row is not pending
+ASSERT refused sequence is not burned
+ASSERT both rows pending in order
+  [OK]          storage boundaries         34   byte cap refuses append befor...
+
+Test Successful in 34.208s. 35 tests run.
+::endgroup::
+[targeted] test/test_keeper_memory_admission_queue: OK in 35s
+[targeted] test/test_lane_addon_host_cycle: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_lane_addon_host_cycle: start 2026-10-22T06:53:09Z
+::group::{lane add-on host request cycle}
+Testing `lane add-on host request cycle'.
+This run has ID `42CZ9FZ0'.
+
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-159965 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-159965 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT for the listed request
+ASSERT the final result
+ASSERT the runner was asked once
+ASSERT the cycle settled
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                              0   a started worker gets ...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-99a094 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-99a094 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT retain the original worker error flag
+ASSERT deliver to the submitted original request
+ASSERT the host retained an answer
+ASSERT one model resolution after the exported reply
+ASSERT a host cycle followed the exported reply
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                              1   an exported reply star...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-1ab2e4 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-1ab2e4 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT retain the original worker error flag
+ASSERT deliver to the submitted original request
+ASSERT the host retained an answer
+ASSERT one model resolution after the exported reply
+ASSERT a host cycle followed the exported reply
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                              2   an exported worker err...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-7df313 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-7df313 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT one scoped model call was cancelled
+ASSERT a withdrawn command receives no late answer
+ASSERT the original worker still receives a later command
+ASSERT events admit a later request without replaying the first
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                              3   model events admit and...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-1f6c2a (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-1f6c2a (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT a stale listing cannot start an already withdrawn model call
+ASSERT a stale listing cannot deliver an answer
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                              4   withdrawal event can p...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-08ef49 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-08ef49 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT no second request starts while worker cleanup is pending
+ASSERT no result is delivered to a retiring worker
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                              5   retirement cancels exa...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-7e5e45 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-7e5e45 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT binding never invokes a worker tool
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                              6   original tool destinat...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-df1d10 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-df1d10 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT source bytes come from the actual declaration
+ASSERT configuration comes from the admitted payload
+ASSERT configured logical identity uses the original codec
+ASSERT factory output is durably retained before return
+ASSERT serializer survives journal callback failure and reuses original ID
+ASSERT saved Off has not yet been reconciled out of the cached export
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT capture and refusal perform no worker RPC
+  [OK]          cycle                              7   capture uses actual li...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-482739 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-482739 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT nothing was delivered
+ASSERT the waiting request
+ASSERT and why
+ASSERT no clock asks again
+ASSERT the lane change asked again
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                              8   a request that is not ...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-4a0f54 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-4a0f54 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT delivered once
+ASSERT the instance shows it
+ASSERT for that request
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                              9   a request listed again...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-218e65 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-218e65 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the result does not fit
+ASSERT and names its size
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                             10   a result larger than t...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-65f6b9 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-65f6b9 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT nothing was run
+ASSERT nothing was delivered
+ASSERT the instance shows it
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          cycle                             11   a listing with an unkn...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-67e18b (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-67e18b (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the original MCP bridge still receives export changes
+ASSERT worker readiness is followed by actual metadata publication
+ASSERT an unchanged reconciliation does not signal metadata again
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT unsubscribe removes only its original registration
+ASSERT another workspace receives no hint
+ASSERT another package receives no hint
+  [OK]          owner wakes                        0   scope, metadata public...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-d6988a (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-d6988a (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on owner observer cancelled package=quiz-package: Cancelled: Stdlib.Exit
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on owner observer failed package=quiz-package: Stdlib.Exit
+ASSERT owner callback runs after the worker RPC returns
+ASSERT accepted receipt retains configured installation identity
+ASSERT accepted receipt retains original request
+ASSERT receipt names the actual instance
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on owner observer cancelled package=quiz-package: Cancelled: Stdlib.Exit
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on owner observer failed package=quiz-package: Stdlib.Exit
+ASSERT owner callback runs after the worker RPC returns
+ASSERT retained result restoration does not rerun the model
+ASSERT restored delivery retains original instance and request
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          owner wakes                        1   accepted original and ...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-8d5c72 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-8d5c72 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT no successful Exact delivery fact is invented
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          owner wakes                        2   an unaccepted result d...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-953409 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-953409 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT no successful Exact delivery fact is invented
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          owner wakes                        3   a malformed receipt do...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-98653d (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-98653d (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT no successful Exact delivery fact is invented
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          owner wakes                        4   a lost receipt does no...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-b0aa8c (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-b0aa8c (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT no successful Exact delivery fact is invented
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          owner wakes                        5   an accepted non-Exact ...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-d62ee1 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-d62ee1 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the declared installation runs
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          grants                             0   an operator declaratio...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-48e06f (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-48e06f (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          grants                             1   a manual attach with g...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-a543ed (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-a543ed (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT a page
+ASSERT granted records, oldest first
+ASSERT the whole board was read
+ASSERT the result names the retained page
+ASSERT and the page is retained
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          board reads                        0   a granted board is rea...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-58d7dd (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-58d7dd (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT only the newer post
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          board reads                        1   a cursor reads only wh...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-5f49a6 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-5f49a6 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the first page is not the whole board
+ASSERT the pages together hold every record once
+ASSERT every delivery fits the frame
+ASSERT every delivery fits the frame
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          board reads                        2   a page holds what fits...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-13214f (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-13214f (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT only what was made from that time
+ASSERT nothing yet
+ASSERT and no cursor to give
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          board reads                        3   a since read keeps wha...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-ceb19b (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-ceb19b (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT an ungranted source
+ASSERT a cursor this host did not give
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          board reads                        4   an ungranted source or...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-839dd4 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-839dd4 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT reconstructed result matches its advertised digest
+ASSERT the oversized first record is preserved
+ASSERT the original page admits more records
+ASSERT the marker preserves the same cursor
+ASSERT every delivered frame is bounded
+ASSERT the next record remains reachable
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          board reads                        5   a giant first record p...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-deafa5 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-deafa5 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT oldest first
+ASSERT the page names the head it read
+ASSERT the first commit
+ASSERT with its changed paths
+ASSERT the page is retained
+ASSERT a cursor reads only later commits
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          repository reads                   0   a repository is read b...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-b597dc (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-b597dc (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT a time before the history reads all of it
+ASSERT a commit made at that time is kept
+ASSERT nothing after the last commit
+ASSERT and the page still names the head
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          repository reads                   1   a since read compares ...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-d9fecd (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-d9fecd (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the file
+ASSERT its bytes
+ASSERT as text
+ASSERT retained
+ASSERT a path outside the grant
+ASSERT a commit the branch does not reach
+ASSERT a file that did not exist then
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          repository reads                   2   a file under the grant...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-84be82 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-84be82 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT nothing was delivered
+ASSERT it waits
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          repository reads                   3   an unregistered reposi...
+[2026-10-22 06:53:09] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:09] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-38c8c0 (no git root found)
+[2026-10-22 06:53:09] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-38c8c0 (MASC_BASE_PATH)
+[2026-10-22 06:53:09] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT reconstructed result matches its advertised digest
+ASSERT every original file byte survived delivery
+ASSERT the file digest is still the raw source digest
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT reconstructed result matches its advertised digest
+ASSERT every original file byte survived delivery
+ASSERT the file digest is still the raw source digest
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          repository reads                   4   large text and binary ...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-ce92e0 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-ce92e0 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT no unretained reference crossed the worker port
+ASSERT persistence failure is visible
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-67ec67 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-67ec67 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT no unretained reference crossed the worker port
+ASSERT persistence failure is visible
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          repository reads                   5   retention failure adve...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-24f85c (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-24f85c (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the original result was retained
+ASSERT the retained reference is delivered despite the unavailable repository
+ASSERT recovery uses exactly the first retained result
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          repository reads                   6   retained recovery does...
+ASSERT a wiki grant with paths is refused
+  [OK]          wiki reads                         0   a wiki grant has no ot...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-211f03 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-211f03 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT a page
+ASSERT each page once, at its latest line, as it is now
+ASSERT the whole wiki was read
+ASSERT the result names the retained page
+ASSERT and the page is retained
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          wiki reads                         1   a granted wiki is read...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-ace1b7 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-ace1b7 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT only the newer revision
+ASSERT nothing after the last line
+ASSERT and that is the whole wiki
+ASSERT the cursor stays where it was
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          wiki reads                         2   a wiki cursor pages re...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-979afe (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-979afe (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT a page from that minute is read, an older one is not
+ASSERT nothing after that minute
+ASSERT and no cursor to give
+ASSERT time zero reads every page
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          wiki reads                         3   a since read of the wi...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-13a5f1 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-13a5f1 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the first page is not the whole wiki
+ASSERT the pages together hold every page once
+ASSERT every delivery fits the frame
+ASSERT every delivery fits the frame
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          wiki reads                         4   wiki pages hold what f...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-958626 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-958626 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT a wiki with no log has no records
+ASSERT and is complete
+ASSERT only the page that reads
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          wiki reads                         5   a page that is gone or...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-7953da (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-7953da (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT a line the log does not hold there
+ASSERT a position past the log
+ASSERT another spelling of a cursor
+ASSERT read_file on a wiki
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          wiki reads                         6   a wiki refuses a curso...
+ASSERT one without a repository is refused
+ASSERT one with paths is refused
+  [OK]          github pull request reads          0   a github_pulls grant n...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-89feb3 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-89feb3 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the merged pull requests, in the order of their commits
+ASSERT a record names its merge commit
+ASSERT every page of reviews
+ASSERT and every page of a review's comments
+ASSERT a deleted account is a null author
+ASSERT the cursor is the last commit read
+ASSERT and the history was read to its head
+ASSERT the page is retained
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          github pull request reads          1   merged pulls come in c...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-04e9fe (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-04e9fe (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT only what came after the cursor
+ASSERT a commit GitHub does not hold gives no record
+ASSERT commits no pull request merged give no record
+ASSERT and the cursor still passes them
+ASSERT nothing after the head
+ASSERT the cursor stays at the head
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          github pull request reads          2   a commit no pull reque...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-c2b9e8 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-c2b9e8 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT a time before the history reads every merged pull request
+ASSERT nothing merged after the last commit
+ASSERT and no cursor to give
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          github pull request reads          3   a since read of pull r...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-3552f3 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-3552f3 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT nothing was delivered without a reader
+ASSERT it waits
+ASSERT nor while GitHub refuses
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          github pull request reads          4   GitHub that cannot be ...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-c19338 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-c19338 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT read_file reads a repository grant only
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          github pull request reads          5   read_file refuses gith...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-b45403 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-b45403 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT nothing is delivered before the answer
+ASSERT it waits for the operator
+ASSERT asked by the installation
+ASSERT the answer is recorded
+ASSERT answered
+ASSERT with the operator's choice
+ASSERT the Keeper question log is untouched
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          asks                               0   a question waits for t...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-46181c (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-46181c (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT answered while no worker runs
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the next worker receives it
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          asks                               1   an answer given while ...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-8459bf (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-8459bf (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the large free-text answer was recorded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT every delivered frame is bounded
+ASSERT reconstructed result matches its advertised digest
+ASSERT Ask results have no record-source authority
+ASSERT the original result remains answered
+ASSERT the operator's entire answer survives bounded delivery
+ASSERT relisting reuses exactly the retained first answer
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          asks                               2   an oversized answer us...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-54d151 (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-54d151 (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT the withdrawal is answered
+ASSERT and the question ends withdrawn
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          asks                               3   only the package withd...
+[2026-10-22 06:53:10] [INFO] [Board] Board flusher actor started
+[2026-10-22 06:53:10] [INFO] [Board] JSONL backend initialized
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-ee5eaa (no git root found)
+[2026-10-22 06:53:10] [INFO] [Workspace] MASC base: /tmp/lane-host-cycle-ee5eaa (MASC_BASE_PATH)
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+ASSERT not allowed
+ASSERT and nothing is recorded
+[2026-10-22 06:53:10] [WARN] [Misc] Lane Add-on resource event was not published: event bus is not initialized
+  [OK]          asks                               4   a package without worl...
+
+Test Successful in 1.634s. 51 tests run.
+::endgroup::
+[targeted] test/test_lane_addon_host_cycle: OK in 1s
+[targeted] test/test_workspace_curator_addon_commit: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_workspace_curator_addon_commit: start 2026-10-22T06:53:10Z
+::group::{Curator original domain commit and recovery}
+Testing `Curator original domain commit and recovery'.
+This run has ID `03S53S10'.
+
+ASSERT actual ledger equals the full original judgment
+  [OK]          domain          0   classification applies once and survives ...
+ASSERT lost save receipt is uncertain
+  [OK]          domain          1   real save with lost receipt confirms afte...
+  [OK]          domain          2   save exception preserves intent and propa...
+ASSERT unreadable domain is uncertain, never a before-state
+ASSERT unreadable domain is uncertain, never a before-state
+ASSERT equal unreadable-state evidence does not grow the journal
+ASSERT unreadable domain is uncertain, never a before-state
+ASSERT equal unreadable-state evidence does not grow the journal
+ASSERT unreadable domain is uncertain, never a before-state
+ASSERT equal unreadable-state evidence does not grow the journal
+ASSERT malformed domain bytes are untouched
+  [OK]          domain          3   malformed domain preserves one original u...
+ASSERT save-edge refusal remains uncertain
+ASSERT fresh retry observation survives actual journal reopen
+  [OK]          domain          4   save-edge refusal retries only from fresh...
+ASSERT fresh retry observation survives actual journal reopen
+  [OK]          domain          5   recovered intent records unknown and fres...
+ASSERT old judgment never overwrites the ledger
+  [OK]          domain          6   changed selected source conflicts without...
+ASSERT unreadable source is not authoritative absence
+ASSERT old judgment never overwrites the ledger
+  [OK]          domain          7   unreadable selected source cannot become ...
+ASSERT other owner's full state survives
+  [OK]          domain          8   another owner's state is not overwritten.
+ASSERT journal cannot substitute an arbitrary after-state
+  [OK]          domain          9   altered commit intent cannot authorize a ...
+ASSERT partial chunk retains another whole source
+ASSERT partial commit preserves previous publication
+ASSERT partial pass advances the complete original state
+ASSERT only the original remaining chunk is prepared
+ASSERT final chunk alone replaces the publication
+  [OK]          domain         10   partial briefing preserves its previous c...
+ASSERT partial chunk retains another whole source
+ASSERT partial commit preserves previous publication
+ASSERT partial pass advances the complete original state
+ASSERT only the original remaining chunk is prepared
+ASSERT final chunk alone replaces the publication
+ASSERT later additions still require a separate pass
+  [OK]          domain         11   source additions wait outside the origina...
+ASSERT partial chunk retains another whole source
+  [OK]          domain         12   removed briefing target prevents old publ...
+ASSERT partial chunk retains another whole source
+  [OK]          domain         13   changed briefing contract prevents old pu...
+ASSERT partial chunk retains another whole source
+  [OK]          domain         14   missing prepared state is not created aft...
+ASSERT child ID differs from the terminal original
+ASSERT immutable predecessor identifies the original parent
+ASSERT original destination and revisions survive narrowing
+ASSERT whole selected prefix and unconsumed suffix are conserved
+ASSERT complete original row payloads survive
+ASSERT captured classification ledger stays unchanged
+ASSERT linking never saves a domain state
+ASSERT reopened parent reuses the same child
+ASSERT repeated linkage does not append a parent fact
+ASSERT unstarted child remains Captured
+ASSERT strict discovery contains only the original and one child
+ASSERT parent keeps its original terminal
+  [OK]          domain         15   input size successor conserves whole rows...
+ASSERT child ID differs from the terminal original
+ASSERT immutable predecessor identifies the original parent
+ASSERT original destination and revisions survive narrowing
+ASSERT whole selected prefix and unconsumed suffix are conserved
+ASSERT complete original row payloads survive
+ASSERT captured classification ledger stays unchanged
+ASSERT linking never saves a domain state
+ASSERT reopened parent reuses the same child
+ASSERT repeated linkage does not append a parent fact
+ASSERT unstarted child remains Captured
+ASSERT strict discovery contains only the original and one child
+ASSERT parent keeps its original terminal
+  [OK]          domain         16   output size classification successor keep...
+ASSERT recovery uses the durably selected ID
+ASSERT recovery keeps the complete original child bytes
+ASSERT strict parent has acknowledged that child
+  [OK]          domain         17   intent without child recovers the same du...
+ASSERT child cannot execute before parent acknowledgement
+ASSERT ordinary capture restore has no unacknowledged escape
+ASSERT recovery uses the durably selected ID
+ASSERT recovery keeps the complete original child bytes
+ASSERT strict parent has acknowledged that child
+  [OK]          domain         18   retained child cannot execute before ackn...
+ASSERT non-size authority cannot mint a child
+ASSERT non-size authority cannot mint a child
+ASSERT non-size authority cannot mint a child
+ASSERT non-size authority cannot mint a child
+ASSERT no unrelated request was invented
+  [OK]          domain         19   pending unknown and invalid output cannot...
+ASSERT single original fact is reported without truncation or new work
+ASSERT singleton remains one terminal capture
+  [OK]          domain         20   one indivisible original fact is never tr...
+ASSERT lost child dispatch history is not new admission permission
+ASSERT acknowledged absent child remains absent
+ASSERT restored child keeps its dispatch uncertainty
+  [OK]          domain         21   acknowledged missing child is not recreat...
+ASSERT conflict cannot retarget or mint another child
+ASSERT original intent remains authoritative
+ASSERT no replacement sibling was minted
+  [OK]          domain         22   conflicting child cannot replace a durabl...
+ASSERT whole original entries are bisected
+ASSERT all unconsumed original sources remain
+ASSERT child has the identical original prepared state
+ASSERT linking does not save or advance briefing
+  [OK]          domain         23   input size Briefing child preserves prepa...
+ASSERT Briefing output limit never authorizes input reduction
+ASSERT linking does not save or advance briefing
+  [OK]          domain         24   Briefing output limit cannot reduce input.
+ASSERT only the original child prefix was applied
+  [OK]          domain         25   acknowledged child answers and commits on...
+ASSERT direct Exact cannot bypass an unacknowledged predecessor
+  [OK]          domain         26   direct Exact authority cannot bypass pare...
+ASSERT child resume cannot borrow missing or cyclic ancestry
+ASSERT direct Exact rejects the same broken ancestry
+  [OK]          domain         27   missing predecessor refuses resume and di...
+ASSERT child resume cannot borrow missing or cyclic ancestry
+ASSERT direct Exact rejects the same broken ancestry
+  [OK]          domain         28   cyclic predecessor refuses resume and dir...
+ASSERT nested child links to its immediate original parent
+ASSERT the root still names its first child
+ASSERT one root, one child, one grandchild only
+  [OK]          domain         29   nested refusal narrows the child without ...
+[2026-10-22 06:53:11] [INFO] [Workspace] MASC base: /tmp/curator-domain-commit-3f91d2 (no git root found)
+[2026-10-22 06:53:11] [INFO] [Workspace] MASC base: /tmp/curator-domain-commit-3f91d2 (MASC_BASE_PATH)
+ASSERT original host judgment commits with no new worker
+  [OK]          domain         30   original host terminal recovers and commi...
+ASSERT invalid host evidence refuses before the supplied worker edge
+ASSERT failed read leaves the original dispatch history unchanged
+  [OK]          domain         31   invalid host original refuses without wor...
+ASSERT partial wire shape is never a valid original domain judgment
+ASSERT no invalid original disposition is committed
+  [OK]          domain         32   observed original still requires complete...
+ASSERT original identity round trips without losing its kind
+ASSERT original identity round trips without losing its kind
+ASSERT unknown blank extra or noncanonical installation refuses
+ASSERT unknown blank extra or noncanonical installation refuses
+ASSERT unknown blank extra or noncanonical installation refuses
+ASSERT unknown blank extra or noncanonical installation refuses
+ASSERT unknown blank extra or noncanonical installation refuses
+  [OK]          domain         33   original installation kind and canonical ...
+ASSERT registration ACK is durable
+ASSERT completion ACK is durable after registration
+ASSERT lost ACK retry never appends another lifecycle
+ASSERT lost ACK retry preserves log inode
+ASSERT delivery never repeats a domain save
+ASSERT already ACKed work never recreates evicted history
+ASSERT already ACKed work keeps original journal bytes
+  [OK]          domain         34   actual registry publication survives lost...
+ASSERT start is ACKed without primary execution
+ASSERT no terminal is fabricated
+ASSERT primary stays Captured
+ASSERT ACKed active original is not re-registered
+  [OK]          domain         35   actual registration ACK does not invent a...
+ASSERT registry failure preserves immutable pending original
+ASSERT later exact retry acknowledges original
+ASSERT later retry uses the actual file-backed registry
+  [OK]          domain         36   unavailable registry preserves pending or...
+ASSERT captured original has no invented completion
+ASSERT observer intent leaves original primary phase Captured
+ASSERT preparing an observation does not commit a domain judgment
+ASSERT unchanged pending receipt preserves journal bytes
+ASSERT unchanged pending receipt preserves journal identity
+ASSERT model judgment alone is not a committed completion
+ASSERT first original observer time survives domain commit
+ASSERT selected slot is the original answering slot
+ASSERT only actually reported basic usage is retained
+ASSERT full original final remains bound
+ASSERT unmeasured provider statistics remain absent
+ASSERT unmeasured provider statistics remain absent
+ASSERT unmeasured provider statistics remain absent
+ASSERT unmeasured provider statistics remain absent
+ASSERT complete original receipt survives reopen without a new clock
+ASSERT complete original input survives receipt preparation
+ASSERT registration may remain pending after domain completion
+  [OK]          domain         37   typed observer follows actual original co...
+ASSERT generic valid hash does not establish original domain receipt authority
+ASSERT refusal preserves forged evidence without rewriting
+  [OK]          domain         38   generic valid registration cannot relabel...
+ASSERT generic valid hash does not establish original domain receipt authority
+ASSERT refusal preserves forged evidence without rewriting
+  [OK]          domain         39   generic valid completion cannot replace o...
+ASSERT generic terminal history cannot bypass full original semantic plan
+ASSERT invalid terminal has no prepared completion receipt
+ASSERT observation validation never saves the forged domain plan
+  [OK]          domain         40   observer rejects invented original commit...
+ASSERT generic terminal history cannot bypass full original semantic plan
+ASSERT invalid terminal has no prepared completion receipt
+ASSERT observation validation never saves the forged domain plan
+  [OK]          domain         41   observer rejects schema-shaped incomplete...
+ASSERT same original refusal survives successor acknowledgement
+ASSERT original typed size refusal remains exact
+ASSERT child owns its own deterministic observation identity
+ASSERT observer preparation grants child no new admission
+  [OK]          domain         42   parent refusal and child have separate or...
+ASSERT actual conflict remains evidence
+ASSERT unsent work has no invented provider slot
+ASSERT unsent work has no invented usage
+ASSERT full host refusal retained
+  [OK]          domain         43   observer conflict differs from unsent hos...
+ASSERT receipt contains complete actual Briefing before state
+ASSERT receipt contains complete actual Briefing after state
+  [OK]          domain         44   observer Briefing receipt binds complete ...
+ASSERT actual eligibility conflict retains its diagnostic wrapper
+ASSERT actual original conflict survives terminal preparation
+ASSERT reopened conflict reuses the complete original terminal receipt
+ASSERT old judgment never overwrites the ledger
+  [OK]          domain         45   actual changed source conflict prepares i...
+ASSERT partial chunk retains another whole source
+ASSERT actual eligibility conflict retains its diagnostic wrapper
+ASSERT actual original conflict survives terminal preparation
+ASSERT reopened conflict reuses the complete original terminal receipt
+  [OK]          domain         46   actual changed Briefing contract prepares...
+ASSERT actual eligibility conflict retains its diagnostic wrapper
+ASSERT actual original conflict survives terminal preparation
+ASSERT reopened conflict reuses the complete original terminal receipt
+  [OK]          domain         47   observer retains opaque eligibility confl...
+ASSERT generic conflict cannot turn malformed state into a typed domain receipt
+ASSERT malformed conflict remains original evidence without terminal receipt
+ASSERT generic conflict cannot turn malformed state into a typed domain receipt
+ASSERT malformed conflict remains original evidence without terminal receipt
+ASSERT generic conflict cannot turn malformed state into a typed domain receipt
+ASSERT malformed conflict remains original evidence without terminal receipt
+ASSERT generic conflict cannot turn malformed state into a typed domain receipt
+ASSERT malformed conflict remains original evidence without terminal receipt
+ASSERT generic conflict cannot turn malformed state into a typed domain receipt
+ASSERT malformed conflict remains original evidence without terminal receipt
+ASSERT generic conflict cannot turn malformed state into a typed domain receipt
+ASSERT malformed conflict remains original evidence without terminal receipt
+ASSERT generic conflict cannot turn malformed state into a typed domain receipt
+ASSERT malformed conflict remains original evidence without terminal receipt
+  [OK]          domain         48   observer rejects incomplete original conf...
+ASSERT empty authoritative original inventory
+ASSERT discovery does not create an owner store
+  [OK]          domain         49   empty discovery publishes no owner state.
+ASSERT discovery cannot turn refusal into new admission
+ASSERT discovered capture keeps its full original input
+ASSERT size refusal remains without a new intent
+ASSERT parked original is not rewritten
+  [OK]          domain         50   discovery does not mint a child from a si...
+ASSERT recover exactly original parent and intended child
+ASSERT discovered capture keeps its full original input
+ASSERT discovered capture keeps its full original input
+ASSERT child is unexecuted after local recovery
+ASSERT ACK keeps original child ID
+ASSERT same original IDs after reopening
+ASSERT ACKed forest is not rewritten
+ASSERT local recovery never saves a domain
+  [OK]          domain         51   discovery recovers durable intent before ...
+ASSERT ordinary restore refuses before the parent ACK
+ASSERT recover exactly original parent and intended child
+ASSERT discovered capture keeps its full original input
+ASSERT discovered capture keeps its full original input
+ASSERT child is unexecuted after local recovery
+ASSERT ACK keeps original child ID
+ASSERT same original IDs after reopening
+ASSERT ACKed forest is not rewritten
+ASSERT local recovery never saves a domain
+  [OK]          domain         52   discovery recovers retained child before ...
+ASSERT incomplete acknowledged forest is not empty or partial
+ASSERT missing acknowledged child is never recreated
+ASSERT parent history is preserved
+  [OK]          domain         53   discovery refuses acknowledged missing ch...
+ASSERT one malformed original rejects the entire forest before repair
+ASSERT valid pending parent was not partially repaired
+ASSERT validation failure creates no child
+  [OK]          domain         54   complete forest validation precedes every...
+ASSERT wrong or already started unacknowledged child is never repaired
+ASSERT invalid child cannot ACK the parent
+  [OK]          domain         55   discovery refuses conflicting pending child.
+ASSERT wrong or already started unacknowledged child is never repaired
+ASSERT invalid child cannot ACK the parent
+  [OK]          domain         56   discovery refuses execution before parent...
+ASSERT one acknowledged chain with an interrupted next link
+ASSERT discovered capture keeps its full original input
+ASSERT discovered capture keeps its full original input
+ASSERT discovered capture keeps its full original input
+  [OK]          domain         57   discovery recovers nested original chain.
+ASSERT an orphan cannot become an independent root
+ASSERT orphan evidence remains unchanged
+  [OK]          domain         58   discovery refuses a missing original pred...
+ASSERT foreign physical workspace is not new work
+  [OK]          domain         59   discovery refuses another physical worksp...
+ASSERT duplicate rows are not a valid complete forest
+  [OK]          domain         60   discovery refuses duplicate original IDs.
+ASSERT original failed save retains uncertainty
+ASSERT live registry changed after the original failed attempt
+ASSERT recovery does not replace the original domain bytes
+  [OK]          domain         61   Briefing recovery reads the changed live ...
+ASSERT original failed save retains uncertainty
+ASSERT live registry changed after the original failed attempt
+ASSERT recovery does not replace the original domain bytes
+  [OK]          domain         62   Briefing confirmed after-state bypasses c...
+
+Test Successful in 1.459s. 63 tests run.
+::endgroup::
+[targeted] test/test_workspace_curator_addon_commit: OK in 2s

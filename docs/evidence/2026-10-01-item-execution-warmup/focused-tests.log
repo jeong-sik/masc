@@ -1,0 +1,9 @@
+
+ RUN  v5.0.2 /private/tmp/masc-cr-40466-warmup-20261001/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  23 passed (23)
+   Start at  18:12:30
+   Duration  1.59s (import 35%, transform 21%, environment 17%, setup 15%, tests 12%)
+

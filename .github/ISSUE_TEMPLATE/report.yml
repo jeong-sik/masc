@@ -1,0 +1,54 @@
+name: File an issue
+description: Humans and keepers file in the same shape.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Classification comes from the declaration block below and nothing else.
+        Fill in the values from
+        [`.github/issue-taxonomy.json`](https://github.com/jeong-sik/masc/blob/main/.github/issue-taxonomy.json),
+        which is the vocabulary SSOT. The `Issue Taxonomy` workflow reads the block and applies
+        the labels; if a value is wrong it replies with the full list of accepted values.
+        Do not set labels by hand.
+
+        Filing with `gh issue create`? Put the same fenced `masc-triage` block in the body.
+
+  - type: textarea
+    id: taxonomy
+    attributes:
+      label: Taxonomy declaration
+      description: Keep the fence lines. `root` takes zero or more values, comma separated.
+      value: |
+        ```masc-triage
+        kind:
+        area:
+        impact:
+        root:
+        must-do: false
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: symptom
+    attributes:
+      label: Symptom
+      description: What happens. Observed behavior only.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Command, environment, input. Say so if it was not reproduced.
+    validations:
+      required: false
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: file:line, logs, PR numbers. Separate what was observed from what is inferred.
+    validations:
+      required: false

@@ -1,0 +1,15 @@
+[
+  {
+    "ts": 1792813190.62941,
+    "method": "POST",
+    "path": "/api/v1/lane-addons/actions",
+    "body": {
+      "instance_id": "worker-browser-replacement",
+      "expected_incarnation": "worker-browser-replacement",
+      "request_id": "01a16bfe-4dd7-7000-a923-c3a3aa9c2162",
+      "action": {
+        "operation": "inspect"
+      }
+    }
+  }
+]

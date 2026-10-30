@@ -1,0 +1,448 @@
+{
+  "schemaVersion": 1,
+  "observedDate": "2026-10-23",
+  "provenance": "direct",
+  "capture": {
+    "runtimeRevision": "8d405320bb713f07735dc78022313eb465b8a4ca13ab6c337d81ff6e1b3cfc67",
+    "manifest": {
+      "audio": "audio.wav",
+      "audioBlocks": "audio-blocks.jsonl",
+      "audioFrames": "134400",
+      "channels": 2,
+      "clock": {
+        "denom": 3,
+        "firstAudioHostTime": "34388227765254",
+        "kind": "mach-host-time",
+        "numer": 125,
+        "requestedStart": "34388226915316"
+      },
+      "failure": null,
+      "input": {
+        "id": "BlackHole2ch_UID",
+        "inputs": 2,
+        "name": "BlackHole 2ch",
+        "outputs": 2
+      },
+      "midi": "midi.ump.jsonl",
+      "midiPacketCount": "8",
+      "midiSources": [
+        {
+          "id": "1776153139",
+          "name": "MASC owned recording probe"
+        }
+      ],
+      "monitoring": {
+        "state": "off"
+      },
+      "sampleRate": 48000,
+      "schemaVersion": 1,
+      "state": "recorded"
+    },
+    "fileHashes": [
+      {
+        "file": "audio-blocks.jsonl",
+        "bytes": 5124,
+        "sha256": "3ed7af1d2d415e3aac10c01f725865035996b0126cc69040e764abc4736af4d8"
+      },
+      {
+        "file": "audio.wav",
+        "bytes": 1079296,
+        "sha256": "e559b216cd20523a940ed2067873fc17ba64e3862fb33c2fa10bd223a68e874f"
+      },
+      {
+        "file": "midi-1.midi2",
+        "bytes": 172,
+        "sha256": "fa21ced5dccfb51b8407aaeabd496986cf7f899a5555abff277db654026056ef"
+      },
+      {
+        "file": "midi.ump.jsonl",
+        "bytes": 1101,
+        "sha256": "f1a8312c051f13a659fa2b2750c2ff5dc3a215bc634f9e62b7d6c5a96bf44b06"
+      },
+      {
+        "file": "session.json",
+        "bytes": 519,
+        "sha256": "64740de9d3eb7912b8c699cb4f1a2242699735fe8643cc37a8eecef3a7a8ec0a"
+      }
+    ],
+    "sentPackets": [
+      {
+        "hostNanoseconds": "1432843680580000",
+        "hostTime": "34388248333920",
+        "kind": "sent",
+        "words": [
+          1085295104,
+          305419896
+        ]
+      },
+      {
+        "hostNanoseconds": "1432843680735875",
+        "hostTime": "34388248337661",
+        "kind": "sent",
+        "words": [
+          1083194368,
+          2452881408
+        ]
+      },
+      {
+        "hostNanoseconds": "1432843680775041",
+        "hostTime": "34388248338601",
+        "kind": "sent",
+        "words": [
+          1100099584,
+          1164378112
+        ]
+      },
+      {
+        "hostNanoseconds": "1432844089505333",
+        "hostTime": "34388258148128",
+        "kind": "sent",
+        "words": [
+          1088421888,
+          2166572391
+        ]
+      },
+      {
+        "hostNanoseconds": "1432844089597625",
+        "hostTime": "34388258150343",
+        "kind": "sent",
+        "words": [
+          1082145792,
+          305397760
+        ]
+      },
+      {
+        "hostNanoseconds": "1432844089638208",
+        "hostTime": "34388258151317",
+        "kind": "sent",
+        "words": [
+          1099051008,
+          1450704896
+        ]
+      },
+      {
+        "hostNanoseconds": "1432844297056791",
+        "hostTime": "34388263129363",
+        "kind": "sent",
+        "words": [
+          1083195392,
+          1450704896
+        ]
+      },
+      {
+        "hostNanoseconds": "1432844707215041",
+        "hostTime": "34388272973161",
+        "kind": "sent",
+        "words": [
+          1082146816,
+          878051328
+        ]
+      }
+    ],
+    "verification": {
+      "result": "PASS",
+      "artifact_only_review": true,
+      "runtime_revision": "8d405320bb713f07735dc78022313eb465b8a4ca13ab6c337d81ff6e1b3cfc67",
+      "hashes_match": {
+        "launcher": "86d97fb0997702899471db8bc7ad41829bc155c5807954b2bf93f7e4cf1d33a6",
+        "nativeCapture": "c6267173bb2e7bba82a19c0551e487d300c05f14a35dba2d1c96c3bc87c92955",
+        "virtualSourceProbe": "87db8d1d9c053de5fa64e63c0c23524de30b39ac8a38a10548d4ff1b6f757384"
+      },
+      "wave": {
+        "format": "IEEE float32",
+        "sample_rate": 48000,
+        "channels": 2,
+        "frames": 134400,
+        "duration_seconds": 2.8,
+        "data_offset": 4096,
+        "audio_block_count": 28,
+        "contiguous_audio_blocks": true,
+        "first_audio_offset_from_requested_start_seconds": 0.03541408333333333
+      },
+      "midi": {
+        "packets": 8,
+        "raw_words_and_host_ticks_equal_sender": true,
+        "source": "1776153139",
+        "protocol": 2,
+        "notes": [
+          {
+            "group": 0,
+            "channel": 0,
+            "pitch": 60,
+            "start": 0.857183625,
+            "end": 1.266045375,
+            "session_start": 0.892597708,
+            "session_end": 1.301459458
+          },
+          {
+            "group": 1,
+            "channel": 2,
+            "pitch": 48,
+            "start": 0.8572227916666667,
+            "end": 1.2660859583333333,
+            "session_start": 0.892636875,
+            "session_end": 1.301500041
+          },
+          {
+            "group": 0,
+            "channel": 0,
+            "pitch": 64,
+            "start": 1.4735045416666666,
+            "end": 1.8836627916666666,
+            "session_start": 1.508918625,
+            "session_end": 1.919076875
+          }
+        ],
+        "clip_type4_messages": 8,
+        "clip_payloads_equal_raw_and_sender": true,
+        "all_midi_host_times_within_audio_recording": true,
+        "notes_reference": "WAV frame0 / firstAudioHostTime",
+        "session_note_times_match_verification": true
+      },
+      "tone": {
+        "analysis_start_frame": 45248,
+        "analysis_frames": 48000,
+        "anchor_frame": 40448,
+        "channels": [
+          {
+            "channel": 1,
+            "frequency": 440,
+            "amplitude": 0.050000000153370305,
+            "peak": 0.05000000074505806,
+            "rms": 0.035355339167779026
+          },
+          {
+            "channel": 2,
+            "frequency": 660,
+            "amplitude": 0.039999999964751606,
+            "peak": 0.03999999910593033,
+            "rms": 0.02828427122253896
+          }
+        ],
+        "producer_rendered_frames": "79872",
+        "producer_underrun_frames": "0"
+      },
+      "limits": [
+        "No fresh capture/device/audio output created",
+        "No physical/acoustic or sample-exact synchronization/latency proof",
+        "Successful attempt source ID positive1776153139; negative --midi=ID parser alone accepted, negative source live selection not tested by success record",
+        "Producer underrun0 does not alone establish recorder/device drop count0",
+        "Clip equality is payload word preservation, not exact original hostTime preservation in clip encoding"
+      ]
+    }
+  },
+  "stretch": {
+    "install": {
+      "revision": "e55030b649cd1fc9d3fdc59dea54a941635c55db62ef39faa161770377b8afb4",
+      "marker": true,
+      "fingerprintVerified": true,
+      "sourceMain": "3ca07987a05ee18889caca38b70e874f68d5ddc0",
+      "copiedInputs": {
+        "ump-source.mjs": "8303cc818a63bcec8fc30d5fe4eb9102b81c44a31d8cf8f4b0370fd04e209664",
+        "ump-editor.mjs": "189ef2dacacb9c4f77d3e89df56f5f20bc680fbccdc00703db205f5abaa20421",
+        "ump-tui.mjs": "74d5b68a4632e9aa4316f3490090d41b3ac7078b20a53a16650eef0305b03572",
+        "capture-midi.mjs": "f5ca9e480de3dd3d095d61bac9a90e4483f515587c0aa6df66d79bf692f51056",
+        "synth-stream.mjs": "17302bc5f330e6465d8d6b34d058fa62e46426f8387e7a24d94dde7d3a18aebb",
+        "soundfont-stream.mjs": "3d2e08d10fd1588a73699d1b28fef44b3ef6ac4be3f36b00c474a43054241dd9",
+        "soundfont_stream.py": "43b73925f602539dffddd9a0d3a6db0382ace63129568ef56d4748b740f265cf",
+        "soundfont.mjs": "c73ea26b5d3537628df3808dc41e9aa8a2142132c2a104054c1ac0d576f44e4d",
+        "soundfont_host.py": "56bdc61c8c973c342290da9f950d6a52446b306e3226a22a9a9971cdbd687047",
+        "ump-region-midi.mjs": "33930bc46ee0fb9bab05d593cb57abd2d9ffd0caf9abc041918a7ab29d9794fc",
+        "practice-midi.mjs": "986b047efea56673d41f018d5778f639269b08e23ef26e72d5ec77df39bec704",
+        "practice-passes.mjs": "fd859bb71c2c59c6bff54bf88a14623ebcc8124d58c5f41c9f0d51d88aa05ae6",
+        "practice-sound.mjs": "6c95791f5bd23e32dbc5949e02e4190622051bb3323e7e97fb22603d20ef874d",
+        "practice-source.mjs": "0536846fe0bb4d9970b24625c9da406a58a4b64ab1e95c95cd357e0cbf24b4c9",
+        "practice-source-files.mjs": "ef81e9315e1955acdeae965d614298edefaa3f2eddafdac3eec9b64ba6416c37",
+        "practice-take.mjs": "d8efa5a2680a83265317f0e1635752f703c6e424fca74f4a4d66fc45e6272192",
+        "render-midi-clock.mjs": "3e4060ea83ce4157ec7359956cf066d5285f89607ee563edbcb49e57dd61c9a1",
+        "phrase-backing.mjs": "d27c5be4891c0de73363e0d4a8a32d416a4ef31931b12920e683692007b1935b",
+        "step-monitor-session.mjs": "1383782298c5b82194f87779a80f9aa55ae91d8030a80ec998a01bf29727a4fd",
+        "step-monitor-worker.mjs": "3e500d594554eb7612780e6e502618f3e19e79f5de99352821dd301d243ecb89",
+        "step-monitor.mjs": "b4abf73384d4cab4ed32eaa40285c8a5b02bb0df3b7ea9c4a190a7e1d20a319b",
+        "pcm-output.mjs": "e2778a62c7450e3997921ac4be3c5ba4085a8f8570bb64471bfdae6fb571e58d",
+        "native/PcmRing.swift": "201ef5c5ecd69d4a8f17daab077ca653f81eb7d0eb12f7bf23bb9eadd93d052d",
+        "native/PcmOutput.swift": "adbfd741bcd646d781ae2522ff65e207862b82c34abb69e51a940324ce816a73",
+        "vst-stream.mjs": "41130f0774e6a4f13ad51cfeefaa44a83c446e352c35af7866e3195b1bf83230",
+        "vst-host.mjs": "ce80f706fee769e8b8243522f2a3e132df72b142a4842256beb52bacb6f41889",
+        "vst-session.mjs": "026d089196cf88bd18c7218acd9b2eebf26c1e33772bae1081e2d2e833f720c9",
+        "midi-source-picker.mjs": "ec3faf2c520c28121b384f06262fc13924e7c8dfa0ab5687929edcee3ff52127",
+        "step-input.mjs": "add60122d724b3a6166ec7735bac4eb3a982a942715545787e51619011b20dde",
+        "midi-input.mjs": "2ebb52884ade2f85705cf5fcf8051acd4b6e42e4572be7a44e6c2639fef63190",
+        "native/MidiInput.swift": "916e68f4ed88203c6f94ef221470c78121348137ae7e19c564a2b74d8dbaf797",
+        "arrangement-sound.mjs": "acd5723e1e44a446ae755eee41f450f0c522ed733f638c1753122571ba82d40f",
+        "source-audio-clock.mjs": "ba4c69366d5d84520cb53a9681db9aaa41cf285020c0e356927c83c45d2686fc",
+        "native/SourceAudioClock.swift": "9323737b8f34f870aee00ae96a1c0f01b726ae684339d34c0ead6f0e20e487e0",
+        "exact-time.mjs": "35ed26640aacbcacd3f5f226961dac37ff79deeb61f6c7c3d5c062c481977024",
+        "project-sound.mjs": "859aac436795ea6caa2cc6e50ac8d3f1f16bdc93d8f83ee95238c5104d58f3f9",
+        "project-sound-files.mjs": "f14944bc08ede688b66e9a7b74ec9bf8131f26cb69e8add1d1a46e9ed123c821",
+        "score-handoff.mjs": "8b821d55c614f4038f7f75462878d11e455973416e87f6b6ddadd4e1850b1dd0",
+        "native/WaveLoopClock.swift": "a6c60724b026a6f35d27b301b39b7bf82aa36d6e0cf74fb081c4bfa5d8da4695",
+        "arrangement-loop.mjs": "cbc50420b16bc095d32534184f0270f775023df0a074d4cc56a62580dc80c3d8",
+        "midi-expression.mjs": "b3ed51a525781667a725e38661c10e808dbbdbba825a9f9c47ff0f35633e1abe",
+        "music-library-info.mjs": "de5f08b134801dedfe4b8ce49ebaf8859b375a64f7d316577de43d0f2b30800c",
+        "music-library-worker.mjs": "4c452fe1089605718e1d868acba8e45845a7ef7c32b51a6fcb4fb3269ec37bd7",
+        "music-workbench.mjs": "6630eb77e6f08cb3ed6fda6e63a83694a7c6525e63830f92bbb9838fe812aca8",
+        "phrase-arrangement.mjs": "0b627315698fd7e035213e0bda78639c13a5ee624211a9fa9a720901494a055b",
+        "arrangement-practice.mjs": "e64d325d7f46dddf409d733b1c68ad98138b56eab781c5341c27d7d6a663c553",
+        "native/PulseAudioClock.swift": "9f837de28cec628b35305039a7d766739c76cfd57a2593ef536311060b45beed",
+        "native/PulseLoopClock.swift": "b7a3c3f1bef714be187f87e27cfee7d1bac95c9ef7682740c513e198c43c7e68",
+        "recording-correction.mjs": "25f485a37f0c497e8900a2f8930c545c17e63140355f5f8d9fb6ad9668ae0cdb",
+        "calibration-profile.mjs": "ce182540ffe988cabe027b3391ef67afa968c6f94572b006c0544cf2d8e290ee",
+        "calibration-files.mjs": "5a7c8818ca740151f1d0f6db0bcaf86d9dce5a3a2b82e8e8366aed74707c1c8b",
+        "capture-placement.mjs": "c8929205e3a14942f828df1a3ca0e26d048212f9100dde7586a87a435291b6b1",
+        "audio-calibration.mjs": "0e7fc272da7a6e90cbecfa8ede76cbab6144fdff8d06e9e9988192c3c45812a9",
+        "live-midi.mjs": "1ddb7766b6082b653e1c45e5bad512b9467b26cb71eb6ebbcda2855e4fb01313",
+        "package.json": "a745c8bbaf3884a207a8301b0cdb1e6c7ec1415e4bcfc3f49aeff1b73f4d10e6",
+        "pnpm-lock.yaml": "7286c3a7e8b0916e6b44247b317a9cd660506594cc4d9d64916a07d7ef3629e7",
+        "engine.mjs": "53d933438dabf11036d5d78e505e2097cf26422e4c7d88d13c9ccf44ebeeb0d9",
+        "audio.mjs": "9c7a835b0052d3045961ed4befa74cfaae41410ecb91ba5f09d5635b9274f1e6",
+        "diagnostics.mjs": "895412d0c8faae595a178d3d514a84dcb05f8f763947b5f033b65453ac2c7ea9",
+        "worker.mjs": "db3ac598075b28d67b6dfafbbd0638de5f6b0fe9aec20c819d5ef66330a93674",
+        "terminal.mjs": "9eaad04739b5c85e8e60a8a53c377aee19cfd4fd8700b370594e59e09030bcb2",
+        "terminal-style.mjs": "107342838265b95bd85598987ab32dd2d89658072cf7bb8831a82461cb848575",
+        "meter-bars.mjs": "184b09873fac05944619ca1b8e4401318ffce0488b83054e9618848bb8148a48",
+        "viewer.mjs": "da458089273a1dbae1112a6d3cf009b201320e72ef1968cd45cae64b8351783e",
+        "capture.mjs": "18b1d1cdde456aff46e3ce2ecae378e3245d43d35502ac9a9498f3391017f51e",
+        "session-data.mjs": "981daa4a2ceb98d7bf840be5ba1c5fc7ec715c3d0cfb1436b226f63365547d18",
+        "capture-time.mjs": "8c30a110083de323ed31f7a27c3e682ff01534ab660879a341915fe1c4d6ebc0",
+        "captured-source.mjs": "7e78ae5e67b7425392b5f4ca60208f27d443598ed89195451975770f375b13cc",
+        "captured-source-files.mjs": "c6750a9e295bdd3b239f47147d9d9e9c3d48d792b2af3f0727c9d75ed4db7e6d",
+        "capture-playback.mjs": "92c8af409f92df37a65a5e0211b4fb889e9594b8877f0e875c4debc5f2a01681",
+        "music-session.mjs": "3033a44b2a1196ec69593851a776c0f8ad7111d4b75fd9a2d11a59c387d8ca86",
+        "wave-file.mjs": "3f71116d37c9a1b5069a60d2127bdb71361160da5f8b4ad11e01495dd4f0c1f7",
+        "sequencer-project.mjs": "b91e9a1fe72c2a2044fd3def6546fae3c1c506a154e15b7e093742329e70c72d",
+        "arrangement.mjs": "dc5446889445016cc1f429185a72ea5696168fc1a216bf9247199ba6a22ac988",
+        "arrangement-files.mjs": "66d2f82e791ec861fc90a85bf57e8c8a295f04d8e92d4131aaa22bc52701cea2",
+        "arrangement-editor.mjs": "0227853cf2060ba658a28b26fd9a54c7031f1b213acdfa63acd4ec4ff15e3dda",
+        "arrangement-worker.mjs": "d2b3a7b2c5d79ac3c4faa1b7772ada1cb151f30c460e9a3da96135967486d508",
+        "arrangement-tui.mjs": "06ef4e93d226c70c67c0e81daf688e0ede164b9a5ae10b7624b20e9a34acb3b0",
+        "arrangement-playback.mjs": "89962eedcef139a3bbfd43b55b8b6026be9c5d70ab42fd9fa3fce8671f8d221c",
+        "arrangement-recording.mjs": "a99684b6c1b32e92ae62388f03416f0f37b461c51c3400e24770b46af0513167",
+        "sequencer-files.mjs": "06ef6e7a5084537bbc4c24a2b06b9bf524c4df24addd9c963ac442f19074a7a1",
+        "sequencer-audio.mjs": "a0b02ec300575a393de7b53ec002d472edcb0cc6e0586ac2c320f86f2022cd52",
+        "sequencer-midi.mjs": "b416cb45be24d9942e59d05e258945943752cd4de9a2a83785a932b07e9aa9ca",
+        "midi-source.mjs": "668afb2aa9b01e8c696e86371511c5dd2aa571211819ba3cd49d83b13d66a21b",
+        "midi-source-editor.mjs": "48ef4078051c7331b454f6953a9385a862914d986f6428d7aac179028e5f6fea",
+        "note-selection.mjs": "0afbb0fd32e49b1b3d2d99253e4439e6ade124d8fb15d1ea21c5280a4a9b069e",
+        "tick-units.mjs": "f4d118dc5b84535343378e9e0b7ef4e759d9270ba0ba40f286ecc6941c4f6b0c",
+        "note-quantize.mjs": "18fa2e559cda048fc2f2b9d6a52b5166aaa26be298e966a9b4297077851a919d",
+        "note-overlap.mjs": "bb23e6a50dc0093391b054a84341f0039fcb127944a2c5d207435156101c9858",
+        "midi-source-playback.mjs": "d6fac7a9965a870c92ba726e5af44fa2c7fba779b0746ea158b550e57592f3bf",
+        "sequencer-editor.mjs": "1ff82fb51c21d7491bba1aa6d3ae16a5c92e65d01174e0d313c852b785aa54b4",
+        "sequencer-vst.mjs": "9f46c16de22c1618744e056673d41c38619943349590c15fb4069e37e26bcb45",
+        "sequencer-worker.mjs": "c9d648aa2fa1264a4bed808a27272b1526ffd4ea7c9ca903ba05f6fae738036b",
+        "sequencer-tui.mjs": "e9f5ba09be626bfafe46f3afb90ff867f200e6ce0a68a95cac22890454e1e130",
+        "playback.mjs": "88472c44fc723a675a117704795b8c3123e142d6a65d7207a4751b8b289b7b06",
+        "native/MusicSession.swift": "337867097b4389e387c5399c1d994c150ae7e9fabed725e9dd439860daf028d2",
+        "native/MusicTransport.swift": "7895f7b2946008f620ccfa5144c41530bfca06bb993865e3785f0b41a3cf5c02",
+        "native/MidiTransport.swift": "38d09d5239b51a42547220273d14e66f8c4ebdb8af17c9f1d782a4acb95eee2a",
+        "native/WaveArrangement.swift": "5d10a811df1952a82654a4950a4e31f7819af37df271474ce3645f76fad8ac75",
+        "native/CaptureAudioClock.swift": "be87bcb5f31299a62938a68c7478ff36f4884c471aec5cd55d6d0faf217b5bbd",
+        "native/UmpTransport.swift": "e890ea1cab04e2fbf6867303235eb5e1b4fe1d217495bbb7e6efc13327b43e51",
+        "native/UmpOutput.swift": "a037526dc257c94154d22586c6a78e55ad0a86a365590ce5a45ca7dfdf1a7299",
+        "native/UmpRegions.swift": "0a66903c40a62a7c4010895e99227bb541d4e897f2f9915f7d75025722e6a86a",
+        "native/HybridMidiTransport.swift": "d36b1bfd747a09788eed54520bd68c4b70146d852c93edd5c25760d9989a56be",
+        "native/UmpLoopTransport.swift": "22e7788f2dd50d8c5ac51646a46fc72ddb8c5a032d6ec3742a0fbd1bf7e0adea",
+        "native/UmpState.swift": "c601dd715933423efd4b0c8ab75789867c1262b6c0ef09563af11410a8b7c4ba",
+        "native/Info.plist": "7f6fae202b107b0bc11e14d6ef11d1a5cf8c492d20ad9113ed209b26efee746a",
+        "native/UmpLiveInput.swift": "54281a084594d6ad2e67c681c1b3bfd81fb3fe1eb7f74fe6f1c68a63a5306e17",
+        "native/LiveMidiMain.swift": "1936c344e3f6d9004b49607207115e132fe0918395d12a8e908835ad7c3c420e",
+        "native/LiveMidiReservations.swift": "aa68c0a7fc1ecb6a70d6c64c57443580bdaefcc2cadc55ebbeafb9a33a54a928",
+        "vst.mjs": "237c9f2d30b31d59f87eb06bed6d51a4e906cc11af0c6a4fad1ed558e81717dd",
+        "instruments.mjs": "cd008833857c910804be8fb04ee87dbc6e822f1303a97eb9485f1dbf348d5997",
+        "status-reader.mjs": "88be25cd06266418cda7f6981fb0c038d24c448f4c4c777ea8032afe126142c2",
+        "arrangement-vst.mjs": "97c5b063526db41d81a040fb3c66c65dac412bb1a096be64f441b85479812cb2",
+        "native/MidiRenderProjection.swift": "3333773a7b9cdd39549a648f81bc5bc087978e9f6ddcef414dd6efd7e958fa4d",
+        "arrangement-export.mjs": "4dbabf9ac23eb35f70d23800e6209f3e1c6bf79cf27774f1ba5de76e10ce3cdf",
+        "arrangement-midi-export.mjs": "3c576784e769e7f03394f5bd39c5c02f3b683ededb3ddb70eb3a36a419f3a763",
+        "../vst/host.py": "b084858f1b0db158619ee5324d8d66045e774ca7054b4bba168f2216970fbfb9"
+      },
+      "vstLockSHA256": "b1e3efee1a3741574c2ed881a2b57a9d676d88bab8454f388507febd23b1f4bc",
+      "nativeHelpers": {
+        "music-native": "c6267173bb2e7bba82a19c0551e487d300c05f14a35dba2d1c96c3bc87c92955",
+        "music-transport": "169737720d4b58fcd6534111de6e71f52c718ea30ca55df521cee091ce0de9ac",
+        "music-pcm-output": "1e4f13ef102649b13995e211276a76496336dbd06c4eac2c744a72a26ae7123f",
+        "music-midi": "f49d97ec5ce78b76da6ae28ef037682d224b169df0b860d19c881fcafca145c6",
+        "music-arrangement": "195865fba0f7d838d625540256d969839fa4f70d554d62886b757dc3f79256ee",
+        "music-midi-input": "ba5a4f9c5e65fa4c7d84ba7cf6fdd054397bea1a7e40a79323a2cede860f2031",
+        "music-midi-live": "400d72fd7548e79dae4824f110ee3ef8db2e7e960776bb5f29a3a8fa9f975354"
+      },
+      "parentBinaryUnchanged": true,
+      "launcherSHA256": "fa55fb193a6a61b9f664392820485e8d0b465e8195d519d430337b86e29baaea",
+      "parentBinarySHA256": "8e1f19c644765a370572a1e1157a501cbd87dacaedd8e78e632ddd0c0eb50eaf"
+    },
+    "savedFileVerification": {
+      "installedRevision": "e55030b649cd1fc9d3fdc59dea54a941635c55db62ef39faa161770377b8afb4",
+      "sourcePPQ": 1001,
+      "iterations": [
+        {
+          "name": "edited",
+          "notes": [
+            [
+              143,
+              572
+            ],
+            [
+              1859,
+              572
+            ]
+          ],
+          "exportSHA256": "638be34ff6c929c6a1be448fe77a2a65c5980fd8cd4cd5b1d3e4f1b628d85952",
+          "originalAndUnrelatedEventsPreserved": true
+        },
+        {
+          "name": "restored",
+          "notes": [
+            [
+              143,
+              286
+            ],
+            [
+              1001,
+              286
+            ]
+          ],
+          "exportSHA256": "9db0aca7d8644497c9c67c49a591ccf7ccf73d97dc168d171d7dce60456f7b09",
+          "originalAndUnrelatedEventsPreserved": true
+        }
+      ],
+      "scope": "Native-parent invocation, saved files and emitted MIDI; no screen layout, playback or physical device claim.",
+      "harmonyIntervalsMatch": true,
+      "nativeParentReturnedAndReopened": true,
+      "harnessCommandCorrection": {
+        "reason": "Library command is :open, not :project. Continued the same live parent and child without restart.",
+        "commands": [
+          "open edited.json",
+          "channel 1",
+          "select-all",
+          "stretch-notes 1/2",
+          "save-as restored.json"
+        ]
+      }
+    },
+    "parentInvocations": {
+      "parentPid": 28825,
+      "serverPort": 62904,
+      "serverReplaced": false,
+      "installedRevision": "e55030b649cd1fc9d3fdc59dea54a941635c55db62ef39faa161770377b8afb4",
+      "firstMusicChild": [
+        {
+          "pid": 28843,
+          "ppid": 28825,
+          "entry": "viewer.mjs --music",
+          "revision": "e55030b649cd1fc9d3fdc59dea54a941635c55db62ef39faa161770377b8afb4"
+        }
+      ],
+      "secondMusicChild": [
+        {
+          "pid": 29178,
+          "ppid": 28825,
+          "entry": "viewer.mjs --music",
+          "revision": "e55030b649cd1fc9d3fdc59dea54a941635c55db62ef39faa161770377b8afb4"
+        }
+      ],
+      "returnedAndReopened": true,
+      "privateParentClosed": true
+    }
+  }
+}

@@ -1,0 +1,196 @@
+[targeted] EIO_BACKEND=<unset> timeout=600s per suite
+[targeted] test_tui_keyboard_input-browser-screenshot: start 2026-09-12T21:04:40Z (dune alias)
+(cd _build/default/test && /usr/bin/python3 ./test_tui_keyboard_input.py ../bin/masc_tui.exe browser-screenshot)
+tui Browser screenshot regression: PASS
+[targeted] test_tui_keyboard_input-browser-screenshot: OK in 39s
+[targeted] dune build test/test_tui_browser_lane.exe test/test_browser_composition.exe test/test_browser_observation_composition.exe skills/browser-live-click-content/SKILL.md skills/browser-live-click-regions/SKILL.md skills/browser-navigate-content/SKILL.md skills/browser-navigate-regions/SKILL.md
+[targeted] test/test_tui_browser_lane: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_tui_browser_lane: start 2026-09-12T21:05:28Z
+PASS raw refresh scroll identity
+PASS scoped refresh failure and region recovery
+PASS visual pointer navigation
+PASS visual scroll ownership
+PASS client connection ownership
+PASS client inventory contract
+PASS screenshot ownership, draft and stale tab
+PASS read and tab selection
+PASS closed-tab refresh recovery
+PASS stale response and provenance
+PASS session generation
+PASS failed refresh preserves evidence
+PASS navigation failure preserves editable URL
+PASS HTTP read status provenance
+PASS operator reader context
+PASS source switch
+PASS malformed response
+PASS empty tabs
+[targeted] test/test_tui_browser_lane: OK in 0s
+[targeted] test/test_browser_composition: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_browser_composition: start 2026-09-12T21:05:28Z
+::group::{browser composition}
+Testing `browser composition'.
+This run has ID `F86S5J0E'.
+
+ASSERT destination reference has a declared string type
+ASSERT activation exposes a typed active receipt
+ASSERT other interactions need no active receipt
+ASSERT ordinary clicks need no destination receipt
+  [OK]          native skill          0   runtime destination output contract.
+ASSERT native callable skill name
+ASSERT follow pins the observed client, tab, URL, document and link
+ASSERT follow-up reads the selected view on the pinned tab and client
+ASSERT composition completes
+ASSERT exact ordered browser route
+  [OK]          native skill          1   observed click then region read.
+ASSERT native callable skill name
+ASSERT follow pins the observed client, tab, URL, document and link
+ASSERT failure is retained
+ASSERT failed click is not retried and no read runs
+  [OK]          native skill          2   failed click stops without replay.
+ASSERT native callable skill name
+ASSERT follow pins the observed client, tab, URL, document and link
+ASSERT follow-up reads the selected view on the pinned tab and client
+ASSERT successful click is never replayed after read failure
+ASSERT completed follow remains a recorded effect after read failure
+ASSERT settled click receipt remains available
+  [OK]          native skill          3   read failure retains successful cli...
+ASSERT native callable skill name
+ASSERT follow pins the observed client, tab, URL, document and link
+ASSERT failure is retained
+ASSERT failed click is not retried and no read runs
+  [OK]          native skill          4   region read rejects malformed follo...
+ASSERT native callable skill name
+ASSERT follow pins the observed client, tab, URL, document and link
+ASSERT follow-up reads the selected view on the pinned tab and client
+ASSERT composition completes
+ASSERT exact ordered browser route
+  [OK]          native skill          5   observed click then visible content.
+ASSERT native callable skill name
+ASSERT follow pins the observed client, tab, URL, document and link
+ASSERT failure is retained
+ASSERT failed click is not retried and no read runs
+  [OK]          native skill          6   content follow failure stops withou...
+ASSERT native callable skill name
+ASSERT follow pins the observed client, tab, URL, document and link
+ASSERT follow-up reads the selected view on the pinned tab and client
+ASSERT successful click is never replayed after read failure
+ASSERT completed follow remains a recorded effect after read failure
+ASSERT settled click receipt remains available
+  [OK]          native skill          7   content read failure retains follow...
+ASSERT native callable skill name
+ASSERT follow pins the observed client, tab, URL, document and link
+ASSERT failure is retained
+ASSERT failed click is not retried and no read runs
+  [OK]          native skill          8   content read rejects malformed foll...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT explicit automation lane
+ASSERT same observed tab
+ASSERT the selected observation precedes the site decision
+ASSERT guard follows the actual redirect receipt
+ASSERT navigation and observation complete
+ASSERT one ordered pair
+  [OK]          native skill          9   navigation uses redirected landing ...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT failure remains visible
+ASSERT no dependent read or navigation retry
+  [OK]          native skill         10   navigation failure stops before read.
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT explicit automation lane
+ASSERT same observed tab
+ASSERT the selected observation precedes the site decision
+ASSERT guard follows the actual redirect receipt
+ASSERT failed observation does not replay navigation
+ASSERT settlement records that navigation already took effect
+ASSERT completed navigation remains available for recovery
+  [OK]          native skill         11   read failure retains navigation rec...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT failure remains visible
+ASSERT no dependent read or navigation retry
+  [OK]          native skill         12   malformed navigation receipt stops ...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT explicit automation lane
+ASSERT same observed tab
+ASSERT the selected observation precedes the site decision
+ASSERT guard follows the actual redirect receipt
+ASSERT navigation and observation complete
+ASSERT one ordered pair
+  [OK]          native skill         13   content uses redirected landing URL.
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT failure remains visible
+ASSERT no dependent read or navigation retry
+  [OK]          native skill         14   content navigation failure stops be...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT explicit automation lane
+ASSERT same observed tab
+ASSERT the selected observation precedes the site decision
+ASSERT guard follows the actual redirect receipt
+ASSERT failed observation does not replay navigation
+ASSERT settlement records that navigation already took effect
+ASSERT completed navigation remains available for recovery
+  [OK]          native skill         15   content read failure retains naviga...
+ASSERT native callable skill name
+ASSERT navigation pins the observed tab and requested URL
+ASSERT failure remains visible
+ASSERT no dependent read or navigation retry
+  [OK]          native skill         16   content rejects malformed navigatio...
+
+Test Successful in 0.027s. 17 tests run.
+::endgroup::
+[targeted] test/test_browser_composition: OK in 0s
+[targeted] test/test_browser_observation_composition: stanza env MASC_BASE_PATH= ZAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false
+[targeted] test/test_browser_observation_composition: start 2026-09-12T21:05:28Z
+::group::{browser observation composition}
+Testing `browser observation composition'.
+This run has ID `386YN1VG'.
+
+[2026-09-12 21:05:28] [INFO] [Workspace] MASC base: /tmp/browser-composition-observation-a6eceb (no git root found)
+[2026-09-12 21:05:28] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/browser-composition-observation-a6eceb for test executable test_browser_observation_composition.exe
+ASSERT producer read succeeds before schema validation
+[2026-09-12 21:05:28] [WARN] [Keeper] composition action telemetry degraded without changing execution: tool=keeper_compose_observed-page node=page error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT executor actually applies declared output schema
+ASSERT schema rejection preserves the exact original observation
+  [OK]          production observer          0   receipt failure prevents com...
+[2026-09-12 21:05:28] [INFO] [Workspace] MASC base: /tmp/browser-composition-observation-63c73c (no git root found)
+[2026-09-12 21:05:28] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/browser-composition-observation-a6eceb for requested path /tmp/browser-composition-observation-63c73c
+[2026-09-12 21:05:28] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/browser-composition-observation-63c73c for test executable test_browser_observation_composition.exe
+ASSERT producer read succeeds before schema validation
+[2026-09-12 21:05:28] [WARN] [Keeper] composition action telemetry degraded without changing execution: tool=keeper_compose_observed-page node=page error=Masc.Keeper_tool_call_log.Commit_required_but_store_unavailable
+ASSERT executor actually applies declared output schema
+ASSERT schema rejection preserves the exact original observation
+  [OK]          production observer          1   schema rejection still requi...
+[2026-09-12 21:05:28] [INFO] [Workspace] MASC base: /tmp/browser-composition-observation-3fb79b (no git root found)
+[2026-09-12 21:05:28] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/browser-composition-observation-63c73c for requested path /tmp/browser-composition-observation-3fb79b
+[2026-09-12 21:05:28] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/browser-composition-observation-3fb79b for test executable test_browser_observation_composition.exe
+ASSERT producer read succeeds before schema validation
+ASSERT executor actually applies declared output schema
+ASSERT schema rejection preserves the exact original observation
+ASSERT node log records schema rejection
+ASSERT node receipt preserves composition identity
+ASSERT retained producer root survives output schema rejection
+ASSERT successful composition payload stays inline
+ASSERT committed node roots retain the observation
+ASSERT retained observation is not a GC candidate
+  [OK]          production observer          2   success preserves inline pay...
+[2026-09-12 21:05:28] [INFO] [Workspace] MASC base: /tmp/browser-composition-observation-949bd9 (no git root found)
+[2026-09-12 21:05:28] [INFO] [Workspace] Ignoring test MASC_BASE_PATH override=/tmp/browser-composition-observation-3fb79b for requested path /tmp/browser-composition-observation-949bd9
+[2026-09-12 21:05:28] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/browser-composition-observation-949bd9 for test executable test_browser_observation_composition.exe
+ASSERT producer read succeeds before schema validation
+ASSERT executor actually applies declared output schema
+ASSERT schema rejection preserves the exact original observation
+ASSERT node log records schema rejection
+ASSERT node receipt preserves composition identity
+ASSERT retained producer root survives output schema rejection
+ASSERT committed node roots retain the observation
+ASSERT retained observation is not a GC candidate
+  [OK]          production observer          3   schema rejection preserves o...
+
+Test Successful in 0.074s. 4 tests run.
+::endgroup::
+[targeted] test/test_browser_observation_composition: OK in 0s

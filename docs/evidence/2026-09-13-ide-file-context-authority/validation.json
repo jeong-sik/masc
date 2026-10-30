@@ -1,0 +1,26 @@
+{
+  "base_commit": "54039b1237358d8bb0db4b4bd57ecba5c999c6fd",
+  "vitest": {
+    "suites": 5,
+    "tests": 74,
+    "passed": true
+  },
+  "whole_dashboard_tsc_noEmit": {
+    "passed": true,
+    "log_bytes": 0
+  },
+  "targeted_production_eslint": {
+    "passed": true,
+    "log_bytes": 0
+  },
+  "source_browser": {
+    "passed": true,
+    "fixture": "synthetic API, real source component",
+    "anchors_by_codebase": [
+      1,
+      1,
+      0
+    ]
+  },
+  "installed_change_acceptance": false
+}

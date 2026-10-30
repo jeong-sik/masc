@@ -1,0 +1,8 @@
+{
+  "at": "2026-10-21T13:28:37.863350+00:00",
+  "server_pid": 49486,
+  "tui_pid": 54510,
+  "verified_server_command": "/tmp/masc-addon-native-39603379628/masc start --base-path /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-repaired-ui-20261021-fx3087s5 --port 51623",
+  "server_signal": "SIGTERM",
+  "scope": "only isolated qualification processes"
+}

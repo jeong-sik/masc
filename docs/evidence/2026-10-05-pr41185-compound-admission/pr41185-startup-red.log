@@ -1,0 +1,41 @@
+Testing `server_browser_stagehand'.
+This run has ID `MLRB0YGJ'.
+
+> [FAIL]        lifetime          0   webdriver startup freezes configuration...
+  [FAIL]        lifetime          1   Stagehand startup freezes configuration...
+  [SKIP]        lifetime          2   failed open stops Chromium before same-...
+  [SKIP]        lifetime          3   malformed owner record blocks profile r...
+  [SKIP]        lifetime          4   unmatched live PID blocks profile reset.
+  [SKIP]        lifetime          5   dead leader with live group blocks prof...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        lifetime          0   webdriver startup freezes configurat...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/browser-start-config-748e50/runtime.toml: [runtime].default is required (no default runtime configured; silent fallback removed)
+FAIL /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/browser-start-config-748e50/runtime.toml: [runtime].default is required (no default runtime configured; silent fallback removed)
+Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+Called from Dune__exe__Test_server_browser_stagehand.test_start_captures_configuration.(fun) in file "test/test_server_browser_stagehand.ml", line 243, characters 4-11
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 133, characters 8-12
+Re-raised at Eio__core__Switch.maybe_raise_exs in file "lib_eio/core/switch.ml", line 119, characters 21-56
+Called from Eio__core__Switch.run_internal in file "lib_eio/core/switch.ml", line 149, characters 4-21
+Called from Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 118, characters 8-12
+Re-raised at Eio__core__Cancel.with_cc in file "lib_eio/core/cancel.ml", line 120, characters 50-58
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 318, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 324, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 386, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 342, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 381-388, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 258, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 263, characters 4-39
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/test/_build/_tests/server_browser_stagehand/lifetime.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41185-browser-compound-admission-20261005/test/_build/_tests/server_browser_stagehand'.
+2 failures! in 0.003s. 2 tests run.

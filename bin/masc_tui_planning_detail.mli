@@ -1,0 +1,105 @@
+(** What a goal's detail has to say under its header.
+
+    The list already draws the judge's verdict and its reason on the line
+    under the cursor -- the reason being, as that code says, the only thing
+    that says what to do next. The detail drew neither, so opening a goal
+    showed less than the row it was opened from, and the two fields the
+    surface decodes for it went nowhere.
+
+    This is the block that fills the gap, and the rows it produces are what
+    the detail's scroll moves through. *)
+
+type tone =
+  | Proven
+  | Refused
+  | Waiting
+  | Unreadable
+  | Note
+  | Quiet
+  | Plain
+
+type line =
+  { tone : tone
+  ; text : string
+  }
+
+module Tui_decode = Masc.Tui_decode
+
+(** The metadata projection of one submitted original, as the confirmation
+    read carries it: identity, size and integrity without contents. A kind
+    this build does not know stays visible as [Original_unknown]. *)
+type submitted_original =
+  | Original_collaboration of { reference : string; sha256 : string; bytes : int }
+  | Original_note of { bytes : int }
+  | Original_artifact of { reference : string; bytes : int; truncated : bool }
+  | Original_binary of { reference : string; bytes : int; sha256 : string; format : string }
+  | Original_unreadable of { reference : string option; reason : string }
+  | Original_unknown of string
+
+type confirmation = {
+  goal_id : string;
+  phase : Goal_phase.t;
+  verdict : Goal_verification.verdict;
+  submitted : submitted_original list;
+}
+
+type confirmation_state =
+  | Inspecting of (string, confirmation) Masc_tui_fetched.t
+  | Submitting of string * (string, confirmation) Masc_tui_fetched.t
+
+val decode_confirmation : goal_id:string -> Yojson.Safe.t -> (confirmation, string) result
+val confirmation_body : confirmation -> Yojson.Safe.t
+val same_confirmation_binding : confirmation -> confirmation -> bool
+val confirmation_lines : width:int -> ko:bool -> confirmation -> line list
+(** The exact proof displayed before the operator confirms, in layers: the
+    instruction, the goal's promise, the binding fine print, then the
+    evidence. Its binding is retained for the POST, so a newer proof cannot
+    silently replace it. Confirmation requires a presented reader frame
+    containing the block's final row, which is why the evidence stays the
+    last group. *)
+
+val timestamp_line : label:string -> string -> string
+(** One timeline row of the detail pane. The field is one wider than the
+    longest label ("reviewed:"), so a value never starts immediately after
+    its colon. *)
+
+val body :
+  width:int -> Tui_decode.goal_proof -> string option -> line list
+(** The verdict, its reason, and the keeper's own note, wrapped to [width].
+
+    An idle ledger with no note still says so: an empty block would read as a
+    goal nobody has looked at, which is the same picture a goal whose verdict
+    failed to decode would draw. *)
+
+val unreconciled_heading : Goal_reconcile_step.t -> string
+(** Which verifier step could not settle the goal, as the row's headline. *)
+
+val verifying_next_step : Tui_decode.verifier_unreconciled option -> tone * string
+(** The next-step sentence for a Verifying goal. Both offer [c] first: on a
+    goal the latest scan could not settle it is the retry that applies the
+    committed proof or re-arms the request, and shows why when it cannot. *)
+
+val unreconciled_lines :
+  width:int -> Tui_decode.verifier_unreconciled -> line list
+(** The headline and the store's reason, wrapped and sanitized like a
+    verdict, for a Verifying goal the latest verifier scan could not
+    settle. *)
+
+val short_ts : string -> string
+(** "2026-07-28T03:57:38Z" -> "07-28 03:57"; anything shorter is shown as-is
+    rather than guessed at. Shared with the task-history rows. *)
+
+val timeline_unavailability_detail : Tui_decode.goal_timeline_unavailability -> string
+(** Preserve the typed source failure's cause at the history read boundary. *)
+
+val timeline :
+  width:int ->
+  goal_id:string ->
+  (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t ->
+  line list
+(** The goal's merged event timeline, appended after [body] so it rides the
+    same scroll. Loaded lazily on detail entry; every non-ready state (still
+    loading, store unavailable, load failed, stale answer for another goal)
+    says what it is instead of rendering as an empty history. Refresh failures
+    retain the last observed rows with their stale reason; they do not certify
+    the goal's current work or turn a source-unavailable result into success. *)

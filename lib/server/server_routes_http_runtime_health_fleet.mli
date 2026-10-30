@@ -1,0 +1,64 @@
+(** Server_routes_http_runtime_health_fleet — fleet-level health field helpers.
+
+    Extracted from [server_routes_http_runtime.ml] during godfile decomposition.
+    Contains keeper reaction ledger, FD accountant, fleet resolution,
+    runtime truth, and contract-verification health JSON renderers. *)
+
+val keeper_reaction_ledger_health_json : unit -> Yojson.Safe.t
+(** An unread Keeper census produces [status=unavailable], an unknown
+    [keeper_count], and [keepers_listing=unreadable] with the read error. *)
+
+val keeper_owner_health_json : unit -> Yojson.Safe.t
+(** Preserves an unread census as unavailable rather than a healthy empty fleet. *)
+
+val keeper_board_event_collection_health_json : unit -> Yojson.Safe.t
+(** Preserves an unread census as unavailable rather than a healthy empty fleet. *)
+
+val keeper_hitl_gate_health_json : unit -> Yojson.Safe.t
+(** The keeper_hitl_gate section (task-1665, design D1). Live waits from the
+    tool-approval registry over the durable ask counts from the asking
+    workspace's queue; see {!Keeper_hitl_gate_health} for the closed
+    aggregation. Every computation failure is a distinct projection rather
+    than a zero: no server state keeps the live side under
+    [snapshot_not_ready], an unread queue goes [unavailable] with an
+    operator demand, never an empty count. *)
+
+val paused_keeper_count : Yojson.Safe.t -> int
+
+val runtime_base_path_opt : unit -> string option
+
+val keeper_event_queue_health_dimensions
+  :  source_unavailable:bool
+  -> Yojson.Safe.t
+  -> Yojson.Safe.t
+(** Split durable storage integrity from work liveness. A readable queue with
+    runnable or retained non-runnable backlog, read errors, or pending
+    transition projection is never returned as backlog-clean [status=ok].
+    Source age is diagnostic and cannot establish queue residence or a stall.
+
+    [source_unavailable] says whether the summary was read at all: the caller
+    knows, because it is the caller that failed to reach the runtime. The
+    summary itself only counts what it could read and states no verdict, so
+    the returned [status] and [operator_action_required] are decided here and
+    nowhere else. *)
+
+val keeper_event_queue_health_json :
+  execution_snapshot:Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot ->
+  unit ->
+  Yojson.Safe.t
+
+val fd_accountant_snapshot_json : unit -> Yojson.Safe.t
+
+val runtime_truth_json :
+  build:Build_identity.t ->
+  path_diagnostics:Server_base_path_diagnostics.t ->
+  keeper_fibers:int ->
+  fd_accountant:Yojson.Safe.t ->
+  Yojson.Safe.t
+
+val keeper_fleet_runtime_resolution_fields :
+  unit -> (string * Yojson.Safe.t) list
+
+val keeper_fleet_runtime_resolution_light_fields :
+  ?profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
+  unit -> (string * Yojson.Safe.t) list

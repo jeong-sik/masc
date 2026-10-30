@@ -1,0 +1,138 @@
+(** Non-blocking orchestration for durable Keeper lifecycle cleanup. *)
+
+type submit_error =
+  | Prepare_error of Keeper_shutdown_prepare_join.error
+  | Existing_operation_load_error of Keeper_shutdown_store.error
+  | Existing_operation_lane_mismatch of Keeper_shutdown_types.t
+  | Existing_operation_intent_mismatch of Keeper_shutdown_types.t
+  | Worker_start_error of worker_start_error
+
+and worker_start_error =
+  | Worker_supervisor_unavailable
+  | Worker_supervisor_stopping of exn
+  | Worker_fork_failed of exn
+
+type restored_inventory =
+  { operations : Keeper_shutdown_types.t list
+  ; blocked_keeper_names : string list
+  ; corrupt_records : Keeper_shutdown_store.corrupt_record list
+  ; corrupt_owner_fences : corrupt_owner_fence list
+  }
+
+and corrupt_owner_fence =
+  { keeper_name : string
+  ; operation_id : Keeper_shutdown_types.Operation_id.t
+  }
+
+val submit_error_to_string : submit_error -> string
+
+(** Retry only post-finalization Dashboard artifact delivery for the exact
+    durable operation. Lane joins and unknown effects are not replayed. *)
+val retry_completion :
+  config:Workspace.config -> keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  (Keeper_shutdown_types.t, [ `Not_ready | `Submit of submit_error ]) result
+
+(** Restore admission from owner-addressable durable inventory. A Keeper with
+    any corrupt payload is fenced once. A current operation that still requires
+    a fence owns admission long enough to recover; otherwise the deterministic
+    [corrupt_owner_fences] entry owns it. Corrupt records remain explicit.
+    A [Blocked] operation at a replayable stage
+    ({!Keeper_shutdown_types.failure_stage_boot_replay}) is fenced too when it
+    is its Keeper's newest operation and no sibling holds the fence, so the
+    Keeper does not autoboot ahead of the replay. If that fence cannot be
+    taken, the operation is left out of [operations] for this boot and logged. *)
+val restore_inventory_admission :
+  config:Workspace.config ->
+  Keeper_shutdown_store.inventory_entry list ->
+  (restored_inventory, string) result
+
+(** Fence admission and persist the operation synchronously, then fork lane
+    join/finalization on the process-lifetime Keeper supervisor switch. The
+    returned operation id is durable before this function returns. *)
+val submit :
+  config:Workspace.config ->
+  entry:Keeper_registry.registry_entry ->
+  request:Keeper_shutdown_prepare_join.request ->
+  (Keeper_shutdown_types.t, submit_error) result
+
+(** Fence same-name registration and submit a meta-only operation for a Keeper
+    with no registered lane. The durable record is committed before the
+    process-owned finalizer fiber starts. *)
+val submit_dormant :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  request:Keeper_shutdown_prepare_join.request ->
+  (Keeper_shutdown_types.t, submit_error) result
+
+(** Recover operations left by an earlier server process. Must run before
+    Keeper autoboot so a stopped Keeper cannot acquire a replacement lane
+    ahead of settlement. Returns one explicit result per durable operation.
+    A replayable [Blocked] operation is replayed to completion, closed as
+    [Superseded (Boot_replay_abandoned _)] with a warning when a later
+    operation or Keeper state overtook it, or left [Blocked] with fresh
+    evidence and a warning; the last two release admission. *)
+val recover_at_boot :
+  config:Workspace.config ->
+  (Keeper_shutdown_types.t, string) result list
+
+(** Recover one durable operation without consulting global inventory. This
+    lets bootstrap isolate every Keeper in its own process-lifetime fiber. *)
+val recover_operation :
+  config:Workspace.config ->
+  ?successor_operation_id:Keeper_shutdown_types.Operation_id.t ->
+  Keeper_shutdown_types.t ->
+  (Keeper_shutdown_types.t, string) result
+(** [successor_operation_id] hands the admission fence to that operation in the
+    same transition instead of releasing it: a keeper whose shutdown is
+    immediately superseded never has an unfenced moment between the two. Absent,
+    the fence is released as before. *)
+
+(** Recover one current operation. If recovery releases admission and the
+    owner also has corrupt durable state, restore that deterministic fail-closed
+    fence before returning success. *)
+val recover_operation_with_corrupt_owner_fence :
+  config:Workspace.config ->
+  corrupt_owner_fence:corrupt_owner_fence option ->
+  Keeper_shutdown_types.t ->
+  (Keeper_shutdown_types.t, string) result
+
+type redrive_error =
+  | Redrive_load_failed of Keeper_shutdown_store.error
+  | Redrive_start_rejected of worker_start_error
+
+val redrive_error_to_string : redrive_error -> string
+
+type redrive_outcome =
+  | Redrive_started
+  | Redrive_already_active
+  | Redrive_not_in_process of Keeper_shutdown_types.phase
+
+(** Walk a stopped operation again inside the running process (#34642).
+    Called when intake is observed refused by this operation's fence, so a
+    finalization that stopped on something since repaired settles without a
+    restart. Runs on the process switch under the same claim as the submit
+    worker and boot recovery. [Redrive_not_in_process] names the durable phase
+    left for operator action or boot recovery; it must not be reported as a
+    started walk. A walk that fails again leaves the operation in its phase. *)
+val redrive_finalization :
+  config:Workspace.config ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  (redrive_outcome, redrive_error) result
+
+module For_testing : sig
+  val persist_unhandled_failure :
+    now:(unit -> string) ->
+    config:Workspace.config ->
+    Keeper_shutdown_types.t ->
+    exn ->
+    unit
+
+  val stop_is_on_record :
+    before:Keeper_shutdown_types.t ->
+    after:Keeper_shutdown_types.t ->
+    bool
+  (** Whether a re-drive that stopped left the stop already on record: the same
+      recorded reason, or, for a phase with no reason, the same revision. *)
+end

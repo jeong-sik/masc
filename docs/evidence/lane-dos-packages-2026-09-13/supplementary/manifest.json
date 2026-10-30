@@ -1,0 +1,14 @@
+{
+  "statistics-browser-after.json": {
+    "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/lane-dos-statistics-proof/4218e1c05e-4dd9ef41e9c3454687b78a2d1aa49a83/evidence/browser-after/result.json",
+    "sha256": "417fff4ca03bebfa4789de845cf9c23ece18ac613c3cf1a9ea9ceb7dd741f6f4"
+  },
+  "statistics-browser-unavailable.json": {
+    "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/lane-dos-statistics-proof/4218e1c05e-4dd9ef41e9c3454687b78a2d1aa49a83/evidence/browser-unavailable/result.json",
+    "sha256": "b6e4d3fb209c87840631ed16f1c1370cc1d7aa94357a2c8c764225360a0a3758"
+  },
+  "dos-SKILL.md": {
+    "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/lane-dos-statistics-proof/4218e1c05e-4dd9ef41e9c3454687b78a2d1aa49a83/packages/addons/dos-world/skills/dos-observe/SKILL.md",
+    "sha256": "d703c329dbabd9ceed43eb5163bc55a10df69755360517dbb0b0d1e2c4c83514"
+  }
+}

@@ -1,0 +1,13 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41208-current-parent-20261005/dashboard
+
+
+ Test Files  7 passed (7)
+      Tests  125 passed (125)
+   Start at  06:13:35
+   Duration  7.41s (tests 33%, import 32%, environment 14%, setup 11%, transform 9%)
+
+     Import  153 modules were evaluated 652 times · 2.17s total, 32% of tracked time
+             ~1.66s faster with isolate: false — shared modules are evaluated once per worker instead of once per file
+             learn more: https://vitest.dev/guide/improving-performance#test-isolation
+

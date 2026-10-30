@@ -1,0 +1,510 @@
+(** Runtime_settings — typed runtime parameter declarations.
+
+    Each parameter is registered with [Runtime_params] with validation bounds.
+
+    Surfaces:
+    - [board_policy]: message retention count
+    - [inference_config]: default model and timeout
+
+    De-hexagonalized: [register_int], [register_float], [register_bool], and
+    [register_string] combinators eliminate the per-parameter serialisation /
+    deserialisation boilerplate, reducing each registration to three lines.
+
+    @since 2.96.0 *)
+
+(* ── validation helpers ──────────────────────────────────────── *)
+
+let validate_float_range ~min ~max key v =
+  if v >= min && v <= max then Ok ()
+  else Error (Printf.sprintf "%s must be in [%g, %g], got %g" key min max v)
+
+let validate_int_range ~min ~max key v =
+  if v >= min && v <= max then Ok ()
+  else Error (Printf.sprintf "%s must be in [%d, %d], got %d" key min max v)
+
+(* The four [deserialize_*] helpers are passed to [Runtime_params.register]
+   as [~deserialize] callbacks.  Their [Error] strings surface directly
+   in runtime-settings validation failures — operators reading those
+   need not only *that* the JSON was wrong-shape but *what kind* they
+   actually sent, to correlate against the surface that produced the
+   misshapen value.  The previous one-word messages ("expected number",
+   "expected integer", "expected string", "expected boolean") discarded
+   the received kind. *)
+
+let deserialize_float json =
+  match json with
+  | `Float f -> Ok f
+  | `Int i -> Ok (float_of_int i)
+  | other ->
+      Error
+        (Printf.sprintf
+           "deserialize_float: expected JSON number (`Float or `Int), got %s"
+           (Json_util.kind_name other))
+
+let deserialize_int json =
+  match json with
+  | `Int i -> Ok i
+  | `Float f ->
+      let i = Float.to_int f in
+      if Float.equal (Float.of_int i) f then Ok i
+      else Error (Printf.sprintf "deserialize_int: expected integer, got %g" f)
+  | other ->
+      Error
+        (Printf.sprintf
+           "deserialize_int: expected JSON integer (`Int or whole-valued `Float), got %s"
+           (Json_util.kind_name other))
+
+let deserialize_bool json =
+  match json with
+  | `Bool b -> Ok b
+  | other ->
+      Error
+        (Printf.sprintf "deserialize_bool: expected JSON boolean, got %s"
+           (Json_util.kind_name other))
+
+(* ── registration combinators ───────────────────────────────── *)
+
+(** Register a bounded integer parameter.
+    Eliminates per-site [serialize]/[deserialize] boilerplate. *)
+let register_int ~key ~default ~min ~max ?meta () =
+  Runtime_params.register
+    ~key
+    ~default
+    ~validate:(validate_int_range ~min ~max key)
+    ~serialize:(fun v -> `Int v)
+    ~deserialize:deserialize_int
+    ?meta
+    ()
+
+(** Register a bounded float parameter. *)
+let register_float ~key ~default ~min ~max ?meta () =
+  Runtime_params.register
+    ~key
+    ~default
+    ~validate:(validate_float_range ~min ~max key)
+    ~serialize:(fun v -> `Float v)
+    ~deserialize:deserialize_float
+    ?meta
+    ()
+
+(** Register an unconstrained boolean parameter. *)
+let register_bool ~key ~default ?meta () =
+  Runtime_params.register
+    ~key
+    ~default
+    ~validate:(fun _ -> Ok ())
+    ~serialize:(fun v -> `Bool v)
+    ~deserialize:deserialize_bool
+    ?meta
+    ()
+
+(* ── dashboard surface (display-only) ────────────────────────── *)
+
+(** Maximum path length before truncation in dashboard output. *)
+let dashboard_max_path_length =
+  register_int
+    ~key:"dashboard.max_path_length"
+    ~default:(fun () -> 30)
+    ~min:10 ~max:200
+    ~meta:{ description = "대시보드 경로 출력 최대 길이 (문자)";
+            value_type = "int";
+            min_value = Some (`Int 10); max_value = Some (`Int 200); choices = [] }
+    ()
+
+(** Maximum message body length before truncation. *)
+let dashboard_max_message_length =
+  register_int
+    ~key:"dashboard.max_message_length"
+    ~default:(fun () -> 35)
+    ~min:10 ~max:500
+    ~meta:{ description = "대시보드 메시지 출력 최대 길이 (문자)";
+            value_type = "int";
+            min_value = Some (`Int 10); max_value = Some (`Int 500); choices = [] }
+    ()
+
+(** Maximum number of pending tasks to show in dashboard. *)
+let dashboard_max_pending_tasks =
+  register_int
+    ~key:"dashboard.max_pending_tasks"
+    ~default:(fun () -> 5)
+    ~min:1 ~max:50
+    ~meta:{ description = "대시보드 pending task 표시 최대 개수";
+            value_type = "int";
+            min_value = Some (`Int 1); max_value = Some (`Int 50); choices = [] }
+    ()
+
+(** Maximum number of recent messages to show. *)
+let dashboard_max_recent_messages =
+  register_int
+    ~key:"dashboard.max_recent_messages"
+    ~default:(fun () -> 5)
+    ~min:1 ~max:50
+    ~meta:{ description = "대시보드 recent message 표시 최대 개수";
+            value_type = "int";
+            min_value = Some (`Int 1); max_value = Some (`Int 50); choices = [] }
+    ()
+
+(** Minimum section border length. *)
+let dashboard_min_border_length =
+  register_int
+    ~key:"dashboard.min_border_length"
+    ~default:(fun () -> 45)
+    ~min:20 ~max:200
+    ~meta:{ description = "대시보드 섹션 경계선 최소 길이";
+            value_type = "int";
+            min_value = Some (`Int 20); max_value = Some (`Int 200); choices = [] }
+    ()
+
+(** Threshold for surfacing a quiet-agent warning in dashboard labels. *)
+let dashboard_agent_quiet_threshold_sec =
+  register_float
+    ~key:"dashboard.agent_quiet_threshold_sec"
+    ~default:(fun () -> Env_config_runtime.InternalTimers.label_quiet_threshold_sec)
+    ~min:30.0 ~max:Masc_time_constants.day
+    ~meta:{
+      description = "대시보드 quiet 상태 임계값(초)";
+      value_type = "float";
+      min_value = Some (`Float 30.0);
+      max_value = Some (`Float Masc_time_constants.day); choices = [] }
+    ()
+
+(** Threshold for surfacing a stuck-agent warning in dashboard labels. *)
+let dashboard_agent_stuck_threshold_sec =
+  register_float
+    ~key:"dashboard.agent_stuck_threshold_sec"
+    ~default:(fun () -> Env_config_runtime.InternalTimers.label_stuck_threshold_sec)
+    ~min:60.0 ~max:(7.0 *. Masc_time_constants.day)
+    ~meta:{
+      description = "대시보드 STUCK 상태 임계값(초)";
+      value_type = "float";
+      min_value = Some (`Float 60.0);
+      max_value = Some (`Float (7.0 *. Masc_time_constants.day)); choices = [] }
+    ()
+
+(* ── cost_policy surface ──────────────────────────────────────── *)
+
+(* ── keeper_lifecycle surface ────────────────────────────────── *)
+
+let keeper_supervisor_sweep_sec =
+  register_float
+    ~key:"keeper.supervisor_sweep_sec"
+    ~default:Env_config_keeper.KeeperSupervisor.sweep_interval_sec
+    ~min:Env_config_keeper.KeeperSupervisor.sweep_interval_min_sec
+    ~max:Env_config_keeper.KeeperSupervisor.sweep_interval_max_sec
+    ~meta:{ description = "Supervisor sweep 주기(초)";
+            value_type = "float";
+            min_value = Some (`Float Env_config_keeper.KeeperSupervisor.sweep_interval_min_sec);
+            max_value = Some (`Float Env_config_keeper.KeeperSupervisor.sweep_interval_max_sec); choices = [] }
+    ()
+
+let keeper_keepalive_interval_sec =
+  Runtime_params.register
+    ~key:"keeper.keepalive_interval_sec"
+    ~default:Env_config_keeper.KeeperKeepalive.interval_sec
+    ~validate:(fun interval_sec ->
+      if interval_sec > 0
+      then Ok ()
+      else Error "keeper.keepalive_interval_sec must be a positive integer")
+    ~serialize:(fun interval_sec -> `Int interval_sec)
+    ~deserialize:deserialize_int
+    ~meta:
+      { description = "Heartbeat 주기(초)"
+      ; value_type = "int"
+      ; min_value = Some (`Int 1)
+      ; max_value = None
+      ; choices = []
+      }
+    ()
+
+(* ── keeper_diagnostics surface ───────────────────────────────── *)
+
+let keeper_snapshot_sec =
+  register_int
+    ~key:"keeper.snapshot_sec"
+    ~default:Env_config_keeper.KeeperRuntime.snapshot_sec
+    ~min:15 ~max:Masc_time_constants.hour_int
+    ~meta:{ description = "Snapshot 캡처 주기(초)";
+            value_type = "int";
+            min_value = Some (`Int 15);
+            max_value = Some (`Int Masc_time_constants.hour_int); choices = [] }
+    ()
+
+let keeper_work_as_hb_enabled =
+  register_bool
+    ~key:"keeper.work_as_hb_enabled"
+    ~default:Env_config_keeper.WorkAsHeartbeat.enabled
+    ~meta:{ description = "Work-as-heartbeat 활성화 여부";
+            value_type = "bool";
+            min_value = None; max_value = None; choices = [] }
+    ()
+
+(* Retention: how much of a keeper's past a store keeps. An operator reads the
+   disk it costs and the history it wants to be able to look at, and those pull
+   in opposite directions, so the value is theirs to set rather than a constant
+   a deploy carries.
+
+   The ceiling is twelve because one dashboard checkpoint request decodes every
+   retained entry beyond the newest, and one entry is 111 MB on a live keeper.
+   A wider window would let a setting change turn that request into gigabytes
+   of decoding on the CPU pool. *)
+let keeper_checkpoint_history_retained =
+  register_int
+    ~key:"keeper.checkpoint_history_retained"
+    ~default:(fun () -> 3)
+    ~min:0 ~max:12
+    ~meta:{ description =
+              "정본 옆에 남기는 지난 체크포인트 수. 하나가 통째로 한 벌이라 \
+               라이브 키퍼에서는 111MB 이고, 대시보드 목록은 가장 최근 것을 \
+               빼고 남은 것을 전부 디코드한다. 그래서 1 이면 목록은 늘 비어 \
+               보이고, 0 이면 아예 남기지 않는다";
+            value_type = "int";
+            min_value = Some (`Int 0); max_value = Some (`Int 12); choices = [] }
+    ()
+
+let keeper_stage_timing_ring_size =
+  register_int
+    ~key:"keeper.stage_timing_ring_size"
+    ~default:(fun () -> Env_config_keeper.KeeperProactive.stage_timing_ring_size)
+    ~min:10 ~max:1000
+    ~meta:{ description = "Stage timing ring buffer 크기 (fiber restart 시 적용)";
+            value_type = "int";
+            min_value = Some (`Int 10); max_value = Some (`Int 1000); choices = [] }
+    ()
+
+(* Whether identity scalars (a `user:` login in a GitHub hosts.yml) mined
+   from keeper secret files are masked as [REDACTED] in chat text and tool
+   output. Credential-shaped values are always masked
+   ([Keeper_secret_redaction.credential_shaped_key]); this switch only governs
+   the identity half.
+
+   Off by default: the scalar miner reads every `key: value` line of a secret
+   file, so with it on a GitHub account name -- public in every repo URL --
+   came back as [REDACTED] throughout chat prose (2026-08-29, keeper
+   edgar.a.poe), which is what the switch was added for. Operators who want
+   account names masked as well turn it on. *)
+let keeper_chat_redact_identity_scalars =
+  register_bool
+    ~key:"keeper.chat_redact_identity_scalars"
+    ~default:(fun () -> false)
+    ~meta:{ description = "secret 파일의 계정명(user 등) 값도 채팅·도구 출력에서 [REDACTED] 처리 (토큰류는 항상 처리)";
+            value_type = "bool";
+            min_value = None; max_value = None; choices = [] }
+    ()
+
+(* ── schedule retention surface ──────────────────────────────── *)
+
+(* How long a finished schedule stays in the ledger after the wake that ended
+   it. Every mutation rewrites the ledger whole, so this is what a tick's write
+   costs: a live ledger held 1,250 finished schedules against 22 live ones,
+   4.3 MB (2026-09-16). Keeping less writes less and looks back less far, and
+   which side matters is the operator's call, so the pass reads this rather
+   than a number the binary carried. *)
+let schedule_terminal_retention_days =
+  register_int
+    ~key:"schedule.terminal_retention_days"
+    ~default:(fun () -> Schedule_store.terminal_schedule_retention_days)
+    ~min:1 ~max:365
+    ~meta:{ description =
+              "끝난 스케줄을 원장에 며칠 더 두는지. 그동안 아무 것도 더 \
+               쓰이지 않으면 그 스케줄과 깨움 기록이 사라지고, 남긴 메모는 \
+               그대로 있는다. 한 번도 실행되지 않은 스케줄은 여기서 지워지지 \
+               않는다";
+            value_type = "int";
+            min_value = Some (`Int 1); max_value = Some (`Int 365); choices = [] }
+    ()
+
+(* ── task archive retention surface ──────────────────────────── *)
+
+(* How long a terminal task stays in the live backlog before the periodic
+   archive pass moves it to tasks-archive.json. [Workspace_gc.archive_terminal_tasks]
+   deliberately has no default retention policy — the caller owns the
+   horizon — so the default lives here at the composition root, next to the
+   schedule retention surface the same maintenance block already reads.
+   Aligned with MASC_JSONL_RETENTION_DAYS (30d). *)
+let task_archive_retention_days =
+  register_int
+    ~key:"task.archive_retention_days"
+    ~default:(fun () -> 30)
+    ~min:1 ~max:365
+    ~meta:{ description =
+              "끝난 작업을 라이브 백로그에 며칠 더 두는지. 그 기간이 지나면 \
+               유지보수 주기가 그 작업을 tasks-archive.json으로 옮기고, \
+               라이브 백로그에서는 사라진다. 삭제가 아니라 아카이브이며, \
+               끝나지 않은 작업은 이 기간과 무관하게 백로그에 남는다";
+            value_type = "int";
+            min_value = Some (`Int 1); max_value = Some (`Int 365); choices = [] }
+    ()
+
+(* ── surface catalog ─────────────────────────────────────────── *)
+
+type surface = {
+  id : string;
+  description : string;
+  param_keys : string list;
+}
+
+let keeper_build_cleanup_enabled =
+  register_bool ~key:"keeper_build_cleanup_enabled" ~default:(fun () -> true) ()
+
+let register_cleanup_duration ~key ~default =
+  Runtime_params.register ~key ~default
+    ~validate:(fun value ->
+      if Float.is_finite value && value > 0. then Ok ()
+      else Error (key ^ " must be finite and positive"))
+    ~serialize:(fun value -> `Float value) ~deserialize:deserialize_float ()
+
+let keeper_build_cleanup_interval_sec =
+  register_cleanup_duration ~key:"keeper_build_cleanup_interval_sec"
+    ~default:(fun () -> Masc_time_constants.hour)
+
+let keeper_build_cleanup_retention_sec =
+  register_cleanup_duration ~key:"keeper_build_cleanup_retention_sec"
+    ~default:(fun () -> Masc_time_constants.day)
+
+let surfaces =
+  [
+    {
+      id = "keeper_build_cleanup";
+      description = "Idle guest build artifact cleanup";
+      param_keys = [ "keeper_build_cleanup_enabled";
+        "keeper_build_cleanup_interval_sec"; "keeper_build_cleanup_retention_sec" ];
+    };
+    {
+      id = "keeper_lifecycle";
+      description = "Keeper heartbeat and supervisor timing";
+      param_keys = [
+        "keeper.supervisor_sweep_sec";
+        "keeper.keepalive_interval_sec";
+      ];
+    };
+    {
+      id = "keeper_retention";
+      description = "How much of a keeper's past each store keeps";
+      param_keys = [
+        "keeper.checkpoint_history_retained";
+      ];
+    };
+    {
+      id = "keeper_diagnostics";
+      description = "Keeper snapshot, heartbeat tuning, and profiling ring";
+      param_keys = [
+        "keeper.snapshot_sec";
+        "keeper.work_as_hb_enabled";
+        "keeper.stage_timing_ring_size";
+      ];
+    };
+    {
+      id = "keeper_chat_redaction";
+      description = "Keeper chat and tool-output secret masking";
+      param_keys = [
+        "keeper.chat_redact_identity_scalars";
+      ];
+    };
+    {
+      id = "keeper_turn";
+      description = "Keeper LLM turn parameters with verified runtime consumers";
+      param_keys = [
+        "keeper.turn.temperature";
+        "keeper.turn.batch_limit";
+        "keeper.turn.enable_thinking";
+        "keeper.tool_search.carry_window";
+      ];
+    };
+    {
+      id = "keeper_proactive";
+      description = "Keeper proactive turn scheduling and bootstrap timing";
+      param_keys = [
+        "keeper.proactive.warmup_sec";
+        "keeper.proactive.stagger_step_sec";
+        "keeper.bootstrap.retry_interval_sec";
+      ];
+    };
+    {
+      id = "keeper_world_observation";
+      description =
+        "What a keeper turn is told about the world — board posts, fleet \
+         messages, and its own past tool calls";
+      param_keys = [
+        "keeper.board.own_recent.max";
+        "keeper.fleet.messages.max";
+        "keeper.own_actions.turns.max";
+      ];
+    };
+    {
+      id = "keeper_hitl";
+      description =
+        "What the HITL judgment bundle carries and how many judgments a keeper \
+         runs at once";
+      param_keys = [
+        "keeper.hitl.thinking_blocks";
+        "keeper.hitl.observation_stderr_bytes";
+        "keeper.hitl.max_concurrent_per_keeper";
+        "keeper.hitl.tool_approval_timeout_sec";
+      ];
+    };
+    {
+      id = "connector_trigger";
+      description = "Which inbound messages start a turn, per connector";
+      param_keys = [
+        "discord.trigger_policy";
+        "slack.trigger_policy";
+      ];
+    };
+    {
+      id = "schedule_retention";
+      description = "How long a finished schedule stays in the ledger";
+      param_keys = [
+        "schedule.terminal_retention_days";
+      ];
+    };
+    {
+      id = "task_retention";
+      description =
+        "How long a finished task stays in the live backlog before the \
+         periodic archive pass moves it to the archive";
+      param_keys = [
+        "task.archive_retention_days";
+      ];
+    };
+    {
+      id = "dashboard";
+      description = "Dashboard rendering — truncation lengths, row limits, borders, status thresholds";
+      param_keys = [
+        "dashboard.max_path_length";
+        "dashboard.max_message_length";
+        "dashboard.max_pending_tasks";
+        "dashboard.max_recent_messages";
+        "dashboard.min_border_length";
+        "dashboard.agent_quiet_threshold_sec";
+        "dashboard.agent_stuck_threshold_sec";
+      ];
+    };
+  ]
+
+(* ── initialization ─────────────────────────────────────────── *)
+
+(** Force module initialization to guarantee all params are registered
+    before [Runtime_params.restore]. Call from server bootstrap. *)
+let ensure_init () =
+  let (_ : _) = Runtime_params.get dashboard_max_path_length in
+  let (_ : _) = Runtime_params.get dashboard_max_message_length in
+  let (_ : _) = Runtime_params.get dashboard_max_pending_tasks in
+  let (_ : _) = Runtime_params.get dashboard_max_recent_messages in
+  let (_ : _) = Runtime_params.get dashboard_min_border_length in
+  let (_ : _) = Runtime_params.get dashboard_agent_quiet_threshold_sec in
+  let (_ : _) = Runtime_params.get dashboard_agent_stuck_threshold_sec in
+  let (_ : _) = Runtime_params.get Connector_trigger_params.discord in
+  let (_ : _) = Runtime_params.get Connector_trigger_params.slack in
+  Keeper_config.ensure_runtime_params_init ()
+
+let surfaces_json () =
+  `List
+    (List.map
+       (fun s ->
+         `Assoc
+           [
+             ("id", `String s.id);
+             ("description", `String s.description);
+             ("param_keys", `List (List.map (fun k -> `String k) s.param_keys));
+           ])
+       surfaces)

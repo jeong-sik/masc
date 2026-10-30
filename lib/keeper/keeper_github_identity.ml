@@ -1,0 +1,1501 @@
+open Result.Syntax
+
+type auth_result =
+  { authenticated : bool
+  ; login : string option
+  ; scopes : string list option
+  ; error : string option
+  }
+
+type effective_probe_scope =
+  [ `Host_process_credential_only
+  | `Endpoint_process_only
+  ]
+
+type observation =
+  { keeper : string
+  ; hostname : string
+  ; config_dir : string
+  ; projected_token_env_names : string list
+  ; stored : auth_result
+  ; effective : auth_result
+  ; effective_probe_scope : effective_probe_scope
+  ; checked_at_unix : float
+  }
+
+(* The scopes a login may ask for beyond gh's own minimum ([repo], [read:org],
+   [gist]). Closed, so a scope reaches [gh] only once someone has named it
+   here: each one widens what a Keeper can do with the token. [Workflow] is
+   what GitHub asks for before a push that touches [.github/workflows]; a
+   workflow runs with the repository's secrets, so it is never on by default. *)
+type login_scope =
+  | Workflow
+  | Write_packages
+  | Read_packages
+  | Project
+  | Write_repo_hook
+[@@deriving enumerate]
+
+let login_scope_to_string = function
+  | Workflow -> "workflow"
+  | Write_packages -> "write:packages"
+  | Read_packages -> "read:packages"
+  | Project -> "project"
+  | Write_repo_hook -> "write:repo_hook"
+;;
+
+let login_scope_of_string s = List.find_opt (fun v -> String.equal (login_scope_to_string v) s) all_of_login_scope
+;;
+
+let all_login_scopes =
+  [ Workflow; Write_packages; Read_packages; Project; Write_repo_hook ]
+
+(* The login request carries its scopes as [?scopes=workflow,...], beside the
+   [hostname] it already takes as a query parameter. An empty or absent value
+   is no extra scope; a name this module does not offer is refused rather than
+   dropped, so a surface that asked for a scope never gets a token without it
+   and a note saying nothing. *)
+let login_scopes_of_query = function
+  | None -> Ok []
+  | Some raw ->
+    let names =
+      String.split_on_char ',' raw
+      |> List.map String.trim
+      |> List.filter (fun name -> not (String.equal name ""))
+    in
+    List.fold_left
+      (fun acc name ->
+        match acc, login_scope_of_string name with
+        | Error _, _ -> acc
+        | Ok scopes, Some scope -> Ok (scope :: scopes)
+        | Ok _, None ->
+          Error
+            (Printf.sprintf
+               "unknown GitHub login scope %S; offered: %s"
+               name
+               (String.concat ", " (List.map login_scope_to_string all_login_scopes))))
+      (Ok [])
+      names
+    |> Result.map List.rev
+;;
+
+type login_lane =
+  { run_login :
+      scopes:login_scope list
+      -> on_stdout_chunk:(string -> unit)
+      -> on_stderr_chunk:(string -> unit)
+      -> Unix.process_status * string * string
+  ; run_login_with_token :
+      token:string
+      -> Unix.process_status * string * string
+  ; secure_after_login : unit -> (unit, string) result
+  ; observe_after_login : unit -> (observation, string) result
+  }
+
+let config_dir_name = "github-cli"
+let default_hostname = "github.com"
+
+let config_dir ~config ~keeper_name =
+  Filename.concat
+    (Filename.concat (Workspace.keepers_runtime_dir config) keeper_name)
+    config_dir_name
+;;
+
+(* Base-path form of [config_dir] for callers that hold only [base_path] (the
+   chat store's redaction snapshot). [hosts.yml] is read where the login
+   wrote it through [config_dir]. *)
+let config_dir_of_base_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    config_dir_name
+;;
+
+let secret_files_of_base_path ~base_path ~keeper_name =
+  [ Filename.concat (config_dir_of_base_path ~base_path ~keeper_name) "hosts.yml" ]
+;;
+
+let container_config_dir ~container_masc_dir ~keeper_name =
+  Filename.concat
+    (Filename.concat (Filename.concat container_masc_dir "keepers") keeper_name)
+    config_dir_name
+;;
+
+let file_kind_to_string = function
+  | Unix.S_REG -> "regular file"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_CHR -> "character device"
+  | Unix.S_BLK -> "block device"
+  | Unix.S_LNK -> "symbolic link"
+  | Unix.S_FIFO -> "FIFO"
+  | Unix.S_SOCK -> "socket"
+;;
+
+let lstat_opt path =
+  try Ok (Some (Unix.lstat path)) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | Unix.Unix_error (error, operation, target) ->
+    Error
+      (Printf.sprintf
+         "cannot inspect GitHub CLI path %s: %s(%s): %s"
+         path
+         operation
+         target
+         (Unix.error_message error))
+;;
+
+let require_directory path =
+  match lstat_opt path with
+  | Error _ as error -> error
+  | Ok None -> Error (Printf.sprintf "required GitHub CLI parent is missing: %s" path)
+  | Ok (Some stats) when stats.Unix.st_kind = Unix.S_DIR -> Ok ()
+  | Ok (Some stats) ->
+    Error
+      (Printf.sprintf
+         "GitHub CLI path must be a directory, not a %s: %s"
+         (file_kind_to_string stats.Unix.st_kind)
+         path)
+;;
+
+let ensure_child_directory ~parent ~name ~private_mode =
+  match require_directory parent with
+  | Error _ as error -> error
+  | Ok () ->
+    let path = Filename.concat parent name in
+    (match lstat_opt path with
+     | Error _ as error -> error
+     | Ok None ->
+       (try Unix.mkdir path 0o700 with
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+        | Unix.Unix_error (error, operation, target) ->
+          raise (Unix.Unix_error (error, operation, target)));
+       (match require_directory path with
+        | Error _ as error -> error
+        | Ok () ->
+          if private_mode then Unix.chmod path 0o700;
+          Ok path)
+     | Ok (Some stats) when stats.Unix.st_kind = Unix.S_DIR ->
+       if private_mode then Unix.chmod path 0o700;
+       Ok path
+     | Ok (Some stats) ->
+       Error
+         (Printf.sprintf
+            "GitHub CLI path must be a directory, not a %s: %s"
+            (file_kind_to_string stats.Unix.st_kind)
+            path))
+;;
+
+let inspect_config_files_in ~on_regular config_path =
+  let rec inspect = function
+    | [] -> Ok ()
+    | filename :: rest ->
+      let path = Filename.concat config_path filename in
+      (match lstat_opt path with
+     | Error _ as error -> error
+     | Ok None -> inspect rest
+     | Ok (Some stats) when stats.Unix.st_kind = Unix.S_REG ->
+         (match on_regular path stats with
+          | Error _ as error -> error
+          | Ok () -> inspect rest)
+       | Ok (Some stats) ->
+         Error
+           (Printf.sprintf
+              "GitHub CLI credential must be a regular file, not a %s: %s"
+              (file_kind_to_string stats.Unix.st_kind)
+              path))
+  in
+  inspect [ "hosts.yml"; "config.yml" ]
+;;
+
+let secure_config_files_in config_path =
+  inspect_config_files_in
+    ~on_regular:(fun path _stats ->
+      Unix.chmod path 0o600;
+      Ok ())
+    config_path
+;;
+
+let validate_config_files_in config_path =
+  let expected_uid = Unix.getuid () in
+  let validate_regular path stats =
+    let mode = stats.Unix.st_perm land 0o777 in
+    if stats.Unix.st_uid <> expected_uid
+    then
+      Error
+        (Printf.sprintf
+           "GitHub CLI credential owner is unsafe: expected uid=%d actual uid=%d path=%s"
+           expected_uid
+           stats.Unix.st_uid
+           path)
+    else if mode <> 0o600
+    then
+      Error
+        (Printf.sprintf
+           "GitHub CLI credential mode is unsafe: expected 0600 actual %04o path=%s"
+           mode
+           path)
+    else Ok ()
+  in
+  inspect_config_files_in ~on_regular:validate_regular config_path
+;;
+
+let validate_existing_config_dir path =
+  let expected_uid = Unix.getuid () in
+  match lstat_opt path with
+  | Error _ as error -> error
+  | Ok None -> Error (Printf.sprintf "GitHub CLI config directory disappeared: %s" path)
+  | Ok (Some stats) when stats.Unix.st_kind <> Unix.S_DIR ->
+    Error
+      (Printf.sprintf
+         "GitHub CLI path must be a directory, not a %s: %s"
+         (file_kind_to_string stats.Unix.st_kind)
+         path)
+  | Ok (Some stats) ->
+    let mode = stats.Unix.st_perm land 0o777 in
+    if stats.Unix.st_uid <> expected_uid
+    then
+      Error
+        (Printf.sprintf
+           "GitHub CLI config directory owner is unsafe: expected uid=%d actual uid=%d path=%s"
+           expected_uid
+           stats.Unix.st_uid
+           path)
+    else if mode <> 0o700
+    then
+      Error
+        (Printf.sprintf
+           "GitHub CLI config directory mode is unsafe: expected 0700 actual %04o path=%s"
+           mode
+           path)
+    else validate_config_files_in path
+;;
+
+let ensure_config_dir ~config ~keeper_name =
+  if not (Keeper_config.validate_name keeper_name)
+  then Error (Printf.sprintf "invalid keeper name: %s" keeper_name)
+  else begin
+    let keepers_root = Workspace.keepers_runtime_dir config in
+    try
+      match require_directory keepers_root with
+      | Error _ as error -> error
+      | Ok () ->
+        (match
+           ensure_child_directory
+             ~parent:keepers_root
+             ~name:keeper_name
+             ~private_mode:false
+         with
+         | Error _ as error -> error
+         | Ok keeper_root ->
+           (match
+              ensure_child_directory
+                ~parent:keeper_root
+                ~name:"github-cli"
+                ~private_mode:true
+            with
+            | Error _ as error -> error
+            | Ok path ->
+              (match secure_config_files_in path with
+               | Error _ as error -> error
+               | Ok () -> Ok path)))
+    with
+    | Unix.Unix_error (error, operation, target) ->
+      Error
+        (Printf.sprintf
+           "cannot prepare GitHub CLI directory under %s: %s(%s): %s"
+           keepers_root
+           operation
+           target
+           (Unix.error_message error))
+  end
+;;
+
+let env_key entry =
+  match String.index_opt entry '=' with
+  | None -> entry
+  | Some index -> String.sub entry 0 index
+;;
+
+let remove_env_keys keys env =
+  Array.to_list env
+  |> List.filter (fun entry -> not (List.mem (env_key entry) keys))
+  |> Array.of_list
+;;
+
+let overlay_config_env ~config_dir env =
+  Array.append
+    [| "GH_CONFIG_DIR=" ^ config_dir |]
+    (remove_env_keys [ "GH_CONFIG_DIR" ] env)
+;;
+
+let projected_config_dir env =
+  let prefix = "GH_CONFIG_DIR=" in
+  Array.find_map
+    (fun entry ->
+       if String.starts_with ~prefix entry
+       then
+         Some
+           (String.sub
+              entry
+              (String.length prefix)
+              (String.length entry - String.length prefix))
+       else None)
+    env
+;;
+
+let strip_github_token_env env =
+  remove_env_keys Exec_ssh_protocol.github_token_env_names env
+;;
+
+let projected_token_env_names env =
+  List.filter
+    (fun name -> Array.exists (fun entry -> String.equal (env_key entry) name) env)
+    Exec_ssh_protocol.github_token_env_names
+;;
+
+type tool_identity_state =
+  | Unconfigured
+  | Configured of string
+
+type captured_identity_kind =
+  | Captured_unconfigured
+  | Captured_configured of { source_dir : string option }
+
+type captured_tool_identity =
+  { kind : captured_identity_kind
+  ; files : (string * string) list
+  ; payload : Fs_compat.directory_payload
+  ; revision : string
+  ; git_wiring : bool
+  }
+
+type docker_tool_projection =
+  { args : string list
+  ; environment : (string * string) list
+  ; identity_state : tool_identity_state
+  ; host_snapshot_dir : string
+  ; revision : string
+  ; cleanup : unit -> unit
+  }
+
+let unconfigured_tool_identity_revision =
+  Agent_core_sha256.(digest_string "masc.github-tool-identity.unconfigured.v1" |> to_hex)
+;;
+
+let yaml_scalar_has_value value =
+  let value = String.trim value in
+  not
+    (String.equal value ""
+     || String.equal value "''"
+     || String.equal value "\"\""
+     || String.equal value "null"
+     || String.equal value "~")
+;;
+
+(* [gh auth login --insecure-storage] writes a deterministic mapping whose
+   credential authority is an [oauth_token] scalar, either directly below a
+   host or below that host's [users] mapping.  Decode that closed shape instead
+   of treating arbitrary non-empty bytes (notably the post-logout [{}]) as an
+   identity.  Unsupported YAML constructs fail closed rather than being
+   guessed into configured state.
+
+   Returns the (host, token) pairs it decoded rather than a bare "yes". One
+   scanner answers both questions asked of this file -- whether an identity is
+   configured, and what the token for a given host is -- because a second
+   decoder of the same bytes is a second thing to keep in step. *)
+let hosts_yaml_stored_tokens content =
+  let lines = String.split_on_char '\n' content in
+  let meaningful =
+    List.filter_map
+      (fun raw_line ->
+         let line = String.trim raw_line in
+         if String.equal line "" || String.starts_with ~prefix:"#" line
+         then None
+         else Some raw_line)
+      lines
+  in
+  match meaningful with
+  | [] -> Ok []
+  | [ line ] when String.equal (String.trim line) "{}" -> Ok []
+  | _ ->
+    let rec scan active_host found = function
+      | [] -> Ok (List.rev found)
+      | raw_line :: rest ->
+        if String.contains raw_line '\t'
+        then Error "GitHub CLI hosts.yml must not contain tab indentation"
+        else
+          let indentation =
+            let rec count index =
+              if index < String.length raw_line && raw_line.[index] = ' '
+              then count (index + 1)
+              else index
+            in
+            count 0
+          in
+          let line = String.sub raw_line indentation (String.length raw_line - indentation) in
+          if String.equal line "" || String.starts_with ~prefix:"#" line
+          then scan active_host found rest
+          else
+            (match String.index_opt line ':' with
+             | None -> Error "GitHub CLI hosts.yml contains a non-mapping entry"
+             | Some separator ->
+               let key = String.sub line 0 separator |> String.trim in
+               let value =
+                 String.sub
+                   line
+                   (separator + 1)
+                   (String.length line - separator - 1)
+                 |> String.trim
+               in
+               if String.equal key ""
+               then Error "GitHub CLI hosts.yml contains an empty mapping key"
+               else if indentation = 0
+               then
+                 if not (String.equal value "")
+                 then Error "GitHub CLI host entry must be a mapping"
+                 else scan (Some key) found rest
+               else (
+                 match active_host with
+                 | None ->
+                   Error "GitHub CLI hosts.yml contains data outside a host mapping"
+                 | Some host ->
+                   if String.equal key "oauth_token" && yaml_scalar_has_value value
+                   then scan active_host ((host, value) :: found) rest
+                   else scan active_host found rest))
+    in
+    scan None [] meaningful
+;;
+
+let hosts_yaml_has_stored_token content =
+  Result.map (fun pairs -> pairs <> []) (hosts_yaml_stored_tokens content)
+;;
+
+let hosts_file_has_stored_token ~config_dir hosts_path =
+  match Fs_compat.load_owned_regular_file ~ownership_root:config_dir hosts_path with
+  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok None -> Ok false
+  | Ok (Some content) -> hosts_yaml_has_stored_token content
+;;
+
+(* The token this Keeper's gh CLI already holds for [hostname].
+
+   Read on demand rather than copied anywhere. gh owns hosts.yml and rewrites
+   it on every login and logout; a copy kept beside it would answer with a
+   credential the Keeper no longer has, and nothing in either file would say
+   which one was current. Absence is an error naming the fix rather than an
+   empty token, because a caller that got "" would send it and read GitHub's
+   401 as the provider being down. *)
+let stored_token ~config ~keeper_name ~hostname =
+  let config_dir = config_dir ~config ~keeper_name in
+  let hosts_path = Filename.concat config_dir "hosts.yml" in
+  match Fs_compat.load_owned_regular_file ~ownership_root:config_dir hosts_path with
+  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok None ->
+    Error
+      (Printf.sprintf
+         "keeper %S has no GitHub CLI identity; log it in from the GitHub tab first"
+         keeper_name)
+  | Ok (Some content) ->
+    (match hosts_yaml_stored_tokens content with
+     | Error _ as error -> error
+     | Ok pairs ->
+       (match List.assoc_opt hostname pairs with
+        | Some token -> Ok token
+        | None ->
+          Error
+            (Printf.sprintf
+               "keeper %S has a GitHub CLI identity but none for %s"
+               keeper_name
+               hostname)))
+;;
+
+let inspect_optional_directory path =
+  match lstat_opt path with
+  | Error _ as error -> error
+  | Ok None -> Ok false
+  | Ok (Some stats) when stats.Unix.st_kind = Unix.S_DIR -> Ok true
+  | Ok (Some stats) ->
+    Error
+      (Printf.sprintf
+         "GitHub CLI path must be a directory, not a %s: %s"
+         (file_kind_to_string stats.Unix.st_kind)
+         path)
+;;
+
+let existing_config_dir ~config ~keeper_name =
+  if not (Keeper_config.validate_name keeper_name)
+  then Error (Printf.sprintf "invalid keeper name: %s" keeper_name)
+  else begin
+    let keepers_root = Workspace.keepers_runtime_dir config in
+    let keeper_root = Filename.concat keepers_root keeper_name in
+    let keeper_config_dir = Filename.concat keeper_root "github-cli" in
+    match inspect_optional_directory keepers_root with
+    | Error _ as error -> error
+    | Ok false -> Ok None
+    | Ok true ->
+      (match inspect_optional_directory keeper_root with
+       | Error _ as error -> error
+       | Ok false -> Ok None
+       | Ok true ->
+         (match inspect_optional_directory keeper_config_dir with
+          | Error _ as error -> error
+          | Ok false -> Ok None
+          | Ok true ->
+            (match validate_existing_config_dir keeper_config_dir with
+             | Error _ as error -> error
+             | Ok () ->
+               let hosts_path = Filename.concat keeper_config_dir "hosts.yml" in
+               (match lstat_opt hosts_path with
+                | Error _ as error -> error
+                | Ok None -> Ok None
+                | Ok (Some stats) when stats.Unix.st_kind = Unix.S_REG ->
+                  (match
+                     hosts_file_has_stored_token
+                       ~config_dir:keeper_config_dir
+                       hosts_path
+                   with
+                   | Error _ as error -> error
+                   | Ok true -> Ok (Some keeper_config_dir)
+                   | Ok false -> Ok None)
+                | Ok (Some stats) ->
+                  Error
+                    (Printf.sprintf
+                       "GitHub CLI credential must be a regular file, not a %s: %s"
+                       (file_kind_to_string stats.Unix.st_kind)
+                       hosts_path)))))
+  end
+;;
+
+let load_optional_config_file config_dir filename =
+  let path = Filename.concat config_dir filename in
+  match Fs_compat.load_owned_regular_file ~ownership_root:config_dir path with
+  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok content -> Ok content
+;;
+
+let configured_revision_of_contents ~hosts ~config =
+  let material = Yojson.Safe.to_string
+      (`Assoc
+        [ "schema", `String "masc.github-tool-identity-revision.v1"
+        ; "hosts.yml", `String hosts
+        ; "config.yml", (match config with None -> `Null | Some value -> `String value)
+        ]) in
+  Agent_core_sha256.(digest_string material |> to_hex)
+;;
+
+let configured_tool_identity_revision config_dir =
+  match load_optional_config_file config_dir "hosts.yml" with
+  | Error _ as error -> error
+  | Ok None -> Error "configured GitHub CLI identity has no hosts.yml"
+  | Ok (Some hosts) ->
+    (match load_optional_config_file config_dir "config.yml" with
+     | Error _ as error -> error
+     | Ok config ->
+       Ok (configured_revision_of_contents ~hosts ~config))
+;;
+
+let current_tool_identity_revision ~config ~keeper_name =
+  match existing_config_dir ~config ~keeper_name with
+  | Error _ as error -> error
+  | Ok None -> Ok unconfigured_tool_identity_revision
+  | Ok (Some config_dir) -> configured_tool_identity_revision config_dir
+;;
+
+let snapshot_cleanup snapshot =
+  let descriptor = Unix.openfile snapshot [ Unix.O_RDONLY ] 0 in
+  Unix.set_close_on_exec descriptor;
+  let created = Unix.fstat descriptor in
+  let claimed = Atomic.make false in
+  let release () =
+    if Atomic.compare_and_set claimed false true
+    then
+      Fun.protect
+        ~finally:(fun () -> Unix.close descriptor)
+        (fun () ->
+           match lstat_opt snapshot with
+           | Ok None -> ()
+           | Ok (Some current)
+             when current.Unix.st_kind = Unix.S_DIR
+                  && current.Unix.st_dev = created.Unix.st_dev
+                  && current.Unix.st_ino = created.Unix.st_ino ->
+             (* Change permissions through the descriptor captured before the
+                child ran. A pathname chmod could follow a replacement
+                symlink between validation and cleanup. *)
+             Unix.fchmod descriptor 0o700;
+             Fs_compat.remove_tree snapshot
+           | Ok (Some _) | Error _ ->
+             (* The non-following tree remover unlinks a replacement entry
+                directly and never traverses a replacement symlink. *)
+             Fs_compat.remove_tree snapshot)
+  in
+  fun () ->
+    match Fs_compat.execution_context () with
+    | Fs_compat.Non_eio -> release ()
+    | Fs_compat.Eio_fiber -> Eio.Cancel.protect release
+;;
+
+let git_credential_config_file_name = "gitconfig"
+let git_config_global_env_name = "GIT_CONFIG_GLOBAL"
+
+let git_credential_config_path ~config_dir =
+  Filename.concat config_dir git_credential_config_file_name
+;;
+
+let git_credential_config_env ~has_git_wiring ~config_dir =
+  if has_git_wiring
+  then [ git_config_global_env_name, git_credential_config_path ~config_dir ]
+  else []
+;;
+
+let git_credential_docker_args ~has_git_wiring ~config_dir =
+  git_credential_config_env ~has_git_wiring ~config_dir
+  |> List.concat_map (fun (name, value) -> [ "--env"; name ^ "=" ^ value ])
+;;
+
+(* The hostnames this identity is logged into. hosts.yml is gh-owned and
+   stable in shape: a top-level key is a line that starts at column zero and
+   ends with ':'. Nothing else in the file has that shape. *)
+let hostnames_of_hosts_yml contents =
+  String.split_on_char '\n' contents
+  |> List.filter_map (fun line ->
+    let len = String.length line in
+    if len < 2 || line.[0] = ' ' || line.[0] = '\t' || line.[len - 1] <> ':'
+    then None
+    else (
+      let host = String.trim (String.sub line 0 (len - 1)) in
+      if String.equal host "" || String.contains host ' ' || String.contains host '"'
+      then None
+      else Some host))
+;;
+
+let git_credential_config_contents contents =
+  match hostnames_of_hosts_yml contents with
+  | [] -> None
+  | hosts ->
+    let hosts =
+      if List.exists (String.equal default_hostname) hosts
+         && not (List.exists (String.equal "gist.github.com") hosts)
+      then hosts @ [ "gist.github.com" ] else hosts in
+    Some (String.concat "" (List.map (fun host ->
+      Printf.sprintf
+        "[credential \"https://%s\"]\n\thelper = \n\thelper = !gh auth git-credential\n"
+        host) hosts))
+;;
+
+let make_captured_identity ~kind ~files ~revision ~git_wiring =
+  let payload_files = List.map (fun (leaf, content) ->
+    Fs_compat.{ leaf; content; permissions = 0o400 }) files in
+  match Fs_compat.directory_payload payload_files with
+  | Error error -> Error (Fs_compat.directory_payload_error_to_string error)
+  | Ok payload -> Ok { kind; files; payload; revision; git_wiring }
+;;
+
+let capture_identity_contents ~hosts ~config =
+  let unconfigured () = make_captured_identity ~kind:Captured_unconfigured
+    ~files:[] ~revision:unconfigured_tool_identity_revision ~git_wiring:false in
+  match hosts with
+  | None ->
+    (match config with
+     | None -> unconfigured ()
+     | Some _ -> Error "GitHub identity config.yml has no hosts.yml")
+  | Some hosts ->
+    (match hosts_yaml_has_stored_token hosts with
+     | Error _ as error -> error
+     | Ok false -> unconfigured ()
+     | Ok true ->
+       let gitconfig = git_credential_config_contents hosts in
+       let files = [ "hosts.yml", hosts ]
+         @ (match config with None -> [] | Some content -> [ "config.yml", content ])
+         @ (match gitconfig with None -> [] | Some content -> [ "gitconfig", content ]) in
+       make_captured_identity ~kind:(Captured_configured { source_dir = None }) ~files
+         ~revision:(configured_revision_of_contents ~hosts ~config)
+         ~git_wiring:(Option.is_some gitconfig))
+;;
+
+let capture_tool_identity ~config ~keeper_name =
+  let open Result.Syntax in
+  let* source = existing_config_dir ~config ~keeper_name in
+  match source with
+  | None -> capture_identity_contents ~hosts:None ~config:None
+  | Some source_dir ->
+    let* hosts = load_optional_config_file source_dir "hosts.yml" in
+    let* config = load_optional_config_file source_dir "config.yml" in
+    (match hosts with
+     | None -> Error "configured GitHub CLI identity has no hosts.yml"
+     | Some _ ->
+       let* captured = capture_identity_contents ~hosts ~config in
+       match captured.kind with
+       | Captured_unconfigured -> Ok captured
+       | Captured_configured _ ->
+         Ok { captured with kind = Captured_configured { source_dir = Some source_dir } })
+;;
+
+let captured_tool_identity_of_files files =
+  let open Result.Syntax in
+  let rec validate_names seen = function
+    | [] -> Ok ()
+    | (name, _) :: rest ->
+      if List.mem name seen then Error "GitHub identity snapshot has duplicate files"
+      else match name with
+        | "hosts.yml" | "config.yml" | "gitconfig" -> validate_names (name :: seen) rest
+        | _ -> Error "GitHub identity snapshot has an unknown file" in
+  let* () = validate_names [] files in
+  let* captured = capture_identity_contents
+    ~hosts:(List.assoc_opt "hosts.yml" files) ~config:(List.assoc_opt "config.yml" files) in
+  if List.sort compare files <> List.sort compare captured.files
+  then Error "GitHub identity snapshot differs from its canonical captured files"
+  else Ok captured
+;;
+
+let captured_revision (captured : captured_tool_identity) = captured.revision
+let captured_payload (captured : captured_tool_identity) = captured.payload
+
+let captured_environment (captured : captured_tool_identity) ~keeper_name ~container_config_dir =
+  Exec_ssh_protocol.keeper_git_author_env ~keeper_name
+  @ [ "GH_CONFIG_DIR", container_config_dir ]
+  @ git_credential_config_env ~has_git_wiring:captured.git_wiring ~config_dir:container_config_dir
+;;
+
+let local_snapshot_of_capture (captured : captured_tool_identity) =
+  let prefix = match captured.kind with
+    | Captured_unconfigured -> "masc-gh-tool-empty-"
+    | Captured_configured _ -> "masc-gh-tool-" in
+  let snapshot = Filename.temp_dir prefix "" in
+  Unix.chmod snapshot 0o700;
+  let cleanup = snapshot_cleanup snapshot in
+  let rec write = function
+    | [] -> Unix.chmod snapshot 0o500; Ok (snapshot, cleanup)
+    | (leaf, content) :: rest ->
+      let target = Filename.concat snapshot leaf in
+      match Fs_compat.save_file_atomic target content with
+      | Error _ as error -> error
+      | Ok () -> Unix.chmod target 0o400; write rest in
+  let cleanup_then_raise exn backtrace =
+    (try cleanup () with cleanup_exn ->
+       Format.eprintf "GitHub identity snapshot cleanup also failed: %s@."
+         (Printexc.to_string cleanup_exn));
+    Printexc.raise_with_backtrace exn backtrace in
+  match write captured.files with
+  | Ok _ as result -> result
+  | Error error ->
+    (match cleanup () with
+     | () -> Error error
+     | exception (Eio.Cancel.Cancelled _ as exn) ->
+       Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+     | exception cleanup_exn ->
+       Error (error ^ "; snapshot cleanup also failed: " ^ Printexc.to_string cleanup_exn))
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+    cleanup_then_raise exn (Printexc.get_raw_backtrace ())
+  | exception exn -> cleanup_then_raise exn (Printexc.get_raw_backtrace ())
+;;
+
+let has_git_credential_wiring ~config ~keeper_name =
+  match existing_config_dir ~config ~keeper_name with
+  | Error _ | Ok None -> false
+  | Ok (Some host_dir) ->
+    (match
+       Fs_compat.load_owned_regular_file
+         ~ownership_root:host_dir
+         (Filename.concat host_dir "hosts.yml")
+     with
+     | Error _ | Ok None -> false
+     | Ok (Some contents) -> hostnames_of_hosts_yml contents <> [])
+;;
+
+let microvm_git_credential_env ~config ~keeper_name ~container_config_dir =
+  git_credential_config_env
+    ~has_git_wiring:(has_git_credential_wiring ~config ~keeper_name)
+    ~config_dir:container_config_dir
+;;
+
+(* git never consults gh's hosts.yml on its own: an https push without a
+   credential helper prompts for a username, and a sandbox has no terminal
+   to answer, so a projected token sits unused ("could not read Username",
+   measured on a replayed push with a valid token — task-847). The identity
+   snapshot therefore carries the same wiring [gh auth setup-git] writes,
+   derived from the hosts this identity actually holds, and only when it
+   holds any. The file is derived state, deliberately outside the identity
+   revision digest: the digest answers "did the login change", and this file
+   is a pure function of it.
+
+   [dir_mode_after] is the directory mode restored after the write: a locked
+   0500 for turn snapshots, 0700 for the stable config directory
+   ([validate_existing_config_dir] rejects anything else). *)
+let write_git_credential_config ~dir_mode_after ~snapshot =
+  match
+    Fs_compat.load_owned_regular_file
+      ~ownership_root:snapshot
+      (Filename.concat snapshot "hosts.yml")
+  with
+  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok None -> Ok false
+  | Ok (Some contents) ->
+    (match git_credential_config_contents contents with
+     | None -> Ok false
+     | Some content ->
+       let target = Filename.concat snapshot git_credential_config_file_name in
+       Unix.chmod snapshot 0o700;
+       let result =
+         match Fs_compat.save_file_atomic target content with
+         | Error _ as error -> error
+         | Ok () ->
+           Unix.chmod target 0o400;
+           Ok true
+       in
+       Unix.chmod snapshot dir_mode_after;
+       result)
+;;
+
+(* The commit names are not part of the GitHub login: every container a
+   Keeper's commands run in gets them, logged in or not. *)
+let git_author_docker_args ~keeper_name =
+  Exec_ssh_protocol.keeper_git_author_env ~keeper_name
+  |> List.concat_map (fun (name, value) -> [ "--env"; name ^ "=" ^ value ])
+;;
+
+(* Keeper-lifetime containers cannot mount a per-turn snapshot: turn cleanup
+   deletes the snapshot directory while the container keeps running, and the
+   bind mount would read a vanished path. They mount the stable config
+   directory itself — read-only, so in-container writes stay impossible, but
+   a host login reaches a running container through the mount. The git wiring
+   is the same pure function of hosts.yml the snapshot lane writes; the
+   stable dir's validator inspects only hosts.yml and config.yml, so the
+   added gitconfig does not break it. GIT_CONFIG_GLOBAL always points at
+   that file: a missing file reads as an empty config to git, so the env
+   stays correct across identity changes without recreating the container.
+
+   An unconfigured keeper (no stable dir yet) gets no identity args at all
+   rather than a provisioned empty one: starting a container must not create
+   directories, and a gh with no GH_CONFIG_DIR is unconfigured either way.
+   The cost is explicit — a container created before the first login stays
+   without the mount until the keeper's teardown recreates it. *)
+let docker_args_persistent ~config ~keeper_name ~container_masc_dir =
+  let author_args = git_author_docker_args ~keeper_name in
+  match existing_config_dir ~config ~keeper_name with
+  | Error _ as error -> error
+  | Ok None -> Ok author_args
+  | Ok (Some host_dir) ->
+    (match write_git_credential_config ~dir_mode_after:0o700 ~snapshot:host_dir with
+     | Error _ as error -> error
+     | Ok _has_git_wiring ->
+       let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
+       Ok
+         (author_args
+          @ [ "--env"
+            ; "GH_CONFIG_DIR=" ^ container_dir
+            ; "-v"
+            ; host_dir ^ ":" ^ container_dir ^ ":ro"
+            ; "--env"
+            ; git_config_global_env_name
+              ^ "="
+              ^ git_credential_config_path ~config_dir:container_dir
+            ]))
+;;
+
+(* Refresh of the derived gitconfig for the persistent mount, called when a
+   container is adopted: hosts written by logins that happened while no turn
+   was watching get their credential wiring without a container restart. *)
+let refresh_git_credential_config ~config ~keeper_name =
+  match existing_config_dir ~config ~keeper_name with
+  | Error _ as error -> error
+  | Ok None -> Ok false
+  | Ok Some dir -> write_git_credential_config ~dir_mode_after:0o700 ~snapshot:dir
+;;
+
+let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
+  let open Result.Syntax in
+  let* captured = capture_tool_identity ~config ~keeper_name in
+  let* identity_state = match captured.kind with
+    | Captured_unconfigured -> Ok Unconfigured
+    | Captured_configured { source_dir = Some source_dir } -> Ok (Configured source_dir)
+    | Captured_configured { source_dir = None } -> Error "captured tool identity has no source directory" in
+  let* snapshot, cleanup = local_snapshot_of_capture captured in
+  let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
+  let author_env = Exec_ssh_protocol.keeper_git_author_env ~keeper_name in
+  let environment = captured_environment captured ~keeper_name ~container_config_dir:container_dir in
+  let args =
+    (author_env @ [ "GH_CONFIG_DIR", container_dir ]
+     |> List.concat_map (fun (key, value) -> [ "--env"; key ^ "=" ^ value ]))
+    @ [ "-v"; snapshot ^ ":" ^ container_dir ^ ":ro" ]
+    @ git_credential_docker_args ~has_git_wiring:captured.git_wiring ~config_dir:container_dir in
+  Ok { args; environment; identity_state; host_snapshot_dir = snapshot;
+       revision = captured.revision; cleanup }
+;;
+
+let login_timeout_sec = 600.0
+
+let login_argv ~hostname ~scopes =
+  let scope_args =
+    match List.filter (fun scope -> List.mem scope scopes) all_login_scopes with
+    | [] -> []
+    | scopes ->
+      [ "--scopes"; String.concat "," (List.map login_scope_to_string scopes) ]
+  in
+  [ "gh"
+  ; "auth"
+  ; "login"
+  ; "--hostname"
+  ; hostname
+  ; "--git-protocol"
+  ; "https"
+  ; "--skip-ssh-key"
+  ; "--web"
+  ; "--insecure-storage"
+  ]
+  @ scope_args
+;;
+
+let login_with_token_argv ~hostname =
+  [ "gh"
+  ; "auth"
+  ; "login"
+  ; "--hostname"
+  ; hostname
+  ; "--git-protocol"
+  ; "https"
+  ; "--insecure-storage"
+  ; "--with-token"
+  ]
+;;
+
+let logout_argv ~hostname = [ "gh"; "auth"; "logout"; "--hostname"; hostname ]
+
+let projected_base_env ~base_path ~keeper_name =
+  match
+    Keeper_secret_projection.local_env_for_keeper
+      ~host_env:(Unix.environment ())
+      ~base_path
+      ~keeper_name
+      ()
+  with
+  | Error _ as error -> error
+  | Ok None ->
+    Error
+      "keeper secret projection returned no environment; refusing host-environment fallback"
+  | Ok (Some env) -> Ok env
+;;
+
+let host_process_env_names =
+  [ "PATH"
+  ; "HOME"
+  ; "TMPDIR"
+  ; "LANG"
+  ; "LC_ALL"
+  ; "LC_CTYPE"
+  ; "SSL_CERT_FILE"
+  ; "SSL_CERT_DIR"
+  ; "HTTP_PROXY"
+  ; "HTTPS_PROXY"
+  ; "NO_PROXY"
+  ; "http_proxy"
+  ; "https_proxy"
+  ; "no_proxy"
+  ]
+;;
+
+let entries_for_names names env =
+  Array.to_list env
+  |> List.filter (fun entry -> List.mem (env_key entry) names)
+  |> Array.of_list
+;;
+
+let minimal_host_process_env () =
+  Unix.environment ()
+  |> remove_env_keys ("GH_CONFIG_DIR" :: Exec_ssh_protocol.github_token_env_names)
+  |> entries_for_names host_process_env_names
+;;
+
+let github_probe_env projected_env =
+  Array.append
+    (entries_for_names Exec_ssh_protocol.github_token_env_names projected_env)
+    (minimal_host_process_env ())
+;;
+
+let login_env ~config ~keeper_name =
+  match ensure_config_dir ~config ~keeper_name with
+  | Error _ as error -> error
+  | Ok keeper_config_dir ->
+    Ok (overlay_config_env ~config_dir:keeper_config_dir (minimal_host_process_env ()))
+;;
+
+let process_exit_text = function
+  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped by signal %d" signal
+;;
+
+let run_capture ~env = function
+  | [] -> Unix.WEXITED 127, "", "GitHub CLI argv must not be empty"
+  | argv ->
+    Process_eio.run_argv_with_status_split
+      ~timeout_sec:15.0
+      ~env
+      argv
+;;
+
+(* [--include] puts the response's status line and headers before the body,
+   and GitHub names an OAuth token's scopes in [X-OAuth-Scopes]. One request
+   answers both who the token is and what it may do. *)
+let auth_probe_argv ~hostname =
+  [ "gh"; "api"; "--hostname"; hostname; "--include"; "user"; "--jq"; ".login" ]
+;;
+
+let scopes_header = "x-oauth-scopes:"
+
+(* The probe's stdout: a status line and headers, a blank line, then the
+   login [--jq] selected. The scopes are [None] when the header is absent,
+   which is what a fine-grained PAT or an App token answers: they carry
+   permissions GitHub does not list here, so no list is invented for them. *)
+let split_probe_output stdout =
+  let lines =
+    String.split_on_char '\n' stdout
+    |> List.map (fun line ->
+      let n = String.length line in
+      if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line)
+  in
+  match lines with
+  | first :: _ when String.starts_with ~prefix:"HTTP/" first ->
+    let rec headers acc = function
+      | [] -> List.rev acc, []
+      | "" :: body -> List.rev acc, body
+      | line :: rest -> headers (line :: acc) rest
+    in
+    let header_lines, body = headers [] lines in
+    let scopes =
+      List.find_map
+        (fun line ->
+          let lower = String.lowercase_ascii line in
+          if String.starts_with ~prefix:scopes_header lower
+          then (
+            let value =
+              String.sub line (String.length scopes_header)
+                (String.length line - String.length scopes_header)
+            in
+            Some
+              (String.split_on_char ',' value
+               |> List.map String.trim
+               |> List.filter (fun scope -> not (String.equal scope ""))))
+          else None)
+        header_lines
+    in
+    String.trim (String.concat "\n" body), scopes
+  | _ -> String.trim stdout, None
+;;
+
+let auth_result_of_run ~redact (status, stdout, stderr) =
+  let login, scopes = split_probe_output stdout in
+  match status with
+  | Unix.WEXITED 0 when not (String.equal login "") ->
+    { authenticated = true; login = Some login; scopes; error = None }
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+    let detail = String.trim (redact stderr) in
+    let detail = if String.equal detail "" then process_exit_text status else detail in
+    { authenticated = false; login = None; scopes = None; error = Some detail }
+;;
+
+let auth_result_of_command ~redact ~env ~hostname =
+  auth_result_of_run ~redact (run_capture ~env (auth_probe_argv ~hostname))
+;;
+
+(* A lane that runs the probe on another machine still reads its outcome by
+   this rule; the redaction snapshot is the Keeper's, wherever the process
+   ran. *)
+let auth_result_of_probe ~base_path ~keeper_name run =
+  let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+  auth_result_of_run ~redact:(Keeper_secret_redaction.redact_text redaction) run
+;;
+
+let observe ~config ~keeper_name ~hostname =
+  let base_path = config.Workspace.base_path in
+  let hostname = String.trim hostname in
+  if String.equal hostname "" then Error "GitHub hostname must not be empty"
+  else
+    match projected_base_env ~base_path ~keeper_name with
+    | Error _ as error -> error
+    | Ok base_env ->
+      let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let redact = Keeper_secret_redaction.redact_text redaction in
+      let token_env_names = projected_token_env_names base_env in
+      (match existing_config_dir ~config ~keeper_name with
+       | Error _ as error -> error
+       | Ok existing ->
+         let unconfigured =
+           { authenticated = false
+           ; login = None
+           ; scopes = None
+           ; error = Some "Keeper GitHub CLI identity is not configured"
+           }
+         in
+         let host_env = minimal_host_process_env () in
+         let effective_host_env = github_probe_env base_env in
+         let probe_with_ephemeral_config env =
+           let probe_dir = Filename.temp_dir "masc-gh-observe-" "" in
+           Unix.chmod probe_dir 0o700;
+           Fun.protect
+             ~finally:(fun () -> Fs_compat.remove_tree probe_dir)
+             (fun () ->
+                auth_result_of_command
+                  ~redact
+                  ~env:(overlay_config_env ~config_dir:probe_dir env)
+                  ~hostname)
+         in
+         let stored, effective =
+           match existing with
+           | Some path ->
+             let stored_env = overlay_config_env ~config_dir:path host_env in
+             let effective_env = overlay_config_env ~config_dir:path effective_host_env in
+             ( auth_result_of_command
+                 ~redact
+                 ~env:stored_env
+                 ~hostname
+             , auth_result_of_command ~redact ~env:effective_env ~hostname )
+           | None ->
+             let effective =
+               match token_env_names with
+               | [] -> unconfigured
+               | _ :: _ -> probe_with_ephemeral_config effective_host_env
+             in
+             unconfigured, effective
+         in
+         Ok
+           { keeper = keeper_name
+           ; hostname
+           ; config_dir = config_dir ~config ~keeper_name
+           ; projected_token_env_names = token_env_names
+           ; stored
+           ; effective
+           ; effective_probe_scope = `Host_process_credential_only
+           ; checked_at_unix = Time_compat.now ()
+           })
+;;
+
+let auth_result_to_yojson result =
+  `Assoc
+    [ "authenticated", `Bool result.authenticated
+    ; "login", (match result.login with Some value -> `String value | None -> `Null)
+    ; ( "scopes"
+      , match result.scopes with
+        | Some scopes -> `List (List.map (fun scope -> `String scope) scopes)
+        | None -> `Null )
+    ; "error", (match result.error with Some value -> `String value | None -> `Null)
+    ]
+;;
+
+let observation_to_yojson (observation : observation) =
+  `Assoc
+    [ "ok", `Bool true
+    ; "keeper", `String observation.keeper
+    ; "hostname", `String observation.hostname
+    ; "config_dir", `String observation.config_dir
+    ; ( "projected_token_env_names"
+      , `List (List.map (fun value -> `String value) observation.projected_token_env_names) )
+    ; "stored", auth_result_to_yojson observation.stored
+    ; "effective", auth_result_to_yojson observation.effective
+    ; ( "effective_probe_scope"
+      , `String
+          (match observation.effective_probe_scope with
+           | `Host_process_credential_only -> "host_process_credential_only"
+           | `Endpoint_process_only -> "endpoint_process_only") )
+    ; "checked_at_unix", `Float observation.checked_at_unix
+    ]
+;;
+
+let secure_config_files ~config ~keeper_name =
+  let root = config_dir ~config ~keeper_name in
+  try
+    match require_directory root with
+    | Error _ as error -> error
+    | Ok () ->
+      Unix.chmod root 0o700;
+      secure_config_files_in root
+  with
+  | Unix.Unix_error (error, operation, target) ->
+    Error
+      (Printf.sprintf
+         "cannot secure GitHub CLI path %s: %s(%s): %s"
+         root
+         operation
+         target
+         (Unix.error_message error))
+;;
+
+let local_lane ~config ~keeper_name ~hostname =
+  match login_env ~config ~keeper_name with
+  | Error _ as error -> error
+  | Ok env ->
+    let lane : login_lane =
+      { run_login =
+          (fun ~scopes ~on_stdout_chunk ~on_stderr_chunk ->
+            Process_eio.run_argv_with_status_split_streaming
+              ~timeout_sec:login_timeout_sec
+              ~env
+              ~on_stdout_chunk
+              ~on_stderr_chunk
+              (login_argv ~hostname ~scopes))
+      ; run_login_with_token =
+          (fun ~token ->
+            Process_eio.run_argv_with_stdin_and_status_split
+              ~timeout_sec:30.0
+              ~env
+              ~stdin_content:token
+              (login_with_token_argv ~hostname))
+      ; secure_after_login = (fun () -> secure_config_files ~config ~keeper_name)
+      ; observe_after_login = (fun () -> observe ~config ~keeper_name ~hostname)
+      }
+    in
+    Ok lane
+;;
+
+let stream_login ~config ~keeper_name ~scopes ~make_lane ~is_closed ~send_event =
+  let base_path = config.Workspace.base_path in
+  let send event json =
+    if is_closed ()
+    then raise (Eio.Cancel.Cancelled (Failure "GitHub login response closed"))
+    else
+      try send_event event json with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> raise (Eio.Cancel.Cancelled exn)
+  in
+  match Eio_context.get_clock_opt () with
+  | None -> Error "GitHub login streaming requires the server Eio clock"
+  | Some clock ->
+    let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+    let stdout_redaction = Keeper_secret_redaction.create_stream_state redaction in
+    let stderr_redaction = Keeper_secret_redaction.create_stream_state redaction in
+    let send_redacted_output stream state chunk =
+      let text = Keeper_secret_redaction.redact_stream_chunk state chunk in
+      if not (String.equal text "")
+      then send "output" (`Assoc [ "stream", `String stream; "text", `String text ])
+    in
+    let finish_redacted_output stream state =
+      let text = Keeper_secret_redaction.redact_stream_finish state in
+      if not (String.equal text "")
+      then send "output" (`Assoc [ "stream", `String stream; "text", `String text ])
+    in
+    let run_process (lane : login_lane) =
+      let finished = Atomic.make false in
+      let process_result = ref None in
+      Eio.Cancel.sub (fun cancellation ->
+        Eio.Fiber.both
+          (fun () ->
+             Fun.protect
+               ~finally:(fun () -> Atomic.set finished true)
+               (fun () ->
+                  process_result :=
+                    Some
+                      (lane.run_login
+                         ~scopes
+                         ~on_stdout_chunk:
+                           (send_redacted_output "stdout" stdout_redaction)
+                         ~on_stderr_chunk:
+                           (send_redacted_output "stderr" stderr_redaction))))
+          (fun () ->
+             while (not (Atomic.get finished)) && not (is_closed ()) do
+               Eio.Time.sleep clock 0.1
+             done;
+             if is_closed ()
+             then
+               Eio.Cancel.cancel
+                 cancellation
+                 (Failure "GitHub login response closed")));
+      match !process_result with
+      | Some result -> result
+      | None -> failwith "GitHub login process completed without a result"
+    in
+    (try
+       (* The lane is shaped here rather than by the caller so that a lane which
+          has to reach another machine does it after the response headers are
+          out. Built before them, a slow or unreachable endpoint left the
+          operator's browser with no reply at all for as long as the shaping
+          steps took, and a failure to shape one is reported as the same [error]
+          event every other failure uses. *)
+       match make_lane () with
+       | Error message ->
+         send "error" (`Assoc [ "message", `String message ]);
+         Ok ()
+       | Ok (lane : login_lane) ->
+         let status, _, stderr = run_process lane in
+         finish_redacted_output "stdout" stdout_redaction;
+         finish_redacted_output "stderr" stderr_redaction;
+         let stderr = Keeper_secret_redaction.redact_text redaction stderr in
+         (match status with
+          | Unix.WEXITED 0 ->
+            (match lane.secure_after_login () with
+             | Error message -> send "error" (`Assoc [ "message", `String message ])
+             | Ok () ->
+               (match lane.observe_after_login () with
+                | Ok observation ->
+                  send
+                    "complete"
+                    (`Assoc [ "observation", observation_to_yojson observation ])
+                | Error message ->
+                  send "error" (`Assoc [ "message", `String message ])))
+          | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as failed ->
+            let detail = String.trim stderr in
+            let detail =
+              if String.equal detail "" then process_exit_text failed else detail
+            in
+            send "error" (`Assoc [ "message", `String detail ]));
+         Ok ()
+     with
+     | Eio.Cancel.Cancelled _ when is_closed () -> Ok ()
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Printexc.to_string exn))
+;;
+
+let print_observation_result = function
+  | Error message ->
+    prerr_endline message;
+    false
+  | Ok observation ->
+    observation_to_yojson observation |> Yojson.Safe.pretty_to_string |> print_endline;
+    true
+;;
+
+let print_observation ~config ~keeper_name ~hostname =
+  print_observation_result (observe ~config ~keeper_name ~hostname)
+;;
+
+let run_inherited ~timeout_sec ~env = function
+  | [] -> Unix.WEXITED 127
+  | command :: _ as argv ->
+    (try
+       let process =
+         Unix.create_process_env
+           command
+           (Array.of_list argv)
+           env
+           Unix.stdin
+           Unix.stdout
+           Unix.stderr
+       in
+       (* NDT-OK: wall-clock deadline bounds the subprocess; on expiry the
+          child is SIGKILLed and reaped, so non-determinism stays at the process boundary. *)
+       let started_at = Unix.gettimeofday () in
+       let deadline = started_at +. timeout_sec in
+       let rec wait () =
+         try
+           match Unix.waitpid [ Unix.WNOHANG ] process with
+           | 0, _ ->
+             (* NDT-OK: wall-clock deadline; on expiry the child is SIGKILLed
+                and reaped, keeping non-determinism at the process boundary. *)
+             if Unix.gettimeofday () >= deadline then begin
+               (try Unix.kill process Sys.sigkill with Unix.Unix_error _ -> ());
+               let rec reap () =
+                 try snd (Unix.waitpid [] process) with
+                 | Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+               in
+               (* fire-and-forget: reap the SIGKILLed child to avoid a zombie *)
+               ignore (reap ());
+               Unix.WEXITED 124
+             end else begin
+               (* fire-and-forget: poll sleep; EINTR is handled by the outer wait loop *)
+               ignore (Unix.select [] [] [] 0.05);
+               wait ()
+             end
+           | _, status -> status
+         with
+         | Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+       in
+       wait ()
+     with
+     | Unix.Unix_error (error, operation, target) ->
+       prerr_endline
+         (Printf.sprintf
+            "cannot run GitHub CLI: %s(%s): %s"
+            operation
+            target
+            (Unix.error_message error));
+       Unix.WEXITED 127)
+;;
+
+(* Inherited stdio would hand [gh] a terminal, and with one it renders an
+   interactive survey prompt instead of writing the one-time code as a plain
+   line. The lane streams both of the child's streams to this terminal instead.
+   Measured 2026-09-03 against [login_argv] with no terminal attached: [gh]
+   writes nothing to stdout and puts the one-time code and the verification URL
+   on stderr, so the stderr callback is the one an operator reads. *)
+let run_cli_login ~(lane : login_lane) ~scopes =
+  let status, _stdout, _stderr =
+    lane.run_login
+      ~scopes
+      ~on_stdout_chunk:(fun chunk ->
+        print_string chunk;
+        flush stdout)
+      ~on_stderr_chunk:(fun chunk ->
+        prerr_string chunk;
+        flush stderr)
+  in
+  let secured =
+    match status with
+    | Unix.WEXITED 0 ->
+      (match lane.secure_after_login () with
+       | Ok () -> true
+       | Error message ->
+         prerr_endline message;
+         false)
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+      (* The captured stderr is not repeated here: [on_stderr_chunk] already put
+         every byte of it on this terminal as it arrived. *)
+      prerr_endline ("gh auth login failed: " ^ process_exit_text status);
+      false
+  in
+  let observed =
+    match lane.observe_after_login () with
+    | Error message ->
+      prerr_endline message;
+      false
+    | Ok observation ->
+      observation_to_yojson observation |> Yojson.Safe.pretty_to_string |> print_endline;
+      true
+  in
+  if secured && observed then 0 else 1
+;;
+
+let set_token ~(lane : login_lane) ~base_path ~keeper_name ~token =
+  let token = String.trim token in
+  if String.equal token "" then Error "token must not be empty"
+  else
+    let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+    let redact text = Keeper_secret_redaction.redact_text redaction text in
+    let status, _stdout, stderr = lane.run_login_with_token ~token in
+    match status with
+    | Unix.WEXITED 0 ->
+      let* () = lane.secure_after_login () in
+      lane.observe_after_login ()
+    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+      let detail = String.trim (redact stderr) in
+      let msg = if String.equal detail "" then process_exit_text status else detail in
+      Error ("gh auth login --with-token failed: " ^ msg)
+;;
+
+let run_cli_set_token ~(lane : login_lane) ~base_path ~keeper_name ~token =
+  match set_token ~lane ~base_path ~keeper_name ~token with
+  | Error message ->
+    prerr_endline message;
+    1
+  | Ok observation ->
+    observation_to_yojson observation |> Yojson.Safe.pretty_to_string |> print_endline;
+    0
+;;
+
+let run_cli_status ~observe =
+  if print_observation_result (observe ()) then 0 else 1
+;;
+
+let run_cli_logout ~config ~keeper_name ~hostname =
+  match login_env ~config ~keeper_name with
+  | Error message ->
+    prerr_endline message;
+    1
+  | Ok env ->
+    let status = run_inherited ~timeout_sec:600.0 ~env (logout_argv ~hostname) in
+    let logged_out =
+      match status with
+      | Unix.WEXITED 0 -> true
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+        prerr_endline ("gh auth logout failed: " ^ process_exit_text status);
+        false
+    in
+    let observed = print_observation ~config ~keeper_name ~hostname in
+    if logged_out && observed then 0 else 1
+;;

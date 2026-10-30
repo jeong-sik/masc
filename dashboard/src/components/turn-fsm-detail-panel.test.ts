@@ -1,0 +1,147 @@
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { render } from "preact"
+import { html } from "htm/preact"
+import {
+  terminalTone,
+  TurnFsmDetailPanel,
+  turnFsmChipTone,
+} from "./turn-fsm-detail-panel"
+import type { KeeperCompositeSnapshot } from "../api/keeper"
+
+vi.mock("./common/cytoscape-fsm", () => ({
+  CytoscapeFsm: () => html`<div data-testid="fsm-graph"></div>`,
+}))
+
+function keeperCompositeSnapshot(
+  overrides: Partial<KeeperCompositeSnapshot> = {},
+): KeeperCompositeSnapshot {
+  const base: KeeperCompositeSnapshot = {
+    correlation_id: "keeper-1:run-1",
+    run_id: "run-1",
+    ts: 0,
+    phase: "Running",
+    turn_phase: "idle",
+    decision: { stage: "undecided" },
+    runtime: { state: "idle" },
+    measurement: { captured: false },
+    invariants: {
+      event_priority_monotone: true,
+      phase_derivation_agreement: true,
+    },
+    fsm_guard_violations: 0,
+    fsm_guard_violation_breakdown: [],
+    is_live: false,
+    last_outcome: null,
+    runtime_attention: {
+      state: "ok",
+      needs_attention: false,
+      blocked: false,
+      fiber_stop_requested: false,
+      reason: null,
+      raw_phase: "Running",
+      is_live: false,
+      source: "composite_snapshot",
+    },
+    recommended_actions: [],
+  }
+
+  return {
+    ...base,
+    ...overrides,
+    decision: { ...base.decision, ...(overrides.decision ?? {}) },
+    runtime: { ...base.runtime, ...(overrides.runtime ?? {}) },
+    measurement: { ...base.measurement, ...(overrides.measurement ?? {}) },
+    invariants: { ...base.invariants, ...(overrides.invariants ?? {}) },
+  }
+}
+
+describe("turnFsmChipTone", () => {
+  it.each([
+    ["accent", "info"],
+    ["neutral", "neutral"],
+    ["warn", "warn"],
+    ["err", "bad"],
+    ["ok", "ok"],
+  ] as const)("maps %s to StatusChip tone %s", (tone, expected) => {
+    expect(turnFsmChipTone(tone)).toBe(expected)
+  })
+})
+
+// `execution.outcome` wire format is the TLA-prefix form
+// (`receipt_done` | `receipt_skipped` | `receipt_failed` |
+//  `receipt_cancelled`) emitted by `outcome_kind_to_tla_receipt`
+// (lib/keeper/keeper_execution_receipt.ml:24-29). Short forms
+// ('done' / 'skipped' / 'failed' / 'error') never appear here in
+// production — prior fixtures asserting them was a mock↔mock loophole
+// that hid five dead branches.
+describe("terminalTone", () => {
+  it.each([
+    ["receipt_done", "ok"],
+    ["receipt_skipped", "ok"],
+    ["receipt_cancelled", "warn"],
+    ["receipt_failed", "err"],
+    ["unknown", "neutral"],
+    ["", "neutral"],
+    [null, "neutral"],
+    [undefined, "neutral"],
+  ])("maps %s to %s", (outcome, expected) => {
+    expect(terminalTone(outcome)).toBe(expected)
+  })
+})
+
+describe("TurnFsmDetailPanel", () => {
+  let container: HTMLElement
+
+  beforeEach(() => {
+    container = document.createElement("div")
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it("renders turn state and receipt badges through StatusChip", () => {
+    const snapshot = keeperCompositeSnapshot({
+      turn_phase: "executing",
+      execution: {
+        latest_receipt_present: true,
+        runtime_lane_observation: { state: 'unreadable', turn: null, evidence: null, error: 'trace_id' },
+        recorded_at: "2026-05-01T16:00:00Z",
+        outcome: "receipt_failed",
+        terminal_reason_code: "tool_contract",
+        operator_disposition: null,
+        operator_disposition_reason: null,
+        model_used: "glm-4.5",
+        stop_reason: null,
+        duration_ms: null,
+        error: null,
+        runtime: null,
+        claim_attempt: {
+          present: false,
+          source: "keeper_task_claim_tool_call",
+          status: "not_observed",
+          result: null,
+          claimed_task_id: null,
+          claimed_goal_id: null,
+        },
+      },
+    })
+
+    render(html`<${TurnFsmDetailPanel} snapshot=${snapshot} />`, container)
+
+    const chips = [...container.querySelectorAll("[data-status-chip]")]
+    expect(chips.map(chip => chip.textContent?.trim())).toEqual(expect.arrayContaining([
+      "실행 중",
+      "receipt receipt_failed",
+      "reason tool_contract",
+    ]))
+    expect(chips.map(chip => chip.getAttribute("data-status-chip-tone"))).toEqual(expect.arrayContaining([
+      "info",
+      "bad",
+    ]))
+    expect(chips.every(chip => chip.getAttribute("data-status-chip-uppercase") === "false")).toBe(true)
+  })
+})

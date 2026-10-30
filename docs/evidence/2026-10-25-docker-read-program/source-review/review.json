@@ -1,0 +1,200 @@
+{
+  "schema": "masc-independent-source-review-v1",
+  "status": "FINAL_FROZEN",
+  "created_at_utc": "2026-10-25T11:48:20.440700+00:00",
+  "reviewer": "repair_eval_metrics",
+  "head": "84003fe04f9ac67a4b4b8f5fe851a3ad2c1924d8",
+  "base": "45592d21f7f1c11226e75c857d1983f7b0eef9d5",
+  "canonical_complete_diff_sha256": "b2ef77f0e0e2a662a277bcf8551bac29b364b9690afe6a9a282ebf75a3d2d6f9",
+  "canonical_algorithm": "scripts/review/review-diff.py raw_identity; SHA256(masc-reviewed-git-diff-v1 NUL + sorted complete raw Git headers/paths)",
+  "full_patch_sha256": "73ffd8e4b7079866d569839374d9f960d77494bdaf5e67bf471a596388921fae",
+  "raw_diff_sha256": "b5052c88e5611d837dc67efbae43ea863b81a9c38189df94d426e095938c2a41",
+  "scope": {
+    "changed_files": [
+      "lib/keeper/keeper_sandbox_read_backend.ml",
+      "lib/keeper/keeper_sandbox_read_backend.mli",
+      "test/test_keeper_sandbox_read_backend.ml"
+    ],
+    "files": 3,
+    "insertions": 61,
+    "deletions": 1,
+    "working_tree_untracked_author_docs_excluded": true,
+    "verdict_is_whole_stack_approval": false
+  },
+  "verdict": "PASS_SOURCE_ONLY",
+  "p0_p2_findings": [],
+  "source_findings": [
+    {
+      "id": "ARGV",
+      "location": "lib/keeper/keeper_sandbox_read_backend.ml:125",
+      "finding": "Blank --entrypoint is a distinct argv token before image. Caller command_argv follows image unchanged. Process_eio passes the list into process spawning without a shell/string round trip. The empty token is retained.",
+      "direct_consumers": [
+        "Keeper_sandbox_read_runner.Docker_backend",
+        "Keeper_workspace_read_ops.run_readonly_in_sandbox"
+      ]
+    },
+    {
+      "id": "OUTCOME",
+      "location": "lib/keeper/keeper_workspace_read_ops.ml:198",
+      "finding": "Grep accepts backend exits 0/1/2, but classifies only 0/1 as Completed. Exit127 is not admitted by backend, becomes an Error, then Keeper_tool_execution.failure Runtime_failure. Exit1 remains Completed with structured ok=true and empty matches when stdout empty."
+    },
+    {
+      "id": "VISIBILITY",
+      "location": "lib/keeper/keeper_tools_agent_core_handler_exec.ml:212",
+      "finding": "Actual tool dispatch preserves Failed class through Tool_result.make_err, observer/registry failure handling and returned dispatch_result. Tool_result serialization retains failure_class/disposition/message. No successful empty-search coercion occurs in this traced failure branch. This is source evidence, not an executed model-wire assertion."
+    },
+    {
+      "id": "FIXTURE",
+      "location": "test/test_keeper_sandbox_read_backend.ml:2102",
+      "finding": "The two registered tests enter real Keeper_workspace_read_ops.try_handle_with_outcome with Docker-profile metadata, catalogued image and existing sandbox root. Only Docker executable is replaced by the existing fixture. Modeled image entrypoint intercept returns1 unless exact separate empty override is present; then returns declared program exit127 or1. On old product code the missing-program case is classified Completed and its assertion fails; fixed code returns typed Runtime_failure. Positive test protects real no-match acceptance."
+    },
+    {
+      "id": "ASSERTIONS",
+      "location": "test/test_keeper_sandbox_read_backend.ml:2139",
+      "finding": "Assertions inspect returned execution after handler completion. Existing Fun.protect fixture restoration/cleanup does not swallow callback assertion failures. New tests reuse an already-used public module and are registered in the existing native suite listed by test/dune."
+    },
+    {
+      "id": "PRESERVATION",
+      "location": "lib/keeper/keeper_sandbox_read_backend.ml:85",
+      "finding": "The product change is one argv insertion. Mount/read-only/network-none/user/capability/seccomp/secret handling and Remote/Attached/Turn_runtime branches are unchanged. Clearing a setup entrypoint intentionally enforces the existing documented caller-program contract. No new authority, root, timeout or exit-code policy is introduced."
+    },
+    {
+      "id": "MLI",
+      "location": "lib/keeper/keeper_sandbox_read_backend.mli:100",
+      "finding": "Documentation describes executable ownership and default-entrypoint clearing. No public function signature or typed result API changes."
+    }
+  ],
+  "validation": [
+    {
+      "kind": "source_read",
+      "result": "PASS",
+      "description": "Entire exact committed three-file diff and direct outcome/transport/test setup consumers read."
+    },
+    {
+      "kind": "git_diff_check",
+      "exit_code": 0,
+      "stdout_bytes": 0,
+      "stderr_bytes": 0,
+      "result": "PASS"
+    },
+    {
+      "kind": "identity",
+      "result": "PASS",
+      "description": "Exact HEAD and direct parent verified, complete raw diff identity computed locally from immutable committed objects."
+    }
+  ],
+  "limitations": [
+    "No OCaml compilation, native tests, Docker execution, API/provider request, CI query or approval publication was performed for this review.",
+    "New tests model Docker entrypoint interception/program outcomes. They do not execute real Docker or rg, establish image package availability, or prove provider-visible serialized error delivery.",
+    "The fake script checks empty entrypoint placement before image and supplies an exit; it does not independently validate the generated rg executable/arguments. The production handler constructs rg in source; existing bare-command argv coverage is adjacent and unchanged.",
+    "No claim is made for arbitrary container image behavior, other backends, runtime installation, deployment, model success or full-stack acceptance.",
+    "Candidate checkout has unrelated untracked author changelog/evidence at final identity read; they are excluded from this committed source review."
+  ],
+  "source_files": [
+    {
+      "path": "lib/keeper/keeper_sandbox_read_backend.ml",
+      "role": "changed",
+      "git_blob": "1367c04819bf7af1e570ad3cc1b2d122b9de2077",
+      "sha256": "94e8c5f1682d4ffca9ca6423f260e66f5f15306164f7f24c22e73aac4c1eb3b6",
+      "bytes": 30262
+    },
+    {
+      "path": "lib/keeper/keeper_sandbox_read_backend.mli",
+      "role": "changed",
+      "git_blob": "6af1cd5b0dd1eb231848f6dc273c0967e5191e8c",
+      "sha256": "13b7f3aa8cacd52230211bc5aab7dad8240d316a9d0e15ff199b476af674c1de",
+      "bytes": 8930
+    },
+    {
+      "path": "test/test_keeper_sandbox_read_backend.ml",
+      "role": "changed",
+      "git_blob": "b5a6fb66dfa4e01f0fd30abc56f5aa21daf06773",
+      "sha256": "11dce62b340361a08d75c73c011280e5d0dc4b7c7d8fe3759a710039982cb56f",
+      "bytes": 138420
+    },
+    {
+      "path": "docs/constitution.xml",
+      "role": "read_context",
+      "git_blob": "7d2ff0b1e8121da7156f6c34df9445740475a3c7",
+      "sha256": "afd95dbc22a2e74fa6b96510c685487ad915260984bd1e1b393fe8eadb544682",
+      "bytes": 40861
+    },
+    {
+      "path": "lib/keeper/keeper_sandbox_read_runner.ml",
+      "role": "read_context",
+      "git_blob": "335940cb2b3d9b90915bc5b2b0f18c4ae95d10d5",
+      "sha256": "95488911943bde29c0b9020d3c6a02083a4b8c26f6b89286eef8e907ad0e5730",
+      "bytes": 4199
+    },
+    {
+      "path": "lib/keeper/keeper_workspace_read_ops.ml",
+      "role": "read_context",
+      "git_blob": "95675a00e4728a46a8414361686d2d816a8d1510",
+      "sha256": "548bac12ae8573cb7636099c11d4ab87230d1d84b0c506b1b0bc7f2b566f9c88",
+      "bytes": 11702
+    },
+    {
+      "path": "lib/keeper/keeper_tool_execution.ml",
+      "role": "read_context",
+      "git_blob": "8a980c736a2682333ee6c01173f3b50b04a96488",
+      "sha256": "5d3c3a8d038b39acc9c7d4854ccfb773edef967c5155f2b7a7881cae2132f6fe",
+      "bytes": 7479
+    },
+    {
+      "path": "lib/keeper/keeper_workspace_ops.ml",
+      "role": "read_context",
+      "git_blob": "5cd11a805c109ffa29ec5c383bace5239ab796e0",
+      "sha256": "f962e86336d2af15d06124fd99f85ca57a482fad46d33ddb298aa5cab0455bf9",
+      "bytes": 3394
+    },
+    {
+      "path": "lib/keeper/keeper_tools_agent_core_handler_exec.ml",
+      "role": "read_context",
+      "git_blob": "07920fa8346b8a504f269f948f6fa3fd5359d2a2",
+      "sha256": "4b4df333913881645b6a2063d37df3f3db3f82e5f507ab1cc2f6fea743f8814a",
+      "bytes": 18156
+    },
+    {
+      "path": "lib/keeper/keeper_tools_agent_core_handler.ml",
+      "role": "read_context",
+      "git_blob": "5b23d6f9a697b3ca1a1ed6d348fb77415963d886",
+      "sha256": "a1b82739f81f41aeffb5a6e9376b245948b669df2376001ebdea94ea5dbd8278",
+      "bytes": 12944
+    },
+    {
+      "path": "lib/process/process_eio.ml",
+      "role": "read_context",
+      "git_blob": "19120b61b0b202b3b6044c525458b8a0849a408f",
+      "sha256": "aaed0df532e9c2c9d46812065702bdebe43df186a00b98662ae777eb93f3a4b6",
+      "bytes": 73832
+    },
+    {
+      "path": "lib/tool_types/tool_result.ml",
+      "role": "read_context",
+      "git_blob": "b903bc6d647e3cb4b4dcd34d6e655f70621f85fa",
+      "sha256": "87205e88ea29fa8702b5fa00442b6a1e53140a5b7e85fdfeae37e6399a890d9b",
+      "bytes": 13661
+    },
+    {
+      "path": "lib/dune",
+      "role": "read_context",
+      "git_blob": "b5f5725386c3d3d35371e3d6fdf2094ab90fa10e",
+      "sha256": "58de602aa17a901b96c1206fd1a37e7aa54aa1118903c864ee1f25960b40f681",
+      "bytes": 6820
+    },
+    {
+      "path": "test/dune",
+      "role": "read_context",
+      "git_blob": "d089edd81e00abfc47e18cb2b631d29730f38392",
+      "sha256": "935e9021d93c7a7d2b2417447d7d83bc7ff09ecdbb5b57df99c752e8125ca081",
+      "bytes": 211244
+    },
+    {
+      "path": "scripts/review/review-diff.py",
+      "role": "read_context",
+      "git_blob": "e5f2113e7fb160b2d3edc5c28a0b896a9cd57cfa",
+      "sha256": "0a43322e6402cbe68a7df096d5fff7e75ae46137cf01312cc3e002febe9c52ed",
+      "bytes": 5822
+    }
+  ]
+}

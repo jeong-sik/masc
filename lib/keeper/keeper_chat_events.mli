@@ -1,0 +1,457 @@
+(** Keeper_chat_events — channel-agnostic event bus for keeper chat turns.
+
+    Decouples turn processing from delivery. Each turn gets its own
+    event stream instance; adapters consume events and translate to
+    channel-specific protocols (SSE, Discord REST, Slack REST).
+
+    @since 2.145.0 *)
+
+(** {1 Types} *)
+
+type response_identity = Ag_ui.response_identity = { response_generation : int; response_scope : int }
+
+(** A persisted generated block owned by its original producer response.
+    [index] is local to that response; [media_ref] names the stored payload. *)
+type generated_media =
+  { index : int
+  ; media_type : string
+  ; source_type : Agent_core.Types.media_source_kind
+  ; media_ref : string
+  ; response : response_identity
+  }
+
+type text_response = Ag_ui.text_response =
+  | Unobserved_scope of int option
+  | Observed_response of response_identity
+
+type role = User | Assistant
+
+type stream_protocol_error_kind =
+  | Tool_start_duplicate_index
+  | Tool_start_missing_identity
+  | Tool_args_without_start
+  | Tool_stop_without_start
+  | Tool_replay_mismatch
+  | Tool_delta_invalid_kind
+  | Tool_attempt_superseded
+  | Tool_message_start_conflict
+  | Stream_event_after_terminal
+  | Tool_occurrence_mapping_invalid
+  | Media_delta_invalid_block
+  | Media_source_unsupported
+  | Media_decode_failed
+  | Media_payload_too_large
+  | Media_persist_failed
+  | Sse_error
+  | Ndjson_error
+  | Sse_parse_failed
+  | Ndjson_parse_failed
+  | Sse_unknown_event_type
+  | Sse_unsupported_part
+  | Sse_unsupported_response
+  | Sse_stream_incomplete
+  | Sse_timeout
+      (** The transport's stream liveness bound expired (first event or idle
+          gap) before the provider finished. Ends the attempt, not the turn. *)
+
+type runtime_attempt_scope_disposition =
+  | Preserve_previous_scope
+  | Abandon_previous_scope
+(** Pre-advance authority for a runtime fallback boundary. The durable stream
+    accumulator decides whether the prior scope was sealed; worker transport
+    and live projection carry this closed value without recomputing it. *)
+
+type tool_stream_occurrence =
+  { stream_scope : int
+  ; provider_message_id : string option
+  ; block_index : int
+  }
+(** Server-owned streamed tool occurrence. [stream_scope]/[block_index] is the
+    live row authority. Provider message/call ids are optional correlation
+    data and may be blank or reused. *)
+
+type model_content_channel = Model_text | Model_thinking
+
+type model_content_state = Content_observed | Content_ended
+
+type model_content_activity =
+  { content_generation : int
+  ; content_scope : int
+  ; content_index : int
+  ; content_provider_message_id : string option
+  ; channel : model_content_channel
+  ; state : model_content_state
+  }
+
+type stream_protocol_error = {
+  kind : stream_protocol_error_kind;
+  quarantined_occurrence : tool_stream_occurrence option;
+  (** Exact live row this error invalidated, when one was actually quarantined.
+      Diagnostics that did not invalidate a tool row keep [None]. Consumers
+      must not select a row from [tool_call_id] or [index]. *)
+  index : int option;
+  tool_call_id : string option;
+  event_type : string option;
+  reason : string option;
+  raw_bytes : int option;
+}
+
+type reply_details =
+  { reply : string
+        (** Canonical terminal body after finalization. This flat string does
+            not identify provider content blocks or authorize distributing
+            its bytes over separate observed text stretches. *)
+  ; turn_outcome : Keeper_turn_outcome.t
+  ; turn_ref : Ids.Turn_ref.t
+  ; terminal_stream_scope : int option
+      (** Stream scope whose terminal message emitted the recorded text.
+          [None] means that provenance was not observed. *)
+  }
+
+type continuation_checkpoint =
+  { message : string
+  ; request_id : string option
+  }
+
+type native_tool =
+  { occurrence : tool_stream_occurrence
+  ; tool_call_id : string option
+  ; tool_call_name : string option
+  }
+(** An official client's built-in tool observation. Missing provider identity
+    stays absent. This is not a MASC tool execution receipt. *)
+
+type keeper_chat_event =
+  | Run_started of { run_id : string; thread_id : string }
+  | Batch_bound of { operation_id : Keeper_chat_operation.Operation_id.t; execution_id : Keeper_chat_operation.Operation_id.t }
+  | Text_message_start of { message_id : string; role : role }
+  | Text_delta of { text : string; response : text_response }
+      (** An observed response retains its complete captured generation/scope.
+          [Unobserved_scope] preserves only the partial evidence supplied by
+          the producer; it never grants known generation ownership. *)
+  | Text_message_end
+  | External_effect_completed of
+      { target : Keeper_surface_post.delivery_target }
+      (** A terminal tool already delivered the reply outside this adapter.
+          Connector adapters settle the receipt without emitting another
+          text message. [target] names where the post actually landed. *)
+  | Run_finished of { run_id : string }
+  | Event_error of { message : string }
+  | Reply_details of reply_details
+  | Continuation_checkpoint of continuation_checkpoint
+  | Agent_core_stream_connected
+  | Provider_retry_observed of
+      { attempt : Runtime_native_tasks.attempt; retry : Runtime_claude_api_retry.t }
+      (** Provider retry observation with original dispatch. It carries no
+          model content or execution receipt and never advances a runtime lane. *)
+  | Agent_core_runtime_attempt_started of
+      { runtime_id : string option
+      ; attempt_index : int option
+      }
+      (** Exact resolved-runtime attempt boundary. Readers discard unfinished
+          text/thinking from the prior attempt while retaining finalized and
+          quarantined tool evidence. *)
+  | Agent_core_stream_message_start of
+      { content_generation : int option
+      ; stream_scope : int
+      ; provider_message_id : string
+      ; model : string
+      ; usage : Agent_core.Types.api_usage option
+      }
+      (** [content_generation] is the captured stream bridge generation,
+          independent of provider message IDs. Absence is unobserved ownership;
+          readers must not assign the previous content generation to it.
+          [stream_scope] is the bridge's producer-call identity, shared with
+          tool occurrences and retained by an exact repeated MessageStart. *)
+  | Agent_core_stream_message_delta of
+      { content_generation : int option
+      ; stream_scope : int
+      ; stop_reason : Agent_core.Types.stop_reason option
+      ; usage : Agent_core.Types.delta_usage option
+      }
+  | Agent_core_stream_message_stop of response_identity option
+  | Agent_core_stream_ping
+  | Agent_core_content_block_start of
+      { index : int
+      ; content_type : string
+      ; tool_call_id : string option
+      ; tool_call_name : string option
+      }
+  | Agent_core_content_block_stop of { index : int }
+  | Model_content_activity of model_content_activity
+  | Agent_core_thinking_delta of { index : int; delta : string; response : response_identity option }
+  | Agent_core_thinking_snapshot of { index : int; snapshot : string; response : response_identity }
+  | Agent_core_thinking_signature_delta of { index : int; signature_bytes : int }
+  | Agent_core_media_delta of generated_media
+  | Agent_core_stream_protocol_error of stream_protocol_error
+  | Tool_call_start of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; tool_call_name : string
+      }
+  | Tool_call_admitted of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; provider_tool_name : string
+      ; tool_call_name : string
+      }
+      (** Admission recovered the registered name of this exact streamed call.
+          This does not start another call or establish execution completion.
+          The provider name remains original wire evidence. *)
+  | Tool_call_args of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; delta : string
+      }
+  | Tool_call_args_snapshot of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; snapshot : string
+      }
+  | Tool_call_end of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      }
+      (** Provider argument streaming ended. This is not execution completion. *)
+  | Native_tool_start of native_tool
+  | Native_tool_end of native_tool * Runtime_native_tools.completion
+      (** The provider reported the native step's end and its available outcome
+          metadata. This observation does not establish a MASC execution result. *)
+  | Native_tool_progress of native_tool * Runtime_native_tools.progress
+      (** Update an existing native row without closing a content channel or
+          providing a MASC execution result. *)
+  | Tool_approval_requested of
+      { tool_call_id : string
+      ; tool_call_name : string
+      ; args : string
+      ; question : string
+      ; because : string
+      }
+      (** The turn is held at this call until an operator answers or the wait
+          runs out. Carries the call's arguments as sent, because a reader
+          deciding whether to allow it needs to see what it would do -- the
+          name alone does not distinguish reading a file from rewriting it.
+          [because] is the policy's one-line reason for asking rather than
+          running: the operator cannot see the policy table, only this. *)
+  | Tool_approval_settled of
+      { tool_call_id : string
+      ; outcome : string
+      }
+      (** How the wait ended: the operator's answer, or that nobody gave one.
+          Sent so a pane showing the prompt stops showing it, including on the
+          paths where no answer arrived. *)
+  | Tool_result_ready of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; execution_id : Ids.Execution_id.t
+      }
+      (** The exact tool result is durably readable from the tool-call store.
+          [occurrence] is the streamed row authority, [tool_call_id] remains
+          optional provider correlation data, and
+          [execution_id] is the canonical cross-store join key. *)
+  (** Exact transcript binding published only after chat append acknowledgement. *)
+  | Tool_transcript_committed of
+      { delivery_key : Keeper_chat_delivery_identity.delivery_key
+      ; execution_id : Ids.Execution_id.t
+      ; ordinal : int
+      }
+  | Link_block of
+      { url : string
+      ; title : string
+      ; description : string option
+      ; image : string option
+      }
+  | Image_block of { url : string; caption : string option }
+  | Status_block of Keeper_chat_blocks.status_block
+      (** Typed control status for channel adapters. It is rendered as channel
+          UI and never reclassified as assistant speech. *)
+  | Audio_block of
+      { token : string
+      ; mime : string
+      ; message_text : string
+      ; duration_sec : float option
+      }
+  | Tool_context_block of
+      { tool_call_id : string
+      ; name : string
+      ; args_summary : string
+      ; result_summary : string option
+      }
+
+(** {1 Stream operations} *)
+
+val bus_capacity : int
+(** Events the bus buffers before [publish] suspends the publisher. *)
+
+type t
+(** Bounded per-turn event stream plus its optional journal hook (RFC-0412
+    stage 1). One publisher fiber writes it; one adapter fiber reads it.
+
+    The publisher ends the turn with {!close}. The reader keeps reading until
+    it takes {!Closed}; terminal events ([Run_finished], [Event_error]) tell
+    the reader what to deliver but do not end its reading. A reader that
+    stopped early would leave the publisher suspended in [Eio.Stream.add] once
+    {!bus_capacity} events waited, and the turn would never settle. *)
+
+(** What a read returns: the next value, or the publisher's declaration that
+    no event follows. Once a reader has taken [Closed], every later read
+    returns [Closed] without blocking. *)
+type 'a next =
+  | Next of 'a
+  | Closed
+
+(** One event as the bus stamped it: the 0-based publish-order sequence number
+    and the publish-time clock reading. The journal line for this event (via
+    [on_publish]) and every live projection of it carry the same [seq] and
+    [ts], so a journal replay reproduces the live wire bytes. *)
+val redact_content :
+  redact_text:(string -> string) -> keeper_chat_event -> keeper_chat_event
+(** Redact human content leaves while preserving protocol keys, discriminants,
+    typed states, correlation identities and diagnostic messages. Internal
+    consumers retain this behavior; live AG-UI and the public replay journal
+    use {!public_content}. Arbitrary argument JSON has its separate recursive
+    key/value redaction boundary before becoming event content. *)
+
+val public_error_code : string
+val public_error_message : string
+val public_protocol_error_message : string
+val public_content :
+  redact_text:(string -> string) -> keeper_chat_event -> keeper_chat_event
+(** The public copy redacts content with the captured Keeper exact-secret
+    policy and replaces terminal diagnostic messages with one fixed safe
+    message. Stream protocol diagnostics retain their closed kind and safe
+    message, while provider diagnostic text stays internal.
+    Event/correlation identities stay intact. The public replay journal stores
+    this safe copy, so reconnects reproduce the public live event. This pure
+    projection leaves the original in-process event and private operation
+    failure intact for diagnostics; {!redact_content} keeps its behavior. *)
+
+type published =
+  { seq : int
+  ; ts : float
+  ; event : keeper_chat_event
+  }
+
+(** [create ?first_seq ?now ?on_publish ()] returns a new bounded event stream. Each turn
+    should create its own stream instance. [first_seq] defaults to zero for a
+    fresh operation; a continuation supplies the next durable journal sequence.
+    [now] is the clock read once per
+    [publish] (default [Time_compat.now]; injectable for deterministic tests).
+    [on_publish], when given, is invoked synchronously with that seq and ts
+    BEFORE the event enters the bus; hook exceptions are logged and swallowed
+    (except cancellation, which is re-raised) so a journal failure can never
+    break the live turn. *)
+val create :
+  ?first_seq:int ->
+  ?now:(unit -> float) ->
+  ?on_publish:(seq:int -> ts:float -> keeper_chat_event -> unit) ->
+  unit ->
+  t
+
+(** [publish t event] runs the journal hook (if any) and adds [event] to the
+    stream. With a journal hook installed, the hook performs brief blocking
+    Unix I/O (fsync + rollback per line); hook-free buses are non-blocking
+    until full. A full stream suspends the writer fiber until a reader frees
+    a slot (Eio backpressure) — the hook has already run by then, so the
+    journal still holds the event. After {!reader_gone} the bus is skipped
+    altogether, so this call cannot suspend.
+
+    @raise Invalid_argument after {!close}: a publish after the end of the
+    turn is a publisher defect, never a delivery. *)
+val publish : t -> keeper_chat_event -> unit
+
+(** [close t] declares that no event follows. Idempotent. The reader takes it
+    after every event published before it; a full stream suspends this call
+    exactly as it suspends [publish]. A close cancelled while suspended has
+    added nothing and leaves the bus open, so a later close still ends the
+    turn. The closed flag is set when this call returns, which can be after
+    the reader has taken the sentinel; the one publisher fiber is inside this
+    call for that window, so no [publish] can land in it. After
+    {!reader_gone} there is nobody to hand the sentinel to and this call adds
+    nothing. *)
+val close : t -> unit
+
+(** [reader_gone t] declares that the bus's consumer has stopped reading and
+    will not read again. Idempotent, suspends nowhere, and releases every
+    publisher already waiting for room.
+
+    The bus holds one turn's events for one consumer, and its bounded window
+    is backpressure on a consumer that is slower than the turn. A consumer
+    that leaves instead — a failed adapter, an unconfigured connector, an
+    operator interrupt — turns that window into a wedge: the turn fills it,
+    suspends in [publish], never returns, and never releases the Owner's turn
+    slot. Calling this on the way out replaces that with a drop: {!publish}
+    keeps feeding the journal hook, which is the durable record, and stops
+    feeding the bus, which nobody is reading.
+
+    Every consumer reaches this whatever ends it, so no consumer has to read
+    events it does not want in order to keep the turn alive. *)
+val reader_gone : t -> unit
+
+(** [subscribe t] blocks until an event is available and returns it, or
+    returns [Closed] once the publisher has closed the bus and every earlier
+    event has been read. *)
+val subscribe : t -> keeper_chat_event next
+
+(** [subscribe_published t] is {!subscribe} with the seq and ts the bus
+    stamped at publish time. The wire adapter reads through this so the frame
+    id is the journal seq and the projected timestamp is the journaled ts. *)
+val subscribe_published : t -> published next
+
+(** [take_nonblocking t] returns the next queued event, or [None] when the
+    bus is empty or closed. Test support: it bypasses the blocking
+    [subscribe] contract and must not sit on a live read path. *)
+val take_nonblocking : t -> keeper_chat_event option
+
+val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
+
+(** JSON for cumulative mid-stream counters and provider-reported charge:
+    only reported fields appear, so "not reported" stays distinguishable from 0.
+    Non-finite charges are omitted to keep live projection JSON valid. *)
+val delta_usage_to_json : Agent_core.Types.delta_usage -> Yojson.Safe.t
+
+(** The wire spelling of why the provider stopped writing, as
+    [Keeper_chat_event_log] writes it into the journal and the AGUI projection
+    sends it to a client. Re-exported here so a reader whose dune unit does not
+    link agent_core still spells the word the producer wrote. *)
+val stop_reason_to_string : Agent_core.Types.stop_reason -> string
+
+val stream_protocol_error_kind_to_string : stream_protocol_error_kind -> string
+val stream_protocol_error_kind_of_string :
+  string -> stream_protocol_error_kind option
+val stream_protocol_error_summary : stream_protocol_error -> string
+val stream_protocol_error_to_json : stream_protocol_error -> Yojson.Safe.t
+
+(** Exact run generation, server stream scope and content index own model activity. Provider
+    message ids are optional correlation only. Observed requires a nonempty
+    accepted payload; Ended closes only that occurrence, not the response,
+    tool, or Keeper turn. The strict shared codec rejects duplicate/unknown
+    keys, invalid indices and unknown channels/states. Generation, scope and
+    index are nonnegative JSON safe integers via {!Runtime_json_integer.of_json},
+    so browser and server consumers share the same exact numeric identity. *)
+val model_content_activity_to_json : model_content_activity -> Yojson.Safe.t
+val model_content_activity_of_json : Yojson.Safe.t -> (model_content_activity, string) result
+
+(** Publish and return the actual sequence assigned to this event. The same
+    single-publisher/backpressure contract as [publish] applies. Run publishers
+    use their Run_started sequence as the content generation, so worker-local
+    scope counters can restart without colliding in an appended journal. *)
+val publish_with_sequence : t -> keeper_chat_event -> int
+
+(** None on a stop means its response identity was not observed. A known identity
+    is an indivisible generation/scope pair; malformed or partial objects reject. *)
+val response_identity_to_json : response_identity -> Yojson.Safe.t
+val response_identity_of_json : Yojson.Safe.t -> (response_identity, string) result
+
+val generated_media_to_json : generated_media -> Yojson.Safe.t
+val generated_media_of_json : Yojson.Safe.t -> (generated_media, string) result
+(** Strict wire and journal value codec. Missing ownership, duplicate or
+    unknown fields and invalid block coordinates are rejected. *)
+
+(** Absent response is explicitly unobserved; duplicate, null or malformed
+    supplied response fields reject instead of weakening ownership. *)
+val optional_response_identity_of_fields : (string * Yojson.Safe.t) list -> (response_identity option, string) result
+
+(** A complete observed response or an explicitly unobserved scope. Simultaneous
+    owner/scope wire fields, duplicate fields and invalid numeric identities reject. *)
+val text_response_of_fields : owner_field:string -> scope_field:string -> (string * Yojson.Safe.t) list -> (text_response, string) result

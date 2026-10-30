@@ -1,0 +1,24 @@
+{
+  "response_counter": 64,
+  "status": "ok",
+  "build": {
+    "release_version": "0.35.12",
+    "binary_version": "0.35.12",
+    "commit": "703ce088c8548e5c2e74a4f682a5ccf6a9a586c4",
+    "commit_source": "embedded",
+    "binary_commit": "703ce088c8548e5c2e74a4f682a5ccf6a9a586c4",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "67ccd4bba372202ba5f2ec30757158fdecb6cb3ae27fb1edeaf374d985460b05",
+    "binary_commit_unix_ts": 1789182311.0,
+    "binary_commit_age_seconds": 22684,
+    "executable_path": "/private/tmp/masc-collaboration-release-03512/runtime/main_eio.exe",
+    "executable_dir": "/private/tmp/masc-collaboration-release-03512/runtime",
+    "runtime_instance_id": "01a094e2-9242-7000-b4f9-3ed5aeb2788f",
+    "started_at": "2026-09-12T09:11:11Z",
+    "uptime_seconds": 723
+  },
+  "startup_phase": "ready",
+  "base_path": "/Users/dancer/.masc-integration/collaboration-baseline-68c7668",
+  "scope": "isolated server; readiness does not establish provider quota availability"
+}

@@ -1,0 +1,596 @@
+(** Lifecycle POST handler (boot/shutdown/reset/clear) for keeper dashboard API,
+    plus execution-surface cache helpers used by lifecycle + directive handlers. *)
+
+open Server_dashboard_http_keeper_api_types
+
+module Http = Http_server_eio
+
+let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
+  Http.Response.json_value ?request ~status (error_json ?ok message) reqd
+
+let tool_detail_json body =
+  try Yojson.Safe.from_string body with
+  | Yojson.Json_error _ -> `String body
+
+(* Surface refresh — invalidate ALL execution: dashboard caches so a pause /
+   resume action reflects on every parameterized view (actor / fixture / full
+   mode) immediately instead of waiting on TTL.
+
+   Plan 가설 D: 이전 구현은 "execution:default:light" 단일 키만 무효화하여
+   server_dashboard_http_execution_surfaces.ml:940-941 의
+   "execution:{actor}:{fixture}:{light|full}" parameterized 키는
+   deep_surface_cache_ttl_s 동안 stale 유지 → 대시보드가 최신 pause/resume
+   상태를 늦게 반영.
+
+   Similarly, dashboard_shell_cache_prefix 로 묶이는 per-keeper shell surface
+   cache (60s TTL) 도 별도 무효화한다.
+
+   - Light cache + parameterized keys: [Dashboard_cache.invalidate_prefix "execution:"]
+   - Per-keeper shell surface: [dashboard_shell_cache_prefix config]
+   - Global execution surface object: [patch_keeper_dependent_caches] (covers
+     [execution_cache] typed-surface invalidation)
+   - Operator control snapshot cache: [Operator_control_snapshot.invalidate_snapshot_cache]
+   - Projection cache: [Dashboard_projection_cache.invalidate_snapshot_json] *)
+(* Which prefixes a refresh could not drop. A caller that cannot leave a
+   Keeper's caches half-dropped reads this instead of the warning text: the
+   lifecycle listener invalidates every keeper-dependent cache when a refresh
+   comes back partial (#37175). *)
+type surface_refresh =
+  | Surfaces_refreshed
+  | Surfaces_partly_dropped of string list
+
+let refresh_keeper_execution_surfaces ~config ~name event =
+  let event_label =
+    Keeper_lifecycle_events.lifecycle_event_to_string event
+  in
+  Operator_control_snapshot.invalidate_snapshot_cache ();
+  Dashboard_projection_cache.invalidate_snapshot_json ~config;
+  let drop_prefix label prefix =
+    match Dashboard_cache.invalidate_prefix prefix with
+    | () -> []
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+    | exception exn ->
+      Log.Dashboard.warn
+        "keeper %s %s: %s cache invalidate failed: %s"
+        name
+        event_label
+        label
+        (Printexc.to_string exn);
+      [ label ]
+  in
+  let undropped =
+    drop_prefix "execution dashboard" "execution:"
+    @ drop_prefix
+        "shell surface"
+        (Server_dashboard_http_core.dashboard_shell_cache_prefix config)
+  in
+  Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
+    ~keeper_name:name ~event;
+  match undropped with
+  | [] -> Surfaces_refreshed
+  | _ :: _ -> Surfaces_partly_dropped undropped
+
+(* Wakeup / invalidate path — same cache-surface coverage as
+   [refresh_keeper_execution_surfaces]. Wakeup doesn't go through the directive
+   lifecycle, but the dashboard must still drop parameterized + shell-surface
+   entries so the wakeup reflects on every view. *)
+let invalidate_keeper_execution_surfaces ~config () =
+  Operator_control_snapshot.invalidate_snapshot_cache ();
+  Dashboard_projection_cache.invalidate_snapshot_json ~config;
+  (try Dashboard_cache.invalidate_prefix "execution:" with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       Log.Dashboard.warn
+         "keeper wakeup: execution dashboard cache invalidate failed: %s"
+         (Printexc.to_string exn));
+  (try
+     Dashboard_cache.invalidate_prefix
+       (Server_dashboard_http_core.dashboard_shell_cache_prefix config)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       Log.Dashboard.warn
+         "keeper wakeup: shell surface cache invalidate failed: %s"
+         (Printexc.to_string exn));
+  Server_dashboard_http_execution_surfaces.invalidate_execution_cache ()
+
+(* Typed outcome of a keeper lifecycle action, so the log severity is chosen by
+   an exhaustive match rather than a string-parsing wildcard with a permissive
+   default (#8605). [Succeeded]/[Already_live]/[Already_absent] are successes (Info);
+   [Rejected] (400) and [Dispatch_none] (500) are failures (Warn) — see
+   docs/spec/18-log-severity-taxonomy.md.
+
+   The failing variants carry the sentence the caller was given, and that same
+   value is what [respond_error] sends, so the log and the HTTP response cannot
+   drift apart. Three different gates answer [Rejected] — operator-paused meta,
+   a paused registry lane, and the dispatched tool's own error — and without
+   the payload the log said only [outcome=rejected], which is not enough to
+   tell them apart after the response is gone. *)
+type lifecycle_outcome =
+  | Succeeded
+  | Already_live
+  | Already_absent
+  | Rejected of string
+  | Dispatch_none
+  | Persist_failed of string
+
+let lifecycle_log_line ~action ~name ~actor ~duration_ms outcome =
+  (* docs/spec/18-log-severity-taxonomy.md: the line carries the
+     outcome, so the severity is derived from it (single emission) instead of
+     a static [Info] — otherwise a rejected/failed lifecycle action hides
+     under the noise floor. Failures are degraded-with-recovery (the client
+     gets an error response, the server keeps serving) -> [Warn], except a
+     persist failure: the transition was not durably preserved, which the
+     taxonomy defines as [Error]. *)
+  let level, outcome_s, reason =
+    match outcome with
+    | Succeeded -> (Log.Info, "ok", None)
+    | Already_live -> (Log.Info, "already_live", None)
+    | Already_absent -> (Log.Info, "already_absent", None)
+    | Rejected why -> (Log.Warn, "rejected", Some why)
+    | Dispatch_none -> (Log.Warn, "dispatch_none", None)
+    | Persist_failed why -> (Log.Error, "persist_failed", Some why)
+  in
+  (* [reason] goes last and its newlines collapse to spaces: a dispatched
+     tool's error is free text and would otherwise break the line into
+     fragments no grep reassembles. *)
+  let reason_s =
+    match reason with
+    | None -> ""
+    | Some why ->
+      " reason=" ^ String.map (function '\n' | '\r' -> ' ' | c -> c) why
+  in
+  ( level
+  , Printf.sprintf
+      "keeper lifecycle %s name=%s actor=%s outcome=%s duration_ms=%d%s"
+      action name actor outcome_s duration_ms reason_s )
+
+type shutdown_outcome =
+  | Shutdown_submitted
+  | Shutdown_target_absent
+
+(* [keeper_down] answers a shutdown it accepted with the operation record
+   ([accepted]) and one for a Keeper with no lane and no metadata with
+   [already_absent]; there is nothing to pause in the second case. Reading the
+   tool's data keeps the handler from guessing from the absence of an owner
+   afterwards, which is what made a shutdown of an unknown name answer
+   "paused-state persist failed after shutdown" (issue #28731). "Absent" is
+   the tool's answer at the time it looked: a create that lands after that
+   look is not paused by this request. A shape that is neither is refused, not
+   read as a submission. *)
+let shutdown_outcome_of_data data =
+  match
+    ( Json_util.get_bool data Keeper_turn_lifecycle.already_absent_field
+    , Json_util.get_bool data Keeper_turn_lifecycle.accepted_field )
+  with
+  | Some true, _ -> Ok Shutdown_target_absent
+  | (Some false | None), Some _ -> Ok Shutdown_submitted
+  | (Some false | None), None ->
+    Error "keeper_down answered neither accepted nor already_absent"
+
+type boot_preflight =
+  | Boot_allowed
+  | Boot_operator_paused
+  | Boot_meta_read_failed of string
+  | Boot_model_setup_required of Runtime_startup_state.reason
+
+type up_workspace_error = Workspace.expected_workspace_error =
+  | Invalid_workspace_precondition
+  | Workspace_precondition_failed
+
+let validate_up_workspace ~(config : Workspace.config) args =
+  Workspace.validate_expected_workspace ~config args
+
+let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
+    state agent_name req reqd =
+  let req_path = Http.Request.path req in
+  let suffix_result =
+    match action with
+    | "boot" -> Ok keeper_suffix_boot
+    | "up" -> Ok keeper_suffix_up
+    | "shutdown" -> Ok keeper_suffix_shutdown
+    | "reset" -> Ok keeper_suffix_reset
+    | "clear" -> Ok keeper_suffix_clear
+    | unknown ->
+        Error (Printf.sprintf "unknown keeper lifecycle action: %s" unknown)
+  in
+  match suffix_result with
+  | Error msg ->
+      respond_error reqd msg
+  | Ok suffix ->
+  let name = extract_keeper_name_for_post req_path suffix in
+  if String.length name = 0 then
+    respond_error reqd "keeper name is required"
+  else
+    let workspace_scope = Mcp_server.workspace_scope state in
+    let config = workspace_scope.config in
+    let persist_keeper_pause () =
+      match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name:name with
+      | Ok owner
+        when Option.exists
+               (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused)
+               (Keeper_owner.projection owner).meta ->
+        true
+      | Ok _ ->
+        (match
+           Keeper_owner_registry.apply_meta
+             ~base_path:config.base_path
+             ~keeper_name:name
+             (Keeper_owner_reducer.Pause
+                { reason =
+                    Keeper_latched_reason.Operator_paused
+                      { operator_actor = Keeper_latched_reason.Keeper_down }
+                ; updated_at = Keeper_meta_contract.now_iso ()
+                })
+         with
+         | Ok (Some _) -> true
+         | Ok None ->
+          Log.Keeper.warn
+            "keeper %s pause: owner metadata missing — skipping paused-state persist"
+            name;
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string PausedStatePersistErrors)
+            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Lifecycle_pause_persist));
+                     ("reason", "meta_missing")]
+            ();
+          false
+         | Error error ->
+           Log.Keeper.error
+             "keeper %s pause: owner command failed: %s"
+             name
+             (Keeper_owner_registry.command_error_to_string error);
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string PausedStatePersistErrors)
+             ~labels:
+               [ ( "phase"
+                 , Keeper_paused_state_persist_phase.(to_label Lifecycle_pause_persist) )
+               ; "reason", "owner_command_error"
+               ]
+             ();
+           false)
+      | Error lookup_error ->
+          Log.Keeper.error
+            "keeper %s pause: owner lookup failed: %s"
+            name
+            (Keeper_owner_registry.lookup_error_to_string lookup_error);
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string PausedStatePersistErrors)
+            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Lifecycle_pause_persist));
+                     ("reason", "owner_lookup_error")]
+            ();
+          false
+    in
+    let keeper_ctx : _ Keeper_tool_surface.context =
+      {
+        config;
+        agent_name;
+        sw;
+        clock;
+        proc_mgr = state.Mcp_server.proc_mgr;
+        net = state.Mcp_server.net;
+        publication_recovery_provider =
+          Mcp_server.publication_recovery_availability_provider state;
+      }
+    in
+    let args_result =
+      match action with
+      | "clear" -> (
+          match body_str with
+          | None ->
+              Error "request body is required for clear"
+          | Some raw -> (
+              try
+                let parsed = Yojson.Safe.from_string raw in
+                match parsed with
+                | `Assoc fields ->
+                    Ok (`Assoc (("name", `String name) :: List.remove_assoc "name" fields))
+                | _ ->
+                    Error "request body must be a JSON object"
+              with
+              | Yojson.Json_error err ->
+                  Error (Printf.sprintf "invalid json: %s" err)))
+      | "up" -> (
+          (* The body carries the create-or-update settings (instructions,
+             mention_targets, ...). Empty body still dispatches name-only so
+             the contract's own validation — not this route — decides what a
+             bare up means. *)
+          match body_str with
+          | None | Some "" -> Ok (`Assoc [("name", `String name)])
+          | Some raw -> (
+              try
+                let parsed = Yojson.Safe.from_string raw in
+                match parsed with
+                | `Assoc fields ->
+                    Ok (`Assoc (("name", `String name) :: List.remove_assoc "name" fields))
+                | _ ->
+                    Error "request body must be a JSON object"
+              with
+              | Yojson.Json_error err ->
+                  Error (Printf.sprintf "invalid json: %s" err)))
+      | _ -> Ok (`Assoc [("name", `String name)])
+    in
+    match args_result with
+    | Error msg ->
+        respond_error ~ok:false reqd msg
+    | Ok args ->
+      (* Use the same captured workspace config for admission and dispatch;
+         never resolve the global current workspace again between them. *)
+      match (if String.equal action "up" then validate_up_workspace ~config args else Ok args) with
+      | Error Invalid_workspace_precondition ->
+        respond_error ~request:req ~ok:false reqd "invalid expected_workspace precondition"
+      | Error Workspace_precondition_failed ->
+        respond_error ~status:`Conflict ~request:req ~ok:false reqd
+          "workspace changed since identity probe; Keeper was not created"
+      | Ok args ->
+        let started_at = Eio.Time.now clock in
+        let duration_ms () =
+          (Eio.Time.now clock -. started_at) *. 1000.0 |> int_of_float
+        in
+        let log_lifecycle_result (outcome : lifecycle_outcome) =
+          let level, line =
+            lifecycle_log_line ~action ~name ~actor:agent_name
+              ~duration_ms:(duration_ms ()) outcome
+          in
+          Log.Server.emit level line
+        in
+        Log.Server.info "keeper lifecycle %s name=%s actor=%s started"
+          action name agent_name;
+        let boot_preflight =
+          if not (String.equal action "boot")
+          then Boot_allowed
+          else if Runtime_startup_state.requires_setup () then
+            (match Runtime_startup_state.get () with
+             | Setup_required reason -> Boot_model_setup_required reason
+             | Not_initialized | Available -> Boot_allowed)
+          else
+            match Keeper_meta_store.read_meta config name with
+            | Error error -> Boot_meta_read_failed error
+            | Ok None -> Boot_allowed
+            | Ok (Some meta) ->
+              (match
+                 Keeper_lifecycle_admission.state
+                   ~paused:meta.paused
+                   ~latched_reason:meta.latched_reason
+               with
+               | Keeper_lifecycle_admission.Paused _ -> Boot_operator_paused
+               | Keeper_lifecycle_admission.Active -> Boot_allowed)
+        in
+        (match boot_preflight with
+         | Boot_model_setup_required reason ->
+           let why = Runtime_startup_state.message reason in
+           log_lifecycle_result (Rejected why);
+           respond_error ~status:`Service_unavailable ~request:req ~ok:false reqd why
+         | Boot_meta_read_failed error ->
+           let why =
+             Printf.sprintf "keeper boot preflight read failed: %s" error
+           in
+           log_lifecycle_result (Persist_failed why);
+           respond_error
+             ~status:`Internal_server_error
+             ~request:req
+             ~ok:false
+             reqd
+             why
+         | Boot_operator_paused ->
+           let why =
+             "keeper is operator-paused; commit Resume_owner through the \
+              directive endpoint"
+           in
+           log_lifecycle_result (Rejected why);
+           respond_error
+             ~status:`Conflict
+             ~request:req
+             ~ok:false
+             reqd
+             why
+         | Boot_allowed ->
+        let live_boot_entry =
+          match Keeper_registry.get ~base_path:config.base_path name with
+          | Some entry
+            when String.equal action "boot"
+                 && entry.conditions.fiber_alive
+                 && not entry.conditions.stop_requested
+                 && (entry.phase = Keeper_state_machine.Running
+                     || entry.phase = Keeper_state_machine.Paused) ->
+            Some entry
+          | Some _ | None -> None
+        in
+        (match live_boot_entry with
+         | Some entry when entry.phase = Keeper_state_machine.Paused ->
+           let why =
+             "keeper registry lane is paused; commit Resume_owner through the \
+              directive endpoint"
+           in
+           log_lifecycle_result (Rejected why);
+           respond_error
+             ~status:`Conflict
+             ~request:req
+             ~ok:false
+             reqd
+             why
+         | Some entry ->
+           (* Dashboard boot is an idempotent lifecycle action.  If a keeper
+              is already live, do not send it through masc_keeper_up's update
+              path: that path intentionally stop/starts changed keepers, and
+              doing so during an active turn creates duplicate fibers and
+              contradictory stopped/executing surfaces. Wake an already
+              running fiber without changing its pause disposition. *)
+           Keeper_keepalive.process_directive ~base_path:config.base_path
+             ~agent_name:entry.name
+             Keeper_directive.Wakeup;
+           (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+           ignore
+             (refresh_keeper_execution_surfaces
+                ~config
+                ~name
+                (Keeper_lifecycle_events.Custom_event
+                   { verb = Keeper_lifecycle_events.Started
+                   ; phase = Some Keeper_state_machine.Running
+                   })
+               : surface_refresh);
+           let detail =
+             match Keeper_registry.get ~base_path:config.base_path name with
+             | Some latest -> Keeper_meta_json.meta_to_json latest.meta
+             | None -> Keeper_meta_json.meta_to_json entry.meta
+           in
+           log_lifecycle_result Already_live;
+           Http.Response.json_value ~compress:true ~request:req
+             (`Assoc
+                [
+                  ("ok", `Bool true);
+                  ("action", `String action);
+                  ("name", `String name);
+                  ("already_live", `Bool true);
+                  ("detail", detail);
+                ])
+             reqd
+         | None ->
+           (match Keeper_tool_surface.dispatch keeper_ctx ~name:tool_name ~args with
+            | Some result
+              when Tool_result.is_success result
+                   && (String.equal action "boot" || String.equal action "clear") ->
+              let body = Tool_result.message result in
+              let post_action_result =
+                if String.equal action "boot"
+                then (
+                  (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+                  ignore
+                    (refresh_keeper_execution_surfaces
+                       ~config
+                       ~name
+                       (Keeper_lifecycle_events.Custom_event
+                          { verb = Keeper_lifecycle_events.Started
+                          ; phase = Some Keeper_state_machine.Running
+                          })
+                      : surface_refresh);
+                  Ok ())
+                else (
+                  match Keeper_registry.get_phase ~base_path:config.base_path name with
+                  | Some Keeper_state_machine.Paused
+                    when not (persist_keeper_pause ()) ->
+                    Error "paused-state persist failed after clear"
+                  | Some
+                      ( Keeper_state_machine.Paused
+                      | Keeper_state_machine.Offline
+                      | Keeper_state_machine.Running
+                      | Keeper_state_machine.Failing
+                      | Keeper_state_machine.Draining
+                      | Keeper_state_machine.Stopped
+                      | Keeper_state_machine.Crashed
+                      | Keeper_state_machine.Restarting )
+                  | None ->
+                    invalidate_keeper_execution_surfaces ~config ();
+                    Ok ())
+              in
+              (match post_action_result with
+               | Error msg ->
+                 log_lifecycle_result (Persist_failed msg);
+                 respond_error
+                   ~status:`Internal_server_error
+                   ~request:req
+                   ~ok:false
+                   reqd
+                   msg
+               | Ok () ->
+                 log_lifecycle_result Succeeded;
+                 Http.Response.json_value ~compress:true ~request:req
+                   (`Assoc
+                      [
+                        ("ok", `Bool true);
+                        ("action", `String action);
+                        ("name", `String name);
+                        ("detail", tool_detail_json body);
+                      ])
+                   reqd)
+            | Some result when Tool_result.is_success result ->
+              let post_action_result =
+                match action with
+                | "shutdown" ->
+                  (match shutdown_outcome_of_data (Tool_result.data result) with
+                   | Error detail -> Error detail
+                   | Ok Shutdown_target_absent -> Ok (Some Shutdown_target_absent)
+                   | Ok Shutdown_submitted ->
+                     if persist_keeper_pause ()
+                     then (
+                       (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+                       ignore
+                         (refresh_keeper_execution_surfaces
+                            ~config
+                            ~name
+                            (Keeper_lifecycle_events.Phase_event
+                               Keeper_state_machine.Paused)
+                           : surface_refresh);
+                       Ok (Some Shutdown_submitted))
+                     else Error "paused-state persist failed after shutdown")
+                | _ ->
+                  invalidate_keeper_execution_surfaces ~config ();
+                  Ok None
+              in
+              (match post_action_result with
+               | Error msg ->
+                 log_lifecycle_result (Persist_failed msg);
+                 respond_error
+                   ~status:`Internal_server_error
+                   ~request:req
+                   ~ok:false
+                   reqd
+                   msg
+               | Ok outcome ->
+                 log_lifecycle_result
+                   (match outcome with
+                    | Some Shutdown_target_absent -> Already_absent
+                    | Some Shutdown_submitted | None -> Succeeded);
+                 (* Three actions reach this branch -- "up", "shutdown" and
+                    "reset" -- and only "up" has anything to report: a create
+                    names the sandbox profile and network mode the keeper
+                    actually landed on, and dropping that left the caller to
+                    guess the isolation of the keeper it had just made. The
+                    other two carry no such report, so they answer with the
+                    fields they always answered with; a [detail] key holding
+                    [`Null] would be a new field on the wire with nothing
+                    behind it. Read from [Tool_result.data] rather than
+                    re-parsing the rendered message, which is the same value
+                    one round-trip later. *)
+                 let create_detail =
+                   if String.equal action "up"
+                   then [ ("detail", Tool_result.data result) ]
+                   else []
+                 in
+                 (* A shutdown of a name that has no Keeper succeeds, as the
+                    tool does, and says so: an operator who mistyped the name
+                    is told nothing was stopped. *)
+                 let absent_detail =
+                   match outcome with
+                   | Some Shutdown_target_absent -> [ ("already_absent", `Bool true) ]
+                   | Some Shutdown_submitted | None -> []
+                 in
+                 Http.Response.json_value ~compress:true ~request:req
+                   (`Assoc
+                      ([
+                         ("ok", `Bool true);
+                         ("action", `String action);
+                         ("name", `String name);
+                       ]
+                      @ create_detail
+                      @ absent_detail))
+                   reqd)
+            | Some result ->
+              let body = Tool_result.message result in
+              log_lifecycle_result (Rejected body);
+              (* The rejection's typed data, not only its prose. A manifest
+                 revision conflict names itself in [data] under
+                 [Keeper_turn_up_update.config_revision_conflict_code]; with
+                 the data dropped, a client could tell that retryable
+                 rejection from a permanent one only by matching the
+                 sentence. *)
+              Http.Response.json_value ~status:`Bad_request ~request:req
+                (`Assoc
+                   [ ("ok", `Bool false)
+                   ; ("error", `String body)
+                   ; ("detail", Tool_result.data result)
+                   ])
+                reqd
+            | None ->
+              log_lifecycle_result Dispatch_none;
+              respond_error ~status:`Internal_server_error ~request:req ~ok:false
+                reqd "dispatch returned None")))

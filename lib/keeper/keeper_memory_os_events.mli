@@ -1,0 +1,124 @@
+(** Memory history events (RFC-0418).
+
+    This module records retrieval, retraction and revision as typed events
+    in a per-keeper append-only sidecar, [<keeper>.memory-events.jsonl], and
+    projects them at read time. It stores no strength, score, or threshold;
+    every number a consumer shows is computed from the events it reads.
+
+    The sidecar is separate from the memory journal on purpose: the journal
+    holds one line per librarian pass and is not read on the turn path, while
+    [Retrieved] is written on the turn path by [keeper_memory_search] and
+    [keeper_memory_select]. Events
+    outlive the fact they name; a dropped fact keeps its events and a reader
+    attaches them only to facts that still exist. *)
+
+(** What happened to the memory. A closed set: a new kind of event is a new
+    constructor, and the compiler names every consumer that has to learn it. *)
+type event_kind =
+  | Retrieved of { query : string }
+  (** The fact was among the results [keeper_memory_search] or
+      [keeper_memory_select] returned for [query]. Assessment without delivery
+      does not create a retrieval event. *)
+  | Retracted
+  (** [keeper_memory_retract] successfully removed the fact identified by its
+      [memory_id]. This records removal, not a judgment of the fact's quality. *)
+  | Revised of { superseded_by : string }
+  (** A new claim continues this fact and this one was dropped: the librarian
+      wrote it, or the keeper passed this fact's id as [supersedes] to
+      [keeper_memory_write]. [superseded_by] is the new fact's [memory_id]. The
+      producer is
+      responsible for pairing this with the drop and for never letting a fact
+      supersede itself. *)
+
+type event =
+  { recorded_at : float (** Unix seconds, the producer's clock. *)
+  ; memory_id : string (** The fact this happened to. *)
+  ; trace_id : string (** The turn it happened in; empty when there is none. *)
+  ; kind : event_kind
+  }
+
+val path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
+
+(** {1 Codec}
+
+    One JSON object per line. [recorded_at], [memory_id], [trace_id], [kind]
+    and the kind's payload ([query] or [superseded_by]); [Retracted] has none.
+    The decoder rejects a missing, extra or
+    duplicate field, an unknown kind token, a non-finite time, a string that is
+    not a memory id where one is required, and a blank [query]. *)
+
+val event_to_json : event -> Yojson.Safe.t
+val event_of_json : Yojson.Safe.t -> (event, Keeper_memory_os_types.wire_error) result
+
+(** {1 Sidecar} *)
+
+type append_error =
+  | Invalid_event of Keeper_memory_os_types.wire_error
+  (** The event fails the same checks the decoder applies; nothing was
+      written. *)
+  | Write_failed of
+      { path : string
+      ; message : string
+      }
+
+val append_error_to_string : append_error -> string
+
+(** Validate, then append one line. The append holds the sidecar's path lock
+    and fsyncs. A final row that a crash cut short, with no newline, is cut off
+    first so the new line starts on its own. The caller decides what a failure
+    means on its path: a search that could not record its [Retrieved] still
+    returns its results, and says so in its log. *)
+val append : keepers_dir:string -> keeper_id:string -> event -> (unit, append_error) result
+
+(** Append the events in order. The valid ones go in one locked append, and
+    only that new suffix is rolled back when the write fails: a torn tail cut
+    off first stays cut, since restoring it would re-corrupt the file. Only
+    the failures come back, the rejected events first and then the write
+    failure if there was one; a caller on a path that must not fail logs them
+    and goes on. *)
+val append_all : keepers_dir:string -> keeper_id:string -> event list -> append_error list
+
+type read_error =
+  | Not_json of string
+  | Malformed of Keeper_memory_os_types.wire_error
+
+type file_read_error =
+  { path : string
+  ; message : string
+  }
+
+val read_error_to_string : read_error -> string
+val file_read_error_to_string : file_read_error -> string
+
+(** Every non-blank line of the sidecar in file order, paired with its
+    zero-based index among non-blank lines. A line this module cannot read
+    stays in the list as an [Error] so a reader can count and name it instead
+    of losing it. A missing file reads as no events. A sidecar lookup or read
+    failure is returned separately, so callers cannot confuse it with an empty
+    history. *)
+val read :
+  keepers_dir:string ->
+  keeper_id:string ->
+  ((int * (event, read_error) result) list, file_read_error) result
+
+(** {1 Projection} *)
+
+type summary =
+  { retrieved_count : int
+  ; retrieved_distinct_days : int
+  (** Distinct UTC calendar days on which the fact was retrieved. Spacing is
+      shown as a count of days, not turned into a score. *)
+  ; last_retrieved_at : float option
+  ; retracted_count : int
+  ; revised_from : string list
+  (** Memory ids of facts whose [Revised] event names this fact as their
+      successor, sorted, without repeats. *)
+  }
+
+(** What the events say about one fact. Events about other facts are ignored
+    except [Revised] events that point at [memory_id]. *)
+val summary_for : memory_id:string -> event list -> summary
+
+(** The summary on the wire: the five fields by name, [last_retrieved_at]
+    null when the fact was never retrieved. *)
+val summary_to_json : summary -> Yojson.Safe.t

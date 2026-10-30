@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_chat_delivery_identity)
+ (public_name masc.keeper_chat_delivery_identity)
+ (wrapped false)
+ (modules keeper_chat_delivery_identity)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries masc.keeper_registry masc.keeper_checkpoint_ref  masc.agent_core.digest masc.masc_types masc_random_id threads uuidm yojson))

@@ -1,0 +1,11 @@
+# Replace the source path with your companion's state directory/snapshot.json.
+# macOS default: ~/Library/Application Support/masc/vst/snapshot.json.
+# Paths in declarations are literal; expand your home directory before saving.
+id = "vst-phrase"
+run_id = "native-midi-phrases"
+manifest_path = "../../../addons/vst-phrase/lane.toml"
+
+[[binding.sources]]
+source_id = "vst-phrase"
+kind = "snapshot_file"
+path = "/absolute/path/to/native-vst-state/snapshot.json"

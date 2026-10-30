@@ -1,0 +1,45 @@
+{
+  "source_commit": "1254542562c1b5a09504297135ee0b2d698f3fe7",
+  "binary_sha256": "957c41fff71e0106b728f762ed9a825c66d9aec58f64de2c03b1091fb641a41c",
+  "workspace": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-skill-refresh-before-a_h1a3qs",
+  "euid": 502,
+  "results": [
+    {
+      "label": "seed",
+      "arguments": [
+        "init",
+        "--skills-only",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-skill-refresh-before-a_h1a3qs"
+      ],
+      "exit": 0,
+      "stdout": "init: 0 written, 0 skipped, 0 failed, 12 builtin Skill package(s) installed or updated (root=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-skill-refresh-before-a_h1a3qs/.masc/config)\n",
+      "stderr": "[2026-09-12 21:04:44] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    },
+    {
+      "label": "unreadable-operator-directory",
+      "arguments": [
+        "init",
+        "--skills-only",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-skill-refresh-before-a_h1a3qs"
+      ],
+      "exit": 125,
+      "stdout": "",
+      "stderr": "[2026-09-12 21:04:44] [INFO] [MCP] Tag registry initialized: 163 tools registered\nmasc: internal error, uncaught exception:\n      Sys_error(\"Sys_error(\\\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-skill-refresh-before-a_h1a3qs/.masc/skills/browser-lanes/references: Permission denied\\\")\")\n      \n"
+    },
+    {
+      "label": "restored-access",
+      "arguments": [
+        "init",
+        "--skills-only",
+        "--base-path",
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-skill-refresh-before-a_h1a3qs"
+      ],
+      "exit": 0,
+      "stdout": "init: 0 written, 0 skipped, 0 failed, 0 builtin Skill package(s) installed or updated (root=/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-skill-refresh-before-a_h1a3qs/.masc/config)\n",
+      "stderr": "[2026-09-12 21:04:44] [INFO] [MCP] Tag registry initialized: 163 tools registered\n"
+    }
+  ],
+  "observation": "pre-fix binary aborts init when an operator directory is unreadable; final implementation still needs compiled proof"
+}

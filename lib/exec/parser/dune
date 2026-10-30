@@ -1,0 +1,16 @@
+; A1 parser — Menhir LR(1) + ocamllex for the bash subset grammar.
+; Built as a nested library so masc_exec stays closed to downstream
+; callers that should go through the canonical parser only.
+
+(library
+ (name masc_exec_bash_parser)
+ (public_name masc.masc_exec_bash_parser)
+ (wrapped true)
+ ; masc_core was here for the substring scan that guessed a refusal reason.
+ ; The lexer names its own refusals now and nothing in this library reads it.
+ (libraries masc_exec))
+
+(ocamllex bash_lexer)
+
+(menhir
+ (modules bash_subset))

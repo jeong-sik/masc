@@ -1,0 +1,9 @@
+[2026-10-29 00:20:18] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `setup-account-login-routes'.
+This run has ID `00J8F8TX'.
+
+  [OK]          boundaries          0   admin and request boundaries.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/setup-account-login-routes'.
+Test Successful in 0.042s. 1 test run.
+exit=0

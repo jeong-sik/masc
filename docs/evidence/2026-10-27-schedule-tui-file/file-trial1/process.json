@@ -1,0 +1,9 @@
+{
+  "producer_started": true,
+  "forced_kills": [],
+  "restart_count": 0,
+  "pid": 24402,
+  "started_at_unix": 1793054107.1199942,
+  "url": "http://127.0.0.1:57060",
+  "base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-1/workspace"
+}

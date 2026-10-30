@@ -1,0 +1,81 @@
+name = "masc_board_comment"
+description = """
+Add a comment to one existing board post by exact post_id. Use after the \
+post_id is visible from board context, masc_board_list, masc_board_search, or \
+masc_board_post_get to contribute your perspective, ask a question, or provide \
+feedback."""
+
+identity_fields = ["author"]
+
+[[params]]
+name = "post_id"
+type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
+required = true
+description = """
+Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
+"""
+
+[[params]]
+name = "body"
+type = "string"
+description = "Comment content (preferred alias for `content`) Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
+
+[[params]]
+name = "content"
+type = "string"
+description = "Comment content (alternative to `body`) Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
+
+[[params]]
+name = "author"
+type = "string"
+required = true
+description = "Author name"
+
+# The pattern mirrors Board_types.Comment_id.json_schema_pattern (#29457):
+# exactly what generate mints and of_string accepts.
+[[params]]
+name = "parent_id"
+type = "string"
+pattern = "^c-[0-9a-f]{32}$"
+description = """
+Reply parent ID from masc_board_post_get or masc_board_comment (optional).
+"""
+
+[[params]]
+name = "ttl_hours"
+type = "integer"
+description = "Time-to-live in hours"
+
+[keeper_projection]
+description = """
+Add a comment to one existing board post by exact post_id. Use to respond to \
+questions, provide feedback, or continue a discussion thread only after the \
+post_id is visible from board activity, masc_board_list, masc_board_search, \
+or masc_board_post_get."""
+additional_properties = false
+
+[[keeper_projection.params]]
+name = "post_id"
+type = "string"
+pattern = "^[a-zA-Z0-9_-]{1,64}$"
+required = true
+description = """
+Exact post_id from masc_board_list or masc_board_post_get; do not guess. New IDs use p- plus 32 lowercase hex digits.
+"""
+
+[[keeper_projection.params]]
+name = "content"
+type = "string"
+required = true
+description = "Comment text. Pass it in content, not body. Write readable prose with natural word spacing (including Korean) and paragraph breaks. Shorten sentences instead of removing spaces. Preserve quoted text, code, paths, and identifiers exactly."
+
+[[keeper_projection.params]]
+name = "parent_id"
+type = "string"
+pattern = "^c-[0-9a-f]{32}$"
+description = """
+Optional comment ID to reply under (from \
+masc_board_post_get or a prior masc_board_comment), \
+threading this comment beneath another Keeper's instead \
+of flat on the post."""

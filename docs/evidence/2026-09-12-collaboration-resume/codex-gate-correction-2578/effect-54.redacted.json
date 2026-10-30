@@ -1,0 +1,18 @@
+{
+  "ok": true,
+  "status": {
+    "kind": "exit",
+    "code": 0
+  },
+  "shim_execution_evidence": {
+    "status": "not_observed",
+    "receipts": []
+  },
+  "output_completeness": "complete",
+  "output": "/usr/bin/soffice\n/usr/bin/libreoffice\nFRAMES_OK\n",
+  "typed": true,
+  "execution_time_ms": 492,
+  "requested_sandbox": "docker",
+  "via": "docker",
+  "sandbox_profile": "docker"
+}

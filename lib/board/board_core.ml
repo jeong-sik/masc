@@ -1,0 +1,967 @@
+(* Board Core — JSONL store logic and persistence.
+   Types in Board_types. Persist + sweep extracted to
+   [Board_core_persist] (godfile decomp). *)
+
+include Board_core_persist
+
+(* Every id parse and policy check in this module already returns
+   [(_, board_error) result] and the failure is always forwarded unchanged, so
+   the arms that spell that out by hand ([| Error e -> Error e]) are
+   [Result.bind] written out. Binding them keeps the happy path at one
+   indentation level. *)
+open Result.Syntax
+
+
+let read_post store ~post_id : (post, board_read_error) Result.t =
+  maybe_sweep store;
+  match Post_id.of_string_for_read post_id with
+  | Error e -> Error e
+  | Ok pid ->
+    with_lock store (fun () ->
+      match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+      | Some post -> Ok post
+      | None -> Error (Read_post_not_found post_id))
+;;
+
+(* RFC-0233 §7 guard #2: exact O(1) index lookups, mirroring [read_post] by
+   primary key. The index is keyed on the full join string (turn_ref =
+   "trace#turn", or the fusion run_id) — never a meta_json substring or a
+   time-window heuristic. A miss returns [None] (no scan, no false positive). *)
+let find_post_by_turn_ref store ~turn_ref : post option =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    match Hashtbl.find_opt store.posts_by_turn_ref turn_ref with
+    | None -> None
+    | Some pid -> Hashtbl.find_opt store.posts pid)
+;;
+
+let find_post_by_run_id store ~run_id : post option =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    match Hashtbl.find_opt store.posts_by_run_id run_id with
+    | None -> None
+    | Some pid -> Hashtbl.find_opt store.posts pid)
+;;
+
+let list_posts_by_run_origin store =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    Hashtbl.fold (fun _ pid posts ->
+      match Hashtbl.find_opt store.posts pid with
+      | Some post -> post :: posts
+      | None -> posts) store.posts_by_run_id [])
+  |> List.sort (fun (left : post) (right : post) ->
+       match Float.compare right.created_at left.created_at with
+       | 0 -> String.compare (Post_id.to_string left.id) (Post_id.to_string right.id)
+       | order -> order)
+;;
+
+(* A thread's comments in the order they were written. [created_at] alone
+   leaves comments stamped in the same instant in whatever order the post's
+   index holds them, so two reads could disagree about which of them comes
+   first. The id settles that tie the same way on every read. The thread read
+   pages through this order by offset, and a Keeper wake names the replies
+   after its own comment by where they start in it, so both reads must agree. *)
+let compare_comments_oldest_first (a : comment) (b : comment) =
+  match Stdlib.Float.compare a.created_at b.created_at with
+  | 0 -> String.compare (Comment_id.to_string a.id) (Comment_id.to_string b.id)
+  | order -> order
+;;
+
+(* Reads post + comments under a single critical section. The previous
+   two-call sequence (read_post then read_comments) acquired
+   [store.mutex] twice with [maybe_sweep] dispatching to the flusher
+   actor between releases. That race window surfaces as
+   [Mutex.lock: Resource deadlock avoided] under contended
+   repeated agent board-read traffic. Coalescing
+   keeps the read atomic, removes one [maybe_sweep] dispatch, and
+   eliminates the inter-call lock churn. *)
+let read_post_and_comments store ~post_id
+  : (post * comment list, board_read_error) Result.t =
+  maybe_sweep store;
+  match Post_id.of_string_for_read post_id with
+  | Error e -> Error e
+  | Ok pid ->
+    with_lock store (fun () ->
+      let post_key = Post_id.to_string pid in
+      match Hashtbl.find_opt store.posts post_key with
+      | None -> Error (Read_post_not_found post_id)
+      | Some post ->
+        let comment_ids =
+          Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[]
+        in
+        let comments =
+          List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
+        in
+        Ok (post, List.sort compare_comments_oldest_first comments))
+;;
+
+let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post list =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    (* Use cached sorted list if available (cache hit = skip sort) *)
+    let sorted_all =
+      match store.sorted_posts_cache with
+      | Some cached -> cached
+      | None ->
+        let all = Hashtbl.fold (fun _ (post : post) acc -> post :: acc) store.posts [] in
+        (* Hot formula lives in [Board_sort] (SSOT) — shared with
+           [Board_dispatch.sort_posts_in_memory] to prevent drift. *)
+        let sorted = List.sort Board_sort.hot_compare all in
+        store.sorted_posts_cache <- Some sorted;
+        sorted
+    in
+    (* Apply filters on the pre-sorted list *)
+    let filtered =
+      match visibility_filter with
+      | None -> sorted_all
+      | Some v -> List.filter (fun (p : post) -> p.visibility = v) sorted_all
+    in
+    let filtered =
+      match hearth with
+      | None -> filtered
+      | Some h ->
+        let h_norm = String.lowercase_ascii (String.trim h) in
+        List.filter
+          (fun (p : post) -> Option.equal String.equal p.hearth (Some h_norm))
+          filtered
+    in
+    take limit filtered)
+;;
+
+let current_post_cursor store =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    match
+      Hashtbl.fold
+        (fun _ (candidate : post) latest ->
+           match latest with
+           | None -> Some candidate
+           | Some (current : post) ->
+             let updated_cmp =
+               Stdlib.Float.compare candidate.updated_at current.updated_at
+             in
+             if updated_cmp > 0
+                || (updated_cmp = 0
+                    && String.compare
+                         (Post_id.to_string candidate.id)
+                         (Post_id.to_string current.id)
+                       > 0)
+             then Some candidate
+             else latest)
+        store.posts
+        None
+    with
+    | Some post -> post.updated_at, Some (Post_id.to_string post.id)
+    | None -> Time_compat.now (), None)
+;;
+
+(** Full-scan search over all posts (no limit on scan, only on results).
+    Used by Board_dispatch.search to avoid the list_posts hard cap. *)
+let search_posts store ~predicate ~limit : post list =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    let matches =
+      Hashtbl.fold
+        (fun _ (p : post) acc -> if predicate p then p :: acc else acc)
+        store.posts
+        []
+    in
+    (* Sort by recency for search results *)
+    let sorted =
+      List.sort
+        (fun (a : post) (b : post) -> Stdlib.Float.compare b.created_at a.created_at)
+        matches
+    in
+    take limit sorted)
+;;
+
+(** {1 Comment Operations} *)
+
+(* task-1758/#39356 completion criterion 2: the closed-post comment
+   rejection must name the successor when one was recorded, so an agent
+   whose comment is refused sees where the conversation continues instead
+   of a dead end. *)
+let closed_post_rejection_message ~post_id (closed : post_close_state) =
+  match closed.successor_id with
+  | Some sid ->
+    Printf.sprintf
+      "Post %s is closed; see successor %s"
+      post_id
+      (Post_id.to_string sid)
+  | None -> Printf.sprintf "Post %s is closed" post_id
+;;
+
+(* task-1758/#39356 scope extension: a post holding Limits.comment_count_cap
+   live comments refuses the next one, with the same "open a successor post"
+   guidance a closed thread gives. The count is the live per-post comment
+   list with expired rows excluded — the same visibility the sweeper
+   enforces — so threads whose timed comments have aged out keep accepting
+   new ones. Runs under the store lock (the staging/commit write boundary
+   holds it); does not mutate anything. *)
+let comment_count_cap_error_unlocked store pid =
+  let cap = Limits.comment_count_cap in
+  if cap <= 0 then None
+  else
+    let now = Time_compat.now () in
+    let comment_keys =
+      match Hashtbl.find_opt store.comments_by_post (Post_id.to_string pid) with
+      | None -> []
+      | Some keys -> keys
+    in
+    let live =
+      List.fold_left
+        (fun n key ->
+           match Hashtbl.find_opt store.comments key with
+           | Some { expires_at; _ } when
+               Stdlib.Float.compare expires_at 0.0 > 0
+               && Stdlib.Float.compare expires_at now < 0 -> n
+           | Some _ -> n + 1
+           | None -> n)
+        0 comment_keys
+    in
+    if live >= cap
+    then
+      Some
+        (Printf.sprintf
+           "Post %s has reached the comment cap of %d; open a successor post"
+           (Post_id.to_string pid) cap)
+    else None
+;;
+
+let add_comment_with_audience
+      store
+      ~lookup
+      ~post_id
+      ~author
+      ~content
+      ?parent_id
+      ?(ttl_hours = Limits.default_ttl_hours)
+      ()
+  : (comment_creation, board_error) Result.t
+  =
+  maybe_sweep store;
+  (* Validate all IDs first *)
+  let* pid = Post_id.of_string post_id in
+  let* author_id = Agent_id.of_string author in
+  let* parent_cid =
+    match parent_id with
+    | None -> Ok None
+    | Some p ->
+      let* cid = Comment_id.of_string p in
+      Ok (Some cid)
+  in
+  (* Validate content *)
+  if ttl_hours < 0
+  then Error (Validation_error "ttl_hours must be non-negative")
+  else if String.length content = 0
+  then Error (Validation_error "Content cannot be empty")
+  else
+    let* audience, unresolved = Board_audience.audience_for_comment ~lookup ~content in
+    (* Write-ahead (PR #28934 class, #28952): validate under [with_lock]
+       with no mutation, then hold the persistence lock across the durable
+       append and commit under [with_lock] from a fresh read. The previous shape mutated
+       first and appended second, so a racing [flush_dirty] could
+       snapshot-write a comment whose durable append was about to fail
+       and be rolled back — reviving it from the snapshot on restart.
+       If staging rejects or the append fails, nothing was mutated, so
+       there is nothing to roll back. *)
+    let staged =
+      with_lock store (fun () ->
+        match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+        | None -> Error (Post_not_found post_id)
+        | Some { closed = Some closed; _ } ->
+          (* task-1758/#39356: a closed thread does not grow. Checked here
+             (before any durable write) and again at commit, because the
+             post can close while this append is in flight. *)
+          Error (Validation_error (closed_post_rejection_message ~post_id closed))
+        | Some post ->
+          (match comment_count_cap_error_unlocked store pid with
+           | Some msg -> Error (Validation_error msg)
+           | None ->
+          (match
+             validate_sub_board_post_policy_unlocked
+               store
+               ~author_id
+               ~hearth:post.hearth
+           with
+           | Error e -> Error e
+           | Ok () ->
+             let now = Time_compat.now () in
+             Ok
+               { id = Comment_id.generate ()
+               ; post_id = pid
+               ; parent_id = parent_cid
+               ; author = author_id
+               ; content
+               ; audience = Some audience
+               ; created_at = now
+               ; expires_at =
+                   (if ttl_hours = 0
+                    then 0.0
+                    else
+                      now
+                      +. (Stdlib.Float.of_int ttl_hours
+                          *. Masc_time_constants.hour))
+               ; votes_up = 0
+               ; votes_down = 0
+               })))
+    in
+    (match staged with
+     | Error _ as e -> e
+     | Ok comment ->
+        (match with_persist_lock store (fun () ->
+          match append_comment comment with
+          | Error _ as e -> e
+          | Ok () -> Ok (with_lock store (fun () ->
+              (* Commit from a fresh read: the post can change or vanish
+                 while the append is in flight; bumping the stale staged
+                 copy would clobber a concurrent unrelated mutation. The
+                 policy is re-checked for the same reason — it can flip
+                 while the append is in flight, and commit is the
+                 authoritative gate. *)
+              match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+              | None -> Error (Post_not_found post_id)
+              | Some { closed = Some closed; _ } ->
+                Error
+                  (Validation_error
+                     (closed_post_rejection_message ~post_id closed))
+              | Some post ->
+                (match comment_count_cap_error_unlocked store pid with
+                 | Some msg -> Error (Validation_error msg)
+                 | None ->
+                (match
+                   validate_sub_board_post_policy_unlocked
+                     store
+                     ~author_id
+                     ~hearth:post.hearth
+                 with
+                 | Error _ as e -> e
+                 | Ok () ->
+                   let post_key = Post_id.to_string pid in
+                   let comment_key = Comment_id.to_string comment.id in
+                   Hashtbl.add store.comments comment_key comment;
+                   let existing =
+                     Hashtbl.find_opt store.comments_by_post post_key
+                     |> Option.value ~default:[]
+                   in
+                   Hashtbl.replace
+                     store.comments_by_post
+                     post_key
+                     (comment_key :: existing);
+                   Hashtbl.replace
+                     store.posts
+                     post_key
+                     { post with
+                       reply_count = post.reply_count + 1
+                     ; updated_at =
+                         (* Never move [updated_at] backwards: a
+                            concurrent mutation can land between staging
+                            and commit with a newer timestamp. *)
+                         Stdlib.Float.max post.updated_at comment.created_at
+                     };
+                   mark_dirty_post store post_key;
+                   mark_dirty_comment store comment_key;
+                   invalidate_post_caches store;
+                   invalidate_comment_caches store;
+                   Ok { comment; audience; unresolved }))))) with
+        | Error _ as e -> e
+        | Ok committed ->
+          (match committed with
+           | Ok _ as ok -> ok
+           | Error _ as e ->
+             (* The durable append won but the commit lost (post deleted
+                or policy flipped mid-append), so the appended row is an
+                orphan on disk. Rewrite the comments snapshot to dispose
+                of it — the snapshot cannot contain the orphan because
+                it never reached memory. If the rewrite itself fails,
+                the next successful snapshot rewrite disposes of the
+                row; until then reply-count recalculation on load skips
+                comments whose post is gone, so the orphan cannot
+                distort counts. *)
+             rewrite_comments store;
+             e)))
+;;
+
+let add_comment store ~lookup ~post_id ~author ~content ?parent_id ?ttl_hours () =
+  add_comment_with_audience
+    store
+    ~lookup
+    ~post_id
+    ~author
+    ~content
+    ?parent_id
+    ?ttl_hours
+    ()
+  |> Result.map (fun creation -> creation.comment)
+;;
+
+let read_comments store ~post_id : (comment list, board_read_error) Result.t =
+  maybe_sweep store;
+  match Post_id.of_string_for_read post_id with
+  | Error e -> Error e
+  | Ok pid ->
+    with_lock store (fun () ->
+      let post_key = Post_id.to_string pid in
+      let comment_ids =
+        Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[]
+      in
+      let comments =
+        List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
+      in
+      Ok (List.sort compare_comments_oldest_first comments))
+;;
+
+let get_comment store ~comment_id : (comment, board_error) Result.t =
+  maybe_sweep store;
+  match Comment_id.of_string comment_id with
+  | Error e -> Error e
+  | Ok cid ->
+    with_lock store (fun () ->
+      let comment_key = Comment_id.to_string cid in
+      match Hashtbl.find_opt store.comments comment_key with
+      | Some comment -> Ok comment
+      | None -> Error (Comment_not_found comment_id))
+;;
+
+(** List all comments (for profile aggregation) *)
+let list_comments store ?(limit = 1000) () : comment list =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    let all = Hashtbl.fold (fun _ c acc -> c :: acc) store.comments [] in
+    let sorted =
+      List.sort (fun (a : comment) (b : comment) -> compare_comments_oldest_first b a) all
+    in
+    List.filteri (fun i _ -> i < limit) sorted)
+;;
+
+(** {1 Reactions} *)
+
+let normalize_reaction_emoji raw =
+  let emoji = String.trim raw in
+  if List.exists (String.equal emoji) board_reaction_emojis
+  then Ok emoji
+  else
+    Error (Validation_error (Printf.sprintf "Unsupported board reaction emoji: %s" emoji))
+;;
+
+let ensure_reaction_target_unlocked store ~target_type ~target_id =
+  match target_type with
+  | Reaction_post ->
+    (match Post_id.of_string target_id with
+     | Error e -> Error e
+     | Ok pid ->
+       if Hashtbl.mem store.posts (Post_id.to_string pid)
+       then Ok ()
+       else Error (Post_not_found target_id))
+  | Reaction_comment ->
+    (match Comment_id.of_string target_id with
+     | Error e -> Error e
+     | Ok cid ->
+       if Hashtbl.mem store.comments (Comment_id.to_string cid)
+       then Ok ()
+       else Error (Comment_not_found target_id))
+;;
+
+type reaction_summary_bucket =
+  { counts : (string, int) Hashtbl.t
+  ; reacted : (string, bool) Hashtbl.t
+  ; recent_users : (string, (string * float) list) Hashtbl.t
+  }
+
+let create_reaction_summary_bucket () =
+  { counts = Hashtbl.create 8
+  ; reacted = Hashtbl.create 8
+  ; recent_users = Hashtbl.create 8
+  }
+;;
+
+let add_reaction_to_summary_bucket bucket ?user_id (reaction : reaction) =
+  let reaction_user_id = Agent_id.to_string reaction.user_id in
+  let current =
+    Hashtbl.find_opt bucket.counts reaction.emoji |> Option.value ~default:0
+  in
+  Hashtbl.replace bucket.counts reaction.emoji (current + 1);
+  let users =
+    Hashtbl.find_opt bucket.recent_users reaction.emoji |> Option.value ~default:[]
+  in
+  Hashtbl.replace
+    bucket.recent_users
+    reaction.emoji
+    ((reaction_user_id, reaction.created_at) :: users);
+  match user_id with
+  | Some user when String.equal reaction_user_id user ->
+    Hashtbl.replace bucket.reacted reaction.emoji true
+  | Some _ | None -> ()
+;;
+
+let reaction_summaries_of_bucket bucket =
+  List.filter_map
+    (fun emoji ->
+       let count = Hashtbl.find_opt bucket.counts emoji |> Option.value ~default:0 in
+       if count = 0
+       then None
+       else
+         Some
+           { emoji
+           ; count
+           ; reacted =
+               Hashtbl.find_opt bucket.reacted emoji |> Option.value ~default:false
+           ; recent_user_ids =
+               Hashtbl.find_opt bucket.recent_users emoji
+               |> Option.value ~default:[]
+               |> List.sort (fun (_, a_ts) (_, b_ts) -> Stdlib.Float.compare b_ts a_ts)
+               |> List.map fst
+               |> List.filteri (fun idx _ -> idx < 5)
+           })
+    board_reaction_emojis
+;;
+
+let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
+  let bucket = create_reaction_summary_bucket () in
+  Hashtbl.iter
+    (fun _ (reaction : reaction) ->
+       if reaction.target_type = target_type && String.equal reaction.target_id target_id
+       then add_reaction_to_summary_bucket bucket ?user_id reaction)
+    store.reactions;
+  reaction_summaries_of_bucket bucket
+;;
+
+let reaction_summaries_batch_unlocked store ~targets ?user_id () =
+  let target_buckets = Hashtbl.create (List.length targets) in
+  List.iter
+    (fun target ->
+       Hashtbl.replace target_buckets target (create_reaction_summary_bucket ()))
+    targets;
+  Hashtbl.iter
+    (fun _ (reaction : reaction) ->
+       match
+         Hashtbl.find_opt target_buckets (reaction.target_type, reaction.target_id)
+       with
+       | None -> ()
+       | Some bucket -> add_reaction_to_summary_bucket bucket ?user_id reaction)
+    store.reactions;
+  Hashtbl.fold
+    (fun target bucket acc -> (target, reaction_summaries_of_bucket bucket) :: acc)
+    target_buckets
+    []
+;;
+
+let normalize_reaction_user_id = function
+  | Some user when not (String.equal (String.trim user) "") -> Some (String.trim user)
+  | Some _ | None -> None
+;;
+
+let list_reactions store ~target_type ~target_id ?user_id () =
+  maybe_sweep store;
+  let user_id = normalize_reaction_user_id user_id in
+  with_lock store (fun () ->
+    match ensure_reaction_target_unlocked store ~target_type ~target_id with
+    | Error e -> Error e
+    | Ok () -> Ok (reaction_summaries_unlocked store ~target_type ~target_id ?user_id ()))
+;;
+
+let list_reactions_batch store ~targets ?user_id () =
+  maybe_sweep store;
+  let user_id = normalize_reaction_user_id user_id in
+  with_lock store (fun () -> reaction_summaries_batch_unlocked store ~targets ?user_id ())
+;;
+
+type staged_reaction_toggle =
+  { key : string
+  ; previous : reaction option
+  ; desired : reaction option
+  ; snapshot : string
+  ; outcome : reaction_toggle_result
+  }
+
+let set_reaction_unlocked store key = function
+  | None -> Hashtbl.remove store.reactions key
+  | Some reaction -> Hashtbl.replace store.reactions key reaction
+;;
+
+let same_reaction_state left right =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right -> left = right
+  | None, Some _ | Some _, None -> false
+;;
+
+let stage_reaction_toggle_unlocked store ~target_type ~target_id ~user_id ~emoji =
+  match ensure_reaction_target_unlocked store ~target_type ~target_id with
+  | Error _ as error -> error
+  | Ok () ->
+    let user_id_string = Agent_id.to_string user_id in
+    let key = reaction_key ~target_type ~target_id ~user_id:user_id_string ~emoji in
+    let previous = Hashtbl.find_opt store.reactions key in
+    let desired =
+      match previous with
+      | Some _ -> None
+      | None ->
+        Some
+          { target_type
+          ; target_id
+          ; user_id
+          ; emoji
+          ; created_at = Time_compat.now ()
+          }
+    in
+    set_reaction_unlocked store key desired;
+    Fun.protect
+      ~finally:(fun () -> set_reaction_unlocked store key previous)
+      (fun () ->
+        let reacted = Option.is_some desired in
+        let summary =
+          reaction_summaries_unlocked
+            store
+            ~target_type
+            ~target_id
+            ~user_id:user_id_string
+            ()
+        in
+        let snapshot = reactions_jsonl_unlocked store in
+        Ok
+          { key
+          ; previous
+          ; desired
+          ; snapshot
+          ; outcome =
+              { target_type
+              ; target_id
+              ; user_id = user_id_string
+              ; emoji
+              ; reacted
+              ; summary
+              }
+          })
+;;
+
+let commit_staged_reaction_unlocked store staged =
+  let outcome = staged.outcome in
+  match
+    ensure_reaction_target_unlocked
+      store
+      ~target_type:outcome.target_type
+      ~target_id:outcome.target_id
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    let current = Hashtbl.find_opt store.reactions staged.key in
+    if not (same_reaction_state current staged.previous)
+    then
+      Error
+        (Validation_error
+           (Printf.sprintf
+              "reaction state changed before durable commit: target=%s user=%s emoji=%s"
+              outcome.target_id
+              outcome.user_id
+              outcome.emoji))
+    else (
+      set_reaction_unlocked store staged.key staged.desired;
+      Ok outcome)
+;;
+
+let toggle_reaction store ~target_type ~target_id ~user_id ~emoji
+  : (reaction_toggle_result, board_error) Result.t
+  =
+  let* () = require_persisted_snapshot_readable store.reactions_load_result in
+  maybe_sweep store;
+  match Agent_id.of_string user_id, normalize_reaction_emoji emoji with
+  | Error e, _ -> Error e
+  | _, Error e -> Error e
+  | Ok user_id, Ok emoji ->
+    with_persist_lock store (fun () ->
+      match
+        with_lock store (fun () ->
+          stage_reaction_toggle_unlocked
+            store
+            ~target_type
+            ~target_id
+            ~user_id
+            ~emoji)
+      with
+      | Error _ as error -> error
+      | Ok staged ->
+        (match save_reactions_jsonl_result staged.snapshot with
+         | Error _ as error -> error
+         | Ok () ->
+           (match with_lock store (fun () -> commit_staged_reaction_unlocked store staged) with
+            | Ok _ as committed -> committed
+            | Error commit_error ->
+              let current_snapshot =
+                with_lock store (fun () -> reactions_jsonl_unlocked store)
+              in
+              (match save_reactions_jsonl_result current_snapshot with
+               | Ok () -> Error commit_error
+               | Error persistence_error ->
+                 (* The durable rollback write also failed, so [persistence_error]
+                    is the error returned to the caller.  Log the superseded
+                    [commit_error] here — otherwise the divergence between the
+                    staged write and the in-memory commit is lost entirely. *)
+                 Log.BoardLog.warn
+                   "reaction commit error superseded by durable rollback failure: commit_error=%s persistence_error=%s"
+                   (Board_types.show_board_error commit_error)
+                   (Board_types.show_board_error persistence_error);
+                 Error persistence_error))))
+;;
+
+(** {1 SubBoard Operations} *)
+
+let sub_board_to_yojson = Board_sub_board_json.sub_board_to_yojson
+let parse_sub_board_members = Board_sub_board_json.parse_sub_board_members
+let sub_board_of_yojson = Board_sub_board_json.sub_board_of_yojson
+
+let sub_boards_jsonl_unlocked store =
+  let buf = Buffer.create 1024 in
+  Hashtbl.iter
+    (fun _ (sb : sub_board) ->
+       Buffer.add_string buf (Yojson.Safe.to_string (sub_board_to_yojson sb));
+       Buffer.add_char buf '\n')
+    store.sub_boards;
+  Buffer.contents buf
+;;
+
+let save_sub_boards_jsonl content =
+  try
+    ensure_masc_dir ();
+    let path = sub_boards_path () in
+    match Fs_compat.save_file_atomic path content with
+    | Ok () -> ()
+    | Error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
+  with
+  | Sys_error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
+;;
+
+let rewrite_sub_boards store =
+  with_persist_lock store (fun () ->
+    let content = with_lock store (fun () -> sub_boards_jsonl_unlocked store) in
+    save_sub_boards_jsonl content)
+;;
+
+let append_sub_board (sb : sub_board) =
+  try
+    ensure_masc_dir ();
+    let path = sub_boards_path () in
+    Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n");
+    Ok ()
+  with
+  | Sys_error msg -> persist_io_error ~where:"append_sub_board" msg
+;;
+
+let valid_slug_pattern = Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
+
+let create_sub_board
+      store
+      ~slug
+      ~name
+      ~description
+      ~owner
+      ?(members = [])
+      ?(access = Open)
+      ()
+  : (sub_board, board_error) Result.t
+  =
+  let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
+  let slug = String.lowercase_ascii (String.trim slug) in
+  if
+    String.length slug < 1
+    || String.length slug > 64
+    || not (Re.execp valid_slug_pattern slug)
+  then
+    Error
+      (Validation_error
+         (Printf.sprintf
+            "Invalid sub-board slug %S: must be 1-64 lowercase alphanumeric/-/_"
+            slug))
+  else (
+    match Agent_id.of_string owner with
+    | Error e -> Error e
+    | Ok owner_id ->
+      (match parse_sub_board_members ~owner:owner_id members with
+       | Error e -> Error e
+       | Ok members ->
+         (* Write-ahead (#29004, same class as #28934/#28952): validate
+            under [with_lock] with no mutation, then hold the persistence
+            lock across append and commit under [with_lock] from a fresh
+            read. The previous shape mutated first and swallowed the
+            append error ([record_persist_error] + unit): a failed
+            append still returned [Ok sb] whose sub-board existed only
+            in memory and vanished on restart. *)
+         let staged =
+           with_lock store (fun () ->
+             if Hashtbl.mem store.sub_boards_by_slug slug
+             then
+               Error
+                 (Already_exists (Printf.sprintf "Sub-board slug %S already exists" slug))
+             else (
+                 let id = Sub_board_id.generate () in
+                 Ok
+                   { id
+                   ; slug
+                   ; name = String.trim name
+                   ; description = String.trim description
+                   ; owner = owner_id
+                   ; members
+                   ; access
+                   ; created_at = Time_compat.now ()
+                   ; post_count = 0
+                   }))
+         in
+         (match staged with
+          | Error _ as e -> e
+          | Ok sb ->
+            (match with_persist_lock store (fun () ->
+               match append_sub_board sb with
+               | Error _ as e -> e
+               | Ok () -> Ok (with_lock store (fun () ->
+                   if Hashtbl.mem store.sub_boards_by_slug slug
+                   then
+                     Error
+                       (Already_exists
+                          (Printf.sprintf "Sub-board slug %S already exists" slug))
+                   else (
+                     Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) sb;
+                     Hashtbl.replace
+                       store.sub_boards_by_slug
+                       slug
+                       (Sub_board_id.to_string sb.id);
+                     Ok sb)))) with
+             | Error _ as e -> e
+             | Ok committed ->
+               (match committed with
+                | Ok _ as ok -> ok
+                | Error _ as e ->
+                  (* Lost a same-slug race after the append: the orphan
+                     row would shadow the winner on restart (the loader
+                     is last-row-wins per slug), so rewrite the snapshot
+                     from the committed store now. *)
+                  rewrite_sub_boards store;
+                  e)))))
+;;
+
+
+let update_sub_board
+      store
+      ~sub_board_id
+      ?name
+      ?description
+      ?members
+      ?access
+      ()
+  : (sub_board, board_error) Result.t
+  =
+  let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
+  let result =
+    with_lock store (fun () ->
+      let sb_opt =
+        match Hashtbl.find_opt store.sub_boards sub_board_id with
+        | Some sb -> Some sb
+        | None ->
+          (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
+           | Some id -> Hashtbl.find_opt store.sub_boards id
+           | None -> None)
+      in
+      match sb_opt with
+      | None ->
+        Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
+      | Some sb ->
+        let members_result =
+          match members with
+          | None -> Ok sb.members
+          | Some raw -> parse_sub_board_members ~owner:sb.owner raw
+        in
+        (match members_result with
+         | Error _ as error -> error
+         | Ok members ->
+           let updated =
+             { sb with
+               (* DET-OK: omitted text fields preserve existing typed values. *)
+               name = Option.value ~default:sb.name (Option.map String.trim name)
+             ; description =
+                 Option.value
+                   ~default:sb.description
+                   (Option.map String.trim description)
+             ; members
+             (* DET-OK: omitted access keeps the existing typed policy. *)
+             ; access = Option.value ~default:sb.access access
+             }
+           in
+           Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) updated;
+           Ok updated))
+  in
+  Result.iter (fun _ -> rewrite_sub_boards store) result;
+  result
+;;
+
+let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
+  with_lock store (fun () ->
+    match Hashtbl.find_opt store.sub_boards sub_board_id with
+    | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
+    | None ->
+      (* fallback: try slug *)
+      (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
+       | Some id ->
+         (match Hashtbl.find_opt store.sub_boards id with
+          | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
+          | None ->
+            Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))
+       | None ->
+         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))))
+;;
+
+let list_sub_boards store : sub_board list =
+  with_lock store (fun () ->
+    let counts = sub_board_post_counts_unlocked store in
+    Hashtbl.fold
+      (fun _ sb acc -> sub_board_with_post_count counts sb :: acc)
+      store.sub_boards
+      []
+    |> List.sort (fun (a : sub_board) (b : sub_board) ->
+      compare a.created_at b.created_at))
+;;
+
+let delete_sub_board store ~sub_board_id : (unit, board_error) Result.t =
+  let* () = require_persisted_snapshot_readable store.sub_boards_load_result in
+  with_persist_lock store (fun () ->
+  let snapshot =
+    with_lock store (fun () ->
+    let resolved_opt =
+      match Hashtbl.find_opt store.sub_boards sub_board_id with
+      | Some sb -> Some (sub_board_id, sb.slug)
+      | None ->
+        (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
+         | None -> None
+         | Some id ->
+           (match Hashtbl.find_opt store.sub_boards id with
+            | Some sb -> Some (id, sb.slug)
+            | None -> None))
+    in
+    match resolved_opt with
+    | None ->
+      Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))
+    | Some (id, slug) ->
+      Hashtbl.remove store.sub_boards id;
+      Hashtbl.remove store.sub_boards_by_slug slug;
+      (* Orphan policy: clear hearth on posts that belonged to this sub-board *)
+      Hashtbl.iter
+        (fun _ (post : post) ->
+           match post.hearth with
+           | Some h when String.equal h slug ->
+             let updated = { post with hearth = None } in
+             Hashtbl.replace store.posts (Post_id.to_string post.id) updated;
+             store.dirty_posts <- true;
+             Hashtbl.replace store.dirty_post_ids (Post_id.to_string post.id) ()
+           | _ -> ())
+        store.posts;
+      invalidate_post_caches store;
+      let content = sub_boards_jsonl_unlocked store in
+      Ok content)
+  in
+  match snapshot with
+  | Error _ as e -> e
+  | Ok content ->
+    save_sub_boards_jsonl content;
+    Ok ())
+;;
+
+(** {1 Voting - Deduplicated} *)

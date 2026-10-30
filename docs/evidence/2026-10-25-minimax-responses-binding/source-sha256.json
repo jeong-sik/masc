@@ -1,0 +1,9 @@
+{
+  "source_head": "fe5060711754abcb42188d6c7188eec33074d283",
+  "base": "b183eb090a737547fccd2bc12c408228f0a1e9ac",
+  "files": {
+    "packages/agent_core/models.toml": "a27fcec99335e2fcc8866c7f6577cc0816a37f72cda08f09cdaec25ec3c6cc85",
+    "packages/agent_core/test/dune": "b5163cd96ee118bbac455652c9a0fc3a42a838a40de8cd1c310d376facc77e7b",
+    "packages/agent_core/test/test_minimax_responses_binding.ml": "bc2359a524f741f4eb75917181a1fcb5bfbe4f2fc5c2bba8f6f91be78c189d3b"
+  }
+}

@@ -1,0 +1,24 @@
+Compact help hidden key: b'?'
+Compact help hidden key: b'\x1b'
+Exact activity focused PTY: PASS (synthetic HTTP)
+Traceback (most recent call last):
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/test_tui_exact_activity_pty.py", line 197, in <module>
+    run_compact_quit(sys.argv[1])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/test_tui_exact_activity_pty.py", line 190, in run_compact_quit
+    h.run_terminal_scenario(binary, description='Compact overlay owns Exact quit',
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        interact=interact, http_fixtures=fixtures, terminal_cols=120, terminal_rows=32)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/tui_keyboard_harness.py", line 2394, in run_terminal_scenario
+    interact(process, master_fd, slave_fd, output, base_path)
+    ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/test/test_tui_exact_activity_pty.py", line 188, in interact
+    assert process.wait(timeout=3) == 0, 'second compact q did not finish the visible quit flow'
+           ~~~~~~~~~~~~^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py", line 1279, in wait
+    return self._wait(timeout=timeout)
+           ~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/subprocess.py", line 2076, in _wait
+    raise TimeoutExpired(self.args, timeout)
+subprocess.TimeoutExpired: Command '['/bin/sh', '-c', 'trap \'\' INT TERM; kill -STOP $$; "$@"; tui_status=$?; kill -STOP $$; exit "$tui_status"', 'masc-tui-test-launcher', '/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41201-machine-help-integration-20261005/_build/default/bin/masc_tui.exe', '--base-path', '/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-tui-keyboard-6a0grw0b', '--workspace', 'workspace\x1b]8;;https://attacker.invalid\x07owned', '--port', '60022', '--refresh', '60.0']' timed out after 3 seconds

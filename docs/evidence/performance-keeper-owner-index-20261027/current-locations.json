@@ -1,0 +1,62 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Locate exact retained helper and historical test-response captures without changing capture-time paths or bytes.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "recorded-capture-hashes.json",
+    "sha256": "377f2aa61957932ddfa69cdb829a135f4642b248de63fafffb2002a9acff3970"
+  },
+  "files": {
+    "docs/evidence/performance-keeper-owner-index-20261027/plan.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/plan.json",
+      "recorded_sha256": "5fa06bd0ec1f179f7b03923d0b25715463f2cb79beed999400d66cc24be4463e",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-keeper-owner-index-20261027/summary.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/summary.json",
+      "recorded_sha256": "2e95907cafd339a3b7e5229d47ebe84dfec4e8fcf4634e1c09390205f41168c2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-keeper-owner-index-20261027/measurements.jsonl": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/stdout.jsonl",
+      "recorded_sha256": "cfe8cdb1bfeb189896ae352a126eac3bb6c114979c05d454e0981e6ff89b7ca9",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-keeper-owner-index-20261027/interpreter.stderr.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/stderr.txt",
+      "recorded_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-keeper-owner-index-20261027/execution.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/execution.json",
+      "recorded_sha256": "e0467bbebf3e892e69188cc66c275c4c8e1a8e123201247ec0080c25467a9b17",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-keeper-owner-index-20261027/probe.ocaml.txt": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-helper-v1/probe.ml",
+      "recorded_sha256": "26f0c68cc3a6b0681221c4e7b332f680936a16e08ab1feb8475cb7efb4e0c0bb",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-keeper-owner-index-20261027/reproduce.py": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-preparation-v1/run_probe.py",
+      "recorded_sha256": "dc1c3fb3eacef86e8436378653d49aea00964a91b500123e1c9752926733659e",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-keeper-owner-index-20261027/test-response-checks.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-review-response-v1/verification.json",
+      "recorded_sha256": "034d40726b8ac10e4ddda8e3a29e3328ceca6eef1ef863a2d3c543c3d2688d7c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-keeper-owner-index-20261027/ci-response-checks.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-ci-response-v1/verification.json",
+      "recorded_sha256": "2113ff125b06da0450f9fca28ec9fe5c65d4a2a7dadfc340c1b359faf0d66aca",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/performance-keeper-owner-index-20261027/ci-runtime-response-checks.json": {
+      "recorded_path": "artifacts/runs/extreme-perf-20261026/owner-projection-map-ci-runtime-response-v1/verification.json",
+      "recorded_sha256": "c8d7106212ccab0752ed5b9f6a578a85218454e0db4121ab329285adcffb4a93",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

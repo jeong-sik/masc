@@ -1,0 +1,67 @@
+accounts.000.output
+ASSERT exact account and dotted model
+ASSERT no prefix guess
+ASSERT missing binding stays missing
+
+accounts.001.output
+ASSERT both account bindings, including implicit set member
+ASSERT binding context is account scoped
+
+accounts.002.output
+
+parse.000.output
+ASSERT provider
+ASSERT api name
+ASSERT effort comes from the models table
+ASSERT temperature comes from the models table
+ASSERT max-tokens comes from the binding
+
+parse.001.output
+ASSERT no effort
+ASSERT no temperature
+ASSERT no max-tokens
+
+parse.002.output
+ASSERT no provider row
+ASSERT no voice row
+ASSERT only the two models
+
+parse.003.output
+ASSERT binding value wins
+
+parse.004.output
+ASSERT comment ignored
+
+render.000.output
+ASSERT effort header found
+ASSERT row is at least as wide as the effort column
+ASSERT row is at least as wide as the effort column
+
+render.001.output
+ASSERT both rows are the same width in cells
+
+render.002.output
+ASSERT no scalar was cut in half
+ASSERT the clip marker is there
+
+render.003.output
+ASSERT narrow pane does not fit fixed table
+ASSERT stacked output keeps max-tokens
+ASSERT stacked lines fit pane
+
+render.004.output
+ASSERT first item starts at zero
+ASSERT second item follows first
+
+render.005.output
+ASSERT empty says so
+
+render.006.output
+ASSERT selected binding detail
+
+render.007.output
+ASSERT absent values and default API name
+
+render.008.output
+ASSERT models section quotes the dotted key
+ASSERT binding section quotes the dotted key

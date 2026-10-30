@@ -1,0 +1,89 @@
+{
+  "scope": "Actual full Toml_line_editor module/interface and existing direct test file; no extracted modules or behavioral mocks",
+  "old_product_head": null,
+  "temporary_directory": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-bool-comment-after-_q5lzff1",
+  "sources": {
+    "lib/toml_line_editor/toml_line_editor.mli": "c04068627dd76c76a5db57b3a05bbf9103ef7691cdd81c019dae90fd1cac68d5",
+    "lib/toml_line_editor/toml_line_editor.ml": "379798dbce2df44e01139e52217325d00587dc24068ddf667f862afea3abf610",
+    "test/toml_line_editor/test_toml_line_editor.ml": "de65dde1467f61077ede281ed9f2c470363c39ff784f7f4a5bbfc96a14ace65f"
+  },
+  "commands": [
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-version"
+      ],
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "otoml,alcotest",
+        "-c",
+        "toml_line_editor.mli"
+      ],
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "otoml,alcotest",
+        "-c",
+        "toml_line_editor.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "otoml,alcotest",
+        "-c",
+        "test_toml_line_editor.ml"
+      ],
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlfind",
+        "ocamlc",
+        "-w",
+        "+32+69",
+        "-warn-error",
+        "+a",
+        "-package",
+        "otoml,alcotest",
+        "-linkpkg",
+        "toml_line_editor.cmo",
+        "test_toml_line_editor.cmo",
+        "-o",
+        "test.exe"
+      ],
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-bool-comment-after-_q5lzff1/test.exe",
+        "--color=never"
+      ],
+      "exit_code": 0
+    }
+  ]
+}

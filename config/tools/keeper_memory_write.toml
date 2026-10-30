@@ -1,0 +1,74 @@
+defer_loading = true
+name = "keeper_memory_write"
+description = """
+Persist a memory candidate or an explicit current-memory update.
+
+Ordinary observations without source_path or supersedes are saved as pending Librarian admission, not current Memory. Their receipt returns request_id and sequence, not memory_id or inserted/reobserved. The Librarian may incorporate, absorb into existing knowledge, decline non-durable input, or defer. A pending request_id cannot be used as a premise or supersedes target; search current Memory for an admitted premise identity. Supersedes still requires origin authored; admission may produce an injected claim that cannot be superseded through this tool. Another tool call creates another pending request, so do not retry merely because current search does not show it.
+
+For derived or superseding current claims, memory_id identifies exact claim bytes. Their current-store receipts distinguish inserted/reobserved.
+
+Memory is for thoughts, decisions and state worth remembering. When a new claim replaces your own earlier claim of the same kind (e.g. a progress or position snapshot), pass that claim's memory_id as supersedes instead of writing another copy. Do not write the same kind of snapshot again without superseding the previous one.
+
+Before recording a recurring lesson, search for the existing memory. A paraphrase or another successful run with a new PR number or date is not new knowledge. Keep the existing claim if its conditions and exceptions have not changed. When correcting your own claim, use supersedes. Store durable decisions and lessons separately from transient run receipts and task/PR progress that their authoritative stores can reconstruct.
+
+Keep task sequencing and operating constraints in typed stores, not memory prose. Writes carry typed provenance and report failures. source_path binds recall to unchanged source bytes. For a derived conclusion, pass rule_id and premise_ids; one complete support set must remain current. For Board evidence, pass board_post_id and optional board_comment_id. Board evidence cannot combine with source_path or derivation."""
+additional_properties = false
+
+[[params]]
+name = "title"
+type = "string"
+description = "Optional hook; may be empty."
+
+[[params]]
+name = "content"
+type = "string"
+required = true
+description = """
+Body. Required, must be non-empty. For decisions, lead with the decision \
+then **Why** and **How to apply** lines."""
+
+[[params]]
+name = "source_path"
+type = "string"
+description = "Optional keeper-visible regular file that makes this claim source-bound."
+
+[[params]]
+name = "rule_id"
+type = "string"
+description = "Opaque rule identity for a derived conclusion. Must be paired with premise_ids."
+
+[[params]]
+name = "premise_ids"
+type = "array"
+items = { type = "string" }
+min_items = 1
+unique_items = true
+description = "Exact memory_id values supporting a derived conclusion. Must be paired with rule_id."
+
+[[params]]
+name = "supersedes"
+type = "string"
+description = "Current memory_id of your own earlier claim that this one replaces: from a current-write receipt or a keeper_memory_search match with origin authored. A pending request_id is not a memory identity. It is removed in the same commit. If the Librarian already dropped it, the claim is still written and the result says so; otherwise nothing is written unless it is one of your current claims."
+
+[[params]]
+name = "board_post_id"
+type = "string"
+description = "The Board post the claim was read from (the post_id the Board tools return). Only for observations, not for derivations or source_path claims."
+
+[[params]]
+name = "board_comment_id"
+type = "string"
+description = "The comment under board_post_id the claim was read from. Requires board_post_id."
+
+[help]
+short_description = "Persist a memory candidate or current-memory update."
+when_to_use = "Use for durable knowledge worth Librarian admission, or an explicit derived/source-bound/superseding update. Pending admission is not current Memory."
+key_constraints = [
+  "There is no kind argument; sending one is rejected.",
+  "Do not use for transient scratch notes.",
+  "A source-bound claim is discarded when its source bytes change or become unreadable.",
+  "A derived claim cannot use source_path and is automatically retracted when no complete support set remains current.",
+  "supersedes names one of your own claims written with this tool (search origin authored); it cannot combine with source_path.",
+]
+details_markdown = "An ordinary observation without source_path or supersedes persists in the pending admission queue. Its request_id and sequence acknowledge input only; they cannot authorize premises or supersession. Current search can return an identity after admission, but absence there does not prove the candidate was not saved. A retry is a new candidate, including after prior consumption. Derived, source-bound and superseding writes retain their current-store behavior. An ordinary-current receipt returns memory_id, identity_disposition (inserted or reobserved), and a bounded basis summary (kind and proof_count for derived facts). Exact proof identities remain available through memory search. A source-bound receipt instead returns source_path and source_sha256 and is not eligible as a derived premise in this slice. For a derived claim, pass the rule identity and exact ordinary-current premise memory ids; Memory OS maintains the least supported fixed point."
+examples = ["title='region' content='The deployment region is eu-west-1.' source_path='config/deploy.env'", "content='The rollout is blocked.' rule_id='blocked_when_dependency_fails' premise_ids=['sha256:...']"]

@@ -1,0 +1,1134 @@
+module Va = Multimodal.Vision_analyze
+module Store = Multimodal.Vision_artifact_store
+
+type complete_fn = Keeper_provider_subcall.complete_fn
+
+(* The media_failover vision runtimes are entirely /v1 "none" thinking-control
+   lanes — reasoning-capable models with no wire field to disable thinking.
+   Requesting enable_thinking=false there is fail-closed by the agent_core
+   guard (Disable_not_encodable), which broke all image analysis (2026-08).
+   So we leave thinking uncontrolled (enable_thinking=None below — the guard
+   admits it) and rely on clear_thinking/preserve_thinking to keep the reply
+   clean; on /v1 the model's reasoning lands in a separate response field and
+   never enters the JSON content. The budget must cover the answer PLUS any
+   reasoning the model spends first, since that phase can no longer be
+   suppressed; structured response inspection still flags a MaxTokens cut. The value
+   is the [Env_config_keeper.KeeperVision.max_output_tokens] knob — one /v1 pool
+   shared by reasoning and answer, defaulting generous so reasoning cannot
+   truncate the reply the way the former 4096 did (2026-08-27 MiniMax M3). *)
+let vision_default_max_tokens () = Env_config_keeper.KeeperVision.max_output_tokens ()
+
+let max_image_bytes () = Env_config_keeper.KeeperVision.max_image_bytes ()
+
+let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
+  { provider_cfg with
+    max_tokens =
+      (match provider_cfg.max_tokens with
+       | Some _ as configured -> configured
+       | None -> Some (vision_default_max_tokens ()))
+  ; tool_choice = None
+  ; disable_parallel_tool_use = true
+  ; enable_thinking = None
+  ; preserve_thinking = Some false
+  ; clear_thinking = Some true
+  }
+  |> Keeper_structured_output_schema.without_response_format
+
+let vision_output_instruction =
+  "Return only a JSON object with a non-empty string field named text. When \
+   the requested content is not visible, explicitly describe its absence \
+   in text; do not invent content to fill the field. Distinguish no visible \
+   content from content that is present but unreadable. Do not include \
+   markdown fences or prose outside the JSON object."
+
+let prompt_of_request (req : Va.request) =
+  Printf.sprintf "Analyze the attached image for this request:\n%s\n\n%s"
+    req.Va.query vision_output_instruction
+
+(* A vision sub-call is a provider request, not history: the image rides
+   inline. *)
+let message_of_request (req : Va.request) : Llm_provider.Types.message =
+  Llm_provider.Types.make_message
+    ~role:Llm_provider.Types.User
+    [ Llm_provider.Types.text_block (prompt_of_request req)
+    ; Llm_provider.Types.image_block
+        ~media_type:req.Va.image_media_type
+        ~source:(Llm_provider.Types.Base64 (Base64.encode_string req.Va.image_bytes))
+    ]
+
+type vision_backend =
+  | Api of Llm_provider.Provider_config.t
+  | Official_client
+
+let vision_runtime_candidates ~now =
+  (* Only [runtime.media_failover] qualifies. Capability admission uses the
+     same predicate as the Keeper media reroute. *)
+  Runtime_agent.media_candidates ()
+  |> Runtime_candidate_standing.order ~now
+       ~policy:(Runtime_candidate_standing.Rate_rest_only
+         {rest_sec=(fun ~retry_after -> Keeper_runtime_failure_route.path_rest_sec
+           ~cap_sec:Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+           ~retry_class:Keeper_runtime_failure_route.Rate_limited
+           ~retry_after_hint:retry_after)})
+       ~quota_scope_of:(fun (rt : Runtime_instance.t) ->
+         Some (Runtime_instance.quota_scope_of_runtime rt))
+       ~candidate_backpressure_of:(fun (rt : Runtime_instance.t) ->
+         Some rt.candidate_backpressure)
+  |> List.filter_map (fun (rt : Runtime_instance.t) ->
+       let caps = Runtime_agent.input_capabilities_of_runtime rt in
+       if not (Runtime_agent.caps_admit_required_modalities caps [ "image" ])
+       then None
+       else match rt.Runtime_instance.execution with
+       | Runtime_execution.Agent_core config -> Some (rt.id, rt, Api config)
+       | Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _ -> Some (rt.id, rt, Official_client)
+       | Runtime_execution.Antigravity_cli _ -> None
+       (* The official-client read holds its answer to an output schema, and
+          [muse serve] has no channel for one: Fusion_official_client refuses
+          the request, so the runtime is no candidate. *)
+       | Runtime_execution.Muse_serve _ -> None)
+
+let vision_runtime_ids ~now : string list =
+  List.map (fun (runtime_id, _, _) -> runtime_id) (vision_runtime_candidates ~now)
+
+let first_vision_runtime_id ~now : (string, string) result =
+  match vision_runtime_ids ~now with
+  | id :: _ -> Ok id
+  | [] -> Error "no image-capable runtime configured"
+
+(* Per-keeper content-addressed storage. Workspace callers keep publication,
+   read and promotion on the same explicit config-root resolution. *)
+let vision_store_dir ?base_path ~keeper_name () =
+  let keepers = match base_path with
+    | None -> Config_dir_resolver.keepers_dir ()
+    | Some base_path -> Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  Filename.concat keepers (keeper_name ^ ".vision")
+
+let frames_dir ?base_path ~keeper_name () =
+  Store.frames_dir ~dir:(vision_store_dir ?base_path ~keeper_name ())
+
+let run_artifact_job ~label f =
+  match Domain_pool_ref.get () with
+  | None -> Eio_guard.run_in_systhread ~label f
+  | Some _ ->
+      Eio_guard.check_if_ready ();
+      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
+
+let store_frame ?base_path ~keeper_name bytes =
+  let dir = frames_dir ?base_path ~keeper_name () in
+  run_artifact_job ~label:"vision-artifact-store" (fun () ->
+    Store.store ~auto_prune:true ~dir bytes)
+
+let store_kept ?base_path ~keeper_name bytes =
+  let dir = vision_store_dir ?base_path ~keeper_name () in
+  run_artifact_job ~label:"vision-artifact-store" (fun () ->
+    Store.store ~auto_prune:false ~dir bytes)
+
+let load_artifact ~dir handle =
+  run_artifact_job ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
+
+let record_vision_analyze_result ~result ~reason =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string VisionAnalyze)
+    ~labels:[ "result", result; "reason", reason ]
+    ()
+;;
+
+(* #35456: candidate start/termination rows join the parent tool call.
+   The parent's [tool_use_id] (and trace id when known) is carried down
+   from the dispatch context; each row names the runtime and its event
+   only -- never image bytes, prompt text, or credentials. The start row
+   is written when a candidate arm begins, the attempt row when it
+   terminates (ok/error/skipped), and the cancelled row when the parent
+   kills the in-flight provider call -- so the repro's exact shape
+   (start, then a parent cancel minutes later) still leaves the
+   joinable pair. Every candidate row is a [Lifecycle_event]: a candidate
+   is a step inside one [keeper_analyze_image] call, not a call of its own,
+   and it carries its own outcome only for the join. Readers that count
+   calls skip it by kind. The parent row is written by the post-tool hook,
+   so a walk the parent cancelled, or the eager ingest path that passes no
+   [tool_use_id], leaves candidate rows with no parent row to join. *)
+
+(* One owner for the kwargs every vision-candidate row shares; callers vary
+   only the input fields, outcome and duration. *)
+let log_vision_row ?tool_use_id ?trace_id ~input ~wire_outcome ~duration_ms () =
+  Keeper_tool_call_log.log_call
+    ~keeper_name:"system"
+    ~tool_name:"vision_candidate"
+    ~input
+    ~output_text:""
+    ~record_kind:Keeper_tool_call_log.Lifecycle_event
+    ~wire_outcome
+    ~duration_ms
+    ?tool_use_id
+    ?trace_id
+    ()
+
+let record_vision_candidate_attempt
+      ?tool_use_id
+      ?trace_id
+      ~runtime_id
+      ~result
+      ~reason
+      ~duration_ms
+      ~success
+      () =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string VisionCandidateAttempts)
+    ~labels:[ "runtime_id", runtime_id; "result", result; "reason", reason ]
+    ();
+  log_vision_row
+    ~input:(`Assoc
+              [ "runtime_id", `String runtime_id
+              ; "result", `String result
+              ; "reason", `String reason
+              ])
+    ~wire_outcome:(if success then Tool_result.Ok else Tool_result.Error)
+    ~duration_ms
+    ?tool_use_id
+    ?trace_id
+    ()
+;;
+
+(* The start row is written when a candidate arm begins, before any provider
+   work, so a parent cancellation that kills the in-flight call still leaves
+   the arm's opening event joined to the parent call. *)
+let record_vision_candidate_start
+      ?tool_use_id
+      ?trace_id
+      ~runtime_id
+      ~attempt_index
+      ~candidate_count
+      () =
+  log_vision_row
+    ~input:(`Assoc
+              [ "runtime_id", `String runtime_id
+              ; "result", `String "started"
+              ; "attempt_index", `Int attempt_index
+              ; "candidate_count", `Int candidate_count
+              ])
+    ~wire_outcome:Tool_result.Unknown
+    ~duration_ms:0.0
+    ?tool_use_id
+    ?trace_id
+    ()
+;;
+
+(* The cancelled row terminates a candidate whose provider call the parent
+   killed. Without it the walk's cancellation left no row at all: the start
+   row said the candidate began and nothing ever said how it ended.
+
+   Its callers are the [Cancelled] arms, so it always runs in a fiber whose
+   context is already cancelled, and the ledger append can suspend (the
+   store's [Eio.Mutex] when another writer holds it). A suspension there
+   raises [Cancelled] again and the row is lost; the exception that escapes
+   is the same [Cancelled], so nothing outside can tell. The write runs in
+   its own uncancelled context; the caller re-raises the original
+   cancellation afterwards. *)
+let record_vision_candidate_cancelled ?tool_use_id ?trace_id ~runtime_id () =
+  Eio.Cancel.protect (fun () ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string VisionCandidateAttempts)
+      ~labels:
+        [ "runtime_id", runtime_id
+        ; "result", "cancelled"
+        ; "reason", "parent_cancelled"
+        ]
+      ();
+    log_vision_row
+      ~input:(`Assoc
+                [ "runtime_id", `String runtime_id
+                ; "result", `String "cancelled"
+                ; "reason", `String "parent_cancelled"
+                ])
+      ~wire_outcome:Tool_result.Error
+      ~duration_ms:0.0
+      ?tool_use_id
+      ?trace_id
+      ())
+;;
+
+let err_json ?detail ~failure_class code =
+  record_vision_analyze_result ~result:"error" ~reason:code;
+  let fields =
+    [ "ok", `Bool false
+    ; "error", `String code
+    ; ( "failure_class"
+      , `String (Tool_result.tool_failure_class_to_string failure_class) )
+    ]
+  in
+  let fields =
+    match detail with
+    | Some d -> fields @ [ "detail", `String d ]
+    | None -> fields
+  in
+  Yojson.Safe.to_string (`Assoc fields)
+
+(* AcceptRejected is the caller's own transport wiring refused before dispatch
+   (a missing clock, an invalid deadline). Every candidate would refuse the
+   same wiring, so this one still ends the walk. *)
+let wiring_rejected = function
+  | Llm_provider.Http_client.AcceptRejected _ -> true
+  | Llm_provider.Http_client.HttpError _ | Llm_provider.Http_client.NetworkError _
+  | Llm_provider.Http_client.TimeoutError _ | Llm_provider.Http_client.ProviderTerminal _
+  | Llm_provider.Http_client.ProviderFailure _ -> false
+
+(* Capacity belongs to the selected binding. A later image runtime may admit
+   the same pixels under a different request/context ceiling. HTTP 413 states
+   that cause directly; arbitrary HTTP 400/422 prose must not infer it. *)
+let candidate_capacity_http_error = function
+  | Llm_provider.Http_client.HttpError { code = 413; _ }
+  | Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Context_overflow _; _ } -> true
+  | Llm_provider.Http_client.HttpError _ | Llm_provider.Http_client.NetworkError _
+  | Llm_provider.Http_client.TimeoutError _ | Llm_provider.Http_client.AcceptRejected _
+  | Llm_provider.Http_client.ProviderTerminal _
+  | Llm_provider.Http_client.ProviderFailure
+      { kind =
+          ( Llm_provider.Http_client.Capacity_exhausted _
+          | Llm_provider.Http_client.Hard_quota _
+          | Llm_provider.Http_client.Capability_mismatch _
+          | Llm_provider.Http_client.Cli_policy_invalid _
+          | Llm_provider.Http_client.Cli_startup_failed _
+          | Llm_provider.Http_client.Provider_parse_error _
+          | Llm_provider.Http_client.Provider_wire_error _
+          | Llm_provider.Http_client.Provider_reported_error _
+          | Llm_provider.Http_client.Provider_interrupted
+          | Llm_provider.Http_client.Response_body_too_large _
+          | Llm_provider.Http_client.Empty_completion _
+          | Llm_provider.Http_client.Unknown_provider_failure _ )
+      ; _
+      } -> false
+
+(* Every other 4xx is this binding's verdict on this request: a parameter
+   range (glm-4.6v refused max_tokens 40960 on 2026-09-07), a media type, a
+   key it does not accept (401), a model its plan does not serve (403/404).
+   It says nothing about the next candidate, which has its own key and its
+   own wire, so this class ends the candidate, not the walk. Transient codes
+   (408/409/429) and capacity (413) are classified before it and keep their
+   own handling; it still names the failure class once every candidate has
+   answered. *)
+let candidate_policy_http_error err =
+  match err with
+  | Llm_provider.Http_client.HttpError { code; _ } ->
+    code >= 400
+    && code < 500
+    && (not (candidate_capacity_http_error err))
+    && not (Runtime_attempt_fsm.should_try_next err)
+  | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.TimeoutError _
+  | Llm_provider.Http_client.AcceptRejected _ | Llm_provider.Http_client.ProviderTerminal _
+  | Llm_provider.Http_client.ProviderFailure _ -> false
+
+let failure_class_of_http_error = function
+  | err when wiring_rejected err || candidate_policy_http_error err ->
+    Tool_result.Policy_rejection
+  | err when candidate_capacity_http_error err -> Tool_result.Runtime_failure
+  | err when Runtime_attempt_fsm.should_try_next err -> Tool_result.Dependency_unavailable
+  | _ -> Tool_result.Runtime_failure
+
+let string_member key json =
+  match Yojson.Safe.Util.member key json with
+  | `String s -> Some s
+  | _ -> None
+
+let normalize_media_type value =
+  String.trim value |> String.lowercase_ascii
+
+(* The downscaler's closed type is the one list of what a vision call may
+   carry: a type it cannot read would go to the provider at full size. *)
+let supported_image_media_types =
+  List.map
+    Keeper_vision_downscale.media_type_to_string
+    Keeper_vision_downscale.all_media_types
+
+let supported_image_media_type media_type =
+  List.mem media_type supported_image_media_types
+
+let supported_image_media_types_csv =
+  String.concat ", " supported_image_media_types
+
+let validate_media_type raw =
+  let media_type = normalize_media_type raw in
+  if String.equal media_type "" then Error "media_type must be non-empty"
+  else if supported_image_media_type media_type then Ok media_type
+  else
+    Error
+      (Printf.sprintf
+         "unsupported image media_type %S; expected one of %s"
+         raw
+         supported_image_media_types_csv)
+
+let validate_image_size bytes =
+  let size = String.length bytes in
+  let max_image_bytes = max_image_bytes () in
+  if size <= max_image_bytes then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "image artifact is %d bytes; max allowed is %d bytes"
+         size
+         max_image_bytes)
+
+let json_member_opt key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+(* Magic-byte identification, shared so the TUI composer and this tool agree on
+   what counts as an image. Two copies of a byte-prefix table drift the moment
+   one side learns a format the other does not. *)
+let sniff_image_media_type bytes =
+  let starts prefix =
+    let lp = String.length prefix in
+    String.length bytes >= lp && String.equal (String.sub bytes 0 lp) prefix
+  in
+  let named media_type = Ok (Keeper_vision_downscale.media_type_to_string media_type) in
+  if starts "\x89PNG" then named Keeper_vision_downscale.Png
+  else if starts "\xff\xd8\xff" then named Keeper_vision_downscale.Jpeg
+  else if starts "GIF8" then named Keeper_vision_downscale.Gif
+  else if
+    String.length bytes >= 12
+    && String.equal (String.sub bytes 0 4) "RIFF"
+    && String.equal (String.sub bytes 8 4) "WEBP"
+  then named Keeper_vision_downscale.Webp
+  else
+    Error
+      (Printf.sprintf
+         "could not identify image media type; expected one of %s"
+         supported_image_media_types_csv)
+;;
+
+let media_type_for_request ~bytes args =
+  match json_member_opt "media_type" args with
+  | None -> sniff_image_media_type bytes
+  | Some (`String raw) -> validate_media_type raw
+  | Some _ -> Error "media_type must be a string"
+
+type vision_reading =
+  { text : string
+  ; runtime_id : string
+  ; requested_model : string
+  ; response_model : string
+  }
+
+type vision_outcome =
+  | Vo_ok of vision_reading
+  | Vo_invalid_request of string
+  | Vo_no_runtime of string
+  | Vo_timeout
+  | Vo_invalid_structured_response of string
+  | Vo_provider of
+      { failure_class : Tool_result.tool_failure_class
+      ; detail : string
+      }
+  | Vo_official_failure of { runtime_id : string; failure : Fusion_official_client.failure }
+  | Vo_empty
+  | Vo_truncated
+
+let ok_data (reading : vision_reading) =
+  record_vision_analyze_result ~result:"ok" ~reason:"ok";
+  (`Assoc
+       [ "ok", `Bool true
+       ; "text", `String reading.text
+       ; "runtime_id", `String reading.runtime_id
+       ; "requested_model", `String reading.requested_model
+       ; "response_model", `String reading.response_model
+       ])
+
+let vision_text_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "text" fields with
+     | Some (`String text) -> Ok (String.trim text)
+     | Some _ -> Error "vision response field \"text\" must be a string"
+     | None -> Error "vision response missing required field \"text\"")
+  | _ -> Error "vision response must be a JSON object"
+;;
+
+let provider_state_outcome ~failure_class state =
+  Vo_provider
+    { failure_class
+    ; detail = Agent_core.Error.to_string
+        (Agent_core.Error.Serialization (StructuredOutputStateError state))
+    }
+;;
+
+let invalid_vision_text ~raw detail =
+  Agent_core.Error.structured_output_parse_error
+    ~reason:Agent_core.Error.Schema_rejected ~detail ~raw
+;;
+
+let official_vision_text raw =
+  match Yojson.Safe.from_string raw with
+  | json ->
+    vision_text_of_json json
+    |> Result.map_error (invalid_vision_text ~raw)
+  | exception Yojson.Json_error detail ->
+    Error (Agent_core.Error.structured_output_parse_error
+      ~reason:Agent_core.Error.Invalid_json ~detail ~raw)
+;;
+
+let outcome_of_response_with_failure
+    ~invalid_response ~runtime_id ~requested_model
+    (response : Agent_core.Types.api_response) =
+  match Agent_core.Structured.inspect_response_json response with
+  | Awaiting_tool_results ->
+    provider_state_outcome ~failure_class:Tool_result.Runtime_failure
+      Agent_core.Error.Awaiting_tool_results
+  | Refused reason ->
+    provider_state_outcome ~failure_class:Tool_result.Policy_rejection
+      (Agent_core.Error.Refused_response reason)
+  | Truncated Token_limit -> Vo_truncated
+  | Truncated (Repetition_limit | Context_limit as reason) ->
+    (* Only a token-budget cut uses the existing larger-budget candidate
+       path. A repetition guard or context cut has a different cause. *)
+    provider_state_outcome ~failure_class:Tool_result.Runtime_failure
+      (Agent_core.Error.Truncated_response reason)
+  | Interrupted reason ->
+    provider_state_outcome ~failure_class:Tool_result.Runtime_failure
+      (Agent_core.Error.Interrupted_response reason)
+  | Invalid error -> Vo_invalid_structured_response (invalid_response error)
+  | Ready json ->
+    (match vision_text_of_json json with
+     | Error detail ->
+       Vo_invalid_structured_response (invalid_response
+         (invalid_vision_text ~raw:(Agent_core.Types.visible_text_of_response response) detail))
+     | Ok text ->
+       (match Va.classify ~truncated:false ~content:text with
+        | Ok text ->
+          Vo_ok { text; runtime_id; requested_model; response_model = response.model }
+        | Error Va.Empty_extraction -> Vo_empty
+        | Error Va.Truncated_extraction -> Vo_truncated))
+;;
+
+let outcome_of_response ~runtime_id ~requested_model response =
+  outcome_of_response_with_failure ~invalid_response:Agent_core.Error.to_string
+    ~runtime_id ~requested_model response
+;;
+
+let bounded_exponential_backoff ~base ~max_backoff ~attempt_index =
+  let rec loop remaining delay =
+    if remaining <= 0 || delay >= max_backoff
+    then Float.min delay max_backoff
+    else if delay >= max_backoff /. 2.0
+    then max_backoff
+    else loop (remaining - 1) (delay *. 2.0)
+  in
+  loop attempt_index base
+;;
+
+let candidate_backoff_sec ~attempt_index =
+  let base = Env_config_keeper.KeeperVision.candidate_backoff_base_sec () in
+  let max_backoff = Env_config_keeper.KeeperVision.candidate_backoff_max_sec () in
+  if base <= 0.0 || max_backoff <= 0.0
+  then 0.0
+  else bounded_exponential_backoff ~base ~max_backoff ~attempt_index
+;;
+
+let sleep_before_next_candidate ~clock ~attempt_index =
+  let delay = candidate_backoff_sec ~attempt_index in
+  if delay > 0.0 then Eio.Time.sleep clock delay
+;;
+
+type candidate_failure =
+  | Candidate_timeout
+  | Candidate_provider_error of Llm_provider.Http_client.http_error
+  | Candidate_output_limit
+  | Candidate_invalid_output of string
+  | Candidate_official_failure of { runtime_id : string; failure : Fusion_official_client.failure }
+
+(* Preserve the client error until the candidate walk has used its typed
+   admission and effect observations. An accepted-but-unobserved timeout is
+   not evidence that another candidate may safely replace the turn. *)
+let official_failure_can_advance : Fusion_official_client.failure -> bool = function
+  | Missing_reply | Setup_failure _ | Antigravity_failure _ | Muse_failure _ -> false
+  | Claude_admission_failure (Invalid_config _) -> false
+  | Claude_admission_failure (Runtime_claude_code.Spawn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Protocol_error _)
+  | Claude_admission_failure (Runtime_claude_code.Subscription_required _)
+  | Claude_admission_failure (Runtime_claude_code.Unsupported_control_request _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_transport_interrupted _)
+  | Claude_admission_failure (Runtime_claude_code.Context_window_exceeded _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed_with_observation _)
+  | Claude_admission_failure (Runtime_claude_code.Stopped_by_host _)
+  | Claude_admission_failure (Runtime_claude_code.Quota_blocked _)
+  | Claude_admission_failure (Runtime_claude_code.Process_exited _)
+  | Claude_admission_failure (Runtime_claude_code.Unhandled_exception _)
+  | Claude_admission_failure (Runtime_claude_code.Timeout _) -> true
+  | Codex_failure error ->
+    (match error with
+     | Subscription_required _ | Spawn_failed _
+     | Reasoning_effort_admission_failed _
+     | Timeout { turn_accepted = false; _ }
+     (* A client that died during initialize, account/read or thread/start
+        submitted no turn, so it owes the walk nothing and the declared media
+        fallback may still be tried. An exit after acceptance is the opposite:
+        the turn may have committed effects upstream. *)
+     | Process_exited { turn_accepted = false; _ }
+     | Context_window_exceeded { tool_effect_attempted = false; _ } -> true
+     | Invalid_config _ | Turn_input_write_failed _ | Protocol_error _
+     | Rpc_error _ | Unsupported_server_request _
+     | Context_window_exceeded _ | Turn_failed _ | Stopped_by_host _
+     | Turn_interrupted | Runtime_shutting_down
+     | Process_exited { turn_accepted = true; _ }
+     | Timeout { turn_accepted = true; _ } -> false)
+  | Claude_failure error ->
+    (match error with
+     | Subscription_required _ | Spawn_failed _
+     | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
+     | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
+     | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ } -> true
+     (* Same rule on this wire: before admission the client submitted no turn,
+        after it the turn may have committed effects upstream. *)
+     | Process_exited { turn_admitted = false; _ } -> true
+     | Invalid_config _ | Protocol_error _ | Unsupported_control_request _
+     | Turn_transport_interrupted _ | Context_window_exceeded _ | Turn_failed _
+     | Turn_failed_with_observation _ | Stopped_by_host _ | Quota_blocked _
+     | Process_exited { turn_admitted = true; _ } | Unhandled_exception _ | Timeout _ -> false)
+;;
+
+let outcome_of_official_failure ~runtime_id failure =
+  Vo_official_failure { runtime_id; failure }
+;;
+
+(* A failed transport does not prove that the accepted turn had no effect.
+   Only typed pre-submission or explicit no-effect observations grant that
+   receipt. The stateless runner supplies no durable recovery session. *)
+let official_failure_effect : Fusion_official_client.failure -> Tool_result.failure_effect_disposition = function
+  | Setup_failure _ | Claude_admission_failure (Runtime_claude_code.Invalid_config _)
+  | Claude_admission_failure (Runtime_claude_code.Spawn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Protocol_error _)
+  | Claude_admission_failure (Runtime_claude_code.Subscription_required _)
+  | Claude_admission_failure (Runtime_claude_code.Unsupported_control_request _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_transport_interrupted _)
+  | Claude_admission_failure (Runtime_claude_code.Context_window_exceeded _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed _)
+  | Claude_admission_failure (Runtime_claude_code.Turn_failed_with_observation _)
+  | Claude_admission_failure (Runtime_claude_code.Stopped_by_host _)
+  | Claude_admission_failure (Runtime_claude_code.Quota_blocked _)
+  | Claude_admission_failure (Runtime_claude_code.Process_exited _)
+  | Claude_admission_failure (Runtime_claude_code.Unhandled_exception _)
+  | Claude_admission_failure (Runtime_claude_code.Timeout _) -> Proven_pre_effect
+  | Codex_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _
+      | Reasoning_effort_admission_failed _
+      | Timeout { turn_accepted = false; _ }
+      | Context_window_exceeded { tool_effect_attempted = false; _ }) -> Proven_pre_effect
+  | Claude_failure (Invalid_config _ | Subscription_required _ | Spawn_failed _
+      | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
+      | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
+      | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ }) -> Proven_pre_effect
+  | Missing_reply | Antigravity_failure _ | Muse_failure _
+  | Codex_failure
+      ( Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
+      | Unsupported_server_request _ | Turn_failed _ | Stopped_by_host _
+      | Turn_interrupted | Runtime_shutting_down | Process_exited _
+      | Timeout { turn_accepted = true; _ }
+      | Context_window_exceeded { tool_effect_attempted = true; _ })
+  | Claude_failure
+      ( Protocol_error _ | Unsupported_control_request _ | Turn_transport_interrupted _
+      | Turn_failed _ | Stopped_by_host _ | Process_exited _ | Unhandled_exception _
+      | Timeout _
+      | Quota_blocked { tool_effect_attempted = true; _ }
+      | Quota_blocked { tool_effect_attempted = false; response_emitted = true; _ }
+      | Context_window_exceeded { tool_effect_attempted = true; _ }
+      | Context_window_exceeded { tool_effect_attempted = false; response_emitted = true; _ }
+      | Turn_failed_with_observation { tool_effect_attempted = true; _ }
+      | Turn_failed_with_observation
+          { tool_effect_attempted = false; response_emitted = true; _ }) ->
+    Effect_outcome_unknown
+;;
+
+let run_candidates_outcome
+    ?base_path
+    ?complete
+    ?tool_use_id
+    ?trace_id
+    ~sw
+    ~clock
+    ~net
+    ~(req : Va.request)
+    ~last_error
+    ~attempt_index
+    candidates
+  =
+  let invocation_id = Structured_response_evidence.invocation_id () in
+  let record_invalid ~runtime_id ~attempt_index error =
+    Structured_response_evidence.record_failure ~base_path
+      ~attempt:{source=Vision; invocation_id; runtime_id; attempt_index;
+        tool_use_id; trace_id} error
+  in
+  let candidate_count = List.length candidates in
+  let rec loop ~last_error ~attempt_index = function
+    | [] ->
+      (* The walk's outcome is the last candidate's: what ended it. A verdict
+         an earlier candidate gave and the walk moved past (a 400, a capacity
+         refusal) is not the reason the image went unread, and it is already
+         on the candidate counter under that runtime's id. *)
+      (match last_error with
+       | None -> Vo_no_runtime "no image-capable runtime configured"
+       | Some (Candidate_official_failure { runtime_id; failure }) ->
+         outcome_of_official_failure ~runtime_id failure
+       | Some Candidate_timeout -> Vo_timeout
+       | Some Candidate_output_limit -> Vo_truncated
+       | Some (Candidate_invalid_output detail) -> Vo_invalid_structured_response detail
+       | Some (Candidate_provider_error err) ->
+         Vo_provider
+           { failure_class = failure_class_of_http_error err
+           ; detail = Provider_http_error.to_message err
+           })
+    | (runtime_id, rt, Official_client) :: rest ->
+      record_vision_candidate_start
+        ?tool_use_id ?trace_id ~runtime_id ~attempt_index
+        ~candidate_count ();
+      let result = match base_path with
+        | None -> Error (Fusion_official_client.Setup_failure
+            "official-client image analysis requires the workspace base path")
+        | Some base_dir ->
+          (try
+             Fusion_official_client.run_with_images ~base_dir ~runtime:rt
+               ~system_prompt:vision_output_instruction
+               ~prompt:(prompt_of_request req)
+               ~images:[{ Fusion_official_client.media_type = req.image_media_type;
+                          base64_data = Base64.encode_string req.image_bytes }]
+               ~output_schema:(`Assoc [
+                 "type", `String "object";
+                 "properties", `Assoc ["text", `Assoc ["type", `String "string"]];
+                 "required", `List [`String "text"];
+                 "additionalProperties", `Bool false]) ()
+           with
+           | Eio.Cancel.Cancelled _ as exn ->
+             record_vision_candidate_cancelled
+               ?tool_use_id ?trace_id ~runtime_id ();
+             raise exn) in
+      (match result with
+       | Error failure ->
+         record_vision_candidate_attempt
+           ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+           ~reason:"official_client_error" ~duration_ms:0.0 ~success:false ();
+         if official_failure_can_advance failure then
+           loop ~last_error:(Some (Candidate_official_failure { runtime_id; failure }))
+             ~attempt_index:(attempt_index + 1) rest
+         else outcome_of_official_failure ~runtime_id failure
+       | Ok response ->
+         let parsed = official_vision_text response.text in
+         (match parsed with
+          | Ok text when String.trim text <> "" ->
+            record_vision_candidate_attempt
+              ?tool_use_id ?trace_id ~runtime_id ~result:"ok"
+              ~reason:"provider_response" ~duration_ms:0.0 ~success:true ();
+            Vo_ok { text; runtime_id; requested_model = rt.model.api_name;
+                    response_model = response.model }
+          | (Ok _ | Error _) as parsed ->
+            let error = match parsed with
+              | Error error -> error
+              | Ok _ -> invalid_vision_text ~raw:response.text "empty extraction" in
+            let detail = record_invalid ~runtime_id ~attempt_index error in
+            record_vision_candidate_attempt
+              ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+              ~reason:"invalid_structured_output" ~duration_ms:0.0
+              ~success:false ();
+            if not (List.is_empty rest) then sleep_before_next_candidate ~clock ~attempt_index;
+            loop ~last_error:(Some (Candidate_invalid_output
+              (Printf.sprintf "%s: %s" runtime_id detail)))
+              ~attempt_index:(attempt_index + 1) rest))
+    | (runtime_id, rt, Api provider_config) :: rest ->
+      record_vision_candidate_start
+        ?tool_use_id ?trace_id ~runtime_id ~attempt_index
+        ~candidate_count ();
+      let continue_with last_error =
+        (if not (List.is_empty rest)
+         then sleep_before_next_candidate ~clock ~attempt_index);
+        loop
+          ~last_error:(Some last_error)
+          ~attempt_index:(attempt_index + 1)
+          rest
+      in
+      let config = provider_for_vision provider_config in
+        (match
+           (try
+              Keeper_provider_subcall.complete ?override:complete ~sw ~net ~clock
+                ~config ~messages:[ message_of_request req ] ()
+            with
+            | Eio.Cancel.Cancelled _ as exn ->
+              record_vision_candidate_cancelled
+                ?tool_use_id ?trace_id ~runtime_id ();
+              raise exn)
+         with
+       | Error (Llm_provider.Http_client.TimeoutError _) ->
+            record_vision_candidate_attempt
+              ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+              ~reason:"timeout" ~duration_ms:0.0 ~success:false ();
+            continue_with Candidate_timeout
+       | Error
+           (( Llm_provider.Http_client.HttpError _
+            | Llm_provider.Http_client.NetworkError _
+            | Llm_provider.Http_client.AcceptRejected _
+            | Llm_provider.Http_client.ProviderTerminal _
+            | Llm_provider.Http_client.ProviderFailure _ ) as err) ->
+            Runtime_candidate_standing.observe_http_error ~now:(Eio.Time.now clock)
+              ~candidate:rt.Runtime_instance.candidate_backpressure
+              ~quota_scope:(Runtime_instance.quota_scope_of_runtime rt) err;
+            if candidate_capacity_http_error err
+            then (
+              record_vision_candidate_attempt
+                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                ~reason:"candidate_capacity_error" ~duration_ms:0.0
+                ~success:false ();
+              (* Another attempt on this binding cannot change its hard limit;
+                 advance without transient-outage backoff or rewriting pixels. *)
+              loop
+                ~last_error:(Some (Candidate_provider_error err))
+                ~attempt_index:(attempt_index + 1)
+                rest)
+            else if wiring_rejected err
+            then (
+              record_vision_candidate_attempt
+                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                ~reason:"terminal_provider_error" ~duration_ms:0.0
+                ~success:false ();
+              Vo_provider
+                { failure_class = failure_class_of_http_error err
+                ; detail = Provider_http_error.to_message err
+                })
+            else if candidate_policy_http_error err
+            then (
+              record_vision_candidate_attempt
+                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                ~reason:"candidate_policy_error" ~duration_ms:0.0
+                ~success:false ();
+              (* The verdict is this binding's; waiting changes nothing about
+                 it, so advance without the transient-outage backoff. *)
+              loop
+                ~last_error:(Some (Candidate_provider_error err))
+                ~attempt_index:(attempt_index + 1)
+                rest)
+            else if Runtime_attempt_fsm.should_try_next err
+            then (
+              record_vision_candidate_attempt
+                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                ~reason:"transient_provider_error" ~duration_ms:0.0
+                ~success:false ();
+              continue_with (Candidate_provider_error err))
+            else (
+              record_vision_candidate_attempt
+                ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                ~reason:"runtime_provider_error" ~duration_ms:0.0
+                ~success:false ();
+              Vo_provider
+                { failure_class = failure_class_of_http_error err
+                ; detail = Provider_http_error.to_message err
+                })
+       | Ok response ->
+            Runtime_candidate_standing.observe
+              ~candidate:(Some rt.Runtime_instance.candidate_backpressure)
+              ~quota_scope:(Some (Runtime_instance.quota_scope_of_runtime rt))
+              Runtime_candidate_standing.Answered;
+            (match
+               outcome_of_response_with_failure
+                 ~invalid_response:(record_invalid ~runtime_id ~attempt_index)
+                 ~runtime_id ~requested_model:config.model_id response
+             with
+             | Vo_truncated ->
+               record_vision_candidate_attempt
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                 ~reason:"output_token_limit" ~duration_ms:0.0
+                 ~success:false ();
+               (* A typed length stop is candidate-local. Keep the same pixels
+                  and query, and let the next serializer enforce its own
+                  declared ceiling. Equal ceilings are still worth trying:
+                  models differ in how much reasoning precedes the answer. *)
+               loop
+                 ~last_error:(Some Candidate_output_limit)
+                 ~attempt_index:(attempt_index + 1)
+                 rest
+             | Vo_invalid_structured_response detail ->
+               record_vision_candidate_attempt
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                 ~reason:"invalid_structured_output" ~duration_ms:0.0
+                 ~success:false ();
+               (* A finished reply whose JSON broke mid-string is the
+                  json_object flake, not a verdict: which backends break
+                  escaping differs per model, exactly as token ceilings do
+                  (2026-09-12, msx-retro-mania: one broken reply ended the
+                  whole vision call and the terminal composition killed the
+                  turn). The SDK classifies refusal and other nonterminal
+                  response states before parsing; those return the terminal
+                  provider-failure arm below. The detail names the runtime so
+                  an exhausted walk reports who answered. *)
+               continue_with
+                 (Candidate_invalid_output
+                    (Printf.sprintf "%s: %s" runtime_id detail))
+             | Vo_empty ->
+               let detail = record_invalid ~runtime_id ~attempt_index
+                 (invalid_vision_text
+                   ~raw:(Agent_core.Types.visible_text_of_response response)
+                   "empty extraction") in
+               record_vision_candidate_attempt
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                 ~reason:"empty_extraction" ~duration_ms:0.0
+                 ~success:false ();
+               continue_with
+                 (Candidate_invalid_output
+                    (Printf.sprintf "%s: %s" runtime_id detail))
+             | (Vo_timeout | Vo_invalid_request _ | Vo_no_runtime _ | Vo_provider _ | Vo_official_failure _) as outcome ->
+               record_vision_candidate_attempt
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"error"
+                 ~reason:"structured_response_state" ~duration_ms:0.0
+                 ~success:false ();
+               outcome
+             | Vo_ok _ as outcome -> record_vision_candidate_attempt
+                 ?tool_use_id ?trace_id ~runtime_id ~result:"ok"
+                 ~reason:"provider_response" ~duration_ms:0.0
+                 ~success:true ();
+               outcome))
+  in
+  loop ~last_error ~attempt_index candidates
+
+let run_vision
+    ?base_path
+    ?complete
+    ?tool_use_id
+    ?trace_id
+    ?runtime_id
+    ?(exclude_runtime_ids = [])
+    ~sw
+    ~clock
+    ~net
+    ~query
+    ~media_type
+    ~bytes
+    () =
+  try
+    match validate_image_size bytes with
+      | Error msg -> Vo_invalid_request msg
+      | Ok () ->
+        (match validate_media_type media_type with
+         | Error msg -> Vo_invalid_request msg
+         | Ok media_type ->
+           let media_type, bytes =
+             Keeper_vision_downscale.downscale_if_needed ~media_type ~bytes ()
+           in
+           (match
+              Va.make_request ~query ~image_media_type:media_type
+                ~image_bytes:bytes
+            with
+            | Error msg -> Vo_invalid_request msg
+            | Ok req ->
+              let all_candidates =
+                vision_runtime_candidates ~now:(Eio.Time.now clock)
+              in
+              (* Candidates the caller's own walk already spent this turn. The
+                 quota window pushes a candidate that answered a hard rejection
+                 behind the live ones but keeps it in the list, so without this
+                 the delegation calls the accounts that just refused to pay one
+                 more time before the text fallback starts (#34829). *)
+              let candidates =
+                match exclude_runtime_ids with
+                | [] -> all_candidates
+                | excluded ->
+                  List.filter
+                    (fun (id, _, _) -> not (List.mem id excluded))
+                    all_candidates
+              in
+              if List.is_empty candidates && not (List.is_empty all_candidates)
+              then
+                (* Distinct from "none configured": there are capable runtimes
+                   and the walk has already asked all of them. *)
+                Vo_no_runtime
+                  "every capable image runtime was already attempted in this turn"
+              else
+              let selected = match runtime_id with
+                | None -> Ok candidates
+                | Some requested ->
+                    let matching = List.filter
+                      (fun (id, _, _) -> String.equal id requested) candidates in
+                    if List.is_empty matching then
+                      Error "requested runtime is not a configured capable image candidate"
+                    else Ok matching
+              in
+              match selected with
+              | Error detail -> Vo_invalid_request detail
+              | Ok candidates -> run_candidates_outcome
+                ?base_path
+                ?complete
+                ?tool_use_id
+                ?trace_id
+                ~sw
+                ~clock
+                ~net
+                ~req
+                ~last_error:None
+                ~attempt_index:0
+                candidates))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _exn ->
+    Vo_provider
+      { failure_class = Tool_result.Runtime_failure
+      ; detail = "vision sub-call raised"
+      }
+
+(* The [Vo_provider] arm below binds its class once and hands the same value
+   to the result and to the payload. The other arms wrote theirs twice, so a
+   change to one spelling left the other saying something else. *)
+let failed ~failure_class ?(effect_disposition = Tool_result.Proven_pre_effect) ?detail code =
+  Keeper_tool_execution.failure
+    ~class_:failure_class
+    ~effect_disposition
+    (err_json ~failure_class ?detail code)
+;;
+
+let execution_of_vision_outcome = function
+  | Vo_ok text -> Keeper_tool_execution.success_data (ok_data text)
+  | Vo_invalid_request detail ->
+    failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_request"
+  | Vo_no_runtime detail ->
+    failed ~failure_class:Tool_result.Runtime_failure ~detail "no_capable_runtime"
+  | Vo_timeout -> failed ~failure_class:Tool_result.Dependency_unavailable "timeout"
+  | Vo_invalid_structured_response detail ->
+    failed
+      ~failure_class:Tool_result.Runtime_failure
+      ~detail
+      "invalid_structured_response"
+  | Vo_provider { failure_class; detail } ->
+    failed ~failure_class ~detail "provider_error"
+  | Vo_official_failure { runtime_id; failure } ->
+    let effect_disposition = official_failure_effect failure in
+    let detail = Fusion_official_client.failure_detail ~runtime_id failure in
+    let failure_class, code = match failure with
+      | Codex_failure (Timeout _)
+      | Claude_failure (Timeout _) | Claude_admission_failure (Timeout _) ->
+        Tool_result.Dependency_unavailable, "timeout"
+      | Codex_failure (Subscription_required _)
+      | Claude_failure (Subscription_required _)
+      | Claude_admission_failure (Subscription_required _) ->
+        Tool_result.Policy_rejection, "provider_error"
+      | _ when official_failure_can_advance failure ->
+        Tool_result.Dependency_unavailable, "provider_error"
+      | Missing_reply | Setup_failure _ | Antigravity_failure _ | Muse_failure _
+      | Codex_failure
+          ( Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
+          | Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
+          | Unsupported_server_request _ | Context_window_exceeded _ | Turn_failed _
+          | Stopped_by_host _ | Turn_interrupted | Runtime_shutting_down
+          | Process_exited _ )
+      | Claude_failure
+          ( Invalid_config _ | Spawn_failed _ | Protocol_error _
+          | Unsupported_control_request _ | Turn_transport_interrupted _
+          | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Unhandled_exception _ )
+      | Claude_admission_failure
+          ( Invalid_config _ | Spawn_failed _ | Protocol_error _
+          | Unsupported_control_request _ | Turn_transport_interrupted _
+          | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Unhandled_exception _ ) ->
+        Tool_result.Runtime_failure, "provider_error" in
+    failed ~failure_class ~effect_disposition ~detail code
+  | Vo_empty ->
+    failed ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
+  | Vo_truncated ->
+    failed ~failure_class:Tool_result.Runtime_failure "truncated_extraction"
+;;
+
+let runtime_id_of_args args =
+  match json_member_opt "runtime_id" args with
+  | None -> Ok None
+  | Some (`String id) when not (String.equal (String.trim id) "") -> Ok (Some id)
+  | Some _ -> Error "runtime_id must be a non-empty configured runtime identifier"
+
+let handle_with_outcome
+    ?base_path
+    ?complete
+    ?tool_use_id
+    ?trace_id
+    ?sw
+    ?clock
+    ?net
+    ~(meta : Keeper_meta_contract.keeper_meta)
+    ~args
+    () =
+  match string_member "artifact" args, string_member "query" args, runtime_id_of_args args with
+  | _, _, Error detail ->
+      failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_args"
+  | None, _, _ | _, None, _ ->
+    failed
+      ~failure_class:Tool_result.Policy_rejection
+      ~detail:"requires string fields: artifact, query"
+      "invalid_args"
+  | Some handle_str, Some query, Ok runtime_id ->
+    (match sw, net, clock with
+     | None, _, _ | _, None, _ | _, _, None ->
+       failed
+         ~failure_class:Tool_result.Runtime_failure
+         "eio_context_unavailable"
+     | Some sw, Some net, Some clock ->
+       let dir = vision_store_dir ?base_path ~keeper_name:meta.name () in
+         (match load_artifact ~dir (Store.of_string handle_str) with
+        | Error error ->
+          let failure_class, code, recovery = match error with
+            | Store.Malformed_handle _ -> Tool_result.Policy_rejection,
+                "invalid_artifact", "Copy the exact artifact returned by the image-producing tool."
+            | Store.Missing_artifact _ -> Tool_result.Workflow_rejection,
+                "artifact_not_found", "Observe again and use the artifact returned for this Keeper."
+            | Store.Hash_mismatch _ | Store.Read_failed _ -> Tool_result.Runtime_failure,
+                "artifact_load_failed", "The stored image could not be read with verified integrity." in
+          failed
+            ~failure_class
+            ~detail:(Store.load_error_to_string error ^ " " ^ recovery)
+            code
+        | Ok bytes ->
+          (match validate_image_size bytes with
+             | Error msg ->
+               failed
+                 ~failure_class:Tool_result.Runtime_failure
+                 ~detail:msg
+                 "image_too_large"
+           | Ok () ->
+             (match media_type_for_request ~bytes args with
+              | Error msg ->
+                failed
+                  ~failure_class:Tool_result.Policy_rejection
+                  ~detail:msg
+                  "invalid_media_type"
+              | Ok media_type ->
+                (match
+                   run_vision
+                     ?base_path
+                     ?complete
+                     ?tool_use_id
+                     ?trace_id
+                     ?runtime_id
+                     ~sw
+                     ~clock
+                     ~net
+                     ~query
+                     ~media_type
+                     ~bytes
+                     ()
+                 with
+                 | Vo_ok _ as outcome ->
+                   (* A frame's handle is the Keeper's only durable reference.
+                      Keep the verified bytes before reporting a successful
+                      analysis, even if rotation removed the frame meanwhile. *)
+                   (match store_kept ?base_path ~keeper_name:meta.name bytes with
+                    | Ok _ -> execution_of_vision_outcome outcome
+                    | Error detail ->
+                      failed
+                        ~failure_class:Tool_result.Runtime_failure
+                        ~detail
+                        "artifact_store_failed")
+                 | (Vo_timeout | Vo_empty | Vo_truncated | Vo_invalid_request _ | Vo_no_runtime _ | Vo_invalid_structured_response _ | Vo_provider _ | Vo_official_failure _) as outcome -> execution_of_vision_outcome outcome)))))
+
+let handle ?base_path ?complete ?tool_use_id ?trace_id ?sw ?clock ?net ~meta ~args () =
+  (handle_with_outcome
+     ?base_path
+     ?complete
+     ?tool_use_id
+     ?trace_id
+     ?sw
+     ?clock
+     ?net
+     ~meta
+     ~args
+     ()).raw_output

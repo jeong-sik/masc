@@ -1,0 +1,42 @@
+name: Changelog fragments
+
+# Pull requests that touch a fragment are checked on every push. The whole
+# directory is checked only when explicitly requested: scripts/bump-version.sh
+# runs the same check before it assembles a release.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "changelog.d/**"
+      - "scripts/changelog-fragments.py"
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check:
+    name: Changelog fragment format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the fragments this pull request changes
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.url }}
+        run: |
+          set -euo pipefail
+          # Only the fragments this PR adds or edits: a stacked PR must not be
+          # refused for a lower fragment it does not carry, and a release fold
+          # deletes fragments, so removed files are skipped. The API call and
+          # the grep stay separate commands: an API failure fails the step,
+          # only an empty match falls through as an empty list.
+          listing=$(gh api --paginate --jq '.[] | select(.status != "removed") | .filename | select(. != "changelog.d/README.md")' \
+            "$PR_URL/files?per_page=100")
+          files=$(printf '%s\n' "$listing" | grep '^changelog\.d/' || true)
+          python3 scripts/changelog-fragments.py check-files $files
+      - name: Check every fragment cites its own pull request
+        if: github.event_name == 'workflow_dispatch'
+        run: python3 scripts/changelog-fragments.py check --dir changelog.d

@@ -1,0 +1,14 @@
+{
+  "at": "2026-10-24T17:38:27.619728+00:00",
+  "source_sha": "2be9d21697fb4c9da9aafd769f5fa691bae2e757",
+  "scope": "Ordinary HTTP actual Keeper only. Official2beP2 is separately fixed/reviewed at author8266/root328; this binary does not contain that Official fix.",
+  "model_selected_goal_link": true,
+  "initial_owner_execution": "FAIL: beta/gamma changed before approval and original alltrue submission rejected",
+  "controlled_rejections": 1,
+  "recovery": "Valid alpha-only55B immutable/current equality at newvrf-a42e77c7eac0e45281d6cd2245840243 after a failed intermediate capture; stale final error report also preserved",
+  "first_approval_after_recovery": true,
+  "operator_goal_links": 0,
+  "owner_execution_reminders": 0,
+  "postapproval_keeper_messages": 0,
+  "human_goal_confirmation": false
+}

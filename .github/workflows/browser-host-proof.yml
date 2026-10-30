@@ -1,0 +1,132 @@
+name: Browser Host Proof
+
+on:
+  workflow_dispatch:
+  # Weekly on main so main holds a macOS opam switch in the cache store.
+  # Pull requests only restore (see .github/actions/setup-ocaml-toolchain),
+  # and this workflow is the only one that runs on macOS, so without a
+  # main-scoped run there would be nothing for them to restore.
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-host-proof-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-native-host:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Setup OCaml
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Install native dependencies
+        run: |
+          brew install flock gmp libpq openssl@3 zstd ripgrep
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+
+      - name: Pin dependencies
+        uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-compact-protocol --with-bisect
+
+      - name: Install OCaml dependencies
+        run: opam install ./masc.opam --deps-only --with-test -y
+
+      - name: Build native host
+        run: opam exec -- dune build --release bin/masc_browser_host.exe test/test_browser_bidi_peer.exe
+
+      - name: Exercise native pipes directly
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          python3 test/test_browser_native_host.py _build/default/bin/masc_browser_host.exe 2>&1 | tee proof/native-host-tests.log
+          _build/default/test/test_browser_bidi_peer.exe 2>&1 | tee proof/bidi-peer-tests.log
+
+      - name: Exercise BiDi host server restart and shutdown cases
+        run: |
+          set -euo pipefail
+          python3 test/test_browser_bidi_host_link.py _build/default/bin/masc_browser_host.exe 2>&1 | tee proof/bidi-host-link-tests.log
+
+      - name: Install Firefox and geckodriver
+        run: |
+          brew install geckodriver
+          if [[ ! -x /Applications/Firefox.app/Contents/MacOS/firefox ]]; then
+            brew install --cask firefox
+          fi
+
+      - name: Exercise attached native BiDi observation and input
+        run: |
+          set -euo pipefail
+          python3 test/test_browser_bidi_host.py \
+            _build/default/bin/masc_browser_host.exe \
+            /Applications/Firefox.app/Contents/MacOS/firefox \
+            --out proof/bidi 2>&1 | tee proof/bidi-host-tests.log
+
+      - name: Verify bounded upload byte transfer
+        run: opam exec -- python3 scripts/probe-browser-upload-bytes.py --out proof/upload-bytes
+
+      - name: Build native Firefox scenario
+        run: opam exec -- dune build --release test/firefox_controls_probe.exe
+
+      - name: Exercise real Firefox controls and screenshots
+        run: |
+          python3 scripts/probe-firefox-controls.py \
+            --geckodriver "$(command -v geckodriver)" \
+            --firefox /Applications/Firefox.app/Contents/MacOS/firefox \
+            --compiled-probe _build/default/test/firefox_controls_probe.exe \
+            --out proof/firefox
+
+      - name: Exercise explicit live tab activation
+        run: |
+          python3 test/test_browser_activation.py \
+            --driver "$(command -v geckodriver)" \
+            --browser /Applications/Firefox.app/Contents/MacOS/firefox \
+            --out proof/activation
+
+      # The scene contract is what the extension and the driver agree the page
+      # looks like, and the probe asserts it against a real Gecko -- 41 checks,
+      # including that background.js still starts with the scene runtime this
+      # repository builds. Nothing ran it: the pull-request gate skips it (no
+      # dune rule declares runtest-test_browser_scene), the nightly names it
+      # nowhere, and this workflow listed the other three probes only. It takes
+      # the same two binaries they take, and they are already installed above.
+      - name: Exercise the real Gecko scene contract
+        run: |
+          python3 test/test_browser_scene.py \
+            --driver "$(command -v geckodriver)" \
+            --browser /Applications/Firefox.app/Contents/MacOS/firefox \
+            --out proof/scene
+
+      - name: Package verified executable and identity
+        working-directory: proof
+        run: |
+          cp ../_build/default/bin/masc_browser_host.exe masc-browser-host-macos-arm64
+          cp ../_build/default/test/firefox_controls_probe.exe firefox-controls-probe-macos-arm64
+          git rev-parse HEAD > SOURCE_COMMIT
+          shasum -a 256 masc-browser-host-macos-arm64 firefox-controls-probe-macos-arm64 > SHA256SUMS
+
+      - name: Upload native host proof
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: masc-browser-host-proof-macos-arm64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: proof/
+          if-no-files-found: ignore

@@ -1,0 +1,37 @@
+(** Explicit turn-local causal evidence for contextual Gate judgment.
+
+    The cell is created once by the outer Keeper turn and threaded through the
+    AGENT_CORE tool bundle. Each completed Tool appends its exact typed input.
+    [snapshot] renders the newest of those calls that fit a declared evidence
+    budget, as immutable JSON for one later Gate request. No global,
+    string-keyed, or fiber-local carrier is used. *)
+
+type t
+
+val evidence_budget_bytes : int
+(** Byte ceiling applied to the rendered ["completed_tool_calls"] of one
+    {!snapshot}. Shared with {!Keeper_run_tools_setup.gate_history_budget_bytes}
+    so the two evidence axes of the judge bundle stay one declared number
+    instead of two independently tuned ones. *)
+
+val create :
+  turn_id:int option -> origin:Keeper_approval_origin.t -> initial:Yojson.Safe.t -> t
+(** [origin] describes this turn's admitted context. A mixed HITL/Board turn
+    keeps that context for new requests; an exact resumed grant retains its
+    own original durable origin independently. *)
+
+val fork : t -> t
+(** Capture the currently completed calls in a fresh invocation-owned cell.
+    Later records in the parent or a sibling do not change this cell. Its
+    own records still extend the captured causal history. *)
+
+val record_tool_result :
+  t -> operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit
+
+val snapshot : t -> Keeper_gate.causal_context
+(** Renders ["completed_tool_calls"] newest-first within
+    {!For_testing.evidence_budget_bytes} and reports how many calls that left
+    out as ["completed_tool_calls_omitted"]. The cell keeps every recorded call;
+    only this rendering is bounded, so the judge is told its view is partial
+    rather than handed an unbounded prompt. See the implementation comment for
+    the #26081 measurement this restores. *)

@@ -1,0 +1,153 @@
+# MCP surface prose (RFC prompts-and-tool-definitions-outside-ocaml §3 item 8):
+# the static resource catalogue advertised by resources/list and
+# resources/templates/list, the server description carried in every initialize
+# result, and the per-tool help-resource name suffix composed by
+# resources/list. Decoded once at boot by Mcp_surface_toml; a file that does
+# not decode refuses the boot.
+
+[server]
+description = "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources."
+
+[tool_help]
+name_suffix = " Help"
+
+[[resources]]
+uri = "masc://status"
+name = "MASC Status"
+title = "Project Status"
+description = "Workspace status view of agents, tasks, and cumulative message count"
+mime_type = "text/markdown"
+
+[[resources]]
+uri = "masc://status.json"
+name = "MASC Status (JSON)"
+title = "Project Status (JSON)"
+description = "Raw workspace state, backlog, and connected sessions as JSON"
+mime_type = "application/json"
+
+[[resources]]
+uri = "masc://tasks"
+name = "Quest Board"
+title = "Task Board"
+description = "Task board view (active tasks by default)"
+mime_type = "text/markdown"
+
+[[resources]]
+uri = "masc://tasks.json"
+name = "Quest Board (JSON)"
+title = "Task Board (JSON)"
+description = "Task board snapshot as JSON (backlog.json; all statuses)"
+mime_type = "application/json"
+
+[[resources]]
+uri = "masc://who"
+name = "Active Agents"
+title = "Online Agents"
+description = "In-memory agent/session status"
+mime_type = "text/markdown"
+
+[[resources]]
+uri = "masc://who.json"
+name = "Active Agents (JSON)"
+title = "Online Agents (JSON)"
+description = "In-memory agent/session status as JSON"
+mime_type = "application/json"
+
+[[resources]]
+uri = "masc://messages?since_seq=0&limit=10"
+name = "Recent Messages"
+title = "Recent Messages"
+description = "Recent workspace messages"
+mime_type = "text/markdown"
+
+[[resources]]
+uri = "masc://messages.json?since_seq=0&limit=10"
+name = "Recent Messages (JSON)"
+title = "Recent Messages (JSON)"
+description = "Recent messages snapshot as JSON (for data collection)"
+mime_type = "application/json"
+
+[[resources]]
+uri = "masc://events?limit=50"
+name = "Recent Events"
+title = "Event Log"
+description = "Recent workspace event log lines"
+mime_type = "text/markdown"
+
+[[resources]]
+uri = "masc://events.json?limit=50"
+name = "Recent Events (JSON)"
+title = "Event Log (JSON)"
+description = "Recent valid JSON workspace event log entries"
+mime_type = "application/json"
+
+# Wiki - pages in <base_path>/.masc/wiki
+[[resources]]
+uri = "masc://wiki"
+name = "Wiki Index"
+title = "Wiki"
+description = "Wiki pages with title, source, and tags. A page whose frontmatter does not read is listed by filename with the reason."
+mime_type = "text/markdown"
+
+[[resources]]
+uri = "masc://wiki.json"
+name = "Wiki Index (JSON)"
+title = "Wiki (JSON)"
+description = "Wiki pages as JSON with title, summary, source, author, created, revision, and tags. A page whose frontmatter does not read carries the reason in unreadable instead."
+mime_type = "application/json"
+
+[[resources]]
+uri = "masc://tool-help-index"
+name = "Tool Help Index"
+title = "Tool Help Index"
+description = "Canonical help index for MCP-exposed MASC tools"
+mime_type = "text/markdown"
+
+[[resource_templates]]
+uri_template = "masc://messages{?since_seq,limit}"
+name = "Messages (range)"
+title = "Messages by Range"
+description = "Read messages with optional since_seq and limit"
+mime_type = "text/markdown"
+
+[[resource_templates]]
+uri_template = "masc://messages.json{?since_seq,limit}"
+name = "Messages (range, JSON)"
+title = "Messages by Range (JSON)"
+description = "Read messages as JSON with optional since_seq and limit"
+mime_type = "application/json"
+
+[[resource_templates]]
+uri_template = "masc://events{?limit}"
+name = "Events (range)"
+title = "Events by Range"
+description = "Read recent event log entries with optional limit"
+mime_type = "text/markdown"
+
+[[resource_templates]]
+uri_template = "masc://events.json{?limit}"
+name = "Events (range, JSON)"
+title = "Events by Range (JSON)"
+description = "Read recent event log entries as JSON with optional limit"
+mime_type = "application/json"
+
+[[resource_templates]]
+uri_template = "masc://wiki/{topic}"
+name = "Wiki Page"
+title = "Wiki Page"
+description = "Read one wiki page by topic name. The topic log reads the wiki's append-only log of page creations and updates. Each page and the log are also listed as resources."
+mime_type = "text/markdown"
+
+[[resource_templates]]
+uri_template = "masc://wiki/{topic}.json"
+name = "Wiki Page (JSON)"
+title = "Wiki Page (JSON)"
+description = "Read one wiki page as JSON: its content with title, summary, source, author, created, revision, and tags, or with the reason in unreadable when its frontmatter does not read"
+mime_type = "application/json"
+
+[[resource_templates]]
+uri_template = "masc://tool-help/{tool_name}"
+name = "Tool Help"
+title = "Tool Help"
+description = "Read canonical help for a specific MCP tool"
+mime_type = "text/markdown"

@@ -1,0 +1,742 @@
+module Plan = Keeper_tool_plan
+
+type template_error =
+  | Template_not_an_object of { found : string }
+  | Template_missing_kind
+  | Template_unknown_kind of string
+  | Template_missing_field of
+      { kind : string
+      ; field : string
+      }
+  | Template_invalid_field of
+      { kind : string
+      ; field : string
+      ; found : string
+      }
+  | Template_invalid_pointer of { pointer : string }
+  | Template_duplicate_object_field of string
+  | Template_duplicate_field of
+      { kind : string
+      ; field : string
+      }
+  | Template_unknown_field of
+      { kind : string
+      ; field : string
+      }
+
+type error =
+  | Request_not_an_object of { found : string }
+  | Missing_nodes
+  | Nodes_not_an_array of { found : string }
+  | Node_not_an_object of
+      { index : int
+      ; found : string
+      }
+  | Node_missing_field of
+      { index : int
+      ; field : string
+      }
+  | Node_invalid_field of
+      { index : int
+      ; field : string
+      ; found : string
+      }
+  | Node_empty_id of { index : int }
+  | Node_template_error of
+      { index : int
+      ; error : template_error
+      }
+  | Unknown_request_field of { field : string }
+  | Duplicate_request_field of { field : string }
+  | Node_duplicate_field of
+      { index : int
+      ; field : string
+      }
+  | Request_invalid_field of { field : string; found : string }
+  | Export_invalid_field of { index : int; field : string; found : string }
+  | Export_template_error of { index : int; error : template_error }
+  | Plan_rejected of Keeper_tool_plan.error
+
+type encode_error = Unsubstituted_param of { name : string }
+
+let kind_name = Json_util.kind_name
+
+let input_schema =
+  let template_ref = `Assoc [ "$ref", `String "#/$defs/template" ] in
+  let closed_object properties required =
+    `Assoc
+      [ "type", `String "object"
+      ; "properties", `Assoc properties
+      ; "required", `List (List.map (fun name -> `String name) required)
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  let field_entry_schema =
+    closed_object
+      [ "name", `Assoc [ "type", `String "string" ]; "value", template_ref ]
+      [ "name"; "value" ]
+  in
+  let template_schema =
+    `Assoc
+      [ ( "oneOf"
+        , `List
+            [ closed_object
+                [ "kind", `Assoc [ "const", `String "literal" ]
+                ; "value", `Assoc []
+                ]
+                [ "kind"; "value" ]
+            ; closed_object
+                [ "kind", `Assoc [ "const", `String "output" ]
+                ; "node", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+                ; ( "pointer"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "pattern", `String "^(?:|/(?:[^~]|~[01])*(?:/(?:[^~]|~[01])*)*)$"
+                      ] )
+                ]
+                [ "kind"; "node"; "pointer" ]
+            ; closed_object
+                [ "kind", `Assoc [ "const", `String "object" ]
+                ; ( "fields"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "items", field_entry_schema
+                      ] )
+                ]
+                [ "kind"; "fields" ]
+            ; closed_object
+                [ "kind", `Assoc [ "const", `String "array" ]
+                ; "items", `Assoc [ "type", `String "array"; "items", template_ref ]
+                ]
+                [ "kind"; "items" ]
+            ] )
+      ]
+  in
+  let node_properties =
+      [ "id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+      ; "tool", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+      ; ( "after"
+        , `Assoc
+            [ "type", `String "array"
+            ; "items", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+            ] )
+      ]
+  in
+  let node_schema =
+    `Assoc ["oneOf", `List
+      [ closed_object (node_properties @ ["input",template_ref]) ["id";"tool"]
+      ; closed_object (node_properties @ ["args",`Assoc ["type",`String "object"]])
+          ["id";"tool";"args"] ]]
+  in
+  `Assoc
+    [ "$id", `String "urn:masc:schema:keeper-tool-plan-request:v1"
+    ; "type", `String "object"
+    ; "properties", `Assoc
+        [ "nodes", `Assoc [ "type", `String "array"; "minItems", `Int 1; "items", node_schema ]
+        ; "exports", `Assoc
+            [ "type", `String "array"
+            ; "items", closed_object
+                [ "name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+                ; "node", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+                ; "pointer", `Assoc [ "type", `String "string" ] ]
+                [ "name"; "node"; "pointer" ] ]
+        ; "branch_failure_policy", `Assoc
+            [ "type", `String "string"
+            ; "enum", `List [ `String "fail_fast"; `String "continue_independent" ] ] ]
+    ; "required", `List [ `String "nodes" ]
+    ; "additionalProperties", `Bool false
+    ; "$defs", `Assoc [ "template", template_schema ]
+    ]
+;;
+
+let template_error_message = function
+  | Template_not_an_object { found } ->
+    Printf.sprintf "input template must be an object, found %s" found
+  | Template_missing_kind -> "input template is missing \"kind\""
+  | Template_unknown_kind kind ->
+    Printf.sprintf
+      "unknown template kind %S (expected literal, output, object, or array)"
+      kind
+  | Template_missing_field { kind; field } ->
+    Printf.sprintf "template kind %S is missing field %S" kind field
+  | Template_invalid_field { kind; field; found } ->
+    Printf.sprintf "template kind %S field %S has invalid value: %s" kind field found
+  | Template_invalid_pointer { pointer } ->
+    Printf.sprintf "invalid JSON pointer %S (must start with '/')" pointer
+  | Template_duplicate_object_field field ->
+    Printf.sprintf "template object declares field %S twice" field
+  | Template_duplicate_field { kind; field } ->
+    Printf.sprintf "template kind %S declares JSON field %S twice" kind field
+  | Template_unknown_field { kind; field } ->
+    Printf.sprintf "template kind %S has unknown field %S" kind field
+;;
+
+let error_message = function
+  | Request_not_an_object { found } ->
+    Printf.sprintf "plan request must be an object, found %s" found
+  | Missing_nodes -> "plan request is missing \"nodes\""
+  | Nodes_not_an_array { found } ->
+    Printf.sprintf "\"nodes\" must be an array, found %s" found
+  | Node_not_an_object { index; found } ->
+    Printf.sprintf "node %d must be an object, found %s" index found
+  | Node_missing_field { index; field } ->
+    Printf.sprintf "node %d is missing field %S" index field
+  | Node_invalid_field { index; field; found } ->
+    Printf.sprintf "node %d field %S has invalid value: %s" index field found
+  | Node_empty_id { index } -> Printf.sprintf "node %d has an empty id" index
+  | Node_template_error { index; error } ->
+    Printf.sprintf "node %d input: %s" index (template_error_message error)
+  | Unknown_request_field { field } ->
+    Printf.sprintf "unknown plan request field %S (expected nodes, exports, or branch_failure_policy)" field
+  | Duplicate_request_field { field } ->
+    Printf.sprintf "plan request declares field %S twice" field
+  | Node_duplicate_field { index; field } ->
+    Printf.sprintf "node %d declares field %S twice" index field
+  | Request_invalid_field { field; found } ->
+    Printf.sprintf "plan field %S has invalid value: %s" field found
+  | Export_invalid_field { index; field; found } ->
+    Printf.sprintf "export %d field %S has invalid value: %s" index field found
+  | Export_template_error { index; error } ->
+    Printf.sprintf "export %d: %s" index (template_error_message error)
+  | Plan_rejected error -> Plan.error_to_string error
+;;
+
+let template_error_to_json error =
+  let tag name fields = `Assoc (("kind", `String name) :: fields) in
+  match error with
+  | Template_not_an_object { found } ->
+    tag "template_not_an_object" [ "found", `String found ]
+  | Template_missing_kind -> tag "template_missing_kind" []
+  | Template_unknown_kind kind -> tag "template_unknown_kind" [ "value", `String kind ]
+  | Template_missing_field { kind; field } ->
+    tag "template_missing_field" [ "template", `String kind; "field", `String field ]
+  | Template_invalid_field { kind; field; found } ->
+    tag
+      "template_invalid_field"
+      [ "template", `String kind; "field", `String field; "found", `String found ]
+  | Template_invalid_pointer { pointer } ->
+    tag "template_invalid_pointer" [ "pointer", `String pointer ]
+  | Template_duplicate_object_field field ->
+    tag "template_duplicate_object_field" [ "field", `String field ]
+  | Template_duplicate_field { kind; field } ->
+    tag "template_duplicate_field" [ "template", `String kind; "field", `String field ]
+  | Template_unknown_field { kind; field } ->
+    tag "template_unknown_field" [ "template", `String kind; "field", `String field ]
+;;
+
+let error_to_json error =
+  let tag name fields = `Assoc (("kind", `String name) :: fields) in
+  match error with
+  | Request_not_an_object { found } ->
+    tag "request_not_an_object" [ "found", `String found ]
+  | Missing_nodes -> tag "missing_nodes" []
+  | Nodes_not_an_array { found } -> tag "nodes_not_an_array" [ "found", `String found ]
+  | Node_not_an_object { index; found } ->
+    tag "node_not_an_object" [ "index", `Int index; "found", `String found ]
+  | Node_missing_field { index; field } ->
+    tag "node_missing_field" [ "index", `Int index; "field", `String field ]
+  | Node_invalid_field { index; field; found } ->
+    tag
+      "node_invalid_field"
+      [ "index", `Int index; "field", `String field; "found", `String found ]
+  | Node_empty_id { index } -> tag "node_empty_id" [ "index", `Int index ]
+  | Node_template_error { index; error } ->
+    tag
+      "node_template_error"
+      [ "index", `Int index; "error", template_error_to_json error ]
+  | Unknown_request_field { field } ->
+    tag "unknown_request_field" [ "field", `String field ]
+  | Duplicate_request_field { field } ->
+    tag "duplicate_request_field" [ "field", `String field ]
+  | Node_duplicate_field { index; field } ->
+    tag "node_duplicate_field" [ "index", `Int index; "field", `String field ]
+  | Request_invalid_field { field; found } ->
+    tag "request_invalid_field" [ "field", `String field; "found", `String found ]
+  | Export_invalid_field { index; field; found } ->
+    tag "export_invalid_field" [ "index", `Int index; "field", `String field; "found", `String found ]
+  | Export_template_error { index; error } ->
+    tag "export_template_error" [ "index", `Int index; "error", template_error_to_json error ]
+  | Plan_rejected plan_error ->
+    tag
+      "plan_rejected"
+      [ "error", Plan.error_to_json plan_error
+      ; "message", `String (Plan.error_to_string plan_error)
+      ]
+;;
+
+let composable_tool_names ~descriptors =
+  descriptors
+  |> List.filter_map (fun descriptor ->
+    match descriptor.Keeper_tool_descriptor.composable_output with
+    | Keeper_tool_descriptor.Opaque_output -> None
+    | Keeper_tool_descriptor.Json_output _ ->
+      (match Keeper_tool_descriptor.keeper_model_names descriptor with
+       | name :: _ -> Some name
+       | [] -> None))
+  |> List.sort_uniq String.compare
+;;
+
+open Result.Syntax
+
+let rec template_to_yojson_with_params ~allow_params = function
+  | Plan.Json_template.Literal value ->
+    Ok (`Assoc [ "kind", `String "literal"; "value", value ])
+  | Plan.Json_template.Output { node_id; pointer } ->
+    Ok
+      (`Assoc
+        [ "kind", `String "output"
+        ; "node", `String (Plan.Node_id.to_string node_id)
+        ; "pointer", `String (Plan.Json_pointer.to_string pointer)
+        ])
+  | Plan.Json_template.Param { name } ->
+    if allow_params then Ok (`Assoc ["kind",`String "param";"name",`String name])
+    else Error (Unsubstituted_param { name })
+  | Plan.Json_template.Object fields ->
+    let* fields =
+      List.fold_left
+        (fun encoded (name, value) ->
+           let* encoded = encoded in
+           let* value = template_to_yojson_with_params ~allow_params value in
+           Ok (`Assoc [ "name", `String name; "value", value ] :: encoded))
+        (Ok [])
+        fields
+    in
+    Ok
+      (`Assoc
+        [ "kind", `String "object"; "fields", `List (List.rev fields) ])
+  | Plan.Json_template.Array items ->
+    let* items =
+      List.fold_left
+        (fun encoded item ->
+           let* encoded = encoded in
+           let* item = template_to_yojson_with_params ~allow_params item in
+           Ok (item :: encoded))
+        (Ok [])
+        items
+    in
+    Ok
+      (`Assoc [ "kind", `String "array"; "items", `List (List.rev items) ])
+;;
+
+let template_to_yojson = template_to_yojson_with_params ~allow_params:false
+
+let node_to_yojson ~allow_params (node : Plan.node) =
+  let* input = template_to_yojson_with_params ~allow_params node.input in
+  let after =
+    match node.after with
+    | [] -> []
+    | dependencies ->
+      [ ( "after"
+        , `List
+            (List.map
+               (fun node_id -> `String (Plan.Node_id.to_string node_id))
+               dependencies) )
+      ]
+  in
+  Ok
+    (`Assoc
+      ([ "id", `String (Plan.Node_id.to_string node.id)
+       ; "tool", `String node.tool_name
+       ]
+       @ after
+       @ [ "input", input ]))
+;;
+
+let contract_exn plan id = match Plan.contract plan id with
+  | Some contract -> contract
+  | None -> invalid_arg "validated plan lost its node contract"
+
+let rec plan_to_yojson ~allow_params plan =
+  let* nodes =
+    List.fold_left
+      (fun encoded node ->
+         let* encoded = encoded in
+         let* json = node_to_yojson ~allow_params node in
+         let* json = match (contract_exn plan node.Plan.id).target with
+           | Plan.Descriptor_target _ -> Ok json
+           | (Plan.Child_arguments _ | Plan.Child_submission _ | Plan.Child_result _) as target ->
+             let* operand = compiled_operand_to_yojson target in
+             (match json with
+              | `Assoc fields -> Ok (`Assoc (fields @ ["compiled_child",operand]))
+              | _ -> invalid_arg "encoded node is not an object") in
+         Ok (json :: encoded))
+      (Ok [])
+      (Plan.nodes plan)
+  in
+  let exports =
+    match Plan.exports plan with
+    | [] -> []
+    | exports ->
+      [ "exports", `List
+          (List.map (fun (export : Plan.export) ->
+             `Assoc [ "name", `String export.name
+                    ; "node", `String (Plan.Node_id.to_string export.node_id)
+                    ; "pointer", `String (Plan.Json_pointer.to_string export.pointer) ]) exports) ]
+  in
+  let policy =
+    match Plan.branch_failure_policy plan with
+    | Plan.Fail_fast -> []
+    | Plan.Continue_independent ->
+      [ "branch_failure_policy", `String (Plan.branch_failure_policy_to_string Plan.Continue_independent) ]
+  in
+  Ok (`Assoc ([ "nodes", `List (List.rev nodes) ] @ exports @ policy))
+and compiled_operand_to_yojson = function
+  | Plan.Descriptor_target _ -> invalid_arg "ordinary descriptor is not a compiled child operand"
+  | Plan.Child_arguments arguments -> Ok (`Assoc
+      ["kind",`String "arguments";"alias",`String (Plan.Node_id.to_string arguments.alias);
+       "reference",Skill_reference.to_yojson arguments.reference;
+       "node",`String (Plan.Node_id.to_string arguments.node.id);
+       "tool_name",`String arguments.node.tool_name;
+       "input_schema_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort arguments.input_schema));
+       "output_schema_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort arguments.output_schema))])
+  | (Plan.Child_submission nodes | Plan.Child_result nodes) as target ->
+    let child = nodes.Plan.child in
+    let* declared_plan = plan_to_yojson ~allow_params:true (Plan.child_plan child) in
+    let* declared_contracts = contracts_to_yojson (Plan.child_plan child) in
+    let* input = template_to_yojson (Plan.child_input child) in
+    let kind = match target with
+      | Plan.Child_submission _ -> "submission"
+      | Plan.Child_result _ -> "result"
+      | Plan.Descriptor_target _ | Plan.Child_arguments _ -> invalid_arg "compiled target changed during encoding" in
+    Ok (`Assoc ["kind",`String kind;"alias",`String (Plan.Node_id.to_string (Plan.child_alias child));
+      "reference",Skill_reference.to_yojson (Plan.child_reference child);
+      "tool_name",`String (Plan.child_tool_name child);"input",input;
+      "input_schema_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort (Plan.child_input_schema child)));
+      "submission_node",`String (Plan.Node_id.to_string nodes.submission.id);
+      "result_node",`String (Plan.Node_id.to_string nodes.result.id);
+      "declared_plan",declared_plan;
+      "declared_contracts_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort declared_contracts))])
+and contracts_to_yojson plan =
+  let* contracts = List.fold_left (fun prior (node : Plan.node) ->
+    let* contracts = prior in
+    let contract = contract_exn plan node.id in
+    let* route = match contract.target with
+      | Plan.Descriptor_target descriptor -> Ok (Keeper_tool_descriptor.route_evidence_json descriptor)
+      | (Plan.Child_arguments _ | Plan.Child_submission _ | Plan.Child_result _) as target -> compiled_operand_to_yojson target in
+    let output_schema = match contract.composable_output with
+      | Keeper_tool_descriptor.Opaque_output -> `Null
+      | Keeper_tool_descriptor.Json_output {schema} -> schema in
+    let frozen = `Assoc ["route",route;"input_schema",contract.input_schema;"output_schema",output_schema] in
+    Ok (`Assoc ["node_id",`String (Plan.Node_id.to_string node.id);
+      "contract_json",`String (Yojson.Safe.to_string (Yojson.Safe.sort frozen))] :: contracts))
+    (Ok []) (Plan.nodes plan) in
+  Ok (`List (List.rev contracts))
+;;
+
+let to_yojson = plan_to_yojson ~allow_params:false
+
+let first_duplicate fields =
+  let rec loop seen = function
+    | [] -> None
+    | (field, _) :: rest ->
+      if List.mem field seen then Some field else loop (field :: seen) rest
+  in
+  loop [] fields
+;;
+
+let validate_template_fields ~kind ~allowed fields =
+  match first_duplicate fields with
+  | Some field -> Error (Template_duplicate_field { kind; field })
+  | None ->
+    (match List.find_opt (fun (field, _) -> not (List.mem field allowed)) fields with
+     | Some (field, _) -> Error (Template_unknown_field { kind; field })
+     | None -> Ok ())
+;;
+
+let node_id_of_string ~index ~field value =
+  match Plan.Node_id.make value with
+  | Ok id -> Ok id
+  | Error Plan.Node_id.Empty ->
+    if String.equal field "id"
+    then Error (Node_empty_id { index })
+    else Error (Node_invalid_field { index; field; found = "empty string" })
+;;
+
+let rec template_of_json json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | None -> Error Template_missing_kind
+     | Some (`String "literal") ->
+       let* () = validate_template_fields ~kind:"literal" ~allowed:[ "kind"; "value" ] fields in
+       (match List.assoc_opt "value" fields with
+        | None -> Error (Template_missing_field { kind = "literal"; field = "value" })
+        | Some value -> Ok (Plan.Json_template.literal value))
+     | Some (`String "output") ->
+       let* () =
+         validate_template_fields ~kind:"output" ~allowed:[ "kind"; "node"; "pointer" ] fields
+       in
+       let* node =
+         match List.assoc_opt "node" fields with
+         | Some (`String node) -> Ok node
+         | Some other ->
+           Error
+             (Template_invalid_field
+                { kind = "output"; field = "node"; found = kind_name other })
+         | None -> Error (Template_missing_field { kind = "output"; field = "node" })
+       in
+       let* node_id =
+         match Plan.Node_id.make node with
+         | Ok id -> Ok id
+         | Error Plan.Node_id.Empty ->
+           Error
+             (Template_invalid_field
+                { kind = "output"; field = "node"; found = "empty string" })
+       in
+       let* pointer_text =
+         match List.assoc_opt "pointer" fields with
+         | Some (`String pointer) -> Ok pointer
+         | Some other ->
+           Error
+             (Template_invalid_field
+                { kind = "output"; field = "pointer"; found = kind_name other })
+         | None ->
+           Error (Template_missing_field { kind = "output"; field = "pointer" })
+       in
+       (match Plan.Json_pointer.of_string pointer_text with
+        | Ok pointer -> Ok (Plan.Json_template.output ~node_id ~pointer)
+        | Error _ -> Error (Template_invalid_pointer { pointer = pointer_text }))
+     | Some (`String "object") ->
+       let* () = validate_template_fields ~kind:"object" ~allowed:[ "kind"; "fields" ] fields in
+       (match List.assoc_opt "fields" fields with
+        | None -> Error (Template_missing_field { kind = "object"; field = "fields" })
+        | Some (`List entries) ->
+          let* parsed =
+            List.fold_left
+              (fun acc entry ->
+                 let* acc = acc in
+                 match entry with
+                 | `Assoc entry_fields ->
+                   let* () =
+                     validate_template_fields
+                       ~kind:"object.fields"
+                       ~allowed:[ "name"; "value" ]
+                       entry_fields
+                   in
+                   let* name =
+                     match List.assoc_opt "name" entry_fields with
+                     | Some (`String name) -> Ok name
+                     | Some other ->
+                       Error
+                         (Template_invalid_field
+                            { kind = "object"
+                            ; field = "fields.name"
+                            ; found = kind_name other
+                            })
+                     | None ->
+                       Error
+                         (Template_missing_field
+                            { kind = "object"; field = "fields.name" })
+                   in
+                   let* value =
+                     match List.assoc_opt "value" entry_fields with
+                     | Some value -> template_of_json value
+                     | None ->
+                       Error
+                         (Template_missing_field
+                            { kind = "object"; field = "fields.value" })
+                   in
+                   Ok ((name, value) :: acc)
+                 | other ->
+                   Error
+                     (Template_invalid_field
+                        { kind = "object"
+                        ; field = "fields"
+                        ; found = kind_name other
+                        }))
+              (Ok [])
+              entries
+          in
+          (match Plan.Json_template.object_ (List.rev parsed) with
+           | Ok template -> Ok template
+           | Error (Plan.Json_template.Duplicate_field field) ->
+             Error (Template_duplicate_object_field field))
+        | Some other ->
+          Error
+            (Template_invalid_field
+               { kind = "object"; field = "fields"; found = kind_name other }))
+     | Some (`String "array") ->
+       let* () = validate_template_fields ~kind:"array" ~allowed:[ "kind"; "items" ] fields in
+       (match List.assoc_opt "items" fields with
+        | None -> Error (Template_missing_field { kind = "array"; field = "items" })
+        | Some (`List items) ->
+          let* parsed =
+            List.fold_left
+              (fun acc item ->
+                 let* acc = acc in
+                 let* template = template_of_json item in
+                 Ok (template :: acc))
+              (Ok [])
+              items
+          in
+          Ok (Plan.Json_template.array (List.rev parsed))
+        | Some other ->
+          Error
+            (Template_invalid_field
+               { kind = "array"; field = "items"; found = kind_name other }))
+     | Some (`String kind) -> Error (Template_unknown_kind kind)
+     | Some other ->
+       Error
+         (Template_invalid_field
+            { kind = "?"; field = "kind"; found = kind_name other }))
+  | other -> Error (Template_not_an_object { found = kind_name other })
+;;
+
+let node_of_json ~index json =
+  match json with
+  | `Assoc fields ->
+    let* () =
+      match first_duplicate fields with
+      | Some field -> Error (Node_duplicate_field { index; field })
+      | None -> Ok ()
+    in
+    let* () =
+      List.fold_left
+        (fun acc (field, _) ->
+           let* () = acc in
+           match field with
+           | "id" | "tool" | "after" | "input" | "args" -> Ok ()
+           | other ->
+             Error (Node_invalid_field { index; field = other; found = "unexpected" }))
+        (Ok ())
+        fields
+    in
+    let* id_text =
+      match List.assoc_opt "id" fields with
+      | Some (`String id) -> Ok id
+      | Some other ->
+        Error (Node_invalid_field { index; field = "id"; found = kind_name other })
+      | None -> Error (Node_missing_field { index; field = "id" })
+    in
+    let* id = node_id_of_string ~index ~field:"id" id_text in
+    let* tool_name =
+      match List.assoc_opt "tool" fields with
+      | Some (`String tool) -> Ok tool
+      | Some other ->
+        Error (Node_invalid_field { index; field = "tool"; found = kind_name other })
+      | None -> Error (Node_missing_field { index; field = "tool" })
+    in
+    let* after =
+      match List.assoc_opt "after" fields with
+      | None -> Ok []
+      | Some (`List entries) ->
+        let* ids =
+          List.fold_left
+            (fun acc entry ->
+               let* acc = acc in
+               match entry with
+               | `String value ->
+                 let* id = node_id_of_string ~index ~field:"after" value in
+                 Ok (id :: acc)
+               | other ->
+                 Error
+                   (Node_invalid_field
+                      { index; field = "after"; found = kind_name other }))
+            (Ok [])
+            entries
+        in
+        Ok (List.rev ids)
+      | Some other ->
+        Error (Node_invalid_field { index; field = "after"; found = kind_name other })
+    in
+    let* input =
+      match List.assoc_opt "input" fields, List.assoc_opt "args" fields with
+      | None, None -> Ok (Plan.Json_template.literal (`Assoc []))
+      | None, Some (`Assoc _ as args) -> Ok (Plan.Json_template.literal args)
+      | None, Some other ->
+        Error (Node_invalid_field {index;field="args";found=kind_name other})
+      | Some _, Some _ ->
+        Error (Node_invalid_field {index;field="input";found="conflicts with args; choose exactly one"})
+      | Some template_json, None ->
+        (match template_of_json template_json with
+         | Ok template -> Ok template
+         | Error error -> Error (Node_template_error { index; error }))
+    in
+    Ok (Plan.node ~id ~tool_name ~after ~input ())
+  | other -> Error (Node_not_an_object { index; found = kind_name other })
+;;
+
+let export_of_json ~index = function
+  | `Assoc fields ->
+    let* name =
+      match List.assoc_opt "name" fields with
+      | Some (`String name) -> Ok name
+      | None -> Error (Export_invalid_field { index; field = "name"; found = "missing" })
+      | Some value -> Error (Export_invalid_field { index; field = "name"; found = kind_name value })
+    in
+    let* () =
+      match first_duplicate fields with
+      | None -> Ok ()
+      | Some field -> Error (Export_template_error
+          { index; error = Template_duplicate_field { kind = "export"; field } })
+    in
+    let reference = `Assoc (("kind", `String "output") :: List.filter (fun (field, _) -> not (String.equal field "name")) fields) in
+    (match template_of_json reference with
+     | Ok (Plan.Json_template.Output { node_id; pointer }) -> Ok (Plan.export ~name ~node_id ~pointer)
+     | Ok (Plan.Json_template.Literal _ | Plan.Json_template.Object _ | Plan.Json_template.Array _ | Plan.Json_template.Param _) ->
+       Error (Export_invalid_field { index; field = "export"; found = "expected output reference" })
+     | Error error -> Error (Export_template_error { index; error }))
+  | value -> Error (Export_invalid_field { index; field = "export"; found = kind_name value })
+;;
+
+type request_shape =
+  { node_jsons : Yojson.Safe.t list
+  ; exports : Plan.export list
+  ; branch_failure_policy : Plan.branch_failure_policy
+  }
+
+let shape_of_json json =
+  match json with
+  | `Assoc fields ->
+    let* () =
+      match first_duplicate fields with
+      | Some field -> Error (Duplicate_request_field { field })
+      | None -> Ok ()
+    in
+    let* () =
+      List.fold_left
+        (fun acc (field, _) ->
+           let* () = acc in
+           match field with
+           | "nodes" | "exports" | "branch_failure_policy" -> Ok ()
+           | other -> Error (Unknown_request_field { field = other }))
+        (Ok ())
+        fields
+    in
+    let* branch_failure_policy =
+      match List.assoc_opt "branch_failure_policy" fields with
+      | None -> Ok Plan.default_branch_failure_policy
+      | Some (`String policy) ->
+        (match Plan.branch_failure_policy_of_string policy with
+         | Some policy -> Ok policy
+         | None -> Error (Request_invalid_field { field = "branch_failure_policy"; found = policy }))
+      | Some value -> Error (Request_invalid_field { field = "branch_failure_policy"; found = kind_name value })
+    in
+    let* exports =
+      match List.assoc_opt "exports" fields with
+      | None -> Ok []
+      | Some (`List values) ->
+        List.fold_left (fun acc (index, value) ->
+          let* acc = acc in
+          let* export = export_of_json ~index value in
+          Ok (export :: acc)) (Ok []) (List.mapi (fun index value -> index, value) values)
+        |> Result.map List.rev
+      | Some value -> Error (Request_invalid_field { field = "exports"; found = kind_name value })
+    in
+    (match List.assoc_opt "nodes" fields with
+     | None -> Error Missing_nodes
+     | Some (`List node_jsons) -> Ok { node_jsons; exports; branch_failure_policy }
+     | Some other -> Error (Nodes_not_an_array { found = kind_name other }))
+  | other -> Error (Request_not_an_object { found = kind_name other })
+;;
+
+let plan_of_json ~descriptors json =
+  let* request = shape_of_json json in
+  let* nodes = List.fold_left (fun acc (index, json) ->
+      let* nodes = acc in
+      let* node = node_of_json ~index json in
+      Ok (node :: nodes)) (Ok []) (List.mapi (fun index json -> index, json) request.node_jsons) in
+  Plan.create ~descriptors ~branch_failure_policy:request.branch_failure_policy
+    ~exports:request.exports (List.rev nodes)
+  |> Result.map_error (fun error -> Plan_rejected error)
+;;

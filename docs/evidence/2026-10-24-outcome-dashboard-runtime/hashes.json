@@ -1,0 +1,32 @@
+[
+  {
+    "path": "docs/evidence/2026-10-24-outcome-dashboard-runtime/observed-task-outcomes.png",
+    "sha256": "d5cd74fa0fb93a63e4f7bce62ffafaed237642b61cfa8fc15669e06d783a5171",
+    "bytes": 111735
+  },
+  {
+    "path": "docs/evidence/2026-10-24-outcome-dashboard-runtime/visible-dialog.json",
+    "sha256": "472b1f15c043a3717335974956c1b88c3b9acc838043f077ba744d2a994ed6ce",
+    "bytes": 1394
+  },
+  {
+    "path": "docs/evidence/2026-10-24-outcome-dashboard-runtime/vite-proof.mts",
+    "sha256": "357bd1224f14719055d3c4a7bb2cfed83c86a000a191696af99b4f6d5ebeb1f6",
+    "bytes": 781
+  },
+  {
+    "path": "dashboard/src/components/agent-detail.ts",
+    "sha256": "4d65bd3c3e2f8186ffbf9f19f1a30ae0bafeb427cbc3d791e99daebcdcb7b7fc",
+    "bytes": 21226
+  },
+  {
+    "path": "dashboard/src/api/agent-fitness.ts",
+    "sha256": "5628f2380bc8cfd829ad331e57099d3b7ec5b1c68ebb399d1bc3b2b78c618429",
+    "bytes": 4933
+  },
+  {
+    "path": "dashboard/pnpm-lock.yaml",
+    "sha256": "5d3c9f77d5f1bb316ee7a78b0798fe727c0513d885b21c525198e0fbeff49cd8",
+    "bytes": 198623
+  }
+]

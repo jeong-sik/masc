@@ -1,0 +1,24 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+   MASC Fusion  pane-audit  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────
+    RUN
+    Pipeline: ● 1 Question ▸ ● 2 Panel ▸ ● 3 Judge ▸ ● 4 Evidence
+    Link: masc://fusion/pane-audit
+    Caller: @alpha [Keeper]  ·  masc://keepers/alpha
+    Status: completed
+    Configuration: trio · simple
+    Started: 2026-08-24 16:47:49 (39d00h ago)
+    Duration: 15s
+    Board: masc://board/post-pane-audit
+    Original question: question-proof-501
+
+    Title: Fusion evidence for pane-audit
+
+    1  QUESTION
+      question-proof-501
+
+    2  PANEL RESPONSES
+
+  j/k:scroll  PgUp/PgDn:page  Esc:back  q:quit  1-17/46  …?
+ › to alpha   (i to write)

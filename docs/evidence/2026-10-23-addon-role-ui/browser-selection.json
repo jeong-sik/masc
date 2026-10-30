@@ -1,0 +1,27 @@
+{
+  "before": {
+    "id": "declaration//fixture/browser.toml",
+    "href": "#monitoring?section=lane-addons&lane_target=%7B%22workspace%22%3A%22%2Ffixture%2Faddon-ui%22%2C%22kind%22%3A%22declaration%22%2C%22path%22%3A%22%2Ffixture%2Fbrowser.toml%22%2C%22installation%22%3A%22fixture-browser%22%7D",
+    "text": "Browser package fixtureIsolated role metadata fixture; no worker runsdeclaration//fixture/browser.toml역할: 브라우저 · 현재 선언Configured off · Off · worker cleanup confirmed/fixture/browser.tomlManage package declarations and retained observationsObserved configuration and worker details{\n  \"kind\": \"package\",\n  \"declaration\": {\n    \"kind\": \"valid\",\n    \"enabled\": false,\n    \"installation_id\": \"fixture-browser\",\n    \"run_id\": \"fixture-run\",\n    \"package_id\": \"fixture-browser\",\n    \"title\": \"Browser package fixture\",\n    \"desired_revision\": \"fixture-input\",\n    \"ui_category\": \"browser\",\n    \"source_revision\": \"fixture-file\",\n    \"exact_outputs\": [],\n    \"application\": {\n      \"kind\": \"inactive\"\n    }\n  },\n  \"instances\": []\n}"
+  },
+  "after": {
+    "id": "declaration//fixture/browser.toml",
+    "href": "#monitoring?section=lane-addons&lane_target=%7B%22workspace%22%3A%22%2Ffixture%2Faddon-ui%22%2C%22kind%22%3A%22declaration%22%2C%22path%22%3A%22%2Ffixture%2Fbrowser.toml%22%2C%22installation%22%3A%22fixture-browser%22%7D",
+    "text": "Browser package fixtureIsolated role metadata fixture; no worker runsdeclaration//fixture/browser.toml역할: 분석 · 현재 선언Configured off · Off · worker cleanup confirmed/fixture/browser.tomlManage package declarations and retained observationsObserved configuration and worker details{\n  \"kind\": \"package\",\n  \"declaration\": {\n    \"kind\": \"valid\",\n    \"enabled\": false,\n    \"installation_id\": \"fixture-browser\",\n    \"run_id\": \"fixture-run\",\n    \"package_id\": \"fixture-browser\",\n    \"title\": \"Browser package fixture\",\n    \"desired_revision\": \"fixture-input\",\n    \"ui_category\": \"analysis\",\n    \"source_revision\": \"fixture-file\",\n    \"exact_outputs\": [],\n    \"application\": {\n      \"kind\": \"inactive\"\n    }\n  },\n  \"instances\": []\n}"
+  },
+  "requests": {
+    "ok": true,
+    "status": 200,
+    "statusText": "OK",
+    "url": "http://127.0.0.1:4178/fixture-request-log",
+    "headers": {
+      "connection": "keep-alive",
+      "content-length": "104",
+      "content-type": "application/json",
+      "date": "Fri, 23 Oct 2026 05:39:04 GMT",
+      "keep-alive": "timeout=5",
+      "vary": "Origin"
+    },
+    "body": "{\"reads\":2,\"requests\":[{\"method\":\"GET\",\"path\":\"/api/v1/lanes\"},{\"method\":\"GET\",\"path\":\"/api/v1/lanes\"}]}"
+  }
+}

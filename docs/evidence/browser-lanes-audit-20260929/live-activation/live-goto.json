@@ -1,0 +1,39 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.46.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"url\":\"http://127.0.0.1:8998/\",\"title\":\"MASC Stagehand verification\"}",
+          "status": "ok",
+          "tool": "masc_browser_goto"
+        },
+        "trace_id": "2",
+        "agent_id": "admin",
+        "tool": "masc_browser_goto",
+        "duration_ms": 400,
+        "attempts": 1,
+        "timestamp": "2026-09-29T02:02:17Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"url\":\"http://127.0.0.1:8998/\",\"title\":\"MASC Stagehand verification\"}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "url": "http://127.0.0.1:8998/",
+      "title": "MASC Stagehand verification"
+    }
+  }
+}

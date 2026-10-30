@@ -1,0 +1,61 @@
+[
+  {
+    "command": [
+      "git",
+      "diff",
+      "--check",
+      "bdd5151351e7de19a80e78722f9bc1f97ff46d1c"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "test/test_workspace_curator_addon_commit.ml"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "test/test_keeper_addon_deferred_runtime.ml"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "test/test_keeper_librarian_addon_owner.ml"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "ocamlc",
+      "-stop-after",
+      "parsing",
+      "-c",
+      "test/test_keeper_librarian_durable_execution.ml"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

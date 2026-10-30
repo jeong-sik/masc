@@ -1,0 +1,9 @@
+{
+  "at_utc": "2026-10-25T17:20:46.456948+00:00",
+  "owned_PIDs_confirmed_absent": [
+    94523,
+    94525
+  ],
+  "scope": "Exactly the two tracked server/proxy PIDs. No descendant, process-group or fleet stop claim.",
+  "original_fixture_state_or_source_modified": false
+}

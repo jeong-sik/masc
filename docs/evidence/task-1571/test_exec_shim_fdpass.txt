@@ -1,0 +1,8 @@
+Testing `shim_fdpass'.
+This run has ID `V91RLZM1'.
+
+  [OK]          scm_rights          0   fd passes over socketpair.
+
+Full test results in `/masc-work/goo-yang-bong/masc/_build/.sandbox/8e6f23dba2328144e5be044489690c4d/default/test/_build/_tests/shim_fdpass'.
+Test Successful in 0.002s. 1 test run.
+exit=0

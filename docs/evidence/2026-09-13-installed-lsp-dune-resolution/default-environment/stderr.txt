@@ -1,0 +1,26 @@
+Uncaught error when handling notification:
+{
+  "params": {
+    "textDocument": {
+      "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml",
+      "languageId": "ocaml",
+      "version": 1,
+      "text": "let value =\n"
+    }
+  },
+  "method": "textDocument/didOpen",
+  "jsonrpc": "2.0"
+}
+Error:
+[ { exn =
+      "Unix.Unix_error(Unix.EACCES, \"execve\", \"/Users/dancer/me/scripts/dune\")"
+  ; backtrace =
+      "Raised by primitive operation at Spawn.spawn in file \"src/spawn.ml\" (inlined), line 176, characters 53-63\n\
+       Called from Spawn.spawn in file \"src/spawn.ml\", line 182, characters 2-87\n\
+       Called from Ocaml_lsp_server__Merlin_config.Process.start in file \"ocaml-lsp-server/src/merlin_config.ml\", lines 84-90, characters 8-12\n\
+       Called from Ocaml_lsp_server__Merlin_config.get_process in file \"ocaml-lsp-server/src/merlin_config.ml\", line 172, characters 19-37\n\
+       Called from Ocaml_lsp_server__Merlin_config.config in file \"ocaml-lsp-server/src/merlin_config.ml\", line 337, characters 19-56\n\
+       Called from Fiber__Scheduler.exec in file \"fiber/src/scheduler.ml\", line 73, characters 8-11\n\
+       "
+  }
+]

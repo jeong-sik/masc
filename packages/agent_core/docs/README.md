@@ -1,0 +1,32 @@
+---
+status: reference
+---
+
+# Agent Core specifications
+
+`packages/agent_core/` was imported into MASC by `eaddf336b6` (#27619), which
+brought 589 `.ml`/`.mli` files across without the specifications that govern
+that code — so RFC discovery over `docs/rfc/` returned nothing for the imported
+subtree.
+
+These files are those specifications, moved to sit beside the code they govern.
+
+## Layout
+
+| Path | Holds |
+|---|---|
+| `rfc/` | 25 RFCs governing provider, capability, tool, and streaming behaviour |
+| `design/` | design notes for boundaries that are still live |
+| `provider-capabilities-spec.md` | capability axis definitions |
+| `provider-catalog.md`, `capability-manifest.md`, `example-capability-manifest.json` | catalog and manifest formats + sample manifest |
+| `architecture.md`, `api-stability.md` | library shape and stability commitments |
+| `custom-providers.md`, `multi-endpoint-setup.md` | integration guides |
+| `resource-scoped-execution.md`, `http-request-observation.md`, `PERFORMANCE-SLO.md` | resource wave scheduling, HTTP request observation, and TTFT/prefill SLOs |
+| `EVENT-CATALOG.md`, `RUNTIME-OUTPUT-SCHEMA-INDEX.md` | event and output schema indexes |
+| `schemas/`, `schema-surfaces/` | machine-readable schema surfaces |
+
+## Status fields are not filtered
+
+An RFC here may be Withdrawn or Superseded. Those are kept because they record
+what was considered and why it was rejected, which is the part a later proposal
+needs. Read the status header before citing one as current.

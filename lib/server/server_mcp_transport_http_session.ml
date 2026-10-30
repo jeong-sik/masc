@@ -1,0 +1,792 @@
+open Result.Syntax
+
+module SMap = Set_util.StringMap
+
+let mcp_protocol_versions = Mcp_transport_protocol.supported_protocol_versions
+
+let mcp_protocol_version_default = Mcp_transport_protocol.default_protocol_version
+
+type registry =
+  { versions : string SMap.t
+  ; profiles : Server_mcp_transport_http_types.tool_profile SMap.t
+  ; timestamps : float SMap.t
+  ; started : float SMap.t
+  ; transports : Otel_dispatch_hook.transport_context SMap.t }
+
+let empty_registry : registry =
+  { versions=SMap.empty;profiles=SMap.empty;timestamps=SMap.empty
+  ; started=SMap.empty;transports=SMap.empty }
+
+let session_registry : registry Atomic.t = Atomic.make empty_registry
+
+(** Grace period: seconds to keep a session after SSE disconnect before reaping.
+    Prevents immediate reap on brief SSE interruptions or server restart.
+    Configurable via [MASC_SESSION_SSE_GRACE_PERIOD_SEC] env var (default 300 = 5 min). *)
+let grace_period_seconds = Env_config_runtime.Session.sse_grace_period_seconds
+
+let default_base_path () =
+  (* Match the launcher guard: a direct binary launch from a checkout with its
+     own .masc must not silently inherit a stale parent MASC_BASE_PATH.
+     When no explicit base path is set, use the current checkout/cwd rather
+     than HOME so runtime artifacts stay under a visible base path. *)
+  let requested_path = Config_dir_resolver.current_working_dir () in
+  Workspace_utils_backend_setup.resolve_server_default_base_path requested_path
+
+let is_valid_protocol_version version =
+  List.mem version mcp_protocol_versions
+
+let option_label key = function
+  | Some value when String.trim value <> "" -> [ key, value ]
+  | _ -> []
+
+let transport_context_labels = function
+  | None -> []
+  | Some transport ->
+      option_label
+        Otel_genai.Mcp_attr_key.network_protocol_name
+        transport.Otel_dispatch_hook.network_protocol_name
+      @ option_label
+          Otel_genai.Mcp_attr_key.network_protocol_version
+          transport.Otel_dispatch_hook.network_protocol_version
+      @ option_label
+          Otel_genai.Mcp_attr_key.network_transport
+          transport.Otel_dispatch_hook.network_transport
+
+let record_mcp_server_session_duration ?error_type session_id =
+  let state = Atomic.get session_registry in
+  match SMap.find_opt session_id state.started with
+  | None -> ()
+  | Some started_at ->
+    (* NDT-OK: session duration is emitted as OTel telemetry only. *)
+    let duration_s = max 0.0 (Unix.gettimeofday () -. started_at) in
+    let labels =
+      option_label
+        Otel_genai.Mcp_attr_key.mcp_protocol_version
+        (SMap.find_opt session_id state.versions)
+      @ transport_context_labels
+          (SMap.find_opt session_id state.transports)
+      @ option_label Otel_genai.Mcp_attr_key.error_type error_type
+    in
+    Otel_metric_store.observe_histogram
+      Otel_genai.Mcp_metric_name.server_session_duration
+      ~labels
+      duration_s
+
+(* The private callers provide either a valid protocol registration or a
+   state whose protocol membership was checked in the same CAS callback. *)
+let with_session_activity ?otel_transport_context ~now session_id (state : registry) =
+  { state with
+    started=(if SMap.mem session_id state.started then state.started
+      else SMap.add session_id now state.started);
+    timestamps=SMap.add session_id now state.timestamps;
+    transports=(match otel_transport_context with
+      | None -> state.transports
+      | Some transport -> SMap.add session_id transport state.transports) }
+
+let remember_protocol_version ?otel_transport_context session_id version =
+  if is_valid_protocol_version version then begin
+    let now = Unix.gettimeofday () in
+    Atomic_util.update session_registry (fun state ->
+      with_session_activity ?otel_transport_context ~now session_id
+        {state with versions=SMap.add session_id version state.versions})
+  end
+
+let jsonrpc_response_succeeded = function
+  | `Assoc fields ->
+    (match List.assoc_opt "jsonrpc" fields with
+     | Some (`String "2.0") ->
+       List.mem_assoc "id" fields
+       && List.mem_assoc "result" fields
+       && not (List.mem_assoc "error" fields)
+     | _ -> false)
+  | _ -> false
+
+let remember_protocol_version_if_initialize_succeeded
+      ?otel_transport_context
+      session_id
+      ~request_body
+      ~response_json
+  =
+  if jsonrpc_response_succeeded response_json then
+    match Mcp_transport_protocol.protocol_version_from_body request_body with
+    | Some version ->
+      remember_protocol_version ?otel_transport_context session_id version
+    | None -> ()
+
+(** RFC-0100 PR-3 — Q3 default: known-session predicate.
+
+    A session is "known" once an [initialize] body has registered a
+    protocol version for its id (see [remember_protocol_version]). Use
+    this to distinguish the legitimate "fresh session, no header"
+    handshake (where the server mints an id) from a client echoing an
+    [Mcp-Session-Id] header that the server has no state for — the latter
+    is rejected with [404 Not Found] so the client must re-handshake
+    instead of silently riding on a phantom session.
+
+    The profile map is not consulted because it is populated on
+    every POST regardless of whether [initialize] has succeeded, so it
+    cannot distinguish the handshake transition. *)
+let is_known_session session_id =
+  SMap.mem session_id (Atomic.get session_registry).versions
+
+let ensure_sse_backing_session_for_known_transport_session
+    ~transport_session_id ~sse_session_id =
+  if is_known_session transport_session_id then
+    let (_ : Session.McpSessionStore.mcp_session) =
+      Session.McpSessionStore.get_or_create ~id:sse_session_id ()
+    in
+    ()
+
+let remember_mcp_profile ?otel_transport_context session_id profile =
+  let now = Unix.gettimeofday () in
+  Atomic_util.update session_registry (fun state ->
+    let state = {state with profiles=SMap.add session_id profile state.profiles} in
+    if SMap.mem session_id state.versions then
+      with_session_activity ?otel_transport_context ~now session_id state
+    else state)
+
+let forget_mcp_session session_id =
+  record_mcp_server_session_duration session_id;
+  Client_registry_eio.unregister_mcp_session session_id;
+  Atomic_util.update session_registry (fun state ->
+    { versions=SMap.remove session_id state.versions
+    ; profiles=SMap.remove session_id state.profiles
+    ; timestamps=SMap.remove session_id state.timestamps
+    ; started=SMap.remove session_id state.started
+    ; transports=SMap.remove session_id state.transports })
+
+(* ===== File persistence ===== *)
+
+let profile_to_string = function
+  | Server_mcp_transport_http_types.Full -> "full"
+  | Server_mcp_transport_http_types.Managed_agent -> "managed_agent"
+  | Server_mcp_transport_http_types.Operator_remote -> "operator_remote"
+  | Server_mcp_transport_http_types.Seat -> "seat"
+
+let profile_of_string = function
+  | "full" -> Some Server_mcp_transport_http_types.Full
+  | "managed_agent" -> Some Server_mcp_transport_http_types.Managed_agent
+  | "operator_remote" -> Some Server_mcp_transport_http_types.Operator_remote
+  | "seat" -> Some Server_mcp_transport_http_types.Seat
+  | _ -> None
+
+let sessions_file_path ~base_path () =
+  Filename.concat
+    (Config_dir_resolver.masc_root ~base_path)
+    "mcp_transport_sessions.json"
+
+(** Serialize current session state to JSON and write to disk atomically.
+    Uses write-then-rename to avoid partial writes on crash. *)
+let write_sessions path =
+  let dir = Filename.dirname path in
+  (* [begin]/[end] close the [then] branch so the trailing [;] sequences into
+     the rest of the function. Without them, OCaml absorbs [; let versions =
+     ... in <body>] into the [Unix.Unix_error] handler, so the serialize/write
+     ran only when [mkdir] raised — i.e. never on the happy path (dir already
+     present or mkdir succeeds), silently persisting nothing. *)
+  if not (Stdlib.Sys.file_exists dir) then begin
+    try Unix.mkdir dir 0o755 with Unix.Unix_error _ -> ()
+  end;
+  let snapshot = Atomic.get session_registry in
+  let versions = snapshot.versions in
+  let profiles = snapshot.profiles in
+  let timestamps = snapshot.timestamps in
+  let started_at = snapshot.started in
+  let transports = snapshot.transports in
+  let all_ids = SMap.fold (fun sid _ acc -> sid :: acc) versions [] in
+  let string_field key = function
+    | Some value when String.trim value <> "" -> [ key, `String value ]
+    | _ -> []
+  in
+  let json_entries =
+    List.filter_map (fun sid ->
+      match SMap.find_opt sid versions with
+      | None -> None
+      | Some pv ->
+          let profile_str =
+            match SMap.find_opt sid profiles with
+            | Some p -> profile_to_string p
+            | None -> "full"
+          in
+          let ts =
+            match SMap.find_opt sid timestamps with
+            | Some t -> t
+            | None -> 0.0
+          in
+          let started =
+            match SMap.find_opt sid started_at with
+            | Some t -> t
+            | None -> ts
+          in
+          let transport_fields =
+            match SMap.find_opt sid transports with
+            | None -> []
+            | Some transport ->
+                string_field
+                  "network_protocol_name"
+                  transport.Otel_dispatch_hook.network_protocol_name
+                @ string_field
+                    "network_protocol_version"
+                    transport.Otel_dispatch_hook.network_protocol_version
+                @ string_field
+                    "network_transport"
+                    transport.Otel_dispatch_hook.network_transport
+          in
+          Some
+            ( sid
+            , `Assoc
+                ([ "protocol_version", `String pv
+                 ; "profile", `String profile_str
+                 ; "last_active_sse", `Float ts
+                 ; "started_at", `Float started
+                 ]
+                 @ transport_fields) )
+    ) all_ids
+  in
+  let json = `Assoc [ "sessions", `Assoc json_entries ] in
+  match Fs_compat.save_file_atomic_rename_only_staged path
+      (Yojson.Basic.to_string json ^ "\n") with
+  | Ok () -> ()
+  | Error failure ->
+      Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+
+(* The process owns one session registry. Lock only in the blocking worker,
+   before capturing its immutable maps, and retain the lock through rename. *)
+let persistence_mutex = Stdlib.Mutex.create ()
+
+type restore_failure =
+  | Read_failed of string
+  | Json_failed of string
+  | Shape_rejected
+  | Non_regular_file of Unix.file_kind
+
+type save_skip_reason =
+  | Restore_unobserved
+  | Restore_unsettled
+  | Restore_failed of restore_failure
+
+type write_failure =
+  | System_error of string
+  | Unix_error of { code : Unix.error; operation : string; path : string }
+
+type save_result = Saved | Skipped of save_skip_reason | Save_failed of write_failure
+
+let restore_failure_to_string = function
+  | Read_failed detail -> "unreadable: " ^ detail
+  | Json_failed detail -> "invalid JSON: " ^ detail
+  | Shape_rejected -> "rejected root"
+  | Non_regular_file kind -> "nonregular snapshot: " ^ Fs_compat.file_kind_to_string kind
+
+let save_skip_reason_to_string = function
+  | Restore_unobserved -> "original has not been restored"
+  | Restore_unsettled -> "restore has not settled successfully"
+  | Restore_failed failure -> restore_failure_to_string failure
+
+let write_failure_to_string = function
+  | System_error detail -> detail
+  | Unix_error {code;operation;path} ->
+      Printf.sprintf "%s %s: %s" operation path (Unix.error_message code)
+
+type persistence_state =
+  | Restore_pending of unit ref
+  | Ready
+  | Restore_refused of restore_failure
+
+(* Refusal belongs to the actual persistence path, not the process-wide live
+   registry. It survives later maintenance and explicit reloads in this process.
+   Atomic transitions do not block the owner domain on a worker-held mutex. *)
+let persistence_by_path : persistence_state SMap.t Atomic.t =
+  Atomic.make SMap.empty
+
+let rec refuse_restore path failure =
+  let states = Atomic.get persistence_by_path in
+  match SMap.find_opt path states with
+  | Some (Restore_refused original) -> original
+  | None | Some Ready | Some (Restore_pending _) ->
+      if Atomic.compare_and_set persistence_by_path states
+          (SMap.add path (Restore_refused failure) states)
+      then failure else refuse_restore path failure
+
+let begin_restore path token =
+  Atomic_util.update persistence_by_path (fun states ->
+    match SMap.find_opt path states with
+    | Some (Restore_refused _) -> states
+    | None | Some Ready | Some (Restore_pending _) ->
+        SMap.add path (Restore_pending token) states)
+
+let finish_restore path token =
+  Atomic_util.update persistence_by_path (fun states ->
+    match SMap.find_opt path states with
+    | Some (Restore_pending owner) when owner == token ->
+        SMap.add path Ready states
+    | None | Some Ready | Some (Restore_refused _) | Some (Restore_pending _) -> states)
+
+let owns_restore path token =
+  match SMap.find_opt path (Atomic.get persistence_by_path) with
+  | Some (Restore_pending owner) -> owner == token
+  | None | Some Ready | Some (Restore_refused _) -> false
+
+(* Called only under [persistence_mutex] in the host worker. A save-first
+   caller may create a missing file, but cannot overwrite an unrestored one. *)
+let check_snapshot_destination path =
+  match Unix.lstat path with
+  | {Unix.st_kind=Unix.S_REG;_} -> Ok ()
+  | {Unix.st_kind=(Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK) as kind;_} ->
+      Error (Non_regular_file kind)
+  | exception Unix.Unix_error (Unix.ENOENT,_,_) -> Ok ()
+  | exception Unix.Unix_error (code,operation,file) ->
+      Error (Read_failed (Printf.sprintf "%s %s: %s" operation file (Unix.error_message code)))
+
+let can_save_sessions path =
+  match SMap.find_opt path (Atomic.get persistence_by_path) with
+  | Some Ready ->
+      (match check_snapshot_destination path with
+       | Ok () -> Ok ()
+       | Error failure -> Error (Restore_failed (refuse_restore path failure)))
+  | Some (Restore_pending _) -> Error Restore_unsettled
+  | Some (Restore_refused failure) -> Error (Restore_failed failure)
+  | None ->
+      (match Unix.lstat path with
+       | _ -> Error Restore_unobserved
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+           let rec admit_missing () =
+             let states = Atomic.get persistence_by_path in
+             match SMap.find_opt path states with
+             | None ->
+                 if Atomic.compare_and_set persistence_by_path states (SMap.add path Ready states)
+                 then Ok () else admit_missing ()
+             | Some Ready -> Ok ()
+             | Some (Restore_pending _) -> Error Restore_unsettled
+             | Some (Restore_refused failure) -> Error (Restore_failed failure)
+           in
+           admit_missing ()
+       | exception Unix.Unix_error (code,operation,file) ->
+           let failure = refuse_restore path
+             (Read_failed (Printf.sprintf "%s %s: %s" operation file (Unix.error_message code))) in
+           Error (Restore_failed failure))
+
+let save_sessions_to_file ~base_path () =
+  let path = sessions_file_path ~base_path () in
+  Eio_guard.check_if_ready ();
+  let saved = Eio_guard.run_in_systhread ~label:"mcp-session-save" (fun () ->
+    try
+      Stdlib.Mutex.protect persistence_mutex (fun () ->
+        match can_save_sessions path with
+        | Ok () -> write_sessions path; Saved
+        | Error reason -> Skipped reason)
+    with
+    | Stdlib.Sys_error detail -> Save_failed (System_error detail)
+    | Unix.Unix_error (code,operation,path) -> Save_failed (Unix_error {code;operation;path})) in
+  Eio_guard.check_if_ready ();
+  (match saved with
+   | Saved -> ()
+   | Skipped reason ->
+       Log.Server.routine "session persist skipped path=%S reason=%s" path (save_skip_reason_to_string reason)
+   | Save_failed failure ->
+       Log.Server.warn "session persist failed path=%S error=%s" path (write_failure_to_string failure));
+  saved
+
+type restored_sessions =
+  { patch : registry
+  ; decoded_entries : int }
+
+type session_restore =
+  | Missing
+  | Unavailable of restore_failure
+  | Restored of restored_sessions
+
+let decode_sessions (json : Yojson.Basic.t) =
+  let float_field = function
+    | Some (`Float value) -> Some value
+    | Some (`Int value) -> Some (float_of_int value)
+    | _ -> None
+  in
+  let string_field key fields =
+    match List.assoc_opt key fields with
+    | Some (`String value) when String.trim value <> "" -> Some value
+    | _ -> None
+  in
+  let transport_context fields =
+    let network_protocol_name = string_field "network_protocol_name" fields in
+    let network_protocol_version =
+      string_field "network_protocol_version" fields
+    in
+    let network_transport = string_field "network_transport" fields in
+    match
+      network_protocol_name, network_protocol_version, network_transport
+    with
+    | None, None, None -> None
+    | _ ->
+      Some
+        { Otel_dispatch_hook.network_protocol_name
+        ; network_protocol_version
+        ; network_transport
+        }
+  in
+  (match json with
+   | `Assoc [("sessions", `Assoc entries)] ->
+       let empty = {patch=empty_registry;decoded_entries=0} in
+       Restored (List.fold_left (fun restored (sid, entry) ->
+         match entry with
+         | `Assoc fields ->
+             let patch = restored.patch in
+             let pv = List.assoc_opt "protocol_version" fields in
+             let profile_str = List.assoc_opt "profile" fields in
+             let ts = List.assoc_opt "last_active_sse" fields in
+             let started = List.assoc_opt "started_at" fields in
+             (match pv with
+              | Some (`String v) ->
+                  if is_valid_protocol_version v then (
+                    let t =
+                      match float_field ts with
+                      | Some value -> value
+                      | None -> 0.0
+                    in
+                    let started_at =
+                      match float_field started with
+                      | Some value -> value
+                      | None -> t
+                    in
+                    let profile =
+                      match profile_str with
+                      | Some (`String p) -> profile_of_string p
+                      | _ -> None
+                    in
+                    {patch={versions=SMap.add sid v patch.versions;
+                     profiles=(match profile with None -> patch.profiles
+                       | Some profile -> SMap.add sid profile patch.profiles);
+                     timestamps=SMap.add sid t patch.timestamps;
+                     started=SMap.add sid started_at patch.started;
+                     transports=(match transport_context fields with None -> patch.transports
+                       | Some transport -> SMap.add sid transport patch.transports)};
+                     decoded_entries=restored.decoded_entries + 1})
+                  else restored
+              | _ -> restored)
+         | _ -> restored
+       ) empty entries)
+   | _ -> Unavailable Shape_rejected)
+
+let read_sessions path =
+  try
+    let expected = Unix.lstat path in
+    match expected.Unix.st_kind with
+    | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK as kind ->
+        Unavailable (Non_regular_file kind)
+    | Unix.S_REG ->
+        (* NONBLOCK prevents a FIFO substituted after lstat from waiting for
+           a writer. Validate the actual descriptor before reading any JSON. *)
+        let descriptor = Unix.openfile path [Unix.O_RDONLY;Unix.O_NONBLOCK;Unix.O_CLOEXEC] 0 in
+        let input = match Unix.in_channel_of_descr descriptor with
+          | input -> input
+          | exception exn ->
+              let backtrace = Printexc.get_raw_backtrace () in
+              Unix.close descriptor;
+              Printexc.raise_with_backtrace exn backtrace in
+        Fun.protect ~finally:(fun () -> close_in_noerr input) (fun () ->
+          let opened = Unix.fstat descriptor in
+          match opened.Unix.st_kind with
+          | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK as kind ->
+              Unavailable (Non_regular_file kind)
+          | Unix.S_REG ->
+              if expected.Unix.st_dev <> opened.Unix.st_dev || expected.Unix.st_ino <> opened.Unix.st_ino then
+                Unavailable (Read_failed "snapshot identity changed during open")
+              else decode_sessions (Yojson.Basic.from_channel input))
+  with
+  | Unix.Unix_error (Unix.ENOENT,_,_) -> Missing
+  | Unix.Unix_error (error,operation,path) ->
+      Unavailable (Read_failed (Printf.sprintf "%s %s: %s" operation path (Unix.error_message error)))
+  | Stdlib.Sys_error detail -> Unavailable (Read_failed detail)
+  | Yojson.Json_error detail -> Unavailable (Json_failed detail)
+
+let merge_restored values current =
+  if SMap.is_empty values then current
+  else SMap.union (fun _ restored _ -> Some restored) values current
+
+let load_sessions_from_file ~base_path () =
+  let path = sessions_file_path ~base_path () in
+  Eio_guard.check_if_ready ();
+  let token = ref () in
+  begin_restore path token;
+  let restored = Eio_guard.run_in_systhread ~label:"mcp-session-load" (fun () ->
+    Stdlib.Mutex.protect persistence_mutex (fun () ->
+      let restored = read_sessions path in
+      (match restored with
+       | Unavailable failure -> ignore (refuse_restore path failure)
+       | Missing | Restored _ -> ());
+      restored)) in
+  Eio_guard.check_if_ready ();
+  match restored with
+  | Missing when owns_restore path token ->
+      finish_restore path token;
+      Log.Server.debug "session restore absent path=%S" path
+  | Unavailable failure ->
+      Log.Server.warn
+        "session restore %s path=%S; preserving original; new sessions remain memory-only until repair and restart"
+        (restore_failure_to_string failure) path
+  | Restored sessions when owns_restore path token ->
+      (* Owner activation publishes these maps without yielding after the
+         cancellation/ownership checks; an older suspended load cannot apply
+         after a newer load has claimed this path on the owner domain. *)
+      let patch = sessions.patch in
+      (* Every valid decoded row adds protocol/activity/start together. No
+         protocol rows therefore means no publishable patch; decoded_entries
+         remains diagnostic, never an admission or authority gate. *)
+      if not (SMap.is_empty patch.versions) then begin
+        Atomic_util.update session_registry (fun current ->
+          { versions=merge_restored patch.versions current.versions
+          ; profiles=merge_restored patch.profiles current.profiles
+          ; timestamps=merge_restored patch.timestamps current.timestamps
+          ; started=merge_restored patch.started current.started
+          ; transports=merge_restored patch.transports current.transports })
+      end;
+      finish_restore path token;
+      Log.Server.debug "session restore applied path=%S entries=%d" path sessions.decoded_entries
+  | Missing | Restored _ ->
+      Log.Server.warn "session restore superseded or previously refused path=%S" path
+
+(** Reap session entries whose session_id has no active SSE connection
+    AND whose grace period has expired.
+
+    Grace period logic: when a session's SSE goes inactive, we record the
+    timestamp in the registry's [timestamps] map. The session is kept for
+    [grace_period_seconds] after that point, giving the client time to
+    reconnect without triggering "Unknown Mcp-Session-Id" errors.
+
+    Call periodically from the cleanup loop. Returns number of reaped entries. *)
+let reap_stale_sessions ~base_path ~is_active_session =
+  let now = Unix.gettimeofday () in
+  let stale, kept_by_grace =
+    SMap.fold (fun sid _ (stale_acc, grace_acc) ->
+      if is_active_session sid then begin
+        (* Active right now — refresh timestamp, keep session *)
+        Atomic_util.update session_registry (fun state ->
+          if SMap.mem sid state.versions then
+            {state with timestamps=SMap.add sid now state.timestamps}
+          else state);
+        (stale_acc, grace_acc)
+      end else begin
+        (* Not active — check grace period *)
+        match SMap.find_opt sid ((Atomic.get session_registry).timestamps) with
+        | Some last_active when now -. last_active < grace_period_seconds ->
+            (* Within grace period — keep *)
+            (stale_acc, grace_acc + 1)
+        | _ ->
+            (* Grace expired or never tracked — reap *)
+            (sid :: stale_acc, grace_acc)
+      end
+    ) ((Atomic.get session_registry).versions) ([], 0)
+  in
+  if stale <> [] then begin
+    (* Reaping is a transport-driven session termination, so it must pass
+       through the same lifecycle boundary as an explicit MCP DELETE.
+       Removing only the HTTP maps leaks the corresponding client-registry
+       session and resolved identity forever. *)
+    List.iter forget_mcp_session stale
+  end;
+  if kept_by_grace > 0 then
+    Log.Server.info "session grace: %d sessions kept (inactive but within %.0fs grace)"
+      kept_by_grace grace_period_seconds;
+  (* Persist session state after each reap cycle so file stays current. *)
+  (match save_sessions_to_file ~base_path () with
+   | Saved | Skipped _ | Save_failed _ -> ());
+  List.length stale
+
+let profile_label = function
+  | Server_mcp_transport_http_types.Full -> "/mcp"
+  | Server_mcp_transport_http_types.Managed_agent -> "/mcp/managed"
+  | Server_mcp_transport_http_types.Operator_remote -> "/mcp/operator"
+  | Server_mcp_transport_http_types.Seat -> "/mcp/play"
+
+module For_testing = struct
+  let profile_count () = SMap.cardinal (Atomic.get session_registry).profiles
+end
+
+let validate_mcp_session_profile ~profile session_id =
+  match SMap.find_opt session_id ((Atomic.get session_registry).profiles) with
+  | None -> Ok ()
+  | Some existing when existing = profile -> Ok ()
+  | Some existing ->
+      Error
+        (Printf.sprintf "Session %s belongs to %s, not %s." session_id
+           (profile_label existing) (profile_label profile))
+
+let validate_mcp_session_delete_profile ~profile session_id =
+  match profile with
+  (* A narrow door ends only the sessions it registered: its credential may
+     not be able to open any other door. *)
+  | Server_mcp_transport_http_types.Operator_remote
+  | Server_mcp_transport_http_types.Seat ->
+      (match SMap.find_opt session_id ((Atomic.get session_registry).profiles) with
+       | Some existing when existing = profile -> Ok ()
+       | Some existing ->
+           Error
+             (Printf.sprintf "Session %s belongs to %s, not %s." session_id
+                (profile_label existing) (profile_label profile))
+       | None ->
+           Error
+             (Printf.sprintf "Session %s is not registered on %s." session_id
+                (profile_label profile)))
+  | Server_mcp_transport_http_types.Full
+  | Server_mcp_transport_http_types.Managed_agent ->
+      validate_mcp_session_profile ~profile session_id
+
+let protocol_version_from_body body_str =
+  Mcp_transport_protocol.protocol_version_from_body body_str
+
+let get_session_id_query target =
+  Uri.get_query_param (Uri.of_string target) "session_id"
+
+let capitalize_ascii (s : string) =
+  if s = "" then
+    s
+  else
+    let first = Char.uppercase_ascii s.[0] |> String.make 1 in
+    let rest =
+      if String.length s > 1 then
+        String.sub s 1 (String.length s - 1) |> String.lowercase_ascii
+      else
+        ""
+    in
+    first ^ rest
+
+let title_case_header_name (header_name : string) =
+  header_name |> String.split_on_char '-' |> List.map capitalize_ascii
+  |> String.concat "-"
+
+let get_header_any_case (headers : Httpun.Headers.t) (name : string) =
+  match Httpun.Headers.get headers name with
+  | Some _ as value -> value
+  | None ->
+      let title_case = title_case_header_name name in
+      (match Httpun.Headers.get headers title_case with
+      | Some _ as value -> value
+      | None -> Httpun.Headers.get headers (String.uppercase_ascii name))
+
+let get_cookie_value (request : Httpun.Request.t) cookie_name =
+  match get_header_any_case request.headers "cookie" with
+  | None -> None
+  | Some raw ->
+      Cohttp.Header.init_with "cookie" raw
+      |> Cohttp.Cookie.Cookie_hdr.extract
+      |> List.find_map (fun (name, value) ->
+             if String.equal name cookie_name then
+               let value = String.trim value in
+               if String.equal value "" then None else Some value
+             else None)
+
+let get_session_id_any (request : Httpun.Request.t) =
+  match get_session_id_query request.target with
+  | Some _ as id -> id
+  | None -> (
+      match get_header_any_case request.headers "mcp-session-id" with
+      | Some _ as id -> id
+      | None -> get_cookie_value request "mcp-session-id")
+
+let get_protocol_version (request : Httpun.Request.t) =
+  match get_header_any_case request.headers "mcp-protocol-version" with
+  | Some v -> v
+  | None -> mcp_protocol_version_default
+
+let get_protocol_version_header_opt (request : Httpun.Request.t) =
+  get_header_any_case request.headers "mcp-protocol-version"
+
+(* Two rejections that used to share one string. They answer different
+   questions — "this server does not speak that version" versus "this session
+   already settled on another version" — and MCP 2026-07-28 fixes the wire
+   shape of only the first (-32022 with data.supported/data.requested). A
+   caller handed a bare string cannot tell them apart, so the distinction
+   lives in the type. *)
+type protocol_version_rejection =
+  | Unsupported_version of { requested : string }
+  | Session_version_mismatch of
+      { session_id : string
+      ; expected : string
+      ; got : string
+      }
+
+let protocol_version_rejection_message = function
+  | Unsupported_version { requested } ->
+      Printf.sprintf "Unsupported MCP-Protocol-Version: %s" requested
+  | Session_version_mismatch { session_id; expected; got } ->
+      Printf.sprintf
+        "MCP-Protocol-Version mismatch for session %s: expected %s, got %s."
+        session_id expected got
+
+let protocol_version_rejection_code : protocol_version_rejection -> Mcp_error_code.t
+  = function
+  | Unsupported_version _ -> Mcp_error_code.Unsupported_protocol_version
+  | Session_version_mismatch _ -> Mcp_error_code.Invalid_request
+
+let protocol_version_rejection_body rejection =
+  match rejection with
+  | Unsupported_version { requested } ->
+      Mcp_error_code.unsupported_protocol_version_body ~requested
+        ~supported:Mcp_transport_protocol.supported_protocol_versions
+  | Session_version_mismatch _ ->
+      Mcp_error_code.jsonrpc_error_body
+        (protocol_version_rejection_code rejection)
+        ~message:(protocol_version_rejection_message rejection)
+
+let correlate_error_body_to_request ~request_body error_body =
+  let values name fields =
+    List.filter_map (fun (key, value) ->
+      if String.equal key name then Some value else None) fields
+  in
+  let id =
+    match Yojson.Safe.from_string request_body with
+    | `Assoc fields ->
+      (match values "jsonrpc" fields, values "method" fields, values "id" fields with
+       | [ `String "2.0" ], [ `String _ ], [] -> None
+       | [ `String "2.0" ], [ `String _ ], [ id ]
+         when Mcp_transport_protocol.is_valid_request_id id -> Some id
+       | _, _, _ -> Some `Null)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
+    | exception Yojson.Json_error _ -> Some `Null
+  in
+  match Yojson.Safe.from_string error_body with
+  | `Assoc fields ->
+    let fields = List.remove_assoc "id" fields in
+    let fields = match id with Some value -> fields @ [ "id", value ] | None -> fields in
+    Yojson.Safe.to_string (`Assoc fields)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
+  | exception Yojson.Json_error _ -> error_body
+
+let protocol_version_rejection_body_for_request ~request_body rejection =
+  correlate_error_body_to_request ~request_body (protocol_version_rejection_body rejection)
+
+let validate_protocol_version_continuity ~session_id request =
+  let validate_supported version =
+    if is_valid_protocol_version version then
+      Ok ()
+    else
+      Error (Unsupported_version { requested = version })
+  in
+  let provided = get_protocol_version_header_opt request in
+  match SMap.find_opt session_id ((Atomic.get session_registry).versions) with
+  | Some expected -> (
+      match provided with
+      | None -> Ok ()
+      | Some version ->
+          let* () = validate_supported version in
+          if String.equal version expected then
+            Ok ()
+          else
+            Error
+              (Session_version_mismatch
+                 { session_id; expected; got = version }))
+  | None -> (
+      match provided with
+      | Some version -> validate_supported version
+      | None -> Ok ())
+
+let get_protocol_version_for_session ?session_id request =
+  match session_id with
+  | Some id ->
+      (match SMap.find_opt id ((Atomic.get session_registry).versions) with
+       | Some v -> v
+       | None -> get_protocol_version request)
+  | None -> get_protocol_version request
+
+let query_param request key =
+  let uri = Uri.of_string request.Httpun.Request.target in
+  Uri.get_query_param uri key

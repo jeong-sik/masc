@@ -1,0 +1,1077 @@
+module Workspace = Masc.Workspace
+module Json = Yojson.Safe.Util
+module Keeper_registry = Masc.Keeper_registry
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_sandbox_control = Masc.Keeper_sandbox_control
+module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
+module Keeper_tool_shared_runtime = Masc.Keeper_tool_shared_runtime
+module Keeper_alerting_path = Masc.Keeper_alerting_path
+
+(* [Keeper_tool_filesystem_runtime.handle_read_file] / [handle_file_write]
+   (the bare string-returning wrappers) were retired: they had zero
+   production callers ([keeper_tool_runtime.ml] calls the [_with_outcome]
+   variants directly). These test-local shims reproduce the [.raw_output]
+   projection so the assertions below keep exercising the real production
+   entry points. *)
+let scheduled_admission_fixture_ref =
+  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
+
+let handle_read_file ~turn_sandbox_factory ~config ~meta ~args =
+  (Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
+     ~turn_sandbox_factory
+     ~config
+     ~meta
+     ~args)
+    .raw_output
+;;
+
+let handle_file_write
+      ~turn_sandbox_factory
+      ~config
+      ~meta
+      ~publication_recovery
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~args
+      ()
+  =
+  (Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+     ~turn_sandbox_factory
+     ~config
+     ~meta
+     ~publication_recovery
+     ?continuation_channel
+     ?gate_context
+     ?gate_grant
+     ~args
+     ())
+    .raw_output
+;;
+
+let temp_dir () =
+  let d = Filename.temp_file "keeper-visible-path-projection-" "" in
+  Unix.unlink d;
+  Unix.mkdir d 0o755;
+  d
+;;
+
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/"
+  then ()
+  else if Sys.file_exists path
+  then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    Unix.mkdir path 0o755)
+;;
+
+let cleanup_dir dir =
+  let rec rm path =
+    match Unix.lstat path with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    | _ -> Unix.unlink path
+    | exception Unix.Unix_error _ -> ()
+  in
+  try rm dir with
+  | _ -> ()
+;;
+
+let write_file path content =
+  ensure_dir (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
+let make_meta
+      ?(sandbox = Keeper_types_profile_sandbox.Docker)
+      ?(always_allow = false)
+      name
+  =
+  let json =
+    `Assoc
+      [ "name", `String name
+      ; "trace_id", `String ("trace-" ^ name)
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta ->
+    (* [base] is the image the premise checks for; each run's workspace
+       catalog promotes it. *)
+    let meta = { meta with sandbox_profile = sandbox; sandbox_image = Some "base" } in
+    if always_allow then { meta with always_allow = Some true } else meta
+  | Error e -> Alcotest.fail e
+;;
+
+let with_eio_fs f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let fs = Eio.Stdenv.fs env in
+  Fs_compat.set_fs fs;
+  Process_eio.init
+    ~cwd_default:Eio.Path.(fs / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  Fun.protect
+    ~finally:(fun () ->
+      Process_eio.reset_for_testing ();
+      Fs_compat.clear_fs ())
+    (fun () -> f ~fs ~sw ())
+;;
+
+(* Every case below runs a turn inside the docker sandbox image. On a runner
+   that has no such image the reads come back as
+   "docker_cat_failed: image_not_found ...", which reads as a product failure
+   and is not one: the suite's own precondition is absent. Say that instead,
+   so the red is about the code and never about the machine. *)
+let docker_sandbox_image_available =
+  lazy
+    (let available =
+       Sys.command
+         (Printf.sprintf
+            "docker image inspect %s >/dev/null 2>&1"
+            (Filename.quote Masc_test_deps.live_sandbox_image_tag))
+       = 0
+     in
+     (* A silent skip reads as "ran and passed" in a log someone scans later.
+        Said once, because the answer does not change within a run. *)
+     if not available
+     then
+       (* stderr, because alcotest captures each case's stdout into a file
+          nobody opens when the run is green. *)
+       Printf.eprintf
+         "SKIPPING every case in this suite: it runs each turn inside the %s \
+          sandbox image, which is not on this host. Build it with `masc \
+          sandbox-image --tag %s` to run them.\n%!"
+         Masc_test_deps.live_sandbox_image_tag Masc_test_deps.live_sandbox_image_tag;
+     available)
+
+(* The image being present is half the premise. Every case here writes the
+   file it wants to read into a temp workspace and reads it back through a
+   container that bind-mounts that workspace, so the host's docker has to
+   share the directory [temp_dir] creates in.
+
+   Measured on this repo's macOS host (2026-09-10): the docker context is
+   colima, whose default mount list is [$HOME] alone. A bind mount whose
+   source is under [$TMPDIR] (/var/folders/...) or /tmp arrives in the
+   container as an empty directory -- the run succeeds, the file is not there,
+   and the read answers "docker_cat_failed: exit=1 output=cat: ...: No such
+   file or directory". That is the machine, not the projection, and it cost a
+   round of looking at mount and path-projection code (#35075).
+
+   The probe mounts a temp directory of its own and reads a sentinel back, so
+   it fails for the same reason the cases would. Same image, so it pulls
+   nothing extra. *)
+let docker_shares_a_temp_workspace =
+  lazy
+    (let dir = temp_dir () in
+     let sentinel = Filename.concat dir "mount-premise" in
+     let out = open_out sentinel in
+     output_string out "visible";
+     close_out out;
+     let shared =
+       Sys.command
+         (Printf.sprintf
+            "docker run --rm -v %s:/masc-mount-premise:ro %s cat \
+             /masc-mount-premise/mount-premise >/dev/null 2>&1"
+            (Filename.quote dir)
+            (Filename.quote Masc_test_deps.live_sandbox_image_tag))
+       = 0
+     in
+     (try Sys.remove sentinel with Sys_error _ -> ());
+     (try Unix.rmdir dir with Unix.Unix_error _ -> ());
+     if not shared
+     then
+       Printf.eprintf
+         "SKIPPING every case in this suite: this host's docker does not share \
+          %s into a container, so a case's temp workspace arrives empty and \
+          every read answers \"No such file or directory\". A colima context \
+          mounts $HOME only; add this path to its mount list, or run the suite \
+          from a workspace under a shared path.\n%!"
+         (Filename.dirname dir);
+     shared)
+
+let setup ?sandbox ?always_allow f =
+  (* No [?sandbox] means [make_meta]'s default, which is Docker. *)
+  (match sandbox with
+   | None | Some Keeper_types_profile_sandbox.Docker ->
+     if (not (Lazy.force docker_sandbox_image_available))
+        || not (Lazy.force docker_shares_a_temp_workspace)
+     then Alcotest.skip ()
+   | Some _ -> ());
+  with_eio_fs
+  @@ fun ~fs ~sw () ->
+  let base = temp_dir () in
+  ensure_dir (Filename.concat base Common.masc_dirname);
+  Masc_test_deps.write_sandbox_image_catalog ~base_path:base
+    [ "base", Masc_test_deps.live_sandbox_image_tag ];
+
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       Keeper_registry.For_testing.clear ();
+       let config = Workspace.default_config base in
+       let meta = make_meta ?sandbox ?always_allow "tester" in
+       let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+       ensure_dir playground;
+       ignore (Keeper_registry.For_testing.register ~base_path:base meta.name meta);
+       Masc_test_deps.with_publication_recovery_registry
+         ~sw
+         ~fs
+         ~registry_root:(Workspace.masc_dir config)
+       @@ fun registry ->
+       let publication_recovery =
+         { Masc.Keeper_publication_recovery_availability.provider =
+             Masc_test_deps.publication_recovery_provider registry
+         ; keeper_name = meta.name
+         }
+       in
+       f ~config ~meta ~playground ~publication_recovery)
+;;
+
+let parse raw = Yojson.Safe.from_string raw
+
+let parse_ok raw =
+  parse raw |> Json.member "ok" |> Json.to_bool_option |> Option.value ~default:false
+;;
+
+let parse_string key raw = parse raw |> Json.member key |> Json.to_string_option
+
+let allow_repo ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) repo_id =
+  let repo_path =
+    Filename.concat
+      (Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta)
+      (Filename.concat "repos" repo_id)
+  in
+  let repo : Repo_manager_types.repository =
+    { id = repo_id
+    ; name = repo_id
+    ; url = Printf.sprintf "https://example.invalid/%s.git" repo_id
+    ; local_path = repo_path
+    ; aliases = []
+    ; default_branch = "main"
+    ; keepers = []
+    ; status = Repo_manager_types.Active
+    ; auto_sync = false
+    ; sync_interval = 0
+    ; created_at = Int64.zero
+    ; updated_at = Int64.zero
+    }
+  in
+  (match Repo_store.save_all ~base_path:config.Workspace.base_path [ repo ] with
+   | Ok () -> ()
+   | Error e -> Alcotest.fail ("failed to seed repository catalog: " ^ e))
+;;
+
+let run_git_or_fail ~cwd args =
+  match Repo_git.run_git ~cwd args with
+  | Ok lines -> lines
+  | Error error ->
+    Alcotest.failf "git %s failed: %s" (String.concat " " args) error
+;;
+
+(* One committed base stamped as [origin/main], one commit ahead of it, and an
+   untracked file: branch=fixture, dirty=true, freshness=ahead 1. Shared by
+   the JSON projection test and the freshness-row tests below so they assert
+   the same seeded world. *)
+let seed_masc_checkout_one_ahead ~config ~meta ~playground =
+  allow_repo ~config ~meta "masc";
+  let checkout = Filename.concat playground "repos/masc" in
+  ensure_dir checkout;
+  ignore (run_git_or_fail ~cwd:checkout [ "init"; "-b"; "fixture" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.email"; "test@example.com" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.name"; "Test" ]);
+  ignore
+    (run_git_or_fail ~cwd:checkout
+       [ "remote"; "add"; "origin"; "https://example.invalid/masc.git" ]);
+  write_file (Filename.concat checkout "README.md") "first\n";
+  ignore (run_git_or_fail ~cwd:checkout [ "add"; "README.md" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "commit"; "-m"; "first" ]);
+  ignore
+    (run_git_or_fail ~cwd:checkout
+       [ "update-ref"; "refs/remotes/origin/main"; "HEAD" ]);
+  write_file (Filename.concat checkout "README.md") "second\n";
+  ignore (run_git_or_fail ~cwd:checkout [ "add"; "README.md" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "commit"; "-m"; "second" ]);
+  write_file (Filename.concat checkout "dirty.txt") "dirty\n"
+;;
+
+let test_repository_checkout_projection_reports_typed_freshness () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  seed_masc_checkout_one_ahead ~config ~meta ~playground;
+  let projection =
+    Keeper_sandbox_control.repository_checkouts_json ~include_repository_checkouts:true ~config ~meta
+  in
+  let entry =
+    projection |> Json.member "entries" |> Json.to_list |> List.hd
+  in
+  Alcotest.(check string) "checkout" "masc"
+    (entry |> Json.member "checkout_name" |> Json.to_string);
+  Alcotest.(check string) "catalog state" "registered"
+    (entry |> Json.member "catalog" |> Json.member "state" |> Json.to_string);
+  Alcotest.(check string) "repository id" "masc"
+    (entry |> Json.member "catalog" |> Json.member "repository_id" |> Json.to_string);
+  Alcotest.(check string) "branch" "fixture"
+    (entry |> Json.member "branch" |> Json.to_string);
+  Alcotest.(check bool) "dirty" true
+    (entry |> Json.member "dirty" |> Json.to_bool);
+  Alcotest.(check string) "freshness" "ahead"
+    (entry |> Json.member "freshness" |> Json.member "state" |> Json.to_string);
+  Alcotest.(check int) "ahead count" 1
+    (entry |> Json.member "freshness" |> Json.member "ahead" |> Json.to_int)
+;;
+
+(* A checkout with no origin remote names no catalog repository: an answer,
+   not an origin that could not be looked up. An origin that is not a
+   comparable URL stays unavailable, since the catalog may hold that same
+   uncomparable URL. *)
+let test_repository_checkout_without_origin_is_unregistered () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let init name =
+    let checkout = Filename.concat playground ("repos/" ^ name) in
+    ensure_dir checkout;
+    ignore (run_git_or_fail ~cwd:checkout [ "init"; "-b"; "main" ]);
+    checkout
+  in
+  ignore (init "no-origin");
+  let local = init "local-origin" in
+  ignore
+    (run_git_or_fail ~cwd:local [ "remote"; "add"; "origin"; Filename.concat playground "elsewhere" ]);
+  let states =
+    Keeper_sandbox_control.repository_checkouts_json ~include_repository_checkouts:true ~config ~meta
+    |> Json.member "entries"
+    |> Json.to_list
+    |> List.map (fun entry ->
+      ( entry |> Json.member "checkout_name" |> Json.to_string
+      , entry |> Json.member "catalog" |> Json.member "state" |> Json.to_string ))
+    |> List.sort compare
+  in
+  Alcotest.(check (list (pair string string)))
+    "catalog state"
+    [ "local-origin", "origin_unavailable"; "no-origin", "unregistered" ]
+    states
+;;
+
+let test_repository_checkout_projection_ignores_symlinked_directory () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let outside = Filename.concat playground "outside-checkout" in
+  ensure_dir outside;
+  let repos = Filename.concat playground "repos" in
+  ensure_dir repos;
+  Unix.symlink outside (Filename.concat repos "linked-checkout");
+  let entries =
+    Keeper_sandbox_control.repository_checkouts_json ~include_repository_checkouts:true ~config ~meta
+    |> Json.member "entries"
+    |> Json.to_list
+  in
+  Alcotest.(check int) "symlink checkout excluded" 0 (List.length entries)
+;;
+
+let test_repository_checkout_projection_shares_inspection_budget () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let fake_bin = Filename.concat playground "fake-bin" in
+  ensure_dir fake_bin;
+  let fake_git = Filename.concat fake_bin "git" in
+  let calls_path = Filename.concat playground "git-calls" in
+  write_file fake_git
+    ("#!/bin/sh\nprintf 'called\\n' >> " ^ Filename.quote calls_path
+     ^ "\nexec sleep 30\n");
+  Unix.chmod fake_git 0o755;
+  List.iter
+    (fun name ->
+       ensure_dir (Filename.concat playground ("repos/" ^ name ^ "/.git")))
+    [ "stalled-a"; "stalled-b" ];
+  let old_path = Sys.getenv "PATH" in
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "PATH" old_path)
+    (fun () ->
+       Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+       let projection =
+         Keeper_sandbox_control.For_testing.repository_checkouts_json_with_budget
+           ~inspection_budget_sec:0.2
+           ~config
+           ~meta
+       in
+       Alcotest.(check string)
+         "projection reports the exhausted request budget"
+         "inspection_budget_exhausted"
+         (projection |> Json.member "state" |> Json.to_string);
+       Alcotest.(check int)
+         "both checkout identities remain visible"
+         2
+         (projection |> Json.member "entries" |> Json.to_list |> List.length);
+       (* Child cancellation includes its own termination grace. Count actual
+          inspections to prove the shared budget without timing that cleanup. *)
+       Alcotest.(check string)
+         "one stalled Git process exhausts the budget for both checkouts"
+         "called\n"
+         (Fs_compat.load_file calls_path))
+;;
+
+let test_repository_checkout_budget_starts_after_discovery () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let checkout = Filename.concat playground "repos/fast-checkout" in
+  ensure_dir checkout;
+  ignore (run_git_or_fail ~cwd:checkout [ "init"; "-b"; "main" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.email"; "test@example.com" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.name"; "Test" ]);
+  ignore
+    (run_git_or_fail ~cwd:checkout [ "commit"; "--allow-empty"; "-m"; "initial" ]);
+  ignore
+    (run_git_or_fail
+       ~cwd:checkout
+       [ "remote"; "add"; "origin"; "https://example.invalid/fast-checkout.git" ]);
+  let projection =
+    Keeper_sandbox_control.For_testing
+    .repository_checkouts_json_with_budget_after_discovery
+      ~before_git_inspection:(fun () -> Unix.sleepf 0.6)
+      ~inspection_budget_sec:0.5
+      ~config
+      ~meta
+  in
+  Alcotest.(check string)
+    "catalog and filesystem discovery do not spend Git inspection budget"
+    "available"
+    (projection |> Json.member "state" |> Json.to_string);
+  let entry = projection |> Json.member "entries" |> Json.to_list |> List.hd in
+  Alcotest.(check string)
+    "fast checkout remains inspectable after slow discovery"
+    "available"
+    (entry |> Json.member "inspection_state" |> Json.to_string)
+;;
+
+let test_visible_scratch_read_resolves_to_private_storage () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let target = Filename.concat playground "scratch/README.md" in
+  write_file target "visible scratch\n";
+  match
+    Keeper_tool_shared_runtime.resolve_keeper_read_path
+      ~config
+      ~meta
+      ~raw_path:"scratch/README.md"
+  with
+  | Ok path -> Alcotest.(check string) "resolved path" target path
+  | Error refusal ->
+    Alcotest.fail
+      ("visible scratch path should resolve: " ^ refusal.Keeper_alerting_path.message)
+;;
+
+let test_absolute_playground_path_is_allowed () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let target = Filename.concat playground "scratch/README.md" in
+  write_file target "private storage fixture\n";
+  (match
+     Keeper_tool_shared_runtime.resolve_keeper_read_path
+       ~config
+       ~meta
+       ~raw_path:target
+   with
+   | Ok path ->
+     Alcotest.(check string) "resolved private path" target path
+   | Error refusal ->
+     Alcotest.fail
+       ("playground-internal path should resolve: "
+        ^ refusal.Keeper_alerting_path.message))
+;;
+
+let test_relative_path_does_not_depend_on_project_root_allowlist () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let target = Filename.concat playground "scratch/README.md" in
+  match
+    Keeper_tool_shared_runtime.resolve_keeper_read_path
+      ~config
+      ~meta
+      ~raw_path:"scratch/README.md"
+  with
+  | Ok path -> Alcotest.(check string) "relative path stays in playground" target path
+  | Error refusal ->
+    Alcotest.fail
+      ("relative path should resolve in playground: "
+       ^ refusal.Keeper_alerting_path.message)
+;;
+
+let test_relative_parent_escape_is_rejected () =
+  setup
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
+  match
+    Keeper_tool_shared_runtime.resolve_keeper_read_path
+      ~config
+      ~meta
+      ~raw_path:"../outside.txt"
+  with
+  | Error refusal ->
+    (* An escape is the caller's path to correct, so a tool reports it as a
+       policy rejection rather than a runtime failure. *)
+    Alcotest.(check string)
+      "refusal class"
+      "policy_rejection"
+      (Tool_result.tool_failure_class_to_string refusal.Keeper_alerting_path.failure_class)
+  | Ok path -> Alcotest.failf "relative parent escape resolved unexpectedly: %s" path
+;;
+
+let test_read_with_visible_repo_cwd_and_relative_file_path () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  let target = Filename.concat playground "repos/masc/README.md" in
+  write_file target "repo readme\n";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "cwd", `String "repos/masc"
+            ; "path", `String "README.md"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if not (parse_ok raw) then Alcotest.failf "expected Read ok, got: %s" raw;
+  Alcotest.(check (option string))
+    "content"
+    (Some "repo readme\n")
+    (parse_string "content" raw)
+;;
+
+let test_repository_backlog_file_is_readable () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  let target = Filename.concat playground "repos/masc/docs/backlog.json" in
+  write_file target {|{"scope":"repository fixture"}|};
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "path", `String "repos/masc/docs/backlog.json"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if not (parse_ok raw) then Alcotest.failf "expected Read ok, got: %s" raw;
+  Alcotest.(check (option string))
+    "repository backlog content"
+    (Some {|{"scope":"repository fixture"}|})
+    (parse_string "content" raw)
+;;
+
+(* A repo-prefixed missing read preserves producer facts without inventing
+   repository or retry advice at the dispatch boundary. *)
+let test_repo_prefixed_missing_read_preserves_exact_input () =
+  setup
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "path", `String "repos/masc/lib/keeper/does_not_exist_xyz.ml"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  let json = parse raw in
+  Alcotest.(check (option string))
+    "repo-prefixed input path preserved"
+    (Some "repos/masc/lib/keeper/does_not_exist_xyz.ml")
+    (Json.member "input_file_path" json |> Json.to_string_option);
+  Alcotest.(check bool) "no inferred repository list" true
+    (Json.member "available_repos" json = `Null)
+;;
+
+(* A keeper that guesses the host layout and one whose repos were never
+   materialized both got "directory does not exist", and the two need opposite
+   responses. Live fixture-keeper asked for
+   [workspace/yousleepwhen/masc] and retried (#23442).
+
+   The hint enumerates the playground's own [repos/]; it does not infer which
+   repo was meant. The last case pins that distinction: the file-path failure
+   keeps refusing to volunteer a repository list, which is a separate decision
+   this change does not touch. *)
+let test_cwd_rejection_names_the_materialized_repos () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  (* The hint enumerates git checkouts measured under the workspace root, not
+     every directory under a prescribed [repos/]. A fixture without [.git] is a
+     plain directory — still a legal cwd, but not something the system reports
+     as a checkout. *)
+  write_file (Filename.concat playground "repos/masc/.git/HEAD") "ref: refs/heads/main\n";
+  write_file (Filename.concat playground "repos/masc/README.md") "readme\n";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "cwd", `String "workspace/yousleepwhen/masc"
+            ; "path", `String "README.md"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  let error = Option.value (parse_string "error" raw) ~default:raw in
+  let contains needle = String_util.contains_substring error needle in
+  Alcotest.(check bool) "names the cwd vocabulary" true (contains "repos/masc");
+  Alcotest.(check bool) "still says why it failed" true
+    (contains "cwd_not_directory")
+;;
+
+let test_cwd_rejection_says_when_nothing_is_materialized () =
+  setup
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "cwd", `String "repos/masc"
+            ; "path", `String "README.md"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  let error = Option.value (parse_string "error" raw) ~default:raw in
+  Alcotest.(check bool) "distinguishes empty from wrong" true
+    (String_util.contains_substring error "no repository is materialized")
+;;
+
+let test_valid_repo_cwd_carries_no_hint () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  write_file (Filename.concat playground "repos/masc/README.md") "readme\n";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "cwd", `String "repos/masc"
+            ; "path", `String "README.md"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if not (parse_ok raw) then Alcotest.failf "expected Read ok, got: %s" raw;
+  Alcotest.(check bool) "success carries no cwd advice" false
+    (String_util.contains_substring raw "available repo cwds")
+;;
+
+let test_missing_file_still_volunteers_no_repository_list () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  allow_repo ~config ~meta "masc";
+  write_file (Filename.concat playground "repos/masc/README.md") "readme\n";
+  let raw =
+    handle_read_file
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+            [ "path", `String "repos/masc/does_not_exist_xyz.ml"
+            ; "max_bytes", `Int 4096
+            ])
+  in
+  if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
+  Alcotest.(check bool) "no inferred repository list" true
+    (Json.member "available_repos" (parse raw) = `Null)
+;;
+
+let test_write_visible_scratch_path () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker ~always_allow:true
+  @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let raw =
+    handle_file_write
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+            [ "path", `String "scratch/allowed.txt"
+            ; "mode", `String "overwrite"
+            ; "content", `String "allowed"
+            ])
+      ()
+  in
+  if not (parse_ok raw) then Alcotest.failf "expected Write ok, got: %s" raw;
+  Alcotest.(check string)
+    "content landed"
+    "allowed"
+    (Fs_compat.load_file (Filename.concat playground "scratch/allowed.txt"))
+;;
+
+let contains_in haystack needle =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
+(* Equal local commits do not prove a fresh origin observation. A ref moved
+   with an old reflog timestamp must say stale on both surfaces; moving it
+   again makes the same checkout current. *)
+let test_equal_checkout_requires_recent_target_ref () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  seed_masc_checkout_one_ahead ~config ~meta ~playground;
+  let checkout = Filename.concat playground "repos/masc" in
+  let fetch_head = Filename.concat checkout ".git/FETCH_HEAD" in
+  if Sys.file_exists fetch_head then Sys.remove fetch_head;
+  let old_update =
+    Printf.sprintf
+      "GIT_COMMITTER_DATE='@1600000000 +0000' git -C %s update-ref refs/remotes/origin/main HEAD"
+      (Filename.quote checkout)
+  in
+  if Sys.command old_update <> 0 then Alcotest.fail "old update-ref failed";
+  let entry () =
+    Keeper_sandbox_control.repository_checkouts_json ~include_repository_checkouts:true ~config ~meta
+    |> Json.member "entries" |> Json.to_list |> List.hd
+    |> Json.member "freshness"
+  in
+  let stale = entry () in
+  Alcotest.(check string) "stale JSON state" "stale_ref"
+    (stale |> Json.member "state" |> Json.to_string);
+  Alcotest.(check int) "last moved" 1600000000
+    (stale |> Json.member "target_ref_last_observed_at_unix" |> Json.to_int);
+  let rows =
+    match Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
+    | Ok [ ({ row_freshness = Keeper_sandbox_control.Stale_ref
+                  { age_s = Some age; _ }; _ } as row) ] ->
+      Alcotest.(check bool) "old local ref" true (age > 900);
+      [ row ]
+    | _ -> Alcotest.fail "World State did not receive Stale_ref"
+  in
+  let observation = Masc.Keeper_world_observation.observe
+    ~pending_board_events:(Some []) ~config ~meta in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    Masc.Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
+      ~turn_decision:(Masc.Keeper_world_observation.keeper_cycle_decision
+                        ~meta observation)
+      ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
+      ~repository_freshness:rows ~observation ()
+  in
+  Alcotest.(check bool) "World State says as of" true
+    (contains_in world_state "origin/main as of 2020-09-13 12:26:40 UTC");
+  let head =
+    match run_git_or_fail ~cwd:checkout [ "rev-parse"; "HEAD" ] with
+    | head :: _ -> head
+    | [] -> Alcotest.fail "HEAD unavailable" in
+  write_file fetch_head
+    (head ^ "\t\tbranch 'other' of https://example.invalid/masc.git\n");
+  Alcotest.(check string) "unrelated fetch remains stale" "stale_ref"
+    (entry () |> Json.member "state" |> Json.to_string);
+  write_file fetch_head
+    (head ^ "\t\tbranch 'main' of https://example.invalid/masc.git\n");
+  Alcotest.(check string) "matching row without fetch receipt stays stale" "stale_ref"
+    (entry () |> Json.member "state" |> Json.to_string);
+  let common_dir = Filename.concat checkout ".git" in
+  (match Repo_fetch_observation.write ~common_dir
+           { common_dir
+           ; origin_url = "https://example.invalid/masc.git"
+           ; target_ref = "origin/main"
+           ; oid = head
+           ; observed_at_unix = int_of_float (Unix.gettimeofday ())
+           } with
+   | Ok () -> ()
+   | Error message -> Alcotest.fail message);
+  Alcotest.(check string) "matching managed fetch receipt is current" "current"
+    (entry () |> Json.member "state" |> Json.to_string);
+  Sys.remove (Filename.concat common_dir Repo_fetch_observation.filename);
+  let _ = run_git_or_fail ~cwd:checkout
+    [ "update-ref"; "refs/remotes/origin/main"; "HEAD~1" ] in
+  let _ = run_git_or_fail ~cwd:checkout
+    [ "update-ref"; "refs/remotes/origin/main"; "HEAD" ] in
+  Alcotest.(check string) "fresh JSON state" "current"
+    (entry () |> Json.member "state" |> Json.to_string)
+;;
+
+(* The row projection reads the same probe as the JSON surface, so the same
+   seeded world must answer with the same facts in typed form. *)
+let test_checkout_freshness_rows_read_the_same_probe () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  seed_masc_checkout_one_ahead ~config ~meta ~playground;
+  match Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
+  | Error scan_error ->
+    Alcotest.fail
+      (Masc.Keeper_playground_checkouts.scan_error_to_string scan_error)
+  | Ok [ row ] ->
+    Alcotest.(check string)
+      "checkout path"
+      "repos/masc"
+      row.Keeper_sandbox_control.row_checkout_path;
+    Alcotest.(check (option string))
+      "branch"
+      (Some "fixture")
+      row.Keeper_sandbox_control.row_branch;
+    (match row.Keeper_sandbox_control.row_freshness with
+     | Keeper_sandbox_control.Ahead { target_ref; ahead; _ } ->
+       Alcotest.(check string) "target ref" "origin/main" target_ref;
+       Alcotest.(check int) "ahead count" 1 ahead
+     | _ -> Alcotest.fail "expected Ahead freshness");
+    (match row.Keeper_sandbox_control.row_changed_files with
+     | Some changed -> Alcotest.(check bool) "dirty seen" true (changed > 0)
+     | None -> Alcotest.fail "expected a changed-files count")
+  | Ok rows ->
+    Alcotest.failf "expected exactly one row, got %d" (List.length rows)
+;;
+
+let test_freshness_rows_render_in_turn_prompt () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  seed_masc_checkout_one_ahead ~config ~meta ~playground;
+  let rows =
+    match Keeper_sandbox_control.checkout_freshness_rows ~config ~meta () with
+    | Ok rows -> rows
+    | Error scan_error ->
+      Alcotest.fail
+        (Masc.Keeper_playground_checkouts.scan_error_to_string scan_error)
+  in
+  let observation =
+    Masc.Keeper_world_observation.observe
+      ~pending_board_events:(Some [])
+      ~config
+      ~meta
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    Masc.Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
+      ~turn_decision:
+        (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
+      ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
+      ~repository_freshness:rows
+      ~observation
+      ()
+  in
+  Alcotest.(check bool)
+    "layer heading present"
+    true
+    (contains_in world_state "### Repository Checkouts (1)");
+  Alcotest.(check bool)
+    "row states the standing"
+    true
+    (contains_in world_state "ahead of origin/main by 1");
+  let without_rows =
+    Masc.Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
+      ~turn_decision:
+        (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
+      ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
+      ~observation
+      ()
+  in
+  Alcotest.(check bool)
+    "layer absent when no rows are supplied"
+    false
+    (contains_in
+       without_rows.Masc.Keeper_unified_prompt.world_state
+       "### Repository Checkouts")
+;;
+
+let index_of haystack needle =
+  let n = String.length needle
+  and h = String.length haystack in
+  let rec go i =
+    if i + n > h then None
+    else if String.sub haystack i n = needle then Some i
+    else go (i + 1)
+  in
+  go 0
+;;
+
+(* Drifted rows render ahead of current ones, and unmeasurable rows collapse
+   into a single count line (a live playground answered 19 of 32 rows with
+   the same budget-exhausted reason — repeating it per row is noise). *)
+let test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured () =
+  setup
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
+  let current_row : Masc.Keeper_sandbox_control.freshness_row =
+    { row_checkout_path = "repos/settled"
+    ; row_branch = Some "main"
+    ; row_changed_files = Some 0
+    ; row_freshness =
+        Masc.Keeper_sandbox_control.Current
+          { target_ref = "origin/main"; upstream_head = "deadbeef"
+          ; last_observed_at_unix = 1; age_s = 0 }
+    }
+  in
+  let stale_row : Masc.Keeper_sandbox_control.freshness_row =
+    { row_checkout_path = "repos/stale"
+    ; row_branch = Some "main"
+    ; row_changed_files = None
+    ; row_freshness =
+        Masc.Keeper_sandbox_control.Behind
+          { target_ref = "origin/main"; upstream_head = "deadbeef"; behind = 5 }
+    }
+  in
+  let broken_row : Masc.Keeper_sandbox_control.freshness_row =
+    { row_checkout_path = "repos/broken"
+    ; row_branch = None
+    ; row_changed_files = None
+    ; row_freshness =
+        Masc.Keeper_sandbox_control.Freshness_unavailable "probe failed"
+    }
+  in
+  let observation =
+    Masc.Keeper_world_observation.observe
+      ~pending_board_events:(Some [])
+      ~config
+      ~meta
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    Masc.Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
+      ~turn_decision:
+        (Masc.Keeper_world_observation.keeper_cycle_decision ~meta observation)
+      ~current_task:Masc.Keeper_world_observation_inputs.No_current_task
+      ~repository_freshness:[ current_row; broken_row; stale_row ]
+      ~observation
+      ()
+  in
+  Alcotest.(check bool)
+    "heading counts every row"
+    true
+    (contains_in world_state "### Repository Checkouts (3)");
+  Alcotest.(check bool)
+    "unmeasurable rows collapse into one count line"
+    true
+    (contains_in world_state "1 checkout(s) not measurable this turn");
+  Alcotest.(check bool)
+    "the failure reason is not repeated per row"
+    false
+    (contains_in world_state "probe failed");
+  (match
+     ( index_of world_state "- repos/stale"
+     , index_of world_state "- repos/settled" )
+   with
+   | Some stale_at, Some settled_at ->
+     Alcotest.(check bool)
+       "behind renders ahead of current"
+       true
+       (stale_at < settled_at)
+   | _ -> Alcotest.fail "expected both measured rows to render")
+;;
+
+let () =
+  (* Forced before the runner starts: alcotest captures each case's stdout and
+     stderr into a per-case file, so a line printed from inside a case reaches
+     nobody scanning a green run. *)
+  ignore (Lazy.force docker_sandbox_image_available : bool);
+  Alcotest.run
+    "Keeper_visible_path_projection"
+    [ ( "shared_projection"
+      , [ Alcotest.test_case
+            "visible scratch read resolves to private storage"
+            `Quick
+            test_visible_scratch_read_resolves_to_private_storage
+        ; Alcotest.test_case
+            "absolute playground storage read is allowed"
+            `Quick
+            test_absolute_playground_path_is_allowed
+        ; Alcotest.test_case
+            "relative path ignores project-root allowlist additions"
+            `Quick
+            test_relative_path_does_not_depend_on_project_root_allowlist
+        ; Alcotest.test_case
+            "relative parent escape is rejected"
+            `Quick
+            test_relative_parent_escape_is_rejected
+        ] )
+    ; ( "file_tools"
+      , [ Alcotest.test_case
+            "Read cwd=repos/<repo> plus relative file path"
+            `Quick
+            test_read_with_visible_repo_cwd_and_relative_file_path
+        ; Alcotest.test_case
+            "Write visible scratch path"
+            `Quick
+            test_write_visible_scratch_path
+        ; Alcotest.test_case
+            "repository backlog.json remains readable"
+            `Quick
+            test_repository_backlog_file_is_readable
+        ; Alcotest.test_case
+            "repo-prefixed missing read surfaces playground hint"
+            `Quick
+            test_repo_prefixed_missing_read_preserves_exact_input
+        ; Alcotest.test_case
+            "cwd rejection names the materialized repos"
+            `Quick
+            test_cwd_rejection_names_the_materialized_repos
+        ; Alcotest.test_case
+            "cwd rejection says when nothing is materialized"
+            `Quick
+            test_cwd_rejection_says_when_nothing_is_materialized
+        ; Alcotest.test_case
+            "valid repo cwd carries no hint"
+            `Quick
+            test_valid_repo_cwd_carries_no_hint
+        ; Alcotest.test_case
+            "missing file still volunteers no repository list"
+            `Quick
+            test_missing_file_still_volunteers_no_repository_list
+        ] )
+    ; ( "repository_checkouts"
+      , [ Alcotest.test_case
+            "reports catalog identity, dirty state, and freshness"
+            `Quick
+            test_repository_checkout_projection_reports_typed_freshness
+        ; Alcotest.test_case
+            "a checkout without an origin is unregistered"
+            `Quick
+            test_repository_checkout_without_origin_is_unregistered
+        ; Alcotest.test_case
+            "ignores symlinked checkout directories"
+            `Quick
+            test_repository_checkout_projection_ignores_symlinked_directory
+        ; Alcotest.test_case
+            "shares one inspection budget across checkouts"
+            `Quick
+            test_repository_checkout_projection_shares_inspection_budget
+        ; Alcotest.test_case
+            "starts inspection budget after discovery"
+            `Quick
+            test_repository_checkout_budget_starts_after_discovery
+        ; Alcotest.test_case
+            "equal checkout requires recent target ref" `Quick
+            test_equal_checkout_requires_recent_target_ref
+        ; Alcotest.test_case
+            "freshness rows read the same probe as the JSON surface"
+            `Quick
+            test_checkout_freshness_rows_read_the_same_probe
+        ; Alcotest.test_case
+            "freshness rows render as a turn-context layer"
+            `Quick
+            test_freshness_rows_render_in_turn_prompt
+        ; Alcotest.test_case
+            "freshness layer sorts drift first and aggregates unmeasured"
+            `Quick
+            test_freshness_layer_sorts_drift_first_and_aggregates_unmeasured
+        ] )
+    ]
+;;

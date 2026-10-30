@@ -1,0 +1,19 @@
+{
+  "command": "pnpm exec vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/api/agent-fitness.test.ts",
+  "exit_code": 0,
+  "test_files_passed": 1,
+  "tests_passed": 6,
+  "source_sha256": {
+    "dashboard/src/api/agent-fitness.ts": "5628f2380bc8cfd829ad331e57099d3b7ec5b1c68ebb399d1bc3b2b78c618429",
+    "dashboard/src/api/agent-fitness.test.ts": "678b34dc09b22c19aee9dcea9ba50991db411d6ef0a9ee4766194630416f322b",
+    "dashboard/src/components/agent-detail.ts": "4d65bd3c3e2f8186ffbf9f19f1a30ae0bafeb427cbc3d791e99daebcdcb7b7fc"
+  },
+  "typecheck": {
+    "command": "pnpm exec tsc --noEmit",
+    "candidate_exit_code": 2,
+    "baseline_exit_code": 2,
+    "baseline_commit": "3e8a9f3f26f841ad9fc7508555f07e84e19a5ff5",
+    "diagnostics_equal": true
+  },
+  "scope": "Actual frontend parser/detail-refresh tests; no browser screenshot, native producer hook, Goal policy or deployed runtime proof"
+}

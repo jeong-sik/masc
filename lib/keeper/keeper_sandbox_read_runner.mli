@@ -1,0 +1,100 @@
+(** Backend-neutral runner for keeper read-side sandbox execution.
+
+    Structured tool execute operations should depend on this facade instead of
+    directly selecting the concrete Docker read backend. *)
+
+module type Backend = sig
+  val container_path_of_host :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string ->
+    (string, string) result
+
+  val read_complete_file :
+    config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string -> timeout_sec:float -> unit -> (string, string) result
+
+  val read_file :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?start_line:int ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (string, Keeper_sandbox_read_backend.read_error) result
+
+  val run_command_with_status :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?ok_exit_codes:int list ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    command_argv:string list ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (Unix.process_status * string, string) result
+
+  val run_command :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?ok_exit_codes:int list ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    command_argv:string list ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (string, string) result
+end
+
+module type S = sig
+  val backend_via : meta:Keeper_meta_contract.keeper_meta -> string
+
+  val container_path_of_host :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string ->
+    (string, string) result
+
+  val read_complete_file :
+    config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string -> timeout_sec:float -> unit -> (string, string) result
+
+  val read_file :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?start_line:int ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (string, Keeper_sandbox_read_backend.read_error) result
+
+  val run_command_with_status :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?ok_exit_codes:int list ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    command_argv:string list ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (Unix.process_status * string, string) result
+
+  val run_command :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?ok_exit_codes:int list ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    command_argv:string list ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (string, string) result
+end
+
+module Make : functor (Backend : Backend) -> S
+
+include S

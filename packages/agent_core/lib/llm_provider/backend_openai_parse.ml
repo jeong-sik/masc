@@ -1,0 +1,602 @@
+(** OpenAI-compatible response parsing.
+
+    Parses JSON responses from Openai Chat Completions API into
+    agent_core Types (api_response, api_usage).
+
+    @since 0.92.0 extracted from Backend_openai *)
+
+open Types
+
+(* A normal blank-content 200 fails closed as [Empty_completion] with response
+   identity. Refusal, truncation and interruption carry their own terminal
+   meaning, independently of whether the provider produced text. *)
+type empty_completion =
+  { id : string
+  ; model : string
+  ; stop_reason : Types.stop_reason
+  ; usage : Types.api_usage option
+  ; telemetry : Types.inference_telemetry option
+  }
+
+type parse_error =
+  | Provider_error of
+      { message : string
+      ; error_type : string option
+      ; provider_status : Types.provider_status option
+      ; report : Types.provider_report
+      }
+  | Unreadable_response of string
+  | Empty_completion of empty_completion
+
+let parse_error_to_string = function
+  | Provider_error { message; error_type = _; provider_status = _; report = _ } -> message
+  | Unreadable_response message -> message
+  | Empty_completion { stop_reason; model; _ } ->
+    Printf.sprintf
+      "empty completion (no thinking, text, or tool calls; model=%s, stop_reason=%s)"
+      model
+      (Types.stop_reason_to_string stop_reason)
+;;
+
+open Result.Syntax
+
+let first_some a b =
+  match a with
+  | Some _ -> a
+  | None -> b
+;;
+
+let json_float_number = function
+  | `Float f -> Some f
+  | `Int i -> Some (float_of_int i)
+  | `Assoc _ | `List _ | `String _ | `Intlit _ | `Bool _ | `Null -> None
+;;
+
+let non_blank_json_string = function
+  | `String s when not (Api_common.string_is_blank s) -> Some s
+  | `String _ | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+    None
+;;
+
+let assoc_field_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let reasoning_detail_of_json ~index = function
+  | `Assoc fields as raw ->
+    let text =
+      match List.assoc_opt "text" fields with
+      | Some text -> non_blank_json_string text
+      | None -> None
+    in
+    Ok { raw; text }
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+    Error (Printf.sprintf "malformed_reasoning_details:index:%d:not_object" index)
+;;
+
+let reasoning_details_of_message msg =
+  match assoc_field_opt "reasoning_details" msg with
+  | None -> Ok None
+  | Some (`List details) ->
+    let rec loop index acc = function
+      | [] -> Ok (Some (List.rev acc))
+      | detail :: rest ->
+        (match reasoning_detail_of_json ~index detail with
+         | Ok parsed -> loop (index + 1) (parsed :: acc) rest
+         | Error _ as error -> error)
+    in
+    loop 0 [] details
+  | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) ->
+    Error "malformed_reasoning_details:not_list"
+;;
+
+let reasoning_content_blocks_of_message_result msg =
+  let open Yojson.Safe.Util in
+  let reasoning_content = non_blank_json_string (msg |> member "reasoning_content") in
+  let* reasoning_details = reasoning_details_of_message msg in
+  match reasoning_details with
+  | Some details -> Ok [ ReasoningDetails { reasoning_content; details } ]
+  | None ->
+    (match reasoning_content with
+     | Some content -> Ok [ Thinking { signature = None; content } ]
+     | None ->
+       (match non_blank_json_string (msg |> member "reasoning") with
+        | Some content -> Ok [ Thinking { signature = None; content } ]
+        | None -> Ok []))
+;;
+
+let text_of_openai_content_block = function
+  | `String s -> Some s
+  | `Assoc fields ->
+    (match List.assoc_opt "text" fields with
+     | Some (`String s) -> Some s
+     | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None
+       -> None)
+  | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let text_content_of_openai_content = function
+  | `String s -> s
+  | `Null -> ""
+  | `List blocks ->
+    blocks |> List.filter_map text_of_openai_content_block |> String.concat ""
+  | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> ""
+;;
+
+let parse_tool_call_string_field ~tool_index ~field json =
+  let open Yojson.Safe.Util in
+  match json |> member field |> to_string_option with
+  | Some value when not (Api_common.string_is_blank value) -> Ok value
+  | Some _ | None ->
+    Error (Printf.sprintf "malformed_tool_call:index:%d:missing_%s" tool_index field)
+;;
+
+let parse_tool_call_function ~tool_index json =
+  let open Yojson.Safe.Util in
+  match json |> member "function" with
+  | `Assoc _ as fn -> Ok fn
+  | `Null | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
+    Error (Printf.sprintf "malformed_tool_call:index:%d:missing_function" tool_index)
+;;
+
+let parse_tool_call_arguments ~tool_index raw =
+  match Tool_call_input.parse_object raw with
+  | Ok (input, _dropped) -> Ok input
+  | Error Tool_call_input.Not_object ->
+    Error (Printf.sprintf "malformed_tool_call_arguments:index:%d:not_object" tool_index)
+  | Error (Tool_call_input.Invalid_json message) ->
+    Error (Printf.sprintf "malformed_tool_call_arguments:index:%d:%s" tool_index message)
+;;
+
+let parse_tool_call ~tool_index tc =
+  let* id = parse_tool_call_string_field ~tool_index ~field:"id" tc in
+  let* fn = parse_tool_call_function ~tool_index tc in
+  let* name = parse_tool_call_string_field ~tool_index ~field:"name" fn in
+  let* raw_arguments = parse_tool_call_string_field ~tool_index ~field:"arguments" fn in
+  let* input = parse_tool_call_arguments ~tool_index raw_arguments in
+  Ok (ToolUse { id; name; input })
+;;
+
+let parse_tool_calls_field = function
+  | `Null -> Ok []
+  | `List calls ->
+    let rec loop acc index = function
+      | [] -> Ok (List.rev acc)
+      | tc :: rest ->
+        (match parse_tool_call ~tool_index:index tc with
+         | Ok tool_call -> loop (tool_call :: acc) (index + 1) rest
+         | Error _ as error -> error)
+    in
+    loop [] 0 calls
+  | `Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
+    Error "malformed_tool_calls:not_list"
+;;
+
+let member_int_fallback json field_names =
+  let open Yojson.Safe.Util in
+  let rec loop = function
+    | [] -> None
+    | key :: rest ->
+      (match json |> member key |> to_int_option with
+       | Some _ as value -> value
+       | None -> loop rest)
+  in
+  loop field_names
+;;
+
+let member_float_fallback json field_names =
+  let open Yojson.Safe.Util in
+  let rec loop = function
+    | [] -> None
+    | key :: rest ->
+      let value = json_float_number (json |> member key) in
+      (match value with
+       | Some _ -> value
+       | None -> loop rest)
+  in
+  loop field_names
+;;
+
+let derive_ms token_count tok_per_sec =
+  match token_count, tok_per_sec with
+  | Some n, Some v when v > 0.0 -> Some (float_of_int n /. v *. 1000.0)
+  | Some _, Some _ | Some _, None | None, Some _ | None, None -> None
+;;
+
+(* Streaming usage objects are partial updates: an absent counter is not zero. *)
+let delta_usage_of_openai_json json : Types.delta_usage option =
+  let open Yojson.Safe.Util in
+  let usage = json |> member "usage" in
+  if usage = `Null then None
+  else
+    let cached_tokens =
+      match member_int_fallback usage [ "prompt_cache_hit_tokens" ] with
+      | Some _ as count -> count
+      | None ->
+        let details = usage |> member "prompt_tokens_details" in
+        if details = `Null then None
+        else member_int_fallback details [ "cached_tokens" ]
+    in
+    let cost_usd =
+      let cost = match member "cost" usage with
+        | `Float amount -> Some amount
+        | `Int amount -> Some (float_of_int amount)
+        | `Intlit amount -> float_of_string_opt amount
+        | `Null | `Bool _ | `String _ | `List _ | `Assoc _ -> None in
+      match cost with
+      | Some amount when Float.is_finite amount && amount >= 0.0 -> Some amount
+      | Some _ | None -> None
+    in
+    Some
+      { input_tokens = member_int_fallback usage [ "prompt_tokens"; "input_tokens" ]
+      ; output_tokens = member_int_fallback usage [ "completion_tokens"; "output_tokens" ]
+      ; cache_creation_input_tokens = None
+      ; cache_read_input_tokens = cached_tokens
+      ; cost_usd
+      }
+;;
+
+let usage_of_openai_json json : Types.api_usage option =
+  Option.map
+    (fun (usage : Types.delta_usage) ->
+      { input_tokens = Option.value usage.input_tokens ~default:0
+      ; output_tokens = Option.value usage.output_tokens ~default:0
+      ; cache_creation_input_tokens = Option.value usage.cache_creation_input_tokens ~default:0
+      ; cache_read_input_tokens = Option.value usage.cache_read_input_tokens ~default:0
+      ; cost_usd = usage.cost_usd
+      })
+    (delta_usage_of_openai_json json)
+;;
+
+(** Extract provider-reported inference telemetry from the raw JSON.
+    llama-server populates [timings] and [system_fingerprint];
+    cloud providers return [None] for those fields. *)
+let telemetry_of_openai_json json =
+  let open Yojson.Safe.Util in
+  let usage = json |> member "usage" in
+  let usage_int keys = if usage = `Null then None else member_int_fallback usage keys in
+  let usage_float keys =
+    if usage = `Null then None else member_float_fallback usage keys
+  in
+  let system_fingerprint = json |> member "system_fingerprint" |> to_string_option in
+  let t = json |> member "timings" in
+  let prompt_n =
+    first_some
+      (if t = `Null then None else member_int_fallback t [ "prompt_n" ])
+      (usage_int [ "prompt_tokens"; "input_tokens" ])
+  in
+  let prompt_per_second =
+    first_some
+      (if t = `Null
+       then None
+       else member_float_fallback t [ "prompt_per_second"; "prompt_tps" ])
+      (first_some
+         (member_float_fallback json [ "prompt_tps" ])
+         (usage_float [ "prompt_tps"; "prompt_per_second" ]))
+  in
+  let predicted_n =
+    first_some
+      (if t = `Null then None else member_int_fallback t [ "predicted_n" ])
+      (usage_int [ "completion_tokens"; "output_tokens" ])
+  in
+  let predicted_per_second =
+    first_some
+      (if t = `Null
+       then None
+       else member_float_fallback t [ "predicted_per_second"; "generation_tps" ])
+      (first_some
+         (member_float_fallback json [ "generation_tps" ])
+         (usage_float [ "generation_tps"; "predicted_per_second" ]))
+  in
+  let timings =
+    if t = `Null && prompt_per_second = None && predicted_per_second = None
+    then None
+    else
+      Some
+        { Types.prompt_n
+        ; prompt_ms =
+            first_some
+              (if t = `Null then None else member_float_fallback t [ "prompt_ms" ])
+              (derive_ms prompt_n prompt_per_second)
+        ; prompt_per_second
+        ; predicted_n
+        ; predicted_ms =
+            first_some
+              (if t = `Null then None else member_float_fallback t [ "predicted_ms" ])
+              (derive_ms predicted_n predicted_per_second)
+        ; predicted_per_second
+        ; cache_n = (if t = `Null then None else member_int_fallback t [ "cache_n" ])
+        }
+  in
+  let reasoning_tokens =
+    if usage = `Null
+    then None
+    else (
+      let details = usage |> member "completion_tokens_details" in
+      if details = `Null
+      then None
+      else details |> member "reasoning_tokens" |> to_int_option)
+  in
+  let peak_memory_gb =
+    first_some
+      (member_float_fallback json [ "peak_memory"; "peak_memory_gb" ])
+      (usage_float [ "peak_memory"; "peak_memory_gb" ])
+  in
+  Some
+    { Types.default_inference_telemetry with
+      system_fingerprint
+    ; timings
+    ; reasoning_tokens
+    ; peak_memory_gb
+    }
+;;
+
+let provider_error (envelope : Openai_error_envelope.t) =
+  Provider_error
+    { message = envelope.message
+    ; error_type = envelope.error_type
+    ; provider_status = envelope.provider_status
+    ; report = envelope.report
+    }
+;;
+
+let unreadable_response message = Unreadable_response message
+
+(** Parse an already-parsed OpenAI-compatible JSON response into an
+    [api_response]. Returns [Error (Provider_error _)] when the provider
+    reported an error -- a top-level [error] object or string, or a choice
+    that finished with [error] -- and [Error (Unreadable_response _)] when the
+    body is not a response this parser can read: no [finish_reason], malformed
+    tool calls or reasoning, or a top-level [error] that is neither an object
+    nor a string.
+
+    [content_inline_reasoning] is the catalog-declared contract for reasoning
+    embedded in the content channel (see
+    {!Capabilities.capabilities.content_inline_reasoning}); when it is
+    [Think_tags], [message.content] is split through {!Inline_reasoning_split}
+    so tagged reasoning becomes a [Thinking] block instead of leaking into the
+    visible [Text] answer. The default keeps every byte of [content] in [Text],
+    byte-identical to the pre-split behavior. *)
+let parse_openai_response_result_json_raw
+      ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
+      (raw_json : Yojson.Safe.t)
+  =
+  let open Yojson.Safe.Util in
+  let json =
+    match raw_json with
+    | `List (first :: _) -> first
+    | `List [] -> raw_json
+    | other -> other
+  in
+  match json |> member "error" with
+  | `Null ->
+    let choice = json |> member "choices" |> index 0 in
+    let msg = choice |> member "message" in
+    let* finish_reason =
+      match choice |> member "finish_reason" |> to_string_option with
+      | Some finish_reason -> Ok finish_reason
+      | None ->
+        Error (unreadable_response "malformed_openai_response:missing_finish_reason")
+    in
+    let* () =
+      if Stop_reason_wire.is_provider_error_finish finish_reason
+      then
+        Error
+          (provider_error
+             (Openai_error_envelope.of_errored_choice
+                choice))
+      else Ok ()
+    in
+    let* has_refusal =
+      Stop_reason_wire.refusal_of_json (msg |> member "refusal")
+      |> Result.map_error (fun () -> unreadable_response "malformed_openai_response:refusal_not_string")
+    in
+    let text_content = text_content_of_openai_content (msg |> member "content") in
+    let* tool_blocks =
+      parse_tool_calls_field (msg |> member "tool_calls")
+      |> Result.map_error unreadable_response
+    in
+    (* Ollama uses "reasoning"; OpenAI-compatible providers commonly use
+       "reasoning_content"; MiniMax split mode may return "reasoning_details".
+       MiniMax split reasoning stays as [ReasoningDetails] so the original
+       provider message shape can be replayed without overloading visible or
+       redacted thinking channels. Other reasoning text stays [Thinking]. *)
+    let* thinking_blocks =
+      reasoning_content_blocks_of_message_result msg |> Result.map_error unreadable_response
+    in
+    (* Models declaring [Think_tags] (e.g. GLM served through ollama-cloud,
+       Qwen3 chat-template runtimes) embed part of their reasoning inside
+       [message.content] itself. Feed the complete string through the same
+       splitter the streaming path uses; [flush] releases an unterminated
+       open tag as reasoning, so a reasoning-only turn stays typed [Thinking]
+       and never lands in visible [Text]. *)
+    let inline_content_blocks =
+      match content_inline_reasoning with
+      | Capabilities.Think_tags | Capabilities.Think_tags_with_chat_replay ->
+        let splitter = Inline_reasoning_split.create () in
+        let head = Inline_reasoning_split.feed_segments splitter text_content in
+        let tail = Inline_reasoning_split.flush_segments splitter in
+        let pieces = head @ tail in
+        List.map (function
+          | Inline_reasoning_split.Text text -> Text text
+          | Inline_reasoning_split.Reasoning content -> Thinking { signature = None; content }) pieces
+      | Capabilities.No_content_inline_reasoning ->
+        if Api_common.string_is_blank text_content then [] else [ Text text_content ]
+    in
+    let content = thinking_blocks @ inline_content_blocks @ tool_blocks in
+    let* inline_content_replay =
+      match content_inline_reasoning, msg |> member "content" with
+      | Capabilities.Think_tags_with_chat_replay, `String raw_content ->
+        Inline_content_replay.make ~content ~raw_content
+          ~block_indices:(List.mapi (fun index _ -> List.length thinking_blocks + index) inline_content_blocks)
+        |> Result.map Option.some |> Result.map_error unreadable_response
+      | (Capabilities.No_content_inline_reasoning | Capabilities.Think_tags
+        | Capabilities.Think_tags_with_chat_replay), _ -> Ok None
+    in
+    let telemetry = match telemetry_of_openai_json json, inline_content_replay with
+      | None, None -> None
+      | existing, _ -> Some { (Option.value existing ~default:default_inference_telemetry) with inline_content_replay } in
+    let stop_reason =
+      (* SSOT: Stop_reason_wire owns the wire finish-reason -> stop_reason table
+         and the StopToolUse => has-tool-block invariant (previously duplicated
+         here and in the streaming chunk handler with divergent guards). *)
+      Stop_reason_wire.of_finish
+        (Stop_reason_wire.wire_finish_of_string finish_reason)
+        ~has_tool_blocks:(tool_blocks <> [])
+      |> Stop_reason_wire.with_refusal ~has_refusal
+    in
+    let model = Cli_common_json.member_str "model" json in
+    Ok
+      { id = Cli_common_json.member_str "id" json
+      ; model
+      ; stop_reason
+      ; content
+      ; usage = usage_of_openai_json json
+      ; telemetry = Some (Types.with_reported_model ~model telemetry)
+      }
+  | err ->
+    (match Openai_error_envelope.of_error_value err with
+     | Some envelope -> Error (provider_error envelope)
+     | None -> Error (unreadable_response "malformed_openai_response:error_not_object_or_string"))
+;;
+
+(* Preserve only authoritative policy/truncation stops without content.
+   Other empty turns still need the existing Empty_completion classification:
+   context overflow recovers there, and unknown/missing-tool stops cannot
+   silently become a successful empty turn. *)
+let parse_openai_response_result_json
+      ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
+      raw_json
+  =
+  match parse_openai_response_result_json_raw ~content_inline_reasoning raw_json with
+  | Error _ as error -> error
+  | Ok ({ content = []; id; model; stop_reason; usage; telemetry } : Types.api_response)
+    as response ->
+    (match stop_reason with
+     | EndTurn | StopToolUse | StopSequence | ContextWindowExceeded
+     | PauseTurn | Compaction | UnmatchedToolCalls | Unknown _ ->
+       Error (Empty_completion { id; model; stop_reason; usage; telemetry })
+     | MaxTokens | Refusal | ContentFilter | RepetitionTruncation -> response)
+  | Ok resp -> Ok resp
+;;
+
+(** [parse_openai_response_result] parses [json_str] then delegates to
+    {!parse_openai_response_result_json}.  Callers that already hold the
+    parsed [Yojson.Safe.t] (e.g. {!Backend_glm.parse_response}, which also
+    error-checks and reasoning-extracts from the same body) should call
+    {!parse_openai_response_result_json} directly to avoid re-parsing. *)
+let parse_openai_response_result
+      ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning)
+      json_str
+  =
+  parse_openai_response_result_json
+    ~content_inline_reasoning
+    (Yojson.Safe.from_string json_str)
+;;
+
+let%test "missing finish reason is not synthesized as stop" =
+  match
+    parse_openai_response_result
+      {|{"id":"chat-1","model":"m","choices":[{"message":{"content":"ok"}}]}|}
+  with
+  | Error (Unreadable_response "malformed_openai_response:missing_finish_reason") -> true
+  | Error (Provider_error _) | Ok _ | Error (Unreadable_response _) | Error (Empty_completion _) -> false
+;;
+
+let%test "a top-level error that is neither an object nor a string is unreadable" =
+  match parse_openai_response_result {|{"error":502}|} with
+  | Error (Unreadable_response "malformed_openai_response:error_not_object_or_string") ->
+    true
+  | Error (Provider_error _) | Ok _ | Error (Unreadable_response _) | Error (Empty_completion _) -> false
+;;
+
+let%test "an error finish with no object says the generation was interrupted" =
+  match
+    parse_openai_response_result
+      {|{"id":"c","model":"m","choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"}}]}|}
+  with
+  | Error (Provider_error { report = Types.Unstated_errored_choice; provider_status = None; _ })
+    -> true
+  | Error
+      (Provider_error { report = Types.Provider_stated | Types.Unstated_errored_choice; _ })
+  | Ok _
+  | Error (Unreadable_response _)
+  | Error (Empty_completion _) -> false
+;;
+
+let%test "an error finish carries the envelope's type and provider condition" =
+  match
+    parse_openai_response_result
+      {|{"id":"c","model":"m","choices":[{"index":0,"finish_reason":"error","message":{"content":"partial"},"error":{"code":503,"message":"overloaded","metadata":{"error_type":"provider_overloaded"}}}]}|}
+  with
+  | Error
+      (Provider_error
+        { message = "overloaded"
+        ; error_type = Some "provider_overloaded"
+        ; provider_status =
+            Some
+              { Types.status = 503
+              ; error_body =
+                  {|{"error":{"code":503,"message":"overloaded","metadata":{"error_type":"provider_overloaded"}}}|}
+              }
+        ; report = Types.Provider_stated
+        }) -> true
+  | Error
+      (Provider_error { report = Types.Provider_stated | Types.Unstated_errored_choice; _ })
+  | Ok _
+  | Error (Unreadable_response _)
+  | Error (Empty_completion _) -> false
+;;
+
+let%test "usage_of_openai_json supports mlx_vlm input/output token fields" =
+  let json =
+    `Assoc
+      [ ( "usage"
+        , `Assoc
+            [ "input_tokens", `Int 11; "output_tokens", `Int 5; "total_tokens", `Int 16 ]
+        )
+      ]
+  in
+  match usage_of_openai_json json with
+  | Some u -> u.input_tokens = 11 && u.output_tokens = 5
+  | None -> false
+;;
+
+let%test "telemetry_of_openai_json synthesizes timings from mlx_vlm usage" =
+  let json =
+    `Assoc
+      [ ( "usage"
+        , `Assoc
+            [ "input_tokens", `Int 11
+            ; "output_tokens", `Int 5
+            ; "prompt_tps", `Float 21.55
+            ; "generation_tps", `Float 81.56
+            ] )
+      ; "peak_memory", `Float 52.66
+      ]
+  in
+  match telemetry_of_openai_json json with
+  | Some { timings = Some t; peak_memory_gb = Some peak; _ } ->
+    t.prompt_n = Some 11
+    && t.predicted_n = Some 5
+    && Option.value ~default:0.0 t.prompt_per_second > 21.5
+    && Option.value ~default:0.0 t.predicted_per_second > 81.5
+    && Option.value ~default:0.0 t.prompt_ms > 500.0
+    && Option.value ~default:0.0 t.predicted_ms > 60.0
+    && peak = 52.66
+  | Some { timings = None; _ }
+  | Some { timings = Some _; peak_memory_gb = None; _ }
+  | None -> false
+;;
+
+let%test "telemetry_of_openai_json keeps timings none without timing signals" =
+  let json =
+    `Assoc [ "usage", `Assoc [ "prompt_tokens", `Int 11; "completion_tokens", `Int 5 ] ]
+  in
+  match telemetry_of_openai_json json with
+  | Some { timings = None; peak_memory_gb = None; _ } -> true
+  | Some { timings = Some _; _ }
+  | Some { timings = None; peak_memory_gb = Some _; _ }
+  | None -> false
+;;

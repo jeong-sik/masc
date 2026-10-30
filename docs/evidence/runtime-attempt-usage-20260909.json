@@ -1,0 +1,13 @@
+{
+  "observed_at": "2026-09-09T10:59:53.210333+00:00",
+  "source": "keepers/rondo/runtime-manifests/trace-1788312314416-00007.jsonl",
+  "bytes": 5355425,
+  "sha256": "35875a490df10d376df447446fe863b2f41447232f1208aafce585cdc435a476",
+  "events": {
+    "runtime_routed": 1150,
+    "runtime_completed": 386,
+    "runtime_failed": 190
+  },
+  "events_with_routing_run_id": 0,
+  "validation": "Read-only installed baseline; no new binary execution or failed provider injection."
+}

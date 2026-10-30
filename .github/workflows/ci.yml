@@ -1,0 +1,32 @@
+name: Stack Core build
+
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        type: string
+        required: true
+      candidate_verification:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  core:
+    name: Core build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha }}
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+      - name: Build only the runtime library
+        run: opam exec -- dune build lib/masc.cmxa

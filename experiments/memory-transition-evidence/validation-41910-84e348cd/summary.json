@@ -1,0 +1,288 @@
+{
+  "source_head": "84e348cd3e321a667edeeeaa4d6ce54c08f0c63c",
+  "policy_sha256": "5b21d8dc48cb3c946c19165679aafbb817ce0b20e9f4c91b7767bcbc028d4413",
+  "cohorts": {
+    "development": {
+      "arms": {
+        "current_pair_only": {
+          "calls": 18,
+          "matches": 15,
+          "errors": 0,
+          "false_merge": 0,
+          "false_retention": 3
+        },
+        "historical_instruction_only": {
+          "calls": 18,
+          "matches": 12,
+          "errors": 0,
+          "false_merge": 0,
+          "false_retention": 6
+        },
+        "current_with_evidence": {
+          "calls": 18,
+          "matches": 18,
+          "errors": 0,
+          "false_merge": 0,
+          "false_retention": 0
+        }
+      },
+      "usage": {
+        "input_tokens": 43653,
+        "output_tokens": 3375
+      },
+      "models": {
+        "jev-1.13.0": 54
+      },
+      "per_case": {
+        "same_incident_fix": {
+          "current_pair_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "mergeable",
+            "mergeable",
+            "mergeable"
+          ]
+        },
+        "same_incident_restoration": {
+          "current_pair_only": [
+            "mergeable",
+            "mergeable",
+            "mergeable"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "mergeable",
+            "mergeable",
+            "mergeable"
+          ]
+        },
+        "other_incident_fix": {
+          "current_pair_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ]
+        },
+        "planned_not_observed": {
+          "current_pair_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ]
+        },
+        "lost_condition": {
+          "current_pair_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ]
+        },
+        "contradicted_resolution": {
+          "current_pair_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ]
+        }
+      },
+      "estimated_input_cost_usd": 0.0018334260000000002
+    },
+    "heldout-new": {
+      "arms": {
+        "current_pair_only": {
+          "calls": 18,
+          "matches": 18,
+          "errors": 0,
+          "false_merge": 0,
+          "false_retention": 0
+        },
+        "historical_instruction_only": {
+          "calls": 18,
+          "matches": 15,
+          "errors": 0,
+          "false_merge": 0,
+          "false_retention": 3
+        },
+        "current_with_evidence": {
+          "calls": 18,
+          "matches": 18,
+          "errors": 0,
+          "false_merge": 0,
+          "false_retention": 0
+        }
+      },
+      "usage": {
+        "input_tokens": 47481,
+        "output_tokens": 3357
+      },
+      "models": {
+        "jev-1.13.0": 54
+      },
+      "per_case": {
+        "catalog_discrepancy_closed": {
+          "current_pair_only": [
+            "mergeable",
+            "mergeable",
+            "mergeable"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "mergeable",
+            "mergeable",
+            "mergeable"
+          ]
+        },
+        "focus_inquiry_continues": {
+          "current_pair_only": [
+            "mergeable",
+            "mergeable",
+            "mergeable"
+          ],
+          "historical_instruction_only": [
+            "mergeable",
+            "mergeable",
+            "mergeable"
+          ],
+          "current_with_evidence": [
+            "mergeable",
+            "mergeable",
+            "mergeable"
+          ]
+        },
+        "shared_cause_separate_press": {
+          "current_pair_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ]
+        },
+        "planned_crate_transfer": {
+          "current_pair_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ]
+        },
+        "unobserved_export_outcome": {
+          "current_pair_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ]
+        },
+        "recurring_belt_distinction": {
+          "current_pair_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "historical_instruction_only": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ],
+          "current_with_evidence": [
+            "loses_knowledge",
+            "loses_knowledge",
+            "loses_knowledge"
+          ]
+        }
+      },
+      "estimated_input_cost_usd": 0.001994202
+    }
+  },
+  "total_calls": 108,
+  "total_input_tokens": 91134,
+  "estimated_total_cost_usd": 0.003827628,
+  "case_sha256": {
+    "development": "ff42242ece15d0b25c01f6e00f47ec2dd502a9522c476bb991ffe5ca6e4c6298",
+    "heldout-new": "564a53c3a6b0a7f9127a4e9e709c9bc07f1f053cc2f6e9833aa83f057349c5dc"
+  },
+  "source_sha256": "96d6c86793884ef314cae816959243bae2857817f3c7416754363cfe50bb6ab7"
+}

@@ -1,0 +1,12 @@
+{
+  "at": 1793055265.748655,
+  "scope": "One read-only root diagnostic via owned relay; actor is not masc-tui, no bearer sent, not an actual TUI observation",
+  "url": "http://127.0.0.1:61922/health",
+  "status": 400,
+  "body": {
+    "error_code": "request_authority_untrusted",
+    "error": "request Host is not a configured server identity"
+  },
+  "body_bytes": 103,
+  "body_sha256": "9899c6d6b7c6164b2154cfa135c99258254e3c157c23efc5ab8e4a30f28da73f"
+}

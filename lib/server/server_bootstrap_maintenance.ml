@@ -1,0 +1,1049 @@
+(* Server_bootstrap_maintenance — background maintenance loops
+   (GC, session purge, state machine housekeeping).
+   Extracted from server_bootstrap_loops.ml during godfile decomposition. *)
+
+(* How often the loop below wakes: transition-outbox projection, mention
+   reconciliation, SSE and session eviction, retention pruning.
+
+   A constant rather than MASC_JANITOR_INTERVAL_SEC, which this replaces. The
+   variable named a concept masc no longer has -- the goal and approval
+   janitors are gone, and there is no janitor Keeper -- and nothing set it:
+   not runtime.toml, not the deployed environment, not a script. A knob
+   nobody turns, named after something that does not exist, is read once at
+   boot to produce the number written here. *)
+let maintenance_tick_sec = 60.0
+
+let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
+let log_server_fiber_crash =
+  Server_bootstrap_loops_fiber.log_server_fiber_crash
+
+let start_otel_exporter_background ~sw setup =
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "otel_exporter_setup")
+    setup
+;;
+
+module Otel_for_testing = struct
+  let start_exporter_background = start_otel_exporter_background
+end
+
+let schedule_runner_interval_sec = Server_schedule_runner_policy.interval_sec
+
+let record_schedule_runner_tick_outcome outcome =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_schedule_runner_tick_outcomes
+    ~labels:[ "outcome", outcome ]
+    ()
+;;
+
+let log_schedule_dispatch (dispatch : Schedule_runner.dispatch_result) =
+  let occurrence_id =
+    Schedule_occurrence_id.to_string dispatch.occurrence_id
+  in
+  let status = Schedule_runner.dispatch_status_to_string dispatch.status in
+  match dispatch.error with
+  | None ->
+    Log.Server.info
+      "schedule_runner: occurrence=%s schedule_id=%s dispatch=%s"
+      occurrence_id
+      dispatch.schedule_id
+      status
+  | Some error ->
+    Log.Server.warn
+      "schedule_runner: occurrence=%s schedule_id=%s dispatch=%s error=%s"
+      occurrence_id
+      dispatch.schedule_id
+      status
+      error
+;;
+
+let log_schedule_hold_started ({ signal; reason } : Schedule_runner.held) =
+  match reason with
+  | Schedule_runner.Previous_occurrence_unconsumed ->
+    Log.Server.info
+      "schedule_runner: occurrence=%s schedule_id=%s held: its target has not \
+       consumed the previous occurrence yet"
+      (Schedule_occurrence_id.to_string signal.occurrence_id)
+      signal.schedule_id
+  | Schedule_runner.Target_intake_fenced { target; fence_owner } ->
+    Log.Server.info
+      "schedule_runner: occurrence=%s schedule_id=%s held: target keeper=%s \
+       refuses intake while operation=%s holds its shutdown fence"
+      (Schedule_occurrence_id.to_string signal.occurrence_id)
+      signal.schedule_id
+      target
+      fence_owner
+;;
+
+let wake_enqueue_counts_of_dispatches dispatches =
+  let module Consumers = Server_schedule_consumers in
+  let bump_wake_failed
+        (counts : Schedule_runner_status.wake_enqueue_counts)
+    =
+    { counts with wake_failed = counts.wake_failed + 1 }
+  in
+  let bump_wake_enqueued
+        (counts : Schedule_runner_status.wake_enqueue_counts)
+    =
+    { counts with wake_enqueued = counts.wake_enqueued + 1 }
+  in
+  List.fold_left
+    (fun counts (dispatch : Schedule_runner.dispatch_result) ->
+       match dispatch.detail with
+       | None -> counts
+       | Some detail ->
+         (match Consumers.dispatch_receipt_of_detail detail with
+          | Error _ | Ok (Consumers.Lane_act_handed_over _) -> counts
+          | Ok
+              (Consumers.Keeper_wake_enqueued
+                  { occurrence_status =
+                    ( Consumers.Keeper_wake_already_acked
+                    | Consumers.Keeper_wake_already_failed
+                    | Consumers.Keeper_wake_already_cancelled )
+                ; _
+                }) ->
+            counts
+          | Ok
+              (Consumers.Keeper_wake_enqueued
+                { occurrence_status = Consumers.Keeper_wake_awaiting_ack
+                ; reaction_ledger_status
+                ; _
+                }) ->
+            let counts = bump_wake_enqueued counts in
+            (match reaction_ledger_status with
+             | Some (Consumers.Keeper_wake_reaction_ledger_record_failed _) ->
+               bump_wake_failed counts
+             | None | Some Consumers.Keeper_wake_reaction_ledger_recorded ->
+               counts)))
+    Schedule_runner_status.empty_wake_enqueue_counts
+    dispatches
+;;
+
+(* One tick of the schedule runner, from its start to the record of its outcome.
+   It catches its own failures so a corrupt schedule row or a transient write
+   error cannot cancel the loop. Once the outcome is on record the cached fleet
+   schedule list is dropped: the page reports the runner's status and holds,
+   and would otherwise keep the previous tick's for up to its cache lifetime
+   (#38411). *)
+type active_schedule_runner =
+  { held : Schedule_runner.held list
+  ; pending_settlements : Schedule_runner.pending_settlement list
+  }
+
+type schedule_runner_state = Startup_pending | Active of active_schedule_runner
+
+let initial_schedule_runner_state = Startup_pending
+
+let run_schedule_runner_tick ~clock config ~state =
+  let started_at = clock () in
+  let last_observed_at = ref started_at in
+  let observe_clock () =
+    let observed = clock () in
+    last_observed_at := observed;
+    observed
+  in
+  Schedule_runner_status.record_tick_started ~now:started_at;
+  let next_state = ref state in
+  (* Keep the accepted immutable progress before any fallible observation or
+     owner effect. A telemetry failure must not discard a returned intent. *)
+  let report_crash exn =
+    Schedule_runner_status.record_tick_crash ~started_at
+      ~finished_at:!last_observed_at (Printexc.to_string exn);
+    Cancel_safe.protect ~on_exn:(fun _ -> ()) (fun () ->
+      record_schedule_runner_tick_outcome "crash";
+      Log.Server.warn "schedule_runner: tick crashed: %s" (Printexc.to_string exn))
+  in
+  let run_active (previous : active_schedule_runner) =
+    match
+      Schedule_runner.tick
+        ~consumer:Server_schedule_consumers.consumer
+        ~clock:observe_clock
+        ~pending_settlements:previous.pending_settlements
+        config ~now:started_at
+        ~retention_days:
+          (Runtime_params.get Runtime_settings.schedule_terminal_retention_days)
+    with
+    | Ok result ->
+      next_state := Active
+        { held = result.held; pending_settlements = result.pending_settlements };
+      Schedule_runner_status.record_settlement_progress
+        ~pending_settlements:result.pending_settlements
+        ~settlement_errors:result.settlement_errors;
+      let finished_at = observe_clock () in
+      let wake_enqueue_counts = wake_enqueue_counts_of_dispatches result.dispatches in
+      List.iter log_schedule_dispatch result.dispatches;
+      List.iter (fun error ->
+        Log.Server.warn "schedule_runner: settlement pending: %s"
+          (Schedule_runner.settlement_error_to_string error)) result.settlement_errors;
+      let newly_held = Schedule_runner.newly_held ~previous:previous.held result.held in
+      List.iter log_schedule_hold_started newly_held;
+      Server_schedule_consumers.resume_fenced_owners config ~newly_held result.held;
+      if result.Schedule_runner.emitted <> []
+         || result.rescheduled > 0 || result.dispatches <> []
+      then Log.Server.info
+        "schedule_runner: due_changed=%d emitted=%d rescheduled=%d dispatched=%d pending_settlements=%d"
+        result.due_changed (List.length result.emitted) result.rescheduled
+        (List.length result.dispatches) (List.length result.pending_settlements)
+      else Log.Server.debug
+        "schedule_runner: idle due_changed=%d held=%d pending_settlements=%d"
+        result.due_changed (List.length result.held) (List.length result.pending_settlements);
+      record_schedule_runner_tick_outcome "ok";
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+      Schedule_runner_status.record_tick_ok ~wake_enqueue_counts
+        ~started_at ~finished_at result
+    | Error failure ->
+      next_state := Active { previous with
+        pending_settlements = failure.pending_settlements };
+      Schedule_runner_status.record_settlement_progress
+        ~pending_settlements:failure.pending_settlements
+        ~settlement_errors:failure.settlement_errors;
+      let finished_at = observe_clock () in
+      let error = Schedule_runner.tick_failure_to_string failure in
+      let outcome, record = match failure.error with
+        | Schedule_runner.Tick_raised _ ->
+          "crash", Schedule_runner_status.record_tick_crash
+        | Schedule_runner.Service_error _ | Schedule_runner.Signal_store_error _ ->
+          "error", Schedule_runner_status.record_tick_error in
+      record_schedule_runner_tick_outcome outcome;
+      Log.Server.warn "schedule_runner: tick %s: %s" outcome error;
+      Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+      record ~started_at ~finished_at error
+  in
+  (try
+     let active = match state with
+       | Active previous -> Some previous
+       | Startup_pending ->
+         match Schedule_store.recover_running_on_startup config ~now:started_at with
+         | Ok (_, recovered) ->
+           let previous = { held = []; pending_settlements = [] } in
+           next_state := Active previous;
+           if recovered > 0 then Log.Server.warn
+             "schedule_runner: recovered %d interrupted running schedule(s)" recovered;
+           Some previous
+         | Error err ->
+           let error = "startup recovery failed: " ^ Schedule_store.store_error_to_string err in
+           let finished_at = observe_clock () in
+           record_schedule_runner_tick_outcome "error";
+           Log.Server.warn "schedule_runner: %s" error;
+           Server_dashboard_http_core_cache.invalidate_scheduled_automation config;
+           Schedule_runner_status.record_tick_error ~started_at ~finished_at error;
+           None
+     in
+     match active with None -> () | Some previous -> run_active previous
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     report_crash exn;
+     (* Invalidation is an observation effect too. The crash is already on
+        record; a second observation failure cannot erase captured progress. *)
+     Cancel_safe.protect ~on_exn:(fun _ -> ()) (fun () ->
+       Server_dashboard_http_core_cache.invalidate_scheduled_automation config));
+  !next_state
+;;
+
+let latest_keeper_msg_recovery = Atomic.make None
+
+(* One archive-first task-only GC pass on the 24h maintenance cadence
+   (audit 2026-10-07 F-06 / D6-11). Terminal tasks older than the retention
+   window move to tasks-archive.json; the window is a preservation policy,
+   not a wall-clock kill — non-terminal tasks are never archived and the
+   archive holds the task before the backlog commit drops it, so a verdict
+   or release obligation on a live task cannot be stranded by this pass.
+   Task-only: old workspace messages and backend pubsub keep their own
+   retention and are never touched here. A failure here is logged and never
+   cancels the cleanup loop. *)
+let run_periodic_task_gc config ~days =
+  try
+    let _, summary = Workspace.archive_terminal_tasks config ~days () in
+    Log.Server.info "periodic task gc: retention=%dd: %s" days summary
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Server.error "periodic task gc failed: %s" (Printexc.to_string exn)
+
+
+let latest_keeper_msg_recovery_observation () =
+  Atomic.get latest_keeper_msg_recovery
+;;
+
+let latest_keeper_config_journal_recovery = Atomic.make None
+
+let latest_keeper_config_journal_recovery_report () =
+  Atomic.get latest_keeper_config_journal_recovery
+;;
+
+let recover_keeper_config_journal_on_startup ~base_path =
+  let recover () =
+    Keeper_config_journal.recover_interrupted ~base_path
+      ~manifest_restore:(fun path before ->
+        match before with
+        | Keeper_config_journal.Manifest_absent ->
+          Keeper_config_journal.remove_durable ~path
+        | Keeper_config_journal.Manifest_bytes bytes ->
+          Fs_compat.save_file_atomic_strict_staged path bytes
+          |> Result.map_error Fs_compat.atomic_replace_failure_to_string)
+      ~runtime_restore:(fun path image ->
+        match image with
+        | Keeper_config_journal.Runtime_bytes source_text ->
+          Fs_compat.write_file_atomic_strict_staged path
+            ~write:(fun channel ->
+              Unix.fchmod (Unix.descr_of_out_channel channel) 0o600;
+              output_string channel source_text)
+          |> Result.map_error Fs_compat.atomic_replace_failure_to_string
+        | Keeper_config_journal.Runtime_absent ->
+          Keeper_config_journal.remove_durable ~path)
+  in
+  let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let failed detail : Keeper_config_journal.report =
+    { outcome = Recovery_failed { detail; notes = [] }
+    ; journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path
+    ; record = None }
+  in
+  let report =
+    match Keeper_config_journal.load
+            ~journal_path:(Keeper_config_journal.journal_path_for_base_path ~base_path) with
+    | Ok None ->
+      { Keeper_config_journal.outcome = No_journal
+      ; journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path
+      ; record = None }
+    | Error detail ->
+      { Keeper_config_journal.outcome = Journal_corrupt detail
+      ; journal_path = Keeper_config_journal.journal_path_for_base_path ~base_path
+      ; record = None }
+    | Ok (Some _) ->
+    try
+      Fs_compat.mkdir_p (Filename.dirname runtime_path);
+      match File_lock_eio.with_durable_lock_observed
+              ~lock_path:(runtime_path ^ ".lock") recover with
+      | File_lock_eio.Lock_not_acquired error ->
+        failed (File_lock_eio.durable_lock_error_to_string error)
+      | File_lock_eio.Body_completed { value; release_error = None } -> value
+      | File_lock_eio.Body_completed { value; release_error = Some error } ->
+        { value with outcome = Recovery_failed
+            { detail = File_lock_eio.durable_lock_error_to_string error; notes = [] } }
+    with
+    | Sys_error detail -> failed detail
+    | Unix.Unix_error (error, action, path) ->
+      failed (Printf.sprintf "%s %s: %s" action path (Unix.error_message error))
+  in
+  Atomic.set latest_keeper_config_journal_recovery (Some report);
+  (match report.outcome with
+   | Keeper_config_journal.No_journal -> ()
+   | Keeper_config_journal.Recovered_rolled_back _ ->
+     Log.Server.info "keeper_config_journal: startup recovery rolled back an interrupted config write (journal cleared)"
+   | Keeper_config_journal.Journal_corrupt detail ->
+     Log.Server.warn "keeper_config_journal: startup recovery found an unreadable journal (%s); leaving it in place for diagnosis"
+       detail
+   | Keeper_config_journal.Recovery_failed { detail; notes } ->
+     Log.Server.warn "keeper_config_journal: startup recovery could not converge (%s; %s); journal preserved for retry"
+       detail
+       (String.concat "; " notes));
+  report
+;;
+
+let with_initial_configuration ~base_path initialize =
+  let runtime_config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+  let config_root = Filename.dirname runtime_config_path in
+  (* Directory creation is atomic. No configuration bytes are read or seeded
+     before journal admission; a concurrent creator is an existing root. *)
+  Fs_compat.mkdir_p (Filename.dirname config_root);
+  let created =
+    try Unix.mkdir config_root 0o755; true with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> false in
+  Runtime.with_config_lock ~runtime_config_path (fun () ->
+    if created then
+      Server_runtime_config_root_bootstrap.bootstrap_initial_config_root ~base_path ~created;
+    Ok (initialize ~runtime_config_path))
+;;
+
+let recover_keeper_msg_requests_on_startup ~base_path =
+  let report = Keeper_msg_async.recover_lost_disk_records ~base_path () in
+  Atomic.set latest_keeper_msg_recovery (Some report);
+  if
+    report.lost > 0
+    || report.finalized > 0
+    || report.cleaned > 0
+    || report.unreadable > 0
+    || report.failed > 0
+    || report.staging_files_deleted > 0
+    || report.staging_files_preserved > 0
+  then
+    Log.Server.info
+      "keeper_msg_async: startup recovery lost=%d finalized=%d cleaned=%d unreadable=%d failed=%d staging_inspected=%d staging_deleted=%d staging_preserved=%d"
+      report.lost
+      report.finalized
+      report.cleaned
+      report.unreadable
+      report.failed
+      report.staging_files_inspected
+      report.staging_files_deleted
+      report.staging_files_preserved;
+  report
+;;
+
+let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
+  Server_keeper_build_maintenance.start ~sw ~clock ~config;
+  Server_keeper_volume_maintenance.start ~sw ~clock ~config;
+  Server_provider_usage_history.install config;
+  Lane_addon_runtime.register_skill_export_handler
+    Server_skill_snapshot_runtime.publish_lane_skills;
+  Server_lane_addon_sampling.register ~config ~net:env#net;
+  Lane_addon_runtime.register_exact_runner
+    ~authorize_request:(Server_lane_addon_exact.authorize_request ~base_path:config.base_path)
+    (Server_lane_addon_exact.runner ~base_path:config.base_path);
+  Lane_addon_runtime.register_web_search_runner Tool_misc_web_search.addon_search_runner;
+  Lane_addon_runtime.register_github_reader
+    (Server_repository_pulls.lane_addon_github ~now:Time_compat.now
+       ~http_post:Server_repository_pulls.default_http_post ~config);
+  Lane_addon_runtime.start_configuration_service ~config ~sw ~clock;
+  Lane_addon_runtime.start_fleet_service ~config ~sw ~clock;
+  (* Exclusive startup ownership: before any new server request can submit a
+     worker, settle disk-only nonterminal rows left by the prior process.  Poll
+     and cancel deliberately cannot infer process death, so this bootstrap
+     boundary is the sole production authority for that transition. *)
+  ignore
+    (recover_keeper_msg_requests_on_startup ~base_path:config.base_path
+      : Keeper_msg_async.recovery_report);
+  let recovery_ctx : _ Keeper_types_profile.context =
+    { config
+    ; agent_name = "keeper-maintenance-recovery"
+    ; sw
+    ; clock
+    ; proc_mgr = Some env#process_mgr
+    ; net = state.net
+    ; publication_recovery_provider =
+        Mcp_server.publication_recovery_availability_provider state
+    }
+  in
+  (* Dated-JSONL count cache: restore, keep, and hand back the per-file
+     (path, boundary, count) table that makes [count_entries] incremental.
+
+     It was process-memory only, so every restart re-counted every retained
+     line of every dated store. Measured 2026-08-29: masc bootstrapped 24
+     times that day, and 23 of the 28 telemetry_summary "heavy refresh"
+     warnings landed within five minutes of a bootstrap -- worst 225.70s and
+     5,704MB, reading tool_calls 1.1GB + agent-core-events 935MB +
+     trajectories 654MB.
+
+     The file is a cache, not a fact: every restored entry is still checked
+     against its file's current size before use, so a stale, truncated, or
+     absent cache costs exactly what a cold start costs today. The periodic
+     save exists because a crash is a restart too, and the whole point is the
+     restart path. *)
+  let count_cache_path =
+    Filename.concat (Workspace.masc_dir config) "dated-jsonl-count-cache.json"
+  in
+  (match Dated_jsonl.load_count_cache ~path:count_cache_path with
+   | Ok 0 -> ()
+   | Ok rows ->
+     Log.Server.info "dated-jsonl count cache restored: rows=%d" rows
+   | Error detail ->
+     Log.Server.warn
+       "dated-jsonl count cache load failed (counting from scratch): %s"
+       detail);
+  (* The trajectories store has its own incremental table with the same
+     restart problem: 654MB re-read on every boot, and telemetry_summary's
+     first call after one was the heavy call every time. Same contract as
+     the count cache above -- rows are re-validated against file size on
+     use, so a missing or stale file costs a cold read and nothing else. *)
+  let trajectory_cache_path =
+    Filename.concat
+      (Workspace.masc_dir config)
+      "trajectory-summary-cache.json"
+  in
+  (match
+     Telemetry_unified.load_trajectory_summary_cache ~path:trajectory_cache_path
+   with
+   | Ok 0 -> ()
+   | Ok rows ->
+     Log.Server.info "trajectory summary cache restored: rows=%d" rows
+   | Error detail ->
+     Log.Server.warn
+       "trajectory summary cache load failed (reading from scratch): %s"
+       detail);
+  let save_count_cache () =
+    (match Dated_jsonl.save_count_cache ~path:count_cache_path with
+     | Ok () -> ()
+     | Error detail ->
+       Log.Server.warn "dated-jsonl count cache save failed: %s" detail);
+    match
+      Telemetry_unified.save_trajectory_summary_cache ~path:trajectory_cache_path
+    with
+    | Ok () -> ()
+    | Error detail ->
+      Log.Server.warn "trajectory summary cache save failed: %s" detail
+  in
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "dated_jsonl_count_cache")
+    (fun () ->
+      let interval_sec = 300.0 in
+      let rec tick () =
+        Eio.Time.sleep clock interval_sec;
+        save_count_cache ();
+        tick ()
+      in
+      tick ());
+  Shutdown.register ~name:"dated_jsonl_count_cache" ~priority:30 save_count_cache;
+  (* Provider usage windows are otherwise heard only during a turn, so an
+     account that is spent, and therefore not picked, stays "no report since
+     server start" and never says when it resets. One read per account, at
+     start and after catalogue publication, without a model turn; an HTTP
+     account whose provider declares usage-read.refresh-s repeats on that period. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "provider_usage_read")
+    (fun () ->
+      Runtime_provider_usage_read.watch_declared
+        ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
+          ~grace_seconds:Process_eio.child_exit_grace_seconds)
+        ~net:env#net
+        ~clock
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / config.base_path));
+  (* Metrics flush fiber: drains write queue every 500ms, batches file appends.
+     Replaces the old mutex + synchronous file I/O pattern. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "metrics_flush")
+    (fun () -> Metrics_store_eio.start_flush_fiber ~clock);
+  Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
+  (* Host FD observation poller. It records sysmon WARN/CRIT signals through
+     [Keeper_fd_pressure.engage_external] for health telemetry and never changes
+     Keeper scheduling. Disable the observer via
+     [MASC_HOST_FD_PRESSURE_POLLER_DISABLED=1]. *)
+  let poller_disabled = Env_config_core.host_fd_pressure_poller_disabled () in
+  if not poller_disabled then
+    Host_fd_pressure_poller.start
+      ~sw
+      ~clock
+      ~base_path:(Mcp_server.workspace_config state).base_path;
+  (* RFC-0465: open pull requests of the registered GitHub repositories, read
+     with the declared pr_reader Keeper's token and held in memory only. *)
+  Server_repository_pulls.start
+    ~sw
+    ~clock
+    ~config:(Mcp_server.workspace_config state);
+  (* Restore retained tool metrics before installing the live observer. This
+     order prevents startup hydration from overwriting a call that completed
+     concurrently. A failed read leaves the current snapshot unchanged and is
+     visible to operators; persistence remains best-effort. *)
+  let tool_metrics_masc_root =
+    Workspace.masc_dir (Mcp_server.workspace_config state)
+  in
+  (try
+     match
+       Tool_metrics_persist.hydrate
+         ~masc_root:tool_metrics_masc_root
+         ~retention_days:(Env_config_core.jsonl_retention_days ())
+     with
+     | Ok report ->
+       Log.Metrics.info
+         "tool_metrics_persist: hydrated %d record(s), pruned=%d record(s)"
+         report.loaded_records
+         report.pruned_records
+     | Error error ->
+       Log.Metrics.warn
+         "tool_metrics_persist: startup hydration failed: %s"
+         error
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     Log.Metrics.warn
+       "tool_metrics_persist: startup hydration crashed: %s"
+       (Printexc.to_string exn));
+  (* The shared dispatch observer is the canonical write path for persisted
+     tool metrics so keeper-internal calls are counted exactly once. *)
+  Tool_dispatch.register_dispatch_observer (fun outcome result ->
+    match outcome, result with
+    | Dispatch_outcome.Handled, Some r ->
+      Tool_metrics.record r;
+      Tool_metrics_persist.enqueue ~masc_root:tool_metrics_masc_root r
+    | (Dispatch_outcome.Handled, None) | (Dispatch_outcome.No_handler, _) -> ());
+  (* RFC-0234 scheduled automation runner.  Public schedule tools and the
+     dashboard-only approval route only mutate the durable ledger; this loop is
+     the production caller that observes due rows and emits at-most-once generic wake signals.  It
+     catches per-tick failures so a corrupt schedule row or transient write
+     error cannot cancel unrelated keeper/server fibers. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "schedule_runner")
+    (fun () ->
+      (* Pending startup recovery and the latest successful held set are
+         carried by this loop at the existing cadence. *)
+      let rec loop runner_state =
+        let next_state =
+          run_schedule_runner_tick
+            ~clock:Time_compat.now
+            (Mcp_server.workspace_config state)
+            ~state:runner_state
+        in
+        Eio.Time.sleep clock schedule_runner_interval_sec;
+        loop next_state
+      in
+      loop initial_schedule_runner_state);
+  (* Non-public registered tool usage log: durable JSONL observability. *)
+  Tool_usage_log.init
+    ~base_path:(Mcp_server.workspace_config state).base_path
+    ();
+  (* Inject keeper FD/disk pressure handling at the boundary so the generic
+     Tool_usage_log surface does not reference the keeper subsystem directly
+     (Tool->Keeper dependency direction; this server module is the right place
+     to name keeper, since the server orchestrates keepers). *)
+  Tool_usage_log.install ~on_io_failure:(fun ~site exn ->
+    Keeper_fd_pressure.note_exception ~site exn;
+    Keeper_disk_pressure.note_exception ~site exn);
+  (* Keeper tool call I/O log: full input/output for dashboard inspector *)
+  Keeper_tool_call_log.init
+    ~base_path:(Mcp_server.workspace_config state).base_path
+    ();
+  Keeper_tool_call_log.start_flush_fiber ~sw ~clock;
+  (* Transition-audit forensics writes leave the keeper hot path: recorders
+     enqueue and this fiber drains (2026-06-10 fleet-freeze fix — the inline
+     append serialized all keepers on one store mutex). *)
+  Keeper_transition_audit.start_flush_fiber ~sw ~clock;
+  Otel_dispatch_hook.install ();
+  (* PR-S3: register the OTel/Otel_metric_store dispatch span wrapper. [Tool_dispatch]
+     (lib/tool/, masc_tool_dispatch) no longer code-depends on [Tool_telemetry]
+     / Otel / Otel_metric_store; the wrapper is injected here at the composition root.
+     Without this call [guarded_dispatch] runs with the identity wrapper (no
+     span / no [tool_dispatch_total] metric). *)
+  Tool_dispatch.set_span_wrapper Tool_telemetry.with_span;
+  Otel_metric_store.register_otel_source_once ();
+  Otel_runtime_observables.start_store_writer
+    ~sw
+    ~clock
+    ~masc_root:(Workspace.masc_dir (Mcp_server.workspace_config state))
+    ();
+  start_otel_exporter_background ~sw (fun () -> Otel_spans.setup_exporter ~sw env);
+  Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
+  (* RFC-0217 S4-2: wire AGENT_CORE OTLP exporter so AGENT_CORE spans/metrics reach the
+     same collector as MASC-native telemetry.  The endpoint is read from
+     the same env-var that MASC's own OTLP client uses. *)
+  (match Sys.getenv_opt "OTEL_EXPORTER_OTLP_ENDPOINT" with
+   | Some endpoint ->
+     let config = Agent_core.Otel_export.default_export_config ~endpoint in
+     let instance = Agent_core.Otel_tracer.create_instance_eio () in
+     let tracer = Agent_core.Otel_tracer.tracer_of_instance instance in
+     Runtime_agent_context.set_agent_core_tracer tracer;
+     let (_state : Agent_core.Otel_export.t) =
+       Agent_core.Otel_export.start_daemon ~sw ~clock:env#clock ~net:env#net ~config instance
+     in
+     Log.Server.info "AGENT_CORE OTLP exporter daemon started (endpoint=%s)" endpoint
+   | None ->
+     Log.Server.info "OTEL_EXPORTER_OTLP_ENDPOINT not set; AGENT_CORE telemetry export disabled");
+  (* Scheduler-lag probe: 1s sleep, gauge = overshoot. A pure-Eio fiber
+     cannot observe a blocked domain from inside while it is blocked, but
+     the first tick after the block lands carries the full stall duration,
+     which is exactly the post-hoc signal the 2026-06 freeze RCAs lacked. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "eio_loop_lag_probe")
+    (fun () ->
+      let interval_sec = 1.0 in
+      let rec tick () =
+        let before = Unix.gettimeofday () in
+        Eio.Time.sleep clock interval_sec;
+        let lag = Unix.gettimeofday () -. before -. interval_sec in
+        Otel_metric_store.set_gauge
+          Otel_metric_store.metric_eio_loop_lag_seconds
+          (Float.max 0.0 lag);
+        tick ()
+      in
+      tick ());
+  (* Board_listener removed: filesystem-first principle.
+     JSONL path emits SSE directly via Board_dispatch.emit_board_sse_event.
+     PG path also uses Board_dispatch, making the pg_notify relay redundant. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "maintenance_cleanup")
+    (fun () ->
+    let last_prune = ref (Unix.gettimeofday ()) in
+    (* Task GC starts due: the first maintenance pass runs it, then every 24h
+       of uptime. Servers that restart more often than daily would otherwise
+       never archive, since the pass is gated on uninterrupted uptime. *)
+    let last_task_gc = ref 0.0 in
+    let last_chat_journal_audit = ref (Unix.gettimeofday ()) in
+    (* Operations the audit has reported: each settled operation is audited
+       once per process life. *)
+    let chat_journal_audited = ref Keeper_chat_journal_audit.Audited.empty in
+    let transition_projection =
+      match
+        Keeper_event_queue_recovery.owner_budget
+          ~max_owners:(Keeper_config.keeper_batch_limit ())
+      with
+      | Ok budget -> Some (Server_transition_outbox_recovery.create
+          ~base_path:config.base_path ~budget ())
+      | Error error ->
+        Log.Server.error
+          "keeper transition outbox maintenance disabled: %s"
+          (Keeper_event_queue_recovery.owner_budget_error_to_string error);
+        None
+    in
+    let project_transition_outboxes source =
+      Option.iter
+        (fun recovery -> Server_transition_outbox_recovery.pulse ~sw recovery source)
+        transition_projection
+    in
+    let delivery_recovery = Server_maintenance_delivery_recovery.create () in
+    let reconcile_broadcast_mentions () =
+      Server_maintenance_delivery_recovery.pulse ~sw
+        ~config:(Mcp_server.workspace_config state) delivery_recovery Broadcast_mentions
+    in
+    let reconcile_goal_events () =
+      Server_maintenance_delivery_recovery.pulse ~sw
+        ~config:(Mcp_server.workspace_config state) delivery_recovery Goal_effects
+    in
+    let composition_completions =
+      Keeper_composition_completion_wake.create ~base_path:config.base_path () in
+    let reconcile_composition_completions () =
+      Keeper_composition_completion_wake.pulse ~sw composition_completions
+    in
+    let prepared_continuations = Keeper_composition_continuation_wake.create ~context:recovery_ctx () in
+    let reconcile_prepared_continuations () =
+      Keeper_composition_continuation_wake.pulse ~sw prepared_continuations
+    in
+    Keeper_composition_completion_wake.observe_results ~sw ~base_path:config.base_path
+      ~on_result_ready:(Keeper_composition_continuation_wake.notify_result_ready ~sw prepared_continuations);
+    let owned_job_completions = Keeper_owned_job_completion_wake.create ~config
+        ~on_result_ready:(fun record ->
+          Keeper_composition_continuation_wake.notify_result_ready ~sw prepared_continuations
+            {base_path=record.base_path;keeper_name=record.keeper_name;
+             dependency=Keeper_composition_dependency.Owned_job record.job_id}) () in
+    let reconcile_owned_job_completions () =
+      Keeper_owned_job_completion_wake.pulse ~sw owned_job_completions
+    in
+    let unread_tool_results = Keeper_client_tool_outbox_wake.create ~config in
+    let reconcile_unread_tool_results () =
+      Keeper_client_tool_outbox_wake.pulse ~sw unread_tool_results
+    in
+    let ask_answers = Keeper_ask_answer_wake.create ~base_path:config.base_path () in
+    let reconcile_ask_answers () =
+      Keeper_ask_answer_wake.pulse ~sw ask_answers
+    in
+    reconcile_goal_events ();
+    reconcile_composition_completions ();
+    reconcile_owned_job_completions ();
+    reconcile_unread_tool_results ();
+    reconcile_prepared_continuations ();
+    reconcile_ask_answers ();
+    project_transition_outboxes Server_transition_outbox_recovery.Startup;
+    let rec loop () =
+      Eio.Time.sleep clock maintenance_tick_sec;
+      (* A payout that could not be prepared (a Task or the links did not read)
+         is tried again on this tick. It comes before the work below so that a
+         step that raises cannot skip the retry. *)
+      Candle_payout_worker.pulse ();
+      Server_workspace_memory_curator.retry_pending_observations
+        ~base_path:(Mcp_server.workspace_config state).base_path;
+      project_transition_outboxes Server_transition_outbox_recovery.Maintenance;
+      reconcile_broadcast_mentions ();
+      reconcile_goal_events ();
+      reconcile_composition_completions ();
+      reconcile_owned_job_completions ();
+      reconcile_unread_tool_results ();
+      reconcile_prepared_continuations ();
+      reconcile_ask_answers ();
+      (try
+         let stale_sids = Sse.cleanup_stale () in
+         List.iter Server_routes_http_common.stop_sse_session stale_sids;
+         if stale_sids <> []
+         then
+           Log.Server.info
+             "Reaped %d stale connections (active: %d)"
+             (List.length stale_sids)
+             (Sse.client_count ());
+         let evicted_events = Sse.cleanup_expired_events () in
+         if evicted_events > 0
+         then
+           (* SSE replay-buffer eviction is periodic housekeeping; failed
+               sends and stale connection reaping remain visible elsewhere. *)
+           Log.Server.routine "Evicted %d expired SSE buffer events" evicted_events;
+         let evicted = Cache_eio.evict_expired (Mcp_server.workspace_config state) in
+         if evicted > 0 then Log.Server.info "Cache: evicted %d expired entries" evicted;
+         let sse_guards_reaped = Server_mcp_transport_http_conn.reap_stale_guards () in
+         let http_guards_reaped = Server_mcp_transport_http.reap_stale_guards () in
+         let is_active sid =
+           Server_mcp_transport_http_conn.is_active_sse_session sid
+           || Server_mcp_transport_http.is_active_sse_session sid
+         in
+         let sessions_reaped =
+           Server_mcp_transport_http_session.reap_stale_sessions
+             ~base_path:config.base_path
+             ~is_active_session:is_active
+         in
+         if sse_guards_reaped + http_guards_reaped + sessions_reaped > 0
+         then
+           Log.Server.info
+             "reaped %d SSE guards + %d HTTP guards + %d stale sessions"
+             sse_guards_reaped
+             http_guards_reaped
+             sessions_reaped;
+         let ext_reaped = Sse.reap_dead_external_subscribers () in
+         Transport_metrics.set_grpc_subscribers
+           (Sse.external_subscriber_count_with_prefix "grpc-subscribe-");
+         if ext_reaped > 0
+         then Log.Server.info "reaped %d dead external subscribers" ext_reaped;
+         (* Rate-limit buckets: evict keys unused for
+             [MASC_RATE_LIMIT_BUCKET_TTL_SEC] (default 5 minutes) *)
+         let rl = Eio.Lazy.force Rate_limit.global in
+         let rl_reaped =
+           Rate_limit.cleanup
+             rl
+             ~older_than_seconds:
+               Env_config_runtime.InternalTimers.rate_limit_bucket_ttl_sec
+         in
+         if rl_reaped > 0
+         then Log.Server.info "Reaped %d stale rate-limit buckets" rl_reaped;
+         (* Periodic JSONL prune: every 24h, clean dated JSONL files *)
+         let now = Unix.gettimeofday () in
+         if now -. !last_prune >= Masc_time_constants.day
+         then (
+           last_prune := now;
+           try
+             let config = Mcp_server.workspace_config state in
+             let outcome =
+               (* Window and stores are shared with the startup pass in
+                  Server_runtime_startup_maintenance. *)
+               Server_runtime_startup_maintenance.prune_jsonl_at_resolved_window
+                 ~base_path:config.base_path
+             in
+             List.iter
+               (fun diagnostic ->
+                  Log.Server.warn
+                    "periodic JSONL prune: ignoring runtime.toml [maintenance]: %s"
+                    (Server_maintenance_toml_config.diagnostic_to_string diagnostic))
+               outcome.diagnostics;
+             if outcome.pruned > 0
+             then
+               Log.Server.info
+                 "periodic JSONL prune: pruned %d day-files (retention=%dd from %s)"
+                 outcome.pruned
+                 outcome.days
+                 (Server_runtime_startup_maintenance.retention_source_label outcome.source);
+               (* Schedule terminal-row GC on the same 24h cadence: terminal
+                  rows (Succeeded/Failed/Cancelled/Expired) otherwise
+                accumulate unbounded — the only pruner was the manual
+                dashboard action (Server_dashboard_http_schedule_actions).
+                Same operation as that button, so operator semantics are
+                unchanged; the cadence bounds how long terminal history
+                lingers, mirroring the dated-JSONL retention above. *)
+             (match Schedule_service.prune (Mcp_server.workspace_config state) with
+              | Ok (_, pruned) when pruned > 0 ->
+                Log.Server.info
+                  "periodic schedule prune: removed %d terminal rows"
+                  pruned
+              | Ok (_, _) -> ()
+              | Error err ->
+                Log.Server.warn
+                  "periodic schedule prune failed: %s"
+                  (Schedule_service.service_error_to_string err));
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             Log.Server.error "periodic JSONL prune failed: %s" (Printexc.to_string exn));
+         (* Task archive on its own 24h cadence (F-06 / D6-11): the backlog
+            only shrank when an operator ran the manual masc_gc tool, so
+            terminal tasks accumulated unbounded — 95% of backlog.json bytes
+            at the 2026-10-07 audit. Archive-first and lock-serialised
+            (#40427/#40571), so automating it is safe; the retention window
+            is a runtime setting, not a wall-clock kill. Its own block, not
+            the JSONL-prune try above: a prune failure must not starve task
+            archival for another 24h. *)
+         if now -. !last_task_gc >= Masc_time_constants.day
+         then begin
+           last_task_gc := now;
+           (try
+              run_periodic_task_gc
+                (Mcp_server.workspace_config state)
+                ~days:(Runtime_params.get Runtime_settings.task_archive_retention_days)
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Server.error "periodic task gc failed: %s" (Printexc.to_string exn))
+         end;
+         (* RFC-0412 stage 2: dual-write consistency audit of the chat event
+            journal against keeper_chat_store. Runs hourly — far more often
+            than the 30d journal retention prune, so the audit window is never
+            silently clipped. Mismatches are metrics + logs; nothing here
+            raises. The stage-2 read-path cutover is gated on this reporting a
+            clean soak. *)
+         if now -. !last_chat_journal_audit >= Masc_time_constants.hour
+         then begin
+           last_chat_journal_audit := now;
+           (try
+              let base_dir = (Mcp_server.workspace_config state).base_path in
+              (* Whether a journal may still be appended is the chat operation
+                 registry's answer: a queued or running row is a live turn.
+                 A terminal row, no row, or a keeper the inventory no longer
+                 holds (nothing can run its turns) is settled. Every other
+                 registry outcome is transient and leaves the file for the
+                 next pass. *)
+              let liveness ~keeper_name ~operation_id =
+                match Keeper_owner.Chat_operation.Operation_id.of_string operation_id with
+                | Error _ ->
+                  (* Not an operation id the registry can hold, so no turn
+                     of the registry's can be appending to it. *)
+                  Keeper_chat_journal_audit.Turn_settled
+                | Ok operation_id ->
+                  (match
+                     Keeper_owner_registry.exact_operation
+                       ~base_path:base_dir
+                       ~keeper_name
+                       operation_id
+                   with
+                   | Ok
+                       (Some
+                          { Keeper_owner.Chat_operation.state =
+                              ( Keeper_owner.Chat_operation.Queued
+                              | Keeper_owner.Chat_operation.Running _ )
+                          ; _
+                          }) -> Keeper_chat_journal_audit.Turn_running
+                   | Ok
+                       (Some
+                          { Keeper_owner.Chat_operation.state =
+                              ( Keeper_owner.Chat_operation.Succeeded _
+                              | Keeper_owner.Chat_operation.Failed _
+                              | Keeper_owner.Chat_operation.Cancelled _ )
+                          ; _
+                          })
+                   | Ok None
+                   | Error
+                       (Keeper_owner_registry.Command_lookup_failed
+                          (Keeper_owner_registry.Owner_not_found _)) ->
+                     Keeper_chat_journal_audit.Turn_settled
+                   | Error
+                       (( Keeper_owner_registry.Command_lookup_failed
+                            ( Keeper_owner_registry.Inventory_not_installed _
+                            | Owner_unavailable _
+                            | Owner_initialization_failed _
+                            | Inventory_stopping )
+                        | Command_lifecycle_reserved _
+                        | Command_rejected _ ) as error) ->
+                     Keeper_chat_journal_audit.Registry_unanswered
+                       (Keeper_owner_registry.command_error_to_string error))
+              in
+              let results, audited =
+                Keeper_chat_journal_audit.sweep
+                  ~base_dir
+                  ~lookback_sec:(2. *. Masc_time_constants.hour)
+                  ~liveness
+                  ~audited:!chat_journal_audited
+                  ()
+              in
+              chat_journal_audited := audited;
+              List.iter
+                (fun (keeper, operation_id, verdict) ->
+                   match verdict with
+                   | Keeper_chat_journal_audit.Match -> ()
+                   | (Keeper_chat_journal_audit.Journal_missing | Keeper_chat_journal_audit.Journal_truncated | Keeper_chat_journal_audit.Mismatch _ | Keeper_chat_journal_audit.Journal_unreadable _ | Keeper_chat_journal_audit.Journal_corrupt _ | Keeper_chat_journal_audit.Journal_unsupported_version _ | Keeper_chat_journal_audit.Store_unreadable _ | Keeper_chat_journal_audit.Liveness_unknown _) as verdict -> Otel_metric_store.inc_counter
+                       Keeper_metrics.(to_string ChatJournalAuditMismatches)
+                       ~labels:
+                         [ "keeper", keeper
+                         ; "verdict", Keeper_chat_journal_audit.verdict_label verdict
+                         ]
+                       ();
+                     Log.Keeper.error
+                       "chat-journal-audit keeper=%s op=%s verdict=%s"
+                       keeper
+                       operation_id
+                       (Keeper_chat_journal_audit.show_verdict verdict))
+                results
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Log.Server.warn
+                "chat journal audit sweep failed: %s"
+                (Printexc.to_string exn))
+         end
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Server.error "cleanup loop iteration failed: %s" (Printexc.to_string exn));
+      loop ()
+    in
+    loop ());
+  (* Periodic repository sync: fetch repositories with auto_sync enabled. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "repo_sync")
+    (fun () ->
+    let repo_sync_interval_sec =
+      Env_config_runtime.InternalTimers.repo_sync_interval_sec
+    in
+    let sync_once () =
+      try
+        let now = Int64.of_float (Eio.Time.now clock) in
+        match Repo_sync.sync_all ~base_path:(Mcp_server.workspace_config state).base_path ~now with
+        | Ok synced ->
+          List.iter
+            (fun ((repo : Repo_manager_types.repository), outcome) ->
+              match outcome with
+              | Repo_sync.Already_current -> ()
+              | Repo_sync.Advanced { behind } ->
+                Log.Server.info
+                  "repo_sync: %s advanced %d commit(s) to origin/%s"
+                  repo.id behind repo.default_branch
+              | Repo_sync.Skipped_dirty { staged; unstaged; conflicted } ->
+                Log.Server.warn
+                  "repo_sync: %s not advanced (dirty tree: staged=%d unstaged=%d conflicted=%d)"
+                  repo.id staged unstaged conflicted
+              | Repo_sync.Skipped_not_on_default_branch { current } ->
+                Log.Server.warn
+                  "repo_sync: %s not advanced (checked out %s, default %s)"
+                  repo.id current repo.default_branch
+              | Repo_sync.Fast_forward_refused { behind; reason } ->
+                Log.Server.warn
+                  "repo_sync: %s is %d commit(s) behind but fast-forward was refused: %s"
+                  repo.id behind reason
+              | Repo_sync.Advance_inspect_failed { reason } ->
+                Log.Server.warn
+                  "repo_sync: %s advance inspection failed: %s" repo.id reason)
+            synced;
+          if synced <> []
+          then Log.Server.info "repo_sync: synced %d repositories" (List.length synced)
+        | Error msg -> Log.Server.warn "repo_sync: sync_all failed: %s" msg
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> Log.Server.error "repo_sync: iteration failed: %s" (Printexc.to_string exn)
+    in
+    let rec sync_loop () =
+      (try Eio.Time.sleep clock repo_sync_interval_sec with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn -> Log.Server.error "repo_sync: sleep failed: %s" (Printexc.to_string exn));
+      sync_once ();
+      sync_loop ()
+    in
+    sync_once ();
+    sync_loop ());
+  (* RFC-0138 Phase 3 Step 1: lock-free dashboard snapshot refresher.
+     Publishes shell/tools/telemetry_summary every [interval_sec] so
+     HTTP read handlers can serve via wait-free [Atomic.get] instead of
+     racing the synchronous compute path through [Dashboard_cache].
+
+     The interval (2.0s) matches RFC-0138 §6 Q2: frontend polls /shell
+     every 3s, so a 2s refresh keeps staleness bounded at 5s (2s + 3s)
+     while leaving the compute path fully out of the request fiber. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "dashboard_snapshot refresh")
+    (fun () ->
+      (* RFC-0138 Phase 3 Step 3: pass [~state] so refresh_loop can
+         populate [namespace_truth] from the cached-refs path.
+         That moves the 6 MASC_NAMESPACE_TRUTH_*_TIMEOUT_S knobs out
+         of the request fiber for the canonical project-snapshot
+         response (Step 4 retires the env knobs themselves). *)
+      Dashboard_snapshot.refresh_loop
+        ~sw ~clock ~config:(Mcp_server.workspace_config state) ~state
+        ~interval_sec:2.0 ());
+  (* Warm the runtime-probe cache before the first dashboard request so the
+     shell does not open on a [warming_up] placeholder (which reads as "runtime
+     down" to an operator). Non-blocking:
+     [maybe_fork_dashboard_runtime_probe_refresh] forks a background fiber under
+     this switch and the single-flight CAS makes a concurrent refresh a no-op. *)
+  Server_dashboard_http_runtime_info.maybe_fork_dashboard_runtime_probe_refresh ();
+  let resolved_base = (Mcp_server.workspace_config state).base_path in
+  let masc_dir = Workspace.masc_dir (Mcp_server.workspace_config state) in
+  resolved_base, masc_dir
+;;

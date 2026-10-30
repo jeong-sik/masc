@@ -1,0 +1,9 @@
+[2026-10-29 00:33:06] [INFO] [MCP] Tag registry initialized: 182 tools registered
+Testing `setup-account-login-routes'.
+This run has ID `N4ZONKXE'.
+
+  [OK]          boundaries          0   admin and request boundaries.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/setup-account-login-routes'.
+Test Successful in 0.017s. 1 test run.
+exit=0

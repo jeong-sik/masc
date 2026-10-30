@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name browser_configuration)
+ (public_name masc.browser_configuration)
+ (wrapped false)
+ (libraries otoml masc.runtime_toml_namespace)
+ (preprocess (pps ppx_deriving.show ppx_deriving.eq)))

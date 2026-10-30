@@ -1,0 +1,11 @@
+{
+  "recorded_at": "2026-10-04T14:36:13.546459+00:00",
+  "kind": "retained integration logs; no rerun",
+  "files": {
+    "README.md": "762523d75d0462a6425d43fea74e13a1f5586c41af2744ab9d46c99910bee867",
+    "build.txt": "6aa1ff6763449d22f099591d453cccbf7559257cb5a83dd3ea40303d7fa19175",
+    "decoder.txt": "fdf8d17e2b61b983086206949705b482496ad78decee690ed1bf3070546ca501",
+    "usage-rows.txt": "baf353922ae3002b2a553ef3756cb65576c9908382ef6a15421dc8aae05def9d",
+    "usage-studio.txt": "da350e1ad22bf3d619cab0435f47db02361af56a9f115137aef02282c32ae268"
+  }
+}

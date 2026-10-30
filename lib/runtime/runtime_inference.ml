@@ -1,0 +1,117 @@
+let clamp_reasoning_effort_to_catalog
+    ~(model_id : string option)
+    ~(requested : Llm_provider.Reasoning_effort.t option)
+    : Llm_provider.Reasoning_effort.t option =
+  match requested, model_id with
+  | None, _ | _, None -> requested
+  | Some effort, Some model ->
+    (match Llm_provider.Capabilities.for_model_id_catalog model with
+     | None -> requested
+     | Some caps ->
+       (match caps.Llm_provider.Capabilities.accepted_reasoning_efforts with
+        | None -> requested
+        | Some accepted when List.mem effort accepted -> requested
+        | Some [] -> requested
+        | Some (first :: rest as accepted) ->
+          let below =
+            List.filter
+              (fun candidate ->
+                 Llm_provider.Reasoning_effort.compare candidate effort < 0)
+              accepted
+          in
+          let pick_max a b =
+            if Llm_provider.Reasoning_effort.compare a b >= 0 then a else b
+          in
+          let pick_min a b =
+            if Llm_provider.Reasoning_effort.compare a b <= 0 then a else b
+          in
+          match below with
+          | [] -> Some (List.fold_left pick_min first rest)
+          | b_first :: b_rest -> Some (List.fold_left pick_max b_first b_rest)))
+;;
+
+(* Per-runtime sampling temperature. A model may declare a fixed [temperature]
+   in runtime.toml ([models.<id>.temperature], read via
+   [Runtime.temperature_of_runtime_id]); when set, that value is the request
+   temperature at every inference boundary for the model. Otherwise the caller's
+   explicitly configured subsystem value stands.
+
+   A model whose endpoint fixes the value is not declared here: its AGENT_CORE
+   catalog row lists [ignored_sampling_parameters] and the request leaves the
+   field out, whatever this resolves to. *)
+let resolve_temperature ~runtime_id ~fallback =
+  match Runtime.temperature_of_runtime_id runtime_id with
+  | Some temperature -> temperature
+  | None -> fallback ()
+
+(* Per-runtime reasoning effort. Official-client runtimes reject
+   [enable_thinking] and take effort instead, so without this the effort a
+   Claude Code / Codex / Antigravity turn runs at is whatever the CLI
+   defaults to and no operator declaration reaches it. [None] leaves the
+   caller's own value in place. *)
+let resolve_reasoning_effort ~runtime_id =
+  Runtime.reasoning_effort_of_runtime_id runtime_id
+
+let resolve_turn_timeout_s ~runtime_id = Runtime.turn_timeout_s_of_runtime_id runtime_id
+
+(* One spelling for the turn-timeout rule every official-client boundary
+   shares. Absent leaves the caller's default standing; a non-positive
+   declaration removes the bound — the deadline exists to notice a client
+   that has gone silent, not to cap how long legitimate work may take, so a
+   deployment is allowed to say the client decides. *)
+let turn_timeout_s_of_declared ~default = function
+  | None -> Some default
+  | Some seconds when seconds <= 0.0 -> None
+  | Some seconds -> Some seconds
+;;
+
+let resolve_turn_timeout_s_or ~runtime_id ~default =
+  turn_timeout_s_of_declared ~default (resolve_turn_timeout_s ~runtime_id)
+;;
+
+(* masc#24067 / agent-core boundary: MASC must not synthesize a request [max_tokens]
+   value. The former resolver invented one from either a model capability
+   ceiling or a flat fallback. Callers now carry explicit intent as [int
+   option], and AGENT_CORE alone owns model-capability validation plus
+   envelope-specific clamp/fallback policy. *)
+
+type seed = {
+  thinking_enabled : bool option;
+  preserve_thinking : bool option;
+}
+
+(** Map a model's [thinking-support] capability (runtime.toml SSOT) to the
+    keeper thinking seed.
+
+    The keeper turn loop ([Keeper_run_tools_hooks]) consumes [thinking_enabled]
+    as an explicit runtime-model policy: [Some false] forces thinking OFF for
+    the turn, while [Some true] actively enables thinking for that runtime.
+    An explicit model policy takes precedence over the fleet request policy.
+
+    [None] means the model leaves the policy unset, or the runtime id is not
+    loaded. Preserve that absence so provider defaults remain authoritative
+    unless the caller explicitly configured a thinking request.
+
+    Thinking is a toggle here, not a quantity: no configuration carries a
+    token budget any more. *)
+let seed_of_thinking_support ?(preserve_thinking = None) (thinking_support : bool option)
+  : seed
+  =
+  { thinking_enabled = thinking_support; preserve_thinking }
+;;
+
+let for_runtime ~name =
+  match Runtime.get_runtime_by_id name with
+  | Some runtime ->
+    (match Runtime_execution.checkpoint_owner runtime.Runtime_instance.execution with
+     | Runtime_execution.Official_client ->
+       seed_of_thinking_support None
+     | Runtime_execution.Masc_agent_core ->
+       seed_of_thinking_support
+         ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
+         (Runtime.thinking_support_of_runtime_id name))
+  | None ->
+    seed_of_thinking_support
+      ~preserve_thinking:(Runtime.preserve_thinking_of_runtime_id name)
+      (Runtime.thinking_support_of_runtime_id name)
+;;

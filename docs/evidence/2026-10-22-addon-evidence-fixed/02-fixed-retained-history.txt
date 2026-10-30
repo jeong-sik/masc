@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Lane Add-ons                                                                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│Lane Add-ons · 1 declared · 0 active · 0 failed workers                                                                                                       │
+│Retained history · 3 instances · h:current installations                                                                                                      │
+│                                                                                                                                                              │
+│/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons/native-ui.toml · add-on vst-phra│
+│se · run native-current-ui-proof                                                                                                                              │
+│> native-current-ui-proof · Native MIDI phrase playback · detached · 1 records                                                                                │
+│    Instance 01a15f30-3b0b-7000-b3b7-70768510066d                                                                                                             │
+│    Latest native phrase render and local player process state                                                                                                │
+│    Enter:open  retained history · D:details                                                                                                                  │
+│  native-current-ui-proof · Native MIDI phrase playback · detached · 1 records                                                                                │
+│    Instance 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad                                                                                                             │
+│    Enter:open  retained history · D:details                                                                                                                  │
+│  native-current-ui-proof · Native MIDI phrase playback · detached · 1 records                                                                                │
+│    Instance 01a15f35-54a5-7000-b929-86084ccafd4e                                                                                                             │
+│    Enter:open  retained history · D:details                                                                                                                  │
+│                                                                                                                                                              │
+│?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command  r:refresh                                                │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Colon:palette  Esc:back  Enter:open  h:history/current  i:install  n:new  S:subs  A:command  r:refresh
+ Choose a Keeper before writing · i:choose

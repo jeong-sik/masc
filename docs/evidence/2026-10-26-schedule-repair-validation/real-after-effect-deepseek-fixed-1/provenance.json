@@ -1,0 +1,113 @@
+{
+  "review_type": "independent static raw-artifact review; no process or API actions",
+  "runtime_product_head": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "runtime_executable_sha256": "a0bd5c3903ef6425024e47b9dc92a7615f4efbb941357ea36e74ac5a18284668",
+  "observer_checkout_head": "e883ccc0ad91ff0ab8dcab60837aee6290eb7a88",
+  "observer_script": "artifacts/scheduled-job-runtime-audit-20261026/probe_real_busy_notes_v3.py",
+  "observer_script_sha256": "6ef94873203553b493c5b0d586070fc124f25d945028cab298f2f2dd5275eeff",
+  "runtime_id": "ollama_cloud.ollama-cloud-deepseek-v4-1-flash",
+  "provider_endpoint": "https://ollama.com/v1",
+  "raw_sources": [
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/provenance.json",
+      "sha256": "c53d556ef1b4038ba33acb15ca7294838e797860880d0ffd2f6c872aecbbf4f6"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/checks.json",
+      "sha256": "c030ac53409ef8e60801f1fc44d41abb1babe8059f05c6492617e7ad87169fe2"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/process.json",
+      "sha256": "dbf9aa14d90d90721523563c2a6ecc054b1784a33b78ee8433ba0ae79be274ea"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/overlap.json",
+      "sha256": "059e877589140df197761e992f2bec7133ea2b498d8c31628fef01cc8aab9457"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/first-busy.json",
+      "sha256": "bab4e59c2b8f7b338c9ebabbdfde33c73703e496323631635d06dacf8c887158"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/last-observation.json",
+      "sha256": "43467049f0909467ce26b666c165ff5ee86ba5d468bbb0c12f1ad820c5823345"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/api-records.json",
+      "sha256": "e9d6b772c68219a94d901816596226e718455116019bcf1134da635734bc8202"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/process-ended.json",
+      "sha256": "fb073ed4408a1491b8c1cce944c256047828565796e3c696e13b34ccca9f96e7"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/server.log",
+      "sha256": "9cb2fd4d52d78b87d1ee3e956ae68984f178dad3d45c52685c54268c3577f6fe"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/workspace/.masc/keepers/audit-live-deepseek/reaction-ledger/v7/2026-10/26.jsonl",
+      "sha256": "7ae7aa89033da66ce18300cec2556cc0b4ba8ae54a9290e16db9b31392540589"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+      "sha256": "b6cabe1da3c688f5fb455c29011beefb4fc59afbeb24973652cf0ff9b6c15264"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/workspace/.masc/schedules.json",
+      "sha256": "dda4ae1ed9c26aca51f2370ecdc0b9d6e997e9885cb09074704673243c5a1463"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-after-effect-deepseek-fixed-1/workspace/.masc/keepers/audit-live-deepseek/event-queue-v19.json",
+      "sha256": "9a234e61a19af3a68e86481dcd7188ac6021939cf15ce760ff2d0327b753f780"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/probe_real_busy_notes_v3.py",
+      "sha256": "6ef94873203553b493c5b0d586070fc124f25d945028cab298f2f2dd5275eeff"
+    }
+  ],
+  "binary_path": "artifacts/scheduled-job-runtime-audit-20261026/native40339887803/runtime/masc",
+  "original_inputs_unchanged_during_review": true,
+  "transformations": [
+    "Reaction rows: select identity/time/kind/disposition; retain exact ACK identity/incarnation/digest/receipt fields, omit payload message. Preserve every raw ledger row and original row order.",
+    "Tool receipts: select all note-add/notes-list records with exact input/output and execution/trace/turn fields; exclude all other tool calls.",
+    "Final state: select exact schedule/source identities, durable notes and zero pending/outbox, idle and shutdown facts.",
+    "Checks: derived from immutable raw artifact reads; do not replace or repair original failing checks.",
+    "Server log: select only checkpoint/yield/resume/SIGTERM/shutdown-complete lines.",
+    "No model thinking, credentials, chat/interrupt/control tokens or auth files copied.",
+    "Record failed-tool summary from the first JSON object in the Execute output, selecting error/typed/cmd/shim_execution_evidence only; do not copy the remaining output."
+  ],
+  "derived_files": [
+    {
+      "path": "selected-reactions.json",
+      "sha256": "739d2ac5f1d61f68f9232629fc96953f7f3b70086c790224537dcab3a4e8a2ca"
+    },
+    {
+      "path": "selected-note-receipts.json",
+      "sha256": "978f0c2d1f4944fbe7af5a23dfd57ff25ca9b5590d9bc1c3e6c5ff4c4fe13841"
+    },
+    {
+      "path": "selected-final-state.json",
+      "sha256": "0b2af82330eca614c22a9af32c4c1f425589544c1ed4a3011e5bc0212728fcf5"
+    },
+    {
+      "path": "timeline.json",
+      "sha256": "8054ce09d45477c7ec9942e8a4ba8dc7b0feb5a77a343d10d98324eebdc4b062"
+    },
+    {
+      "path": "review-checks.json",
+      "sha256": "073c6c308fe22cba161285d386e91a8f3bcc5926ca31cb7bc3f1fac5bb3ba5c4"
+    },
+    {
+      "path": "selected-server-log.json",
+      "sha256": "7f9ede3cebb25bc3775e29f939972b0bc4b102317a3d6b3c7113c42a78d846a8"
+    },
+    {
+      "path": "README.md",
+      "sha256": "f09fcb65f63b91179badebaacba6add2a568d9e13bdd227bf7d990a1cb019046"
+    },
+    {
+      "path": "finding.json",
+      "sha256": "57a9c9bccc620b971288b2a274335c301476b3853fe3ddbc92011b17a028dbd3"
+    }
+  ]
+}

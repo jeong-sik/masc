@@ -1,0 +1,6 @@
+(include_subdirs no)
+(library
+ (name workspace_connection)
+ (public_name masc.workspace_connection)
+ (wrapped false)
+ (libraries masc.config masc_core masc.fs_compat masc.masc_process masc.toml_line_editor otoml unix))

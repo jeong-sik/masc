@@ -1,0 +1,25 @@
+{
+  "scope": "Parser checks rerun on 2026-10-10 against this commit's files for the recorded source hashes only; a file whose current hash differs from its entry is not covered. Syntax only: native regressions and geometry were not rerun. The four PTY scripts listed before were deleted by main (#42155) and are no longer checked.",
+  "checks": {
+    "bin/masc_tui_footer.ml": {
+      "sha256": "ef84845ad664c67843ebfafefd9392c250b627e662e1fa9f8bd85bdf96b262d0",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "bin/masc_tui_render.ml": {
+      "sha256": "28b47c74d48560c7950470e92c8d1c9beec2ee3d261fdd0ec04a3b1bbfb1d31a",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "bin/masc_tui_render_prim.ml": {
+      "sha256": "52845f2384935ec32a5f782bf5adda109e21e10376199fc9181f7e78d63f0953",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    },
+    "test/test_tui_footer_status_items.ml": {
+      "sha256": "924bd76fa3158f50237c214b4063983e874c8ba107f99250095d9427bdda973c",
+      "check": "ocaml parsing",
+      "result": "PASS"
+    }
+  }
+}

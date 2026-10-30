@@ -1,0 +1,41 @@
+{
+  "source_sha": "a6fba325404c963061b7b95c4c564e35f5ea5e2e",
+  "linux": {
+    "run_id": 39928835869,
+    "conclusion": "success",
+    "suites": [
+      {
+        "suite": "test_keeper_addon_deferred_runtime",
+        "passed": 1,
+        "failed": 0,
+        "alcotest_elapsed_s": 0.2
+      }
+    ]
+  },
+  "native": {
+    "run_id": 39928840589,
+    "conclusion": "success",
+    "workflow_sha": "9bf443caaeaf8c54db442c64cfb90d87d6b7cf26",
+    "suites": [
+      {
+        "suite": "test_tui_lane_addons",
+        "passed": 26,
+        "failed": 0,
+        "alcotest_elapsed_s": 0.026
+      },
+      {
+        "suite": "test_lane_addon_application",
+        "passed": 5,
+        "failed": 0,
+        "alcotest_elapsed_s": 0.001
+      }
+    ]
+  },
+  "not_claimed": [
+    "the four other Linux suites rerun at this new source",
+    "real provider",
+    "operator installation",
+    "visible UI",
+    "whole54 completion"
+  ]
+}

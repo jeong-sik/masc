@@ -1,0 +1,32 @@
+ Dashboard  Work  Keepers  Usage  ▸Board  Workspace  System
+
+   MASC Board (1)  16:00:53  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    Sort [s]: net votes first; newer breaks ties · H:choose hearth
+    f/F:next/previous · none counted yet — f narrows once they are
+    Selected post · 댓글 폭 기준 화면
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+        ID           HEARTH       AUTHOR           TITLE                                             AGE SCORE REPLIES
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+        post-layout               board-author     댓글 폭 기준 화면                                   — ▲+1   1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k:move  s:sort  Ctrl-W:pane  PgUp/PgDn:page  Right / Enter:read  Left / Esc:back  v / V:up / down  q:quit  …?
+ › to alpha   (i to write)

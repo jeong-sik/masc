@@ -1,0 +1,190 @@
+{
+  "schema": "masc.keeper_e0_campaign_receipt.v1",
+  "captured_at": "2026-08-18T05:35:00Z",
+  "run": {
+    "run_id": "e0-r6-20260818",
+    "mission_marker": "keeper-collab-e0-r6-20260818",
+    "runtime_id": "glm-coding.glm-5-turbo",
+    "binary_commit": "b183f20e9f0c6a594e5268cb615a80e790c595db",
+    "runner_source_sha": "b183f20e9f0c6a594e5268cb615a80e790c595db",
+    "sha_pinned_worktree": true,
+    "status": "failed",
+    "supersedes": "keeper-e0-campaign-r4-2026-08-18.json"
+  },
+  "verdict": {
+    "missions_passed": 15,
+    "missions_total": 19,
+    "assertions_passed": 33,
+    "assertions_total": 37,
+    "passed_missions": [
+      "RW02",
+      "RW04",
+      "RW05",
+      "RW06",
+      "RW07",
+      "RW08",
+      "RW09",
+      "RW10",
+      "RW11",
+      "RW12",
+      "RW13",
+      "RW14",
+      "RW15",
+      "RW16",
+      "RW18"
+    ],
+    "missions": [
+      {
+        "id": "RW01",
+        "name": "five_keeper_role_fleet",
+        "status": "failed",
+        "failed_assertions": [
+          "all_keepers_live"
+        ]
+      },
+      {
+        "id": "RW02",
+        "name": "shared_goal_assignment",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW03",
+        "name": "parallel_distinct_task_work",
+        "status": "failed",
+        "failed_assertions": [
+          "parallel_wave_completed"
+        ]
+      },
+      {
+        "id": "RW04",
+        "name": "board_comment_handoff",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW05",
+        "name": "ide_artifact_task_evidence",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW06",
+        "name": "fusion_while_peers_progress",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW07",
+        "name": "schedule_wake_interleaves",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW08",
+        "name": "deterministic_tool_rejection_recovery",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW09",
+        "name": "fleet_failure_isolation",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW10",
+        "name": "restart_context_continuity",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW11",
+        "name": "durable_memory_continuity",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW12",
+        "name": "completion_authority_boundary",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW13",
+        "name": "single_task_claim_contention",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW14",
+        "name": "goal_task_reconciliation",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW15",
+        "name": "all_surface_interleave",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW16",
+        "name": "correlated_product_outcome_bundle",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW17",
+        "name": "typed_inline_and_async_tool_composition",
+        "status": "failed",
+        "failed_assertions": [
+          "composition_inline_observed"
+        ]
+      },
+      {
+        "id": "RW18",
+        "name": "same_keeper_eleven_linked_turn_restart_recall",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW19",
+        "name": "durable_turn_span_dashboard_projection",
+        "status": "failed",
+        "failed_assertions": [
+          "persistence_tiers_dashboard_projection_observed"
+        ]
+      }
+    ]
+  },
+  "progression": {
+    "r4": "6/19 (22/37)",
+    "r5": "11/19 (30/37) — #28979 harness repair validated; parallel wave lost 5/5 to glm rate limit during post-redeploy boot storm",
+    "r6": "15/19 (33/37) — after lane cooldown"
+  },
+  "residual_failures": {
+    "RW01_RW03_RW17_partial": {
+      "issue": "masc#28983",
+      "summary": "benign nonzero exit (ls on a missing dir) classified terminal_effect_failed killed both builder parallel turns; cascades into final liveness, wave count, and run attribution"
+    },
+    "RW17_exactly_once": {
+      "issue": "masc#28977",
+      "summary": "second observed duplicate keeper_compose call (continuity-4) against an exactly-once instruction"
+    },
+    "RW19": {
+      "summary": "persistence-tier check assumes an isolated runtime; the shared production fleet fails it by design — recorded honestly, isolation discussion tracked separately"
+    }
+  },
+  "browser_proofs": {
+    "keeper-composition-inspector.png": {
+      "sha256": "bd0d0f56f9d7d7d04a6127249c8d69352faa0cf1fca41579b87a3244044808e4"
+    },
+    "keeper-persistence-proof.png": {
+      "sha256": "be00e6b7dc5bf71e9ecd38cc34aa895662d8769d0f073f1b87cb6d06d4755940"
+    }
+  },
+  "raw_source_paths_untracked": {
+    "root": ".worktrees/run/e0-r5-pin/reports/e0-campaign-20260818-r6/"
+  }
+}

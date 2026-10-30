@@ -1,0 +1,41 @@
+{
+  "base": "3014cfce79636f1e41cc39f6019a3428c6912145",
+  "head": "c352e598968c5d6003c584a0dd4d079669974cad",
+  "changed_files": [
+    "test/test_keeper_direct_goal_provider_wire.ml"
+  ],
+  "product_source_trees": {
+    "lib": {
+      "parent_tree": "cb4a2cad87e55d84ce16a50a7458d5801e65282d",
+      "repair_tree": "cb4a2cad87e55d84ce16a50a7458d5801e65282d",
+      "equal": true
+    },
+    "config": {
+      "parent_tree": "9cc654caafe2b955f3e2631dfb178ec0af5344af",
+      "repair_tree": "9cc654caafe2b955f3e2631dfb178ec0af5344af",
+      "equal": true
+    },
+    "packages": {
+      "parent_tree": "e3d2cf0aeac18c66b3248732bc29a9dd9b618fcb",
+      "repair_tree": "e3d2cf0aeac18c66b3248732bc29a9dd9b618fcb",
+      "equal": true
+    },
+    "bin": {
+      "parent_tree": "290bb3af19d632193fefbdd17f59706e9f2df5a8",
+      "repair_tree": "290bb3af19d632193fefbdd17f59706e9f2df5a8",
+      "equal": true
+    }
+  },
+  "native_failure": {
+    "run": "40110334799",
+    "source": "/tmp/masc-goal-receipt-3014-native-failure.log",
+    "sha256": "0baaf56c0d34fc5fc41b94cf1a2db4b3e3ac462eb5f4a4c5664d10ec615031c7",
+    "observed": "DirectGoalWire5PASS/1FAIL; Empty assertion164 expectedfalse receivedtrue"
+  },
+  "local_checks": [
+    "ocamlc -stop-after parsing -impl test/test_keeper_direct_goal_provider_wire.ml:PASS",
+    "git diff --check:PASS"
+  ],
+  "native_after_repair": "not run",
+  "scope": "Test assertion only; equal product source inputs do not claim new binary execution."
+}

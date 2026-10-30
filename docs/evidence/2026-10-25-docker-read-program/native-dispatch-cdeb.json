@@ -1,0 +1,30 @@
+{
+  "schema": "masc.read-program.native-dispatch.v1",
+  "source_sha": "cdeb9e5af15677c22fc4be8b0cc0f82d42e5b351",
+  "branch": "codex/goal-read-program-20261025",
+  "observed_at": "2026-10-25T11:52:13.370618+00:00",
+  "suites": [
+    "test_keeper_sandbox_read_backend"
+  ],
+  "command": [
+    "gh",
+    "workflow",
+    "run",
+    "test.yml",
+    "--repo",
+    "jeong-sik/masc",
+    "--ref",
+    "codex/goal-read-program-20261025",
+    "-f",
+    "minimal=true",
+    "-f",
+    "suite=test_keeper_sandbox_read_backend"
+  ],
+  "exit_code": 0,
+  "stdout": "https://github.com/jeong-sik/masc/actions/runs/40190669931\n",
+  "stderr": "",
+  "reason_for_new_run": "Changed new fixture API call after first native compilation failure. Same selected suite; no broadening.",
+  "previous_run": 40189920561,
+  "full_regression": "not_run",
+  "previous_full_regression_run_head_suites": "not_established"
+}

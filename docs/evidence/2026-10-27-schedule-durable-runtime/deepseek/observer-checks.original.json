@@ -1,0 +1,183 @@
+[
+  {
+    "name": "owned workspace and pinned native source are actually served",
+    "passed": true,
+    "detail": {
+      "release_version": "0.64.0",
+      "binary_version": "0.64.0",
+      "repo_version": "0.64.0",
+      "commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "commit_source": "embedded",
+      "binary_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "binary_commit_source": "embedded",
+      "provenance_source": "self_observed",
+      "executable_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+      "binary_commit_unix_ts": 1793046677.0,
+      "binary_commit_age_seconds": 2983,
+      "repo_head_commit": "a3950a189b9",
+      "repo_head_commit_source": "runtime_repo_head",
+      "repo_head_commit_unix_ts": 1793046677.0,
+      "repo_head_commit_age_seconds": 2983,
+      "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc",
+      "executable_dir": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact",
+      "repo_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate",
+      "runtime_instance_id": "01a17a16-86c1-7000-9207-7b798f488e8b",
+      "started_at": "2026-10-26T21:20:59Z",
+      "uptime_seconds": 0
+    }
+  },
+  {
+    "name": "owned workspace gate accepts setting",
+    "passed": true,
+    "detail": {
+      "recovery_status": "not_requested",
+      "recovery_error": null,
+      "started": 0,
+      "queued": 0,
+      "recovery_failure_count": 0,
+      "recovery_failures": [],
+      "recovery_blockers": [],
+      "ok": true,
+      "previous_mode": "auto_judge",
+      "mode": "always_allow",
+      "actor": "schedule-audit-observer",
+      "changed_at": "2026-10-26T21:21:00Z"
+    }
+  },
+  {
+    "name": "owned Keeper tool approval accepts setting",
+    "passed": true,
+    "detail": {
+      "keeper": "audit-live-deepseek",
+      "mode": "yolo"
+    }
+  },
+  {
+    "name": "first actual A1 publication has exactly one Keeper-authored note",
+    "passed": true,
+    "detail": [
+      {
+        "note_id": "6",
+        "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f",
+        "author_id": "audit-live-deepseek",
+        "author_kind": "automated_actor",
+        "created_at": 1793049665.984938,
+        "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0"
+      }
+    ]
+  },
+  {
+    "name": "both synthetic schedules contain exactly the three requested notes",
+    "passed": true,
+    "detail": {
+      "first_note_count": 2,
+      "second_note_count": 1
+    }
+  },
+  {
+    "name": "A1 B A2 each exist exactly once with the actual Keeper author",
+    "passed": true,
+    "detail": {
+      "notes": [
+        [
+          {
+            "note_id": "6",
+            "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f",
+            "author_id": "audit-live-deepseek",
+            "author_kind": "automated_actor",
+            "created_at": 1793049665.984938,
+            "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0"
+          }
+        ],
+        [
+          {
+            "note_id": "11",
+            "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f-second",
+            "author_id": "audit-live-deepseek",
+            "author_kind": "automated_actor",
+            "created_at": 1793049674.222739,
+            "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_SECOND"
+          }
+        ],
+        [
+          {
+            "note_id": "12",
+            "schedule_id": "audit-real-model-9d05dc9680b84cafa6813d8204202b8f",
+            "author_id": "audit-live-deepseek",
+            "author_kind": "automated_actor",
+            "created_at": 1793049681.882445,
+            "body": "SCHEDULE_EFFECT_7f1aaa2537794abebc29c55f646c02f0_AFTER_B"
+          }
+        ]
+      ],
+      "primary": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/after-effect-deepseek-c2-1/workspace/.masc/schedules.json",
+        "sha256": "d9f34b2e6473555ba349edab8fd4ee71e3b49278a4090b72df82a8ff365fc8e8",
+        "bytes": 5805,
+        "observed_at_unix": 1793049689.5656419
+      }
+    }
+  },
+  {
+    "name": "synthetic schedules have exactly three note_add calls with no additional attempt",
+    "passed": true,
+    "detail": {
+      "note_add_call_count": 3
+    }
+  },
+  {
+    "name": "A1 precedes B arrival, actual A checkpoint and B source entry",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "original A has no premature ACK and is readmitted after B ACK",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "A retention and final ACK refer to the exact original incarnation",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "successful tool result names its exact stored note 6",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "successful tool result names its exact stored note 11",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "successful tool result names its exact stored note 12",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "B actual effect belongs to B admitted source before its ACK",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "exact execution lookup confirms execution-node-25ad4730843904db3d0af24772d02cf4",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "exact execution lookup confirms execution-node-1dc49c160845ec3f7dc5f754ba77299d",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "exact execution lookup confirms execution-node-91c384ef91bbf616fbf2a5719815dfb5",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "A2 executes only after exact A readmission, separately from the B Keeper turn",
+    "passed": false,
+    "detail": null
+  }
+]

@@ -1,0 +1,1171 @@
+{
+  "run": 40101567388,
+  "head": "2c3a9f701afd57cd0f62deb853325cb0197e0432",
+  "method": "Independently count actual anchored Alcotest status markers per suite, compare actual summaries. Subfixtures are not extra cases.",
+  "suites": [
+    {
+      "suite": "test/test_goal_verifier_worker",
+      "start_utc": "2026-10-24T14:18:58Z",
+      "runner_start_line": 6,
+      "runner_terminal_ok_line": 333,
+      "summary_line": 331,
+      "summary": "Test Successful in 1.738s. 16 tests run.",
+      "alcotest_elapsed_seconds": 1.738,
+      "actual_counts": {
+        "OK": 16,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "cases": [
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 0,
+          "title_in_log": "actual retained visual lookup and rest...",
+          "runner_line": 27
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 1,
+          "title_in_log": "unknown and cancellation never redispa...",
+          "runner_line": 39
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 2,
+          "title_in_log": "same-original pre-admission repair.",
+          "runner_line": 50
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 3,
+          "title_in_log": "authority destination and strict inven...",
+          "runner_line": 56
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 4,
+          "title_in_log": "linked frontier restores the original ...",
+          "runner_line": 83
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 5,
+          "title_in_log": "actual Goal proof commit reply loss an...",
+          "runner_line": 96
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 6,
+          "title_in_log": "actual integral receipt commits after ...",
+          "runner_line": 109
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 7,
+          "title_in_log": "actual agent restores before lookup an...",
+          "runner_line": 122
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 8,
+          "title_in_log": "finished publication survives registry...",
+          "runner_line": 134
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 9,
+          "title_in_log": "caught reviewer Exit retains its actua...",
+          "runner_line": 145
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 10,
+          "title_in_log": "raised review retains actual tool obse...",
+          "runner_line": 156
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 11,
+          "title_in_log": "actual proof partial write and phase-m...",
+          "runner_line": 225
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 12,
+          "title_in_log": "actual explicit retry and unknown fence.",
+          "runner_line": 248
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 13,
+          "title_in_log": "reasonless Goal reply needs an explici...",
+          "runner_line": 295
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 14,
+          "title_in_log": "actual bound suspend and drop.",
+          "runner_line": 318
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 15,
+          "title_in_log": "cloned workspace refuses the original ...",
+          "runner_line": 329
+        }
+      ]
+    },
+    {
+      "suite": "test/test_goal_verification_agent",
+      "start_utc": "2026-10-24T14:18:59Z",
+      "runner_start_line": 335,
+      "runner_terminal_ok_line": 936,
+      "summary_line": 934,
+      "summary": "Test Successful in 80.671s. 39 tests run.",
+      "alcotest_elapsed_seconds": 80.671,
+      "actual_counts": {
+        "OK": 39,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "cases": [
+        {
+          "status": "OK",
+          "group": "submitted evidence",
+          "case": 0,
+          "title_in_log": "pending proof binds e...",
+          "runner_line": 362
+        },
+        {
+          "status": "OK",
+          "group": "submitted evidence",
+          "case": 1,
+          "title_in_log": "invalid evidence leav...",
+          "runner_line": 378
+        },
+        {
+          "status": "OK",
+          "group": "historical review evidence",
+          "case": 0,
+          "title_in_log": "superseded review kee...",
+          "runner_line": 404
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 0,
+          "title_in_log": "wake after deferred p...",
+          "runner_line": 423
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 1,
+          "title_in_log": "same-request explicit...",
+          "runner_line": 442
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 2,
+          "title_in_log": "deferred review is an...",
+          "runner_line": 478
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 3,
+          "title_in_log": "raised review is anno...",
+          "runner_line": 490
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 4,
+          "title_in_log": "pending before phase ...",
+          "runner_line": 504
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 5,
+          "title_in_log": "reopen from verifying...",
+          "runner_line": 519
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 6,
+          "title_in_log": "new request rejects a...",
+          "runner_line": 535
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 7,
+          "title_in_log": "proof pending drains ...",
+          "runner_line": 551
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 8,
+          "title_in_log": "goal proof reads the ...",
+          "runner_line": 568
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 9,
+          "title_in_log": "a refuted goal can re...",
+          "runner_line": 588
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 10,
+          "title_in_log": "goal proof surface su...",
+          "runner_line": 600
+        },
+        {
+          "status": "OK",
+          "group": "drain",
+          "case": 11,
+          "title_in_log": "refuted proof returns...",
+          "runner_line": 612
+        },
+        {
+          "status": "OK",
+          "group": "non-verdicts keep evidence",
+          "case": 0,
+          "title_in_log": "scan preserves source...",
+          "runner_line": 620
+        },
+        {
+          "status": "OK",
+          "group": "non-verdicts keep evidence",
+          "case": 1,
+          "title_in_log": "skipped scan records ...",
+          "runner_line": 639
+        },
+        {
+          "status": "OK",
+          "group": "non-verdicts keep evidence",
+          "case": 2,
+          "title_in_log": "healthy store scan re...",
+          "runner_line": 646
+        },
+        {
+          "status": "OK",
+          "group": "non-verdicts keep evidence",
+          "case": 3,
+          "title_in_log": "lane unavailable keep...",
+          "runner_line": 656
+        },
+        {
+          "status": "OK",
+          "group": "non-verdicts keep evidence",
+          "case": 4,
+          "title_in_log": "malformed reply fails...",
+          "runner_line": 668
+        },
+        {
+          "status": "OK",
+          "group": "non-verdicts keep evidence",
+          "case": 5,
+          "title_in_log": "all slots failed keep...",
+          "runner_line": 679
+        },
+        {
+          "status": "OK",
+          "group": "non-verdicts keep evidence",
+          "case": 6,
+          "title_in_log": "approve without a sta...",
+          "runner_line": 688
+        },
+        {
+          "status": "OK",
+          "group": "in-flight criterion edits",
+          "case": 0,
+          "title_in_log": "target edit invalidat...",
+          "runner_line": 701
+        },
+        {
+          "status": "OK",
+          "group": "in-flight criterion edits",
+          "case": 1,
+          "title_in_log": "target ABA invalidate...",
+          "runner_line": 714
+        },
+        {
+          "status": "OK",
+          "group": "in-flight criterion edits",
+          "case": 2,
+          "title_in_log": "priority edit preserv...",
+          "runner_line": 728
+        },
+        {
+          "status": "OK",
+          "group": "transient retry",
+          "case": 0,
+          "title_in_log": "provider recovery nee...",
+          "runner_line": 745
+        },
+        {
+          "status": "OK",
+          "group": "transient retry",
+          "case": 1,
+          "title_in_log": "drop invalidates an o...",
+          "runner_line": 757
+        },
+        {
+          "status": "OK",
+          "group": "transient retry",
+          "case": 2,
+          "title_in_log": "a stated provider res...",
+          "runner_line": 781
+        },
+        {
+          "status": "OK",
+          "group": "permanent refusal",
+          "case": 0,
+          "title_in_log": "retired model candida...",
+          "runner_line": 802
+        },
+        {
+          "status": "OK",
+          "group": "permanent refusal",
+          "case": 1,
+          "title_in_log": "retired model is filt...",
+          "runner_line": 815
+        },
+        {
+          "status": "OK",
+          "group": "re-arm",
+          "case": 0,
+          "title_in_log": "committed proven proo...",
+          "runner_line": 826
+        },
+        {
+          "status": "OK",
+          "group": "re-arm",
+          "case": 1,
+          "title_in_log": "committed refuted pro...",
+          "runner_line": 837
+        },
+        {
+          "status": "OK",
+          "group": "re-arm",
+          "case": 2,
+          "title_in_log": "one unreconcilable go...",
+          "runner_line": 859
+        },
+        {
+          "status": "OK",
+          "group": "re-arm",
+          "case": 3,
+          "title_in_log": "a clean scan replaces...",
+          "runner_line": 873
+        },
+        {
+          "status": "OK",
+          "group": "re-arm",
+          "case": 4,
+          "title_in_log": "verifying goal with a...",
+          "runner_line": 883
+        },
+        {
+          "status": "OK",
+          "group": "candle snapshot",
+          "case": 0,
+          "title_in_log": "a passing verdict lea...",
+          "runner_line": 896
+        },
+        {
+          "status": "OK",
+          "group": "candle snapshot",
+          "case": 1,
+          "title_in_log": "without a candle.toml...",
+          "runner_line": 907
+        },
+        {
+          "status": "OK",
+          "group": "candle snapshot",
+          "case": 2,
+          "title_in_log": "a refutation leaves n...",
+          "runner_line": 918
+        },
+        {
+          "status": "OK",
+          "group": "candle snapshot",
+          "case": 3,
+          "title_in_log": "a snapshot that canno...",
+          "runner_line": 932
+        }
+      ]
+    },
+    {
+      "suite": "test/test_verifier_review_worker",
+      "start_utc": "2026-10-24T14:20:20Z",
+      "runner_start_line": 938,
+      "runner_terminal_ok_line": 1251,
+      "summary_line": 1249,
+      "summary": "Test Successful in 1.212s. 18 tests run.",
+      "alcotest_elapsed_seconds": 1.212,
+      "actual_counts": {
+        "OK": 18,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "cases": [
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 0,
+          "title_in_log": "frozen prompt, media, lookup and verdict.",
+          "runner_line": 953
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 1,
+          "title_in_log": "missing and changed authority refuse b...",
+          "runner_line": 959
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 2,
+          "title_in_log": "retry keeps both immutable originals.",
+          "runner_line": 972
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 3,
+          "title_in_log": "unknown and cancellation never redispa...",
+          "runner_line": 981
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 4,
+          "title_in_log": "actual host commit and restart.",
+          "runner_line": 991
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 5,
+          "title_in_log": "actual host recovers cancellation afte...",
+          "runner_line": 1002
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 6,
+          "title_in_log": "Judged recovery precedes actual prepar...",
+          "runner_line": 1011
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 7,
+          "title_in_log": "commit unknown recovers original.",
+          "runner_line": 1017
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 8,
+          "title_in_log": "actual inner walk respects retained di...",
+          "runner_line": 1027
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 9,
+          "title_in_log": "pre-admission configuration repair reu...",
+          "runner_line": 1038
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 10,
+          "title_in_log": "invalid inventory refuses allocation.",
+          "runner_line": 1041
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 11,
+          "title_in_log": "Judged boot preserves terminal operato...",
+          "runner_line": 1072
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 12,
+          "title_in_log": "actual typed refusal race never reappl...",
+          "runner_line": 1097
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 13,
+          "title_in_log": "atomic judgment observation survives u...",
+          "runner_line": 1110
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 14,
+          "title_in_log": "terminal publication cancellation reco...",
+          "runner_line": 1131
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 15,
+          "title_in_log": "post-atomic observation cancellation r...",
+          "runner_line": 1143
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 16,
+          "title_in_log": "unpublishable original cannot starve a...",
+          "runner_line": 1153
+        },
+        {
+          "status": "OK",
+          "group": "execution",
+          "case": 17,
+          "title_in_log": "missing actual observer facts refuse b...",
+          "runner_line": 1247
+        }
+      ]
+    },
+    {
+      "suite": "test/test_completion_trust_harness",
+      "start_utc": "2026-10-24T14:20:22Z",
+      "runner_start_line": 1253,
+      "runner_terminal_ok_line": 1570,
+      "summary_line": 1568,
+      "summary": "Test Successful in 1.030s. 9 tests run.",
+      "alcotest_elapsed_seconds": 1.03,
+      "actual_counts": {
+        "OK": 9,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "cases": [
+        {
+          "status": "OK",
+          "group": "completion_trust_dispatch_oracle",
+          "case": 0,
+          "title_in_log": "non-owner compl...",
+          "runner_line": 1278
+        },
+        {
+          "status": "OK",
+          "group": "completion_trust_dispatch_oracle",
+          "case": 1,
+          "title_in_log": "completion of a...",
+          "runner_line": 1295
+        },
+        {
+          "status": "OK",
+          "group": "completion_trust_dispatch_oracle",
+          "case": 2,
+          "title_in_log": "short notes rea...",
+          "runner_line": 1325
+        },
+        {
+          "status": "OK",
+          "group": "completion_trust_dispatch_oracle",
+          "case": 3,
+          "title_in_log": "rendered image ...",
+          "runner_line": 1358
+        },
+        {
+          "status": "OK",
+          "group": "completion_trust_dispatch_oracle",
+          "case": 4,
+          "title_in_log": "submitted evide...",
+          "runner_line": 1389
+        },
+        {
+          "status": "OK",
+          "group": "completion_trust_dispatch_oracle",
+          "case": 5,
+          "title_in_log": "delivered rejec...",
+          "runner_line": 1434
+        },
+        {
+          "status": "OK",
+          "group": "completion_trust_dispatch_oracle",
+          "case": 6,
+          "title_in_log": "unavailable eva...",
+          "runner_line": 1461
+        },
+        {
+          "status": "OK",
+          "group": "completion_trust_dispatch_oracle",
+          "case": 7,
+          "title_in_log": "legitimate self...",
+          "runner_line": 1480
+        },
+        {
+          "status": "OK",
+          "group": "completion_trust_dispatch_oracle",
+          "case": 8,
+          "title_in_log": "late verdict re...",
+          "runner_line": 1566
+        }
+      ]
+    },
+    {
+      "suite": "test/test_verification_run_registry",
+      "start_utc": "2026-10-24T14:20:23Z",
+      "runner_start_line": 1572,
+      "runner_terminal_ok_line": 1704,
+      "summary_line": 1702,
+      "summary": "Test Successful in 0.104s. 23 tests run.",
+      "alcotest_elapsed_seconds": 0.104,
+      "actual_counts": {
+        "OK": 23,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "cases": [
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 0,
+          "title_in_log": "running review is visible before it ...",
+          "runner_line": 1581
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 1,
+          "title_in_log": "every outcome has a distinct wire la...",
+          "runner_line": 1584
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 2,
+          "title_in_log": "failure outcomes carry an operator-r...",
+          "runner_line": 1609
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 3,
+          "title_in_log": "every outcome survives replay.",
+          "runner_line": 1626
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 4,
+          "title_in_log": "an approval carries the reviewer's s...",
+          "runner_line": 1628
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 5,
+          "title_in_log": "an approval written without a reason...",
+          "runner_line": 1631
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 6,
+          "title_in_log": "not_reviewed wire shape is gate and ...",
+          "runner_line": 1635
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 7,
+          "title_in_log": "legacy row carrying retryable is rej...",
+          "runner_line": 1639
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 8,
+          "title_in_log": "replay drops running reviews.",
+          "runner_line": 1643
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 9,
+          "title_in_log": "a retry replaces its prior attempt.",
+          "runner_line": 1647
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 10,
+          "title_in_log": "unknown completion is logged without...",
+          "runner_line": 1651
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 11,
+          "title_in_log": "unknown outcome label is an error.",
+          "runner_line": 1656
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 12,
+          "title_in_log": "rejected without a reason is an error.",
+          "runner_line": 1661
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 13,
+          "title_in_log": "completed runs are pruned.",
+          "runner_line": 1665
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 14,
+          "title_in_log": "stream replay large history.",
+          "runner_line": 1669
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 15,
+          "title_in_log": "stream replay retries and running ba...",
+          "runner_line": 1675
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 16,
+          "title_in_log": "tool evidence keeps input and typed ...",
+          "runner_line": 1679
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 17,
+          "title_in_log": "global registry has one installation...",
+          "runner_line": 1683
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 18,
+          "title_in_log": "terminal publication reopens without...",
+          "runner_line": 1686
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 19,
+          "title_in_log": "terminal publication preserves confl...",
+          "runner_line": 1691
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 20,
+          "title_in_log": "terminal publication refuses unconfi...",
+          "runner_line": 1694
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 21,
+          "title_in_log": "terminal publication decoder refuses...",
+          "runner_line": 1696
+        },
+        {
+          "status": "OK",
+          "group": "rfc-0361-d4",
+          "case": 22,
+          "title_in_log": "terminal confirmation survives displ...",
+          "runner_line": 1700
+        }
+      ]
+    },
+    {
+      "suite": "packages/agent_core/test/test_output_token_receipt",
+      "start_utc": "2026-10-24T14:20:23Z",
+      "runner_start_line": 1706,
+      "runner_terminal_ok_line": 1994,
+      "summary_line": 1992,
+      "summary": "Test Successful in 0.004s. 15 tests run.",
+      "alcotest_elapsed_seconds": 0.004,
+      "actual_counts": {
+        "OK": 15,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "cases": [
+        {
+          "status": "OK",
+          "group": "completion_serialization",
+          "case": 0,
+          "title_in_log": "all codecs retain fin...",
+          "runner_line": 1824
+        },
+        {
+          "status": "OK",
+          "group": "completion_serialization",
+          "case": 1,
+          "title_in_log": "optional omission and...",
+          "runner_line": 1857
+        },
+        {
+          "status": "OK",
+          "group": "wire_codec",
+          "case": 0,
+          "title_in_log": "stable scalar vocabul...",
+          "runner_line": 1872
+        },
+        {
+          "status": "OK",
+          "group": "wire_codec",
+          "case": 1,
+          "title_in_log": "exact receipt JSON.",
+          "runner_line": 1874
+        },
+        {
+          "status": "OK",
+          "group": "optional_envelopes",
+          "case": 0,
+          "title_in_log": "OpenAI Chat omission.",
+          "runner_line": 1884
+        },
+        {
+          "status": "OK",
+          "group": "optional_envelopes",
+          "case": 1,
+          "title_in_log": "OpenAI Responses exact.",
+          "runner_line": 1894
+        },
+        {
+          "status": "OK",
+          "group": "optional_envelopes",
+          "case": 2,
+          "title_in_log": "Gemini clamp.",
+          "runner_line": 1905
+        },
+        {
+          "status": "OK",
+          "group": "optional_envelopes",
+          "case": 3,
+          "title_in_log": "Ollama exact.",
+          "runner_line": 1915
+        },
+        {
+          "status": "OK",
+          "group": "optional_envelopes",
+          "case": 4,
+          "title_in_log": "GLM Chat envelope.",
+          "runner_line": 1925
+        },
+        {
+          "status": "OK",
+          "group": "optional_envelopes",
+          "case": 5,
+          "title_in_log": "GLM provider-default ...",
+          "runner_line": 1938
+        },
+        {
+          "status": "OK",
+          "group": "optional_envelopes",
+          "case": 6,
+          "title_in_log": "GLM vision runtime ro...",
+          "runner_line": 1948
+        },
+        {
+          "status": "OK",
+          "group": "required_messages_envelope",
+          "case": 0,
+          "title_in_log": "Anthropic catalog fal...",
+          "runner_line": 1958
+        },
+        {
+          "status": "OK",
+          "group": "required_messages_envelope",
+          "case": 1,
+          "title_in_log": "Anthropic and Kimi ov...",
+          "runner_line": 1977
+        },
+        {
+          "status": "OK",
+          "group": "required_messages_envelope",
+          "case": 2,
+          "title_in_log": "missing required ceil...",
+          "runner_line": 1981
+        },
+        {
+          "status": "OK",
+          "group": "required_messages_envelope",
+          "case": 3,
+          "title_in_log": "explicit zero remains...",
+          "runner_line": 1990
+        }
+      ]
+    },
+    {
+      "suite": "test/test_keeper_native_result_retention",
+      "start_utc": "2026-10-24T14:20:23Z",
+      "runner_start_line": 1996,
+      "runner_terminal_ok_line": 2015,
+      "summary_line": 2013,
+      "summary": "Test Successful in 0.000s. 4 tests run.",
+      "alcotest_elapsed_seconds": 0.0,
+      "actual_counts": {
+        "OK": 4,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "cases": [
+        {
+          "status": "OK",
+          "group": "scope and occurrence",
+          "case": 0,
+          "title_in_log": "prior identical result.",
+          "runner_line": 2003
+        },
+        {
+          "status": "OK",
+          "group": "scope and occurrence",
+          "case": 1,
+          "title_in_log": "repeated invocation.",
+          "runner_line": 2006
+        },
+        {
+          "status": "OK",
+          "group": "scope and occurrence",
+          "case": 2,
+          "title_in_log": "exact transcript and payload.",
+          "runner_line": 2009
+        },
+        {
+          "status": "OK",
+          "group": "scope and occurrence",
+          "case": 3,
+          "title_in_log": "provider-only projection.",
+          "runner_line": 2011
+        }
+      ]
+    },
+    {
+      "suite": "test/test_anti_rationalization_empty_reject",
+      "start_utc": "2026-10-24T14:20:23Z",
+      "runner_start_line": 2017,
+      "runner_terminal_ok_line": 2240,
+      "summary_line": 2238,
+      "summary": "Test Successful in 0.019s. 22 tests run.",
+      "alcotest_elapsed_seconds": 0.019,
+      "actual_counts": {
+        "OK": 22,
+        "FAIL": 0,
+        "SKIP": 0,
+        "TODO": 0
+      },
+      "cases": [
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 0,
+          "title_in_log": "failed lookup handoff uses the f...",
+          "runner_line": 2076
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 1,
+          "title_in_log": "oversized lookup handoff retains...",
+          "runner_line": 2094
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 2,
+          "title_in_log": "lookup evidence survives failove...",
+          "runner_line": 2181
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 3,
+          "title_in_log": "structured tool verdict.",
+          "runner_line": 2184
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 4,
+          "title_in_log": "explicit BasePath reaches reviewer.",
+          "runner_line": 2187
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 5,
+          "title_in_log": "response text ignored.",
+          "runner_line": 2191
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 6,
+          "title_in_log": "provider failure unavailable.",
+          "runner_line": 2195
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 7,
+          "title_in_log": "structural budget failure is not...",
+          "runner_line": 2199
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 8,
+          "title_in_log": "rate limit failure stays retryable.",
+          "runner_line": 2203
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 9,
+          "title_in_log": "reject without reason is malformed.",
+          "runner_line": 2204
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 10,
+          "title_in_log": "reject reason is preserved.",
+          "runner_line": 2206
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 11,
+          "title_in_log": "approve reason is preserved.",
+          "runner_line": 2209
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 12,
+          "title_in_log": "evidence meaning stays with revi...",
+          "runner_line": 2211
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 13,
+          "title_in_log": "verdict enum mirrors valid_verdi...",
+          "runner_line": 2215
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 14,
+          "title_in_log": "note-only verdict stays with the...",
+          "runner_line": 2219
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 15,
+          "title_in_log": "successful lookup is exposed to ...",
+          "runner_line": 2223
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 16,
+          "title_in_log": "a REJECT resent with its reason ...",
+          "runner_line": 2225
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 17,
+          "title_in_log": "a resend that flips the decision...",
+          "runner_line": 2227
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 18,
+          "title_in_log": "a resend after an unreadable ref...",
+          "runner_line": 2229
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 19,
+          "title_in_log": "a second call after a verdict is...",
+          "runner_line": 2231
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 20,
+          "title_in_log": "only the latest refusal counts.",
+          "runner_line": 2234
+        },
+        {
+          "status": "OK",
+          "group": "review boundary",
+          "case": 21,
+          "title_in_log": "a flip to a reasonless APPROVE s...",
+          "runner_line": 2236
+        }
+      ]
+    }
+  ],
+  "actual_counts": {
+    "OK": 146,
+    "FAIL": 0,
+    "SKIP": 0,
+    "TODO": 0
+  }
+}

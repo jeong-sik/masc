@@ -1,0 +1,23 @@
+{
+  "title": "가상 전시 안내 책자와 포스터 제작",
+  "goal_id": "exhibition-publication-baseline",
+  "description": "가상 전시 《기억의 정원》을 처음 접하는 관람객에게 설명할 한국어 안내 책자와 포스터를 준비한다. 편집과 시각 디자인을 결합해야 한다. 운영자는 필요한 행사 정보를 알고 있다.",
+  "contract": {
+    "strict": true,
+    "completion_contract": [
+      "한국어 안내 책자 booklet.pdf 정확히 3페이지와 세 페이지 PNG 렌더가 있다.",
+      "인쇄용 포스터 poster.png가 있고 책자와 제목·대상·행사 정보가 일치한다.",
+      "본문과 그림에 한글 누락 글리프, 텍스트 겹침·잘림이 없다.",
+      "가상 전시임을 명시하고 확정되지 않은 정보는 사실처럼 꾸미지 않는다.",
+      "검증 요약 evidence.json이 실제 파일 이름·바이트 수·SHA256·페이지 수를 기록한다."
+    ],
+    "required_evidence": [
+      "artifact:booklet.pdf",
+      "artifact:renders/page1.png",
+      "artifact:renders/page2.png",
+      "artifact:renders/page3.png",
+      "artifact:poster.png",
+      "artifact:evidence.json"
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "scope": "Actual serialized leading System; delivery observation, not proof of model use or Tool-round retention.",
+  "request_path": "/tmp/masc-goal-wire-2be9d216-qwen/request-000020.request",
+  "request_sha256": "960b61b065e42051ce6228682c886b4aaf798a9da8b8e5e361065e70b7f313c5",
+  "request_bytes": 93914,
+  "system_sha256": "348ef89fc94fd37f07d8dd15e807d0b30f6bf06276fe27760220a83a2345490d",
+  "matching_line_numbers_1based": [
+    133,
+    135
+  ],
+  "authority_excerpt": "\n### Approved Task Outcomes (1)\nRows below record evidence you submitted for a Task that a completion authority approved. task_id and verification_id are correlation keys; the approval is final, so do not resubmit the Task or redo the work. Read that Task's current goal link when it is needed: if linked, inspect the Goal's declared metric, record any actually observed change with evidence, and continue its unmet success conditions. Task approval alone does not complete or increment a Goal. An independent Task needs no invented Goal. A rejected verdict arrives as a separate Completion Authority Decisions row.\n- post_id=\"task-outcome:task-001\" task_id=\"task-001\" verification_id=\"vrf-a42e77c7eac0e45281d6cd2245840243\" authority_kind=\"human_operator\" authority_actor=\"goal-canary-operator\"\n",
+  "input_delivery_flags": {
+    "section_present": true,
+    "task_id_present": true,
+    "approved_verification_id_present": true,
+    "authority_kind_present": true,
+    "authority_actor_present": true,
+    "old_rejection_section_present": false,
+    "old_rejected_verification_in_system": false,
+    "system_sha256": "348ef89fc94fd37f07d8dd15e807d0b30f6bf06276fe27760220a83a2345490d"
+  },
+  "subsequent_tool_requests": 0,
+  "tool_round_retention": "NOT EXERCISED: the only postapproval request returned zero tools."
+}

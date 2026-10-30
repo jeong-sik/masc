@@ -1,0 +1,86 @@
+type codex_app_server =
+  { cli_path : string
+  ; account_home : string option
+  ; model : string option
+  ; timeout_s : float
+  }
+
+type antigravity_cli =
+  { cli_path : string
+  ; model : string
+  ; agent : string option
+  ; effort : Runtime_antigravity.effort option
+  ; oauth_source : string
+  ; timeout_s : float
+  ; add_dirs : string list
+  }
+
+type claude_code =
+  { cli_path : string
+  ; account_home : string option
+  ; model : string option
+  ; timeout_s : float
+  }
+
+type muse_serve =
+  { cli_path : string
+  ; account_home : string
+  ; model : string
+  ; timeout_s : float
+  }
+
+type t =
+  | Agent_core of Llm_provider.Provider_config.t
+  | Codex_app_server of codex_app_server
+  | Antigravity_cli of antigravity_cli
+  | Claude_code of claude_code
+  | Muse_serve of muse_serve
+
+type checkpoint_owner =
+  | Masc_agent_core
+  | Official_client
+
+type usage_report =
+  | Each_agent_core_response
+  | Client_usage_stream
+
+let supports_native_none = function
+  | Agent_core _ | Claude_code _ -> true
+  | Codex_app_server _ | Antigravity_cli _ -> false
+  | Muse_serve _ -> Runtime_native_tools.muse_none_supported
+
+let model_id = function
+  | Agent_core config -> Some config.Llm_provider.Provider_config.model_id
+  | Codex_app_server config -> config.model
+  | Antigravity_cli config -> Some config.model
+  | Claude_code config -> config.model
+  | Muse_serve config -> Some config.model
+;;
+
+let label = function
+  | Agent_core _ -> "agent_core"
+  | Codex_app_server _ -> "codex_app_server"
+  | Antigravity_cli _ -> "antigravity_cli"
+  | Claude_code _ -> "claude_code"
+  | Muse_serve _ -> "muse_serve"
+;;
+
+let checkpoint_owner = function
+  | Agent_core _ -> Masc_agent_core
+  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ -> Official_client
+;;
+
+let claude_code_inline_result_bytes = 32_768
+
+let tool_result_inline_ceiling_bytes = function
+  | Claude_code _ -> claude_code_inline_result_bytes
+  | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ ->
+      Common.max_tool_result_wire_bytes
+  | Agent_core _ -> Common.max_agent_core_inline_result_bytes
+;;
+
+let usage_report = function
+  | Agent_core _ -> Each_agent_core_response
+  | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+    Client_usage_stream
+;;

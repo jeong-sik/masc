@@ -1,0 +1,86 @@
+{
+  "schema": "schedule.native.artifact-byte-verification.v1",
+  "run_id": 40339887803,
+  "workflow": "Test",
+  "workflow_definition_head": "117dc31e1ca8f71f47bbbe91fa2adab5befb5761",
+  "workflow_ref": "jeong-sik/masc/.github/workflows/test.yml@refs/heads/ci/schedule-native-runtime-proof-20261026",
+  "product_source": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "archive_sha256": "ff173bf56e440f31fd8812c4b69bd88870fc16a1a7ac7046fd931490104b17f1",
+  "expected_archive_digest_origin": "parent observed GitHub artifact digest, also retained in unchanged local-verification.json",
+  "all_dist_files_verified": {
+    "masc-browser-host-macos-arm64": {
+      "sha256": "ab2660a2b2156ab956f748382ca8a01b74d5dead1e67c93f44214775f847b9ef",
+      "bytes": 44471376,
+      "zip_and_unpacked_equal": true
+    },
+    "masc-check-runtime-deployment-preflight-macos-arm64": {
+      "sha256": "af7b33ec59d5e73c2998323a1a89afe4e6f3dbc7448fb7765d2c00b481c829d5",
+      "bytes": 17019,
+      "zip_and_unpacked_equal": true
+    },
+    "masc-deployment-preflight-helper-macos-arm64": {
+      "sha256": "37f5131e6269d4e3520afd3a881247bb248316c66ffa0108299f6202482c0155",
+      "bytes": 105464800,
+      "zip_and_unpacked_equal": true
+    },
+    "masc-exec-ssh-bootstrap-macos-arm64": {
+      "sha256": "6326ec74dd9c655706230c0e84b363edf730146976fd1b838f95acb9a575f862",
+      "bytes": 28803936,
+      "zip_and_unpacked_equal": true
+    },
+    "masc-macos-arm64": {
+      "sha256": "a0bd5c3903ef6425024e47b9dc92a7615f4efbb941357ea36e74ac5a18284668",
+      "bytes": 107661536,
+      "zip_and_unpacked_equal": true
+    },
+    "masc-runtime-macos-arm64.tar.gz": {
+      "sha256": "4867d072f3148e0d754cf1fd0b44350250ef6763a0092da27fd0671c02ceaaf5",
+      "bytes": 57196200,
+      "zip_and_unpacked_equal": true
+    },
+    "masc-tui-macos-arm64": {
+      "sha256": "f2d2cd3ebcde02ed0103b71ac76ffe21cca0d07189bdd489bc0d45aaef171308",
+      "bytes": 105144624,
+      "zip_and_unpacked_equal": true
+    }
+  },
+  "embedded_source_evidence": "unchanged CI embedded-source-after-package.txt; not reexecuted during packaging",
+  "local_runtime_server_matches_dist": true,
+  "later_test_head": "b5c9762b27845918eba2acb804434a0da435cc78",
+  "product_tree_comparison": {
+    "lib": {
+      "product_source_tree": "b9528846c2369d3388c4ff271e0a7393c3ce9b43",
+      "later_test_head_tree": "b9528846c2369d3388c4ff271e0a7393c3ce9b43",
+      "equal": true
+    },
+    "bin": {
+      "product_source_tree": "eae2830bbdd7d455ec58c9bad70bc92604ad7fc5",
+      "later_test_head_tree": "eae2830bbdd7d455ec58c9bad70bc92604ad7fc5",
+      "equal": true
+    }
+  },
+  "not_a_build_of_later_head": true,
+  "selected_log": {
+    "original": "portable-package.log",
+    "original_sha256": "bb3285fd03ce471b02961f1ad958c6e05a3ef3f32ecc61ad92c5463acf68a288",
+    "one_based_lines": [
+      2,
+      151
+    ],
+    "transformation": "Exact original lines only; source commit and staged Python HTTPS check. No normalization."
+  },
+  "producer_completion_evidence": "artifact-manifest build_completed=true; Actions terminal success was observed by parent, not queried in this packaging unit",
+  "source_origins": {
+    "artifact-manifest.json": "artifacts/scheduled-job-runtime-audit-20261026/native40339887803/unpacked/artifacts/schedule-native-proof/artifact-manifest.json",
+    "source-selection.json": "artifacts/scheduled-job-runtime-audit-20261026/native40339887803/unpacked/artifacts/schedule-native-proof/source-selection.json",
+    "runtime-provenance.json": "artifacts/scheduled-job-runtime-audit-20261026/native40339887803/unpacked/artifacts/schedule-native-proof/runtime-provenance.json",
+    "embedded-source-after-package.txt": "artifacts/scheduled-job-runtime-audit-20261026/native40339887803/unpacked/artifacts/schedule-native-proof/embedded-source-after-package.txt"
+  },
+  "original_sha256": {
+    "artifact-manifest.json": "652cc15ec24dc4fa34d5af9ee6ee818c065311c68005640863e100d1f5a5b4da",
+    "source-selection.json": "b049e763e95094d49c7c0cb30240a1aaea92ccf94dc653ac82170d80463bc342",
+    "runtime-provenance.json": "202beb05ecd383087aad1c41c79578ca3e4c1e58b525fa953a8afe26d201ed61",
+    "embedded-source-after-package.txt": "e79c7d2e62b50ddc21df881972955f202abbb227bc2a209123619fd86b862d50"
+  },
+  "local_verification_original_sha256": "fa8abc25d34476517178b9a12cf37ea69b6e46cb7dab19bab33fb5c22736bafb"
+}

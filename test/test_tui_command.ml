@@ -1,0 +1,1098 @@
+open Alcotest
+
+module Command = Masc_tui_command
+module Mcp = Masc_tui_mcp
+
+let describe = function
+  | Command.Say text -> "say:" ^ text
+  | Command.Task_recover -> "task-recover"
+  | Command.Task_inspect -> "task-inspect"
+  | Command.Task_for_keeper { title; body } -> Printf.sprintf "task:%s|%s" title body
+  | Command.Task_missing_title -> "task-missing-title"
+  | Command.Help -> "help"
+  | Command.Features -> "features"
+  | Command.Show_load_errors -> "show-load-errors"
+  | Command.About -> "about"
+  | Command.Open_settings -> "open-settings"
+  | Command.Open_diff -> "open-diff"
+  | Command.Open_patch_modal -> "open-patch-modal"
+  | Command.Open_usage -> "open-usage"
+  | Command.Open_link_preview None -> "open-link-preview"
+  | Command.Open_link_preview (Some u) -> "open-link-preview:" ^ u
+  | Command.Open_links_list -> "open-links-list"
+  | Command.Set_embeds `On -> "set-embeds:on"
+  | Command.Set_embeds `Compact -> "set-embeds:compact"
+  | Command.Set_embeds `Off -> "set-embeds:off"
+  | Command.Open_changes -> "open-changes"
+  | Command.Toggle_acting_pane -> "toggle-acting-pane"
+  | Command.Show_acting_pane_tab `Fleet -> "acting-pane-tab:fleet"
+  | Command.Show_acting_pane_tab `Changes -> "acting-pane-tab:changes"
+  | Command.Acting_pane_tab_unknown word -> "acting-pane-tab-unknown:" ^ word
+  | Command.Set_acting_pane_call_order `Next -> "acting-pane-call-order:next"
+  | Command.Set_acting_pane_call_order `Newest -> "acting-pane-call-order:newest"
+  | Command.Set_acting_pane_call_order `Oldest -> "acting-pane-call-order:oldest"
+  | Command.Set_acting_pane_call_order `Longest -> "acting-pane-call-order:longest"
+  | Command.Set_acting_pane_call_order `By_tool -> "acting-pane-call-order:by-tool"
+  | Command.Acting_pane_call_order_unknown word ->
+      "acting-pane-call-order-unknown:" ^ word
+  | Command.Scroll_acting_pane `Up -> "acting-pane-scroll:up"
+  | Command.Scroll_acting_pane `Down -> "acting-pane-scroll:down"
+  | Command.Scroll_acting_pane `Top -> "acting-pane-scroll:top"
+  | Command.Scroll_acting_pane (`By rows) -> Printf.sprintf "acting-pane-scroll:%+d" rows
+  | Command.Acting_pane_scroll_unknown word -> "acting-pane-scroll-unknown:" ^ word
+  | Command.Lane_addons input -> "lane-addons:" ^ input
+  | Command.Play_invites -> "play-invites"
+  | Command.Play_link None -> "play-link"
+  | Command.Play_link (Some name) -> "play-link:" ^ name
+  | Command.Play_invite { name; hours } ->
+      Printf.sprintf "play-invite:%s:%d" name hours
+  | Command.Play_revoke name -> "play-revoke:" ^ name
+  | Command.Play_invalid reason -> "play-invalid:" ^ reason
+  | Command.Listen -> "listen"
+  | Command.Open_score index -> Printf.sprintf "score:%d" index
+  | Command.Score_invalid_index -> "score-invalid-index"
+  | Command.Open_images index -> Printf.sprintf "images:%d" index
+  | Command.List_images -> "list-images"
+  | Command.Images_invalid_index -> "images-invalid-index"
+  | Command.Open_artifacts -> "open-artifacts"
+  | Command.Open_music -> "open-music"
+  | Command.Open_music_midi -> "open-music-midi"
+  | Command.Music_invalid_arguments -> "music-invalid-arguments"
+  | Command.Open_metrics -> "open-metrics"
+  | Command.Account_login client -> "account-login:" ^ client
+  | Command.Switch_keeper name -> "keeper:" ^ name
+  | Command.Switch_keeper_missing_name -> "keeper-missing-name"
+  | Command.Queue input -> "queue:" ^ input
+  | Command.Run_next -> "run-next"
+  | Command.Priority None -> "priority"
+  | Command.Priority (Some opt) -> "priority:" ^ opt
+  | Command.Interrupt_turn -> "interrupt"
+  | Command.Answer_tool_approval allow -> if allow then "approve" else "deny"
+  | Command.Interrupt_keeper_turn name -> "interrupt:" ^ name
+  | Command.Steer_turn message -> "steer:" ^ message
+  | Command.Steer_missing_message -> "steer-missing-message"
+  | Command.Set_thinking mode ->
+      "thinking:"
+      ^ (match mode with
+         | `Cycle -> "cycle"
+         | `Hidden -> "hidden"
+         | `Folded -> "folded"
+         | `Full -> "full")
+  | Command.Open_calls -> "calls"
+  | Command.Set_tools mode ->
+      "tools:"
+      ^ (match mode with
+         | `Toggle -> "toggle"
+         | `Compact -> "compact"
+         | `Results -> "results"
+         | `Full -> "full")
+  | Command.Cycle_memory -> "cycle-memory"
+  | Command.Open_fleet_memory -> "open-fleet-memory"
+  | Command.Find_in_chat text -> "find:" ^ text
+  | Command.Find_next -> "find-next"
+  | Command.Copy_latest_reply -> "copy-latest-reply"
+  | Command.Open_measurement sha -> "measurement:" ^ sha
+  | Command.Measurement_missing_sha -> "measurement-missing-sha"
+  | Command.Inspect_context -> "inspect-context"
+  (* [describe] is total on purpose: it is what makes a new command show up
+     here as a compile error instead of silently going untested. #30234 added
+     these two and the match was not swept, which is exactly the miss the
+     totality is for. *)
+  | Command.View_image path -> "image:" ^ path
+  | Command.View_image_missing_path -> "image-missing-path"
+  | Command.Attach_image path -> "attach:" ^ path
+  | Command.Attach_image_missing_path -> "attach-missing-path"
+  | Command.Attach_image_ref value -> "ref:" ^ value
+  | Command.Attach_image_ref_missing_value -> "ref-missing-value"
+  | Command.Preset_list -> "preset-list"
+  | Command.Preset_save { name; description } ->
+      Printf.sprintf "preset-save:%s|%s" name description
+  | Command.Preset_save_missing_name -> "preset-save-missing-name"
+  | Command.Preset_restore name -> "preset-restore:" ^ name
+  | Command.Preset_restore_missing_name -> "preset-restore-missing-name"
+  | Command.Preset_show name -> "preset-show:" ^ name
+  | Command.Preset_show_missing_name -> "preset-show-missing-name"
+  | Command.Preset_delete name -> "preset-delete:" ^ name
+  | Command.Preset_delete_missing_name -> "preset-delete-missing-name"
+  | Command.Unknown word -> "unknown:" ^ word
+
+let test_measurement_command () =
+  check string "missing SHA is local command" "measurement-missing-sha"
+    (describe (Command.parse "/measurement"));
+  let sha = String.make 64 'a' in
+  check string "explicit artifact" ("measurement:" ^ sha)
+    (describe (Command.parse ("/measurement " ^ sha)));
+  check string "second line is retained for SHA rejection" ("measurement:" ^ sha ^ "\nextra")
+    (describe (Command.parse ("/measurement " ^ sha ^ "\nextra")));
+  check string "prefix is not a command" "unknown:measure"
+    (describe (Command.parse ("/measure " ^ sha)))
+
+let test_play_commands_are_explicit () =
+  check (list string) "play list, issue and revoke are distinct"
+    [ "play-invites"; "play-invites"; "play-invite:guest1:24"; "play-link"
+    ; "play-link:guest1"
+    ; "play-revoke:guest1" ]
+    (List.map (fun line -> describe (Command.parse line))
+       [ "/play"; "/play invites"; "/play invite guest1 24"; "/play link"
+       ; "/play link guest1"
+       ; "/play revoke guest1" ]);
+  check bool "two names are invalid" true
+    (String.starts_with ~prefix:"play-invalid:"
+       (describe (Command.parse "/play link guest1 guest2")));
+  check bool "a missing expiry never issues an invite" true
+    (String.starts_with ~prefix:"play-invalid:"
+       (describe (Command.parse "/play invite guest1")))
+
+let test_play_menu_requires_explicit_execution () =
+  let menu draft =
+    match Command.menu ~keeper_names:[] ~state:Command.Menu_idle draft with
+    | Some menu -> menu
+    | None -> fail ("missing Play suggestions for " ^ draft)
+  in
+  let choices = menu "/play " in
+  check (list string) "all supported Play actions are discoverable"
+    ["/play invites"; "/play invite"; "/play link"; "/play revoke"]
+    (List.map (fun (item : Command.menu_item) -> item.label) choices.items);
+  let draft = "/play " in
+  let selecting = Command.menu_step ~direction:Command.Next ~draft choices in
+  let selected = match Command.menu ~keeper_names:[] ~state:selecting draft with
+    | Some menu -> menu | None -> fail "moving selection closed the Play menu" in
+  let completion = Command.menu_accept selected in
+  check string "selection inserts the issue verb, not guessed arguments"
+    "/play invite" completion;
+  check string "the selected issue action still requires name and expiry"
+    "play-invalid:use /play invite <name> <hours>"
+    (describe (Command.parse completion));
+  check string "an explicit completed issue preserves both arguments"
+    "play-invite:guest1:24" (describe (Command.parse (completion ^ " guest1 24")));
+  check string "revoke prefix completes the supported action"
+    "/play revoke" (Command.menu_accept (menu "/play r"));
+  List.iter (fun draft ->
+    check bool (draft ^ " is ready for execution, not another menu acceptance") true
+      (Option.is_none (Command.menu ~keeper_names:[] ~state:Command.Menu_idle draft)))
+    ["/play invites"; "/play link"; "/play invite guest1 24"; "/play revoke guest1"]
+
+let test_ref_command_parses_url_and_bare_id () =
+  check (list string) "a whole http(s) URL and a bare id both stage as references"
+    [ "ref:https://example.test/a.png"; "ref:file-abc123" ]
+    (List.map
+       (fun line -> describe (Command.parse line))
+       [ "/ref https://example.test/a.png"; "/ref file-abc123" ]);
+  check string "no value names the miss"
+    "ref-missing-value"
+    (describe (Command.parse "/ref"))
+
+let test_plain_text_is_a_message () =
+  check (list string) "text, blanks, and a slash that is not first are messages"
+    [ "say:fix the caret"; "say: /task not a command"; "say:" ]
+    (List.map
+       (fun text -> describe (Command.parse text))
+       [ "fix the caret"; " /task not a command"; "" ])
+
+let test_task_takes_the_line_as_title_and_the_rest_as_body () =
+  check string "title only" "task:Lanes surface|"
+    (describe (Command.parse "/task Lanes surface"));
+  check string "title and body"
+    "task:Lanes surface|composite \xe2\x86\x92 table\nPTY test too"
+    (describe
+       (Command.parse "/task   Lanes surface  \ncomposite \xe2\x86\x92 table\nPTY test too"));
+  check string "a bare /task is reported, not sent" "task-missing-title"
+    (describe (Command.parse "/task"));
+  check string "and so is /task with only blanks" "task-missing-title"
+    (describe (Command.parse "/task   "))
+
+let test_pane_commands_parse_by_word () =
+  check (list string) "pane commands"
+    [ "help"
+    ; "about"
+    ; "about"
+    ; "open-settings"
+    ; "open-diff"
+    ; "open-patch-modal"
+    ; "open-patch-modal"
+    ; "open-usage"
+    ; "open-link-preview"
+    ; "open-link-preview:https://github.com/jeong-sik/masc"
+    ; "open-links-list"
+    ; "set-embeds:on"
+    ; "set-embeds:compact"
+    ; "set-embeds:off"
+    ; "open-changes"
+    ; "toggle-acting-pane"
+    ; "acting-pane-tab:fleet"
+    ; "acting-pane-tab:changes"
+    ; "acting-pane-tab-unknown:code"
+    ; "acting-pane-call-order:next"
+    ; "acting-pane-call-order:newest"
+    ; "acting-pane-call-order:oldest"
+    ; "acting-pane-call-order:longest"
+    ; "acting-pane-call-order:by-tool"
+    ; "acting-pane-call-order:by-tool"
+    ; "acting-pane-call-order-unknown:fastest"
+    ; "acting-pane-tab-unknown:orders"
+    ; "acting-pane-call-order:oldest"
+    ; "acting-pane-scroll:up"
+    ; "acting-pane-scroll:down"
+    ; "acting-pane-scroll:top"
+    ; "acting-pane-scroll:+5"
+    ; "acting-pane-scroll:-2"
+    ; "acting-pane-scroll-unknown:5"
+    ; "acting-pane-scroll-unknown:"
+    ; "acting-pane-scroll-unknown:+"
+    ; "keeper:orbiter"
+    ; "keeper-missing-name"
+    ; "queue:"
+    ; "queue:pause"
+    ; "run-next"
+    ; "priority"
+    ; "priority:on"
+    ; "priority:off"
+    ; "approve"
+    ; "deny"
+    ; "interrupt"
+    ; "interrupt:tester"
+    ; "steer:answer the correction\nwith this context"
+    ; "steer-missing-message"
+    ; "thinking:cycle"
+    ; "thinking:hidden"
+    ; "thinking:folded"
+    ; "thinking:full"
+    ; "tools:toggle"
+    ; "tools:compact"
+    ; "tools:results"
+    ; "tools:full"
+    ; "cycle-memory"
+    ; "open-fleet-memory"
+    ; "find:caret"
+    ; "find:two words"
+    ; "find-next"
+    ; "find-next"
+    ; "copy-latest-reply"
+    ; "inspect-context"
+    ; "image:shots/frame.png"
+    ; "image-missing-path"
+    ]
+    (List.map
+       (fun text -> describe (Command.parse text))
+       [ "/help"
+       ; "/about"
+       ; "/splash"
+       ; "/settings"
+       ; "/diff"
+       ; "/patch"
+       ; "/review"
+       ; "/cost"
+       ; "/preview"
+       ; "/preview https://github.com/jeong-sik/masc"
+       ; "/links"
+       ; "/embeds on"
+       ; "/embeds compact"
+       ; "/embeds off"
+       ; "/changes"
+       ; "/activity"
+       ; "/activity fleet"
+       ; "/activity changes"
+       ; "/activity code"
+       ; "/activity order"
+       ; "/activity order newest"
+       ; "/activity order oldest"
+       ; "/activity order longest"
+       ; "/activity order tool"
+       ; "/activity order by tool"
+       ; "/activity order fastest"
+       ; "/activity orders"
+       ; "/activity order\toldest"
+       ; "/activity scroll up"
+       ; "/activity scroll down"
+       ; "/activity scroll top"
+       ; "/activity scroll +5"
+       ; "/activity scroll -2"
+       ; "/activity scroll 5"
+       ; "/activity scroll"
+       ; "/activity scroll +"
+       ; "/keeper orbiter"
+       ; "/keeper   "
+       ; "/queue"
+       ; "/queue pause"
+       ; "/run-next"
+       ; "/priority"
+       ; "/priority on"
+       ; "/autonext off"
+       ; "/approve"
+       ; "/deny"
+       ; "/interrupt"
+       ; "/interrupt tester"
+       ; "/steer answer the correction\nwith this context"
+       ; "/steer"
+       ; "/thinking"
+       ; "/thinking hidden"
+       ; "/thinking folded"
+       ; "/thinking full"
+       ; "/tools"
+       ; "/tools compact"
+       ; "/tools results"
+       ; "/tools full"
+       ; "/memory"
+       ; "/fleet-memory"
+       (* The text is the rest of the line, spaces and all: a search phrase is
+          not one word, and quoting it would be a second grammar. *)
+       ; "/find caret"
+       ; "/find two words"
+       (* Arg-less repeats rather than resetting, the same shape [/thinking]
+          with no argument already has here. Blanks are not a query. *)
+       ; "/find"
+       ; "/find   "
+       ; "/copy"
+       ; "/context"
+       ; "/image shots/frame.png"
+       ; "/image   "
+       ])
+
+let test_preset_commands_parse_verb_name_and_description () =
+  check (list string) "preset commands"
+    [ "preset-list"
+    ; "preset-save:morning|"
+    ; "preset-save:morning|state before the campaign"
+    ; "preset-save:morning|first line\nand the rest"
+    ; "preset-save:morning|only the body"
+    ; "preset-save-missing-name"
+    ; "preset-restore:morning"
+    ; "preset-restore-missing-name"
+    ; "preset-show:morning"
+    ; "preset-show-missing-name"
+    ; "preset-delete:_autosave"
+    ; "preset-delete-missing-name"
+    ; "unknown:preset drop"
+    ]
+    (List.map
+       (fun text -> describe (Command.parse text))
+       [ "/preset"
+       ; "/preset save morning"
+       ; "/preset save   morning  state before the campaign"
+       ; "/preset save morning first line\nand the rest"
+       ; "/preset save morning\nonly the body"
+       ; "/preset save"
+       ; "/preset restore morning"
+       ; "/preset restore"
+       ; "/preset show morning"
+       ; "/preset show"
+       ; "/preset delete _autosave"
+       ; "/preset delete"
+       ; "/preset drop morning"
+       ])
+
+let test_every_command_has_a_help_line () =
+  (* Read from the catalog, so a command added there is checked without
+     anyone remembering to extend a list here. The hand-written list this
+     replaced had gone stale twice: it never gained image, attach or
+     preset. *)
+  check bool "the catalog is not empty" true (Command.catalog <> []);
+  List.iter
+    (fun (entry : Command.command_help) ->
+      let word = entry.Command.word in
+      check bool (Printf.sprintf "help mentions /%s" word) true
+        (List.exists
+           (fun line -> String.starts_with ~prefix:("/" ^ word) line)
+           Command.help_lines))
+    Command.catalog
+
+let test_keeper_names_resolve_by_unique_prefix () =
+  let names = [ "orbiter"; "orbit"; "lantern"; "zephyr" ] in
+  let describe_match = function
+    | Command.Keeper_found name -> "found:" ^ name
+    | Command.Keeper_ambiguous candidates ->
+        "ambiguous:" ^ String.concat "," candidates
+    | Command.Keeper_unknown -> "unknown"
+  in
+  check (list string)
+    "exact wins over prefix, unique prefix resolves, ambiguity is reported"
+    [ "found:orbit" (* exact, though it prefixes orbiter *)
+    ; "found:lantern"
+    ; "found:zephyr" (* unique prefix *)
+    ; "ambiguous:orbiter,orbit" (* orb- prefixes two *)
+    ; "unknown"
+    ]
+    (List.map
+       (fun typed -> describe_match (Command.resolve_keeper_name ~names typed))
+       [ "orbit"; "lantern"; "ze"; "orb"; "zzz" ])
+
+let test_an_unknown_command_is_named_not_sent () =
+  check (list string) "the word after the slash, nothing else"
+    [ "unknown:tsak"; "unknown:wake"; "unknown:" ]
+    (List.map
+       (fun text -> describe (Command.parse text))
+       [ "/tsak Lanes"; "/wake @alpha"; "/" ])
+
+let test_the_keeper_message_carries_the_task_id_first () =
+  check string "title only" "[task-500] Lanes surface"
+    (Command.task_message ~task_id:"task-500" ~title:"Lanes surface" ~body:"");
+  check string "with a body" "[task-500] Lanes surface\ncomposite \xe2\x86\x92 table"
+    (Command.task_message ~task_id:"task-500" ~title:"Lanes surface"
+       ~body:"composite \xe2\x86\x92 table")
+
+(* The live server's answer to a tools/call, trimmed: SSE framing, the
+   JSON-RPC object on one data line. *)
+let live_answer ~id ~text ~is_error =
+  Printf.sprintf
+    "retry: 3000\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":{\"resultType\":\"complete\",\"content\":[{\"type\":\"text\",\"text\":%s}],\"isError\":%b,\"_meta\":{\"com.github.yousleepwhen.masc/call\":{\"envelope\":{\"kind\":\"tool_call\",\"summary\":\"x\",\"status\":\"ok\",\"tool\":\"masc_add_task\"}}}}}\n\n"
+    id (Yojson.Safe.to_string (`String text)) is_error
+
+let test_a_tool_answer_is_read_off_the_sse_body () =
+  match
+    Mcp.outcome_of_body ~request_id:"tui-1"
+      (live_answer ~id:"\"tui-1\""
+         ~text:"{\"ok\":true,\"task_id\":\"task-500\",\"summary\":\"Added task-500\"}"
+         ~is_error:false)
+  with
+  | Ok { Mcp.text; is_error } ->
+      check bool "not an error" false is_error;
+      check (result string string) "the task id comes out of the text" (Ok "task-500")
+        (Mcp.task_id_of_add_task text)
+  | Error detail -> failf "expected an outcome, got %s" detail
+
+let test_a_tool_that_failed_is_an_outcome_not_a_transport_error () =
+  match
+    Mcp.outcome_of_body ~request_id:"tui-2"
+      (live_answer ~id:"\"tui-2\"" ~text:"title must not be empty" ~is_error:true)
+  with
+  | Ok { Mcp.text; is_error } ->
+      check bool "the tool's verdict" true is_error;
+      check string "with its words" "title must not be empty" text
+  | Error detail -> failf "expected an outcome, got %s" detail
+
+let test_answers_this_cannot_use_say_why () =
+  let reason body =
+    match Mcp.outcome_of_body ~request_id:"tui-3" body with
+    | Ok _ -> "ok"
+    | Error detail -> detail
+  in
+  check bool "another request's answer" true
+    (String.starts_with ~prefix:"tools/call answered request tui-9"
+       (reason (live_answer ~id:"\"tui-9\"" ~text:"x" ~is_error:false)));
+  check string "a JSON-RPC error"
+    "tools/call refused: unknown tool"
+    (reason
+       "data: {\"jsonrpc\":\"2.0\",\"id\":\"tui-3\",\"error\":{\"code\":-32601,\"message\":\"unknown tool\"}}\n");
+  check bool "not JSON at all" true
+    (String.starts_with ~prefix:"tools/call answer was not JSON"
+       (reason "<html>502</html>"));
+  check string "a plain JSON object without SSE framing also reads" "ok"
+    (reason
+       "{\"jsonrpc\":\"2.0\",\"id\":\"tui-3\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"fine\"}],\"isError\":false}}");
+  check bool "an add_task answer without an id" true
+    (Result.is_error (Mcp.task_id_of_add_task "Added task: Lanes surface"))
+
+let test_the_request_names_the_tool_and_its_arguments () =
+  match
+    Yojson.Safe.from_string
+      (Mcp.request_body ~request_id:"tui-4" ~tool:"masc_add_task"
+         ~arguments:[ ("title", `String "Lanes"); ("priority", `Int 2) ])
+  with
+  | `Assoc fields ->
+      check (option string) "method" (Some "tools/call")
+        (match List.assoc_opt "method" fields with Some (`String m) -> Some m | _ -> None);
+      (match List.assoc_opt "params" fields with
+       | Some (`Assoc params) ->
+           check (option string) "tool name" (Some "masc_add_task")
+             (match List.assoc_opt "name" params with
+              | Some (`String n) -> Some n
+              | _ -> None);
+           check bool "arguments carried as given" true
+             (List.assoc_opt "arguments" params
+             = Some (`Assoc [ ("title", `String "Lanes"); ("priority", `Int 2) ]))
+       | _ -> fail "params missing")
+  | _ -> fail "request is not an object"
+
+let resources_answer ~id resources =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0")
+      ; ("id", `String id)
+      ; ("result", `Assoc [ ("resources", `List resources) ])
+      ])
+
+let test_resource_catalog_keeps_explanatory_metadata () =
+  let body =
+    resources_answer ~id:"res-1"
+      [ `Assoc
+          [ ("uri", `String "masc://status.json")
+          ; ("name", `String "MASC Status JSON")
+          ; ("title", `String "Project Status")
+          ; ("description", `String "Current project status snapshot")
+          ; ("mimeType", `String "application/json")
+          ; ("size", `Int 4096)
+          ]
+      ; `Assoc [ ("uri", `String "masc://minimal") ]
+      ]
+  in
+  match Mcp.resources_of_body ~request_id:"res-1" body with
+  | Error detail -> failf "expected resources, got %s" detail
+  | Ok [ full; minimal ] ->
+      check string "uri" "masc://status.json" full.Mcp.uri;
+      check string "name" "MASC Status JSON" full.name;
+      check (option string) "title" (Some "Project Status") full.title;
+      check (option string) "purpose" (Some "Current project status snapshot")
+        full.description;
+      check (option string) "format" (Some "application/json") full.mime_type;
+      check (option int) "size" (Some 4096) full.size;
+      check string "missing name falls back to uri" "masc://minimal" minimal.name;
+      check (option string) "missing purpose stays absent" None minimal.description
+  | Ok rows -> failf "expected two resources, got %d" (List.length rows)
+
+let resources_page ~id ?next_cursor resources =
+  let fields = [ ("resources", `List resources) ] in
+  let fields =
+    match next_cursor with
+    | Some cursor -> fields @ [ ("nextCursor", `String cursor) ]
+    | None -> fields
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0"); ("id", `String id)
+      ; ("result", `Assoc fields)
+      ])
+
+let uri_row uri = `Assoc [ ("uri", `String uri) ]
+
+(* The server pages this listing and the wiki pages sort at its end, so a
+   client that keeps only the first answer loses them. This checks the page
+   reader hands back the cursor, and that the walk follows it to the last
+   page. *)
+let test_resources_page_reports_the_next_cursor () =
+  let body =
+    resources_page ~id:"res-1" ~next_cursor:"cur-2" [ uri_row "masc://a" ]
+  in
+  (match Mcp.resources_page_of_body ~request_id:"res-1" body with
+  | Error detail -> failf "expected a page, got %s" detail
+  | Ok (resources, next_cursor) ->
+      check int "one resource on the page" 1 (List.length resources);
+      check (option string) "the cursor is handed back" (Some "cur-2")
+        next_cursor);
+  (* A last page carries no cursor. *)
+  match
+    Mcp.resources_page_of_body ~request_id:"res-1"
+      (resources_page ~id:"res-1" [ uri_row "masc://b" ])
+  with
+  | Error detail -> failf "expected a page, got %s" detail
+  | Ok (_, next_cursor) ->
+      check (option string) "no cursor on the last page" None next_cursor
+
+let test_resources_list_all_walks_every_page () =
+  let pages =
+    [ (None, resources_page ~id:"res-1" ~next_cursor:"cur-2" [ uri_row "masc://a" ])
+    ; (Some "cur-2", resources_page ~id:"res-1" ~next_cursor:"cur-3" [ uri_row "masc://b" ])
+    ; (Some "cur-3", resources_page ~id:"res-1" [ uri_row "masc://c" ])
+    ]
+  in
+  let asked = ref [] in
+  let fetch ~cursor =
+    asked := cursor :: !asked;
+    match List.assoc_opt cursor pages with
+    | Some body -> Ok body
+    | None -> Error "asked for an unexpected cursor"
+  in
+  match Mcp.resources_list_all ~request_id:"res-1" ~fetch () with
+  | Error detail -> failf "expected every page, got %s" detail
+  | Ok (resources, stop) ->
+      check (list string) "every page in server order"
+        [ "masc://a"; "masc://b"; "masc://c" ]
+        (List.map (fun (r : Mcp.resource) -> r.uri) resources);
+      check (list (option string)) "the cursors asked, in order"
+        [ None; Some "cur-2"; Some "cur-3" ]
+        (List.rev !asked);
+      check bool "the walk reports a complete listing" true
+        (stop = `Complete)
+
+(* A cursor that never advances must not spin, and the caller must be told the
+   listing it gets is not the whole listing. *)
+let test_resources_list_all_stops_on_a_repeated_cursor () =
+  let calls = ref 0 in
+  let fetch ~cursor:_ =
+    incr calls;
+    Ok (resources_page ~id:"res-1" ~next_cursor:"cur-2" [ uri_row "masc://a" ])
+  in
+  match Mcp.resources_list_all ~request_id:"res-1" ~fetch () with
+  | Error detail -> failf "expected a stop, got %s" detail
+  | Ok (resources, stop) ->
+      check int "the repeated page is kept once per call" 2 (List.length resources);
+      check int "and the walk stops" 2 !calls;
+      check bool "the stop names the cursor that repeated" true
+        (stop = `Repeated_cursor "cur-2")
+
+(* The page bound is reachable with a small MASC_LIST_PAGE_SIZE, and a walk
+   that hits it must not answer as though it read the whole listing. *)
+let test_resources_list_all_reports_the_page_bound () =
+  let pages =
+    [ (None, resources_page ~id:"res-1" ~next_cursor:"cur-2" [ uri_row "masc://a" ])
+    ; (Some "cur-2", resources_page ~id:"res-1" ~next_cursor:"cur-3" [ uri_row "masc://b" ])
+    ; (Some "cur-3", resources_page ~id:"res-1" [ uri_row "masc://c" ])
+    ]
+  in
+  let calls = ref 0 in
+  let fetch ~cursor =
+    incr calls;
+    match List.assoc_opt cursor pages with
+    | Some body -> Ok body
+    | None -> Error "asked for an unexpected cursor"
+  in
+  match Mcp.resources_list_all ~request_id:"res-1" ~max_pages:2 ~fetch () with
+  | Error detail -> failf "expected a bounded walk, got %s" detail
+  | Ok (resources, stop) ->
+      check int "only the bound's pages are read" 2 !calls;
+      check (list string) "and they are the first pages"
+        [ "masc://a"; "masc://b" ]
+        (List.map (fun (r : Mcp.resource) -> r.uri) resources);
+      check bool "the stop names the bound it hit" true
+        (stop = `Page_limit_reached 2)
+
+let test_resources_list_request_carries_the_cursor () =
+  let params_of body =
+    match Yojson.Safe.from_string body with
+    | `Assoc fields -> List.assoc_opt "params" fields
+    | _ -> None
+  in
+  check (option string) "the first page asks for no cursor" (Some "{}")
+    (Option.map Yojson.Safe.to_string
+       (params_of (Mcp.resources_list_request_body ~request_id:"res-2" ())));
+  check (option string) "a later page asks for its cursor"
+    (Some {|{"cursor":"cur-2"}|})
+    (Option.map Yojson.Safe.to_string
+       (params_of
+          (Mcp.resources_list_request_body ~cursor:"cur-2" ~request_id:"res-2" ())))
+
+let describe_hint = function
+  | Command.No_command -> "none"
+  | Command.Chosen entry -> "chosen:" ^ entry.Command.word
+  | Command.Unknown_command word -> "unknown:" ^ word
+  | Command.Candidates { entries; _ } ->
+      "candidates:"
+      ^ String.concat "," (List.map (fun e -> e.Command.word) entries)
+
+let hint text = describe_hint (Command.hint text)
+
+let test_plain_text_has_no_hint () =
+  check string "a message" "none" (hint "please look at the log");
+  check string "empty" "none" (hint "");
+  check string "a slash mid-sentence" "none" (hint "look at a/b")
+
+let test_a_lone_slash_lists_everything () =
+  (* One candidate per spelling, not per command: the composer answers to an
+     alias, so the bare slash offers it too. *)
+  check int "one candidate per spelling" (List.length Command.spellings)
+    (match Command.hint "/" with
+     | Command.Candidates { entries; _ } -> List.length entries
+     | Command.No_command | Command.Chosen _ | Command.Unknown_command _ -> 0)
+
+let candidate_commands ~typed text =
+  match Command.hint text with
+  | Command.Candidates { typed = actual; entries } ->
+      check string "the candidate query is preserved" typed actual;
+      List.map (fun entry -> Command.parse ("/" ^ entry.Command.word)) entries
+  | Command.No_command | Command.Chosen _ | Command.Unknown_command _ ->
+      fail "expected an incomplete command to offer candidates"
+
+let test_a_prefix_narrows_the_list () =
+  let candidates = candidate_commands ~typed:"t" "/t" in
+  List.iter
+    (fun command -> check bool "the matching command is available" true (List.mem command candidates))
+    [ Command.Task_missing_title; Command.Task_inspect; Command.Task_recover
+    ; Command.Set_thinking `Cycle; Command.Set_tools `Toggle; Command.Open_metrics ];
+  check bool "an unrelated command is excluded" false (List.mem Command.Help candidates);
+  check bool "a narrower prefix resolves to one command" true
+    (candidate_commands ~typed:"th" "/th" = [ Command.Set_thinking `Cycle ])
+
+(* [parse] does no prefix matching, so a half-typed word is not a command yet.
+   A hint that described it would say the line was ready when sending it would
+   be refused. *)
+let test_a_half_typed_word_is_not_chosen () =
+  let candidates = candidate_commands ~typed:"ta" "/ta" in
+  List.iter
+    (fun command -> check bool "a Task command is offered without choosing it" true
+        (List.mem command candidates))
+    [ Command.Task_missing_title; Command.Task_inspect; Command.Task_recover ];
+  check bool "and the parser agrees" true
+    (match Command.parse "/ta" with
+     | Command.Unknown "ta" -> true
+     | _ -> false)
+
+let test_a_complete_word_is_described () =
+  check string "bare" "chosen:task" (hint "/task");
+  check string "with an argument" "chosen:task" (hint "/task write the runbook");
+  check string "with a body below" "chosen:task" (hint "/task title\nbody");
+  check string "an argument it knows" "chosen:thinking" (hint "/thinking folded")
+
+let test_a_word_that_begins_nothing_is_named () =
+  check string "named while it can be fixed" "unknown:zork" (hint "/zork");
+  check string "and with an argument" "unknown:zork" (hint "/zork a b")
+
+let test_every_catalogued_command_parses () =
+  (* Every spelling, not every command: an alias the catalog names and the
+     parser does not know would be offered in the composer and then refused. *)
+  List.iter
+    (fun word ->
+      check bool
+        (Printf.sprintf "/%s parses" word)
+        true
+        (match Command.parse ("/" ^ word) with
+         | Command.Unknown _ -> false
+         | _ -> true))
+    Command.spellings
+
+let test_an_alias_shares_its_command_row () =
+  check bool "the catalog carries at least one alias" true
+    (List.exists
+       (fun (entry : Command.command_help) -> entry.Command.aliases <> [])
+       Command.catalog);
+  check bool "/patch spells /review in its own column" true
+    (List.exists
+       (fun line -> String.starts_with ~prefix:"/patch (/review)" line)
+       Command.help_lines);
+  check int "and /review opens no row of its own" 0
+    (List.length
+       (List.filter
+          (fun line -> String.starts_with ~prefix:"/review" line)
+          Command.help_lines));
+  check int "one row per command" (List.length Command.catalog)
+    (List.length Command.help_lines)
+
+(* An alias is one command under another spelling, so every composer path must
+   answer the two the same way. The pairs are read off the catalog rather than
+   listed here, so a fifth alias is covered the day it arrives. *)
+let test_an_alias_answers_like_its_command () =
+  List.iter
+    (fun (entry : Command.command_help) ->
+      List.iter
+        (fun alias ->
+          check bool
+            (Printf.sprintf "/%s parses as /%s" alias entry.Command.word)
+            true
+            (Command.parse ("/" ^ alias)
+             = Command.parse ("/" ^ entry.Command.word));
+          check bool
+            (Printf.sprintf "/%s navigates like /%s" alias entry.Command.word)
+            (Command.is_slash_navigable ("/" ^ entry.Command.word))
+            (Command.is_slash_navigable ("/" ^ alias));
+          check string
+            (Printf.sprintf "/%s is chosen under its own spelling" alias)
+            ("chosen:" ^ alias)
+            (hint ("/" ^ alias)))
+        entry.Command.aliases)
+    Command.catalog
+
+let test_autocomplete_plain_text_is_ignored () =
+  check (option string) "plain text" None (Command.autocomplete "hello");
+  check (option string) "empty string" None (Command.autocomplete "");
+  check (option string) "slash mid sentence" None (Command.autocomplete "look at a/b")
+
+let test_autocomplete_unique_prefix () =
+  check (option string) "/th -> /thinking " (Some "/thinking ") (Command.autocomplete "/th");
+  check (option string) "/task-r -> /task-recover" (Some "/task-recover")
+    (Command.autocomplete "/task-r");
+  check (option string) "/se -> /settings" (Some "/settings") (Command.autocomplete "/se");
+  (* Several matches: the [play] argument [i] stops at the "invite" that
+     invite and invites share, and [c] has nothing shared past the letter
+     itself, so it offers the catalog's first c-word (cost, today). The
+     command words in the Task family also share a prefix, covered below. *)
+  check (option string) "/play i -> /play invite" (Some "/play invite")
+    (Command.autocomplete "/play i");
+  check (option string) "/c -> /cost" (Some "/cost") (Command.autocomplete "/c");
+  check (option string) "/h -> /help" (Some "/help") (Command.autocomplete "/h");
+  check (option string) "/zork -> None" None (Command.autocomplete "/zork")
+
+let test_autocomplete_cycles_ambiguous_prefix () =
+  check (option string) "the Task family completes only its common word"
+    (Some "/task") (Command.autocomplete "/ta");
+  (match Command.autocomplete "/t", Command.autocomplete ~direction:Command.Prev "/t" with
+   | Some next, Some prev ->
+       check bool "opposite directions offer different choices" false (String.equal next prev);
+       List.iter
+         (fun completion ->
+           check bool "the choice still belongs to the requested prefix" true
+             (String.starts_with ~prefix:"/t" completion);
+           check bool "the offered command is accepted by the parser" true
+             (match Command.parse completion with Command.Unknown _ -> false | _ -> true))
+         [ next; prev ]
+   | _ -> fail "an ambiguous command prefix must offer a choice");
+  check (option string) "/to -> /tools " (Some "/tools ") (Command.autocomplete "/to");
+  check (option string) "/st -> /steer " (Some "/steer ") (Command.autocomplete "/st")
+
+(* #33405: A finished command word must not mutate into another command on Tab.
+   /settings must stay /settings (None) rather than cycling to /steer,
+   and /task with a space must stay /task rather than cycling to /thinking. *)
+let test_autocomplete_finished_word_does_not_mutate () =
+  check (option string) "/settings stays /settings (no args)" None
+    (Command.autocomplete "/settings");
+  check (option string) "/memory stays /memory (no args)" None
+    (Command.autocomplete "/memory");
+  check (option string) "/help stays /help (no args)" None
+    (Command.autocomplete "/help");
+  check (option string) "/task adds trailing space for args" (Some "/task ")
+    (Command.autocomplete "/task");
+  check (option string) "/task with trailing space does not cycle" None
+    (Command.autocomplete "/task ");
+  check (option string) "reverse completion also preserves the exact Task command"
+    (Some "/task ") (Command.autocomplete ~direction:Command.Prev "/task");
+  List.iter
+    (fun command ->
+      check (option string) "an exact argument-free Task command does not change" None
+        (Command.autocomplete command))
+    [ "/task-inspect"; "/task-recover" ]
+
+let test_autocomplete_preserves_multiline_body () =
+  check (option string) "multiline body preserved while the Task family is ambiguous"
+    (Some "/task\nfirst line of body\nsecond line of body")
+    (Command.autocomplete "/ta\nfirst line of body\nsecond line of body");
+  check (option string) "multiline body preserved when the exact Task command takes arguments"
+    (Some "/task \nfirst line of body\nsecond line of body")
+    (Command.autocomplete "/task\nfirst line of body\nsecond line of body");
+  check (option string) "multiline body preserved on subargument"
+    (Some "/thinking hidden\nnotes here")
+    (Command.autocomplete "/thinking h\nnotes here")
+
+let test_autocomplete_utf8_lcp_safety () =
+  let keeper_names = [ "가"; "각"; "가나다"; "가나락" ] in
+  (match Command.autocomplete ~keeper_names "/keeper " with
+   | Some res -> check bool "result is valid utf-8" true (String.is_valid_utf_8 res)
+   | None -> ());
+  (match Command.autocomplete ~keeper_names "/keeper 가" with
+   | Some res -> check bool "completed hangul prefix is valid utf-8" true (String.is_valid_utf_8 res)
+   | None -> ());
+  let keepers_shared = [ "가나다"; "가나락" ] in
+  check (option string) "LCP stops at valid utf8 character boundary"
+    (Some "/keeper 가나")
+    (Command.autocomplete ~keeper_names:keepers_shared "/keeper 가")
+
+let test_autocomplete_trailing_space_subargument_not_mutated () =
+  check (option string) "trailing space on finished arg is preserved"
+    None (Command.autocomplete "/preset save ")
+
+let test_autocomplete_sub_arguments () =
+  check (option string) "/thinking h -> hidden" (Some "/thinking hidden")
+    (Command.autocomplete "/thinking h");
+  check (option string) "/thinking folded -> full" (Some "/thinking full")
+    (Command.autocomplete "/thinking folded");
+  check (option string) "/tools c -> compact" (Some "/tools compact")
+    (Command.autocomplete "/tools c");
+  check (option string) "/tools r -> results" (Some "/tools results")
+    (Command.autocomplete "/tools r");
+  check (option string) "/preset s -> save" (Some "/preset save")
+    (Command.autocomplete "/preset s");
+  check (option string) "/preset sh -> show" (Some "/preset show")
+    (Command.autocomplete "/preset sh");
+  let keeper_names = [ "sol-xhigh"; "roger"; "librarian" ] in
+  check (option string) "/keeper s -> sol-xhigh" (Some "/keeper sol-xhigh")
+    (Command.autocomplete ~keeper_names "/keeper s");
+  check (option string) "/keeper r -> roger" (Some "/keeper roger")
+    (Command.autocomplete ~keeper_names "/keeper r");
+  check (option string) "empty keeper list yields none" None
+    (Command.autocomplete ~keeper_names:[] "/keeper s")
+
+let test_autocomplete_prev_direction () =
+  check (option string) "prev on /t wraps to last candidate"
+    (Some "/telemetry") (Command.autocomplete ~direction:Command.Prev "/t");
+  check (option string) "prev on /thinking  wraps to full"
+    (Some "/thinking full") (Command.autocomplete ~direction:Command.Prev "/thinking ");
+  check (option string) "prev on /thinking full cycles to folded"
+    (Some "/thinking folded") (Command.autocomplete ~direction:Command.Prev "/thinking full");
+  check (option string) "prev on /thinking folded cycles to hidden"
+    (Some "/thinking hidden") (Command.autocomplete ~direction:Command.Prev "/thinking folded");
+  check (option string) "prev on /thinking hidden wraps to full"
+    (Some "/thinking full") (Command.autocomplete ~direction:Command.Prev "/thinking hidden");
+  let keeper_names = [ "sol-xhigh"; "roger" ] in
+  check (option string) "prev on keeper wraps to last keeper"
+    (Some "/keeper roger") (Command.autocomplete ~direction:Command.Prev ~keeper_names "/keeper ")
+
+let test_is_slash_navigable () =
+  check bool "empty string is not navigable" false
+    (Command.is_slash_navigable "");
+  check bool "plain text is not navigable" false
+    (Command.is_slash_navigable "hello world");
+  check bool "bare slash is navigable" true
+    (Command.is_slash_navigable "/");
+  check bool "/t prefix is navigable" true
+    (Command.is_slash_navigable "/t");
+  check bool "/task without space is navigable (arg-taking command)" true
+    (Command.is_slash_navigable "/task");
+  check bool "/task with empty space is not navigable (free text)" false
+    (Command.is_slash_navigable "/task ");
+  check bool "/settings with no args is not navigable" false
+    (Command.is_slash_navigable "/settings");
+  check bool "/task with free text is not navigable" false
+    (Command.is_slash_navigable "/task Buy milk at store");
+  check bool "/thinking with space is navigable" true
+    (Command.is_slash_navigable "/thinking ");
+  check bool "/thinking h is navigable" true
+    (Command.is_slash_navigable "/thinking h");
+  check bool "/thinking hidden[space] is not navigable (arg complete)" false
+    (Command.is_slash_navigable "/thinking hidden ");
+  let keeper_names = [ "sol-xhigh"; "roger" ] in
+  check bool "/keeper with space is navigable" true
+    (Command.is_slash_navigable ~keeper_names "/keeper ");
+  check bool "/unknown is not navigable" false
+    (Command.is_slash_navigable "/xyz")
+
+let test_autocomplete_subargument_cycling () =
+  let step0 = "/thinking " in
+  let step1 = Command.autocomplete step0 in
+  check (option string) "step 1: /thinking  -> /thinking hidden" (Some "/thinking hidden") step1;
+  let step2 = Command.autocomplete (Option.get step1) in
+  check (option string) "step 2: /thinking hidden -> /thinking folded" (Some "/thinking folded") step2;
+  let step3 = Command.autocomplete (Option.get step2) in
+  check (option string) "step 3: /thinking folded -> /thinking full" (Some "/thinking full") step3;
+  let step4 = Command.autocomplete (Option.get step3) in
+  check (option string) "step 4: /thinking full wraps -> /thinking hidden" (Some "/thinking hidden") step4
+
+let test_resource_read_keeps_each_part_type () =
+  let body =
+    {|{"jsonrpc":"2.0","id":"resource-2","result":{"contents":[{"uri":"masc://events.json","mimeType":"application/json","text":"{\"ok\":true}"},{"uri":"masc://proof.bin","mimeType":"application/octet-stream","blob":"QUJDRA=="}]}}|}
+  in
+  match Mcp.resource_contents_of_body ~request_id:"resource-2" body with
+  | Error detail -> Alcotest.fail detail
+  | Ok
+      [ { rc_uri = Some "masc://events.json"
+        ; rc_mime_type = Some "application/json"
+        ; rc_kind = Mcp.Resource_text "{\"ok\":true}"
+        }
+      ; { rc_uri = Some "masc://proof.bin"
+        ; rc_mime_type = Some "application/octet-stream"
+        ; rc_kind = Mcp.Resource_blob { base64 = "QUJDRA==" }
+        }
+      ] ->
+      ()
+  | Ok contents ->
+      Alcotest.failf "unexpected resource contents (%d parts)"
+        (List.length contents)
+
+let test_command_menu_keeps_selection_separate_from_draft () =
+  let menu state draft = Command.menu ~keeper_names:["가람"; "가온"] ~state draft |> Option.get in
+  let draft = "/t\nkeep the original body" in
+  let initial = menu Command.Menu_idle draft in
+  let next = menu (Command.menu_step ~direction:Command.Next ~draft initial) draft in
+  let accepted = Command.menu_accept next in
+  check bool "arrow selects another command" false
+    (String.equal (Command.menu_accept initial) accepted);
+  (match String.split_on_char '\n' accepted with
+   | first_line :: body ->
+       check (list string) "accepting a choice preserves the original body"
+         [ "keep the original body" ] body;
+       check bool "the accepted command is known" true
+         (match Command.parse first_line with Command.Unknown _ -> false | _ -> true)
+   | [] -> fail "accepting a command must preserve its first line");
+  check int "window contains one selection" 1
+    (Command.menu_window ~max_rows:2 next |> List.filter fst |> List.length);
+  check bool "dismissed exact draft closes" true
+    (Option.is_none (Command.menu ~keeper_names:[] ~state:(Command.Menu_dismissed draft) draft));
+  check bool "changed query opens" true
+    (Option.is_some (Command.menu ~keeper_names:[] ~state:(Command.Menu_dismissed draft) "/d"));
+  check bool "complete command can execute normally" true
+    (Option.is_none (Command.menu ~keeper_names:[] ~state:Command.Menu_idle "/help"));
+  check string "Korean keeper argument remains whole" "/keeper 가온"
+    (let draft = "/keeper 가" in
+     let initial = menu Command.Menu_idle draft in
+     menu (Command.menu_step ~direction:Command.Next ~draft initial) draft |> Command.menu_accept)
+
+let test_images_command () =
+  List.iter (fun (text,expected) ->
+    check bool "visual command stays local with an explicit positive selection" true
+      (Command.parse text = expected))
+    ["/images",Command.List_images; "/images 1",Command.Open_images 1;
+     "/images 3",Command.Open_images 3;
+     "/images 0",Command.Images_invalid_index;
+     "/images -1",Command.Images_invalid_index;
+     "/images 1 extra",Command.Images_invalid_index]
+
+let () =
+  run "tui command"
+    [ ( "composer"
+      , [ test_case "images lists or explicitly selects a visual source" `Quick test_images_command
+        ; test_case "measurement artifact is an exact local command" `Quick test_measurement_command
+        ; test_case "plain text is a message" `Quick test_plain_text_is_a_message
+        ; test_case "ref command parses url and bare id" `Quick
+            test_ref_command_parses_url_and_bare_id
+        ; test_case "play commands are explicit" `Quick
+            test_play_commands_are_explicit
+        ; test_case "Play menu requires explicit execution" `Quick
+            test_play_menu_requires_explicit_execution
+        ; test_case "keeper names resolve by unique prefix" `Quick
+            test_keeper_names_resolve_by_unique_prefix
+        ; test_case "pane commands parse by word" `Quick
+            test_pane_commands_parse_by_word
+        ; test_case "every command has a help line" `Quick
+            test_every_command_has_a_help_line
+        ; test_case "preset commands parse verb, name and description" `Quick
+            test_preset_commands_parse_verb_name_and_description
+        ; test_case "/task takes the line as title and the rest as body" `Quick
+            test_task_takes_the_line_as_title_and_the_rest_as_body
+        ; test_case "an unknown command is named, not sent" `Quick
+            test_an_unknown_command_is_named_not_sent
+        ; test_case "the keeper message carries the task id first" `Quick
+            test_the_keeper_message_carries_the_task_id_first
+        ; test_case "plain text has no hint" `Quick test_plain_text_has_no_hint
+        ; test_case "a lone slash lists everything" `Quick
+            test_a_lone_slash_lists_everything
+        ; test_case "a prefix narrows the list" `Quick
+            test_a_prefix_narrows_the_list
+        ; test_case "a half-typed word is not chosen" `Quick
+            test_a_half_typed_word_is_not_chosen
+        ; test_case "a complete word is described" `Quick
+            test_a_complete_word_is_described
+        ; test_case "a word that begins nothing is named" `Quick
+            test_a_word_that_begins_nothing_is_named
+        ; test_case "every catalogued command parses" `Quick
+            test_every_catalogued_command_parses
+        ; test_case "an alias shares its command row" `Quick
+            test_an_alias_shares_its_command_row
+        ; test_case "an alias answers like its command" `Quick
+            test_an_alias_answers_like_its_command
+        ; test_case "plain text is ignored by autocomplete" `Quick
+            test_autocomplete_plain_text_is_ignored
+        ; test_case "autocomplete unique prefix" `Quick
+            test_autocomplete_unique_prefix
+        ; test_case "autocomplete cycles ambiguous prefix" `Quick
+            test_autocomplete_cycles_ambiguous_prefix
+        ; test_case "autocomplete finished word does not mutate" `Quick
+            test_autocomplete_finished_word_does_not_mutate
+        ; test_case "autocomplete preserves multiline body" `Quick
+            test_autocomplete_preserves_multiline_body
+        ; test_case "autocomplete utf8 lcp safety" `Quick
+            test_autocomplete_utf8_lcp_safety
+        ; test_case "autocomplete trailing space subargument not mutated" `Quick
+            test_autocomplete_trailing_space_subargument_not_mutated
+        ; test_case "autocomplete sub arguments" `Quick
+            test_autocomplete_sub_arguments
+        ; test_case "autocomplete prev direction" `Quick
+            test_autocomplete_prev_direction
+        ; test_case "is slash navigable predicate" `Quick
+            test_is_slash_navigable
+        ; test_case "autocomplete subargument cycling" `Quick
+            test_autocomplete_subargument_cycling
+        ; test_case "command menu selection preserves its draft" `Quick
+            test_command_menu_keeps_selection_separate_from_draft
+        ] )
+    ; ( "tools/call"
+      , [ test_case "a tool answer is read off the SSE body" `Quick
+            test_a_tool_answer_is_read_off_the_sse_body
+        ; test_case "a tool that failed is an outcome, not a transport error" `Quick
+            test_a_tool_that_failed_is_an_outcome_not_a_transport_error
+        ; test_case "answers this cannot use say why" `Quick
+            test_answers_this_cannot_use_say_why
+        ; test_case "the request names the tool and its arguments" `Quick
+            test_the_request_names_the_tool_and_its_arguments
+        ] )
+    ; ( "resources"
+      , [ test_case "catalog keeps explanatory metadata" `Quick
+            test_resource_catalog_keeps_explanatory_metadata
+        ; test_case "read keeps each part type" `Quick
+            test_resource_read_keeps_each_part_type
+        ; test_case "list request carries the cursor" `Quick
+            test_resources_list_request_carries_the_cursor
+        ; test_case "a page hands back its next cursor" `Quick
+            test_resources_page_reports_the_next_cursor
+        ; test_case "the walk follows every page" `Quick
+            test_resources_list_all_walks_every_page
+        ; test_case "a repeated cursor ends the walk" `Quick
+            test_resources_list_all_stops_on_a_repeated_cursor
+        ; test_case "a bounded walk reports the bound" `Quick
+            test_resources_list_all_reports_the_page_bound
+        ] )
+    ]

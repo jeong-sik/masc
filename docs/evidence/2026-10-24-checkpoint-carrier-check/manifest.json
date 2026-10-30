@@ -1,0 +1,46 @@
+{
+  "frozen_evidence_checkout": "2c3a9f701afd57cd0f62deb853325cb0197e0432",
+  "scope": "Actual historical combined-main results before the two checkpoint-fixture fields are repaired. No repaired execution claimed.",
+  "files": [
+    {
+      "path": "main-four-products.json",
+      "bytes": 305,
+      "sha256": "b982d861fa3411ed189e9af6661fa0603b15ed0ad29e5ab6f3d7e5eff107c1a6"
+    },
+    {
+      "path": "main-four-products-build.log",
+      "bytes": 1668,
+      "sha256": "4e00d4ca9e2e74ca44065837f61b65e3e2a4f8b2dafbdb841309a8bb6a156a07"
+    },
+    {
+      "path": "main-check-failure.json",
+      "bytes": 1424,
+      "sha256": "0fab1aaca8bd006c9f88c60232b1441a1ad257e13216303c24f6e4765794d512"
+    },
+    {
+      "path": "main-check-two-errors.log",
+      "bytes": 6998,
+      "sha256": "02dcc8fbc28df65f9290723786304baf0eac74d58ecef503a46a8a5dd4da7bd4"
+    },
+    {
+      "path": "main-eight-suite.log",
+      "bytes": 196925,
+      "sha256": "13ec8c20a9aac0c04928f327c4d7f2b2a1215e8a68ecb94dab16e764c783f933"
+    },
+    {
+      "path": "main-eight-suite-counts.json",
+      "bytes": 32439,
+      "sha256": "0f50157b22301e1cad577b4661e8609d9b079f20a40ec521b6248e9f62d01100"
+    },
+    {
+      "path": "main-eight-suite-critical.json",
+      "bytes": 5312,
+      "sha256": "782088a4fe98cc43567e4cbe71981597fee1bcb210a15025e791d0708258999f"
+    },
+    {
+      "path": "case17-critical.json",
+      "bytes": 10096,
+      "sha256": "ead42cbcbd020af0fd5b8a266b68343defc50ef7463e9bac05383794202204fb"
+    }
+  ]
+}

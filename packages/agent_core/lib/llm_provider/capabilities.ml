@@ -1,0 +1,2707 @@
+(** Provider capabilities -- per-provider/model feature flags and limits.
+
+    Tracks what a provider/model supports so the agent runtime can make
+    correct decisions (e.g., context reduction, tool filtering, thinking
+    budget enforcement).
+
+    @since 0.42.0
+    @since 0.72.0 — added numeric limits, parallel tool calls, thinking split *)
+
+(** Wire-format for controlling thinking/reasoning on OpenAI-compat backends.
+    Different model families use different JSON shapes to enable/disable
+    thinking, so the runtime must know which format to emit.
+
+    @since 0.184.0 *)
+type thinking_control_format = Capability_vocab.thinking_control_format =
+  | No_thinking_control (** No thinking control supported *)
+  | Thinking_object (** Top-level [thinking] object plus optional [reasoning_effort]. *)
+  | Thinking_object_adaptive
+  | Thinking_object_only
+  | Chat_template_kwargs
+  | Chat_template_token of string
+  (** Thinking toggled by a chat-template token (e.g. [<|think|>]) emitted in
+          the system turn; the token is carried in the constructor. *)
+  | Ollama_think
+  | Reasoning_effort
+  | Reasoning_effort_default_on
+[@@deriving show, eq]
+
+let%test "thinking_control_format derives equal and show" =
+  equal_thinking_control_format No_thinking_control No_thinking_control
+  && (not (equal_thinking_control_format No_thinking_control Reasoning_effort))
+  && String.length (show_thinking_control_format Reasoning_effort) > 0
+;;
+
+type preserve_thinking_control_format =
+      Capability_vocab.preserve_thinking_control_format =
+  | No_preserve_thinking_control
+  | Thinking_object_keep_all
+  | Chat_template_kwargs_preserve_thinking
+  | Always_preserved_thinking
+  | Thinking_object_clear_thinking
+  (** Provider [thinking] object whose [clear_thinking] member gates prior-turn
+      reasoning replay. See {!Capability_vocab.preserve_thinking_control_format}. *)
+
+(** Optional override for the multi-turn reasoning replay policy. Most providers
+    inherit the policy implied by [thinking_control_format]; catalog entries set
+    this when a model's documented replay contract differs (e.g. Kimi K2 requires
+    replaying [reasoning_content] on every turn, so [Force_preserve_always]).
+
+    @since 0.207.16 *)
+type uncontrolled_reasoning = Capability_vocab.uncontrolled_reasoning =
+  | Provider_default_reasoning
+  | Provider_enables_reasoning
+
+type reasoning_replay_override = Capability_vocab.reasoning_replay_override =
+  | Default_reasoning_replay
+  | Force_no_replay
+  | Force_drop_without_tool_preserve_with_tool
+  | Force_latest_user_turn_tool_calls
+  | Force_initial_system_latest_user_turn_tool_calls
+  (** Replay tool-call reasoning only inside the structurally latest user turn. *)
+  | Force_preserve_always
+  | Force_preserve_responses_text
+  | Force_turn_scoped_system_context_preserve_always
+  | Force_preserve_with_request_tools
+
+type assistant_tool_content_format = Capability_vocab.assistant_tool_content_format =
+  | Assistant_tool_content_null
+  | Assistant_tool_content_empty_string
+
+type chat_output_budget_field = Capability_vocab.chat_output_budget_field =
+  | Chat_max_tokens
+  | Chat_max_completion_tokens
+
+type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
+  | Rich_json_schema
+  | Conformant_subset_required
+
+type content_inline_reasoning = Capability_vocab.content_inline_reasoning =
+  | No_content_inline_reasoning
+  | Think_tags
+  | Think_tags_with_chat_replay
+
+type reasoning_output_format = Capability_vocab.reasoning_output_format =
+  | No_reasoning_output_format
+  | Split_reasoning_fields
+
+type reasoning_streaming_format = Capability_vocab.reasoning_streaming_format =
+  | Default_reasoning_streaming
+  | No_reasoning_streaming
+  | Delta_reasoning_field of string
+  | Delta_reasoning_field_and_details of string
+  | Template_reasoning_streaming
+
+type sampling_parameter = Capability_vocab.sampling_parameter =
+  | Temperature
+  | Top_p
+  | Top_k
+  | Min_p
+  | Presence_penalty
+  | Frequency_penalty
+  | Seed
+
+(** Catalog-declared inference task for non-chat models. [None] on every
+    chat/completion model; a value is only ever set by an explicit [task]
+    field on a model catalog entry — never inferred from the model id. *)
+type task = Capability_vocab.task =
+  | Transcription
+  | Speech
+  | Image_generation
+  | Video_generation
+
+(** Structured-output tier, projected from the two capability booleans below by
+    {!structured_output_support}. The request-admission decision reads this typed
+    view rather than provider identity. See {!Capability_vocab.structured_output_support}. *)
+type structured_output_support = Capability_vocab.structured_output_support =
+  | No_structured_output
+  | Json_object_only
+  | Native_json_schema
+[@@deriving show, eq]
+
+type json_schema_dialect = Capability_vocab.json_schema_dialect =
+  | Openai_json_schema
+  | Json_object_schema
+
+type anthropic_thinking_control =
+  | Anthropic_adaptive_default
+  | Anthropic_adaptive_disabled_through_high
+  | Anthropic_adaptive_between_tools
+  | Anthropic_always_adaptive
+
+let anthropic_thinking_control_of_vocab_value = function
+  | Capability_vocab.Adaptive_default -> Anthropic_adaptive_default
+  | Capability_vocab.Adaptive_disabled_through_high -> Anthropic_adaptive_disabled_through_high
+  | Capability_vocab.Adaptive_between_tools -> Anthropic_adaptive_between_tools
+  | Capability_vocab.Always_adaptive -> Anthropic_always_adaptive
+;;
+
+type capabilities =
+  { (* ── Numeric limits ────────────────────────────────── *)
+    max_context_tokens : int option (** Model's context window. None = unknown. *)
+  ; serving_constraint : Serving_constraint.t option
+  ; max_output_tokens : int option (** Model's max output. None = unknown. *)
+  ; (* ── Tool use ──────────────────────────────────────── *)
+    supports_tools : bool
+  ; supports_tool_choice : bool
+  ; supports_required_tool_choice : bool
+  ; supports_named_tool_choice : bool
+  ; supports_parallel_tool_calls : bool
+  ; assistant_tool_content_format : assistant_tool_content_format
+    (** Wire shape for assistant messages that contain tool calls but no visible
+        text. OpenAI-compatible providers disagree here: OpenAI accepts
+        [content:null], while GLM's OpenAI-compatible contract keeps
+        [content:""]. This is independent from reasoning replay. *)
+  ; chat_output_budget_field : chat_output_budget_field
+    (** Which Chat Completions field carries the output-token budget: the
+        classic [max_tokens] or the reasoning-era [max_completion_tokens]
+        OpenAI's gpt-5 family requires. Emission-side field name only; the
+        #2517 receipt policy (omit/clamp) is unchanged. *)
+  ; tool_schema_conformance : tool_schema_conformance
+    (** Whether this model's provider rejects enum/oneOf/anyOf/allOf inside
+        function parameter schemas. When conformant-only, the request
+        serializer projects tool schemas down to the allowed subset; the
+        dispatcher's [[params]] validation remains the authority. *)
+  ; (* ── Thinking / reasoning ──────────────────────────── *)
+    supports_reasoning : bool (** Any form of reasoning/thinking *)
+  ; accepted_reasoning_efforts : Reasoning_effort.t list option
+    (** Model/provider-specific subset of canonical reasoning efforts accepted
+        by the request wire format. [None] means no subset is declared and the
+        dialect vocabulary applies; [Some values] is enforced before request
+        serialization. *)
+  ; thinking_control_format : thinking_control_format
+    (** Wire-format for thinking control on OpenAI-compat backends.
+        Determines which JSON shape the backend emits for enable_thinking.
+        Only meaningful when [supports_reasoning]
+        is true and the request goes through backend_openai.
+        @since 0.184.0 *)
+  ; preserve_thinking_control_format : preserve_thinking_control_format
+    (** Wire-format for preserving historical reasoning between requests.
+        This is intentionally separate from [thinking_control_format]: some
+        models use [thinking.keep], some have no request toggle but require
+        replay, and Qwen-style chat templates use a nested boolean. *)
+  ; content_inline_reasoning : content_inline_reasoning
+  ; reasoning_output_format : reasoning_output_format
+    (** Request-side control for where provider reasoning is returned. Some
+        OpenAI-compatible providers require an explicit split switch before
+        returning reasoning in side-channel fields instead of embedding it in
+        visible [content]. *)
+  ; reasoning_streaming_format : reasoning_streaming_format
+    (** Optional streaming side-channel override. [Default_reasoning_streaming]
+        derives the parser field from [thinking_control_format]; catalog entries
+        set a concrete value when the endpoint stream field differs from the
+        request-side thinking control shape. *)
+  ; uncontrolled_reasoning : uncontrolled_reasoning
+  ; reasoning_replay_override : reasoning_replay_override
+    (** Optional override for the multi-turn reasoning replay policy. Defaults to
+        the policy implied by [thinking_control_format]; catalog entries set this
+        when the model's documented replay contract differs (e.g. Kimi K2). *)
+  ; (* ── Output format ─────────────────────────────────── *)
+    supports_response_format_json : bool (** JSON mode *)
+  ; supports_structured_output : bool (** JSON schema 100% guarantee *)
+  ; json_schema_dialect : json_schema_dialect
+  ; (* ── Input modalities ──────────────────────────────── *)
+    supports_multimodal_inputs : bool (** Any non-text input *)
+  ; supports_image_input : bool
+  ; supports_audio_input : bool
+  ; supports_video_input : bool
+  ; supports_document_input : bool
+    (** Whether the row accepts a [Document] block as input.
+
+        Deliberately a sibling of the image/audio/video fields rather than a
+        reading of [supports_multimodal_inputs]: document support is not
+        implied by image support (a vision row on the OpenAI-compatible Chat
+        Completions wire may accept images and have no document part at all),
+        and the catch-all cannot express the difference. Serialization consults
+        this at admission, so a document that the row cannot carry is reported
+        instead of being emitted as some other modality (agent-core boundary). *)
+  ; modality_priority : Modality.priority
+    (** Block ordering applied to multimodal user messages just before
+        serialization. [Visual_first] for Gemma 4 family.
+        @since 0.193.0 *)
+  ; (* ── Inference task ────────────────────────────────── *)
+    task : task option
+    (** Inference task declared by the model catalog entry (transcription,
+        speech, image/video generation). [None] = no declared task; there is
+        no model-id inference fallback. *)
+  ; (* ── Protocol ──────────────────────────────────────── *)
+    supports_native_streaming : bool
+  ; supports_system_prompt : bool
+  ; supports_assistant_prefill : bool
+  ; supports_prompt_caching : bool
+  ; (* ── Sampling parameters ───────────────────────────── *)
+    supports_top_k : bool
+  ; supports_min_p : bool
+  ; supports_seed : bool (** Deterministic seed for reproducible sampling. *)
+  ; ignored_sampling_parameters : sampling_parameter list
+    (** Request sampling parameters that must not be serialized for this
+        provider/model even when a caller supplied them. This is catalog data,
+        not a model-id heuristic. *)
+  ; (* ── Usage reporting ─────────────────────────────────── *)
+    emits_usage_tokens : bool
+    (** True when the provider's standard response carries
+      [input_tokens]/[output_tokens] (direct APIs like Anthropic,
+      OpenAI_compat, Gemini, Kimi, Glm, Ollama).
+
+      Consumers use this to decide whether a text-only turn with no
+      usage should be treated as a structurally unreported one
+      (not a coverage gap) vs. a real gap. *)
+  ; (* ── Model limitations ────────────────────────────────── *)
+    supported_models : string list option
+  }
+
+let default_capabilities =
+  { max_context_tokens = None
+  ; serving_constraint = None
+  ; max_output_tokens = None
+  ; supports_tools = false
+  ; supports_tool_choice = false
+  ; supports_required_tool_choice = false
+  ; supports_named_tool_choice = false
+  ; supports_parallel_tool_calls = false
+  ; assistant_tool_content_format = Assistant_tool_content_null
+  ; chat_output_budget_field = Chat_max_tokens
+  ; tool_schema_conformance = Rich_json_schema
+  ; supports_reasoning = false
+  ; accepted_reasoning_efforts = None
+  ; thinking_control_format = No_thinking_control
+  ; preserve_thinking_control_format = No_preserve_thinking_control
+  ; content_inline_reasoning = No_content_inline_reasoning
+  ; reasoning_output_format = No_reasoning_output_format
+  ; reasoning_streaming_format = Default_reasoning_streaming
+  ; uncontrolled_reasoning = Provider_default_reasoning
+  ; reasoning_replay_override = Default_reasoning_replay
+  ; supports_response_format_json = false
+  ; supports_structured_output = false
+  ; json_schema_dialect = Openai_json_schema
+  ; supports_multimodal_inputs = false
+  ; supports_image_input = false
+  ; supports_audio_input = false
+  ; supports_video_input = false
+  ; supports_document_input = false
+  ; modality_priority = Modality.Preserve_input_order
+  ; task = None
+  ; supports_native_streaming = false
+  ; supports_system_prompt = true
+  ; supports_assistant_prefill = true
+  ; supports_prompt_caching = false
+  ; supports_top_k = false
+  ; supports_min_p = false
+  ; supports_seed = false
+  ; ignored_sampling_parameters = []
+  ; emits_usage_tokens = true (* stricter default: most providers report usage *)
+  ; supported_models = None
+  }
+;;
+
+(** Structured-output tier a resolved capability record advertises.
+
+    Single typed view the request-admission decision
+    ({!Provider_config.validate_output_schema_request}) reads instead of
+    branching on provider identity. It is a total projection of the two
+    independent, catalog-sourced booleans — [supports_structured_output] (native
+    json_schema) and [supports_response_format_json] (json_object mode) — which
+    the provider catalog, model catalog, capability manifest, and public view
+    already thread. It is deliberately not a stored field: the two booleans stay
+    the single source of truth (they are separate, non-interchangeable contracts
+    per docs/provider-capabilities-spec.md), so this projection cannot drift.
+
+    A native schema guarantee is the top tier regardless of the JSON-mode flag,
+    so both [(structured=true, json=true)] and [(structured=true, json=false)]
+    map to [Native_json_schema]. JSON mode without a native schema field is
+    [Json_object_only]; neither flag is [No_structured_output]. *)
+let structured_output_support (caps : capabilities) : structured_output_support =
+  if caps.supports_structured_output
+  then Native_json_schema
+  else if caps.supports_response_format_json
+  then Json_object_only
+  else No_structured_output
+;;
+
+let effective_disable_parallel_tool_use
+      ~caller_disabled
+      ~supports_parallel_tool_calls
+      ~tools_present
+  =
+  caller_disabled || (tools_present && not supports_parallel_tool_calls)
+;;
+
+(* The lookups below take a parsed [Model_id.t]. Each public entry parses the
+   caller's string once here and answers [None] for a malformed id, as every
+   lookup did when each of them parsed (and discarded) the id itself. *)
+let with_model_id model_id f =
+  match Model_identifiers.Model_id.of_string model_id with
+  | Ok model_id -> f model_id
+  | Error _ -> None
+;;
+
+let anthropic_thinking_control_from_sources ~catalog ~manifest model_id =
+  let manifest_value () =
+    match manifest with
+    | None -> None
+    | Some manifest ->
+      (match
+         Capability_manifest.lookup manifest model_id
+       with
+       | Some entry ->
+         Option.map
+           anthropic_thinking_control_of_vocab_value
+           entry.anthropic_thinking_control
+       | None -> None)
+  in
+  match catalog with
+  | None -> manifest_value ()
+  | Some catalog ->
+    (match Model_catalog.lookup catalog model_id with
+     | Some entry ->
+       Option.map
+         anthropic_thinking_control_of_vocab_value
+         entry.anthropic_thinking_control
+     | None -> manifest_value ())
+;;
+
+let anthropic_thinking_control_for_model_id model_id =
+  with_model_id model_id
+    (anthropic_thinking_control_from_sources
+       ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()))
+;;
+
+let anthropic_thinking_control_for_provider_from_sources
+      ~catalog ~manifest ~provider model_id =
+  let manifest_value () = match provider with
+    | Model_catalog.Anonymous_wire
+        (Provider_kind.Anthropic | Kimi | Ollama | Gemini | Glm) ->
+      anthropic_thinking_control_from_sources ~catalog:None ~manifest model_id
+    | Model_catalog.Anonymous_wire Provider_kind.OpenAI_compat
+    | Model_catalog.Declared_provider _ -> None in
+  match catalog with
+  | None -> manifest_value ()
+  | Some catalog ->
+    (match Model_catalog.lookup_model_for_provider catalog ~provider ~model_id with
+     | Some entry ->
+       Option.map
+         anthropic_thinking_control_of_vocab_value
+         entry.anthropic_thinking_control
+     | None -> manifest_value ())
+;;
+
+let anthropic_thinking_control_for_provider_model_id ~provider ~model_id =
+  with_model_id model_id (fun model_id ->
+    anthropic_thinking_control_for_provider_from_sources
+      ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ())
+      ~provider model_id)
+;;
+
+let anthropic_capabilities =
+  { default_capabilities with
+    max_context_tokens = Some 200_000
+  ; (* default; opus/sonnet 4.6 = 1M *)
+    max_output_tokens = Some 8_192
+  ; (* default; higher for newer models *)
+    supports_tools = true
+  ; supports_tool_choice = true
+  ; supports_required_tool_choice = true
+  ; supports_named_tool_choice = true
+  ; supports_parallel_tool_calls = true
+  ; supports_reasoning = true
+  ; supports_structured_output = true
+  ; supports_multimodal_inputs = true
+  ; supports_image_input = true
+  ; (* The Messages API has a first-class [document] content block with its own
+       [source] object (docs.anthropic.com/en/docs/build-with-claude/pdf-support);
+       {!Api_common.content_block_to_json} emits exactly that shape. *)
+    supports_document_input = true
+  ; supports_native_streaming = true
+  ; supports_prompt_caching = true
+  ; (* Anthropic Messages API documents [top_k] as a valid sampling
+     parameter ("Only sample from the top K options for each
+     subsequent token", docs.anthropic.com/en/api/messages body
+     params). [backend_anthropic.build_request] already serializes
+     [config.top_k] unconditionally when [Some]; the capability record
+     must match so cross-layer consumers (the #831 Api_openai gate,
+     the #830 Backend_openai gate, and the capability_filter passes)
+     do not silently drop top_k when the caller routes an Anthropic
+     config through a capability-checking path. [supports_min_p]
+     remains [false] — Anthropic does not accept min_p. *)
+    supports_top_k = true
+  }
+;;
+
+let kimi_capabilities =
+  { default_capabilities with
+    max_context_tokens =
+      Some 256_000
+      (* platform.kimi.ai documents only the default max_tokens (32768); it does
+       not state a higher output ceiling. Keep the verified default here. A
+       higher ceiling (if any) is deferred to the per-provider capability pass. *)
+  ; max_output_tokens = Some 32_768
+  ; supports_tools = true
+  ; supports_tool_choice = true
+  ; (* Kimi's chat API documents [tools] but not [tool_choice] in any request
+     schema (platform.kimi.ai/docs/api/chat covers KimiK27Code/K26/K25/MoonshotV1
+     request bodies; none expose tool_choice), and tool_choice=required is
+     unsupported — developers prompt the model to force a tool instead. Plain
+     [auto] passes through the OpenAI-compatible endpoint so [supports_tool_choice]
+     stays true, but a forced *named* tool_choice has no faithful wire
+     representation. AGENT_CORE therefore treats Kimi like GLM: tools supported, named
+     forced tool_choice rejected with a typed [Unsupported_named_tool_choice]
+     rather than serialized into a request the model cannot honor. This is the
+     conservative declaration-over-probing default (same rationale as the Ollama
+     profile); a deployment that verified native named support can still override
+     per-entry via the model catalog. Ref checked 2026-06-30:
+     platform.kimi.ai/docs/api/chat, platform.kimi.ai/docs/api/tool-use. *)
+    supports_required_tool_choice = false
+  ; (* Same Kimi contract: named forced tool_choice has no faithful wire
+       representation. Keep required/named separated so Auto/None remain valid. *)
+    supports_named_tool_choice = false
+  ; supports_parallel_tool_calls = true
+  ; supports_reasoning = true
+  ; thinking_control_format = No_thinking_control
+  ; preserve_thinking_control_format = Always_preserved_thinking
+  ; reasoning_replay_override =
+      Force_preserve_always
+      (* Kimi K2 docs (platform.moonshot.ai, checked 2026-06-29): reasoning_content
+       must be replayed across turns — hard-required on tool-call turns
+       ("otherwise an error will be thrown") and recommended on all turns;
+       kimi-k2.7-code keeps Preserved Thinking always-on. The base Kimi profile
+       carries [Always_preserved_thinking], and this typed override preserves the
+       same replay contract for catalog rows whose per-entry capabilities inherit
+       base="kimi" without repeating the policy. *)
+  ; supports_response_format_json = true
+  ; (* Path-dependent, so keep the builtin declaration false. The platform
+       chat-completions API documents response_format json_schema with
+       strict=true (MFJS spec) — platform.kimi.ai/docs/api/chat, checked
+       2026-07-03 — and the Kimi Code coding-plan gateway honors it on its
+       OpenAI-compatible path (measured 10/10 schema compliance at
+       api.kimi.com/coding/v1/chat/completions). But this builtin speaks the
+       Anthropic-compatible /v1/messages path, which silently ignores
+       output_format and returns free text (measured 2026-07-03). A deployment
+       that routes Kimi through an OpenAI-compatible provider config can
+       override per-entry via the model catalog. Ollama Cloud Kimi rows are
+       provider-qualified and declare their own schema support. *)
+    supports_structured_output = false
+  ; supports_system_prompt = true
+  ; supports_native_streaming = true
+  ; supports_multimodal_inputs = true
+  ; supports_image_input = true
+  }
+;;
+
+let openai_compat_chat_capabilities =
+  (* [max_context_tokens] and [max_output_tokens] stay [None] (inherited from
+     [default_capabilities]): this preset covers arbitrary OpenAI-compatible
+     endpoints whose real windows agent core cannot know. A family-level guess
+     becomes the limit of every catalog-silent model. For output it is the wire
+     [max_tokens] and truncates long thinking; for context a caller that takes
+     the smaller of its declared window and this value clamps a 1M-token model
+     to the guess. Unknown means unknown — request builders omit the output
+     field, context consumers use the caller's declared window or fail with a
+     typed unknown-limit error, and per-model rows declare real ceilings. *)
+  { default_capabilities with
+    supports_tools = true
+  ; supports_tool_choice = true
+  ; supports_required_tool_choice = true
+  ; supports_named_tool_choice = true
+  ; supports_parallel_tool_calls = true
+  ; supports_response_format_json = true
+  ; supports_structured_output = true
+  ; supports_multimodal_inputs = true
+  ; supports_image_input = true
+  ; supports_native_streaming = true
+  ; supports_prompt_caching = false
+  }
+;;
+
+let openai_compat_chat_extended_capabilities =
+  { openai_compat_chat_capabilities with
+    supports_reasoning = true
+  ; thinking_control_format = Reasoning_effort
+  ; supports_top_k = true
+  ; supports_min_p = true
+  }
+;;
+
+(* A router publishes one effort contract for every model it serves: it accepts
+   the whole ladder and maps a level the chosen model lacks to the nearest one
+   it has, rather than refusing the request
+   (https://openrouter.ai/docs/use-cases/reasoning-tokens, checked 2026-09-18).
+   That makes the accepted set a property of the router, which is why it can be
+   declared here instead of once per model row.
+
+   [None_] is left out although the router accepts it. "The router takes the
+   value" and "the model stops thinking" are different claims, and mapping to
+   the nearest level turns the first into the second only by luck: a model with
+   no off state receives the neighbouring level and reasons on. The cost of
+   omitting it is that a caller asking to disable thinking is refused before
+   dispatch and takes its other path; the cost of including it would be a reply
+   the caller believes is thinking-free. A model whose off behaviour is
+   documented or measured declares [None_] on its own catalog row. *)
+let openrouter_capabilities =
+  { openai_compat_chat_extended_capabilities with
+    accepted_reasoning_efforts =
+      Some
+        [ Reasoning_effort.Minimal
+        ; Reasoning_effort.Low
+        ; Reasoning_effort.Medium
+        ; Reasoning_effort.High
+        ; Reasoning_effort.XHigh
+        ; Reasoning_effort.Max
+        ]
+  }
+;;
+
+let%test "the router's ladder carries every level it maps, and no off value" =
+  match openrouter_capabilities.accepted_reasoning_efforts with
+  | None -> false
+  | Some accepted ->
+    (* The omission is the decision, so it is the assertion: a request asking
+       this router to stop thinking is refused here rather than mapped to a
+       neighbouring level and returned as a thinking-free reply. *)
+    (not (List.mem Reasoning_effort.None_ accepted))
+    && List.for_all
+         (fun effort -> List.mem effort accepted)
+         [ Reasoning_effort.Minimal
+         ; Reasoning_effort.Low
+         ; Reasoning_effort.Medium
+         ; Reasoning_effort.High
+         ; Reasoning_effort.XHigh
+         ; Reasoning_effort.Max
+         ]
+;;
+
+let mimo_capabilities =
+  { openai_compat_chat_capabilities with
+    max_context_tokens = Some 1_000_000
+  ; max_output_tokens = Some 128_000
+  ; supports_reasoning = true
+  ; thinking_control_format = Thinking_object_only
+  ; content_inline_reasoning = No_content_inline_reasoning
+  ; reasoning_output_format = Split_reasoning_fields
+  ; reasoning_streaming_format = Delta_reasoning_field "reasoning_content"
+  ; reasoning_replay_override = Force_drop_without_tool_preserve_with_tool
+  ; supports_required_tool_choice = false
+  ; supports_named_tool_choice = false
+  ; supports_response_format_json = true
+  ; supports_structured_output = false
+  ; supports_multimodal_inputs = false
+  ; supports_image_input = false
+  ; supports_audio_input = false
+  ; supports_video_input = false
+  ; supports_document_input = false
+  ; supports_native_streaming = true
+  }
+;;
+
+(* Ollama OpenAI-compat endpoint behavior on tool_choice is model-dependent
+   (docs.ollama.com/capabilities/tool-calling: the parameter is silently
+   ignored for some models). Some Qwen3.5 deployments w/ native Jinja
+   chat template do honor tool_choice:required in practice.
+
+   Industry context: LiteLLM's model_prices_and_context_window.json
+   registry lacks per-Ollama-model tool support flags for the same
+   reason (see BerriAI/litellm#14067 — Ollama model metadata surfaces
+   no authoritative capability flag, so any static table is a guess).
+
+   Design choice here: declaration-over-probing. The default stays
+   conservative (supports_tool_choice = false → contract relaxes to
+   Allow_text_or_tool, text-only replies accepted even when the consumer
+   asked for a tool). A consumer that has verified its model-side support
+   states it on the model's catalog row, or -- for a model no row names --
+   in its own runtime capability table. Agent Core does not
+   match on [model_id] to guess model-side behavior — the consumer
+   (e.g. a config loader that knows it deployed Qwen3.5 w/ the Jinja
+   chat template) owns that policy. This is stricter than LiteLLM's
+   static-table approach, which requires JSON edits + redeploy to
+   flip capability, and avoids the fragile model_id pattern match that
+   the Claude Agent SDK sidesteps by being single-provider. *)
+(* NVIDIA NIM Nvidia: Llama-based OpenAI-compatible endpoint.
+   Thinking uses chat_template_kwargs (same wire format as Ollama's
+   llama-server backend). VL variants add image input.
+   Ref: build.nvidia.com/nvidia docs, Nvidia model cards. *)
+let provider_l_capabilities =
+  { openai_compat_chat_extended_capabilities with
+    supports_tool_choice = true
+  ; supports_reasoning = true
+  ; thinking_control_format = Chat_template_kwargs
+  ; preserve_thinking_control_format = Chat_template_kwargs_preserve_thinking
+  }
+;;
+
+let ollama_capabilities =
+  { openai_compat_chat_extended_capabilities with
+    supports_tool_choice = false
+  ; supports_required_tool_choice = false
+  ; supports_named_tool_choice = false
+  ; supports_seed = true
+  ; thinking_control_format = Ollama_think
+  }
+;;
+
+(* Ollama Cloud is a distinct provider identity (its own base_url + auth).
+   Reasoning-only replies still reach the user through the display path
+   ([Api_common.text_blocks_to_string] includes [Thinking] blocks); they are no longer
+   promoted into assistant answer text, which previously re-injected reasoning on
+   replay and caused the CoT loop (#2236).
+
+   IMPORTANT: do not inherit either exact-output capability from local Ollama.
+   "Ollama's Cloud currently does not support structured outputs"
+   (https://docs.ollama.com/capabilities/structured-outputs, re-read
+   2026-09-22), so a schema request has no Cloud contract to run on.
+
+   JSON mode is a second question, not the same one. The same page separates
+   the schema-constrained form from plain JSON generation, and the
+   OpenAI-compatible surface lists [response_format] among the fields it takes
+   (https://docs.ollama.com/api/openai-compatibility). What the docs do not
+   say is whether Cloud honours [response_format: json_object] for a given
+   model, so this base answers no for both and a row that has been measured
+   says otherwise for itself -- ten ollama_cloud rows below do. A reader who
+   comes here to make those rows agree with this base should measure first:
+   the difference is the only thing standing between the Librarian's JSON
+   lane and these models. *)
+let ollama_cloud_capabilities =
+  { ollama_capabilities with
+    supports_response_format_json = false
+  ; supports_structured_output = false
+  ; reasoning_replay_override =
+      Force_latest_user_turn_tool_calls
+      (* One contract for both wires of this provider. The native /api/chat
+         takes each assistant message's [thinking] back with its tool calls
+         (docs.ollama.com/capabilities/tool-calling), and the /v1 wire hands an
+         assistant [reasoning] field to that same slot (ollama openai/openai.go
+         [FromChatRequest], checked 2026-10-07). Before this the /v1 base fell
+         back to no replay, so every row that did not repeat the declaration
+         lost its reasoning between tool calls: 12 of the 19 ollama_cloud rows.
+         On 2026-10-06 one of them (glm-5.3-flash) thought 13 times in the first
+         48 steps of a keeper turn and never again over the next 1,579 tool
+         calls. A row whose model needs another contract still declares its
+         own. *)
+  }
+;;
+
+(* The same provider over its other wire. [[providers]] ollama_cloud declares
+   identity_kinds = ["ollama", "openai_compat"], and a deployment may point it
+   at either; the preset above describes the native /api/chat one it names in
+   [kind].
+
+   On the OpenAI-compatible wire the native [think] toggle does not exist, so
+   [Ollama_think] encodes nothing and a request carrying no control is not a
+   request with thinking off -- Ollama turns reasoning on by itself: "Ollama
+   auto-enables thinking for capable models when no reasoning_effort is
+   provided" (ollama#14820, docs.ollama.com/api/openai-compatibility).
+
+   The control this wire does have is [reasoning_effort]. The ladder was
+   measured against https://ollama.com/v1 on 2026-08-27 with
+   deepseek-v4-flash:0731, gemma4:31b, nemotron-3-ultra and kimi-k3:
+   none/low/medium/high/max all answered, and minimal/xhigh were refused by
+   the endpoint, which names the legal set in its own error -- 'invalid
+   reasoning value: ... (must be "high", "medium", "low", "max", or "none")'.
+
+   Structured output stays fail-closed for the same reason as the native
+   preset: the Cloud contract has not changed. *)
+let ollama_cloud_v1_capabilities =
+  { ollama_cloud_capabilities with
+    thinking_control_format = Reasoning_effort
+    (* The sentence above, as a value the admission can read: this endpoint
+       turns reasoning on by itself when the request carries no
+       [reasoning_effort], so a model row that declares no effort here runs
+       with reasoning on while its operator reads the config as off. Measured
+       2026-09-15 against https://ollama.com/v1 with deepseek-v4.1-flash:cloud,
+       three runs of one reasoning prompt, median reasoning characters: no
+       control 1985, "high" 1996, "medium" 1767, "low" 1671, "none" 0. An
+       uncontrolled request sits at the reasoning-on end of that ladder. *)
+  ; uncontrolled_reasoning = Provider_enables_reasoning
+  ; accepted_reasoning_efforts =
+      Some
+        [ Reasoning_effort.None_
+        ; Reasoning_effort.Low
+        ; Reasoning_effort.Medium
+        ; Reasoning_effort.High
+        ; Reasoning_effort.Max
+        ]
+  }
+;;
+
+let glm_capabilities =
+  { default_capabilities with
+    max_context_tokens = Some 200_000
+  ; (* The ceiling for a GLM id with no row of its own. 40960 is the lowest
+     limit a Z.AI endpoint has enforced: glm-5.1 refused anything higher on
+     2026-04-12 with "Invalid request: `max_tokens` must be less than or equal
+     to `40960`", on glm-coding and glm alike. On 2026-09-22 the glm-coding
+     endpoint named [1,131072] for glm-5.1, and the glm-coding rows in
+     models.toml carry their own measured ceilings; an id without a row keeps
+     this lower bound. *)
+    max_output_tokens = Some 40_960
+  ; supports_tools = true
+  ; (* Z.AI's function-calling docs currently document [tool_choice]
+     as default [auto] and "only supports auto". AGENT_CORE therefore treats
+     Glm as "tools supported, forced tool_choice unsupported":
+     callers may still send tools, but named forced tool_choice requests
+     are not serialized because GLM has no faithful representation for
+     them. The completion contract must stay relaxed so direct Glm text
+     replies do not count as contract violations. Ref checked 2026-04-21:
+     https://docs.z.ai/guides/capabilities/function-calling *)
+    supports_tool_choice = true
+  ; supports_required_tool_choice = false
+  ; supports_named_tool_choice = false
+  ; assistant_tool_content_format = Assistant_tool_content_empty_string
+  ; supports_reasoning = true
+  ; supports_response_format_json = true
+  ; (* Z.AI's current official docs describe JSON mode via
+     response_format={"type":"json_object"} plus prompt/schema-in-text
+     guidance, but do not document a native JSON-schema request field
+     equivalent to Openai's json_schema response_format. AGENT_CORE therefore
+     treats Glm as JSON-mode-only: supports_response_format_json=true
+     but supports_structured_output=false. validate_output_schema_request
+     rejects JsonSchema response formats for Glm configs to prevent silent
+     pass-through of schemas the provider will not enforce.
+     Ref: https://docs.z.ai/guides/capabilities/struct-output — checked 2026-04-21. *)
+    supports_structured_output = false
+  ; supports_native_streaming = true
+  ; (* Z.AI's chat-completion API carries the thinking toggle in a top-level
+       [thinking] object and only echoes prior-turn [reasoning_content] under
+       "preserved thinking" ([clear_thinking = false]). Declaring the wire here
+       is what makes the replay conditional typed capability data: the dialect
+       resolver reads [preserve_thinking_control_format], not a provider
+       identity predicate (Agent Core contract S1.1/S3.1).
+       Ref: https://docs.z.ai/api-reference/llm/chat-completion *)
+    preserve_thinking_control_format = Thinking_object_clear_thinking
+  }
+;;
+
+let gemini_capabilities =
+  { default_capabilities with
+    max_context_tokens = Some 1_000_000
+  ; max_output_tokens = Some 65_000
+  ; supports_tools = true
+  ; supports_tool_choice = true
+  ; supports_required_tool_choice = true
+  ; supports_parallel_tool_calls = true
+  ; supports_reasoning = true
+  ; supports_response_format_json = true
+  ; supports_structured_output = true
+  ; supports_multimodal_inputs = true
+  ; supports_image_input = true
+  ; supports_audio_input = true
+  ; supports_video_input = true
+  ; (* [inlineData] carries an arbitrary MIME type plus base64 bytes, so a
+       document keeps its own media type on the wire — the Gemini serializer
+       does not relabel it. *)
+    supports_document_input = true
+  ; supports_native_streaming = true
+  ; supports_prompt_caching = false
+  ; (* Google Gemini's generateContent API documents [topK] as part of
+     generationConfig (ai.google.dev/api/generate-content). The
+     [backend_gemini.build_request] serializer already emits it at
+     lib/llm_provider/backend_gemini.ml:162-164, so the capability
+     record must match. Same discrepancy story as anthropic_capabilities
+     (#832) — OpenAI-compat consumers that route a Gemini config
+     through a capability-checking path were silently dropping top_k.
+     [supports_min_p] stays false; Gemini's generationConfig has no
+     min_p field. *)
+    supports_top_k = true
+  }
+;;
+
+(* CLI subprocess transports have been removed; CLI-specific capability
+   records deleted. See PR #1809. *)
+
+(* ── Model-specific overrides (lookup table) ─────────── *)
+
+(** Capabilities preset for a canonical {!Provider_kind.t}.
+
+    Typed counterpart of {!capabilities_for_provider_label}: maps the 7 closed
+    variants directly to their presets without serialising the kind to a string
+    and re-parsing it. Adding a new variant to {!Provider_kind.t} forces a
+    compile error here, instead of silently falling through the [_ -> None] arm
+    of the label classifier. This is the path callers that already hold a typed
+    [kind] should use, so the
+    [kind |> string_of_provider_kind |> capabilities_for_provider_label]
+    round-trip disappears.
+
+    Wire aliases and presets not expressible as a {!Provider_kind.t}
+    (e.g. ["claude"], ["zhipu"], ["openai_chat_extended"], ["ollama_cloud"],
+    ["nvidia"]) remain reachable only through {!capabilities_for_provider_label}
+    at the catalog/env parse boundary.
+
+    @since 0.209.0 *)
+let capabilities_of_kind (kind : Provider_kind.t) : capabilities =
+  match kind with
+  | Provider_kind.Anthropic -> anthropic_capabilities
+  | Provider_kind.Kimi -> kimi_capabilities
+  | Provider_kind.OpenAI_compat -> openai_compat_chat_capabilities
+  | Provider_kind.Ollama -> ollama_capabilities
+  | Provider_kind.Gemini -> gemini_capabilities
+  | Provider_kind.Glm -> glm_capabilities
+;;
+
+let provider_kind_alias_of_label label =
+  match Provider_kind.of_string label with
+  | Some kind -> Some kind
+  | None ->
+    (match label with
+     | "claude" -> Some Provider_kind.Anthropic
+     | "openai" | "openai_chat" -> Some Provider_kind.OpenAI_compat
+     | "zhipu" | "glm-coding" -> Some Provider_kind.Glm
+     | _ -> None)
+;;
+
+(** Lookup capabilities by provider label string.
+
+    Canonical labels and aliases for the closed {!Provider_kind.t} space are
+    normalized to a typed kind first, then delegated to {!capabilities_of_kind}.
+    String-only presets that are not expressible as a provider kind stay at this
+    label boundary. Returns [None] for labels outside the recognized set so
+    callers can fail closed rather than silently treating unknown providers as
+    having default capabilities. *)
+let capabilities_for_provider_label label =
+  let label = String.lowercase_ascii (String.trim label) in
+  match provider_kind_alias_of_label label with
+  | Some kind -> Some (capabilities_of_kind kind)
+  | None ->
+    (match label with
+     | "openai_compat_chat_extended" | "openai_chat_extended" ->
+       Some openai_compat_chat_extended_capabilities
+     | "openrouter" -> Some openrouter_capabilities
+     | "xai" | "mistral" -> Some openai_compat_chat_extended_capabilities
+     | "cohere" ->
+       Some { openai_compat_chat_capabilities with json_schema_dialect = Json_object_schema }
+     | "mimo" -> Some mimo_capabilities
+     | "ollama_cloud" -> Some ollama_cloud_capabilities
+     | "ollama_cloud_v1" -> Some ollama_cloud_v1_capabilities
+     | "nvidia" -> Some provider_l_capabilities
+     | _ -> None)
+;;
+
+let%test "capabilities_of_kind aliases the same presets as the label classifier" =
+  (* SSOT guard: the label path delegates canonical kinds to the typed variant
+     path, so the resolved preset must be the exact same record. *)
+  List.for_all
+    (fun (kind, label) ->
+       let via_kind = capabilities_of_kind kind in
+       match capabilities_for_provider_label label with
+       | Some via_label -> via_label == via_kind
+       | None -> false)
+    [ Provider_kind.Anthropic, "anthropic"
+    ; Provider_kind.Kimi, "kimi"
+    ; Provider_kind.OpenAI_compat, "openai_compat"
+    ; Provider_kind.Ollama, "ollama"
+    ; Provider_kind.Gemini, "gemini"
+    ; Provider_kind.Glm, "glm"
+    ]
+;;
+
+let%test "every base_label vocab value resolves to a preset (no false-reject)" =
+  (* SSOT drift-guard (Agent Core contract): [Capability_vocab.base_label_values] is what
+     the catalog/manifest parsers accept for a [base] field. If a listed value
+     did NOT resolve here, the parser would accept a label that then silently
+     collapses to [default_capabilities] — reopening the gap this closes. So
+     every vocab value must resolve to [Some]. (The reverse — resolver labels not
+     in the vocab — is caught loudly at parse time, not silently.) *)
+  List.for_all
+    (fun label -> Option.is_some (capabilities_for_provider_label label))
+    Capability_vocab.base_label_values
+;;
+
+let%test "unknown base label resolves to None, not a permissive default" =
+  (* The classifier fails closed on unrecognised labels; the parsers turn that
+     [None] into a parse Error rather than [default_capabilities]. *)
+  List.for_all
+    (fun label -> Option.is_none (capabilities_for_provider_label label))
+    [ "runpod_mtp"; "vllm"; "typo_label"; "" ]
+;;
+
+(** Merge Discovery ctx_size into capabilities. *)
+let with_context_size caps ~ctx_size = { caps with max_context_tokens = Some ctx_size }
+
+(* ── Capability manifest integration ───────────────────── *)
+
+(** Apply a capability manifest entry on top of a base capabilities record.
+
+    [base_label] resolves to a provider preset via
+    [capabilities_for_provider_label]; defaults to [default_capabilities]
+    when absent or unrecognised.  Each [Some] field in [entry] overrides
+    the corresponding field of the base; [None] fields are left unchanged. *)
+
+let preserve_thinking_control_format_of_manifest_string raw =
+  Capability_vocab.preserve_thinking_control_format_of_string raw
+;;
+
+let warn_unknown_capability_value ~field raw =
+  Diag.warn
+    "capabilities"
+    "unknown %s value %S; keeping provider base capability"
+    field
+    raw
+;;
+
+let reasoning_replay_override_of_catalog_string raw =
+  Capability_vocab.reasoning_replay_override_of_string raw
+;;
+
+let sampling_parameter_to_string = Capability_vocab.sampling_parameter_to_string
+
+let assistant_tool_content_format_of_catalog_string raw =
+  Capability_vocab.assistant_tool_content_format_of_string raw
+
+let chat_output_budget_field_of_catalog_string raw =
+  Capability_vocab.chat_output_budget_field_of_string raw
+
+let tool_schema_conformance_of_catalog_string raw =
+  Capability_vocab.tool_schema_conformance_of_string raw
+;;
+
+let content_inline_reasoning_of_catalog_string raw =
+  Capability_vocab.content_inline_reasoning_of_string raw
+;;
+
+let reasoning_output_format_of_catalog_string raw =
+  Capability_vocab.reasoning_output_format_of_string raw
+;;
+
+let reasoning_streaming_format_of_catalog_string raw =
+  Capability_vocab.reasoning_streaming_format_of_string raw
+;;
+
+let modality_priority_of_catalog_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "preserve_input_order" | "preserve-input-order" | "preserve" ->
+    Some Modality.Preserve_input_order
+  | "visual_first" | "visual-first" -> Some Modality.Visual_first
+  | _ -> None
+;;
+
+let reasoning_efforts_of_catalog_strings ~field values =
+  let parsed =
+    List.map
+      (fun raw ->
+         match Reasoning_effort.of_string raw with
+         | Some effort -> Ok effort
+         | None -> Error raw)
+      values
+  in
+  let efforts, invalid =
+    List.partition_map
+      (function
+        | Ok effort -> Either.Left effort
+        | Error raw -> Either.Right raw)
+      parsed
+  in
+  match invalid with
+  | [] -> Some efforts
+  | values ->
+    Diag.warn
+      "capabilities"
+      "unknown %s value(s) %s; keeping provider base capability"
+      field
+      (String.concat ", " values);
+    None
+;;
+
+type declarative_capability_overrides =
+  { base_label : string option
+  ; max_context_tokens : int option
+  ; serving_constraint : Serving_constraint.t option
+  ; max_output_tokens : int option
+  ; supports_tools : bool option
+  ; supports_tool_choice : bool option
+  ; supports_required_tool_choice : bool option
+  ; supports_named_tool_choice : bool option
+  ; supports_parallel_tool_calls : bool option
+  ; assistant_tool_content_format : string option
+  ; chat_output_budget_field : string option
+  ; tool_schema_conformance : string option
+  ; supports_reasoning : bool option
+  ; accepted_reasoning_efforts : string list option
+  ; supports_response_format_json : bool option
+  ; supports_structured_output : bool option
+  ; json_schema_dialect : json_schema_dialect option
+  ; supports_multimodal_inputs : bool option
+  ; supports_image_input : bool option
+  ; supports_audio_input : bool option
+  ; supports_video_input : bool option
+  ; supports_document_input : bool option
+  ; modality_priority : string option
+  ; task : Capability_vocab.task option
+  ; supports_native_streaming : bool option
+  ; supports_system_prompt : bool option
+  ; supports_assistant_prefill : bool option
+  ; supports_prompt_caching : bool option
+  ; supports_top_k : bool option
+  ; supports_min_p : bool option
+  ; supports_seed : bool option
+  ; ignored_sampling_parameters : Capability_vocab.sampling_parameter list option
+  ; thinking_control_format : Capability_vocab.thinking_control_format option
+    (* Already joined with its token by the catalog/manifest parser; the token
+       lives in the [Chat_template_token] constructor, not a sibling field. *)
+  ; preserve_thinking_control_format : string option
+  ; content_inline_reasoning : string option
+  ; reasoning_output_format : string option
+  ; reasoning_streaming_format : string option
+  ; reasoning_replay : string option
+  }
+
+let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
+  { base_label = Option.map Capability_manifest.base_label_to_string entry.base_label
+  ; max_context_tokens = entry.max_context_tokens
+  ; serving_constraint = None
+  ; max_output_tokens = entry.max_output_tokens
+  ; supports_tools = entry.supports_tools
+  ; supports_tool_choice = entry.supports_tool_choice
+  ; supports_required_tool_choice = entry.supports_required_tool_choice
+  ; supports_named_tool_choice = entry.supports_named_tool_choice
+  ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
+  ; assistant_tool_content_format = entry.assistant_tool_content_format
+  ; chat_output_budget_field = entry.chat_output_budget_field
+  ; tool_schema_conformance = entry.tool_schema_conformance
+  ; supports_reasoning = entry.supports_reasoning
+  ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
+  ; supports_response_format_json = entry.supports_response_format_json
+  ; supports_structured_output = entry.supports_structured_output
+  ; json_schema_dialect = entry.json_schema_dialect
+  ; supports_multimodal_inputs = entry.supports_multimodal_inputs
+  ; supports_image_input = entry.supports_image_input
+  ; supports_audio_input = entry.supports_audio_input
+  ; supports_video_input = entry.supports_video_input
+  ; supports_document_input = entry.supports_document_input
+  ; modality_priority = entry.modality_priority
+  ; (* The JSON capability manifest carries no task field; task is
+       catalog-only vocabulary. *)
+    task = None
+  ; supports_native_streaming = entry.supports_native_streaming
+  ; supports_system_prompt = entry.supports_system_prompt
+  ; supports_assistant_prefill = entry.supports_assistant_prefill
+  ; supports_prompt_caching = entry.supports_prompt_caching
+  ; supports_top_k = entry.supports_top_k
+  ; supports_min_p = entry.supports_min_p
+  ; supports_seed = entry.supports_seed
+  ; ignored_sampling_parameters = entry.ignored_sampling_parameters
+  ; thinking_control_format = entry.thinking_control_format
+  ; preserve_thinking_control_format = entry.preserve_thinking_control_format
+  ; content_inline_reasoning = entry.content_inline_reasoning
+  ; reasoning_output_format = entry.reasoning_output_format
+  ; reasoning_streaming_format = entry.reasoning_streaming_format
+  ; reasoning_replay = entry.reasoning_replay
+  }
+;;
+
+let apply_declarative_capability_overrides ?(base=default_capabilities) overrides =
+  let base =
+    match overrides.base_label with
+    | None -> base
+    | Some label ->
+      (match capabilities_for_provider_label label with
+       | Some c -> c
+       | None -> default_capabilities)
+  in
+  let override_bool base_val = function
+    | Some b -> b
+    | None -> base_val
+  in
+  let supports_tool_choice =
+    override_bool base.supports_tool_choice overrides.supports_tool_choice
+  in
+  let supports_required_tool_choice =
+    match overrides.supports_required_tool_choice with
+    | Some required -> required && supports_tool_choice
+    | None -> base.supports_required_tool_choice && supports_tool_choice
+  in
+  (* Read only this field's own override, the way
+     [supports_required_tool_choice] above does. Consulting
+     [overrides.supports_tool_choice] here made an omission mean "yes": a
+     catalog row that declared `supports_tool_choice = true` and left
+     `supports_named_tool_choice` out was answered `true`, so the record
+     claimed a capability nobody wrote down. 21 rows in models.toml are
+     shaped that way. An absent field now falls through to the base record
+     like every sibling, and a row that really does support named choice has
+     to say so. *)
+  let supports_named_tool_choice =
+    match overrides.supports_named_tool_choice with
+    | Some named -> named && supports_tool_choice
+    | None -> base.supports_named_tool_choice && supports_tool_choice
+  in
+  let override_int_opt base_val = function
+    | Some n -> Some n
+    | None -> base_val
+  in
+  let capabilities =
+    { base with
+    max_context_tokens =
+      override_int_opt base.max_context_tokens overrides.max_context_tokens
+  ; serving_constraint =
+      (match overrides.serving_constraint with
+       | Some _ as constraint_ -> constraint_
+       | None -> base.serving_constraint)
+  ; max_output_tokens =
+      override_int_opt base.max_output_tokens overrides.max_output_tokens
+  ; supports_tools = override_bool base.supports_tools overrides.supports_tools
+  ; supports_tool_choice
+  ; supports_required_tool_choice
+  ; supports_named_tool_choice
+  ; supports_parallel_tool_calls =
+      override_bool
+        base.supports_parallel_tool_calls
+        overrides.supports_parallel_tool_calls
+  ; assistant_tool_content_format =
+      (match overrides.assistant_tool_content_format with
+       | Some s ->
+         (match assistant_tool_content_format_of_catalog_string s with
+          | Some format -> format
+          | None ->
+            warn_unknown_capability_value ~field:"assistant_tool_content_format" s;
+            base.assistant_tool_content_format)
+       | None -> base.assistant_tool_content_format)
+  ; chat_output_budget_field =
+      (match overrides.chat_output_budget_field with
+       | Some s ->
+         (match chat_output_budget_field_of_catalog_string s with
+          | Some field -> field
+          | None ->
+            warn_unknown_capability_value ~field:"chat_output_budget_field" s;
+            base.chat_output_budget_field)
+       | None -> base.chat_output_budget_field)
+  ; tool_schema_conformance =
+      (match overrides.tool_schema_conformance with
+       | Some s ->
+         (match tool_schema_conformance_of_catalog_string s with
+          | Some c -> c
+          | None ->
+            warn_unknown_capability_value ~field:"tool_schema_conformance" s;
+            base.tool_schema_conformance)
+       | None -> base.tool_schema_conformance)
+  ; supports_reasoning =
+      override_bool base.supports_reasoning overrides.supports_reasoning
+  ; accepted_reasoning_efforts =
+      (match overrides.accepted_reasoning_efforts with
+       | Some values ->
+         (match
+            reasoning_efforts_of_catalog_strings
+              ~field:"accepted_reasoning_efforts"
+              values
+          with
+          | Some efforts -> Some efforts
+          | None -> base.accepted_reasoning_efforts)
+       | None -> base.accepted_reasoning_efforts)
+  ; supports_response_format_json =
+      override_bool
+        base.supports_response_format_json
+        overrides.supports_response_format_json
+  ; supports_structured_output =
+      override_bool base.supports_structured_output overrides.supports_structured_output
+  ; json_schema_dialect = Option.value overrides.json_schema_dialect ~default:base.json_schema_dialect
+  ; supports_multimodal_inputs =
+      override_bool base.supports_multimodal_inputs overrides.supports_multimodal_inputs
+  ; supports_image_input =
+      override_bool base.supports_image_input overrides.supports_image_input
+  ; supports_audio_input =
+      override_bool base.supports_audio_input overrides.supports_audio_input
+  ; supports_video_input =
+      override_bool base.supports_video_input overrides.supports_video_input
+  ; supports_document_input =
+      override_bool base.supports_document_input overrides.supports_document_input
+  ; modality_priority =
+      (match overrides.modality_priority with
+       | Some s ->
+         (match modality_priority_of_catalog_string s with
+          | Some priority -> priority
+          | None ->
+            warn_unknown_capability_value ~field:"modality_priority" s;
+            base.modality_priority)
+       | None -> base.modality_priority)
+  ; task =
+      (* Already typed at the catalog parse boundary; no string re-parse. *)
+      (match overrides.task with
+       | Some _ as task -> task
+       | None -> base.task)
+  ; supports_native_streaming =
+      override_bool base.supports_native_streaming overrides.supports_native_streaming
+  ; supports_system_prompt =
+      override_bool base.supports_system_prompt overrides.supports_system_prompt
+  ; supports_assistant_prefill =
+      override_bool base.supports_assistant_prefill overrides.supports_assistant_prefill
+  ; supports_prompt_caching =
+      override_bool base.supports_prompt_caching overrides.supports_prompt_caching
+  ; supports_top_k = override_bool base.supports_top_k overrides.supports_top_k
+  ; supports_min_p = override_bool base.supports_min_p overrides.supports_min_p
+  ; supports_seed = override_bool base.supports_seed overrides.supports_seed
+  ; ignored_sampling_parameters =
+      (match overrides.ignored_sampling_parameters with
+       | Some parameters -> parameters
+       | None -> base.ignored_sampling_parameters)
+  ; thinking_control_format =
+      (* Typed and token-joined at catalog/manifest parse time (unknown labels
+         already failed closed there), so this is a plain override. *)
+      (match overrides.thinking_control_format with
+       | Some fmt -> fmt
+       | None -> base.thinking_control_format)
+  ; preserve_thinking_control_format =
+      (match overrides.preserve_thinking_control_format with
+       | Some s ->
+         (match preserve_thinking_control_format_of_manifest_string s with
+          | Some t -> t
+          | None ->
+            warn_unknown_capability_value ~field:"preserve_thinking_control_format" s;
+            base.preserve_thinking_control_format)
+       | None -> base.preserve_thinking_control_format)
+  ; content_inline_reasoning =
+      (match overrides.content_inline_reasoning with
+       | Some s ->
+         (match content_inline_reasoning_of_catalog_string s with
+          | Some format -> format
+          | None ->
+            warn_unknown_capability_value ~field:"content_inline_reasoning" s;
+            base.content_inline_reasoning)
+       | None -> base.content_inline_reasoning)
+  ; reasoning_output_format =
+      (match overrides.reasoning_output_format with
+       | Some s ->
+         (match reasoning_output_format_of_catalog_string s with
+          | Some format -> format
+          | None ->
+            warn_unknown_capability_value ~field:"reasoning_output_format" s;
+            base.reasoning_output_format)
+       | None -> base.reasoning_output_format)
+  ; reasoning_streaming_format =
+      (match overrides.reasoning_streaming_format with
+       | Some s ->
+         (match reasoning_streaming_format_of_catalog_string s with
+          | Some format -> format
+          | None ->
+            warn_unknown_capability_value ~field:"reasoning_streaming_format" s;
+            base.reasoning_streaming_format)
+       | None -> base.reasoning_streaming_format)
+  ; reasoning_replay_override =
+      (match overrides.reasoning_replay with
+       | Some s ->
+         (match reasoning_replay_override_of_catalog_string s with
+          | Some replay -> replay
+          | None ->
+            warn_unknown_capability_value ~field:"reasoning_replay" s;
+            base.reasoning_replay_override)
+       | None -> base.reasoning_replay_override)
+    }
+  in
+  (* Native adapters own their wire format, so [No_thinking_control] does not
+     erase an enabled model's effort vocabulary. An explicit lack of reasoning
+     support still invalidates it before native request validation. *)
+  if capabilities.supports_reasoning then capabilities
+  else { capabilities with accepted_reasoning_efforts = None }
+;;
+
+let apply_manifest_entry (entry : Capability_manifest.entry) : capabilities =
+  let capabilities =
+    entry |> overrides_of_manifest_entry |> apply_declarative_capability_overrides
+  in
+  (* [emits_usage_tokens] and [supported_models] are manifest-only overrides:
+     the shared declarative override record also serves the model catalog,
+     whose rows do not route these fields through it, so they are applied
+     here instead of widening the catalog path. *)
+  { capabilities with
+    emits_usage_tokens =
+      (match entry.emits_usage_tokens with
+       | Some emits -> emits
+       | None -> capabilities.emits_usage_tokens)
+  ; supported_models =
+      (match entry.supported_models with
+       | Some _ as models -> models
+       | None -> capabilities.supported_models)
+  }
+;;
+
+let%test "apply_manifest_entry applies thinking_control_format (Agent Core contract)" =
+  match
+    Capability_manifest.of_json
+      (Yojson.Safe.from_string
+         {|{"schema_version":2,"models":[{"model_id":"m","thinking_control_format":"chat_template_kwargs"}]}|})
+  |> Result.map Capability_manifest.entries
+  with
+  | Ok [ entry ] ->
+    (apply_manifest_entry entry).thinking_control_format = Chat_template_kwargs
+  | Ok _ | Error _ -> false
+;;
+
+let%test "apply_manifest_entry without thinking_control_format keeps base format" =
+  match
+    Capability_manifest.of_json
+      (Yojson.Safe.from_string {|{"schema_version":2,"models":[{"model_id":"m"}]}|})
+  |> Result.map Capability_manifest.entries
+  with
+  | Ok [ entry ] ->
+    (apply_manifest_entry entry).thinking_control_format = No_thinking_control
+  | Ok _ | Error _ -> false
+;;
+
+let%test "apply_manifest_entry applies reasoning_replay preserve_always" =
+  match
+    Capability_manifest.of_json
+      (Yojson.Safe.from_string
+         {|{"schema_version":2,"models":[{"model_id":"m","reasoning_replay":"preserve_always"}]}|})
+  |> Result.map Capability_manifest.entries
+  with
+  | Ok [ entry ] ->
+    (apply_manifest_entry entry).reasoning_replay_override = Force_preserve_always
+  | Ok _ | Error _ -> false
+;;
+
+let%test "apply_manifest_entry applies assistant_tool_content_format" =
+  match
+    Capability_manifest.of_json
+      (Yojson.Safe.from_string
+         {|{"schema_version":2,"models":[{"model_id":"m","assistant_tool_content_format":"empty_string"}]}|})
+  |> Result.map Capability_manifest.entries
+  with
+  | Ok [ entry ] ->
+    (apply_manifest_entry entry).assistant_tool_content_format
+    = Assistant_tool_content_empty_string
+  | Ok ([] | _ :: _ :: _) | Error _ -> false
+;;
+
+let%test "apply_manifest_entry without reasoning_replay keeps base default" =
+  match
+    Capability_manifest.of_json
+      (Yojson.Safe.from_string {|{"schema_version":2,"models":[{"model_id":"m"}]}|})
+  |> Result.map Capability_manifest.entries
+  with
+  | Ok [ entry ] ->
+    (apply_manifest_entry entry).reasoning_replay_override = Default_reasoning_replay
+  | Ok _ | Error _ -> false
+;;
+
+let%test "reasoning_replay_override_of_catalog_string parses vocabulary" =
+  reasoning_replay_override_of_catalog_string "preserve_always"
+  = Some Force_preserve_always
+  && reasoning_replay_override_of_catalog_string "drop_without_tool"
+     = Some Force_drop_without_tool_preserve_with_tool
+  && reasoning_replay_override_of_catalog_string "latest_user_turn_tool_calls"
+     = Some Force_latest_user_turn_tool_calls
+  && reasoning_replay_override_of_catalog_string "no_replay" = Some Force_no_replay
+  && reasoning_replay_override_of_catalog_string "" = None
+  && reasoning_replay_override_of_catalog_string "bogus" = None
+;;
+
+let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
+  { base_label = entry.base_label
+  ; max_context_tokens = entry.max_context_tokens
+  ; serving_constraint = entry.serving_constraint
+  ; max_output_tokens = entry.max_output_tokens
+  ; supports_tools = entry.supports_tools
+  ; supports_tool_choice = entry.supports_tool_choice
+  ; supports_required_tool_choice = entry.supports_required_tool_choice
+  ; supports_named_tool_choice = entry.supports_named_tool_choice
+  ; supports_parallel_tool_calls = entry.supports_parallel_tool_calls
+  ; assistant_tool_content_format = entry.assistant_tool_content_format
+  ; chat_output_budget_field = entry.chat_output_budget_field
+  ; tool_schema_conformance = entry.tool_schema_conformance
+  ; supports_reasoning = entry.supports_reasoning
+  ; accepted_reasoning_efforts = entry.accepted_reasoning_efforts
+  ; supports_response_format_json = entry.supports_response_format_json
+  ; supports_structured_output = entry.supports_structured_output
+  ; json_schema_dialect = entry.json_schema_dialect
+  ; supports_multimodal_inputs = entry.supports_multimodal_inputs
+  ; supports_image_input = entry.supports_image_input
+  ; supports_audio_input = entry.supports_audio_input
+  ; supports_video_input = entry.supports_video_input
+  ; supports_document_input = entry.supports_document_input
+  ; modality_priority = entry.modality_priority
+  ; task = entry.task
+  ; supports_native_streaming = entry.supports_native_streaming
+  ; supports_system_prompt = entry.supports_system_prompt
+  ; supports_assistant_prefill = entry.supports_assistant_prefill
+  ; supports_prompt_caching = entry.supports_prompt_caching
+  ; supports_top_k = entry.supports_top_k
+  ; supports_min_p = entry.supports_min_p
+  ; supports_seed = entry.supports_seed
+  ; ignored_sampling_parameters = entry.ignored_sampling_parameters
+  ; thinking_control_format = entry.thinking_control_format
+  ; preserve_thinking_control_format = entry.preserve_thinking_control_format
+  ; content_inline_reasoning = entry.content_inline_reasoning
+  ; reasoning_output_format = entry.reasoning_output_format
+  ; reasoning_streaming_format = entry.reasoning_streaming_format
+  ; reasoning_replay = entry.reasoning_replay
+  }
+;;
+
+let provider_base_label ~catalog ~wire provider =
+  match Model_catalog.provider_entry_for_reference catalog provider with
+  | None -> None
+  | Some provider ->
+    (match Option.bind wire (fun kind -> List.assoc_opt kind provider.capabilities_base_by_identity_kind) with
+     | Some _ as base -> base
+     | None -> provider.capabilities_base)
+;;
+
+let apply_catalog_entry ?base ~provider_entry ~wire
+    (entry : Model_catalog.model_entry) : capabilities =
+  let overrides = overrides_of_catalog_entry entry in
+  let wire_base = Option.bind provider_entry
+    (fun (provider : Model_catalog.provider_entry) ->
+      Option.bind wire (fun kind ->
+        List.assoc_opt kind provider.capabilities_base_by_identity_kind)) in
+  let base_label = match wire_base, overrides.base_label with
+    | (Some _ as base), _ -> base
+    | None, (Some _ as base) -> base
+    | None, None -> Option.bind provider_entry
+        (fun (provider : Model_catalog.provider_entry) -> provider.capabilities_base)
+  in
+  apply_declarative_capability_overrides ?base { overrides with base_label }
+;;
+
+(** Look up capabilities for [model_id] in the loaded model catalog only.
+
+    The catalog itself is resolved by {!Model_catalog.global}: an explicit
+    runtime override installed via {!Model_catalog.set_global}, otherwise the
+    build-time embedded AGENT_CORE [models.toml]. AGENT_CORE performs no environment-based
+    catalog discovery.
+
+    Returns [None] when no catalog is available or when the catalog has
+    no entry whose [model_id] matches [model_id]. There is no in-code
+    fallback table: the former built-in static table was removed when
+    model specifications were externalized to the TOML catalog. *)
+
+let for_model_id_from_catalog catalog model_id =
+  match catalog with
+  | Some catalog ->
+    (match Model_catalog.lookup catalog model_id with
+     | Some entry -> Some (apply_catalog_entry ~provider_entry:None ~wire:None entry)
+     | None -> None)
+  | None -> None
+;;
+
+let for_model_id_catalog model_id =
+  with_model_id model_id (for_model_id_from_catalog (Model_catalog.global ()))
+;;
+
+(** Look up capabilities for [model_id] against an explicit manifest,
+    falling back to the catalog lookup ({!for_model_id_catalog}) when no
+    manifest entry matches. *)
+let for_model_id_with_manifest_from_catalog ~catalog manifest model_id =
+  match Capability_manifest.lookup manifest model_id with
+  | Some entry -> Some (apply_manifest_entry entry)
+  | None -> for_model_id_from_catalog catalog model_id
+;;
+
+let for_model_id_with_manifest manifest model_id =
+  with_model_id model_id
+    (for_model_id_with_manifest_from_catalog ~catalog:(Model_catalog.global ()) manifest)
+;;
+
+(** Look up capabilities for [model_id].
+
+    Checks the globally loaded model catalog first, then the capability
+    manifest. Returns [None] when neither source has a matching entry;
+    there is no built-in fallback table. *)
+let for_model_id_from_sources ~catalog ~manifest model_id =
+  match catalog with
+  | Some catalog ->
+    (match Model_catalog.lookup catalog model_id with
+     | Some entry -> Some (apply_catalog_entry ~provider_entry:None ~wire:None entry)
+     | None ->
+       (match manifest with
+        | Some manifest -> for_model_id_with_manifest_from_catalog ~catalog:(Some catalog) manifest model_id
+        | None -> for_model_id_from_catalog (Some catalog) model_id))
+  | None ->
+    (match manifest with
+     | Some manifest -> for_model_id_with_manifest_from_catalog ~catalog:None manifest model_id
+     | None -> None)
+;;
+
+let for_model_id model_id =
+  with_model_id model_id
+    (for_model_id_from_sources
+       ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ()))
+;;
+
+let for_provider_reference_base ~catalog ~wire ~provider =
+  match catalog with
+  | None -> None
+  | Some catalog ->
+    Option.bind
+      (provider_base_label ~catalog ~wire provider)
+      capabilities_for_provider_label
+;;
+
+let for_provider_model_id_from_sources ~catalog ~manifest ~wire ~provider ~model_id =
+  let row = Option.bind catalog (fun catalog ->
+    Option.map (fun entry -> catalog, entry)
+      (Model_catalog.lookup_model_for_provider catalog ~provider ~model_id)) in
+  match row with
+  | Some (catalog, entry) ->
+    (match entry.Model_catalog.provider_name with
+     | None -> Some (apply_catalog_entry ~provider_entry:None ~wire:None entry)
+     | Some _ ->
+       let provider_entry = Model_catalog.provider_entry_for_reference catalog provider in
+       Some (apply_catalog_entry ~provider_entry ~wire entry))
+  | None ->
+    let manifest_caps = match provider with
+      | Model_catalog.Anonymous_wire Provider_kind.OpenAI_compat
+      | Model_catalog.Declared_provider _ -> None
+      | Model_catalog.Anonymous_wire
+          (Provider_kind.Anthropic | Kimi | Ollama | Gemini | Glm) ->
+        for_model_id_from_sources ~catalog:None ~manifest model_id
+    in
+    (match manifest_caps with
+     | Some _ as caps -> caps
+     | None -> for_provider_reference_base ~catalog ~wire ~provider)
+;;
+
+let for_provider_model_id ~wire ~provider ~model_id =
+  with_model_id model_id (fun model_id ->
+    for_provider_model_id_from_sources
+      ~catalog:(Model_catalog.global ()) ~manifest:(Capability_manifest.global ())
+      ~wire ~provider ~model_id)
+;;
+
+type request_policy =
+  { model_capabilities : capabilities option
+  ; anthropic_thinking_control : anthropic_thinking_control option
+  }
+
+let resolve_request_policy ~wire ~provider ~model_id =
+  match Model_identifiers.Model_id.of_string model_id with
+  | Error _ -> { model_capabilities = None; anthropic_thinking_control = None }
+  | Ok model_id ->
+  let catalog = Model_catalog.global () in
+  let manifest = Capability_manifest.global () in
+  let model_capabilities = for_provider_model_id_from_sources
+      ~catalog ~manifest ~wire:(Some wire) ~provider ~model_id in
+  let anthropic_thinking_control =
+    match wire with
+    | Provider_kind.Anthropic ->
+      anthropic_thinking_control_for_provider_from_sources
+        ~catalog ~manifest ~provider model_id
+    | Provider_kind.Kimi | Provider_kind.OpenAI_compat | Provider_kind.Ollama
+    | Provider_kind.Gemini | Provider_kind.Glm -> None
+  in
+  { model_capabilities; anthropic_thinking_control }
+;;
+
+let resolve_bound_request_policy ~catalog ~(provider : Model_catalog.provider_entry)
+    ~capabilities ~model_id =
+  let capabilities = match Option.bind
+      (List.assoc_opt provider.kind provider.capabilities_base_by_identity_kind)
+      capabilities_for_provider_label with
+    | Some capabilities -> capabilities
+    | None -> capabilities in
+  let row = match Model_identifiers.Model_id.of_string model_id with
+    | Error _ -> None
+    | Ok model_id -> Option.bind catalog (fun catalog ->
+        Model_catalog.lookup_model_for_provider_entry catalog ~provider ~model_id) in
+  match row with
+  | None -> {model_capabilities=Some capabilities;anthropic_thinking_control=None}
+  | Some row ->
+    let scoped_provider = match row.Model_catalog.provider_name with
+      | None -> None | Some _ -> Some provider in
+    let model_capabilities = Some (apply_catalog_entry ~base:capabilities
+        ~provider_entry:scoped_provider ~wire:(Some provider.kind) row) in
+    let anthropic_thinking_control = match provider.kind with
+      | Provider_kind.Anthropic -> Option.map anthropic_thinking_control_of_vocab_value
+          row.anthropic_thinking_control
+      | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> None in
+    {model_capabilities;anthropic_thinking_control}
+;;
+
+let request_policy_capabilities policy = policy.model_capabilities
+let request_policy_anthropic_thinking_control policy = policy.anthropic_thinking_control
+
+(* The token is the single source of truth carried by the entry's
+   [Chat_template_token] constructor (the parser validated its exactness), so it
+   is read back through the constructor rather than a sibling field. *)
+let token_of_declared_format format =
+  Option.bind format Capability_vocab.token_of_thinking_control_format
+;;
+
+let thinking_control_token_for_provider_model_id
+      ~(provider_label : string)
+      ~(model_id : string)
+  =
+  with_model_id model_id (fun model_id ->
+    match Model_catalog.global () with
+    | None -> None
+    | Some catalog ->
+      (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id with
+       | Some entry -> token_of_declared_format entry.Model_catalog.thinking_control_format
+       | None -> None))
+;;
+
+[@@@coverage off]
+
+let%test "for_model_id glm-4.5 has reasoning" =
+  match for_model_id "glm-4.5" with
+  | Some c ->
+    c.supports_reasoning
+    && c.max_context_tokens = Some 128_000
+    && c.max_output_tokens = Some 96_000
+  | None -> false
+;;
+
+let%test "for_provider_model_id glm-4-flash basic" =
+  match
+    for_provider_model_id
+      ~wire:None
+      ~provider:(Model_catalog.Anonymous_wire Provider_kind.Glm)
+      ~model_id:"glm-4-flash"
+  with
+  | Some c -> c.supports_tools && c.max_output_tokens = Some 4_096
+  | None -> false
+;;
+
+let%test "for_model_id glm-5 is text only" =
+  match for_model_id "glm-5" with
+  | Some c -> c.supports_reasoning && not c.supports_image_input
+  | None -> false
+;;
+
+let%test "for_model_id glm-5v has vision" =
+  match for_model_id "glm-5v-turbo" with
+  | Some c -> c.supports_reasoning && c.supports_image_input
+  | None -> false
+;;
+
+let%test "for_model_id glm-4.6v stays vision-capable" =
+  match for_model_id "glm-4.6v" with
+  | Some c ->
+    c.supports_reasoning && c.supports_image_input && c.max_output_tokens = Some 32_768
+  | None -> false
+;;
+
+let%test "for_model_id glm-4.5v stays vision-capable" =
+  match for_model_id "glm-4.5v" with
+  | Some c ->
+    c.supports_reasoning && c.supports_image_input && c.max_output_tokens = Some 16_384
+  | None -> false
+;;
+
+let%test "for_model_id glm-4.7-flashx has GLM-4.7 thinking limits" =
+  match for_model_id "glm-4.7-flashx" with
+  | Some c ->
+    c.supports_reasoning
+    && c.max_context_tokens = Some 200_000
+    && c.max_output_tokens = Some 128_000
+    && c.supports_tools
+  | None -> false
+;;
+
+let%test "for_model_id glm-4.7-flash has thinking" =
+  match for_model_id "glm-4.7-flash" with
+  | Some c -> c.supports_reasoning && c.max_output_tokens = Some 128_000
+  | None -> false
+;;
+
+let%test "for_model_id glm-4.5-flash has GLM-4.5 thinking limits" =
+  match for_model_id "glm-4.5-flash" with
+  | Some c ->
+    c.supports_reasoning
+    && c.max_context_tokens = Some 128_000
+    && c.max_output_tokens = Some 96_000
+    && c.supports_tools
+  | None -> false
+;;
+
+(* [for_model_id_catalog] tests below install an explicit catalog through
+   [Model_catalog.set_global] and restore the override afterwards, so they
+   are insulated from any caller-installed model catalog. Inline tests that
+   exercise the production catalog use the embedded default generated directly
+   from the AGENT_CORE-owned [models.toml].
+
+   Fixtures are strict TOML snapshots, parsed through the same constructor as
+   deployment catalogs; they are not auto-synced with [models.toml]. *)
+let%test_module "catalog fixtures" = (module struct
+let test_catalog_of_toml contents =
+  Model_catalog.of_toml_string ~source:"capabilities inline fixture" contents
+  |> Result.get_ok
+;;
+
+let%test_module "named tool choice catalog" =
+  (module struct
+    let test_catalog_entry model_id fields =
+      let catalog = test_catalog_of_toml
+          (Printf.sprintf "[[models]]\nmodel_id = %S\n%s" model_id fields) in
+      match Model_catalog.model_entries catalog with
+      | [ entry ] -> entry
+      | _ -> invalid_arg "capabilities fixture must declare one row"
+    ;;
+
+    let%test "named tool choice needs its own declaration, not a sibling override" =
+      (* A row that turns tool_choice on and says nothing about named choice used
+         to be answered `true`, so the record advertised a capability the catalog
+         never declared. 21 rows in models.toml are shaped this way. *)
+      let entry =
+        test_catalog_entry "named-choice-omitted" {|base = "openai_chat"
+supports_tools = true
+supports_tool_choice = true
+|}
+      in
+      let derived = apply_catalog_entry ~provider_entry:None ~wire:None entry in
+      let base =
+        match capabilities_for_provider_label "openai_chat" with
+        | Some c -> c
+        | None -> default_capabilities
+      in
+      derived.supports_tool_choice
+      && derived.supports_named_tool_choice = base.supports_named_tool_choice
+    ;;
+
+    let%test "named tool choice honours an explicit declaration" =
+      let entry =
+        test_catalog_entry "named-choice-declared" {|base = "openai_chat"
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = true
+|}
+      in
+      (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
+    ;;
+
+    let%test "named tool choice cannot outlive tool choice" =
+      (* Declaring named choice while tool choice is off stays false: the sibling
+         fields are conjoined, not independent. *)
+      let entry =
+        test_catalog_entry "named-choice-without-tool-choice" {|base = "openai_chat"
+supports_tools = true
+supports_tool_choice = false
+supports_named_tool_choice = true
+|}
+      in
+      not
+        (apply_catalog_entry ~provider_entry:None ~wire:None entry).supports_named_tool_choice
+    ;;
+  end)
+;;
+
+let test_catalog : Model_catalog.t =
+  test_catalog_of_toml {|
+[[models]]
+model_id = "qwen3"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+
+[[models]]
+model_id = "qwen3-32b"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+
+[[models]]
+model_id = "qwen3.5"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+
+[[models]]
+model_id = "qwen36-35b-a3b-mtp"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+
+[[models]]
+model_id = "qwen-3"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+
+[[models]]
+model_id = "qwen/qwen3.6"
+base = "openai_chat"
+max_context_tokens = 262144
+max_output_tokens = 81920
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_reasoning = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5.1"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5-turbo"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5v-turbo"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "glm-ocr"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 16384
+supports_tools = false
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "glm-4.7-flashx"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.7-flash"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.5-air"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.5-flash"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-5"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.6"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.7"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.5"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 96000
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+
+[[models]]
+model_id = "glm-4.6v"
+base = "glm"
+max_context_tokens = 128000
+max_output_tokens = 32768
+supports_tools = true
+supports_tool_choice = false
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_native_streaming = true
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "glm-4-flash"
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+
+[[models]]
+model_id = "glm-4v"
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "glm-4"
+max_context_tokens = 128000
+max_output_tokens = 4096
+supports_tools = true
+
+[[models]]
+model_id = "deepseek-v4-pro"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object"
+supports_native_streaming = true
+
+[[models]]
+model_id = "deepseek-ai/deepseek-v4-pro"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object"
+supports_native_streaming = true
+
+[[models]]
+model_id = "deepseek-v4-flash"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object"
+supports_native_streaming = true
+
+[[models]]
+model_id = "deepseek-ai/deepseek-v4-flash"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "thinking_object"
+supports_native_streaming = true
+
+[[models]]
+model_id = "nvidia/nvidia-vl"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "nvidia-vl"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+supports_multimodal_inputs = true
+supports_image_input = true
+
+[[models]]
+model_id = "nvidia/nvidia"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+
+[[models]]
+model_id = "nvidia"
+base = "nvidia"
+max_context_tokens = 131072
+max_output_tokens = 16384
+
+[[models]]
+model_id = "google/gemma-4"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+model_id = "google/gemma-4-26b-a4b"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = true
+supports_named_tool_choice = true
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_native_streaming = true
+supports_seed = true
+
+[[models]]
+model_id = "hf.co/unsloth/gemma-4"
+base = "ollama"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_seed = true
+
+[[models]]
+model_id = "hf.co/unsloth/gemma-4-e2b-it-qat-gguf"
+base = "ollama"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+thinking_control_format = "chat_template_token"
+thinking_control_token = "<|think|>"
+supports_multimodal_inputs = true
+supports_image_input = true
+modality_priority = "visual_first"
+supports_seed = true
+supports_audio_input = true
+
+[[models]]
+model_id = "claude-opus-5-5"
+base = "anthropic"
+max_context_tokens = 1000000
+max_output_tokens = 128000
+
+[[models]]
+model_id = "gpt-4.1"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 32000
+|}
+;;
+
+(* Installs [test_catalog] as the runtime override for the duration of [f],
+   then clears the override so subsequent lookups use the embedded catalog. *)
+let with_test_catalog f =
+  Model_catalog.set_global test_catalog;
+  Fun.protect ~finally:Model_catalog.clear_global f
+;;
+
+let%test "for_model_id_catalog qwen3 has extended thinking" =
+  with_test_catalog (fun () ->
+    match for_model_id_catalog "qwen3-32b" with
+    | Some c ->
+      c.supports_reasoning
+      && c.supports_tools
+      && c.supports_native_streaming
+    | None -> false)
+;;
+
+let%test "for_model_id_catalog qwen3.5 routes to Qwen_3 family" =
+  with_test_catalog (fun () ->
+    match for_model_id_catalog "qwen3.5" with
+    | Some c -> c.max_output_tokens = Some 81_920
+    | None -> false)
+;;
+
+let%test "for_model_id_catalog qwen36 model routes to Qwen_3 family" =
+  with_test_catalog (fun () ->
+    match for_model_id_catalog "qwen36-35b-a3b-mtp" with
+    | Some c ->
+      c.thinking_control_format = Chat_template_kwargs
+    | None -> false)
+;;
+
+let%test "for_model_id_catalog glm-5-turbo has GLM-5 thinking limits" =
+  with_test_catalog (fun () ->
+    match for_model_id_catalog "glm-5-turbo" with
+    | Some c ->
+      c.supports_reasoning
+      && c.max_context_tokens = Some 200_000
+      && c.max_output_tokens = Some 128_000
+    | None -> false)
+;;
+
+let%test "for_model_id_catalog glm-5.1 full model (reasoning + extended thinking)" =
+  with_test_catalog (fun () ->
+    match for_model_id_catalog "glm-5.1" with
+    | Some c ->
+      c.supports_reasoning
+      && c.max_output_tokens = Some 128_000
+    | None -> false)
+;;
+
+let%test "for_model_id_catalog bare glm-5 full model (reasoning + extended thinking)" =
+  with_test_catalog (fun () ->
+    match for_model_id_catalog "glm-5" with
+    | Some c ->
+      c.supports_reasoning
+      && c.max_output_tokens = Some 128_000
+    | None -> false)
+;;
+
+let%test "for_model_id_catalog catalog miss returns None" =
+  with_test_catalog (fun () ->
+    Option.is_none (for_model_id_catalog "totally-unknown-model-id"))
+;;
+
+let%test "for_model_id_catalog empty catalog returns None" =
+  Model_catalog.set_global Model_catalog.empty;
+  Fun.protect ~finally:Model_catalog.clear_global (fun () ->
+    Option.is_none (for_model_id_catalog "qwen3-32b"))
+;;
+
+let%test "Anthropic thinking policy resolves from the model catalog declaration" =
+  Model_catalog.set_global
+    (test_catalog_of_toml {|[[models]]
+model_id = "declared-anthropic-model"
+anthropic_thinking_control = "adaptive_default"
+|});
+  Fun.protect ~finally:Model_catalog.clear_global (fun () ->
+    anthropic_thinking_control_for_model_id "declared-anthropic-model"
+    = Some Anthropic_adaptive_default)
+;;
+
+let%test "Anthropic thinking policy falls back to manifest when catalog has no row" =
+  Model_catalog.set_global Model_catalog.empty;
+  let manifest = Capability_manifest.of_json (Yojson.Safe.from_string
+    {|{"schema_version":2,"models":[{"model_id":"manifest-anthropic-model","anthropic_thinking_control":"adaptive_disabled_through_high"}]}|})
+    |> Result.get_ok in
+  Capability_manifest.set_global manifest;
+  Fun.protect
+    ~finally:(fun () ->
+      Model_catalog.clear_global ();
+      Capability_manifest.clear_global ())
+    (fun () ->
+       anthropic_thinking_control_for_model_id "manifest-anthropic-model"
+       = Some Anthropic_adaptive_disabled_through_high)
+;;
+
+(* Adversarial F1 (2026-09-06): a provider-qualified row — deepseek on the
+   Anthropic-compatible surface — is invisible to the bare lookup, so the
+   provider-aware variant must be the one that sees its policy, and the bare
+   reading must stay blind to it. *)
+let%test "Anthropic thinking policy on a provider-qualified row resolves by provider label" =
+  Model_catalog.set_global
+    (test_catalog_of_toml {|[[models]]
+model_id = "provider-scoped-anthropic-model"
+provider_name = "deepseek-anthropic"
+anthropic_thinking_control = "always_adaptive"
+|});
+  Fun.protect ~finally:Model_catalog.clear_global (fun () ->
+    anthropic_thinking_control_for_provider_model_id
+      ~provider:(Model_catalog.Declared_provider "deepseek-anthropic")
+      ~model_id:"provider-scoped-anthropic-model"
+    = Some Anthropic_always_adaptive
+    && Option.is_none
+         (anthropic_thinking_control_for_model_id
+            "provider-scoped-anthropic-model"))
+;;
+
+(* --- emits_usage_tokens / capabilities_for_provider_label --- *)
+
+let%test "emits_usage_tokens: default is true" = default_capabilities.emits_usage_tokens
+
+let%test "emits_usage_tokens: anthropic reports usage" =
+  anthropic_capabilities.emits_usage_tokens
+;;
+
+let%test "emits_usage_tokens: ollama reports usage" =
+  ollama_capabilities.emits_usage_tokens
+;;
+
+let%test "capabilities_for_provider_label: anthropic" =
+  match capabilities_for_provider_label "anthropic" with
+  | Some c -> c.emits_usage_tokens
+  | None -> false
+;;
+
+let%test "capabilities_for_provider_label: openai alias" =
+  Option.is_some (capabilities_for_provider_label "openai")
+  && Option.is_some (capabilities_for_provider_label "openai_chat")
+;;
+
+let%test "capabilities_for_provider_label: glm alias" =
+  Option.is_some (capabilities_for_provider_label "glm")
+  && Option.is_some (capabilities_for_provider_label "glm-coding")
+;;
+
+let%test "capabilities_for_provider_label: unknown returns None" =
+  Option.is_none (capabilities_for_provider_label "not_a_real_provider_xyz")
+;;
+
+(* --- Nvidia / Gemma 4 --- *)
+
+let%test "provider_l_capabilities has chat_template_kwargs thinking" =
+  provider_l_capabilities.thinking_control_format = Chat_template_kwargs
+;;
+
+let%test "for_model_id nvidia/nvidia resolves reasoning and tool choice" =
+  (* The nvidia-ultra-253b row left the embedded catalog with #45872's exact
+     identities; nvidia/nvidia is the surviving bare nvidia row. *)
+  match for_model_id "nvidia/nvidia" with
+  | Some c -> c.supports_tool_choice
+  | None -> false
+;;
+
+let%test "for_model_id nvidia-vl has image input" =
+  match for_model_id "nvidia-vl" with
+  | Some c -> c.supports_image_input && c.supports_multimodal_inputs
+  | None -> false
+;;
+
+let%test "for_model_id qwen3 has chat_template_kwargs thinking control" =
+  (* Qwen3.x OpenAI-compatible llama.cpp/llama-server deployments return
+     [reasoning_content] when thinking is enabled through
+     {"chat_template_kwargs": {"enable_thinking": bool}}.  Without this
+     format, a declared thinking capability never reaches the wire. *)
+  match for_model_id "qwen3.6" with
+  | Some c -> c.thinking_control_format = Chat_template_kwargs
+  | None -> false
+;;
+
+(* nvidia-ultra-253b and nvidia/nvidia-core left the embedded catalog with
+   #45872's exact-identity rows; no surviving row carries their properties,
+   so the surviving nvidia rows carry this coverage now. *)
+
+let%test "for_model_id google/gemma-4-26b-a4b has tools + seed" =
+  match for_model_id "google/gemma-4-26b-a4b" with
+  | Some c ->
+    c.supports_tools
+    && c.supports_seed
+    && c.supports_image_input
+    && c.max_context_tokens = Some 262_144
+    && c.modality_priority = Modality.Visual_first
+  | None -> false
+;;
+
+let%test "for_model_id google/gemma-4-e2b has tools, audio, and 128K context" =
+  match for_model_id "google/gemma-4-e2b" with
+  | Some c ->
+    c.supports_tools
+    && c.supports_image_input
+    && c.supports_audio_input
+    && c.max_context_tokens = Some 131_072
+  | None -> false
+;;
+
+let%test "for_provider_model_id unsloth Gemma 4 QAT uses template token thinking" =
+  (* The QAT rows are provider-scoped (provider_name = "ollama"), so a bare
+     for_model_id cannot see them; the provider-scoped lookup is the real
+     runtime path. *)
+  match
+    for_provider_model_id ~wire:None
+      ~provider:(Model_catalog.Declared_provider "ollama")
+      ~model_id:"hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+  with
+  | Some c ->
+    c.supports_reasoning
+    && c.thinking_control_format = Chat_template_token "<|think|>"
+    && c.modality_priority = Modality.Visual_first
+  | None -> false
+;;
+
+let%test "for_provider_model_id unsloth Gemma 4 E2B QAT keeps exact 128K audio row" =
+  match
+    for_provider_model_id ~wire:None
+      ~provider:(Model_catalog.Declared_provider "ollama")
+      ~model_id:"hf.co/unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+  with
+  | Some c ->
+    c.supports_tools
+    && c.supports_image_input
+    && c.supports_audio_input
+    && c.max_context_tokens = Some 131_072
+    && c.thinking_control_format = Chat_template_token "<|think|>"
+    && c.modality_priority = Modality.Visual_first
+  | None -> false
+;;
+
+let%test "for_model_id hf.co/google Gemma 4 uses template token thinking" =
+  (* The 26B-A4B-it-qat-q4_0-gguf row left the catalog; hf.co/google/gemma-4
+     is the surviving ollama-hosted google QAT row with template-token thinking. *)
+  match for_model_id "hf.co/google/gemma-4" with
+  | Some c ->
+    c.supports_reasoning
+    && c.thinking_control_format = Chat_template_token "<|think|>"
+  | None -> false
+;;
+
+let%test "for_model_id google/gemma-4-e2b is not a 256K model" =
+  match for_model_id "google/gemma-4-e2b" with
+  | Some c -> c.max_context_tokens = Some 131_072
+  | None -> false
+;;
+
+let%test "for_model_id google/gemma-4-31b resolves" =
+  match for_model_id "google/gemma-4-31b" with
+  | Some c -> c.supports_tools && c.supports_image_input
+  | None -> false
+;;
+
+let%test "for_model_id Qwen mtp alias uses chat_template_kwargs" =
+  match for_model_id "qwen36-35b-a3b-mtp" with
+  | Some c ->
+    c.thinking_control_format = Chat_template_kwargs
+  | None -> false
+;;
+
+let%test "capabilities_for_provider_label: nvidia" =
+  match capabilities_for_provider_label "nvidia" with
+  | Some c -> c.thinking_control_format = Chat_template_kwargs
+  | None -> false
+;;
+
+(* Exact declarations keep their capability fingerprints without inheritance. *)
+let%test
+    "for_model_id_catalog: specific model IDs get correct (not shadowed) capabilities"
+  =
+  with_test_catalog (fun () ->
+    let check model_id expected =
+      match for_model_id_catalog model_id with
+      | Some c -> expected c
+      | None -> false
+    in
+    List.for_all
+      (fun (m, e) -> check m e)
+      [ ( "glm-4.7-flash"
+        , fun c -> c.max_output_tokens = Some 128_000 )
+      ; ( "glm-4.5-flash"
+        , fun c -> c.max_output_tokens = Some 96_000 )
+      ; ( "glm-5-turbo"
+        , fun c -> c.max_output_tokens = Some 128_000 )
+      ; ( "glm-5-turbo"
+        , fun c -> c.max_output_tokens = Some 128_000 )
+      ; ("glm-4.6v", fun c -> c.supports_image_input && c.supports_reasoning)
+      ; ( "glm-4.7-flash"
+        , fun c -> c.max_output_tokens = Some 128_000 && c.supports_reasoning )
+      ; ( "glm-4.7-flashx"
+        , fun c -> c.max_output_tokens = Some 128_000 && c.supports_reasoning )
+      ; ( "glm-4-flash"
+        , fun c -> c.max_output_tokens = Some 4_096 && not c.supports_reasoning )
+      ; ("glm-4v", fun c -> c.supports_image_input)
+      ; ( "glm-4.5-air"
+        , fun c -> c.max_output_tokens = Some 96_000 && c.supports_reasoning )
+      ; ( "glm-4.5-air"
+        , fun c -> c.max_output_tokens = Some 96_000 && c.supports_reasoning )
+      ; ( "glm-5v-turbo"
+        , fun c ->
+            c.supports_image_input
+            && c.supports_reasoning
+            && c.max_output_tokens = Some 128_000 )
+      ; ( "glm-5v-turbo"
+        , fun c ->
+            c.supports_image_input
+            && c.supports_reasoning
+            && c.max_output_tokens = Some 128_000 )
+      ; ("glm-ocr", fun c -> c.supports_image_input && not c.supports_tools)
+      ; ("glm-ocr", fun c -> c.supports_image_input && not c.supports_tools)
+      ; ("claude-opus-5-5", fun c -> c.max_output_tokens = Some 128_000)
+      ; ("gpt-4.1", fun c -> c.max_output_tokens = Some 32_000)
+      ; ( "deepseek-v4-flash"
+        , fun c ->
+            c.thinking_control_format = Thinking_object
+            && c.max_output_tokens = Some 384_000 )
+      ; ( "deepseek-v4-flash"
+        , fun c ->
+            c.thinking_control_format = Thinking_object
+            && c.max_output_tokens = Some 384_000 )
+      ; ( "deepseek-v4-pro"
+        , fun c ->
+            c.thinking_control_format = Thinking_object
+            && c.max_output_tokens = Some 384_000 )
+      ; ( "deepseek-ai/DeepSeek-V4-Flash"
+        , fun c ->
+            c.thinking_control_format = Thinking_object
+            && c.max_output_tokens = Some 384_000 )
+      ; ( "deepseek-ai/DeepSeek-V4-Pro"
+        , fun c ->
+            c.thinking_control_format = Thinking_object
+            && c.max_output_tokens = Some 384_000 )
+      ; ( "qwen/qwen3.6"
+        , fun c ->
+            c.thinking_control_format = Chat_template_kwargs
+            )
+      ; ( "deepseek-v4-pro"
+        , fun c ->
+            c.thinking_control_format = Thinking_object
+            && c.max_output_tokens = Some 384_000 )
+      ; ( "nvidia"
+        , fun c ->
+            c.thinking_control_format = Chat_template_kwargs && c.supports_tool_choice )
+      ; ( "nvidia/nvidia"
+        , fun c ->
+            c.thinking_control_format = Chat_template_kwargs && c.supports_tool_choice )
+      ; ("nvidia-vl", fun c -> c.supports_image_input && c.supports_multimodal_inputs)
+      ; ( "google/gemma-4-26b-a4b"
+        , fun c ->
+            c.supports_tools
+            && c.supports_image_input
+            && c.supports_seed
+            && c.modality_priority = Modality.Visual_first
+            && c.max_context_tokens = Some 262_144 )
+      ; ( "hf.co/unsloth/gemma-4"
+        , fun c ->
+            c.supports_reasoning
+            && c.thinking_control_format = Chat_template_token "<|think|>" )
+      ; ( "hf.co/unsloth/gemma-4-e2b-it-qat-gguf"
+        , fun c ->
+            c.supports_audio_input
+            && c.thinking_control_format = Chat_template_token "<|think|>"
+            && c.max_context_tokens = Some 131_072 )
+      ])
+;;
+
+let%test "undeclared model variants do not inherit catalog policies" =
+  with_test_catalog (fun () ->
+    List.for_all (fun (entry : Model_catalog.model_entry) ->
+      let raw = Model_identifiers.Model_id.to_string entry.model_id in
+      List.for_all (fun variant -> Option.is_none (for_model_id_catalog variant))
+        [raw ^ ".undeclared"; "undeclared-provider/" ^ raw]) (Model_catalog.model_entries test_catalog))
+;;
+
+end)
+;;
+
+(* ── Capability drift detection ────────────────────────── *)
+
+type drift_observation =
+  | Usage_missing_but_declared (** [emits_usage_tokens=true] but response has no usage *)
+  | Tools_used_but_declared_unsupported
+  (** Response contains ToolUse but [supports_tools=false] *)
+  | Thinking_returned_but_declared_unsupported
+  (** Response contains Thinking/RedactedThinking but [supports_reasoning=false] *)
+  | Stop_tool_use_but_declared_unsupported
+  (** [stop_reason=StopToolUse] but [supports_tools=false] *)
+[@@deriving show]
+
+let detect_drift (caps : capabilities) (resp : Types.api_response)
+  : drift_observation list
+  =
+  let obs = ref [] in
+  (* Usage drift *)
+  if caps.emits_usage_tokens && resp.usage = None
+  then obs := Usage_missing_but_declared :: !obs;
+  (* Content block analysis.
+     Enumerate every [Types.content_block] variant explicitly so that adding
+     a new constructor (e.g. [Video], [Reasoning_summary]) triggers an
+     exhaustiveness warning here, forcing a deliberate decision on whether
+     the new block carries tool-use or reasoning semantics. The previous
+     [_ -> ()] catch-all silently grouped 5 unrelated variants and would
+     have absorbed any future block without review. *)
+  let has_tool_use = ref false
+  and has_thinking = ref false in
+  List.iter
+    (fun (block : Types.content_block) ->
+       match block with
+       | ToolUse _ -> has_tool_use := true
+       | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> has_thinking := true
+       | Text _ | ToolResult _ | Image _ | Document _ | Audio _ ->
+         (* No capability-drift signal: these blocks are valid against any
+           capability set the response declares. *)
+         ())
+    resp.content;
+  if !has_tool_use && not caps.supports_tools
+  then obs := Tools_used_but_declared_unsupported :: !obs;
+  if !has_thinking && not caps.supports_reasoning
+  then obs := Thinking_returned_but_declared_unsupported :: !obs;
+  (* Stop reason analysis *)
+  if resp.stop_reason = Types.StopToolUse && not caps.supports_tools
+  then obs := Stop_tool_use_but_declared_unsupported :: !obs;
+  List.rev !obs
+;;
+
+(* ── Alias collision invariant ─────────────────────── *)
+
+(* Aliases must resolve to the same underlying capabilities record.
+   If a new provider is added with overlapping labels, this test catches
+   divergence. M06 regression guard. *)
+let%test "capabilities_for_provider_label: aliases resolve to identical capabilities" =
+  let resolve label = capabilities_for_provider_label label in
+  let same_base a b =
+    match resolve a, resolve b with
+    | Some ca, Some cb ->
+      ca.supports_tools = cb.supports_tools
+      && ca.supports_reasoning = cb.supports_reasoning
+      && ca.emits_usage_tokens = cb.emits_usage_tokens
+      && ca.max_context_tokens = cb.max_context_tokens
+      && ca.max_output_tokens = cb.max_output_tokens
+      && ca.supports_image_input = cb.supports_image_input
+      && ca.thinking_control_format = cb.thinking_control_format
+      && ca.accepted_reasoning_efforts = cb.accepted_reasoning_efforts
+      && ca.preserve_thinking_control_format = cb.preserve_thinking_control_format
+      && ca.content_inline_reasoning = cb.content_inline_reasoning
+      && ca.reasoning_output_format = cb.reasoning_output_format
+      && ca.reasoning_streaming_format = cb.reasoning_streaming_format
+      && ca.assistant_tool_content_format = cb.assistant_tool_content_format
+      && ca.ignored_sampling_parameters = cb.ignored_sampling_parameters
+      && ca.reasoning_replay_override = cb.reasoning_replay_override
+    | _ -> false
+  in
+  let alias_pairs = [ "openai", "openai_chat"; "glm", "glm-coding" ] in
+  List.for_all (fun (a, b) -> same_base a b) alias_pairs
+  && Option.is_some (resolve "anthropic")
+  && Option.is_some (resolve "gemini")
+  && Option.is_some (resolve "ollama")
+  && Option.is_some (resolve "kimi")
+  && Option.is_some (resolve "xai")
+  && Option.is_some (resolve "mistral")
+  && Option.is_some (resolve "cohere")
+  && Option.is_some (resolve "mimo")
+  && Option.is_some (resolve "nvidia")
+;;
+
+(* Every declared label is reachable — no dead branches in the match.
+   If a label is added to the match but has no corresponding capability
+   binding, this test will fail. *)
+let%test "capabilities_for_provider_label: all declared labels resolve" =
+  let labels =
+    [ "anthropic"
+    ; "openai"
+    ; "openai_chat"
+    ; "openai_chat_extended"
+    ; "openrouter"
+    ; "gemini"
+    ; "ollama"
+    ; "glm"
+    ; "glm-coding"
+    ; "xai"
+    ; "mistral"
+    ; "cohere"
+    ; "mimo"
+    ; "nvidia"
+    ; "kimi"
+    ]
+  in
+  List.for_all (fun l -> Option.is_some (capabilities_for_provider_label l)) labels
+;;
+
+(* Every label resolves to a distinct capability fingerprint unless
+   explicitly aliased. Catches accidental capability merging. *)
+let%test
+    "capabilities_for_provider_label: no accidental aliasing across distinct providers"
+  =
+  let non_aliased = [ "anthropic"; "gemini"; "ollama"; "kimi"; "nvidia" ] in
+  let fingerprints =
+    List.filter_map
+      (fun l ->
+         match capabilities_for_provider_label l with
+         | Some c ->
+           Some
+             ( c.supports_tools
+             , c.supports_reasoning
+             , c.emits_usage_tokens
+             , c.max_context_tokens
+             , c.max_output_tokens
+             , c.thinking_control_format )
+         | None -> None)
+      non_aliased
+  in
+  (* Each non-aliased provider should have at least one distinguishing field *)
+  let n = List.length fingerprints in
+  n = List.length non_aliased
+;;

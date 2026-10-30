@@ -1,0 +1,70 @@
+{
+  "source": "a6fba325404c963061b7b95c4c564e35f5ea5e2e",
+  "receipt": "/tmp/masc-addon-goal-resume-20261021/native-39937556339/receipt.json",
+  "launcher_realpath": "/private/tmp/masc-addon-goal-resume-20261021/native-39937556339/masc-native-addon-launcher",
+  "actual_sha256": "fe2803bcddbed5865a5d6213b8340da3c188d67e1a0063391255711ac046e93d",
+  "kernel_observations": [
+    {
+      "unix": 1792751254.424656,
+      "monotonic_ns": 1456353716101916,
+      "pid": 76284,
+      "parent_pid": 63988,
+      "kernel_executable_path": "/private/tmp/masc-addon-goal-resume-20261021/native-39937556339/masc-native-addon-launcher",
+      "same_pid_exec_transitions": [
+        {
+          "unix": 1792751254.424656,
+          "monotonic_ns": 1456353716101916,
+          "pid": 76284,
+          "parent_pid": 63988,
+          "kernel_executable_path": "/private/tmp/masc-addon-goal-resume-20261021/native-39937556339/masc-native-addon-launcher"
+        },
+        {
+          "unix": 1792751254.4327419,
+          "monotonic_ns": 1456353724187500,
+          "pid": 76284,
+          "parent_pid": 63988,
+          "kernel_executable_path": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14"
+        },
+        {
+          "unix": 1792751254.438027,
+          "monotonic_ns": 1456353729472208,
+          "pid": 76284,
+          "parent_pid": 63988,
+          "kernel_executable_path": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+        }
+      ]
+    },
+    {
+      "unix": 1792751318.63092,
+      "monotonic_ns": 1456417921468375,
+      "pid": 84600,
+      "parent_pid": 63988,
+      "kernel_executable_path": "/private/tmp/masc-addon-goal-resume-20261021/native-39937556339/masc-native-addon-launcher",
+      "same_pid_exec_transitions": [
+        {
+          "unix": 1792751318.63092,
+          "monotonic_ns": 1456417921468375,
+          "pid": 84600,
+          "parent_pid": 63988,
+          "kernel_executable_path": "/private/tmp/masc-addon-goal-resume-20261021/native-39937556339/masc-native-addon-launcher"
+        },
+        {
+          "unix": 1792751318.640801,
+          "monotonic_ns": 1456417931349541,
+          "pid": 84600,
+          "parent_pid": 63988,
+          "kernel_executable_path": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/bin/python3.14"
+        },
+        {
+          "unix": 1792751318.645256,
+          "monotonic_ns": 1456417935804500,
+          "pid": 84600,
+          "parent_pid": 63988,
+          "kernel_executable_path": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+        }
+      ]
+    }
+  ],
+  "PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+  "observation_scope": "Read-only macOS libproc on exact server child PIDs; no wrappers/source modifications; launcher is observed before it execs Python."
+}

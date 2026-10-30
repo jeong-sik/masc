@@ -1,0 +1,11 @@
+{
+  "scope": "Python AST plus authored fixture checks and actual isolated decoder; no PTY/native execution",
+  "python_ast_files": 182,
+  "fixture_payloads_decoded": 5,
+  "sources": {
+    "test/tui_keyboard_keepers.py": "eae0fdc038c7ca558744a40ca8e7ab604848097ebb5f09a6577ff999f087131c",
+    "test/test_tui_lane_inventory_pty.py": "ad837148019f06561c5370cc7ee2ee7115c4a7a58518bcaa845a48a7813ff7bc",
+    "test/test_tui_lane_heading_keeps_its_reading.py": "3607b3d0cb4342129a910485e82e21e773c4c8d6392300902e86d98be125687c",
+    "test/test_tui_runtime_lane_editor.py": "ce06d4be60687a445e1eb833a2e3066814187324faca265e951b0e7ebd4ef012"
+  }
+}

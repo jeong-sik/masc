@@ -1,0 +1,50 @@
+{
+  "scope": "Independent read-only revalidation of already executed installed CLI receipts, current installed release/original bytes, and saved state captures. No rerun of native inspectors or runtime mutation by reviewer.",
+  "status": "passed",
+  "source_commit": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+  "binary_sha256": "41a75acff6d190e767cebee3b53c371ed643293a41e1f1b5d93a6c5ab88c180d",
+  "release_files_rehashed": 5431,
+  "original_formats_revalidated": [
+    "pptx",
+    "mp4",
+    "pdf"
+  ],
+  "rendered_pngs_redecoded_and_compared": 16,
+  "raw_receipt_file_hashes_verified": 37,
+  "state_capture_files_unchanged": 352,
+  "protected_state_paths_unchanged": 191,
+  "directly_viewed": [
+    "pptx/page-006.png",
+    "pdf/page-006.png"
+  ],
+  "visual_observation": "Both selected page renders show readable Korean text and three choices (leave, take, not decide yet). Font/layout differences between original PDF and PPTX-to-PDF rendering are visible; pixel equality or a complete visual/content verdict is not claimed.",
+  "github_api_observations": {
+    "test": {
+      "id": 34710740227,
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34710740227",
+      "target_suites": 15,
+      "target_test_cases": 228
+    },
+    "arm_release_job": {
+      "id": 103598999598,
+      "run_id": 34710741534,
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "851f412a88f4d5bf290dfa67ac60c4b78bb3ebb1",
+      "url": "https://github.com/jeong-sik/masc/actions/runs/34710741534/job/103598999598"
+    }
+  },
+  "all_platform_release_success_claimed": false,
+  "not_proven": [
+    "LLM media comprehension or semantic artifact acceptance",
+    "Task/Goal approval",
+    "automatic verifier lane invocation on these originals",
+    "audio decoding on this particular MP4 (no audio stream)",
+    "all-platform release completion",
+    "general visual fidelity or accessibility",
+    "long-running Keeper or semantic memory continuity"
+  ]
+}

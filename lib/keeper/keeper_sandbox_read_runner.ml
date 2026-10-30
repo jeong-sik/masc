@@ -1,0 +1,116 @@
+module type Backend = sig
+  val container_path_of_host :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string ->
+    (string, string) result
+
+  val read_complete_file :
+    config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string -> timeout_sec:float -> unit -> (string, string) result
+
+  val read_file :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?start_line:int ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (string, Keeper_sandbox_read_backend.read_error) result
+
+  val run_command_with_status :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?ok_exit_codes:int list ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    command_argv:string list ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (Unix.process_status * string, string) result
+
+  val run_command :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?ok_exit_codes:int list ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    command_argv:string list ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (string, string) result
+end
+
+module type S = sig
+  val backend_via : meta:Keeper_meta_contract.keeper_meta -> string
+
+  val container_path_of_host :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string ->
+    (string, string) result
+
+  val read_complete_file :
+    config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string -> timeout_sec:float -> unit -> (string, string) result
+
+  val read_file :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?start_line:int ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    host_path:string ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (string, Keeper_sandbox_read_backend.read_error) result
+
+  val run_command_with_status :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?ok_exit_codes:int list ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    command_argv:string list ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (Unix.process_status * string, string) result
+
+  val run_command :
+    ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+    ?ok_exit_codes:int list ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    command_argv:string list ->
+    max_bytes:int ->
+    timeout_sec:float ->
+    unit ->
+    (string, string) result
+end
+
+module Make (Backend : Backend) = struct
+  let backend_via ~(meta : Keeper_meta_contract.keeper_meta) =
+    Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile
+
+  let container_path_of_host = Backend.container_path_of_host
+  let read_complete_file = Backend.read_complete_file
+  let read_file = Backend.read_file
+  let run_command_with_status = Backend.run_command_with_status
+  let run_command = Backend.run_command
+end
+
+module Docker_backend = struct
+  let container_path_of_host = Keeper_sandbox_read_backend.container_path_of_host
+  let read_complete_file ~config ~meta ~host_path ~timeout_sec () =
+    Keeper_sandbox_read_backend.read_complete_file ~config ~meta ~host_path ~timeout_sec ()
+  let read_file ?turn_sandbox_factory ?start_line ~config ~meta ~host_path ~max_bytes ~timeout_sec () =
+    Keeper_sandbox_read_backend.read_file ?turn_sandbox_factory ?start_line ~config ~meta ~host_path ~max_bytes ~timeout_sec ()
+  let run_command_with_status ?turn_sandbox_factory ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec () =
+    Keeper_sandbox_read_backend.run_command_with_status ?turn_sandbox_factory ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+  let run_command ?turn_sandbox_factory ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec () =
+    Keeper_sandbox_read_backend.run_command ?turn_sandbox_factory ?ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
+end
+
+include Make (Docker_backend)

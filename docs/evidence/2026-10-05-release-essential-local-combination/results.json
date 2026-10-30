@@ -1,0 +1,117 @@
+{
+  "candidate": "7e10a972db75e696448e128f495b650bb2d3c1bd",
+  "tree": "ea50994c383863092ec21d5868f353d31e08aa03",
+  "parents": [
+    "a549b6e0fb99ebf3792dbff2a3844fa9dd2ccf88",
+    "d98f76c980a06f64e60fe209ccde44b376f2e256"
+  ],
+  "profile_sha256": "70e088bf9a046c385ada20ac67069ee315491975ac37ccee38554b4048f0f93d",
+  "profile": {
+    "profile": "release-essential-v1",
+    "suites": [
+      "test_tui_chat_queue_wiring",
+      "test_tui_chat_input_pty",
+      "test_tui_remote_workspace_history_pty",
+      "test_keeper_turn_interrupt",
+      "test_keeper_chat_operation_http",
+      "test_keeper_chat_delivery_identity",
+      "test_mcp_session_task_lifecycle",
+      "keeper_chat_operations/test_keeper_chat_operation_store",
+      "test_goal_tools",
+      "test_goal_verification_agent",
+      "test_workspace_memory_ledger",
+      "test_keeper_librarian_continuity",
+      "test_schedule_store"
+    ]
+  },
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/qualify-release-essential-current-fixtures-20261005",
+  "local_only": true,
+  "results": [
+    {
+      "suite": "test_tui_chat_input_pty",
+      "result": "OK",
+      "seconds": 44
+    },
+    {
+      "suite": "test_tui_remote_workspace_history_pty",
+      "result": "OK",
+      "seconds": 100
+    },
+    {
+      "suite": "test/test_tui_chat_queue_wiring",
+      "result": "OK",
+      "seconds": 1
+    },
+    {
+      "suite": "test/test_keeper_turn_interrupt",
+      "result": "OK",
+      "seconds": 1
+    },
+    {
+      "suite": "test/test_keeper_chat_operation_http",
+      "result": "OK",
+      "seconds": 1
+    },
+    {
+      "suite": "test/test_keeper_chat_delivery_identity",
+      "result": "OK",
+      "seconds": 1
+    },
+    {
+      "suite": "test/test_mcp_session_task_lifecycle",
+      "result": "OK",
+      "seconds": 1
+    },
+    {
+      "suite": "test/keeper_chat_operations/test_keeper_chat_operation_store",
+      "result": "OK",
+      "seconds": 1
+    },
+    {
+      "suite": "test/test_goal_tools",
+      "result": "OK",
+      "seconds": 1
+    },
+    {
+      "suite": "test/test_goal_verification_agent",
+      "result": "OK",
+      "seconds": 2
+    },
+    {
+      "suite": "test/test_workspace_memory_ledger",
+      "result": "OK",
+      "seconds": 1
+    },
+    {
+      "suite": "test/test_keeper_librarian_continuity",
+      "result": "OK",
+      "seconds": 8
+    },
+    {
+      "suite": "test/test_schedule_store",
+      "result": "OK",
+      "seconds": 3
+    }
+  ],
+  "prebuild": {
+    "handle": 33714,
+    "exit_code": 0
+  },
+  "canonical_runner": {
+    "handle": 32698,
+    "exit_code": 0,
+    "command": "OPAMSWITCH=5.5.1 DUNE_JOBS=2 CI_TEST_LOG_FILE=/tmp/release-essential-local-candidate.log bash scripts/run-release-behavior.sh"
+  },
+  "logs": {
+    "/tmp/release-essential-local-prebuild.log": "631fbb80a0d7444bb420a0672888a77486ffbda1b3cf5bb220ce09d9f95a9ebb",
+    "/tmp/release-essential-local-runner.log": "a033bf9b277aed60ba1c64f5239db3d541b61074c5fc8c257a2f1c1c449179eb",
+    "/tmp/release-essential-local-candidate.log": "a033bf9b277aed60ba1c64f5239db3d541b61074c5fc8c257a2f1c1c449179eb"
+  },
+  "binaries": {
+    "_build/default/bin/masc_tui.exe": "2eac8757d03607883b7be75947b988a3e5cbd6da043b988caba84a3d57737b94",
+    "_build/default/bin/main_eio.exe": "f77377f4952c7a4f57714313c492a51514023bc48559897facd914f82ee73cd4"
+  },
+  "after_candidate": "7e10a972db75e696448e128f495b650bb2d3c1bd",
+  "worktree_clean": true,
+  "limits": "Local combined candidate only; 13 selected suites, not fullCI/RC/deployment/liveprovider. Metadata/Homeoutsideprofile not qualified. No TerminalBench execution."
+}

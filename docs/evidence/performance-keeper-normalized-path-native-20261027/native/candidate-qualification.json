@@ -1,0 +1,39 @@
+{
+  "schema": "masc.qualified-native-normalized-path.v1",
+  "qualified_utc": "2026-10-26T18:40:03.718941+00:00",
+  "workflow": "Minimal manual checks",
+  "run_id": 40375875592,
+  "workflow_conclusion": "success",
+  "artifact_id": 12674977446,
+  "builder_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "application_source": "f861e7c628ff5cfd504c7e85120c39a804a99c41",
+  "archive_sha256": "774c14570d011aee3611f66983623143a6ca5a5bba81578fe57e9cc8b0d61ace",
+  "server_sha256": "8cf014ab8a9eeb564bd8f0f56d162f77fc619dffe9ea9fb4fdcdd4a6620d1d6f",
+  "tui_sha256": "40c3c43a98e9f7e95ef23278d2fe5305c3c110d5dab76cf511ce11005875184b",
+  "native_suites": [
+    {
+      "suite": "test_tui_published_reports",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_document_search",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_image_admission",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_resource_images",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    }
+  ],
+  "actual_build_commit_commands_match": true,
+  "primary_installed": false,
+  "visible_ui": false,
+  "scope": "Actual byte/source identity and four selected native resource suites; no owned workload result or overall native performance gain yet"
+}

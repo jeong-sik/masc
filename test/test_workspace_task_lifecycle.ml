@@ -1,0 +1,492 @@
+module L = Workspace_task_lifecycle
+module D = Masc_domain
+
+let owner = "alice"
+let now = "2026-07-13T00:00:00Z"
+let producer_reason = "the premise no longer holds"
+
+
+let decide
+      ?(notes = "evidence at /tmp/proof")
+      ?reason
+      ~same_agent
+      ~task_status
+      ~action
+      ()
+  =
+  L.decide
+    ~new_verification_id:(fun () -> "vrf-1")
+    ~same_agent:(fun _ -> same_agent)
+    ~agent_name:owner
+    ~task_id:"task-1"
+    ~task_status
+    ~action
+    ~now
+    ~notes
+    ~reason
+;;
+
+let in_progress = D.InProgress { assignee = owner; started_at = now }
+
+let awaiting =
+  D.AwaitingVerification
+    { assignee = owner
+    ; started_at = now
+    ; submitted_at = now
+    ; verification_id = "vrf-1"
+    }
+;;
+
+let contains ~needle haystack =
+  let nl = String.length needle
+  and hl = String.length haystack in
+  let rec go i = i + nl <= hl && (String.equal (String.sub haystack i nl) needle || go (i + 1)) in
+  nl = 0 || go 0
+;;
+
+let expect_error expected = function
+  | Error actual when actual = expected -> ()
+  | Error _ -> failwith "unexpected lifecycle error"
+  | Ok _ -> failwith "expected lifecycle error"
+;;
+
+let test_done_requires_verification_submission () =
+  decide ~same_agent:true ~task_status:in_progress ~action:D.Done_action ()
+  |> expect_error L.Verification_submission_required
+;;
+
+let test_claimed_done_requires_verification_submission () =
+  let claimed = D.Claimed { assignee = owner; claimed_at = now } in
+  decide ~same_agent:true ~task_status:claimed ~action:D.Done_action ()
+  |> expect_error L.Verification_submission_required
+;;
+
+let test_done_has_no_non_verification_lane () =
+  decide ~same_agent:true ~task_status:in_progress ~action:D.Done_action ()
+  |> expect_error L.Verification_submission_required
+;;
+
+(* The holder ends its own Task at once, with the reason on the record. *)
+let cancelled_with_reason ~what = function
+  | Ok { L.new_status = D.Cancelled { cancelled_by; reason; _ }; _ } ->
+    if not (String.equal cancelled_by owner)
+    then failwith (what ^ ": the canceller must be recorded");
+    if reason <> Some producer_reason
+    then failwith (what ^ ": the stated reason must be recorded")
+  | Ok { L.new_status = D.AwaitingVerification _; _ } ->
+    failwith (what ^ ": a holder's cancel must not wait for anyone")
+  | Ok _ -> failwith (what ^ ": cancel did not end the task")
+  | Error _ -> failwith (what ^ ": cancel was refused")
+;;
+
+let test_holder_cancel_ends_the_task_at_once () =
+  let claimed = D.Claimed { assignee = owner; claimed_at = now } in
+  decide ~reason:producer_reason ~same_agent:true ~task_status:claimed ~action:D.Cancel ()
+  |> cancelled_with_reason ~what:"claimed";
+  decide ~reason:producer_reason ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()
+  |> cancelled_with_reason ~what:"in progress"
+;;
+
+(* A pending submission is the producer's own, so withdrawing it ends the Task
+   the same way. *)
+let test_cancel_of_a_pending_submission_ends_the_task () =
+  decide ~reason:producer_reason ~same_agent:true ~task_status:awaiting ~action:D.Cancel ()
+  |> cancelled_with_reason ~what:"pending submission"
+;;
+
+let test_holder_cancel_requires_a_reason () =
+  decide ~same_agent:true ~task_status:in_progress ~action:D.Cancel ()
+  |> expect_error L.Cancel_reason_required;
+  decide ~same_agent:true ~task_status:awaiting ~action:D.Cancel ()
+  |> expect_error L.Cancel_reason_required
+;;
+
+let test_cancel_of_someone_elses_task_is_refused () =
+  decide ~reason:producer_reason ~same_agent:false ~task_status:in_progress ~action:D.Cancel ()
+  |> expect_error (L.Current_owner_required { current_assignee = owner });
+  decide ~reason:producer_reason ~same_agent:false ~task_status:awaiting ~action:D.Cancel ()
+  |> expect_error (L.Current_owner_required { current_assignee = owner })
+;;
+
+(* Refusal carries the authoritative holder and never allocates a new
+   submission, including when another actor tries to supersede a pending one. *)
+let test_submit_refusal_preserves_holder_and_pending_submission () =
+  List.iter
+    (fun task_status ->
+       let allocated = ref false in
+       let result =
+         L.decide
+           ~new_verification_id:(fun () -> allocated := true; "unexpected")
+           ~same_agent:(fun _ -> false)
+           ~agent_name:"intruder" ~task_id:"task-1" ~task_status
+           ~action:D.Submit_for_verification ~now ~notes:"other actor's evidence"
+           ~reason:None
+       in
+       result |> expect_error (L.Current_owner_required { current_assignee = owner });
+       if !allocated then failwith "a refusal must not supersede the owner's submission")
+    [ D.Claimed { assignee = owner; claimed_at = now }; in_progress; awaiting ];
+  decide ~same_agent:true ~task_status:D.Todo ~action:D.Submit_for_verification ()
+  |> expect_error L.Claim_required
+;;
+
+let test_held_action_refusals_and_pending_release () =
+  List.iter
+    (fun action ->
+       decide ~reason:producer_reason ~same_agent:false ~task_status:in_progress ~action ()
+       |> expect_error (L.Current_owner_required { current_assignee = owner }))
+    [ D.Claim; D.Start; D.Done_action; D.Cancel; D.Release ];
+  decide ~same_agent:true ~task_status:awaiting ~action:D.Release ()
+  |> expect_error L.Invalid_transition;
+  decide ~same_agent:false ~task_status:awaiting ~action:D.Release ()
+  |> expect_error (L.Current_owner_required { current_assignee = owner })
+;;
+
+let test_operator_cancel_states () =
+  let operator_id = "operator" in
+  let cancel task_status reason =
+    L.decide_operator_cancel ~operator_id ~task_status ~now ~reason
+  in
+  List.iter (fun task_status ->
+    match cancel task_status (Some "  wrong scope  ") with
+    | Ok { L.new_status = D.Cancelled { cancelled_by; reason; _ }; set_current = None }
+      when cancelled_by = operator_id && reason = Some "wrong scope" -> ()
+    | Ok _ | Error _ -> failwith "operator cancellation must record the real actor")
+    [ D.Todo; D.Claimed { assignee = owner; claimed_at = now }; in_progress; awaiting ];
+  List.iter (fun reason ->
+    cancel in_progress reason |> expect_error L.Cancel_reason_required)
+    [ None; Some ""; Some "  " ];
+  cancel (D.Done { assignee = owner; completed_at = now; notes = None })
+    (Some producer_reason) |> expect_error L.Invalid_transition;
+  let prior = D.Cancelled { cancelled_by = owner; cancelled_at = now;
+                           reason = Some producer_reason } in
+  match cancel prior None with
+  | Ok { L.new_status; _ } when new_status = prior -> ()
+  | Ok _ | Error _ -> failwith "operator retry must preserve the original cancellation"
+;;
+
+let test_cancel_cannot_undo_a_finished_task () =
+  let done_status = D.Done { assignee = owner; completed_at = now; notes = None } in
+  decide ~same_agent:true ~task_status:done_status ~action:D.Cancel ()
+  |> expect_error L.Invalid_transition
+;;
+
+let approve status =
+  L.decide_verdict
+    ~authority:(D.Human_operator { operator_id = "op-1" })
+    ~verdict:D.Verdict_approved
+    ~task_id:"task-1"
+    ~verification_id:"vrf-1"
+    ~task_status:status
+    ~now
+    ~notes:"operator's own note"
+;;
+
+let test_approval_ends_the_task_as_done () =
+  match approve awaiting with
+  | Ok { decision = { new_status = D.Done { assignee; _ }; _ }; _ }
+    when String.equal assignee owner -> ()
+  | Ok _ | Error _ -> failwith "an approved submission must end as Done"
+;;
+
+let test_verification_preserves_original_start_time () =
+  let original_started_at = "2026-07-12T23:45:00Z" in
+  let submitted =
+    match
+      decide
+        ~same_agent:true
+        ~task_status:(D.InProgress { assignee = owner; started_at = original_started_at })
+        ~action:D.Submit_for_verification
+        ()
+    with
+    | Ok
+        { new_status =
+            D.AwaitingVerification { started_at; submitted_at; verification_id; _ }
+        ; _
+        }
+      when String.equal started_at original_started_at
+           && String.equal submitted_at now
+           && String.equal verification_id "vrf-1" ->
+      D.AwaitingVerification
+        { assignee = owner; started_at; submitted_at; verification_id }
+    | Ok _ | Error _ -> failwith "submission must preserve the producer start time"
+  in
+  match
+    L.decide_verdict
+      ~authority:(D.System_llm_agent { agent_run_id = "judge-run-preserve-start" })
+      ~verdict:(D.Verdict_rejected { reason = "missing evidence" })
+      ~task_id:"task-1"
+      ~verification_id:"vrf-1"
+      ~task_status:submitted
+      ~now:"2026-07-13T00:10:00Z"
+      ~notes:""
+  with
+  | Ok { decision = { new_status = D.InProgress { started_at; _ }; _ }; _ }
+    when String.equal started_at original_started_at -> ()
+  | Ok _ | Error _ -> failwith "rejection must restore the original producer start time"
+;;
+
+let test_awaiting_metrics_use_original_start_time () =
+  let original_started_at = "2026-07-12T23:45:00Z" in
+  let expected =
+    match D.parse_iso8601_opt original_started_at with
+    | Some timestamp -> timestamp
+    | None -> failwith "test timestamp must be valid RFC 3339"
+  in
+  let actual =
+    Workspace_task_classify.task_started_at_unix
+      (D.AwaitingVerification
+         { assignee = owner
+         ; started_at = original_started_at
+         ; submitted_at = "2026-07-13T00:00:00Z"
+         ; verification_id = "vrf-metrics"
+         })
+  in
+  match actual with
+  | Some actual when Float.compare expected actual = 0 -> ()
+  | Some _ | None -> failwith "awaiting metrics must use the original producer start time"
+;;
+
+(* #26575: a start that does not parse has no duration. It used to read as
+   [now], so the completion metric reported a 0 ms task. *)
+let test_unparsable_start_has_no_duration () =
+  let unparsable = "not-a-timestamp" in
+  List.iter
+    (fun (label, status) ->
+       match Workspace_task_classify.task_started_at_unix status with
+       | None -> ()
+       | Some _ -> failwith (label ^ ": an unparsable start must not yield a start time"))
+    [ "claimed", D.Claimed { assignee = owner; claimed_at = unparsable }
+    ; "in_progress", D.InProgress { assignee = owner; started_at = unparsable }
+    ; ( "awaiting_verification"
+      , D.AwaitingVerification
+          { assignee = owner
+          ; started_at = unparsable
+          ; submitted_at = now
+          ; verification_id = "vrf-unparsable"
+          } )
+    ]
+;;
+
+(* A start after [now] is a clock that ran backwards: it has no duration, not a
+   zero one. A start at or before [now] measures from it. *)
+let test_backwards_clock_has_no_duration () =
+  match D.parse_iso8601_opt now with
+  | None -> failwith "fixture timestamp must parse"
+  | Some started_at ->
+    let status = D.InProgress { assignee = owner; started_at = now } in
+    (match Workspace_task_classify.task_duration_ms_since ~now:(started_at -. 1.0) status with
+     | None -> ()
+     | Some ms -> failwith (Printf.sprintf "a start after now must have no duration, got %dms" ms));
+    (match Workspace_task_classify.task_duration_ms_since ~now:(started_at +. 2.0) status with
+     | Some 2000 -> ()
+     | Some ms -> failwith (Printf.sprintf "two seconds after the start must read 2000ms, got %dms" ms)
+     | None -> failwith "a start before now must have a duration")
+;;
+
+(* A verdict is not an agent action. There is no [task_action] constructor for it,
+   so the string surface must refuse "approve"/"reject" by naming the authority
+   rather than reporting an unknown action — an agent that asks is told why. *)
+let test_verdict_is_not_an_agent_action () =
+  List.iter
+    (fun verb ->
+       match D.task_action_of_string verb with
+       | Ok _ -> failwith (verb ^ " must not parse as an agent action")
+       | Error msg ->
+         if not (contains ~needle:"completion authority" msg)
+         then failwith (verb ^ " rejection must name the completion authority"))
+    [ "approve"; "reject" ]
+;;
+
+(* The verdict path is separate from agent actions. The producer boundary owns
+   authentication; the leaf still refuses empty provenance so audit identity
+   cannot disappear. *)
+let test_verdict_requires_authority_and_reason () =
+  let operator = D.Human_operator { operator_id = "op-1" } in
+  (match
+     L.decide_verdict
+       ~authority:operator
+       ~verdict:D.Verdict_approved
+       ~task_id:"task-1"
+       ~verification_id:"vrf-1"
+       ~task_status:awaiting
+       ~now
+       ~notes:"evidence at /tmp/proof"
+   with
+   | Ok
+       { decision = { new_status = D.Done { assignee; _ }; _ }
+       ; authority = D.Human_operator { operator_id }
+       ; producer
+       ; verification_id
+       }
+     when String.equal assignee owner
+          && String.equal operator_id "op-1"
+          && String.equal producer owner
+          && String.equal verification_id "vrf-1" -> ()
+   | Ok _ | Error _ -> failwith "operator approval must complete the task");
+  (match
+     L.decide_verdict
+       ~authority:operator
+       ~verdict:(D.Verdict_rejected { reason = " " })
+       ~task_id:"task-1"
+       ~verification_id:"vrf-1"
+       ~task_status:awaiting
+       ~now
+       ~notes:""
+   with
+   | Error L.Verdict_rejection_reason_required -> ()
+   | Ok _ | Error _ -> failwith "a blank rejection reason must be refused");
+  (match
+     L.decide_verdict
+       ~authority:(D.Human_operator { operator_id = " " })
+       ~verdict:D.Verdict_approved
+       ~task_id:"task-1"
+       ~verification_id:"vrf-1"
+       ~task_status:awaiting
+       ~now
+       ~notes:""
+   with
+   | Error L.Verdict_authority_identity_required -> ()
+   | Ok _ | Error _ -> failwith "a blank authority identity must be refused");
+  match
+    L.decide_verdict
+      ~authority:(D.System_llm_agent { agent_run_id = "fusion-run-9" })
+      ~verdict:(D.Verdict_rejected { reason = "missing test evidence" })
+      ~task_id:"task-1"
+      ~verification_id:"vrf-1"
+      ~task_status:awaiting
+      ~now
+      ~notes:""
+  with
+  | Ok
+      { decision = { new_status = D.InProgress { assignee; _ }; _ }
+      ; authority = D.System_llm_agent { agent_run_id }
+      ; producer
+      ; verification_id
+      }
+    when String.equal assignee owner
+         && String.equal agent_run_id "fusion-run-9"
+         && String.equal producer owner
+         && String.equal verification_id "vrf-1" -> ()
+  | Ok _ | Error _ -> failwith "judge rejection must return the task to its producer"
+;;
+
+let test_verdict_rejects_stale_verification_id () =
+  match
+    L.decide_verdict
+      ~authority:(D.System_llm_agent { agent_run_id = "judge-run-1" })
+      ~verdict:D.Verdict_approved
+      ~task_id:"task-1"
+      ~verification_id:"vrf-stale"
+      ~task_status:awaiting
+      ~now
+      ~notes:""
+  with
+  | Error (L.Verification_id_mismatch { expected; actual })
+    when String.equal expected "vrf-stale" && String.equal actual "vrf-1" -> ()
+  | Ok _ | Error _ -> failwith "a stale verification verdict must be refused"
+;;
+
+(* Claiming an obligation used to bind the claimant as its verifier, so whichever
+   keeper won the race held approval authority. Nobody claims it now. *)
+let test_claim_on_awaiting_is_refused () =
+  decide ~same_agent:false ~task_status:awaiting ~action:D.Claim ()
+  |> expect_error L.Verification_pending_verdict
+;;
+
+let task_with_status task_status : D.task =
+  { id = "task-1"
+  ; title = "review"
+  ; description = ""
+  ; task_status
+  ; priority = 1
+  ; files = []
+  ; created_at = now
+  ; created_by = None
+  ; predecessor_task_id = None
+  ; contract = None
+  ; handoff_context = None
+  ; cycle_count = 0
+  ; reclaim_policy = None
+  ; execution_links = Masc_domain.no_execution_links
+  ; do_not_reclaim_reason = None
+  ; skills = []
+  }
+;;
+
+(* Inverts the removed authority-by-claim behaviour. Previously the producer was
+   refused and any peer that claimed became the verifier; now no actor at all can
+   claim an obligation that is awaiting a verdict. *)
+let test_awaiting_is_claimable_by_nobody () =
+  let task = task_with_status awaiting in
+  List.iter
+    (fun actor ->
+       match L.resolve_claim ~same_actor:(String.equal actor) ~agent_name:actor ~now task with
+       | L.Held_pending_verdict { verification_id }
+         when String.equal verification_id "vrf-1" -> ()
+       | _ ->
+         failwith (actor ^ " must not claim an obligation awaiting a completion verdict"))
+    [ owner; "verifier"; "other" ]
+;;
+
+(* A rejection returns its task to the producer. It takes the producer's focus
+   unless the producer is working a different task they started meanwhile. *)
+let test_rejection_keeps_the_focus_of_other_active_work () =
+  let producer = "alice" in
+  let task id status : D.task = { (task_with_status status) with id } in
+  let held_by assignee = D.Claimed { assignee; claimed_at = now } in
+  let focus ~current_task other_status =
+    L.focus_after_rejection ~producer ~rejected_task:"task-1" ~current_task
+      ~tasks:[ task "task-1" in_progress; task "task-2" other_status ]
+  in
+  let check label expected actual =
+    if not (String.equal expected actual)
+    then failwith (Printf.sprintf "%s: expected %s, got %s" label expected actual)
+  in
+  check "no focus" "task-1" (focus ~current_task:None (held_by producer));
+  check "focus already on the rejected task" "task-1"
+    (focus ~current_task:(Some "task-1") (held_by producer));
+  check "claimed other work keeps the focus" "task-2"
+    (focus ~current_task:(Some "task-2") (held_by producer));
+  check "started other work keeps the focus" "task-2"
+    (focus ~current_task:(Some "task-2")
+       (D.InProgress { assignee = producer; started_at = now }));
+  check "other work held by someone else does not" "task-1"
+    (focus ~current_task:(Some "task-2") (held_by "bob"));
+  check "other work not yet claimed does not" "task-1"
+    (focus ~current_task:(Some "task-2") D.Todo);
+  check "other work awaiting its own verdict does not" "task-1"
+    (focus ~current_task:(Some "task-2") awaiting);
+  check "finished other work does not" "task-1"
+    (focus ~current_task:(Some "task-2")
+       (D.Done { assignee = producer; completed_at = now; notes = None }));
+  check "cancelled other work does not" "task-1"
+    (focus ~current_task:(Some "task-2")
+       (D.Cancelled { cancelled_by = producer; cancelled_at = now; reason = None }));
+  check "a task missing from the backlog does not" "task-1"
+    (focus ~current_task:(Some "task-9") (held_by producer))
+;;
+
+let () =
+  test_done_requires_verification_submission ();
+  test_claimed_done_requires_verification_submission ();
+  test_done_has_no_non_verification_lane ();
+  test_verification_preserves_original_start_time ();
+  test_awaiting_metrics_use_original_start_time ();
+  test_unparsable_start_has_no_duration ();
+  test_backwards_clock_has_no_duration ();
+  test_verdict_is_not_an_agent_action ();
+  test_verdict_requires_authority_and_reason ();
+  test_verdict_rejects_stale_verification_id ();
+  test_claim_on_awaiting_is_refused ();
+  test_awaiting_is_claimable_by_nobody ();
+  test_operator_cancel_states ();
+  test_holder_cancel_ends_the_task_at_once ();
+  test_cancel_of_a_pending_submission_ends_the_task ();
+  test_holder_cancel_requires_a_reason ();
+  test_cancel_of_someone_elses_task_is_refused ();
+  test_submit_refusal_preserves_holder_and_pending_submission ();
+  test_held_action_refusals_and_pending_release ();
+  test_cancel_cannot_undo_a_finished_task ();
+  test_approval_ends_the_task_as_done ();
+  test_rejection_keeps_the_focus_of_other_active_work ();
+  Printf.printf "workspace_task_lifecycle: all tests passed\n%!"

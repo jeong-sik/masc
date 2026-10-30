@@ -1,0 +1,3328 @@
+type authentication = Claude_ai | Api_key | OAuth_token | Third_party
+
+type api_provider = First_party | Bedrock | Vertex | Foundry | Mantle
+
+type subscription =
+  { authentication : authentication
+  ; subscription_type : string option
+  ; api_provider : api_provider
+  }
+
+let authentication_to_string = function
+  | Claude_ai -> "claude.ai" | Api_key -> "api_key"
+  | OAuth_token -> "oauth_token" | Third_party -> "third_party"
+
+let api_provider_to_string = function
+  | First_party -> "firstParty" | Bedrock -> "bedrock" | Vertex -> "vertex"
+  | Foundry -> "foundry" | Mantle -> "mantle"
+
+type config =
+  { cli_path : string
+  ; account_home : string option
+  ; cwd : string
+  ; model : string option
+  ; system_prompt : string option
+  ; admission_timeout_s : float
+  ; native : Runtime_native_tools.posture
+  ; timeout_s : float option
+  ; output_schema : Yojson.Safe.t option
+  }
+
+let default_timeout_s = 300.0
+
+(* [None] installs no deadline. The vendor client owns when its own turn ends;
+   a declared bound is the operator's optional liveness guard over a silent
+   client, not a limit on how long legitimate work may take. *)
+let stderr_chunk_bytes = 4096
+let stderr_tail_bytes = 4096
+let max_wire_line_bytes = 8 * 1024 * 1024
+let mcp_server_name = "masc"
+
+let default_config ~cwd =
+  { cli_path = "claude"
+  ; account_home = None
+  ; cwd
+  ; model = None
+  ; system_prompt = None
+  ; native = Runtime_native_tools.claude_code_default
+  ; admission_timeout_s = default_timeout_s
+  ; timeout_s = Some default_timeout_s
+  ; output_schema = None
+  }
+;;
+
+let effective_account_home = function
+  | Some path -> Some path
+  | None ->
+    (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+     | Some path when path <> "" ->
+       (match Runtime_account_home.of_inherited path with
+        | Ok selected -> Some selected
+        (* Keep an invalid inherited choice visible to validation. Falling
+           back to HOME here would silently switch login identities. *)
+        | Error _ -> Some path)
+     | Some _ | None ->
+       Option.map
+         (fun home -> Filename.concat home ".claude")
+         (Env_config_core.raw_value_opt "HOME"))
+;;
+
+(* Claude Code 2.1.283 reads [.config.json] in its config directory while that
+   legacy file exists, and otherwise
+   [join(CLAUDE_CONFIG_DIR || homedir(), ".claude.json")]: without
+   CLAUDE_CONFIG_DIR the file sits in HOME itself, not in the HOME/.claude
+   directory above. *)
+let account_file account_home =
+  let legacy =
+    Option.map
+      (fun directory -> Filename.concat directory ".config.json")
+      (effective_account_home account_home)
+  in
+  match legacy with
+  | Some path when Sys.file_exists path -> Some path
+  | Some _ | None ->
+    let directory =
+      match account_home, Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+      | Some _, _ -> effective_account_home account_home
+      | None, Some path when path <> "" -> effective_account_home None
+      | None, (Some _ | None) ->
+        (match Env_config_core.raw_value_opt "HOME" with
+         | Some home when home <> "" -> Some home
+         | Some _ | None -> None)
+    in
+    Option.map (fun directory -> Filename.concat directory ".claude.json") directory
+;;
+
+(* Claude Code uses a cloud provider selection, ANTHROPIC_AUTH_TOKEN,
+   ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN before the /login account, and
+   a non-interactive session always uses ANTHROPIC_API_KEY when it is set
+   (code.claude.com/docs/en/iam, "Authentication precedence", read
+   2026-09-28). [client_environment] passes all of these to a child on the
+   inherited home and none to a selected home. *)
+let provider_switches =
+  [ "CLAUDE_CODE_USE_BEDROCK"; "CLAUDE_CODE_USE_VERTEX"; "CLAUDE_CODE_USE_FOUNDRY"
+  ; "CLAUDE_CODE_USE_MANTLE"
+  ]
+
+let credentials_before_login =
+  [ "ANTHROPIC_AUTH_TOKEN"; "ANTHROPIC_API_KEY"; "CLAUDE_CODE_OAUTH_TOKEN" ]
+
+let environment_credential_names = provider_switches @ credentials_before_login
+
+(* The 2.1.283 bundle reads a provider switch as on only for "1", "true",
+   "yes" or "on", ignoring case and surrounding space. *)
+let switch_on value =
+  List.mem (String.lowercase_ascii (String.trim value)) [ "1"; "true"; "yes"; "on" ]
+
+let runs_on_environment_credential = function
+  | Some _ -> false
+  | None ->
+    let set test name =
+      match Env_config_core.raw_value_opt name with
+      | Some value -> test value
+      | None -> false
+    in
+    List.exists (set switch_on) provider_switches
+    || List.exists (set (fun value -> value <> "")) credentials_before_login
+;;
+
+let timeout_s_for_phase config ~turn_admitted =
+  if turn_admitted
+  then config.timeout_s
+  else Some config.admission_timeout_s
+;;
+
+type image_input =
+  { media_type : string
+  ; base64_data : string
+  }
+
+type session_mode =
+  | Start
+  | Resume of { session_id : string }
+
+type rate_limit_status =
+  | Allowed
+  | Allowed_warning
+  | Rejected
+
+let rate_limit_status_to_string = function
+  | Allowed -> "allowed"
+  | Allowed_warning -> "allowed_warning"
+  | Rejected -> "rejected"
+;;
+
+type rate_limit =
+  { status : rate_limit_status
+  ; rate_limit_type : string option
+  ; resets_at : int option
+  ; overage_status : string option
+  ; overage_disabled_reason : string option
+  }
+
+type request_input =
+  { input_tokens : int
+  ; cache_creation_input_tokens : int
+  ; cache_read_input_tokens : int
+  }
+
+type turn_usage =
+  { input_tokens : int
+  ; output_tokens : int
+  ; cache_creation_input_tokens : int
+  ; cache_read_input_tokens : int
+  }
+
+(* Token counts over the assistant frames of one turn. Each assistant frame
+   carries the usage of the API call that produced it, and parallel tool
+   calls repeat one message id with identical usage, so ids are deduplicated
+   (code.claude.com/docs/en/agent-sdk/cost-tracking, read 2026-09-03).
+
+   An assistant frame's usage is a snapshot taken while the response
+   streams: its input side is final (the request was already sent), its
+   output_tokens is not. On Claude Code 2.1.280 a turn of two requests
+   showed output 3 and 2 in its assistant frames and 270 in its result
+   frame. So only the input side of the newest request is kept, as the
+   context that request occupied; the turn's spend comes from the result
+   frame. Neither stands in for the other: the sum of the requests' inputs
+   is not a size any request had (a Keeper on a 1M-token model once
+   recorded 3.75M input tokens for one turn that way), and the newest
+   request's counts are not what the turn spent.
+
+   Declared here, before handle_control_request reads the accumulator, so
+   the field is in scope at its use site. *)
+type assistant_usage =
+  { seen_message_ids : (string, unit) Hashtbl.t
+  ; mutable newest_input : request_input option
+  }
+
+type observed_usage =
+  { latest_request_input : request_input option
+  ; turn_total : turn_usage option
+  }
+
+type turn_result =
+  { session_id : string
+  ; turn_id : string
+  ; model : string
+  ; text : string
+  ; dynamic_tool_calls : int
+  ; subscription : subscription
+  ; rate_limit : rate_limit option
+  ; resumed : bool
+  ; usage : observed_usage
+  }
+
+type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; detail : Keeper_terminal_effect_detail.t
+      }
+
+type host_stop = Runtime_official_client_tool.host_stop =
+  | Repeated_tool_call of
+      { tool_name : string
+      ; repeated_count : int
+      }
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
+      }
+
+type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
+  { success : bool
+  ; content : string
+  ; content_blocks : Llm_provider.Types.content_block list option
+  ; abort_turn : host_stop option
+  ; on_response_sent : (unit -> unit) option
+  }
+
+type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
+  { name : string
+  ; description : string
+  ; input_schema : Yojson.Safe.t
+  ; loading : Runtime_official_client_tool.loading
+  ; result_bound : Runtime_official_client_tool.result_bound
+  ; execution_mode : Yojson.Safe.t -> Agent_core.Tool_contract.execution_mode
+  ; call_effect : Yojson.Safe.t -> Agent_core.Tool.call_effect
+  ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
+  }
+
+type content_block =
+  | Partial_block of { message_id : string; index : int }
+  | Assistant_block of { uuid : string; ordinal : int }
+
+type content_channel = Text_content | Thinking_content
+
+type native_task_status = Runtime_native_tasks.status =
+  | Task_pending | Task_running | Task_completed | Task_failed | Task_killed | Task_paused
+
+type native_task_terminal = Runtime_native_tasks.terminal = Task_completed_notice | Task_failed_notice | Task_stopped_notice
+type native_task_reason = Runtime_native_tasks.reason = Worker_restart
+type native_task_boundary = Runtime_native_tasks.boundary = Task_terminal_unobserved | Task_terminal_observed
+
+type native_task_usage = Runtime_native_tasks.usage =
+  { total_tokens : int; tool_uses : int; duration_ms : int }
+(** Provider task observations, never the root model's usage. [duration_ms]
+    preserves the signed safe integer reported by the provider's wall-clock
+    subtraction; a negative value neither fails nor terminates the task. *)
+
+type native_task_event = Runtime_native_tasks.event =
+  | Task_registered of
+      { subagent_type : string option; is_backgrounded : bool option
+      ; skip_transcript : bool option; ambient : bool option }
+      (** Registration declares no task status. [None] means not reported. *)
+  | Task_patched of
+      { status : native_task_status option; is_backgrounded : bool option
+      ; end_time : int option; total_paused_ms : int option }
+      (** [total_paused_ms] retains signed safe integers; absence is
+          unreported, not zero. [end_time] admission retains the separate
+          nonnegative timestamp check. *)
+  | Task_progress_reported of
+      { usage : native_task_usage; last_tool_name : string option }
+  | Task_terminal_reported of
+      { outcome : native_task_terminal; reason : native_task_reason option
+      ; usage : native_task_usage option; skip_transcript : bool option
+      ; ambient : bool option }
+
+type native_task_owner =
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; task_id : string; run_id : string; call_id : string
+  ; call_envelope_uuid : string; call_ordinal : int }
+(** Exact root Agent occurrence that registered this task run. The call may
+    already have returned an async launch result. [run_id] is opaque except
+    for the provider-declared lexical ordering of runs of the same task. *)
+
+type native_task_observation =
+  { owner : native_task_owner; uuid : string; event : native_task_event
+  ; boundary : native_task_boundary }
+(** Invocation-local observations: explicit session/run identity, Native_full,
+    unambiguous Root_response/Built_in Agent and provider root spawn depth.
+    No ownership is inferred for run-less, unknown or child task frames.
+    Raw prompt, summary, description, error and output-file bodies are excluded.
+    Task termination does not terminate the native call, model response or turn.
+    This client still returns on the first root result; post-result receiving
+    requires a separate process/session lifetime implementation. *)
+
+type native_agent_parent_witness =
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; call_id : string
+  ; call_envelope_uuid : string
+  ; call_ordinal : int
+  }
+
+type complete_child_content =
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; observation_id : string
+  ; parent_tool_use_id : string
+  ; parent_occurrence : native_agent_parent_witness option
+  ; message_id : string option
+  ; model : string
+  ; block : content_block
+  ; channel : content_channel
+  ; text : string
+  }
+
+type complete_content_scope =
+  | Root_model_content
+  | Child_model_content of { parent_tool_use_id : string; observation_id : string }
+  | Diagnostic_content
+
+type stream_event =
+  | Turn_started of
+      { turn_id : string
+      ; model : string
+      }
+  | Text_delta of
+      { message_id : string option
+      ; block : content_block
+      ; text : string
+      }
+  | Thinking_delta of
+      { message_id : string option
+      ; block : content_block
+      ; text : string
+      }
+  | Child_content_observed of complete_child_content
+  | Content_block_stopped of { block : content_block; channel : content_channel }
+  | Dynamic_tool_started of
+      { call_id : string
+      ; tool_name : string
+      ; arguments : Yojson.Safe.t
+      }
+  | Dynamic_tool_finished of { call_id : string }
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.finished
+  | Native_tool_progress of
+      { identity : Runtime_native_tools.action_identity
+      ; progress : Runtime_native_tools.progress
+      }
+  | Native_task_observed of native_task_observation
+  | Usage_windows_reported of Runtime_provider_usage_window.report
+  | Provider_retry_observed of Runtime_claude_api_retry.t
+  | Conversation_compacted
+  | Usage_reported of
+      { session_id : string
+      ; turn_id : string
+      ; model : string
+      ; usage : turn_usage
+      }
+  | Turn_finished of { text : string }
+
+let emit_stream_event on_stream_event event =
+  match on_stream_event with
+  | None -> ()
+  | Some emit ->
+    (try emit event with
+     | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Runtime_agent.warn
+         "Claude Code stream callback raised (error=%s)"
+         (Printexc.to_string exn))
+;;
+
+type error =
+  | Invalid_config of string
+  | Spawn_failed of string
+  | Protocol_error of
+      { stage : string
+      ; detail : string
+      }
+  | Subscription_required of string
+  | Unsupported_control_request of string
+  | Turn_transport_interrupted of
+      { stage : string
+      ; tool_effect_attempted : bool
+      ; detail : string
+      }
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
+  | Turn_failed of string
+  | Turn_failed_with_observation of
+      { detail : string
+      ; api_error_status : int option
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
+  | Stopped_by_host of
+      { stop : host_stop
+      ; latest_request_input : request_input option
+        (** Input side of the newest assistant request before the host
+            ended the turn. No result frame arrives after a host stop, so
+            the turn's spend is not observed. *)
+      }
+  | Quota_blocked of
+      { api_error_status : int option
+      ; rate_limit : rate_limit option
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
+  | Process_exited of
+      { detail : string
+      ; turn_admitted : bool
+      }
+  | Unhandled_exception of string
+  | Timeout of float
+
+exception Runtime_error of error
+
+let error_to_string = function
+  | Invalid_config detail -> "invalid Claude Code config: " ^ detail
+  | Spawn_failed detail -> "failed to start Claude Code: " ^ detail
+  | Protocol_error { stage; detail } ->
+    Printf.sprintf "Claude Code protocol error during %s: %s" stage detail
+  | Subscription_required detail ->
+    "Claude Code authentication required: " ^ detail
+  | Unsupported_control_request subtype ->
+    "Claude Code requested unsupported control action: " ^ subtype
+  | Turn_transport_interrupted { stage; tool_effect_attempted; detail } ->
+    Printf.sprintf
+      "Claude Code turn transport interrupted during %s (tool_effect_attempted=%b): %s"
+      stage
+      tool_effect_attempted
+      detail
+  | Context_window_exceeded
+      { message; tool_effect_attempted; response_emitted } ->
+    Printf.sprintf
+      "Claude Code context window exceeded (tool_effect_attempted=%b response_emitted=%b): %s"
+      tool_effect_attempted
+      response_emitted
+      message
+  | Turn_failed detail -> "Claude Code turn failed: " ^ detail
+  | Turn_failed_with_observation { detail; _ } ->
+    "Claude Code turn failed: " ^ detail
+  | Stopped_by_host { stop = Repeated_tool_call { tool_name; repeated_count }; _ } ->
+    Printf.sprintf
+      "Claude Code stopped after repeated tool call: tool=%s count=%d"
+      tool_name
+      repeated_count
+  | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
+    Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
+  | Quota_blocked
+      { api_error_status; rate_limit; tool_effect_attempted; response_emitted } ->
+    let status =
+      Option.fold
+        ~none:"unknown"
+        ~some:(fun value -> rate_limit_status_to_string value.status)
+        rate_limit
+    in
+    let api_status =
+      Option.fold ~none:"unknown" ~some:string_of_int api_error_status
+    in
+    Printf.sprintf
+      "Claude Code quota blocked (rate_limit=%s api_status=%s tool_effect_attempted=%b response_emitted=%b)"
+      status
+      api_status
+      tool_effect_attempted
+      response_emitted
+  | Process_exited { detail; turn_admitted } ->
+    Printf.sprintf "Claude Code exited before terminal result (turn_admitted=%b): %s"
+      turn_admitted detail
+  | Unhandled_exception detail -> "Claude Code runtime raised: " ^ detail
+  | Timeout seconds ->
+    Printf.sprintf "Claude Code stream was idle for %.3fs" seconds
+;;
+
+let error_kind = function
+  | Invalid_config _ -> "invalid_config"
+  | Spawn_failed _ -> "spawn_failed"
+  | Protocol_error _ -> "protocol_error"
+  | Subscription_required _ -> "subscription_required"
+  | Unsupported_control_request _ -> "unsupported_control_request"
+  | Turn_transport_interrupted _ -> "turn_transport_interrupted"
+  | Context_window_exceeded _ -> "context_window_exceeded"
+  | Turn_failed _ -> "turn_failed"
+  | Turn_failed_with_observation _ -> "turn_failed"
+  | Stopped_by_host _ -> "stopped_by_host"
+  | Quota_blocked _ -> "quota_blocked"
+  | Process_exited _ -> "process_exited"
+  | Unhandled_exception _ -> "unhandled_exception"
+  | Timeout _ -> "timeout"
+;;
+
+let protocol_error stage detail = Error (Protocol_error { stage; detail })
+let ( let* ) result f = Result.bind result f
+
+(* The three official-client runtimes speak the same line-delimited JSON
+   protocol and differ only in the error constructor they fail with. The shape
+   checks live once in {!Runtime_official_client_json}; this instantiates them
+   against this runtime's own [error]. *)
+module Shared_json = Runtime_official_client_json.Make (struct
+  type t = error
+
+  let protocol ~stage ~detail = Protocol_error { stage; detail }
+end)
+
+open Shared_json
+
+module Stderr = Runtime_official_client_json.Stderr
+
+let parse_json_value ~stage text =
+  try Ok (Yojson.Safe.from_string text) with
+  | Yojson.Json_error detail -> protocol_error stage ("invalid JSON: " ^ detail)
+;;
+
+let optional_int stage name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) -> Ok (Some value)
+  | Some _ ->
+    protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
+;;
+
+(* Empty text starts a block; whitespace-only token pieces are content. *)
+let text_value stage fields =
+  let* value = required_member stage "text" fields in
+  match value with
+  | `String text -> Ok text
+  | _ -> protocol_error stage "text must be a string"
+;;
+
+(* Deferred MCP loading is part of how masc drives this client, not an
+   operator preference: every posture names [ToolSearch] in [--tools]
+   ([Runtime_native_tools.claude_code_tools_arg]) so masc's tool schemas are
+   sent by name. Left unset, the client turns tool search off whenever
+   [ANTHROPIC_BASE_URL] names a non-first-party host, and every masc schema
+   rides inline on every request of a routed turn. [true] keeps it on there
+   too; on the first-party API it is the client's own default. A gateway that
+   does not forward [tool_reference] blocks then fails the request rather than
+   silently paying for the whole surface -- a runtime failure the lane can
+   fail over from. Documented at https://code.claude.com/docs/en/mcp
+   ("Configure tool search"). *)
+let client_environment account_home =
+  (* A selected CLI home isolates Claude's own credential store. HOME and XDG
+     remain available for OS facilities, so settings under those shared paths
+     can still influence more than one selected home. *)
+  let inherited =
+    Runtime_claude_environment_projection.inherited_names
+      ~explicit_account:(Option.is_some account_home)
+  |> List.filter_map (fun name ->
+    let value =
+      match name, account_home with
+      | "CLAUDE_CONFIG_DIR", None ->
+        (match Env_config_core.raw_value_opt "CLAUDE_CONFIG_DIR" with
+         | Some path when path <> "" -> effective_account_home None
+         | Some _ -> Some ""
+         | None -> None)
+      | _ -> Sys.getenv_opt name
+    in
+    Option.map (fun value -> name ^ "=" ^ value) value)
+  in
+  Runtime_claude_environment_projection.of_inherited ~account_home inherited
+;;
+
+let parse_subscription json =
+  let stage = "auth status" in
+  let* fields = assoc_at stage json in
+  let* logged_in = required_bool stage "loggedIn" fields in
+  if not logged_in then
+    Error (Subscription_required "No supported CLI credential is available with the configured settings isolation. Export the CLI credential/routing variables or sign in with the CLI; the CLI loads no settings layer, so a settings-only apiKeyHelper credential is not read.")
+  else
+    let* method_name = required_string stage "authMethod" fields in
+    let* authentication = match method_name with
+      | "claude.ai" -> Ok Claude_ai | "api_key" -> Ok Api_key
+      | "oauth_token" -> Ok OAuth_token | "third_party" -> Ok Third_party
+      | _ -> protocol_error stage "unsupported authentication method reported by Claude Code" in
+    let* provider_name = required_string stage "apiProvider" fields in
+    let* api_provider = match provider_name with
+      | "firstParty" -> Ok First_party | "bedrock" -> Ok Bedrock
+      | "vertex" -> Ok Vertex | "foundry" -> Ok Foundry | "mantle" -> Ok Mantle
+      | _ -> protocol_error stage "unsupported API provider reported by Claude Code" in
+    let* subscription_type = optional_string stage "subscriptionType" fields in
+    Ok { authentication; subscription_type; api_provider }
+;;
+
+(* The CLI's stderr is the only witness when its stdout stops mid-document:
+   keep an excerpt with the probe's failures so the next truncated probe
+   names the crash instead of only the cut. The excerpt is flattened to one
+   line, capped at 300 bytes on a UTF-8 boundary, with control bytes
+   neutralised: the detail is shown in the UI. *)
+let subscription_stderr_limit = 300
+
+let subscription_stderr_excerpt stderr_buf =
+  let mapped =
+    Buffer.contents stderr_buf
+    |> String.trim
+    |> String.map (fun char ->
+      if char = '\n' || char = '\r' || char = '\t' then ' '
+      else if Char.code char < 0x20 || char = '\x7f' then '?'
+      else char)
+  in
+  if mapped = "" then None
+  else if String.length mapped <= subscription_stderr_limit then Some mapped
+  else
+    Some (String_util.utf8_prefix ~max_bytes:subscription_stderr_limit mapped ^ "…")
+
+(* A document the CLI stopped in the middle names no reason by itself. The
+   byte count tells a cut at the very start from one near the end. The probe
+   decides "cut" where the text fails to parse, not from the error's wording,
+   so this only annotates a failure it was already told is a cut document. *)
+let note_cut_document ~bytes = function
+  | Error (Protocol_error { stage; detail }) ->
+      Error (Protocol_error { stage; detail = Printf.sprintf "%s (stdout %d bytes)" detail bytes })
+  | ( Ok _
+    | Error
+        ( Invalid_config _ | Spawn_failed _ | Subscription_required _
+        | Unsupported_control_request _ | Turn_transport_interrupted _
+        | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+        | Unhandled_exception _ | Timeout _ ) ) as result -> result
+
+(* The boolean is true when the CLI exited cleanly but its stdout was not a
+   complete JSON document. *)
+let probe_auth_status ~mgr ~cwd config =
+  let stderr_buf = Buffer.create 256 in
+  let enrich ~excerpt result =
+    match result, excerpt with
+    | Error (Protocol_error { stage; detail }), Some text ->
+        true, Error (Protocol_error { stage; detail = detail ^ "; stderr: " ^ text })
+    | Error (Protocol_error _), None -> false, result
+    | ( Ok _
+      | Error
+          ( Invalid_config _ | Spawn_failed _ | Subscription_required _
+          | Unsupported_control_request _ | Turn_transport_interrupted _
+          | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Unhandled_exception _ | Timeout _ ) ),
+      (None | Some _) -> false, result
+  in
+  try
+    let stdout =
+      Eio.Process.parse_out
+        mgr
+        Eio.Buf_read.take_all
+        ~is_success:(fun code -> code = 0 || code = 1)
+        ~cwd
+        ~stderr:(Eio.Flow.buffer_sink stderr_buf)
+        ~env:(client_environment config.account_home)
+        [ config.cli_path
+        ; Runtime_native_tools.claude_setting_sources_arg
+        ; "auth"; "status"; "--json" ]
+    in
+    (* parse_out joins its stderr copier before it returns, so the buffer is
+       drained here. *)
+    let excerpt = subscription_stderr_excerpt stderr_buf in
+    let parsed = parse_json_value ~stage:"auth status" (String.trim stdout) in
+    let cut_document = Result.is_error parsed in
+    let result =
+      let* json = parsed in
+      let* () = validate_unique_object_keys ~stage:"auth status" ~path:"$" json in
+      parse_subscription json
+    in
+    let result =
+      if cut_document then note_cut_document ~bytes:(String.length stdout) result else result
+    in
+    let attached, result = enrich ~excerpt result in
+    (* Stderr that the detail does not carry still reaches the debug log:
+       success-path warnings were inherited by the server log before this
+       probe captured its stderr. *)
+    if not attached then Option.iter (Log.Runtime_agent.debug "auth probe stderr: %s") excerpt;
+    result, cut_document
+  with
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Eio.Exn.Io
+      (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
+    Error (Invalid_config (Printf.sprintf "executable %S was not found" executable)), false
+  | exn ->
+      (* A crashed probe may still have told its stderr why: keep what the
+         copier had drained, best-effort past this point. *)
+      let detail = Printexc.to_string exn in
+      (match subscription_stderr_excerpt stderr_buf with
+       | None -> Error (Spawn_failed detail), false
+       | Some text -> Error (Spawn_failed (detail ^ "; stderr: " ^ text)), false)
+;;
+
+(* [auth status] only reads. A CLI that exits cleanly with a cut document is
+   usually a transient failure (two probes racing on one account home, or the
+   process dying mid-write), so one more probe is cheaper than failing the
+   Keeper request. A second cut document is reported as the failure it is. *)
+let read_subscription ~mgr ~cwd config =
+  let first, cut_document = probe_auth_status ~mgr ~cwd config in
+  if cut_document
+  then (
+    (* [cut_document] is only true for a [Protocol_error], so the first result
+       carries the reason. *)
+    (match first with
+     | Ok _ -> ()
+     | Error error ->
+       Log.Runtime_agent.warn
+         "auth probe returned a cut document, retrying once: %s"
+         (error_to_string error));
+    fst (probe_auth_status ~mgr ~cwd config))
+  else first
+;;
+
+(* Claude Code reads two keys from a tools/list entry's [_meta]
+   (code.claude.com/docs/en/mcp):
+
+   - ["anthropic/alwaysLoad"]: it keeps that one tool's definition in context
+     instead of behind tool search, whatever [ENABLE_TOOL_SEARCH] says. It is
+     written only for a tool whose declaration loads it upfront.
+   - ["anthropic/maxResultSizeChars"]: the result size above which Claude Code
+     writes the result to a file instead of passing it inline. It is written
+     only for a tool whose result MASC bounds ([Bounded_bytes]), with that
+     bound: UTF-8 characters never outnumber their bytes, so the byte
+     ceiling is a safe character count. An attached-service
+     result reaches the wire as the service returned it
+     ([Keeper_identity_tools.tool_result_of_call]), so it is [Unbounded] and
+     keeps the client's own threshold.
+
+   A tool with neither is sent as it was before, with no [_meta]. *)
+let dynamic_tool_meta (tool : dynamic_tool) =
+  let always_load =
+    match tool.loading with
+    | Runtime_official_client_tool.Upfront -> [ "anthropic/alwaysLoad", `Bool true ]
+    | Runtime_official_client_tool.On_demand -> []
+  in
+  let max_result_size =
+    match tool.result_bound with
+    | Runtime_official_client_tool.Bounded_bytes bytes ->
+      [ "anthropic/maxResultSizeChars", `Int bytes ]
+    | Runtime_official_client_tool.Unbounded -> []
+  in
+  match always_load @ max_result_size with
+  | [] -> None
+  | meta -> Some (`Assoc meta)
+;;
+
+let dynamic_tool_spec (tool : dynamic_tool) =
+  let fields =
+    [ "name", `String tool.name
+    ; "description", `String tool.description
+    ; "inputSchema", tool.input_schema
+    ]
+  in
+  match dynamic_tool_meta tool with
+  | None -> `Assoc fields
+  | Some meta -> `Assoc (fields @ [ "_meta", meta ])
+;;
+
+(* The name, description and schema sum is shared with Codex. Claude Code also
+   carries a per-tool [_meta] object that only some tools have, so its bytes
+   are added here: a surface size that leaves out part of what is sent cannot
+   be checked against the request window (#27427). *)
+let dynamic_tool_bytes tools =
+  Runtime_official_client_tool.dynamic_tool_bytes tools
+  + List.fold_left
+      (fun acc tool ->
+         match dynamic_tool_meta tool with
+         | None -> acc
+         | Some meta -> acc + String.length (Yojson.Safe.to_string meta))
+      0
+      tools
+;;
+
+let find_dynamic_tool tools name =
+  List.find_opt (fun (tool : dynamic_tool) -> String.equal tool.name name) tools
+;;
+
+type io =
+  { send : Yojson.Safe.t -> unit
+  ; send_context :
+      Runtime_official_client_write.selection -> Yojson.Safe.t -> Runtime_official_client_write.t
+        (* The same line write, returning the receipt of the bytes written. *)
+  ; receive : unit -> (Yojson.Safe.t, error) result
+  }
+
+type context_frame =
+  | System_prompt_file
+  | User_message of { client_uuid : string }
+
+type context_submission =
+  { frame : context_frame
+  ; write : Runtime_official_client_write.t
+  }
+
+let context_submission_to_json submission =
+  let frame = match submission.frame with
+    | System_prompt_file -> [ "frame", `String "system_prompt_file" ]
+    | User_message { client_uuid } ->
+      [ "frame", `String "user_message"; "client_uuid", `String client_uuid ] in
+  `Assoc ([ "schema", `String "masc.claude-code-context-submission.v1"
+          ; "phase", `String "write_completed" ]
+    @ frame
+    @ [ "write", Runtime_official_client_write.to_json submission.write
+      ; "client_acceptance", `String "not_observed_by_this_event" ])
+;;
+
+(* The turn's text and images ride [message.content]; the rest of the
+   envelope is carried. *)
+let user_message_selection =
+  Runtime_official_client_write.(Fields [ "message", Fields [ "content", turn_input ] ])
+;;
+
+let send_control_success io ~request_id response =
+  io.send
+    (`Assoc
+       [ "type", `String "control_response"
+       ; ( "response"
+         , `Assoc
+             [ "subtype", `String "success"
+             ; "request_id", `String request_id
+             ; "response", response
+             ] )
+       ])
+;;
+
+let send_control_error io ~request_id detail =
+  io.send
+    (`Assoc
+       [ "type", `String "control_response"
+       ; ( "response"
+         , `Assoc
+             [ "subtype", `String "error"
+             ; "request_id", `String request_id
+             ; "error", `String detail
+             ] )
+       ])
+;;
+
+type control_phase =
+  | Before_turn_admission
+  | Turn_admitted
+
+let send_control_response
+      io
+      ~control_phase
+      ~stage
+      ~tool_effect_attempted
+      response
+  =
+  try
+    response ();
+    Ok ()
+  with
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Idle_timeout _ as exn -> raise exn
+  | Eio.Time.Timeout as exn -> raise exn
+  | exn ->
+    let detail = Printexc.to_string exn in
+    (match control_phase with
+     | Before_turn_admission -> protocol_error stage detail
+     | Turn_admitted ->
+       Error
+         (Turn_transport_interrupted
+            { stage; tool_effect_attempted; detail }))
+;;
+
+let handle_control_request
+      io
+      ~control_phase
+      ~mcp_session
+      ~tools
+      ~tool_call_count
+      ~assistant_usage
+      ~on_stream_event
+      fields
+  =
+  let stage = "control request" in
+  let* request_id = required_string stage "request_id" fields in
+  let* request = required_member stage "request" fields in
+  let* request_fields = assoc_at stage request in
+  let* subtype = required_string stage "subtype" request_fields in
+  match subtype with
+  | "mcp_message" ->
+    let* server_name = required_string stage "server_name" request_fields in
+    if server_name <> mcp_server_name
+    then
+      let detail = Printf.sprintf "unknown SDK MCP server %S" server_name in
+      let* () =
+        send_control_response
+          io
+          ~control_phase
+          ~stage:"control error response"
+          ~tool_effect_attempted:false
+          (fun () -> send_control_error io ~request_id detail)
+      in
+      Error (Unsupported_control_request subtype)
+    else
+      let* message = required_member stage "message" request_fields in
+      let tool_specs () = List.map dynamic_tool_spec tools in
+      let abort_turn = ref None in
+      let on_response_sent = ref None in
+      let call_tool ~name ~call_id ~arguments =
+        match find_dynamic_tool tools name with
+        | None -> None
+        | Some tool ->
+          emit_stream_event
+            on_stream_event
+            (Dynamic_tool_started { call_id; tool_name = name; arguments });
+          let result =
+            try tool.call ~call_id arguments with
+            | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              Log.Runtime_agent.warn
+                "Claude Code MCP tool handler raised (tool=%s error=%s)"
+                name
+                (Printexc.to_string exn);
+              { success = false
+              ; content = "MASC tool handler raised"
+              ; content_blocks = None; abort_turn = None; on_response_sent = None
+              }
+          in
+          abort_turn := result.abort_turn;
+          on_response_sent := Runtime_official_client_tool.response_observer Mcp result;
+          emit_stream_event on_stream_event (Dynamic_tool_finished { call_id });
+          Some
+            { Runtime_official_client_mcp.success = result.success
+            ; content = result.content
+            ; content_blocks = result.content_blocks
+            }
+      in
+      let* dispatch =
+        Runtime_official_client_mcp.handle_message
+          ~session:mcp_session
+          ~server_name:mcp_server_name
+          ~tool_call_policy:
+            (match control_phase with
+             | Before_turn_admission ->
+               Runtime_official_client_mcp.Reject_tool_calls
+             | Turn_admitted -> Runtime_official_client_mcp.Allow_tool_calls)
+          ~tool_specs
+          ~call_tool
+          message
+        |> Result.map_error (fun { Runtime_official_client_mcp.stage; detail } ->
+          Protocol_error { stage; detail })
+      in
+      if dispatch.tool_called then incr tool_call_count;
+      (* The control channel and the MCP payload have different reply rules and
+         the two must not be conflated. An MCP notification carries no id and so
+         produces no JSON-RPC response, but the client wraps *every* MCP message
+         in a control_request that carries a [request_id] and blocks until that
+         id is answered. Returning without sending anything therefore parks the
+         client forever: it waits for the control_response, MASC waits for the
+         next message, and the stream-idle timeout eventually fires.
+
+         Measured against the real client (2.1.226): with the notification
+         unanswered the turn stops after `notifications/initialized` and never
+         reaches a result; answering it with an empty payload lets the same turn
+         run tools/list -> init -> result in 5.2s. Every other variable held. *)
+      let control_payload =
+        match dispatch.response with
+        | Some mcp_response -> `Assoc [ "mcp_response", mcp_response ]
+        | None -> `Assoc []
+      in
+      let* () =
+        send_control_response
+          io
+          ~control_phase
+          ~stage:"control success response"
+          ~tool_effect_attempted:dispatch.tool_called
+          (fun () -> send_control_success io ~request_id control_payload)
+      in
+      Runtime_official_client_tool.notify_response_sent !on_response_sent;
+      (match !abort_turn with
+       | None -> Ok ()
+       | Some stop -> Error
+           (Stopped_by_host
+              { stop; latest_request_input = assistant_usage.newest_input }))
+  | unsupported ->
+    let* () =
+      send_control_response
+        io
+        ~control_phase
+        ~stage:"control error response"
+        ~tool_effect_attempted:false
+        (fun () ->
+          send_control_error
+            io
+            ~request_id
+            (Printf.sprintf "MASC does not support control request %S" unsupported))
+    in
+    Error (Unsupported_control_request unsupported)
+;;
+
+(* The candidate boundary and strict decoder share the producer's field set. *)
+let agent_retry_fields =
+  [ "type"; "tool_use_id"; "tool_name"; "parent_tool_use_id"
+  ; "elapsed_time_seconds"; "uuid"; "session_id"; "subagent_type"; "subagent_retry"
+  ]
+;;
+
+type task_frame_kind = Task_start | Task_update | Task_progress | Task_notification
+
+let task_kind = function
+  | "task_started" -> Some Task_start | "task_updated" -> Some Task_update
+  | "task_progress" -> Some Task_progress | "task_notification" -> Some Task_notification
+  | _ -> None
+;;
+
+let task_fields kind =
+  ["type"; "subtype"; "task_id"; "run_id"; "uuid"; "session_id"]
+  @ match kind with
+    | Task_start -> ["tool_use_id"; "description"; "subagent_type"; "is_backgrounded";
+        "spawn_depth"; "parent_task_id"; "task_type"; "workflow_name"; "prompt";
+        "skip_transcript"; "ambient"; "owned_by_subagent"; "awaited"]
+    | Task_update -> ["patch"]
+    | Task_progress -> ["tool_use_id"; "description"; "subagent_type"; "usage";
+        "last_tool_name"; "summary"; "workflow_progress"]
+    | Task_notification -> ["tool_use_id"; "status"; "reason"; "output_file"; "summary";
+        "usage"; "resource_links"; "handback"; "handback_report"; "skip_transcript"; "ambient"]
+;;
+
+let task_observation_candidate fields =
+  let subtypes = List.filter_map
+    (fun (key,value) -> if key="subtype" then Some value else None) fields in
+  (* Duplicate task discriminators are malformed telemetry too. Every value
+     must identify task telemetry; mixed root/system frames still fail closed. *)
+  let kinds = List.filter_map (function
+    | `String subtype -> task_kind subtype | _ -> None) subtypes in
+  kinds <> [] && List.length kinds = List.length subtypes
+  && List.for_all (fun (key,_) ->
+    List.exists (fun kind -> List.mem key (task_fields kind)) kinds) fields
+;;
+
+(* The retry notice's producer field set: what the strict decoder reads, plus
+   the private error text it deliberately drops. This allowlist only decides
+   which malformed (duplicate-key) frames reach that decoder instead of
+   failing the turn; the decoder stays the final arbiter. *)
+let api_retry_fields =
+  [ "type"; "subtype"; "session_id"; "uuid"; "attempt"; "max_retries"
+  ; "retry_delay_ms"; "error_status"; "error"
+  ]
+;;
+
+let api_retry_observation_candidate fields =
+  let subtypes = List.filter_map
+    (fun (key,value) -> if key="subtype" then Some value else None) fields in
+  (* Like task telemetry: every discriminator must name a retry notice, so
+     mixed frames still fail closed at the uniqueness gate. *)
+  subtypes <> []
+  && List.for_all (function `String "api_retry" -> true | _ -> false) subtypes
+  && List.for_all (fun (key,_) -> List.mem key api_retry_fields) fields
+;;
+
+(* The [type] tag of a stream-json frame, parsed once. Both dispatch loops and
+   the progress-observation gate match on this value without a wildcard, so a
+   tag this client learns to read is a compile error in each of them until it
+   has an arm. A tag no arm decodes stays [Frame_other] and fails closed. *)
+type frame_kind =
+  | Frame_control_request
+  | Frame_control_response
+  | Frame_stream_event
+  | Frame_assistant
+  | Frame_rate_limit_event
+  | Frame_result
+  | Frame_user
+  | Frame_system
+  | Frame_tool_progress
+  | Frame_command_lifecycle
+  | Frame_other of string
+
+let frame_kind_of_tag = function
+  | "control_request" -> Frame_control_request
+  | "control_response" -> Frame_control_response
+  | "stream_event" -> Frame_stream_event
+  | "assistant" -> Frame_assistant
+  | "rate_limit_event" -> Frame_rate_limit_event
+  | "result" -> Frame_result
+  | "user" -> Frame_user
+  | "system" -> Frame_system
+  | "tool_progress" -> Frame_tool_progress
+  | "command_lifecycle" -> Frame_command_lifecycle
+  | other -> Frame_other other
+;;
+
+let frame_kind_to_tag = function
+  | Frame_control_request -> "control_request"
+  | Frame_control_response -> "control_response"
+  | Frame_stream_event -> "stream_event"
+  | Frame_assistant -> "assistant"
+  | Frame_rate_limit_event -> "rate_limit_event"
+  | Frame_result -> "result"
+  | Frame_user -> "user"
+  | Frame_system -> "system"
+  | Frame_tool_progress -> "tool_progress"
+  | Frame_command_lifecycle -> "command_lifecycle"
+  | Frame_other tag -> tag
+;;
+
+let parse_wire_line line =
+  let stage = "stream-json message" in
+  let* json = parse_json_value ~stage line in
+  (* Only positively identified provider observations reach their own strict
+     decoder when malformed. Agent retry/clear has its own exact discriminant;
+     this does not admit arbitrary non-heartbeat progress or relax auth JSON. *)
+  let progress_observation =
+    match json with
+    | `Assoc fields ->
+      let type_values =
+        List.filter_map
+          (fun (name, value) -> if name = "type" then Some value else None)
+          fields
+      in
+      let heartbeat_values =
+        List.filter_map
+          (fun (name, value) -> if name = "heartbeat" then Some value else None)
+          fields
+      in
+      (match type_values with
+       | [ `String tag ] ->
+         (match frame_kind_of_tag tag with
+          | Frame_tool_progress ->
+            List.exists (function `Bool true -> true | _ -> false) heartbeat_values
+            || (heartbeat_values = []
+                && List.exists (function "tool_name", `String "Agent" -> true | _ -> false) fields
+                && List.mem_assoc "subagent_type" fields
+                && List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields)
+          | Frame_system ->
+            task_observation_candidate fields || api_retry_observation_candidate fields
+          | Frame_control_request
+          | Frame_control_response
+          | Frame_stream_event
+          | Frame_assistant
+          | Frame_rate_limit_event
+          | Frame_result
+          | Frame_user
+          | Frame_command_lifecycle
+          | Frame_other _ -> false)
+       | _ -> false)
+    | _ -> false
+  in
+  if progress_observation
+  then Ok json
+  else
+    let* () = validate_unique_object_keys ~stage ~path:"$" json in
+    Ok json
+;;
+
+
+let wire_fields json =
+  let stage = "stream-json message" in
+  let* fields = assoc_at stage json in
+  let* tag = required_string stage "type" fields in
+  Ok (frame_kind_of_tag tag, fields)
+;;
+
+let initialize_request request_id =
+  `Assoc
+    [ "type", `String "control_request"
+    ; "request_id", `String request_id
+    ; ( "request"
+      , `Assoc [ "subtype", `String "initialize"; "hooks", `Null ] )
+    ]
+;;
+
+let parse_control_response ~expected_request_id fields =
+  let stage = "initialize control response" in
+  let* response = required_member stage "response" fields in
+  let* response_fields = assoc_at stage response in
+  let* request_id = required_string stage "request_id" response_fields in
+  if request_id <> expected_request_id
+  then
+    protocol_error
+      stage
+      (Printf.sprintf
+         "response request_id %S does not match %S"
+         request_id
+         expected_request_id)
+  else
+    let* subtype = required_string stage "subtype" response_fields in
+    match subtype with
+    | "success" -> Ok ()
+    | "error" ->
+      let* detail = required_string stage "error" response_fields in
+      Error (Turn_failed ("control initialization failed: " ^ detail))
+    | other ->
+      protocol_error stage (Printf.sprintf "unknown response subtype %S" other)
+;;
+
+let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id
+    ~on_stream_event =
+  let* json = io.receive () in
+  let* kind, fields = wire_fields json in
+  match kind with
+  | Frame_control_response ->
+    parse_control_response ~expected_request_id:request_id fields
+  | Frame_control_request ->
+    let* () =
+      handle_control_request
+        io
+        ~control_phase:Before_turn_admission
+        ~mcp_session
+        ~tools
+        ~tool_call_count
+        ~assistant_usage
+        ~on_stream_event
+        fields
+    in
+    await_initialize
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~request_id ~on_stream_event
+  | Frame_system | Frame_rate_limit_event | Frame_command_lifecycle ->
+    (* Informational frames before the control response. The admission
+       deadline bounds a client that never answers; a count of these frames
+       does not change what
+       the client is doing. *)
+    await_initialize
+      io
+      ~mcp_session
+      ~tools
+      ~tool_call_count
+      ~assistant_usage
+      ~request_id
+      ~on_stream_event
+  | Frame_stream_event | Frame_assistant | Frame_result | Frame_user | Frame_tool_progress | Frame_other _ ->
+    protocol_error
+      "initialize"
+      (Printf.sprintf
+         "unexpected message type %S before control response"
+         (frame_kind_to_tag kind))
+;;
+
+(* The stream-json user message always carries a content-block array, never the
+   bare-string form. Both are valid on the wire, but one shape means one code
+   path: an image turn and a text turn differ only in how many blocks precede
+   the text. Images come first — the same order the vision docs use, and the
+   order a reader needs to make sense of the text that refers to them. *)
+let image_block (image : image_input) =
+  `Assoc
+    [ "type", `String "image"
+    ; ( "source"
+      , `Assoc
+          [ "type", `String "base64"
+          ; "media_type", `String image.media_type
+          ; "data", `String image.base64_data
+          ] )
+    ]
+;;
+
+let parse_rate_limit ~expected_session_id fields =
+  let stage = "rate_limit_event" in
+  let* session_id = required_string stage "session_id" fields in
+  let* () =
+    if session_id = expected_session_id
+    then Ok ()
+    else protocol_error stage "session_id does not match the active Claude session"
+  in
+  let* info = required_member stage "rate_limit_info" fields in
+  let* info_fields = assoc_at stage info in
+  let* status_wire = required_string stage "status" info_fields in
+  let* status =
+    match status_wire with
+    | "allowed" -> Ok Allowed
+    | "allowed_warning" -> Ok Allowed_warning
+    | "rejected" -> Ok Rejected
+    | unknown -> protocol_error stage (Printf.sprintf "unknown status %S" unknown)
+  in
+    let* rate_limit_type = optional_string stage "rateLimitType" info_fields in
+    let* resets_at = optional_int stage "resetsAt" info_fields in
+    let* overage_status = optional_string stage "overageStatus" info_fields in
+    let* overage_disabled_reason =
+      optional_string stage "overageDisabledReason" info_fields
+    in
+    Ok
+      { status
+      ; rate_limit_type
+      ; resets_at
+      ; overage_status
+      ; overage_disabled_reason
+      }
+;;
+
+type assistant_block =
+  | Assistant_text of string
+  | Assistant_thinking of string
+  | Assistant_native_tool of Runtime_native_tools.observation
+
+type assistant_origin =
+  | Model_response
+  | Api_error_diagnostic
+
+type assistant_scope = Root_response | Child_response of string
+
+(* Claude Code 2.1.292 forwards child tool envelopes even when child text
+   forwarding is disabled. Their session id is the root session's, while
+   this required field distinguishes whose model request the envelope carries. *)
+let assistant_scope ~stage fields =
+  match List.filter (fun (key, _) -> key = "parent_tool_use_id") fields with
+  | [_, `Null] -> Ok Root_response
+  | [_, `String parent] when String.trim parent <> "" -> Ok (Child_response parent)
+  | [] -> protocol_error stage "field \"parent_tool_use_id\" is required"
+  | [_] -> protocol_error stage "field \"parent_tool_use_id\" must be null or a nonblank string"
+  | _ -> protocol_error stage "field \"parent_tool_use_id\" is duplicated"
+;;
+
+(* Claude Code 2.1.263's assistant envelope declares this optional boolean;
+   its producer maps isApiErrorMessage=true to is_api_error_message=true.
+   The text of an API diagnostic is not a model response. Only the terminal
+   result classifies the failure; tool effects remain independent evidence. *)
+let assistant_origin ~stage fields =
+  match List.assoc_opt "is_api_error_message" fields with
+  | None | Some (`Bool false) -> Ok Model_response
+  | Some (`Bool true) -> Ok Api_error_diagnostic
+  | Some _ -> protocol_error stage "field \"is_api_error_message\" must be a boolean"
+;;
+
+let non_blank = function
+  | Some value when String.trim value <> "" -> Some value
+  | Some _ | None -> None
+;;
+
+(* Native observations have the same parent scope as their SDK envelope.
+   Retain closed/ambiguous identities for this invocation so replay cannot
+   reopen an ended call or attach a heartbeat to a reused provider id. *)
+type native_call_owner =
+  { observation : Runtime_native_tools.observation
+  ; scope : assistant_scope
+  ; envelope_uuid : string
+  ; ordinal : int
+  }
+
+type native_call_state =
+  | Native_open of native_call_owner
+  | Native_closed of native_call_owner
+  | Native_ambiguous
+
+type heartbeat =
+  { uuid : string
+  ; progress_id : string
+  ; parent_id : string
+  ; tool_name : string
+  ; elapsed_seconds : int
+  }
+
+type agent_retry_frame =
+  { retry_uuid : string
+  ; progress_id : string
+  ; parent_id : string
+  ; subagent_type : string
+  ; note : Runtime_native_tools.retry_note option
+  }
+
+type task_frame =
+  { task_uuid : string; task_id : string; run_id : string option
+  ; tool_use_id : string option; root_registration : bool
+  ; task_event : native_task_event }
+
+type observed_progress =
+  | Heartbeat_frame of heartbeat
+  | Agent_retry_frame of agent_retry_frame
+  | Task_frame of task_frame
+
+type task_binding =
+  | Task_unowned
+  | Task_owned of
+      { owner : native_task_owner; registration : native_task_event
+      ; mutable boundary : native_task_boundary }
+
+type task_run = { run_id : string; mutable binding : task_binding }
+
+type retry_binding =
+  { progress_id : string; agent : Runtime_native_tools.retry_agent; mutable pending : bool }
+
+type native_call_registry =
+  { invocation : Runtime_claude_input_attribution.ticket
+  ; calls : (string, native_call_state) Hashtbl.t
+  ; progress_uuids : (string, observed_progress) Hashtbl.t
+  ; retry_bindings : (string, retry_binding) Hashtbl.t
+  ; task_runs : (string, task_run) Hashtbl.t
+  ; native_posture : Runtime_native_tools.posture
+  }
+
+type native_start =
+  | Native_start_new
+  | Native_start_active_replay
+  | Native_start_closed_replay
+  | Native_start_conflict
+
+let same_native_owner left right =
+  left.scope=right.scope && left.envelope_uuid=right.envelope_uuid
+  && left.ordinal=right.ordinal && left.observation=right.observation
+;;
+
+let same_heartbeat left right =
+  left.uuid=right.uuid && left.progress_id=right.progress_id
+  && left.parent_id=right.parent_id && left.tool_name=right.tool_name
+  && left.elapsed_seconds=right.elapsed_seconds
+;;
+
+let observe_native_start registry ~scope ~uuid ~ordinal observation =
+  match Runtime_native_tools.call_id observation with
+  | None -> Native_start_new
+  | Some id ->
+    let owner = {observation; scope; envelope_uuid=uuid; ordinal} in
+    match Hashtbl.find_opt registry.calls id with
+    | None -> Hashtbl.add registry.calls id (Native_open owner); Native_start_new
+    | Some (Native_open previous) when same_native_owner previous owner -> Native_start_active_replay
+    | Some (Native_closed previous) when same_native_owner previous owner -> Native_start_closed_replay
+    | Some (Native_open _ | Native_closed _ | Native_ambiguous) ->
+        Hashtbl.replace registry.calls id Native_ambiguous;
+        Native_start_conflict
+;;
+
+let finish_native_call registry ~scope id =
+  match Hashtbl.find_opt registry.calls id with
+  | Some (Native_open owner) when scope=Some owner.scope ->
+      Hashtbl.replace registry.calls id (Native_closed owner);
+      Some owner.observation
+  | Some (Native_open _) when scope=None ->
+      (* An unattributed result cannot certify which call ended, and the
+         remaining open row no longer has authority to receive heartbeats. *)
+      Hashtbl.replace registry.calls id Native_ambiguous;
+      None
+  | Some (Native_open _ | Native_closed _ | Native_ambiguous) | None -> None
+;;
+
+let root_native_agent_parent registry ~call_id : native_agent_parent_witness option =
+  match registry.native_posture, Hashtbl.find_opt registry.calls call_id with
+  | Runtime_native_tools.Native_full,
+    Some (Native_open {scope=Root_response;envelope_uuid;ordinal;
+            observation={origin=Built_in;tool_name=Some "Agent";_}}
+        | Native_closed {scope=Root_response;envelope_uuid;ordinal;
+            observation={origin=Built_in;tool_name=Some "Agent";_}}) ->
+      Some {invocation=registry.invocation;call_id;
+        call_envelope_uuid=envelope_uuid;call_ordinal=ordinal}
+  | (Native_full | Native_read | Native_none),
+    ( Some
+        ( Native_open
+            { observation = { identity = Some _ | None
+                            ; tool_name = Some _ | None
+                            ; origin = Built_in | Mcp_wrapper }
+            ; scope = Root_response | Child_response _
+            ; envelope_uuid = _; ordinal = _ }
+        | Native_closed
+            { observation = { identity = Some _ | None
+                            ; tool_name = Some _ | None
+                            ; origin = Built_in | Mcp_wrapper }
+            ; scope = Root_response | Child_response _
+            ; envelope_uuid = _; ordinal = _ }
+        | Native_ambiguous )
+    | None ) -> None
+;;
+
+type heartbeat_ignored =
+  | Not_heartbeat
+  | Malformed_heartbeat
+  | Other_session
+  | Replayed_heartbeat
+  | Conflicting_heartbeat
+  | No_active_root_call
+
+type heartbeat_projection =
+  | Heartbeat_observed of Runtime_native_tools.action_identity * int
+  | Heartbeat_ignored of heartbeat_ignored
+
+let parse_native_heartbeat ~expected_session_id fields =
+  let ( let* ) = Result.bind in
+  let malformed = Error Malformed_heartbeat in
+  let unique key = match List.filter (fun (name,_) -> name=key) fields with
+    | [_,value] -> Ok value
+    | [] | _::_ -> malformed in
+  let string key =
+    let* value = unique key in
+    match value with `String value when String.trim value <> "" -> Ok value
+    | _ -> malformed in
+  match List.assoc_opt "heartbeat" fields with
+  | None -> Error Not_heartbeat
+  | Some _ ->
+    let* heartbeat = unique "heartbeat" in
+    let* () = match heartbeat with
+      | `Bool true -> Ok () | `Bool false -> Error Not_heartbeat | _ -> malformed in
+    let* session = string "session_id" in
+    let* () = if session=expected_session_id then Ok () else Error Other_session in
+    let* uuid = string "uuid" in
+    let* progress_id = string "tool_use_id" in
+    let* parent_id = string "parent_tool_use_id" in
+    let* tool_name = string "tool_name" in
+    let* elapsed = unique "elapsed_time_seconds" in
+    let* elapsed_seconds = match Runtime_json_integer.of_json elapsed with
+      | Ok seconds when seconds >= 0 -> Ok seconds | Ok _ | Error _ -> malformed in
+    Ok {uuid; progress_id; parent_id; tool_name; elapsed_seconds}
+;;
+
+let project_native_heartbeat registry ~expected_session_id fields =
+  match parse_native_heartbeat ~expected_session_id fields with
+  | Error reason -> Heartbeat_ignored reason
+  | Ok heartbeat ->
+    match Hashtbl.find_opt registry.progress_uuids heartbeat.uuid with
+    | Some (Heartbeat_frame previous) when same_heartbeat previous heartbeat -> Heartbeat_ignored Replayed_heartbeat
+    | Some (Heartbeat_frame _ | Agent_retry_frame _ | Task_frame _) ->
+      Heartbeat_ignored Conflicting_heartbeat
+    | None ->
+      Hashtbl.add registry.progress_uuids heartbeat.uuid (Heartbeat_frame heartbeat);
+      match Hashtbl.find_opt registry.calls heartbeat.parent_id with
+      | Some (Native_open {scope=Root_response;
+          observation={origin=Runtime_native_tools.Built_in; tool_name=Some name; _}; _})
+        when name=heartbeat.tool_name ->
+          Heartbeat_observed (Runtime_native_tools.Call_id heartbeat.parent_id, heartbeat.elapsed_seconds)
+      | Some
+          ( Native_open
+              { observation = { identity = Some _ | None
+                              ; tool_name = Some _ | None
+                              ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+              ; scope = Root_response | Child_response _
+              ; envelope_uuid = _; ordinal = _ }
+          | Native_closed
+              { observation = { identity = Some _ | None
+                              ; tool_name = Some _ | None
+                              ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+              ; scope = Root_response | Child_response _
+              ; envelope_uuid = _; ordinal = _ }
+          | Native_ambiguous )
+      | None ->
+          Heartbeat_ignored No_active_root_call
+;;
+
+type retry_projection =
+  | Retry_observed of Runtime_native_tools.action_identity * Runtime_native_tools.retry_observation
+  | Retry_ignored
+
+let parse_agent_retry ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  let unique key = match List.filter (fun (name,_) -> name=key) fields with
+    | [_,value] -> Some value | [] | _::_ -> None in
+  let string key = let* value = unique key in
+    match value with `String value when String.trim value <> "" -> Some value | _ -> None in
+  let* name = string "tool_name" in
+  let* session = string "session_id" in
+  if name <> "Agent" || session <> expected_session_id || List.mem_assoc "heartbeat" fields
+     || not (List.for_all (fun (key,_) -> List.mem key agent_retry_fields) fields) then None
+  else
+    let* elapsed = unique "elapsed_time_seconds" in
+    let* () = match Runtime_json_integer.of_json elapsed with Ok 0 -> Some () | Ok _ | Error _ -> None in
+    let* retry_uuid = string "uuid" in
+    let* progress_id = string "tool_use_id" in
+    let* parent_id = string "parent_tool_use_id" in
+    let* subagent_type = string "subagent_type" in
+    let* note = match List.filter (fun (key,_) -> key="subagent_retry") fields with
+      | [] -> Some None
+      | [_,`Assoc note_fields] ->
+          (match Runtime_native_tools.progress_of_json
+            (`Assoc (("kind",`String "retry_reported")::("subagent_type",`String subagent_type)::note_fields)) with
+           | Ok (Runtime_native_tools.Retry_observed (Retry_reported note)) -> Some (Some note)
+           | Ok (Runtime_native_tools.Output_observed _) | Error _
+           | Ok (Runtime_native_tools.Message_reported _)
+           | Ok (Runtime_native_tools.Heartbeat_reported _)
+           | Ok (Runtime_native_tools.Retry_observed (Runtime_native_tools.Retry_cleared _)) -> None)
+      | [_] | _::_ -> None in
+    Some {retry_uuid;progress_id;parent_id;subagent_type;note}
+;;
+
+let project_agent_retry registry ~expected_session_id fields =
+  match parse_agent_retry ~expected_session_id fields with
+  | None -> Retry_ignored
+  | Some frame ->
+      (* Like heartbeat, valid but unowned UUIDs stay observed so later call
+         starts cannot adopt their replay. Malformed/foreign frames claim none. *)
+      if Hashtbl.mem registry.progress_uuids frame.retry_uuid then Retry_ignored
+      else begin
+        Hashtbl.add registry.progress_uuids frame.retry_uuid (Agent_retry_frame frame);
+        match registry.native_posture, Hashtbl.find_opt registry.calls frame.parent_id with
+        | Runtime_native_tools.Native_full, Some (Native_open
+            {scope=Root_response;observation={origin=Built_in;tool_name=Some "Agent";_};_}) ->
+            let binding = Hashtbl.find_opt registry.retry_bindings frame.parent_id in
+            let matches (binding : retry_binding) = binding.progress_id=frame.progress_id
+              && binding.agent.subagent_type=frame.subagent_type in
+            let report observation = Retry_observed (Runtime_native_tools.Call_id frame.parent_id, observation) in
+            (match frame.note, binding with
+             | Some note, None ->
+                 Hashtbl.add registry.retry_bindings frame.parent_id
+                   {progress_id=frame.progress_id;agent=note.agent;pending=true};
+                 report (Runtime_native_tools.Retry_reported note)
+             | Some note, Some binding when binding.agent=note.agent ->
+                 Hashtbl.replace registry.retry_bindings frame.parent_id
+                   {progress_id=frame.progress_id;agent=note.agent;pending=true};
+                 report (Runtime_native_tools.Retry_reported note)
+             | None, Some binding when matches binding && binding.pending ->
+                 binding.pending <- false; report (Runtime_native_tools.Retry_cleared binding.agent)
+             | Some _, Some _ | None, (Some _ | None) -> Retry_ignored)
+        | (Native_full | Native_read | Native_none),
+          ( Some
+              ( Native_open
+                  { observation = { identity = Some _ | None
+                                  ; tool_name = Some _ | None
+                                  ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+                  ; scope = Root_response | Child_response _
+                  ; envelope_uuid = _; ordinal = _ }
+              | Native_closed
+                  { observation = { identity = Some _ | None
+                                  ; tool_name = Some _ | None
+                                  ; origin = Runtime_native_tools.Built_in | Runtime_native_tools.Mcp_wrapper }
+                  ; scope = Root_response | Child_response _
+                  ; envelope_uuid = _; ordinal = _ }
+              | Native_ambiguous )
+          | None ) -> Retry_ignored
+      end
+;;
+
+let parse_task_frame ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  (* The narrowly admitted observation still receives the shared recursive
+     duplicate-key check. Malformed telemetry is dropped, not a turn error. *)
+  let* () = Result.to_option (validate_unique_object_keys
+      ~stage:"task observation" ~path:"$" (`Assoc fields)) in
+  let string = function `String value -> Some value | _ -> None in
+  let identity = function
+    | `String value when String.trim value <> "" -> Some value
+    | _ -> None in
+  let bool = function `Bool value -> Some value | _ -> None in
+  let int value = Result.to_option (Runtime_json_integer.of_json value) in
+  let nonnegative_int value =
+    Option.bind (int value) (fun value -> if value >= 0 then Some value else None) in
+  let required parse key fields = Option.bind (List.assoc_opt key fields) parse in
+  let optional parse key fields = match List.assoc_opt key fields with
+    | None -> Some None | Some value -> Option.map Option.some (parse value) in
+  let string_field key = required string key fields in
+  let* subtype = string_field "subtype" in
+  let* kind = task_kind subtype in
+  let* () = if List.for_all (fun (key,_) -> List.mem key (task_fields kind)) fields
+    then Some () else None in
+  let* session_id = required identity "session_id" fields in
+  let* () = if session_id=expected_session_id then Some () else None in
+  let* task_uuid = required identity "uuid" fields in
+  let* task_id = required identity "task_id" fields in
+  let* run_id = optional identity "run_id" fields in
+  let* tool_use_id = optional identity "tool_use_id" fields in
+  let usage = function
+    | `Assoc counts when List.for_all (fun (key,_) ->
+        List.mem key ["total_tokens";"tool_uses";"duration_ms"]) counts ->
+        let* total_tokens = required nonnegative_int "total_tokens" counts in
+        let* tool_uses = required nonnegative_int "tool_uses" counts in
+        let* duration_ms = required int "duration_ms" counts in
+        Some {total_tokens;tool_uses;duration_ms}
+    | _ -> None in
+  let status = function
+    | `String "pending" -> Some Task_pending | `String "running" -> Some Task_running
+    | `String "completed" -> Some Task_completed | `String "failed" -> Some Task_failed
+    | `String "killed" -> Some Task_killed | `String "paused" -> Some Task_paused
+    | _ -> None in
+  let* task_event, root_registration = match kind with
+    | Task_start ->
+        let* _description = string_field "description" in
+        let* _prompt = optional string "prompt" fields in
+        let* _workflow = optional string "workflow_name" fields in
+        let* subagent_type = optional string "subagent_type" fields in
+        let* is_backgrounded = optional bool "is_backgrounded" fields in
+        (* Claude 2.1.294 marks resumed tasks awaited by their caller.
+           This scheduling observation does not prove spawning ownership. *)
+        let* _awaited = optional bool "awaited" fields in
+        let* skip_transcript = optional bool "skip_transcript" fields in
+        let* ambient = optional bool "ambient" fields in
+        let* task_type = optional string "task_type" fields in
+        let* spawn_depth = optional int "spawn_depth" fields in
+        let* parent_task_id = optional identity "parent_task_id" fields in
+        let* owned_by_subagent = optional bool "owned_by_subagent" fields in
+        (* SDK 2.1.292 defines depth 1 as top-level. An absent parent alone
+           cannot prove root origin: untracked/workflow launchers lack it too. *)
+        let root = task_type=Some "local_agent" && spawn_depth=Some 1
+          && parent_task_id=None && owned_by_subagent<>Some true in
+        Some (Task_registered {subagent_type;is_backgrounded;skip_transcript;ambient}, root)
+    | Task_update ->
+        let* patch = match List.assoc_opt "patch" fields with
+          | Some (`Assoc patch) when List.for_all (fun (key,_) -> List.mem key
+              ["status";"description";"end_time";"total_paused_ms";"error";"is_backgrounded"]) patch -> Some patch
+          | _ -> None in
+        let* _description = optional string "description" patch in
+        let* _error = optional string "error" patch in
+        let* status = optional status "status" patch in
+        let* is_backgrounded = optional bool "is_backgrounded" patch in
+        let* end_time = optional nonnegative_int "end_time" patch in
+        let* total_paused_ms = optional int "total_paused_ms" patch in
+        Some (Task_patched {status;is_backgrounded;end_time;total_paused_ms}, false)
+    | Task_progress ->
+        let* _description = string_field "description" in
+        let* _summary = optional string "summary" fields in
+        let* _subagent_type = optional string "subagent_type" fields in
+        let* usage = required usage "usage" fields in
+        let* last_tool_name = optional string "last_tool_name" fields in
+        Some (Task_progress_reported {usage;last_tool_name}, false)
+    | Task_notification ->
+        let* _summary = string_field "summary" in
+        let* _output_file = string_field "output_file" in
+        let* outcome = match List.assoc_opt "status" fields with
+          | Some (`String "completed") -> Some Task_completed_notice
+          | Some (`String "failed") -> Some Task_failed_notice
+          | Some (`String "stopped") -> Some Task_stopped_notice
+          | _ -> None in
+        let* reason = optional (function `String "worker_restart" -> Some Worker_restart
+          | _ -> None) "reason" fields in
+        let* () = match reason,outcome with
+          | Some Worker_restart,(Task_completed_notice|Task_failed_notice) -> None
+          | None,_ | Some Worker_restart,Task_stopped_notice -> Some () in
+        let* usage = optional usage "usage" fields in
+        let* skip_transcript = optional bool "skip_transcript" fields in
+        let* ambient = optional bool "ambient" fields in
+        Some (Task_terminal_reported {outcome;reason;usage;skip_transcript;ambient}, false) in
+  Some {task_uuid;task_id;run_id;tool_use_id;root_registration;task_event}
+;;
+
+let project_native_task registry ~expected_session_id fields =
+  let ( let* ) = Option.bind in
+  let* frame = parse_task_frame ~expected_session_id fields in
+  if Hashtbl.mem registry.progress_uuids frame.task_uuid then None else begin
+    (* Valid unowned identities stay seen across all metadata kinds. A replay
+       cannot acquire a native owner that happened to appear later. *)
+    Hashtbl.add registry.progress_uuids frame.task_uuid (Task_frame frame);
+    let* run_id = frame.run_id in
+    let emit owner boundary = Some {owner;uuid=frame.task_uuid;event=frame.task_event;boundary} in
+    let register () =
+      let binding =
+        match frame.root_registration, frame.tool_use_id with
+        | true, Some call_id ->
+            (match root_native_agent_parent registry ~call_id with
+             | Some parent ->
+                 Task_owned {owner={invocation=parent.invocation;task_id=frame.task_id;
+                     run_id;call_id=parent.call_id;call_envelope_uuid=parent.call_envelope_uuid;
+                     call_ordinal=parent.call_ordinal};
+                   registration=frame.task_event;boundary=Task_terminal_unobserved}
+             | None -> Task_unowned)
+        | false, (Some _ | None) | true, None -> Task_unowned in
+      Hashtbl.replace registry.task_runs frame.task_id {run_id;binding};
+      match binding with Task_owned {owner;boundary;_} -> emit owner boundary | Task_unowned -> None in
+    match frame.task_event, Hashtbl.find_opt registry.task_runs frame.task_id with
+    | Task_registered _, None -> register ()
+    | Task_registered _, Some previous when String.compare run_id previous.run_id > 0 ->
+        (* This ordering is the provider's declared per-task run contract.
+           The opaque run string is never parsed as a timestamp or prefix. *)
+        register ()
+    | Task_registered _, Some previous when run_id=previous.run_id ->
+        (match previous.binding with
+         | Task_owned held when frame.root_registration
+             && frame.tool_use_id=Some held.owner.call_id
+             && frame.task_event=held.registration -> ()
+         | Task_owned _ -> previous.binding <- Task_unowned
+         | Task_unowned -> ());
+        None
+    | Task_registered _, Some _ -> None
+    | (Task_patched _ | Task_progress_reported _ | Task_terminal_reported _), Some current
+        when run_id=current.run_id ->
+        (match current.binding with
+         | Task_unowned -> None
+         | Task_owned held ->
+             if Option.exists (fun call_id -> call_id<>held.owner.call_id) frame.tool_use_id
+             then None else
+             match frame.task_event, held.boundary with
+             | Task_patched {status;_}, Task_terminal_unobserved ->
+                 (match status with
+                  | Some (Task_completed | Task_failed | Task_killed) -> held.boundary <- Task_terminal_observed
+                  | Some (Task_pending | Task_running | Task_paused) | None -> ());
+                 emit held.owner held.boundary
+             | Task_patched {status=(None | Some (Task_completed | Task_failed | Task_killed));_},
+                 Task_terminal_observed ->
+                 (* End-time/background metadata can change after a terminal
+                    observation. Retain the patch without reopening the run. *)
+                 emit held.owner held.boundary
+             | Task_progress_reported _, Task_terminal_unobserved -> emit held.owner held.boundary
+             | Task_terminal_reported _, (Task_terminal_unobserved | Task_terminal_observed) ->
+                 (* The SDK allows a later notification to replace the task's
+                    report. Its fresh UUID is another observation, not a reopen. *)
+                 held.boundary <- Task_terminal_observed; emit held.owner held.boundary
+             | (Task_patched {status=Some (Task_pending | Task_running | Task_paused);_}
+                 | Task_progress_reported _), Task_terminal_observed
+             | Task_registered _, (Task_terminal_unobserved | Task_terminal_observed) -> None)
+    | (Task_patched _ | Task_progress_reported _ | Task_terminal_reported _), previous ->
+        (* Losing a registration cannot make a later call with the same ID
+           own the preceding task edge. Retain its exact run as unowned. *)
+        (match previous with
+         | None -> Hashtbl.add registry.task_runs frame.task_id {run_id;binding=Task_unowned}
+         | Some old when String.compare run_id old.run_id > 0 ->
+             Hashtbl.replace registry.task_runs frame.task_id {run_id;binding=Task_unowned}
+         | Some _ -> ());
+        None
+  end
+;;
+
+let allowed_tool_name (tool : dynamic_tool) =
+  Printf.sprintf "mcp__%s__%s" mcp_server_name tool.name
+;;
+
+let assistant_blocks ~stage ~mcp_tool_names content =
+  match content with
+  | `List blocks ->
+    let rec loop ordinal parsed = function
+      | [] -> Ok (List.rev parsed)
+      | `Assoc fields :: rest ->
+        let* type_ = required_string stage "type" fields in
+        (match type_ with
+         | "text" ->
+           let* text = text_value stage fields in
+           loop (ordinal + 1) ((ordinal, Assistant_text text) :: parsed) rest
+         | "tool_use" ->
+           let* call_id = optional_string stage "id" fields in
+           let* tool_name = optional_string stage "name" fields in
+           let tool_name = non_blank tool_name in
+           let origin =
+             match tool_name with
+             | Some name when List.mem name mcp_tool_names ->
+               Runtime_native_tools.Mcp_wrapper
+             | Some _ | None -> Runtime_native_tools.Built_in
+           in
+           loop (ordinal + 1)
+             ((ordinal, Assistant_native_tool
+                { identity =
+                    Option.map
+                      (fun call_id -> Runtime_native_tools.Call_id call_id)
+                      (non_blank call_id)
+                ; tool_name
+                ; origin
+                })
+              :: parsed)
+             rest
+         | "thinking" ->
+           let* thinking = required_member stage "thinking" fields in
+           (match thinking with
+            | `String text ->
+                loop (ordinal + 1) ((ordinal, Assistant_thinking text) :: parsed) rest
+            | _ -> protocol_error stage "thinking must be a string")
+         | "redacted_thinking" ->
+             (* Omit opaque payloads, but retain every wire position in the
+                identities of later public body and native call blocks. *)
+             loop (ordinal + 1) parsed rest
+         | other ->
+           protocol_error
+             stage
+             (Printf.sprintf "unsupported assistant content type %S" other))
+      | _ :: _ -> protocol_error stage "assistant content block must be an object"
+    in
+    loop 0 [] blocks
+  | _ -> protocol_error stage "assistant content must be an array"
+;;
+
+(* The keeper side of this runtime hardcoded [usage = None] while the
+   antigravity runtime fills the same slot from its CLI stream, which is why
+   official-client turns carry no input_tokens (#28023) and why a window
+   overflow is discovered from the result frame's own verdict below rather
+   than from token counts (#27427). Read leniently: a turn must not fail
+   because its usage block is absent or shaped differently than expected,
+   and an absent value after this lands means the CLI does not send one. *)
+let turn_usage_of_fields fields =
+  match List.assoc_opt "usage" fields with
+  | None | Some `Null -> None
+  | Some (`Assoc usage_fields) ->
+    let int_field name =
+      match List.assoc_opt name usage_fields with
+      | Some (`Int value) when value >= 0 -> Some value
+      | _ -> None
+    in
+    (* The CLI mirrors Anthropic Messages usage: input_tokens is the
+       exclusive count (tokens after the last cache breakpoint) and the
+       cache components arrive as their own fields. Both are carried so
+       the keeper can build the canonical inclusive api_usage
+       (Backend_anthropic.usage_of_wire_counts); an absent cache field
+       reads as 0, the same convention every Anthropic-format parse in
+       agent_core uses. Presence of a usage block still requires both
+       base counts. *)
+    (match int_field "input_tokens", int_field "output_tokens" with
+     | Some input_tokens, Some output_tokens ->
+       Some
+         { input_tokens
+         ; output_tokens
+         ; cache_creation_input_tokens =
+             (* DET-OK: absent wire field is 0 by api_usage convention *)
+             Option.value (int_field "cache_creation_input_tokens") ~default:0
+         ; cache_read_input_tokens =
+             (* DET-OK: absent wire field is 0 by api_usage convention *)
+             Option.value (int_field "cache_read_input_tokens") ~default:0
+         }
+     | Some _, None | None, Some _ | None, None -> None)
+  | Some _ -> None
+;;
+
+(* The input side of an assistant frame's usage. Its output_tokens is a
+   streaming snapshot and is dropped here so no reader can count it. *)
+let request_input_of_fields fields : request_input option =
+  Option.map
+    (fun (usage : turn_usage) : request_input ->
+       { input_tokens = usage.input_tokens
+       ; cache_creation_input_tokens = usage.cache_creation_input_tokens
+       ; cache_read_input_tokens = usage.cache_read_input_tokens
+       })
+    (turn_usage_of_fields fields)
+;;
+
+let new_assistant_usage () =
+  { seen_message_ids = Hashtbl.create 8; newest_input = None }
+;;
+
+let observe_assistant_usage acc ~message_id usage =
+  let count usage = acc.newest_input <- Some usage in
+  match usage with
+  | None -> ()
+  | Some usage ->
+    (match message_id with
+     | Some id when Hashtbl.mem acc.seen_message_ids id -> ()
+     | Some id ->
+       Hashtbl.replace acc.seen_message_ids id ();
+       count usage
+     | None ->
+       (* A frame without a message id cannot be matched to a sibling, so
+          it counts on its own. *)
+       count usage)
+;;
+
+let parse_assistant ~expected_session_id ~tools fields =
+  let stage = "assistant message" in
+  let* session_id = required_string stage "session_id" fields in
+  if session_id <> expected_session_id
+  then protocol_error stage "session_id does not match the active Claude session"
+  else
+    let* scope = assistant_scope ~stage fields in
+    let* origin = assistant_origin ~stage fields in
+    let* uuid = required_string stage "uuid" fields in
+    let* message = required_member stage "message" fields in
+    let* message_fields = assoc_at stage message in
+    let* model = required_string stage "model" message_fields in
+    let* content = required_member stage "content" message_fields in
+    let message_id =
+      match List.assoc_opt "id" message_fields with
+      | Some (`String id) -> Some id
+      | Some _ | None -> None
+    in
+    let usage = request_input_of_fields message_fields in
+    let* blocks =
+      assistant_blocks
+        ~stage
+        ~mcp_tool_names:(List.map allowed_tool_name tools)
+        content
+    in
+    Ok (scope, origin, uuid, model, blocks, message_id, usage)
+;;
+
+let native_tool_results ~expected_session_id fields =
+  let stage = "user message" in
+  let* session_id = optional_string stage "session_id" fields in
+  let* () =
+    match non_blank session_id with
+    | Some session_id when session_id <> expected_session_id ->
+      protocol_error stage "session_id does not match the active Claude session"
+    | Some _ | None -> Ok ()
+  in
+  match List.assoc_opt "message" fields with
+  | Some (`Assoc message_fields) ->
+    (match List.assoc_opt "content" message_fields with
+     | Some (`List blocks) ->
+       let rec loop results = function
+         | [] -> Ok (List.rev results)
+         | `Assoc block_fields :: rest ->
+           (match List.assoc_opt "type" block_fields with
+            | Some (`String "tool_result") ->
+              let* call_id = optional_string stage "tool_use_id" block_fields in
+              let* is_error = match List.assoc_opt "is_error" block_fields with
+                | None -> Ok None
+                | Some (`Bool value) -> Ok (Some value)
+                | Some _ -> protocol_error stage "tool_result is_error must be a boolean"
+              in
+              let completion : Runtime_native_tools.completion =
+                {outcome=Result_received {is_error}; exit_code=None} in
+              loop (Option.to_list (Option.map (fun id -> id, completion) (non_blank call_id)) @ results) rest
+            | Some (`String _) | None -> loop results rest
+            | Some _ -> protocol_error stage "content block type must be a string")
+         | _ :: _ -> protocol_error stage "user content block must be an object"
+       in
+       loop [] blocks
+     | Some `Null | None -> Ok []
+     | Some _ -> protocol_error stage "user content must be an array")
+  | Some `Null | None -> Ok []
+  | Some _ -> protocol_error stage "user message must be an object"
+;;
+
+(* [terminal_reason] on the result frame is the CLI's own enum for why its
+   query loop stopped. CLI 2.1.278 groups these three values under its stop
+   cause "context_limit". [prompt_too_long] is the API refusing the request.
+   [blocking_limit] is the CLI refusing to send it when its token count reaches
+   the window minus 3000 tokens, with "Prompt is too long" and no API status.
+   [rapid_refill_breaker] stops repeated refills after automatic compaction.
+   Every other value leaves this lane's handling unchanged and is kept only
+   for the failure line. *)
+type terminal_reason =
+  | Prompt_too_long
+  | Blocking_limit
+  | Rapid_refill_breaker
+  | Other_terminal_reason of string
+
+let terminal_reason_of_wire = function
+  | "prompt_too_long" -> Prompt_too_long
+  | "blocking_limit" -> Blocking_limit
+  | "rapid_refill_breaker" -> Rapid_refill_breaker
+  | wire -> Other_terminal_reason wire
+;;
+
+let terminal_reason_to_wire = function
+  | Prompt_too_long -> "prompt_too_long"
+  | Blocking_limit -> "blocking_limit"
+  | Rapid_refill_breaker -> "rapid_refill_breaker"
+  | Other_terminal_reason wire -> wire
+;;
+
+(* The result frame's own session and turn identity, checked before anything
+   it carries is taken as this turn's: a frame of another session is a
+   protocol error, not this turn's spend. *)
+let result_turn_id ~expected_session_id fields =
+  let stage = "result message" in
+  let* session_id = required_string stage "session_id" fields in
+  if session_id <> expected_session_id
+  then protocol_error stage "session_id does not match the active Claude session"
+  else required_string stage "uuid" fields
+;;
+
+let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~usage
+    fields =
+  let stage = "result message" in
+  let* subtype = required_string stage "subtype" fields in
+  let* is_error = required_bool stage "is_error" fields in
+  let* api_error_status = optional_int stage "api_error_status" fields in
+  let* terminal_reason = optional_string stage "terminal_reason" fields in
+  let terminal_reason = Option.map terminal_reason_of_wire terminal_reason in
+  let result =
+    match List.assoc_opt "result" fields with
+    | None | Some `Null -> Ok None
+    | Some (`String value) -> Ok (Some value)
+    | Some _ -> protocol_error stage "field \"result\" must be a string or null"
+  in
+  let* result = result in
+  (* Under --json-schema the client validates its own answer and re-prompts,
+     and [structured_output] carries what passed. The docs say a run can end
+     [subtype=success] with the field absent and that this counts as a
+     failure, so an absent field is left to the caller's own contract rather
+     than silently read as "no schema was asked for". Measured 2026-08-30 in
+     this argv shape: a prompt asking for a key the schema forbids came back
+     without it, and both fields agreed. Prefer the parsed value anyway --
+     the sibling antigravity adapter's narrated text does not agree. *)
+  let result =
+    match List.assoc_opt "structured_output" fields with
+    | None | Some `Null -> result
+    | Some value -> Some (Yojson.Safe.to_string value)
+  in
+  let structurally_quota_blocked =
+    Option.equal Int.equal api_error_status (Some 429)
+    || Option.exists
+         (fun (limit : rate_limit) -> limit.status = Rejected)
+         rate_limit
+  in
+  let terminal_failure_detail () =
+    (* [terminal_reason] decides whether an overflow is typed as one, and it
+       used to be absent from what a reader sees. A live failure carrying
+       "Prompt is too long" that did not reach the overflow path was
+       indistinguishable from one where the sentence never appeared: both
+       printed the same line, and the field that separates them was not in
+       it (one keeper, 2026-08-24). Naming it costs one field and answers the
+       question the next reader will have. *)
+    Printf.sprintf
+      "terminal subtype=%s api_status=%s reason=%s%s"
+      subtype
+      (Option.fold
+         ~none:"unknown"
+         ~some:string_of_int
+         api_error_status)
+      (Option.fold ~none:"none" ~some:terminal_reason_to_wire terminal_reason)
+      (match result with
+       | Some detail when String.trim detail <> "" -> ": " ^ String.trim detail
+       | Some _ | None -> "")
+  in
+  let provider_reported_context_window_exceeded =
+    (* The CLI states why its query loop terminated as a typed enum on this
+       frame; [prompt_too_long] is the CLI's own promotion of every provider
+       context-window rejection (either status, or a 413 naming the window),
+       [blocking_limit] is the same verdict reached before sending, and
+       [rapid_refill_breaker] reports repeated refills after compaction.
+       A frame that carries the verdict is authoritative in both directions,
+       like the codex lane's [codexErrorInfo]; a frame without it is not an
+       overflow. *)
+    match terminal_reason with
+    | Some (Prompt_too_long | Blocking_limit | Rapid_refill_breaker) -> true
+    | Some (Other_terminal_reason _) | None -> false
+  in
+  if structurally_quota_blocked
+  then
+    Error
+      (Quota_blocked
+         { api_error_status
+         ; rate_limit
+         ; tool_effect_attempted
+         ; response_emitted
+         })
+  else if is_error && provider_reported_context_window_exceeded
+  then
+    Error
+      (Context_window_exceeded
+         { message = terminal_failure_detail ()
+         ; tool_effect_attempted
+         ; response_emitted
+         })
+  else if is_error
+  then
+    (* [result] is the one field on this frame that says why the turn failed.
+       The prompt-too-long verdict above (typed [terminal_reason]) has its
+       own typed path; unrelated 400s and every other terminal rejection
+       still retain the provider's sentence instead of collapsing to the
+       status code (#28071). *)
+    Error
+      (Turn_failed_with_observation
+         { detail = terminal_failure_detail ()
+         ; api_error_status
+         ; tool_effect_attempted
+         ; response_emitted
+         })
+  else if subtype <> "success"
+  then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
+  else Ok (turn_id, result, usage)
+;;
+
+(* Partial SDK frames precede the complete assistant block. Keep the current
+   text block so its later complete envelope contributes only missing bytes.
+   Complete blocks remain the source for terminal text and usage accounting. *)
+type partial_phase = Streaming | Wire_stopped | Envelope_complete | Content_closed
+
+type partial_block =
+  { identity : content_block
+  ; message_id : string
+  ; index : int
+  ; channel : content_channel
+  ; buffer : Buffer.t
+  ; mutable phase : partial_phase
+  }
+
+type partial_stream =
+  { mutable message_id : string option
+  ; mutable blocks : partial_block list
+  ; completed_envelopes : ((string * int), (content_channel * string)) Hashtbl.t
+  }
+
+let emit_content ~on_stream_event ~response_emitted ~message_id ~block channel text =
+  if text <> "" then match channel with
+  | Text_content ->
+      response_emitted := true;
+      emit_stream_event on_stream_event (Text_delta {message_id; block; text})
+  | Thinking_content ->
+      emit_stream_event on_stream_event (Thinking_delta {message_id; block; text})
+;;
+
+let close_partial ~on_stream_event block =
+  if block.phase <> Content_closed then begin
+    block.phase <- Content_closed;
+    Buffer.clear block.buffer;
+    emit_stream_event on_stream_event
+      (Content_block_stopped {block=block.identity; channel=block.channel})
+  end
+;;
+
+let partial_text_value stage channel fields =
+  match channel with
+  | Text_content -> text_value stage fields
+  | Thinking_content ->
+      let* value = required_member stage "thinking" fields in
+      (match value with
+       | `String text -> Ok text
+       | _ -> protocol_error stage "thinking must be a string")
+;;
+
+let partial_block_index stage fields =
+  let* index = optional_int stage "index" fields in
+  match index with
+  | Some index when index >= 0 -> Ok index
+  | Some _ | None -> protocol_error stage "index must be a nonnegative integer"
+;;
+
+let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
+    ~on_stream_event (partial : partial_stream) fields =
+  let stage = "partial stream event" in
+  let* session_id = required_string stage "session_id" fields in
+  if session_id <> expected_session_id then
+    protocol_error stage "session_id does not match the active Claude session"
+  else
+    let* event = required_member stage "event" fields in
+    let* event = assoc_at stage event in
+    let* event_type = required_string stage "type" event in
+    match event_type with
+    | "message_start" ->
+        let* message = required_member stage "message" event in
+        let* message = assoc_at stage message in
+        let* id = required_string stage "id" message in
+        let* model = required_string stage "model" message in
+        partial.message_id <- Some id;
+        if not !stream_started then begin
+          stream_started := true;
+          emit_stream_event on_stream_event (Turn_started {turn_id=id; model})
+        end;
+        Ok ()
+    | "content_block_start" ->
+        let* index = partial_block_index stage event in
+        let* block = required_member stage "content_block" event in
+        let* block = assoc_at stage block in
+        let* kind = required_string stage "type" block in
+        let start_text_block channel =
+          let* text = partial_text_value stage channel block in
+          let* message_id = match partial.message_id with
+            | Some id -> Ok id
+            | None -> protocol_error stage "content block has no message start" in
+          if List.exists (fun (held : partial_block) -> held.message_id = message_id && held.index = index)
+              partial.blocks then
+            protocol_error stage "content block index already started"
+          else begin
+            let buffer = Buffer.create 256 in
+            Buffer.add_string buffer text;
+            let identity = Partial_block {message_id; index} in
+            partial.blocks <- partial.blocks @
+              [{identity; message_id; index; channel; buffer; phase=Streaming}];
+            emit_content ~on_stream_event ~response_emitted
+              ~message_id:partial.message_id ~block:identity channel text;
+            Ok ()
+          end
+        in
+        (match kind with
+         | "text" -> start_text_block Text_content
+         | "thinking" -> start_text_block Thinking_content
+         | "tool_use" | "redacted_thinking" -> Ok ()
+         | other -> protocol_error stage ("unsupported content block type " ^ other))
+    | "content_block_delta" ->
+        let* index = partial_block_index stage event in
+        let* delta = required_member stage "delta" event in
+        let* delta = assoc_at stage delta in
+        let* kind = required_string stage "type" delta in
+        let append_text_delta channel =
+          let* text = partial_text_value stage channel delta in
+          let held = List.find_opt (fun (held : partial_block) ->
+            Some held.message_id = partial.message_id && held.index = index
+            && held.channel = channel) partial.blocks in
+          (match held with
+           | Some held when held.phase = Streaming ->
+               Buffer.add_string held.buffer text;
+               emit_content ~on_stream_event ~response_emitted
+                 ~message_id:partial.message_id ~block:held.identity channel text;
+               Ok ()
+           | _ -> protocol_error stage "content delta has no matching open message/channel block")
+        in
+        (match kind with
+         | "text_delta" -> append_text_delta Text_content
+         | "thinking_delta" -> append_text_delta Thinking_content
+         | "input_json_delta" | "signature_delta" | "citations_delta" -> Ok ()
+         | other -> protocol_error stage ("unsupported content delta type " ^ other))
+    | "content_block_stop" ->
+        let* index = partial_block_index stage event in
+        List.iter (fun (held : partial_block) ->
+          if Some held.message_id = partial.message_id && held.index = index then begin
+            (* Empty blocks have no complete assistant envelope. Nonempty
+               blocks close only after reconciliation, including a late suffix. *)
+            match held.phase with
+            | Streaming when Buffer.length held.buffer = 0 -> close_partial ~on_stream_event held
+            | Streaming -> held.phase <- Wire_stopped
+            | Envelope_complete -> close_partial ~on_stream_event held
+            | Wire_stopped | Content_closed -> ()
+          end) partial.blocks;
+        Ok ()
+    | "message_delta" | "message_stop" | "ping" -> Ok ()
+    | other -> protocol_error stage ("unsupported partial event type " ^ other)
+;;
+
+(* A partial frame stamped with a child's [parent_tool_use_id] carries that
+   child's model output. The complete [Child_response] envelope publishes the
+   same body once as [Child_content_observed]; the partial copy must not open,
+   extend, or close root blocks, nor count as root response evidence. Frames
+   without the field keep the root reading this parser has always given them. *)
+let partial_stream_scope fields =
+  match List.assoc_opt "parent_tool_use_id" fields with
+  | None -> Ok Root_response
+  | Some _ -> assistant_scope ~stage:"partial stream event" fields
+;;
+
+let child_partial_stream_event ~expected_session_id fields =
+  let stage = "partial stream event" in
+  let* session_id = required_string stage "session_id" fields in
+  if session_id <> expected_session_id then
+    protocol_error stage "session_id does not match the active Claude session"
+  else Ok ()
+;;
+
+let complete_partial_text (partial : partial_stream) ~on_stream_event ~response_emitted
+    ~channel ~message_id ~uuid ~ordinal text =
+  let envelope = uuid, ordinal in
+  match Hashtbl.find_opt partial.completed_envelopes envelope with
+  | Some previous when previous = (channel, text) -> Ok ()
+  | Some _ -> protocol_error "assistant content" "replayed complete block changed"
+  | None ->
+      let held = List.find_opt (fun (held : partial_block) ->
+        Some held.message_id = message_id && held.channel = channel
+        && (match held.phase with Streaming | Wire_stopped -> true
+             | Envelope_complete | Content_closed -> false)
+        && (if text = "" then Buffer.length held.buffer = 0
+            else Buffer.length held.buffer > 0)) partial.blocks in
+      let* () = match held with
+      | Some held ->
+          let prefix = Buffer.contents held.buffer in
+          if not (String.starts_with ~prefix text) then
+            protocol_error "assistant content" "complete block conflicts with streamed content"
+          else begin
+            let remaining = String.sub text (String.length prefix)
+                (String.length text - String.length prefix) in
+            emit_content ~on_stream_event ~response_emitted ~message_id
+              ~block:held.identity channel remaining;
+            Buffer.add_string held.buffer remaining;
+            (match held.phase with
+             | Streaming -> held.phase <- Envelope_complete
+             | Wire_stopped -> close_partial ~on_stream_event held
+             | Envelope_complete | Content_closed -> ());
+            Ok ()
+          end
+      | None ->
+          let block = Assistant_block {uuid; ordinal} in
+          emit_content ~on_stream_event ~response_emitted ~message_id ~block channel text;
+          if text <> "" then emit_stream_event on_stream_event
+            (Content_block_stopped {block; channel});
+          Ok () in
+      Hashtbl.add partial.completed_envelopes envelope (channel, text);
+      Ok ()
+;;
+
+module Input_attribution = Runtime_claude_input_attribution
+
+type input_observer =
+  { input_state : Input_attribution.t
+  ; on_input_observation : (Input_attribution.observation -> unit) option
+  }
+
+let emit_input_observation observer observation =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some emit ->
+      (try emit observation with
+       | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Log.Runtime_agent.warn "Claude Code input observation callback raised (error=%s)"
+           (Printexc.to_string exn))
+;;
+
+let observe_input observer ~session_id ~frame fields =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some _ ->
+      Option.iter (emit_input_observation observer)
+        (Input_attribution.observe observer.input_state ~session_id ~frame fields)
+;;
+
+let input_frame_uuid fields =
+  match List.assoc_opt "uuid" fields with Some (`String value) -> Some value | _ -> None
+;;
+
+let observe_partial_input observer ~session_id fields =
+  match observer.on_input_observation with
+  | None -> ()
+  | Some _ ->
+  let uuid = input_frame_uuid fields in
+  let frame = match List.assoc_opt "event" fields with
+    | Some (`Assoc event) ->
+        (match List.assoc_opt "type" event with
+         | Some (`String "message_start") ->
+             (match List.assoc_opt "message" event with
+              | Some (`Assoc message) ->
+                  (match List.assoc_opt "id" message with
+                   | Some (`String message_id) -> Some (Input_attribution.Partial_start {uuid;message_id})
+                   | _ -> None)
+              | _ -> None)
+         | Some (`String "message_stop") -> Some (Input_attribution.Partial_stop {uuid})
+         | Some (`String "ping") -> None
+         | Some (`String _) -> Some (Input_attribution.Partial_fragment {uuid})
+         | _ -> None)
+    | _ -> None in
+  (* Root ownership is explicit in the SDK envelope. The older content parser
+     accepts unscoped partial starts; those cannot leave an old root cursor
+     alive for the next unstamped fragment. No authored bytes are changed. *)
+  match assistant_scope ~stage:"input attribution scope" fields, frame with
+  | Ok Root_response, Some frame -> observe_input observer ~session_id ~frame fields
+  | (Ok (Child_response _) | Error _), Some (Input_attribution.Partial_start {message_id;_}) ->
+      Input_attribution.unowned_response_start observer.input_state ~message_id
+  | (Ok (Child_response _) | Error _), Some (Partial_fragment _ | Partial_stop _ | Assistant _ | Result _)
+  | (Ok Root_response | Ok (Child_response _) | Error _), None -> ()
+;;
+
+let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
+    ~expected_session_id
+    ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
+    ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
+    ~input_observer ~partial_stream ~stream_started ~response_emitted =
+  let* json = io.receive () in
+  let* kind, fields = wire_fields json in
+  match kind with
+  | Frame_control_request ->
+    let* () =
+      handle_control_request
+        io
+        ~control_phase:Turn_admitted
+        ~mcp_session
+        ~tools
+        ~tool_call_count
+        ~assistant_usage
+        ~on_stream_event
+        fields
+    in
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
+      ~response_emitted
+  | Frame_control_response ->
+    protocol_error "turn" "received an unsolicited control response"
+  | Frame_stream_event ->
+    let* scope = partial_stream_scope fields in
+    let* () = match scope with
+      | Root_response ->
+          partial_stream_event ~expected_session_id ~stream_started ~response_emitted
+            ~on_stream_event partial_stream fields
+      | Child_response _ -> child_partial_stream_event ~expected_session_id fields in
+    observe_partial_input input_observer ~session_id:expected_session_id fields;
+    await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
+      ~expected_session_id ~subscription ~resumed ~rate_limit ~assistant_model
+      ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started
+      ~on_stream_event ~input_observer ~partial_stream ~stream_started ~response_emitted
+  | Frame_assistant ->
+    let* scope, origin, uuid, model, blocks, message_id, usage =
+      parse_assistant ~expected_session_id ~tools fields
+    in
+    (match scope with
+     | Root_response -> observe_input input_observer ~session_id:expected_session_id
+         ~frame:(Input_attribution.Assistant {uuid=Some uuid;message_id}) fields
+     | Child_response _ -> ());
+    let assistant_model =
+      match scope, origin with
+      | (Root_response | Child_response _), Api_error_diagnostic
+      | Child_response _, Model_response -> assistant_model
+      | Root_response, Model_response ->
+        observe_assistant_usage assistant_usage ~message_id usage;
+        if not !stream_started
+        then (
+          stream_started := true;
+          emit_stream_event on_stream_event (Turn_started { turn_id = uuid; model }));
+        Some model
+    in
+    let content_scope = match scope, origin with
+      | (Root_response | Child_response _), Api_error_diagnostic -> Diagnostic_content
+      | Root_response, Model_response -> Root_model_content
+      | Child_response parent_tool_use_id, Model_response ->
+          Child_model_content {parent_tool_use_id; observation_id=Random_id.hex ~bytes:16} in
+    let texts_rev = ref [] in
+    let* () = List.fold_left (fun result (ordinal, block) ->
+      let* () = result in
+      match block with
+      | Assistant_text text ->
+          (match content_scope with
+           | Diagnostic_content -> Ok ()
+           | Root_model_content ->
+               texts_rev := text :: !texts_rev;
+               complete_partial_text partial_stream ~on_stream_event ~response_emitted
+                 ~channel:Text_content ~message_id ~uuid ~ordinal text
+           | Child_model_content {parent_tool_use_id; observation_id} ->
+               let parent_occurrence = root_native_agent_parent native_tool_calls
+                 ~call_id:parent_tool_use_id in
+               emit_stream_event on_stream_event
+                 (Child_content_observed {invocation=native_tool_calls.invocation; observation_id; parent_tool_use_id; parent_occurrence; message_id; model;
+                   block=Assistant_block {uuid; ordinal}; channel=Text_content; text});
+               Ok ())
+      | Assistant_thinking text ->
+          (match content_scope with
+           | Diagnostic_content -> Ok ()
+           | Root_model_content ->
+               complete_partial_text partial_stream ~on_stream_event ~response_emitted
+                 ~channel:Thinking_content ~message_id ~uuid ~ordinal text
+           | Child_model_content {parent_tool_use_id; observation_id} ->
+               let parent_occurrence = root_native_agent_parent native_tool_calls
+                 ~call_id:parent_tool_use_id in
+               emit_stream_event on_stream_event
+                 (Child_content_observed {invocation=native_tool_calls.invocation; observation_id; parent_tool_use_id; parent_occurrence; message_id; model;
+                   block=Assistant_block {uuid; ordinal}; channel=Thinking_content; text});
+               Ok ())
+      | Assistant_native_tool observation ->
+          native_tool_attempted := true;
+          (match observe_native_start native_tool_calls ~scope ~uuid ~ordinal observation with
+           | Native_start_new ->
+               emit_stream_event on_stream_event (Native_tool_started observation)
+           | Native_start_active_replay | Native_start_closed_replay | Native_start_conflict -> ());
+          Ok ()) (Ok ()) blocks in
+    let texts = List.rev !texts_rev in
+    if List.exists (fun text -> String.length text > 0) texts then response_emitted := true;
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model
+      ~assistant_texts:(assistant_texts @ texts)
+      ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
+      ~input_observer ~partial_stream ~stream_started ~response_emitted
+  | Frame_rate_limit_event ->
+    let* rate_limit = parse_rate_limit ~expected_session_id fields in
+    (* The usage windows ride the same event. They are an observation for
+       operators: a shape this client cannot read is logged and the turn goes
+       on, with [rate_limit] above still governing the turn as before. *)
+    (match Runtime_provider_usage_window.decode_claude_rate_limit_event json with
+     | Ok { Runtime_provider_usage_window.windows = []; _ } -> ()
+     | Ok report -> emit_stream_event on_stream_event (Usage_windows_reported report)
+     | Error error ->
+       Log.Runtime_agent.warn
+         "Claude Code rate_limit_event usage windows not read: %s"
+         (Runtime_provider_usage_window.decode_error_to_string error));
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
+      ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
+      ~input_observer ~partial_stream ~stream_started ~response_emitted
+  | Frame_result ->
+    (* The result frame is the only place the turn's spend is reported, and
+       it arrives on failures too (a quota refusal, a provider error after
+       tool calls). Once the frame is known to be this session's turn, the
+       spend is reported, before the frame decides whether the turn
+       succeeded, so a failed turn still reports it. The model is the one the
+       turn's responses were measured on; a frame with usage and no measured
+       model response has no model to attribute it to and is logged. *)
+    let* turn_id = result_turn_id ~expected_session_id fields in
+    on_terminal_received ();
+    let usage = turn_usage_of_fields fields in
+    (match assistant_model, usage with
+     | Some model, Some usage ->
+       emit_stream_event
+         on_stream_event
+         (Usage_reported { session_id = expected_session_id; turn_id; model; usage })
+     | None, Some usage ->
+       Log.Runtime_agent.warn
+         "Claude Code result %s reported usage (input=%d output=%d) with no measured \
+          model response; it is not attributed to a model"
+         turn_id
+         usage.input_tokens
+         usage.output_tokens
+     | (Some _ | None), None -> ());
+    let parsed_result =
+      parse_result
+        ~rate_limit
+        ~tool_effect_attempted:(!tool_call_count > 0 || !native_tool_attempted)
+        ~response_emitted:!response_emitted
+        ~turn_id
+        ~usage
+        fields
+    in
+    let outcome = match parsed_result with
+      | Ok _ -> Some Input_attribution.Provider_success
+      | Error (Quota_blocked _ | Context_window_exceeded _
+          | Turn_failed _ | Turn_failed_with_observation _) -> Some Input_attribution.Provider_error
+      | Error (Invalid_config _) | Error (Spawn_failed _) | Error (Protocol_error _)
+      | Error (Subscription_required _) | Error (Unsupported_control_request _)
+      | Error (Turn_transport_interrupted _) | Error (Stopped_by_host _) | Error (Process_exited _)
+      | Error (Unhandled_exception _) | Error (Timeout _) -> None in
+    observe_input input_observer ~session_id:expected_session_id
+      ~frame:(Input_attribution.Result {uuid=Some turn_id;outcome}) fields;
+    let* turn_id, result, usage =
+      match parsed_result with
+      | Error
+          (Context_window_exceeded
+             { tool_effect_attempted = false; response_emitted = false; _ } as error) ->
+        if !stream_started
+        then emit_stream_event on_stream_event (Turn_finished { text = "" });
+        Error error
+      | (Error (Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_}) | Error (Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_}) | Error (Invalid_config _ | (Spawn_failed _ | (Protocol_error _ | (Subscription_required _ | (Unsupported_control_request _ | (Turn_transport_interrupted _ | (Turn_failed _ | (Turn_failed_with_observation _ | (Stopped_by_host _ | (Quota_blocked _ | (Process_exited _ | (Unhandled_exception _ | Timeout _)))))))))))) | Ok _) as result -> result
+    in
+    let* () =
+      invoke_state_callback ~stage:"turn started callback" (fun () ->
+        on_turn_started ~session_id:expected_session_id ~turn_id)
+    in
+    let* model =
+      match assistant_model with
+      | Some model -> Ok model
+      | None -> protocol_error "result message" "no measured assistant model"
+    in
+    let text =
+      match result with
+      | Some text when String.trim text <> "" -> Some text
+      | None | Some _ ->
+        assistant_texts
+        |> String.concat "\n"
+        |> String.trim
+        |> fun value -> if value = "" then None else Some value
+    in
+    let* text =
+      match text with
+      | Some text -> Ok text
+      | None when Option.is_some result ->
+          (* A measured successful result with an explicit blank is valid
+             protocol. Keeper acceptance still requires text or tool progress;
+             rejecting that response must not retire the resumable session. *)
+          Ok ""
+      | None -> protocol_error "result message" "successful turn has no text"
+    in
+    emit_stream_event on_stream_event (Turn_finished { text });
+    (* Both facts travel: the newest request's input is the context it
+       occupied, the result frame's total is what the turn spent. *)
+    let usage =
+      { latest_request_input = assistant_usage.newest_input
+      ; turn_total = usage
+      }
+    in
+    Ok
+      { session_id = expected_session_id
+      ; turn_id
+      ; model
+      ; text
+      ; dynamic_tool_calls = !tool_call_count
+      ; subscription
+      ; rate_limit
+      ; resumed
+      ; usage
+      }
+  | Frame_user ->
+    let* finished = native_tool_results ~expected_session_id fields in
+    let scope = Result.to_option (assistant_scope ~stage:"native result scope" fields) in
+    List.iter (fun (call_id, completion) ->
+      Option.iter (fun observation ->
+        emit_stream_event on_stream_event (Native_tool_finished {observation; completion}))
+        (finish_native_call native_tool_calls ~scope call_id)) finished;
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
+      ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event ~input_observer ~partial_stream ~stream_started
+      ~response_emitted
+  | Frame_system ->
+    (* [compact_boundary] is the client's own record that it summarised the
+       conversation: what the session held as sent before it is now a
+       summary. Exact task edge kinds have their own observation registry;
+       other system frames remain informational. *)
+    let* subtype = optional_string "system message" "subtype" fields in
+    (match subtype with
+     | Some "compact_boundary" -> emit_stream_event on_stream_event Conversation_compacted
+     | Some "api_retry" ->
+         (match Runtime_claude_api_retry.decode ~expected_session_id (`Assoc fields) with
+          | Ok (Some retry) -> emit_stream_event on_stream_event (Provider_retry_observed retry)
+          | Ok None | Error _ -> ())
+     | Some value when Option.is_some (task_kind value) ->
+         Option.iter (fun observation ->
+           emit_stream_event on_stream_event (Native_task_observed observation))
+           (project_native_task native_tool_calls ~expected_session_id fields)
+     | Some _ | None -> ());
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
+      ~response_emitted
+  | Frame_tool_progress ->
+    (* An observation cannot fail a healthy turn. Only the exact open root
+       call owns this heartbeat; the progress id is opaque, not a call id. *)
+    (match project_native_heartbeat native_tool_calls ~expected_session_id fields with
+     | Heartbeat_observed (identity, elapsed_seconds) ->
+       emit_stream_event on_stream_event (Native_tool_progress
+         {identity; progress=Runtime_native_tools.Heartbeat_reported {elapsed_seconds}})
+     | Heartbeat_ignored (Not_heartbeat | Malformed_heartbeat | Other_session
+         | Replayed_heartbeat | Conflicting_heartbeat | No_active_root_call) -> ());
+    (match project_agent_retry native_tool_calls ~expected_session_id fields with
+     | Retry_observed (identity, retry) ->
+         emit_stream_event on_stream_event (Native_tool_progress
+           {identity;progress=Runtime_native_tools.Retry_observed retry})
+     | Retry_ignored -> ());
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
+      ~response_emitted
+  | Frame_command_lifecycle ->
+    (* Claude Code reports the fate of a queued inbound command
+       (queued/started/completed/cancelled/discarded/refused). The frame also
+       names commands this client never sent, and [completed] can arrive
+       after the result frame, so no decision here may depend on it: the
+       turn still ends with its own result frame. *)
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
+      ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
+      ~response_emitted
+  | Frame_other tag ->
+    protocol_error
+      "turn"
+      (Printf.sprintf "unsupported stream message type %S" tag)
+;;
+
+let mcp_config tools =
+  match tools with
+  | [] -> None
+  | _ ->
+    Some
+      (Yojson.Safe.to_string
+         (`Assoc
+            [ ( "mcpServers"
+              , `Assoc
+                  [ ( mcp_server_name
+                    , `Assoc
+                        [ "type", `String "sdk"
+                        ; "name", `String mcp_server_name
+                        ] )
+                  ] )
+            ]))
+;;
+
+(* Claude Code's CLI ladder is low/medium/high/xhigh/max. The canonical
+   vocabulary also serves other runtimes, so its unsupported endpoints must
+   be admitted here even when the selected model has no catalog row.
+   https://code.claude.com/docs/en/cli-reference#cli-flags *)
+let cli_admitted_reasoning_effort = function
+  | Llm_provider.Reasoning_effort.Minimal -> Llm_provider.Reasoning_effort.Low
+  | Llm_provider.Reasoning_effort.Ultra -> Llm_provider.Reasoning_effort.Max
+  | (Llm_provider.Reasoning_effort.None_
+    | Llm_provider.Reasoning_effort.Low
+    | Llm_provider.Reasoning_effort.Medium
+    | Llm_provider.Reasoning_effort.High
+    | Llm_provider.Reasoning_effort.XHigh
+    | Llm_provider.Reasoning_effort.Max) as effort -> effort
+;;
+
+let reasoning_args = function
+  | None -> Ok []
+  | Some Llm_provider.Reasoning_effort.None_ ->
+    Ok [ "--thinking"; "disabled" ]
+  | Some Llm_provider.Reasoning_effort.Minimal ->
+    Error
+      (Invalid_config
+         "Claude Code does not admit reasoning effort minimal; use low, medium, high, xhigh, max, or none")
+  | Some Llm_provider.Reasoning_effort.Ultra ->
+    Error
+      (Invalid_config
+         "Claude Code does not admit reasoning effort ultra; use low, medium, high, xhigh, max, or none")
+  | Some ((Llm_provider.Reasoning_effort.Low
+          | Llm_provider.Reasoning_effort.Medium
+          | Llm_provider.Reasoning_effort.High
+          | Llm_provider.Reasoning_effort.XHigh
+          | Llm_provider.Reasoning_effort.Max) as effort) ->
+    Ok [ "--effort"; Llm_provider.Reasoning_effort.to_string effort ]
+;;
+
+let command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
+  let* reasoning_args = reasoning_args reasoning_effort in
+  let* system_prompt_args = match config.system_prompt, system_prompt_file with
+    | None, None -> Ok []
+    | Some _, Some path when String.trim path <> "" -> Ok ["--system-prompt-file"; path]
+    | Some _, None -> Error (Invalid_config "configured system prompt requires a prepared system_prompt_file")
+    | None, Some _ -> Error (Invalid_config "system_prompt_file requires a configured system prompt")
+    | Some _, Some _ -> Error (Invalid_config "system_prompt_file must not be empty")
+  in
+  let args =
+    [ config.cli_path; "--output-format"; "stream-json"; "--verbose"; "--include-partial-messages" ]
+    (* System context is prepared before spawn; no prompt bytes enter argv. *)
+    @ system_prompt_args
+    (* Pinned rather than left to the client's default: a Resume omits the
+       carried context the session already holds
+       ([Keeper_official_client_host.resume_prompt]), which is sound only while
+       the session keeps the system prompt it recorded at its first launch. *)
+    @ [ "--system-prompt-snapshot"; "on" ]
+    @ [ "--tools"; Runtime_native_tools.claude_code_tools_arg config.native ]
+    @ ((* [Native_read] pre-approves its built-in read tools alongside the
+          MCP tools so [dontAsk] never has a prompt to suppress.
+          [Native_full] enables the whole built-in set via [--tools default],
+          which cannot be enumerated here; execution is governed by
+          [--permission-mode dontAsk] and admitted only for Yolo keepers. *)
+       let native_allowed =
+         match config.native with
+         | Runtime_native_tools.Native_read ->
+           Runtime_native_tools.claude_code_read_tool_names
+         | Runtime_native_tools.Native_none
+         | Runtime_native_tools.Native_full -> []
+       in
+       match native_allowed @ List.map allowed_tool_name dynamic_tools with
+       | [] -> []
+       | allowed -> [ "--allowedTools"; String.concat "," allowed ])
+    @ (match config.model with
+       | None -> []
+       | Some model -> [ "--model"; model ])
+    @ [ "--permission-mode"; "dontAsk" ]
+    @ (match session_mode with
+       | Start -> [ "--session-id=" ^ session_id ]
+       | Resume { session_id } -> [ "--resume=" ^ session_id ])
+    @ (match mcp_config dynamic_tools with
+       | None -> []
+       | Some value -> [ "--mcp-config"; value; "--strict-mcp-config" ])
+    @ [ Runtime_native_tools.claude_setting_sources_arg ]
+    @ reasoning_args
+    @ (match config.output_schema with
+       | None -> []
+       (* --json-schema is documented as print-mode only, and this invocation
+          is print mode: --input-format stream-json only works with --print.
+          Measured 2026-08-30 in exactly this argv shape -- a prompt asking for
+          a key the schema forbids came back without it, and the result frame
+          carried structured_output. *)
+       | Some schema -> [ "--json-schema"; Yojson.Safe.to_string schema ])
+    @ [ "--input-format"; "stream-json" ]
+  in
+  Ok args
+;;
+
+let drain_stderr flow tail =
+  let chunk = Cstruct.create stderr_chunk_bytes in
+  try
+    while true do
+      let count = Eio.Flow.single_read flow chunk in
+      let text = Cstruct.to_string (Cstruct.sub chunk 0 count) in
+      Stderr.append tail text
+    done
+  with
+  | End_of_file -> ()
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Runtime_agent.debug
+      "Claude Code stderr drain failed: %s"
+      (Printexc.to_string exn)
+;;
+
+(* The host is asked to stop and given the shared grace to exit before it is
+   killed. A cancelled owner only asks: the switch's release hook kills and
+   reaps the host, and [Eio.Process.await] cannot finish once the switch that
+   owns the host is cancelled. *)
+let terminate_spawned_process ~sw ~clock proc stdin_w =
+  let owning_switch_cancelled = Eio.Fiber.is_cancelled () in
+  Eio.Cancel.protect (fun () ->
+    (try Eio.Flow.close stdin_w with
+     | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
+       Log.Runtime_agent.debug
+         "Claude Code stdin close failed: %s"
+         (Printexc.to_string exn));
+    if owning_switch_cancelled
+    then (
+      try Eio.Process.signal proc Sys.sigterm with
+      | exn -> (* cancel-guard-ok: the whole process-termination body runs under Eio.Cancel.protect, so the ambient cancellation cannot fire inside it even where Eio.Process.await suspends. *)
+        Log.Runtime_agent.debug
+          "Claude Code termination signal failed: %s"
+          (Printexc.to_string exn))
+    else
+      Eio_process_capture.reap_proc_with_clock
+        ~sw
+        (clock :> float Eio.Time.clock_ty Eio.Resource.t)
+        proc)
+;;
+
+let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~session_id
+    ~prompt ~images ~on_session_ready ~on_turn_starting ~on_terminal_received ~on_turn_started ~on_prompt_sent
+    ~on_context_submission ~on_stream_event ~on_input_observation ~turn_admitted =
+  let tool_call_count = ref 0 in
+  let assistant_usage = new_assistant_usage () in
+  let mcp_session = Runtime_official_client_mcp.create_session () in
+  let initialize_id = Random_id.prefixed ~prefix:"masc-init-" ~bytes:12 in
+  io.send (initialize_request initialize_id);
+  let* () =
+    await_initialize
+      io
+      ~mcp_session
+      ~tools:dynamic_tools
+      ~tool_call_count
+      ~assistant_usage
+      ~request_id:initialize_id
+      ~on_stream_event
+  in
+  let* () =
+    invoke_state_callback ~stage:"session ready callback" (fun () ->
+      on_session_ready ~session_id)
+  in
+  let* () =
+    invoke_state_callback ~stage:"turn starting callback" (fun () ->
+      on_turn_starting ~session_id)
+  in
+  let input_observer =
+    { input_state = Input_attribution.create
+        ~receiver_generation:(Random_id.uuid_v7 ()) ~session_id
+        ~client_uuid:(Random_id.uuid_v7 ())
+    ; on_input_observation } in
+  emit_input_observation input_observer (Input_attribution.prepared input_observer.input_state);
+  let failed_write exn =
+    (* No rejection or claim that the child read zero bytes, even on cancel. *)
+    emit_input_observation input_observer (Input_attribution.write_unknown input_observer.input_state);
+    raise exn in
+  let* write =
+    try
+      let write =
+        try io.send_context user_message_selection
+            (Input_attribution.user_message input_observer.input_state
+               ~content:(List.map image_block images @
+                 [`Assoc ["type", `String "text"; "text", `String prompt]]))
+        with
+        | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> failed_write exn
+        | Eio.Cancel.Cancelled _ as exn -> failed_write exn
+        | exn -> failed_write exn in
+      turn_admitted := true;
+      Ok write
+    with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Idle_timeout _ as exn -> raise exn
+    | Eio.Time.Timeout as exn -> raise exn
+    | exn ->
+      Error
+        (Turn_transport_interrupted
+           { stage = "user message write"
+           ; tool_effect_attempted = false
+           ; detail = Printexc.to_string exn
+           })
+  in
+  emit_input_observation input_observer (Input_attribution.written input_observer.input_state);
+  Runtime_official_client_write.report ~label:"Claude Code user message" on_context_submission
+    { frame = User_message
+          { client_uuid = (Input_attribution.ticket input_observer.input_state).client_uuid }
+    ; write };
+  let* () = invoke_state_callback ~stage:"prompt sent callback" (fun () ->
+    on_prompt_sent (); Ok ()) in
+  await_terminal
+    io
+    ~mcp_session
+    ~tools:dynamic_tools
+    ~tool_call_count
+    ~assistant_usage
+    ~expected_session_id:session_id
+    ~subscription
+    ~resumed:
+      (match session_mode with
+       | Start -> false
+       | Resume _ -> true)
+    ~rate_limit:None
+    ~assistant_model:None
+    ~assistant_texts:[]
+    ~native_tool_calls:{invocation=Input_attribution.ticket input_observer.input_state;
+      calls=Hashtbl.create 8;progress_uuids=Hashtbl.create 8;
+      retry_bindings=Hashtbl.create 8;task_runs=Hashtbl.create 8;native_posture}
+    ~native_tool_attempted:(ref false)
+    ~on_terminal_received
+    ~on_turn_started
+    ~on_stream_event
+    ~input_observer
+    ~partial_stream:{message_id=None; blocks=[]; completed_envelopes=Hashtbl.create 8}
+    ~stream_started:(ref false)
+    ~response_emitted:(ref false)
+;;
+
+(* The replacement System channel supports files in print mode. Keep complete
+   projected context off argv (Linux limits each argument independently), and
+   keep the private file alive until the child and its scoped fibers exit. The
+   caller gets the file's path and the text it holds, so the receipt is of the
+   bytes this function wrote. *)
+let with_system_prompt_file prompt use = match prompt with
+  | None -> use None
+  | Some contents ->
+    let path, output = Filename.open_temp_file ~perms:0o600 ~mode:[Open_binary]
+      "masc-claude-system-" ".txt" in
+    Fun.protect
+      ~finally:(fun () ->
+        close_out_noerr output;
+        try Sys.remove path with Sys_error detail ->
+          Log.Runtime_agent.warn "Claude system context file cleanup failed: %s" detail)
+      (fun () ->
+        output_string output contents;
+        close_out output;
+        let absolute_path = if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path else path in
+        use (Some (absolute_path, contents)))
+;;
+
+let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
+    ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
+    ~on_session_ready ~on_turn_starting ~on_terminal_received ~on_turn_started ~on_prompt_sent ~on_context_submission
+    ~on_stream_event ~on_input_observation =
+  let turn_admitted = ref false in
+  try
+    with_system_prompt_file config.system_prompt (fun system_prompt ->
+    let system_prompt_file = Option.map fst system_prompt in
+    let* argv = command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id in
+    Eio.Switch.run (fun sw ->
+    let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
+    let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
+    let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
+    let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
+    let proc =
+      try
+        Eio.Process.spawn
+          ~sw
+          mgr
+          ~cwd
+          ~env:(client_environment config.account_home)
+          ~stdin:stdin_r
+          ~stdout:stdout_w
+          ~stderr:stderr_w
+          argv
+      with
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Eio.Exn.Io (Eio.Process.E (Eio.Process.Executable_not_found executable), _) ->
+        raise (Runtime_error (Invalid_config (Printf.sprintf "executable %S was not found" executable)))
+      | exn -> raise (Runtime_error (Spawn_failed (Printexc.to_string exn)))
+    in
+    Option.iter (fun callback -> callback ()) on_spawned;
+    (* The child was started with the file's path; the file was complete before. *)
+    Option.iter (fun (_, contents) ->
+      Runtime_official_client_write.report ~label:"Claude Code system prompt file"
+        on_context_submission
+        { frame = System_prompt_file
+        ; write = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+            Runtime_official_client_write.raw contents) })
+      system_prompt;
+    Eio.Flow.close stdin_r;
+    Eio.Flow.close stdout_w;
+    Eio.Flow.close stderr_w;
+    (* Diagnostics only, so a daemon: the switch cancels it once the body
+       returns. A grandchild the CLI leaves behind (an MCP server orphaned
+       when the CLI is reaped) inherits this pipe's write end, so EOF may
+       never come, and a joined fiber would hold the switch open after the
+       turn was served. *)
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      drain_stderr stderr_r stderr_tail;
+      `Stop_daemon);
+    let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
+    let current_timeout_s () =
+      timeout_s_for_phase config ~turn_admitted:!turn_admitted
+    in
+    let send json =
+      with_optional_idle_timeout clock (current_timeout_s ()) (fun () ->
+        Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
+        Eio.Flow.copy_string "\n" stdin_w)
+    in
+    (* Encoding and hashing share the write's timeout, and run off the
+       scheduler domain: a message with images is megabytes of base64. *)
+    let send_context selection json =
+      with_optional_idle_timeout clock (current_timeout_s ()) (fun () ->
+        let payload, write =
+          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+            let payload = Yojson.Safe.to_string json in
+            payload, Runtime_official_client_write.json_line selection json payload)
+        in
+        Eio.Flow.copy_string payload stdin_w;
+        Eio.Flow.copy_string "\n" stdin_w;
+        write)
+    in
+    let receive () =
+      let timeout_s = current_timeout_s () in
+      try
+        with_optional_idle_timeout clock timeout_s (fun () ->
+          Eio.Buf_read.line reader)
+        |> parse_wire_line
+      with
+      | End_of_file ->
+        let detail = String.trim (Stderr.contents stderr_tail) in
+        (* A client that dies before the turn is admitted submitted nothing,
+           so another candidate may still be tried. [turn_admitted] is the
+           same fact the control responses above already read. *)
+        Error
+          (Process_exited
+             { detail = (if detail = "" then "stdout closed" else detail)
+             ; turn_admitted = !turn_admitted
+             })
+      | Idle_timeout seconds -> Error (Timeout seconds)
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Eio.Time.Timeout as exn -> raise exn
+      | exn -> protocol_error "stdout read" (Printexc.to_string exn)
+    in
+    Fun.protect
+      ~finally:(fun () -> terminate_spawned_process ~sw ~clock proc stdin_w)
+      (fun () ->
+        let with_admission_timeout callback =
+          with_idle_timeout clock config.admission_timeout_s callback
+        in
+        run_protocol
+          { send; send_context; receive }
+          ~native_posture:config.native
+          ~dynamic_tools
+          ~subscription
+          ~session_mode
+          ~session_id
+          ~prompt
+          ~images
+          ~on_session_ready:(fun ~session_id ->
+            with_admission_timeout (fun () -> on_session_ready ~session_id))
+          ~on_turn_starting:(fun ~session_id ->
+            with_admission_timeout (fun () -> on_turn_starting ~session_id))
+          ~on_terminal_received
+          ~on_turn_started:(fun ~session_id ~turn_id ->
+            with_admission_timeout (fun () -> on_turn_started ~session_id ~turn_id))
+          ~on_prompt_sent
+          ~on_context_submission
+          ~on_stream_event
+          ~on_input_observation
+          ~turn_admitted)))
+  with
+  | Idle_timeout seconds -> Error (Timeout seconds)
+  | Eio.Time.Timeout as exn -> raise exn
+;;
+
+let validate_process_config config =
+  if String.trim config.cli_path = ""
+  then Error (Invalid_config "cli_path must not be empty")
+  else if (match config.account_home with
+      | None -> false
+      | Some home -> not (Runtime_account_home.is_valid home))
+  then Error (Invalid_config "account_home must be a non-empty absolute path")
+  else if (match effective_account_home config.account_home with
+      | Some home -> not (Runtime_account_home.is_valid home)
+      | None -> true)
+  then Error (Invalid_config "Claude Code needs account_home, CLAUDE_CONFIG_DIR, or HOME")
+  else if String.trim config.cwd = "" || Filename.is_relative config.cwd
+  then Error (Invalid_config "cwd must be an absolute path")
+  else if
+    not (Float.is_finite config.admission_timeout_s)
+    || config.admission_timeout_s <= 0.0
+  then Error (Invalid_config "admission_timeout_s must be positive and finite")
+  else if
+    (match config.timeout_s with
+     | None -> false
+     | Some seconds -> not (Float.is_finite seconds) || seconds <= 0.0)
+  then Error (Invalid_config "a declared timeout_s must be positive and finite")
+  else Ok ()
+;;
+
+let validate_config config ~session_mode ~prompt =
+  let* () = validate_process_config config in
+  if String.trim prompt = ""
+  then Error (Invalid_config "prompt must not be empty")
+  else
+    match session_mode with
+    | Resume { session_id } when String.trim session_id = "" ->
+      Error (Invalid_config "resume session_id must not be empty")
+    | Start | Resume _ -> Ok ()
+;;
+
+(* Media types the stream-json image block accepts. Same closed set as the
+   analyze_image tool schema and the dashboard composer, so a file the operator
+   can attach is a file this transport can carry. *)
+let supported_image_media_types =
+  Runtime_official_client_tool.official_client_image_media_types
+;;
+
+(* Fail closed before spawning the CLI. A malformed image reaches the provider
+   as a 400 several seconds later, with the turn already started and the error
+   attributed to the model rather than to the caller that built the block. *)
+let validate_images images =
+  let rec loop index = function
+    | [] -> Ok ()
+    | image :: rest ->
+      let where = Printf.sprintf "images[%d]" index in
+      if not (List.mem image.media_type supported_image_media_types)
+      then
+        Error
+          (Invalid_config
+             (Printf.sprintf
+                "%s.media_type %S is not one of %s"
+                where
+                image.media_type
+                (String.concat ", " supported_image_media_types)))
+      else match Runtime_official_client_tool.validate_base64_image_data image.base64_data with
+        | Error detail -> Error (Invalid_config (where ^ ".base64_data " ^ detail))
+        | Ok () -> loop (index + 1) rest
+  in
+  loop 0 images
+;;
+
+let validate_dynamic_tools tools =
+  let valid_tool_character = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
+    | _ -> false
+  in
+  let rec loop seen = function
+    | [] -> Ok ()
+    | (tool : dynamic_tool) :: rest ->
+      let name = String.trim tool.name in
+      if name = ""
+      then Error (Invalid_config "dynamic tool name must not be empty")
+      else if List.mem name seen
+      then
+        Error
+          (Invalid_config (Printf.sprintf "duplicate dynamic tool name %S" name))
+      else if not (String.for_all valid_tool_character name)
+      then
+        Error
+          (Invalid_config
+             (Printf.sprintf
+                "dynamic tool name %S contains a character unsupported by Claude Code allowedTools"
+                name))
+      else loop (name :: seen) rest
+  in
+  loop [] tools
+;;
+
+let validate_turn ?(dynamic_tools = []) ?(session_mode = Start) config ~prompt ~images =
+  let* () = validate_config config ~session_mode ~prompt in
+  let* () = validate_images images in
+  validate_dynamic_tools dynamic_tools
+;;
+
+let bounded_subscription_probe_config
+      ~fallback_timeout_s
+      (turn_config : config)
+  =
+  match turn_config.timeout_s with
+  | Some _ -> turn_config
+  | None -> { turn_config with timeout_s = Some fallback_timeout_s }
+;;
+
+let probe_subscription ~mgr ~clock ~cwd config =
+  let* () = validate_process_config config in
+  try
+    with_idle_timeout clock config.admission_timeout_s (fun () ->
+      read_subscription ~mgr ~cwd config)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | Idle_timeout seconds -> Error (Timeout seconds)
+  | Eio.Time.Timeout as exn -> raise exn
+;;
+
+let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
+    ?admitted_subscription ?on_spawned ?(on_prompt_sent = fun () -> ())
+    ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd
+    ?(on_session_ready = fun ~session_id:_ -> Ok ())
+    ?(on_turn_starting = fun ~session_id:_ -> Ok ())
+    ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ())
+    ?(on_terminal_received = fun () -> ()) ?on_stream_event ?on_input_observation config
+    ~prompt ~images =
+  let result =
+    let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt ~images in
+    let* _ = reasoning_args reasoning_effort in
+    let* subscription =
+      match admitted_subscription with
+      | Some subscription -> Ok subscription
+      | None ->
+        let probe_config =
+          bounded_subscription_probe_config
+            ~fallback_timeout_s:default_timeout_s
+            config
+        in
+        probe_subscription ~mgr ~clock ~cwd probe_config
+    in
+    let session_id =
+      match session_mode with
+      | Start -> Random_id.uuid_v7 ()
+      | Resume { session_id } -> session_id
+    in
+    Log.Runtime_agent.info
+      "Claude Code turn starting (authentication=%s)"
+      (authentication_to_string subscription.authentication);
+    try
+      run_spawned
+        ?on_spawned
+        ~mgr
+        ~clock
+        ~cwd
+        config
+        ~dynamic_tools
+        ~reasoning_effort
+        ~session_mode
+        ~session_id
+        ~subscription
+        ~prompt
+        ~images
+        ~on_session_ready
+        ~on_turn_starting
+        ~on_terminal_received
+        ~on_turn_started
+        ~on_prompt_sent
+        ~on_context_submission
+        ~on_stream_event
+        ~on_input_observation
+    with
+    | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Idle_timeout seconds -> Error (Timeout seconds)
+    | Eio.Time.Timeout as exn -> raise exn
+    | Runtime_error error -> Error error
+    | exn ->
+      (* Read before anything else runs: the backtrace belongs to this raise.
+         Nothing else records where the exception came from -- the typed error
+         and the turn-failed line below carry only its text. *)
+      let backtrace = Printexc.get_backtrace () in
+      Llm_provider.Reserved_exn.reraise_if_reserved exn;
+      Log.Runtime_agent.error
+        "Claude Code runtime raised outside the protocol: %s\nBacktrace: %s"
+        (Printexc.to_string exn)
+        backtrace;
+      Error (Unhandled_exception (Printexc.to_string exn))
+  in
+  (match result with
+   | Ok turn ->
+     Log.Runtime_agent.info
+       "Claude Code turn completed (session_id=%s turn_id=%s model=%s)"
+       turn.session_id
+       turn.turn_id
+       turn.model
+   | Error (Stopped_by_host { stop; _ } as stopped)
+     when not (Runtime_official_client_tool.host_stop_failed stop) ->
+     (* The host ended the turn on purpose, at a terminal tool boundary or
+        after a repeated tool call, and the keeper settles it as a completed
+        or yielded turn. Fifty of these read as failures on 2026-09-02. A
+        terminal tool that failed falls through to the warning below. *)
+     Log.Runtime_agent.info
+       "Claude Code turn stopped by host: %s"
+       (error_to_string stopped)
+   | Error
+       (( Invalid_config _ | Spawn_failed _ | Protocol_error _ | Subscription_required _
+        | Unsupported_control_request _ | Turn_transport_interrupted _
+        | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
+        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+        | Unhandled_exception _ | Timeout _ ) as error) ->
+     (* The sibling branches above pass [error_to_string]; this one passed only
+        the kind, so every failure that does not stop at a host boundary landed
+        in the log as a bare "kind=turn_failed". [Turn_failed] carries its
+        detail, so the reason existed and was dropped at the call rather than
+        never produced -- a turn that ran 184s before failing on 2026-09-12
+        17:08:06 KST could not be told from an instant one afterwards. *)
+     Log.Runtime_agent.warn
+       "Claude Code turn failed (kind=%s): %s"
+       (error_kind error)
+       (error_to_string error));
+  result
+;;

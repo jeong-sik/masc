@@ -1,0 +1,20 @@
+{
+  "binary_commit": "4fae8f4e3fef99a0b23871dd6bfc58a0250df43f",
+  "prompt_commit": "0ee4d40910ab0433cc8020c194a104873f7b6f82",
+  "prompt_file": "config/prompts/candle_appraiser_grade.md",
+  "prompt_sha256": {
+    "candle_appraiser_grade.md": "ea0085dc4b0de14f1cd3a61e9edb9ec216c973bb23ca8eb6d9866736c9482a85",
+    "candle_appraiser_relation.md": "515f02279539c69e38d86202b48d865687f89446e560cff9692d141c0fb731ad",
+    "candle_appraiser_weights.md": "2adf48d36d1686f2b5be67855850da2b7d109eb18777ced390d187894c00d4ae"
+  },
+  "baseline_prompt_sha256": {
+    "candle_appraiser_grade.md": "ad555b807b75b214a1efdc4d3616403ae5a6cd95068dc2ed8591c544659008f9",
+    "candle_appraiser_relation.md": "515f02279539c69e38d86202b48d865687f89446e560cff9692d141c0fb731ad",
+    "candle_appraiser_weights.md": "2adf48d36d1686f2b5be67855850da2b7d109eb18777ced390d187894c00d4ae"
+  },
+  "changed_prompt_files": [
+    "candle_appraiser_grade.md"
+  ],
+  "same_cases_and_runtime_config": true,
+  "scope": "Separate candidate, original baseline untouched; no acceptance or human calibration inferred"
+}

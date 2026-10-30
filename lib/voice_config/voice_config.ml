@@ -1,0 +1,1011 @@
+type endpoint_kind =
+  | Openai_compat
+  | Elevenlabs_direct
+  | Voice_mcp
+  | Macos_say
+  | Espeak_ng
+  | Whisper_cli
+
+type endpoint = {
+  id : string;
+  kind : endpoint_kind;
+  base_url : string option;
+  mcp_url : string option;
+  health_url : string option;
+  api_key_env : string option;
+  enabled : bool;
+  timeout_seconds : float option;
+  default_voice : string option;
+  agent_voices : (string * string) list;
+  command : string option;
+  model : string option;
+}
+
+type voice_tuning = {
+  stability : float;
+  similarity_boost : float;
+  style : float;
+}
+
+type tts_config = {
+  default_model : string option;
+  default_voice : string;
+  default_voice_settings : voice_tuning;
+  agent_voices : (string * string) list;
+  agent_voice_settings : (string * voice_tuning) list;
+  endpoints : endpoint list;
+}
+
+type stt_config = {
+  default_model : string option;
+  endpoints : endpoint list;
+  send_on_stop : bool;
+}
+
+type session_config = { endpoints : endpoint list }
+
+type capture_config = {
+  calibration_seconds : float;
+  trigger_margin_db : float;
+  trailing_silence_seconds : float;
+  speech_margin_db : float;
+  noise_reduction : bool;
+}
+
+type local_playback_config = {
+  enabled : bool;
+  agents : string list;
+}
+
+type gate_config = {
+  always_allow : bool;
+  exempt_agents : string list;
+}
+
+(* [tts] and [stt] are [None] when their section is absent: a typed absence
+   here and a refusal at the speak and transcribe paths, not a model with no
+   name.
+
+   Within a section [default_model] may be blank, but only where nothing is
+   asked for it: a speaking section whose endpoints all run a command that
+   takes no model. Where an endpoint would be asked, the load refuses a blank
+   rather than sending [model_id ""] after the audio. The public config
+   publishes no model in the blank case rather than one named "". *)
+type t = {
+  tts : tts_config option;
+  stt : stt_config option;
+  session : session_config;
+  capture : capture_config;
+  local_playback : local_playback_config;
+  gate : gate_config;
+}
+
+open Result.Syntax
+
+let default_elevenlabs_base_url = "https://api.elevenlabs.io/v1"
+
+let voice_config_file_in root =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:root) "voice_config.json"
+
+let base_path_voice_config_path_opt () =
+  (Host_config.from_env ()).base_path
+  |> Option.map voice_config_file_in
+
+let repo_voice_config_path_opt () =
+  let root =
+    match (Host_config.from_env ()).base_path with
+    | Some bp -> bp
+    | None ->
+      let cwd = Config_dir_resolver.current_working_dir () in
+      (match Workspace_utils_backend_setup.find_git_root cwd with
+       | Some path -> path
+       | None -> cwd)
+  in
+  Some (voice_config_file_in root)
+
+let fallback_voice_config_path () =
+  let root =
+    match (Host_config.from_env ()).base_path with
+    | Some bp -> bp
+    | None -> Config_dir_resolver.base_path_or_cwd ()
+  in
+  voice_config_file_in root
+
+let config_path_candidates () =
+  [
+    base_path_voice_config_path_opt ();
+    repo_voice_config_path_opt ();
+    Some (fallback_voice_config_path ());
+  ]
+  |> List.filter_map Fun.id
+  |> Json_util.dedupe_keep_order
+
+let config_path () =
+  let candidates = config_path_candidates () in
+  match List.find_opt Sys.file_exists candidates, candidates with
+  | Some path, _ -> path
+  | None, path :: _ -> path
+  | None, [] -> fallback_voice_config_path ()
+
+let trim_nonempty_json = function
+  | `String value ->
+      let trimmed = String.trim value in
+      if trimmed = "" then None else Some trimmed
+  | _ -> None
+
+let require_string ~ctx ~field json =
+  match Json_util.get_string_nonempty json field with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s.%s is required" ctx field)
+
+let require_list ~ctx ~field json =
+  match Json_util.get_array json field with
+  | Some (`List items) -> Ok items
+  | _ ->
+      let raw = Option.value ~default:`Null (Json_util.assoc_member_opt field json) in
+      Error
+        (Printf.sprintf "%s.%s must be array, got %s: %s" ctx field
+           (Json_util.kind_name raw) (Json_util.excerpt raw))
+
+(* A field that takes a boolean. Absent is the default the caller names;
+   present, it is a boolean or a refusal naming the key, the type wanted and
+   what was found. A string "yes" where a boolean is meant is not silently
+   the default: the operator typed a value and the load acted on a different
+   one. *)
+let optional_boolean ~ctx ~field ~default json =
+  match Json_util.assoc_member_opt field json with
+  | None -> Ok default
+  | Some (`Bool v) -> Ok v
+  | Some other ->
+      Error
+        (Printf.sprintf "%s.%s must be a boolean, got %s: %s" ctx field
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+(* A field that takes a list of names. Absent is the empty list; present, it
+   is an array or a refusal naming the key. Every element is a string with
+   something in it once trimmed, or a refusal naming its index the way
+   [tts.endpoints[0]] is named: a number in the list, or a blank, is not
+   silently one fewer name. *)
+let optional_string_list ~ctx ~field json =
+  match Json_util.assoc_member_opt field json with
+  | None -> Ok []
+  | Some (`List items) ->
+      let rec loop index acc = function
+        | [] -> Ok (List.rev acc)
+        | item :: rest -> (
+            match trim_nonempty_json item with
+            | Some value -> loop (index + 1) (value :: acc) rest
+            | None ->
+                Error
+                  (Printf.sprintf "%s.%s[%d] must be a non-empty string, got %s: %s"
+                     ctx field index (Json_util.kind_name item)
+                     (Json_util.excerpt item)))
+      in
+      loop 0 [] items
+  | Some other ->
+      Error
+        (Printf.sprintf "%s.%s must be an array, got %s: %s" ctx field
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+let reject_unknown_fields ~ctx ~allowed = function
+  | `Assoc fields -> (
+    match
+      List.find_opt
+        (fun (field, _) -> not (List.mem field allowed))
+        fields
+    with
+    | None -> Ok ()
+    | Some (field, _) ->
+      Error (Printf.sprintf "%s.%s is not a supported field" ctx field) )
+  | json ->
+    Error
+      (Printf.sprintf "%s must be object, got %s: %s" ctx
+         (Json_util.kind_name json) (Json_util.excerpt json))
+
+let endpoint_kind_of_string = function
+  | "openai_compat" -> Ok Openai_compat
+  | "elevenlabs_direct" -> Ok Elevenlabs_direct
+  | "voice_mcp" -> Ok Voice_mcp
+  | "macos_say" -> Ok Macos_say
+  | "espeak_ng" -> Ok Espeak_ng
+  | "whisper_cli" -> Ok Whisper_cli
+  | value ->
+      Error
+        (Printf.sprintf
+           "endpoint.kind must be one of openai_compat|elevenlabs_direct|voice_mcp|macos_say|espeak_ng|whisper_cli (got %s)"
+           value)
+
+(* Whether an endpoint of this kind is ever asked for the section's model by
+   name. The three that reach an address are, and so is whisper-cli, for which
+   the model is the file it loads. say takes no model at all: it is asked for a
+   voice, which is a different setting.
+
+   Exhaustive on purpose. A new kind has to answer this, because the section's
+   requirement is computed from it and a wrong default would either demand a
+   setting that means nothing or let one be skipped that does. *)
+let kind_needs_default_model = function
+  | Openai_compat | Elevenlabs_direct | Voice_mcp | Whisper_cli -> true
+  | Macos_say | Espeak_ng -> false
+
+let endpoint_kind_of_name name =
+  match endpoint_kind_of_string name with
+  | Ok kind -> Some kind
+  | Error _ -> None
+
+let string_of_endpoint_kind = function
+  | Openai_compat -> "openai_compat"
+  | Elevenlabs_direct -> "elevenlabs_direct"
+  | Voice_mcp -> "voice_mcp"
+  | Macos_say -> "macos_say"
+  | Espeak_ng -> "espeak_ng"
+  | Whisper_cli -> "whisper_cli"
+
+let parse_agent_voices ~ctx json =
+  match Json_util.assoc_member_opt "agent_voices" json with
+  | Some (`Assoc pairs) ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | (agent_id, value) :: rest -> (
+            match trim_nonempty_json value with
+            | Some voice ->
+                loop ((String.trim agent_id, voice) :: acc) rest
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "%s.agent_voices.%s must be a non-empty string" ctx agent_id) )
+      in
+      loop [] pairs
+  | None | Some `Null -> Ok []
+  | Some other ->
+      Error
+        (Printf.sprintf "%s.agent_voices must be an object, got %s: %s" ctx
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+let parse_endpoint ~ctx json =
+  let open Result in
+  let* () =
+    reject_unknown_fields ~ctx
+      ~allowed:
+        [ "id"
+        ; "kind"
+        ; "base_url"
+        ; "mcp_url"
+        ; "health_url"
+        ; "api_key_env"
+        ; "enabled"
+        ; "timeout_seconds"
+        ; "default_voice"
+        ; "agent_voices"
+        ; "command"
+        ; "model"
+        ]
+      json
+  in
+  let* id = require_string ~ctx ~field:"id" json in
+  let* kind_raw = require_string ~ctx ~field:"kind" json in
+  let* kind = endpoint_kind_of_string kind_raw in
+  let base_url = Json_util.get_string_nonempty json "base_url" in
+  let mcp_url = Json_util.get_string_nonempty json "mcp_url" in
+  let health_url = Json_util.get_string_nonempty json "health_url" in
+  let api_key_env = Json_util.get_string_nonempty json "api_key_env" in
+  (* Absent means on. Written means meant, as for the timeout below: an
+     [enabled] that is not a boolean, such as "no", is refused by name rather
+     than read as absent, which would turn on the endpoint it was written to
+     turn off. *)
+  let* enabled =
+    match Json_util.optional_bool json "enabled" with
+    | Error message -> Error (Printf.sprintf "%s.%s" ctx message)
+    | Ok None -> Ok true
+    | Ok (Some enabled) -> Ok enabled
+  in
+  (* Absent means the workspace timeout. Written means meant: a value that is
+     not a number, or that is not a finite duration above zero, is refused by
+     name rather than read as absent, which would quietly hand this endpoint
+     the workspace's. Zero is not a short timeout but one already expired:
+     the voice bridge hands the value to its timer as written, so the endpoint
+     would fail every call (#35641). The dashboard route refuses the same
+     values before they reach the file. *)
+  let* timeout_seconds =
+    match Json_util.optional_float json "timeout_seconds" with
+    | Error message -> Error (Printf.sprintf "%s.%s" ctx message)
+    | Ok None -> Ok None
+    | Ok (Some seconds) when Float.is_finite seconds && seconds > 0. ->
+      Ok (Some seconds)
+    | Ok (Some seconds) ->
+      Error
+        (Printf.sprintf
+           "%s.timeout_seconds must be a finite number greater than zero (got %g)"
+           ctx seconds)
+  in
+  (* A voice id is provider vocabulary, so it belongs to the endpoint that
+     answers to it rather than to the workspace (#24068). *)
+  let default_voice = Json_util.get_string_nonempty json "default_voice" in
+  let* agent_voices = parse_agent_voices ~ctx json in
+  (* Which executable answers, for the kinds that are a command rather than an
+     address. Optional: each command kind knows the name it is normally
+     installed under, and this overrides it for a path the PATH does not
+     carry. *)
+  let command = Json_util.get_string_nonempty json "command" in
+  (* The model this endpoint is asked for. A model name is provider
+     vocabulary and a whisper-cli model is a file path, so a section that mixes
+     the two cannot hand one shared name to both; the endpoint says its own. *)
+  let* model =
+    (* Present means meant: a blank or non-string model is refused rather than
+       read as absent, which would quietly hand this endpoint the section's. *)
+    match Json_util.assoc_member_opt "model" json with
+    | None -> Ok None
+    | Some value ->
+      (match trim_nonempty_json value with
+       | Some model -> Ok (Some model)
+       | None -> Error (Printf.sprintf "%s.model must be a non-blank string" ctx))
+  in
+  let base_url =
+    match kind, base_url with
+    | Elevenlabs_direct, None -> Some default_elevenlabs_base_url
+    | (Elevenlabs_direct, Some _)
+    | ((Openai_compat | (Voice_mcp | (Macos_say | (Espeak_ng | Whisper_cli)))), _) -> base_url
+  in
+  let* () =
+    match kind with
+    | Openai_compat ->
+        if Option.is_some base_url then Ok ()
+        else Error (Printf.sprintf "%s.base_url is required for openai_compat" ctx)
+    | Elevenlabs_direct -> Ok ()
+    | Voice_mcp -> Ok ()
+    (* A command kind needs no address, and an address on one would be read by
+       nothing. Refused rather than ignored: a field that is silently dropped
+       reads as a setting that took. *)
+    | Macos_say | Espeak_ng | Whisper_cli ->
+        if Option.is_none base_url then Ok ()
+        else
+          Error
+            (Printf.sprintf "%s.base_url means nothing for %s, which runs a command"
+               ctx (string_of_endpoint_kind kind))
+  in
+  Ok
+    {
+      id;
+      kind;
+      base_url;
+      mcp_url;
+      health_url;
+      api_key_env;
+      enabled;
+      timeout_seconds;
+      default_voice;
+      agent_voices;
+      command;
+      model;
+    }
+
+let rec parse_endpoints ~ctx acc = function
+  | [] ->
+      let endpoints = List.rev acc in
+      if endpoints = [] then Error (Printf.sprintf "%s must not be empty" ctx)
+      else Ok endpoints
+  | item :: rest ->
+      let next_ctx = Printf.sprintf "%s[%d]" ctx (List.length acc) in
+      (match parse_endpoint ~ctx:next_ctx item with
+      | Ok endpoint -> parse_endpoints ~ctx (endpoint :: acc) rest
+      | Error _ as error -> error)
+
+let parse_voice_tuning ~ctx json =
+  match json with
+  | `Assoc _ ->
+      Ok
+        {
+          stability =
+            Option.value ~default:0.5 (Json_util.get_float json "stability");
+          similarity_boost =
+            Option.value ~default:0.75 (Json_util.get_float json "similarity_boost");
+          style = Option.value ~default:0.0 (Json_util.get_float json "style");
+        }
+  | `Null ->
+      Ok { stability = 0.5; similarity_boost = 0.75; style = 0.0 }
+  | other ->
+      Error
+        (Printf.sprintf "%s must be an object, got %s: %s" ctx
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+let parse_agent_voice_settings json =
+  match Json_util.assoc_member_opt "agent_voice_settings" json with
+  | Some (`Assoc pairs) ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | (agent_id, tuning_json) :: rest -> (
+            match parse_voice_tuning ~ctx:("tts.agent_voice_settings." ^ agent_id) tuning_json with
+            | Ok tuning -> loop ((String.trim agent_id, tuning) :: acc) rest
+            | Error _ as err -> err)
+      in
+      loop [] pairs
+  | None | Some `Null -> Ok []
+  | Some other ->
+      Error
+        (Printf.sprintf "tts.agent_voice_settings must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+(* The model an endpoint is asked for: its own, else the section's. *)
+let model_at_endpoint ~default_model (endpoint : endpoint) =
+  match endpoint.model with
+  | Some _ as model -> model
+  | None -> default_model
+
+(* The section's [default_model] is a fallback for endpoints that name no
+   model of their own, and it can only stand in where every such endpoint
+   reads it the same way. An address kind reads it as a provider's model name
+   and whisper-cli reads it as a file to load; one string cannot be both, so a
+   section whose unbound endpoints include both kinds has no usable fallback
+   and each of those endpoints must name its model. Every endpoint that is
+   asked for a model must end up with one, from itself or from the section. *)
+let parse_section_model ~ctx json (endpoints : endpoint list) =
+  let default_model = Json_util.get_string_nonempty json "default_model" in
+  let unbound = List.filter (fun (endpoint : endpoint) -> Option.is_none endpoint.model) endpoints in
+  let reads_model_name (endpoint : endpoint) =
+    match endpoint.kind with
+    | Openai_compat | Elevenlabs_direct -> true
+    | Voice_mcp | Macos_say | Espeak_ng | Whisper_cli -> false
+  in
+  let reads_model_file (endpoint : endpoint) =
+    match endpoint.kind with
+    | Whisper_cli -> true
+    | Openai_compat | Elevenlabs_direct | Voice_mcp | Macos_say | Espeak_ng -> false
+  in
+  let mixed = List.exists reads_model_name unbound && List.exists reads_model_file unbound in
+  let rec validate = function
+    | [] -> Ok default_model
+    | (endpoint : endpoint) :: rest ->
+      if not (kind_needs_default_model endpoint.kind) then validate rest
+      else (
+        match endpoint.model, default_model with
+        | Some _, _ -> validate rest
+        | None, Some _ when not mixed -> validate rest
+        | None, Some _ ->
+          Error
+            (Printf.sprintf
+               "%s.endpoints[%s].model is required: %s.default_model cannot name both a \
+                provider model and a whisper-cli model file"
+               ctx endpoint.id ctx)
+        | None, None ->
+          Error
+            (Printf.sprintf
+               "%s.endpoints[%s] is asked for a model: set its model or %s.default_model"
+               ctx endpoint.id ctx))
+  in
+  validate endpoints
+
+let parse_tts json =
+  match Json_util.assoc_member_opt "tts" json with
+  | None | Some `Null -> Ok None
+  | Some (`Assoc _ as tts_json) ->
+      let open Result in
+      let* default_voice =
+        require_string ~ctx:"tts" ~field:"default_voice" tts_json
+      in
+      let* default_voice_settings =
+        parse_voice_tuning ~ctx:"tts.default_voice_settings"
+          (Option.value ~default:`Null
+             (Json_util.assoc_member_opt "default_voice_settings" tts_json))
+      in
+      let* agent_voices = parse_agent_voices ~ctx:"tts" tts_json in
+      let* agent_voice_settings =
+        parse_agent_voice_settings tts_json
+      in
+      let* endpoints_json = require_list ~ctx:"tts" ~field:"endpoints" tts_json in
+      let* endpoints = parse_endpoints ~ctx:"tts.endpoints" [] endpoints_json in
+      (* A blank model is a request the provider answers with an error after
+         the audio has been sent, so every endpoint asked for one has to have
+         one before the section loads. A section whose endpoints all take no
+         model -- say, on a fresh mac -- is not made to invent one. *)
+      let* default_model = parse_section_model ~ctx:"tts" tts_json endpoints in
+      Ok
+        (Some
+           {
+             default_model;
+             default_voice;
+             default_voice_settings;
+             agent_voices;
+             agent_voice_settings;
+             endpoints;
+           })
+  | Some other ->
+      Error
+        (Printf.sprintf "root.tts must be object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+let parse_stt json =
+  match Json_util.assoc_member_opt "stt" json with
+  | None | Some `Null -> Ok None
+  | Some (`Assoc _ as stt_json) ->
+      let open Result in
+      let* endpoints_json = require_list ~ctx:"stt" ~field:"endpoints" stt_json in
+      let* endpoints = parse_endpoints ~ctx:"stt.endpoints" [] endpoints_json in
+      (* Every kind that transcribes is asked for a model: the ones that reach
+         an address by name, whisper-cli as the file it loads. *)
+      let* default_model = parse_section_model ~ctx:"stt" stt_json endpoints in
+      (* Optional and false by default: absent is the operator not having
+         asked for a spoken sentence to send itself. *)
+      let* send_on_stop =
+        optional_boolean ~ctx:"stt" ~field:"send_on_stop" ~default:false stt_json
+      in
+      Ok (Some { default_model; endpoints; send_on_stop })
+  | Some other ->
+      Error
+        (Printf.sprintf "root.stt must be object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+let default_session = { endpoints = [] }
+
+let parse_session json =
+  match Json_util.assoc_member_opt "session" json with
+  | None | Some `Null -> Ok default_session
+  | Some (`Assoc _ as session_json) ->
+      let open Result in
+      let* endpoints_json =
+        require_list ~ctx:"session" ~field:"endpoints" session_json
+      in
+      (match endpoints_json with
+      | [] -> Ok { endpoints = [] }
+      | items ->
+        let* endpoints = parse_endpoints ~ctx:"session.endpoints" [] items in
+        Ok { endpoints })
+  | Some other ->
+      Error
+        (Printf.sprintf "root.session must be object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+(* Defaults measured on one workstation 2026-09-04, which is exactly why they
+   are configurable: a room read 4.48% peak here and speech clipped at 100%,
+   and two earlier margins picked from one room were both wrong. An operator
+   whose captures never start, or never end, needs a knob rather than a PR. *)
+let default_capture =
+  { calibration_seconds = 0.5
+  ; trigger_margin_db = 6.0
+  ; trailing_silence_seconds = 2.0
+  ; speech_margin_db = 4.0
+  ; noise_reduction = false
+  }
+;;
+
+(* The keys [\[voice.capture\]] accepts. Anything else is refused by name,
+   the way an endpoint's fields are: a misspelt knob that parsed as "absent,
+   so the default" left an operator turning a dial that was not connected. *)
+let capture_fields =
+  [ "calibration_seconds"
+  ; "trigger_margin_db"
+  ; "trailing_silence_seconds"
+  ; "speech_margin_db"
+  ; "noise_reduction"
+  ]
+
+let parse_capture json =
+  (* Field errors name [capture.<key>], the form [tts.<field>] and
+     [stt.<field>] take; the shape error at the end names [root.capture] the
+     way the other sections' shape errors do. *)
+  let ctx = "capture" in
+  match Json_util.assoc_member_opt "capture" json with
+  | Some (`Assoc _ as capture_json) ->
+      let open Result in
+      let* () = reject_unknown_fields ~ctx ~allowed:capture_fields capture_json in
+      (* Absent means the measured default. Present means it must be the
+         type the key takes: a string where a number is meant, or a null, is
+         not a value this can act on and is not silently the default. An int
+         where a float is meant is what an operator types and is accepted. *)
+      let number key ~default =
+        match Json_util.assoc_member_opt key capture_json with
+        | None -> Ok default
+        | Some (`Float v) -> Ok v
+        | Some (`Int v) -> Ok (float_of_int v)
+        | Some other ->
+            Error
+              (Printf.sprintf "%s.%s must be a number, got %s: %s" ctx key
+                 (Json_util.kind_name other) (Json_util.excerpt other))
+      in
+      let* calibration_seconds =
+        number "calibration_seconds" ~default:default_capture.calibration_seconds
+      in
+      let* trailing_silence_seconds =
+        number
+          "trailing_silence_seconds"
+          ~default:default_capture.trailing_silence_seconds
+      in
+      let* trigger_margin_db =
+        number "trigger_margin_db" ~default:default_capture.trigger_margin_db
+      in
+      let* speech_margin_db =
+        number "speech_margin_db" ~default:default_capture.speech_margin_db
+      in
+      let* noise_reduction =
+        optional_boolean ~ctx ~field:"noise_reduction"
+          ~default:default_capture.noise_reduction capture_json
+      in
+      (* A probe of zero length measures nothing and would hand the capture a
+         threshold derived from an empty file. *)
+      if calibration_seconds <= 0.0 then
+        Error (ctx ^ ".calibration_seconds must be greater than zero")
+      else if trailing_silence_seconds <= 0.0 then
+        (* Zero would stop the capture on the first gap between two words. *)
+        Error (ctx ^ ".trailing_silence_seconds must be greater than zero")
+      else
+        Ok
+          { calibration_seconds
+          ; trailing_silence_seconds
+          ; trigger_margin_db
+          ; speech_margin_db
+          ; noise_reduction
+          }
+  | None | Some `Null -> Ok default_capture
+  | Some other ->
+      Error
+        (Printf.sprintf "root.capture must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+let parse_local_playback json =
+  match Json_util.assoc_member_opt "local_playback" json with
+  | Some (`Assoc _ as local_json) ->
+      let enabled =
+        Option.value ~default:false (Json_util.get_bool local_json "enabled")
+      in
+      let agents =
+        match Json_util.assoc_member_opt "agents" local_json with
+        | Some (`List values) -> List.filter_map trim_nonempty_json values
+        | _ -> []
+      in
+      Ok { enabled; agents }
+  | None | Some `Null -> Ok { enabled = false; agents = [] }
+  | Some other ->
+      Error
+        (Printf.sprintf "root.local_playback must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+(* Absent, the Gate reviews every speak: nobody is exempt and no agent is
+   named. *)
+let default_gate = { always_allow = false; exempt_agents = [] }
+
+(* The keys [\[voice.gate\]] accepts, refused by name the way [capture_fields]
+   are. *)
+let gate_fields = [ "always_allow"; "exempt_agents" ]
+
+let parse_gate json =
+  (* Read the way [parse_capture] reads: a key this does not know, or a value
+     of another type, fails the load naming [gate.<key>]. A mistyped
+     [exempt_agents] read as "no exemptions", or a non-boolean [always_allow]
+     read as [false], would leave an operator whose speak is still being
+     reviewed with a gate behaving as if the section were absent, and no
+     sentence saying why. *)
+  let ctx = "gate" in
+  match Json_util.assoc_member_opt "gate" json with
+  | Some (`Assoc _ as gate_json) ->
+      let open Result in
+      let* () = reject_unknown_fields ~ctx ~allowed:gate_fields gate_json in
+      let* always_allow =
+        optional_boolean ~ctx ~field:"always_allow"
+          ~default:default_gate.always_allow gate_json
+      in
+      let* exempt_agents =
+        optional_string_list ~ctx ~field:"exempt_agents" gate_json
+      in
+      Ok { always_allow; exempt_agents }
+  | None | Some `Null -> Ok default_gate
+  | Some other ->
+      Error
+        (Printf.sprintf "root.gate must be an object, got %s: %s"
+           (Json_util.kind_name other) (Json_util.excerpt other))
+
+let parse_json json =
+  let open Result in
+  let* tts = parse_tts json in
+  let* stt = parse_stt json in
+  let* session = parse_session json in
+  let* capture = parse_capture json in
+  let* local_playback = parse_local_playback json in
+  let* gate = parse_gate json in
+  Ok { tts; stt; session; capture; local_playback; gate }
+
+(** ── runtime.toml [voice] section loading ─────────────────────
+    Otoml → Yojson bridge so {!parse_json} can consume a TOML
+    [\[voice\]] section without a dedicated TOML parser.
+    The bridge handles only the types that appear in voice_config:
+    integers, floats, strings, booleans, tables (objects), and arrays.
+    TOML arrays-of-tables ([[\[voice.tts.endpoints\]]]) become JSON
+    arrays of objects — matching what [parse_json] expects. *)
+
+type load_error =
+  | Not_configured
+  | Invalid of string
+
+let rec toml_to_json = function
+  | Otoml.TomlInteger i -> `Int i
+  | Otoml.TomlFloat f -> `Float f
+  | Otoml.TomlString s -> `String s
+  | Otoml.TomlBoolean b -> `Bool b
+  | Otoml.TomlOffsetDateTime d
+  | Otoml.TomlLocalDateTime d
+  | Otoml.TomlLocalDate d
+  | Otoml.TomlLocalTime d -> `String d
+  | Otoml.TomlTable pairs
+  | Otoml.TomlInlineTable pairs ->
+      `Assoc (List.map (fun (k, v) -> (k, toml_to_json v)) pairs)
+  | Otoml.TomlArray elems -> `List (List.map toml_to_json elems)
+  | Otoml.TomlTableArray elems -> `List (List.map toml_to_json elems)
+
+(** Resolve the runtime.toml path from the config root.
+    Uses {!Config_dir_resolver} (SSOT) so the path stays in sync
+    with the rest of the config loading pipeline. *)
+let runtime_toml_path () : string option =
+  let resolution = Config_dir_resolver.resolve () in
+  if resolution.config_root.exists then
+    let path =
+      Filename.concat resolution.config_root.path
+        Config_dir_resolver.runtime_toml_filename
+    in
+    if Sys.file_exists path then Some path else None
+  else None
+
+(** Parse the [\[voice\]] section out of runtime.toml source text.
+    Returns:
+    - [Ok (Some config)] when the section exists and parses cleanly;
+    - [Ok None] when the [\[voice\]] section is absent (expected —
+      caller falls back to JSON);
+    - [Error _] when the text does not parse as TOML, or the section
+      exists but is broken — surfaced to the caller, NOT silently
+      swallowed, so the operator knows the TOML is broken.
+
+    Taking text rather than a path is what lets a writer check its own
+    edit before committing it. The parser that will load the file is
+    the one that answers whether the edit is loadable, so a voice
+    section cannot reach disk in a shape that only fails later, at the
+    first speak or transcribe. *)
+let parse_runtime_toml_text text =
+  match Otoml.Parser.from_string text with
+  | exception Otoml.Parse_error (_, msg) ->
+    Error (Printf.sprintf "runtime.toml parse error: %s" msg)
+  | toml -> (
+    match Otoml.find_opt toml Fun.id [ Runtime_toml_namespace.(key Voice) ] with
+    | None -> Ok None
+    | Some voice_value -> (
+      (* Fun.id returns the raw Otoml.t value; toml_to_json
+         pattern-matches on its constructors. *)
+      match parse_json (toml_to_json voice_value) with
+      | Ok config -> Ok (Some config)
+      | Error msg -> Error (Printf.sprintf "runtime.toml [voice]: %s" msg)))
+
+(** Try loading voice config from the [\[voice\]] section of
+    runtime.toml.  An absent runtime.toml reads as [Ok None], the same
+    as an absent section: neither is a fault, and the caller falls back
+    to the standalone JSON. *)
+let load_from_runtime_toml () =
+  match runtime_toml_path () with
+  | None -> Ok None
+  | Some path -> (
+    match
+      try Ok (Fs_compat.load_file path) with
+      | Sys_error error ->
+        Error (Printf.sprintf "runtime.toml read failed: %s" error)
+      | Eio.Io _ as exn ->
+        Error
+          (Printf.sprintf
+             "runtime.toml Eio read failed: %s"
+             (Printexc.to_string exn))
+    with
+    | Error msg -> Error msg
+    | Ok text -> parse_runtime_toml_text text)
+
+(* The standalone source read the way the loader reads it, so a surface that
+   reports which configuration is active cannot parse the file differently from
+   the speak and transcribe paths. *)
+let load_standalone_file path =
+  match
+    try Ok (Fs_compat.load_file path) with
+    | Sys_error error ->
+      Error (Printf.sprintf "voice config read failed: %s" error)
+    | Eio.Io _ as exn ->
+      Error
+        (Printf.sprintf
+           "voice config Eio read failed: %s"
+           (Printexc.to_string exn))
+  with
+  | Error msg -> Error msg
+  | Ok content -> (
+    (* parse via parse_json_safe (keeps the UTF-8 repair pass) but
+       keep the Error — read_json_eio would swallow a syntax error
+       into a warn-log plus an empty object that then fails schema
+       parsing with a misleading "must be object" message. *)
+    match Safe_ops.parse_json_safe ~context:path content with
+    | Error msg -> Error (Printf.sprintf "invalid voice config json: %s" msg)
+    | Ok json -> parse_json json)
+
+let load_detailed () =
+  (* Prefer runtime.toml [voice] section over standalone JSON.
+     Only fall back when the file or section is absent — TOML
+     parse errors are surfaced to the operator. *)
+  match load_from_runtime_toml () with
+  | Ok (Some config) -> Ok config
+  | Error msg -> Error (Invalid msg)
+  | Ok None -> (
+    let path = config_path () in
+    if not (Sys.file_exists path)
+    then Error Not_configured
+    else
+      match load_standalone_file path with
+      | Ok config -> Ok config
+      | Error msg -> Error (Invalid msg))
+
+let load_error_to_string = function
+  (* Names both places a configuration is read from, and where runtime.toml
+     was looked for. Naming only the standalone JSON sent a reader whose voice
+     lives in runtime.toml to a file they never made, when what was missing was
+     the workspace the lookup ran against. *)
+  | Not_configured ->
+    let resolution = Config_dir_resolver.resolve () in
+    let root = resolution.Config_dir_resolver.config_root in
+    let runtime_toml =
+      Filename.concat root.Config_dir_resolver.path Config_dir_resolver.runtime_toml_filename
+    in
+    (* [exists] on the resolved root means "resolved", not "on disk": with no
+       MASC_BASE_PATH or MASC_CONFIG_DIR the resolver does not take the current
+       directory as a workspace, and reports a default path under it as
+       missing even when that directory is there. So the sentence follows the
+       source, not the flag. *)
+    let where =
+      match root.Config_dir_resolver.source with
+      | Config_dir_resolver.Missing ->
+        (match (Host_config.from_env ()).base_path with
+         | None ->
+           "no workspace is resolved (MASC_BASE_PATH and MASC_CONFIG_DIR are unset)"
+         | Some _ ->
+           Printf.sprintf "no masc configuration at %s" root.Config_dir_resolver.path)
+      | Config_dir_resolver.Invalid_env ->
+        Printf.sprintf "MASC_CONFIG_DIR does not point to a directory: %s"
+          root.Config_dir_resolver.path
+      | Config_dir_resolver.Env | Config_dir_resolver.Local_masc ->
+        if Sys.file_exists runtime_toml
+        then Printf.sprintf "no [voice] section in %s" runtime_toml
+        else Printf.sprintf "no %s" runtime_toml
+    in
+    Printf.sprintf "voice config missing: %s, and no %s" where (config_path ())
+  | Invalid message -> message
+
+let enabled_endpoints (endpoints : endpoint list) =
+  List.filter (fun (endpoint : endpoint) -> endpoint.enabled) endpoints
+
+let select_endpoint ?endpoint_id (endpoints : endpoint list) =
+  let endpoints = enabled_endpoints endpoints in
+  match endpoint_id with
+  | Some id when String.trim id <> "" -> (
+      let id = String.trim id in
+      List.find_opt
+        (fun (endpoint : endpoint) ->
+          endpoint.id = id || string_of_endpoint_kind endpoint.kind = id)
+        endpoints )
+  | _ -> (
+      match endpoints with
+      | first :: _ -> Some first
+      | [] -> None)
+
+let voice_for_agent (tts : tts_config) agent_id =
+  match List.assoc_opt agent_id tts.agent_voices with
+  | Some voice -> voice
+  | None -> tts.default_voice
+
+let voice_for_agent_at_endpoint (tts : tts_config) (endpoint : endpoint) agent_id =
+  match List.assoc_opt agent_id endpoint.agent_voices, endpoint.default_voice with
+  | Some voice, _ -> voice
+  | None, Some voice -> voice
+  | None, None -> voice_for_agent tts agent_id
+;;
+
+let tuning_for_agent (tts : tts_config) agent_id =
+  match List.assoc_opt agent_id tts.agent_voice_settings with
+  | Some tuning -> tuning
+  | None -> tts.default_voice_settings
+
+let local_playback_enabled_for_agent config agent_id =
+  config.local_playback.enabled
+  &&
+  match config.local_playback.agents with
+  | [] -> true
+  | agents -> List.mem agent_id agents
+
+let voice_gate_always_allow_for_agent config agent_id =
+  config.gate.always_allow
+  || List.mem agent_id config.gate.exempt_agents
+
+let unique_strings = Json_util.dedupe_keep_order
+
+let available_voices (tts : tts_config) =
+  (tts.default_voice :: List.map snd tts.agent_voices)
+  @ List.concat_map (fun (endpoint : endpoint) ->
+      Option.to_list endpoint.default_voice @ List.map snd endpoint.agent_voices)
+      tts.endpoints
+  |> unique_strings
+
+let endpoint_public_json (endpoints : endpoint list) =
+  let active : endpoint option = select_endpoint endpoints in
+  let fallback_configured =
+    List.fold_left
+      (fun acc (endpoint : endpoint) -> if endpoint.enabled then acc + 1 else acc)
+      0 endpoints
+    > 1
+  in
+  `Assoc
+    [
+      ("configured", `Bool (endpoints <> []));
+      ( "enabled",
+        `Bool
+          (match active with
+          | Some (endpoint : endpoint) -> endpoint.enabled
+          | None -> false) );
+      ("fallback_configured", `Bool fallback_configured);
+    ]
+
+let active_endpoint_json endpoints =
+  endpoint_public_json endpoints
+
+(* An absent section renders as [null], not as an object of empty strings: a
+   reader that finds no model there is told there is none, rather than handed
+   a name of length zero to display or send. *)
+(* The model the endpoint that would answer now is asked for. *)
+let active_model ~default_model endpoints =
+  Option.bind (select_endpoint endpoints) (model_at_endpoint ~default_model)
+
+let public_json config =
+  Tool_args.ok_assoc
+    [
+      ( "tts",
+        match config.tts with
+        | None -> `Null
+        | Some tts ->
+            `Assoc
+              [
+                (* Null and empty rather than a blank name and a list holding
+                   one: a section whose endpoints take no model has none, and
+                   [""] here would read as a model named "". *)
+                ( "default_model"
+                , match active_model ~default_model:tts.default_model tts.endpoints with
+                  | Some model -> `String model
+                  | None -> `Null );
+                ("default_voice", `String tts.default_voice);
+                ("available_voices", `List (List.map (fun voice -> `String voice) (available_voices tts)));
+                ( "available_models"
+                , `List
+                    (tts.endpoints
+                     |> List.filter_map (model_at_endpoint ~default_model:tts.default_model)
+                     |> unique_strings
+                     |> List.map (fun model -> `String model)) );
+                ("active_endpoint", active_endpoint_json tts.endpoints);
+              ] );
+      ( "stt",
+        match config.stt with
+        | None -> `Null
+        | Some stt ->
+            `Assoc
+              [
+                ( "default_model"
+                , match active_model ~default_model:stt.default_model stt.endpoints with
+                  | Some model -> `String model
+                  | None -> `Null );
+                ("active_endpoint", active_endpoint_json stt.endpoints);
+                (* The TUI reads this to decide whether ending a capture also
+                   sends; without it on the wire the setting cannot reach the
+                   surface that acts on it. *)
+                ("send_on_stop", `Bool stt.send_on_stop);
+              ] );
+      ( "session",
+        `Assoc [ ("active_endpoint", active_endpoint_json config.session.endpoints) ] );
+      ( "local_playback",
+        `Assoc
+          [
+            ("enabled", `Bool config.local_playback.enabled);
+            ( "agents",
+              `List
+                (List.map (fun agent_id -> `String agent_id) config.local_playback.agents) );
+          ] );
+      ( "gate",
+        `Assoc
+          [
+            ("always_allow", `Bool config.gate.always_allow);
+            ( "exempt_agents",
+              `List
+                (List.map (fun agent_id -> `String agent_id) config.gate.exempt_agents) );
+          ] );
+    ]

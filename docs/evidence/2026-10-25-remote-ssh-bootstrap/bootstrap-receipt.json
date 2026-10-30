@@ -1,0 +1,121 @@
+{
+  "result": "PASS",
+  "runtime_source": "f9bf6b408afcff200131dfdd9040cba2551abab4",
+  "helper_sha256": "ab41a3c7e5a3cba2a052e55312bc8f8c8ba45d3af1f0720d3cbbb77b6a43d410",
+  "fixture": {
+    "container": "masc-ssh-bootstrap-proof-20261025",
+    "container_id": "7c0b77a2fd787f9fae757dcdf6a4bd6d18f26922b1ff8530458a9a61de739f72",
+    "image": "sha256:4912ad8314963342d28a92719a9bddf0d7b161d5bc463959249b96b0c170ee9c",
+    "host": "127.0.0.1",
+    "port": 65479,
+    "fingerprint": "SHA256:MlAet0f4elnlFVGg4/vxQqtfvzMkecAITbrQUI8Z8yo",
+    "out_of_band": "Docker-owned fixture host public key matched against ssh-keyscan",
+    "shim_sha256": "ad79352d398d00eb48eebdf0bc29faacd3b4de633349e377ed81d560dc379183",
+    "shim_source": "preexisting separately identified fixture binary; not source rebuilt",
+    "remote_root": "/srv/masc/bootstrap-ready",
+    "base": "/tmp/mssh-bootstrap-native-20261025/workspace",
+    "shim": "/tmp/mssh-bootstrap-native-20261025/preexisting-shim-linux-arm64"
+  },
+  "keeper": "native-bootstrap-keeper",
+  "steps": [
+    {
+      "phase": "first",
+      "argv": [
+        "/private/tmp/mssh-candidate-runtime-f9bf6b4/masc-exec-ssh-bootstrap",
+        "--base-path",
+        "/tmp/mssh-bootstrap-native-20261025/workspace",
+        "--endpoint",
+        "bootstrap_proof",
+        "--shim",
+        "/tmp/mssh-bootstrap-native-20261025/preexisting-shim-linux-arm64",
+        "--keeper",
+        "native-bootstrap-keeper"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "76b43256d0c514cabe0d6effdb8d4c2683ac6e2ed70c078221a2bddc523f8d43"
+    },
+    {
+      "phase": "repeat",
+      "argv": [
+        "/private/tmp/mssh-candidate-runtime-f9bf6b4/masc-exec-ssh-bootstrap",
+        "--base-path",
+        "/tmp/mssh-bootstrap-native-20261025/workspace",
+        "--endpoint",
+        "bootstrap_proof",
+        "--shim",
+        "/tmp/mssh-bootstrap-native-20261025/preexisting-shim-linux-arm64",
+        "--keeper",
+        "native-bootstrap-keeper"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "76b43256d0c514cabe0d6effdb8d4c2683ac6e2ed70c078221a2bddc523f8d43"
+    },
+    {
+      "phase": "symlink-refusal",
+      "argv": [
+        "/private/tmp/mssh-candidate-runtime-f9bf6b4/masc-exec-ssh-bootstrap",
+        "--base-path",
+        "/tmp/mssh-bootstrap-native-20261025/workspace",
+        "--endpoint",
+        "bootstrap_proof",
+        "--shim",
+        "/tmp/mssh-bootstrap-native-20261025/preexisting-shim-linux-arm64",
+        "--keeper",
+        "hostile-keeper"
+      ],
+      "exit_code": 124,
+      "stdout_sha256": "e85d2bcdcf88fd7c4e0785e4abf1bfbe75a1fc021afb2a608cdac6d90a27839c"
+    },
+    {
+      "phase": "after-refusal",
+      "argv": [
+        "/private/tmp/mssh-candidate-runtime-f9bf6b4/masc-exec-ssh-bootstrap",
+        "--base-path",
+        "/tmp/mssh-bootstrap-native-20261025/workspace",
+        "--endpoint",
+        "bootstrap_proof",
+        "--shim",
+        "/tmp/mssh-bootstrap-native-20261025/preexisting-shim-linux-arm64",
+        "--keeper",
+        "native-bootstrap-keeper"
+      ],
+      "exit_code": 0,
+      "stdout_sha256": "76b43256d0c514cabe0d6effdb8d4c2683ac6e2ed70c078221a2bddc523f8d43"
+    }
+  ],
+  "not_claimed": [
+    "source-rebuilt shim",
+    "released distribution",
+    "production installation",
+    "GitHub login or cancellation",
+    "real-model sustained use"
+  ],
+  "workspace": {
+    "sha256": "6a075ec6d845b4e325caa9a407d7f68755df8551aefe5a626cf0019b0a629a21",
+    "length": 39,
+    "owner": 1000,
+    "mode": 448,
+    "github_hosts_exists": false
+  },
+  "outside_before": {
+    "owner": 0,
+    "mode": 493,
+    "sha256": "780b3045ac411ce806531d9289c32765305b7d2cd1a0503f0bdd90754b1db1cb"
+  },
+  "outside_after": {
+    "owner": 0,
+    "mode": 493,
+    "sha256": "780b3045ac411ce806531d9289c32765305b7d2cd1a0503f0bdd90754b1db1cb"
+  },
+  "config": {
+    "remote_root": "/srv/masc/bootstrap-ready",
+    "env_allowlist": "",
+    "path": "/opt/masc-bootstrap-proof/bin:/usr/local/bin:/usr/bin:/bin",
+    "env_file": "/etc/masc-bootstrap-proof.env",
+    "scratch_root": "/tmp/masc-bootstrap-proof-scratch"
+  },
+  "github_tokens_supplied": false,
+  "successful_bootstraps": 3,
+  "expected_workspace_refusals": 1,
+  "driver_sha256": "7813bebd5d20f42fec955e7f943fa3ac14196f54b3560d0714e6827f9d41138a"
+}

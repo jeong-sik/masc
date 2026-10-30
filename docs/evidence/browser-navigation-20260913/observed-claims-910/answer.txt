@@ -1,0 +1,21 @@
+확인한 범위에서 세 채널 모두 `Cedar`와 `schema v4`를 공통 작업/의존성으로 다루고 있습니다.
+
+- **Alpha**
+  - 현재 결정: 접근성 승인 후 화요일에 Cedar 배포
+  - 담당자: 명시되지 않음
+  - Mina 요청: 월요일까지 접근성 체크리스트 승인
+  - [근거 메시지](http://127.0.0.1:54561/alpha.html#a2)
+
+- **Beta**
+  - 현재 결정: 월요일에 Cedar의 schema v4 마이그레이션 완료
+  - 담당자: Joon
+  - Mina 요청: 마이그레이션 시작 전 클라이언트 payload 확인
+  - [근거 메시지](http://127.0.0.1:54561/beta.html#b1)
+
+- **Gamma**
+  - 현재 결정: 수요일에 schema v4 기준 Cedar E2E QA 수행
+  - 담당자: Sora
+  - Mina 요청: 추가 요청 없음
+  - [근거 메시지](http://127.0.0.1:54561/gamma.html#g1)
+
+읽은 범위는 각 채널 페이지의 **현재 화면에 표시된 메시지 목록 전체**입니다(Alpha 2개, Beta 1개, Gamma 1개). 페이지에 표시된 “Navigation summary”의 오래된 캐시 문구는 메시지 근거에서 제외했습니다. 각 채널이 “currently displayed messages only”라고 표시하므로, 숨겨진 과거 메시지나 전체 이력은 확인하지 못했습니다.

@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-25T00:28:19.309048+00:00",
+  "scope": "Only finished isolated GLM canary and its private wire recorder after actual model/tool/queue and TaskSpace32 UI evidence were frozen. Production8935 untouched. Files retained.",
+  "processes": [
+    {
+      "pid": 49755,
+      "command": "/tmp/masc-goal-runtime-32805eb7/masc --port 51535 --base-path /tmp/masc-goal-canary-32805eb7-glm53",
+      "signal": "SIGTERM",
+      "post_signal_absent": true
+    },
+    {
+      "pid": 49528,
+      "command": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/masc_goal_openai_wire_proxy.py --out /tmp/masc-goal-wire-32805eb7-glm53 --upstream https://api.z.ai/api/coding/paas/v4",
+      "signal": "SIGTERM",
+      "post_signal_absent": true
+    }
+  ]
+}

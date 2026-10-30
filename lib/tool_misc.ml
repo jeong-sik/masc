@@ -1,0 +1,433 @@
+(** Tool_misc — Miscellaneous operations (facade).
+
+    Dispatches config introspection and tool inventory helpers to
+    [Tool_misc_introspection], and the masc_ask family to
+    [Mcp_tool_runtime_ask], whose handlers the MCP and agent-core lanes share.
+
+    Retains: dashboard, verify_handoff, gc, tool_stats, tool_help.
+
+    @since 2.187.0 — Decomposed from monolithic tool_misc.ml *)
+
+open Tool_args
+
+type tool_result = Tool_result.result
+
+type context = {
+  config: Workspace.config;
+  agent_name: string;
+  help_schemas: Masc_domain.tool_schema list;
+}
+
+
+(* ================================================================ *)
+(* Handlers (retained in facade)                                    *)
+(* ================================================================ *)
+
+(* RFC-0189 PR-1b.10 — facade handlers return typed [Tool_result.result].
+   Failure-class mapping (caller-input violations only in this cluster):
+   - [Workflow_rejection] : invalid dashboard scope; missing
+                            tool_name; unknown tool.
+   - No [Runtime_failure] / [Dependency_unavailable] sites here — the
+     [Workspace.gc] / [Dashboard.generate]
+     backends assume-success or raise. When a backend later returns
+     a typed Error variant, the construction site here gets the
+     appropriate class at that time. *)
+
+let text_ok ~tool_name ~start_time body : Tool_result.result =
+  Tool_result.ok ~tool_name ~start_time body
+
+let workflow_err = Tool_result.workflow_err
+
+let expect_no_args ~tool_name ~start_time args =
+  match args with
+  | `Assoc [] -> Ok ()
+  | `Assoc fields ->
+      let names = fields |> List.map fst |> String.concat ", " in
+      Error
+        (workflow_err
+           ~tool_name
+           ~start_time
+           (Printf.sprintf "%s does not accept arguments: %s" tool_name names))
+  | _ ->
+      Error
+        (workflow_err
+           ~tool_name
+           ~start_time
+           (Printf.sprintf "%s arguments must be an object" tool_name))
+
+let dashboard_handler =
+  ref (fun ~tool_name ~start_time _ctx _args ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "Dashboard handler not registered"
+  )
+
+let register_dashboard_handler f =
+  dashboard_handler := f
+
+let handle_dashboard ~tool_name ~start_time ctx args =
+  !dashboard_handler ~tool_name ~start_time ctx args
+
+let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
+  match get_int_opt args "days" with
+  | None -> workflow_err ~tool_name ~start_time "days is required"
+  | Some days when days < 1 ->
+    workflow_err ~tool_name ~start_time "days must be >= 1"
+  | Some days ->
+    let gc_result = Workspace.gc ctx.config ~days () in
+    text_ok ~tool_name ~start_time gc_result
+
+let handle_keeper_waiting_inventory ~tool_name ~start_time ctx args : Tool_result.result =
+  match expect_no_args ~tool_name ~start_time args with
+  | Error result -> result
+  | Ok () ->
+      Tool_result.make_ok
+        ~tool_name
+        ~start_time
+        ~data:(Server_keeper_waiting_inventory.dashboard_json ctx.config)
+        ()
+
+let strip_mcp_prefix = Tool_transport_prefix.strip
+
+(* TEL-OK: help schema selection and formatting are read-only; the outer tool
+   execution boundary owns invocation telemetry for every caller projection. *)
+let handle_tool_help ~schemas ~tool_name ~start_time _ctx args : Tool_result.result =
+  let raw_name = String.trim (get_string args "tool_name" "") in
+  if String.equal raw_name "" then
+    workflow_err ~tool_name ~start_time "tool_name is required"
+  else
+    let tool_name = strip_mcp_prefix raw_name in
+    match Tool_help_registry.find_entry schemas tool_name with
+    | None ->
+        workflow_err ~tool_name ~start_time
+          (Printf.sprintf "unknown tool: %s" raw_name)
+    | Some entry ->
+        Tool_result.make_ok
+          ~tool_name
+          ~start_time
+          ~data:(Tool_help_registry.entry_json entry)
+          ()
+
+(* PR-1b.8 / PR-1b.9 web_* handlers are already typed at the source.
+   With dispatch lifting internally now, these wrappers can pass
+   the typed result straight through. *)
+let handle_web_search ~tool_name ~start_time _ctx args : Tool_result.result =
+  let result = Tool_misc_web_search.handle ~tool_name ~start_time args in
+  Tool_misc_web_enrichment.enrich_result_if_requested
+    ~tool_name
+    ~start_time
+    args
+    result
+
+let handle_web_fetch ~tool_name ~start_time _ctx args : Tool_result.result =
+  Tool_misc_web_fetch.handle ~tool_name ~start_time args
+
+(* ================================================================ *)
+(* Public re-exports from sub-modules                               *)
+(* ================================================================ *)
+
+let tool_inventory_json ctx ~include_hidden =
+  Tool_misc_introspection.tool_inventory_json ctx ~include_hidden
+
+(* ================================================================ *)
+(* Dispatch (facade)                                                *)
+(* ================================================================ *)
+
+(* The ask handlers are shared with the MCP lane and take their own narrow
+   context; the misc context already carries everything they read. *)
+let ask_context (ctx : context) arguments : Mcp_tool_runtime_ask.context =
+  { Mcp_tool_runtime_ask.config = ctx.config
+  ; agent_name = ctx.agent_name
+  ; arguments
+  }
+
+(* The wire name is parsed once and the operations are matched, so an operation
+   added to [Tool_schemas_misc.misc_operation] is a compile error here. [None]
+   means the name is not this facade's -- the tag dispatcher owns that case. *)
+let dispatch ?ask_source_turn_ref ?dos_admission ?(lane_access = Lane_addon_sources.Unauthenticated)
+    ?(browser_principal=Lane_addon_call_context.Anonymous) ctx ~name ~args : Tool_result.result option =
+  let start = Tool_timing.start () in
+  let browser tool=Browser_addon_tools.handle ~config:ctx.config ~access:lane_access
+    ~principal:browser_principal
+    ~reserved:(List.map (fun (schema:Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas)
+    ~keeper_name:(match lane_access with Lane_addon_sources.Keeper name -> Some name
+      | Operator_configuration|Unauthenticated -> None)
+    ~tool ~tool_name:name ~start_time:start args in
+  (* Lane ownership uses the verified Keeper principal. The session name is
+     still the attribution for unrelated tools and operator calls. *)
+  let lane_caller = match lane_access with
+    | Lane_addon_sources.Keeper keeper -> keeper
+    | Lane_addon_sources.Operator_configuration
+    | Lane_addon_sources.Unauthenticated -> ctx.agent_name in
+  let lane_error error =
+    let class_ = match error with
+      | Lane_addon_runtime.Request_rejected _ -> Tool_result.Workflow_rejection
+      | Runtime_failed _ -> Tool_result.Runtime_failure in
+    Tool_result.make_err ~tool_name:name ~start_time:start ~class_
+      (Lane_addon_runtime.error_to_string error) in
+  match Tool_schemas_misc.misc_operation_of_tool_name name with
+  | None -> None
+  | Some (Tool_schemas_misc.Misc_lane_declaration_read | Tool_schemas_misc.Misc_lane_declaration_save as operation) ->
+      let result = match operation with
+        | Tool_schemas_misc.Misc_lane_declaration_read -> Lane_addon_runtime.read_declaration ~access:lane_access ~config:ctx.config args
+        | Tool_schemas_misc.Misc_lane_declaration_save | Tool_schemas_misc.Misc_lane_updates
+        | Tool_schemas_misc.Misc_lane_attach | Tool_schemas_misc.Misc_lane_inspect
+        | Tool_schemas_misc.Misc_lane_observe | Tool_schemas_misc.Misc_lane_slice
+        | Tool_schemas_misc.Misc_lane_detach | Tool_schemas_misc.Misc_lane_evidence
+        | Tool_schemas_misc.Misc_lane_act | Tool_schemas_misc.Misc_lane_action_status
+        | Tool_schemas_misc.Misc_ask | Tool_schemas_misc.Misc_ask_status
+        | Tool_schemas_misc.Misc_ask_withdraw | Tool_schemas_misc.Misc_config
+        | Tool_schemas_misc.Misc_dashboard | Tool_schemas_misc.Misc_gc
+        | Tool_schemas_misc.Misc_keeper_waiting_inventory | Tool_schemas_misc.Misc_tool_help
+        | Tool_schemas_misc.Misc_web_fetch | Tool_schemas_misc.Misc_web_search
+        | Tool_schemas_misc.Misc_browser_tabs | Tool_schemas_misc.Misc_browser_read
+        | Tool_schemas_misc.Misc_browser_session | Tool_schemas_misc.Misc_browser_goto
+        | Tool_schemas_misc.Misc_browser_act | Tool_schemas_misc.Misc_browser_interact
+        | Tool_schemas_misc.Misc_browser_instruct | Tool_schemas_misc.Misc_msx _
+        | Tool_schemas_misc.Misc_portrait_read
+        | Tool_schemas_misc.Misc_candle_balance | Tool_schemas_misc.Misc_candle_catalog
+        | Tool_schemas_misc.Misc_candle_purchase | Tool_schemas_misc.Misc_candle_equip
+        | Tool_schemas_misc.Misc_candle_gift | Tool_schemas_misc.Misc_dos_load
+        | Tool_schemas_misc.Misc_dos_meta | Tool_schemas_misc.Misc_dos_inventory
+        | Tool_schemas_misc.Misc_dos_eject | Tool_schemas_misc.Misc_dos_screen
+        | Tool_schemas_misc.Misc_dos_step | Tool_schemas_misc.Misc_dos_press
+        | Tool_schemas_misc.Misc_dos_click | Tool_schemas_misc.Misc_dos_type
+        | Tool_schemas_misc.Misc_dos_peek | Tool_schemas_misc.Misc_play_room
+        | Tool_schemas_misc.Misc_dos_pass | Tool_schemas_misc.Misc_dos_save
+        | Tool_schemas_misc.Misc_dos_restore -> Lane_addon_runtime.save_declaration ~access:lane_access ~config:ctx.config args in
+      Some (match result with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error error ->
+            let class_ = match error.Lane_addon_declaration.code with
+              | Io_error -> Tool_result.Runtime_failure
+              | Invalid_request | Invalid_declaration | Revision_conflict | Not_found -> Tool_result.Workflow_rejection in
+            Tool_result.make_err ~tool_name:name ~start_time:start ~class_
+              ~data:(Lane_addon_declaration.error_to_json error) error.message)
+  | Some Tool_schemas_misc.Misc_lane_updates ->
+      Some (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+        Lane_addon_subscription.handle ~access:lane_access ~config:ctx.config ~caller:lane_caller args) with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error message -> Tool_result.make_err ~tool_name:name ~start_time:start
+            ~class_:Tool_result.Workflow_rejection message)
+  | Some (Tool_schemas_misc.Misc_portrait_read
+      | Tool_schemas_misc.Misc_candle_balance | Tool_schemas_misc.Misc_candle_catalog
+      | Tool_schemas_misc.Misc_candle_purchase
+      | Tool_schemas_misc.Misc_candle_equip
+      | Tool_schemas_misc.Misc_candle_gift) -> None
+  | Some Tool_schemas_misc.Misc_lane_action_status ->
+      Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Action_status args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error error -> lane_error error)
+  | Some Tool_schemas_misc.Misc_lane_act ->
+      Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Act args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error error -> lane_error error)
+  | Some Tool_schemas_misc.Misc_lane_attach ->
+      Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Attach args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error error -> lane_error error)
+  | Some Tool_schemas_misc.Misc_lane_inspect ->
+      Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Inspect args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error error -> lane_error error)
+  | Some Tool_schemas_misc.Misc_lane_observe ->
+      Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Observe args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error error -> lane_error error)
+  | Some Tool_schemas_misc.Misc_lane_slice ->
+      Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Slice args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error error -> lane_error error)
+  | Some Tool_schemas_misc.Misc_lane_detach ->
+      Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Detach args with
+        | Ok data -> Tool_result.make_ok ~tool_name:name ~start_time:start ~data ()
+        | Error error -> lane_error error)
+  | Some Tool_schemas_misc.Misc_lane_evidence ->
+      Some (match Lane_addon_runtime.dispatch ~caller:lane_caller ~access:lane_access ~config:ctx.config ~operation:Lane_addon_runtime.Evidence args with
+        | Ok data ->
+            let result = Tool_result.make_ok ~tool_name:name ~start_time:start ~data () in
+            (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              Tool_projection.attach_artifact_manifest
+                ~projection:Tool_output.Inline_with_reference
+                ~base_path:ctx.config.base_path result) with
+             | Ok result -> result
+             | Error error ->
+                 Tool_result.make_err ~tool_name:name ~start_time:start
+                   ~class_:Tool_result.Runtime_failure
+                   ~effect_disposition:Tool_result.Effect_outcome_unknown ~data
+                   ("Lane evidence result manifest unavailable: " ^ error.message))
+        | Error error -> lane_error error)
+  | Some Tool_schemas_misc.Misc_play_room ->
+      let speaker = match lane_access with
+        | Lane_addon_sources.Keeper _ -> Play_room.Keeper
+        | Operator_configuration | Unauthenticated -> Play_room.Participant in
+      Some (match Result.bind (Play_room.parse_action args) (fun action ->
+        Play_room.perform ~base_path:ctx.config.base_path ~who:lane_caller ~speaker
+          ~now:(Time_compat.now ()) action) with
+        | Ok snapshot -> Tool_result.make_ok ~tool_name:name ~start_time:start
+            ~data:(Play_room.snapshot_json ~viewer:lane_caller snapshot) ()
+        | Error error ->
+            let class_ = match error with
+              | Play_room.Invalid_request _ | Conflict _ -> Tool_result.Workflow_rejection
+              | Unavailable _ -> Tool_result.Runtime_failure in
+            Tool_result.make_err ~tool_name:name ~start_time:start ~class_ (Play_room.error_message error))
+  | Some Tool_schemas_misc.Misc_config ->
+      Some (Tool_misc_introspection.handle_config ~tool_name:name ~start_time:start args)
+  | Some Tool_schemas_misc.Misc_dashboard ->
+      Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Misc_keeper_waiting_inventory ->
+      Some (handle_keeper_waiting_inventory ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Misc_gc ->
+      Some (handle_gc ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Misc_tool_help ->
+      Some (handle_tool_help ~schemas:ctx.help_schemas ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Misc_ask ->
+      Mcp_tool_runtime_ask.handle_ask ?source_turn_ref:ask_source_turn_ref ~tool_name:name ~start_time:start
+        (ask_context ctx args)
+  | Some Tool_schemas_misc.Misc_ask_status ->
+      Mcp_tool_runtime_ask.handle_ask_status ~tool_name:name ~start_time:start
+        (ask_context ctx args)
+  | Some Tool_schemas_misc.Misc_ask_withdraw ->
+      Mcp_tool_runtime_ask.handle_ask_withdraw ~tool_name:name ~start_time:start
+        (ask_context ctx args)
+  | Some Tool_schemas_misc.Misc_web_search ->
+      Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Misc_web_fetch ->
+      Some (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
+  | Some Tool_schemas_misc.Misc_browser_tabs ->
+      Some (browser Browser_capabilities.Tabs)
+  | Some Tool_schemas_misc.Misc_browser_read ->
+      Some (browser Browser_capabilities.Read)
+  | Some Tool_schemas_misc.Misc_browser_session ->
+      Some (browser Browser_capabilities.Session)
+  | Some Tool_schemas_misc.Misc_browser_interact ->
+      Some (browser Browser_capabilities.Interact)
+  | Some Tool_schemas_misc.Misc_browser_goto ->
+      Some (browser Browser_capabilities.Goto)
+  | Some Tool_schemas_misc.Misc_browser_act ->
+      Some (browser Browser_capabilities.Act)
+  | Some Tool_schemas_misc.Misc_browser_instruct ->
+      Some (browser Browser_capabilities.Instruct)
+  | Some (Tool_schemas_misc.Misc_msx _)
+  | Some Tool_schemas_misc.Misc_dos_load
+  | Some Tool_schemas_misc.Misc_dos_meta
+  | Some Tool_schemas_misc.Misc_dos_inventory
+  | Some Tool_schemas_misc.Misc_dos_eject
+  | Some Tool_schemas_misc.Misc_dos_screen
+  | Some Tool_schemas_misc.Misc_dos_step
+  | Some Tool_schemas_misc.Misc_dos_pass
+  | Some Tool_schemas_misc.Misc_dos_press
+  | Some Tool_schemas_misc.Misc_dos_click
+  | Some Tool_schemas_misc.Misc_dos_type
+  | Some Tool_schemas_misc.Misc_dos_peek
+  | Some Tool_schemas_misc.Misc_dos_save
+  | Some Tool_schemas_misc.Misc_dos_restore -> None
+
+(* ================================================================ *)
+(* Tool_spec registration                                           *)
+(* ================================================================ *)
+
+let is_read_only = function
+  | Tool_schemas_misc.Misc_lane_declaration_read -> true
+  | Tool_schemas_misc.Misc_lane_declaration_save
+  | Tool_schemas_misc.Misc_candle_balance
+  | Tool_schemas_misc.Misc_candle_purchase
+  | Tool_schemas_misc.Misc_candle_equip
+  | Tool_schemas_misc.Misc_candle_gift
+  | Tool_schemas_misc.Misc_play_room
+  | Tool_schemas_misc.Misc_lane_updates -> false
+  | Tool_schemas_misc.Misc_lane_action_status
+  | Tool_schemas_misc.Misc_lane_inspect
+  | Tool_schemas_misc.Misc_lane_slice -> true
+  | Tool_schemas_misc.Misc_lane_act
+  | Tool_schemas_misc.Misc_lane_attach
+  | Tool_schemas_misc.Misc_lane_observe
+  | Tool_schemas_misc.Misc_lane_detach
+  | Tool_schemas_misc.Misc_lane_evidence -> false
+  | Tool_schemas_misc.Misc_dashboard
+  | Tool_schemas_misc.Misc_keeper_waiting_inventory
+  | Tool_schemas_misc.Misc_tool_help
+  | Tool_schemas_misc.Misc_portrait_read
+  | Tool_schemas_misc.Misc_candle_catalog
+  (* Read-back only: records nothing, matching the descriptor's readonly flag
+     and the MCP lane's runtime_tool_policy. *)
+  | Tool_schemas_misc.Misc_ask_status -> true
+  | Tool_schemas_misc.Misc_msx tool -> Msx_tool.reads_only tool
+  (* Browser readers change nothing in the browser; the verb set in
+     Browser_lane is this classification's source of truth. *)
+  | Tool_schemas_misc.Misc_browser_tabs
+  | Tool_schemas_misc.Misc_browser_read
+  (* Reads the machine without moving its time. *)
+  | Tool_schemas_misc.Misc_dos_screen -> true
+  (* RAM introspection reads memory and moves nothing. *)
+  | Tool_schemas_misc.Misc_dos_peek ->
+    true
+  | Tool_schemas_misc.Misc_dos_meta
+  | Tool_schemas_misc.Misc_dos_inventory -> true
+  (* Booting, ejecting, pressing and typing change the shared machine. *)
+  | Tool_schemas_misc.Misc_dos_load
+  | Tool_schemas_misc.Misc_dos_eject
+  | Tool_schemas_misc.Misc_dos_pass
+  | Tool_schemas_misc.Misc_dos_press
+  | Tool_schemas_misc.Misc_dos_click
+  | Tool_schemas_misc.Misc_dos_type
+  | Tool_schemas_misc.Misc_dos_step
+  (* Saving writes a named slot; restoring replaces the shared machine. *)
+  | Tool_schemas_misc.Misc_dos_save
+  | Tool_schemas_misc.Misc_dos_restore
+  (* Starting and stopping the automation browser changes its lifecycle. *)
+  | Tool_schemas_misc.Misc_browser_session
+  | Tool_schemas_misc.Misc_ask
+  | Tool_schemas_misc.Misc_ask_withdraw
+  | Tool_schemas_misc.Misc_config
+  | Tool_schemas_misc.Misc_gc
+  | (* A navigation reaches the web from a keeper-owned profile — the same
+       classification the web fetch carries. *)
+    Tool_schemas_misc.Misc_browser_goto
+  | Tool_schemas_misc.Misc_browser_act
+  | Tool_schemas_misc.Misc_browser_interact
+  | Tool_schemas_misc.Misc_browser_instruct
+  | Tool_schemas_misc.Misc_web_fetch
+  | Tool_schemas_misc.Misc_web_search -> false
+
+(* Registration walks the same list [dispatch] matches, so this facade can no
+   longer register a name it does not route. It used to register the whole
+   [Tool_schemas_misc.schemas] list: masc_broadcast, masc_messages, masc_start
+   and the three masc_plan_* names went in under [Mod_misc] with no route here,
+   and answered correctly only because Tool_plan and Mcp_tool_runtime link later
+   and overwrite the tag. *)
+let () =
+  Tool_schemas_misc.misc_operations
+  |> List.iter (fun operation ->
+       match Tool_schemas_misc.misc_registered_schema operation with
+       | None -> ()
+       | Some (schema : Masc_domain.tool_schema) ->
+         Tool_spec.register
+           (Tool_spec.create
+              ~name:(Tool_schemas_misc.misc_tool_name operation)
+              ~description:schema.description
+              ~module_tag:Tool_dispatch.Mod_misc
+              ~input_schema:schema.input_schema
+              ~handler_binding:Tag_dispatch
+              ~is_read_only:(is_read_only operation)
+              ()))
+let parse_searxng_json = Tool_misc_web_search.parse_searxng_json
+let parse_brave_json = Tool_misc_web_search.parse_brave_json
+let parse_brave_llm_context_json = Tool_misc_web_search.parse_brave_llm_context_json
+let parse_ollama_search_json = Tool_misc_web_search.parse_ollama_search_json
+let parse_tavily_json = Tool_misc_web_search.parse_tavily_json
+let parse_exa_json = Tool_misc_web_search.parse_exa_json
+let parse_bing_search_json = Tool_misc_web_search.parse_bing_search_json
+let redact_transport_error_detail = Tool_misc_web_search.redact_transport_error_detail
+let web_search_provider_error_to_string = Tool_misc_web_search.provider_error_to_string
+let web_search_provider_plan = Tool_misc_web_search.provider_plan
+let web_search_simulate_for_test ~query ~limit outcomes =
+  Tool_misc_web_search.simulate_for_test ~query ~limit outcomes
+
+let with_web_search_simulation_for_test ~outcomes f =
+  Tool_misc_web_search.with_simulated_search_for_test ~outcomes f
+
+let with_web_fetch_http_get_for_test http_get f =
+  Tool_misc_web_fetch.with_http_get_for_test http_get f

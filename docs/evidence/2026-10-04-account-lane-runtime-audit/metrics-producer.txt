@@ -1,0 +1,330 @@
+basics.000.output
+ASSERT total_entries
+ASSERT total_error_entries
+ASSERT models count
+
+basics.001.output
+ASSERT total_entries
+ASSERT total_error_entries
+ASSERT models
+ASSERT model_id
+ASSERT entry_count
+ASSERT success_count
+ASSERT error_count
+ASSERT total_input_tokens
+ASSERT total_output_tokens
+ASSERT usage samples
+ASSERT telemetry samples
+ASSERT total_tool_calls
+ASSERT cost > 0
+ASSERT avg_tool_calls > 0
+ASSERT latency > 0
+ASSERT tok/s > 0
+
+basics.002.output
+ASSERT total_entries
+ASSERT model stays bare
+
+basics.003.output
+ASSERT total entries retained for diagnosis
+ASSERT models
+ASSERT raw input total
+ASSERT raw output total
+ASSERT all reported usage samples count
+ASSERT invalidity is not missing usage
+ASSERT all reported tok/s observations remain
+ASSERT cost is not suppressed by usage label
+ASSERT trust label retained as provenance
+ASSERT large input remains visible
+ASSERT anomaly reason retained as provenance
+ASSERT negative input is explicitly invalid
+ASSERT negative reason is explicit
+
+basics.004.output
+ASSERT total_entries
+ASSERT total_error_entries
+ASSERT error model found
+ASSERT error_count
+ASSERT success_count
+ASSERT error model latency unknown
+ASSERT error model input unknown
+ASSERT error model cost unknown
+
+basics.005.output
+ASSERT total_entries
+ASSERT models
+ASSERT first model
+ASSERT first entry_count
+
+basics.006.output
+ASSERT only recent entry
+
+buckets.000.output
+ASSERT empty → no models
+
+buckets.001.output
+ASSERT one model
+ASSERT model_id
+ASSERT one bucket (60min window, 60min bucket)
+
+buckets.002.output
+ASSERT one model
+ASSERT sparse → 2 distinct buckets (10min apart, 5min width)
+
+buckets.003.output
+ASSERT standalone input total
+ASSERT standalone cache total
+ASSERT paired input
+ASSERT paired cache
+ASSERT paired sample count
+ASSERT JSON paired input
+ASSERT JSON paired cache
+ASSERT JSON sample coverage
+
+buckets.004.output
+ASSERT cached input is part of reported input
+ASSERT cached input is part of reported input
+ASSERT cached input is part of reported input
+
+buckets.005.output
+ASSERT bucket_minutes populated
+ASSERT model_stats.buckets non-empty
+ASSERT bucket entry_count
+
+enrichment.000.output
+ASSERT has top_tools
+ASSERT top tool
+ASSERT top count
+
+enrichment.001.output
+ASSERT recent_entries capped at 5
+ASSERT most recent first
+ASSERT recent cache read
+ASSERT recent cache creation
+
+enrichment.002.output
+ASSERT prompt avg present
+ASSERT prompt avg
+ASSERT prompt p50
+ASSERT prompt p95
+ASSERT max peak mem
+ASSERT recent prompt tok/s
+ASSERT recent peak memory
+ASSERT prompt avg json
+ASSERT max peak mem json
+ASSERT recent prompt json
+ASSERT recent peak mem json
+
+enrichment.003.output
+ASSERT success_count
+ASSERT usage samples
+ASSERT telemetry samples
+ASSERT input unknown
+ASSERT latency unknown
+ASSERT cost unknown
+ASSERT recent input unknown
+ASSERT recent cache read unknown
+ASSERT recent cache creation unknown
+ASSERT recent latency unknown
+ASSERT json input null
+ASSERT json latency null
+ASSERT recent json input null
+ASSERT recent json cache read null
+ASSERT recent json cache creation null
+
+enrichment.004.output
+ASSERT coverage status
+ASSERT usage missing count
+ASSERT telemetry missing count
+ASSERT primary coverage reason
+ASSERT primary coverage stage
+ASSERT coverage reason counts
+ASSERT recent outcome
+ASSERT recent stop reason
+ASSERT recent turn lane
+ASSERT recent usage_reported
+ASSERT recent telemetry_reported
+ASSERT recent coverage reason
+ASSERT recent coverage stage
+ASSERT json coverage status
+ASSERT json usage missing count
+ASSERT json telemetry missing count
+ASSERT json primary coverage reason
+ASSERT json primary coverage stage
+ASSERT json reason count length
+ASSERT json reason count reason
+ASSERT recent json outcome
+ASSERT recent json stage
+
+enrichment.005.output
+ASSERT null-model row retained
+ASSERT one attributed bucket
+ASSERT runtime attribution
+ASSERT success count
+ASSERT tool calls preserved
+ASSERT coverage reason retained
+
+enrichment.006.output
+ASSERT sparse rows retained
+ASSERT error row counted
+ASSERT one attributed bucket
+ASSERT provider_context runtime attribution
+ASSERT success count
+ASSERT error count
+
+enrichment.007.output
+ASSERT both rows retained
+ASSERT attributed to the answering candidates
+
+enrichment.008.output
+ASSERT both rows retained
+ASSERT one bucket, shared with the latency label
+ASSERT an error row with only the lane is refused
+ASSERT a model-less success row with only the lane is refused
+ASSERT a number: a malformed answerer is refused as such, not as absent
+ASSERT a blank string: a malformed answerer is refused as such, not as absent
+
+enrichment.009.output
+ASSERT current field
+
+enrichment.010.output
+ASSERT current cost field
+
+enrichment.011.output
+
+enrichment.012.output
+ASSERT cost model
+ASSERT one cost entry
+ASSERT wall tok/sec from cost latency
+ASSERT usage sample
+ASSERT telemetry sample
+
+enrichment.013.output
+ASSERT one model bucket
+ASSERT model field remains authoritative
+ASSERT both rows retained
+ASSERT tokens aggregate without provider rewrite
+
+enrichment.014.output
+ASSERT one cost entry
+ASSERT zero latency not averaged
+ASSERT zero latency not p50
+ASSERT zero latency does not derive tok/sec
+ASSERT usage sample preserved
+ASSERT telemetry sample absent
+ASSERT recent latency unknown
+ASSERT zero latency skipped from buckets
+
+enrichment.015.output
+ASSERT exactly matching rows merged
+ASSERT cost observation supplies wall tok/sec
+ASSERT decision tool fields survive merge
+
+enrichment.016.output
+ASSERT both exact identities remain
+
+enrichment.017.output
+[2026-10-04 14:10:44] [WARN] [model_inference_metrics] cost ledger exact identity conflict: rows=3 action=excluded
+ASSERT conflicting identity is excluded
+ASSERT conflicting identity creates no aggregate
+ASSERT all conflicting rows diagnosed
+
+enrichment.018.output
+ASSERT the paired turn and the attempt reading
+ASSERT no conflict
+
+enrichment.019.output
+[2026-10-04 14:10:44] [WARN] [model_inference_metrics] cost ledger schema drop: reason=invalid_current_cost_row detail=cost row must be a JSON object
+[2026-10-04 14:10:44] [WARN] [model_inference_metrics] cost ledger malformed row: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc_model_metricsf661a0/.masc/costs/2026-10/04.jsonl:3 detail=Line 1, bytes 0-1:
+Unexpected end of input
+ASSERT cost read state
+ASSERT malformed rows
+ASSERT schema violation rows
+ASSERT identity conflicts
+
+enrichment.020.output
+[2026-10-04 14:10:44] [ERROR] [model_inference_metrics] costs/dated read failed: dated JSONL path is not a directory: /var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc_model_metrics46e3dd/.masc/costs
+ASSERT decision metrics remain available
+ASSERT cost read state
+ASSERT typed read detail is surfaced
+
+enrichment.021.output
+ASSERT perAgent row count
+ASSERT highest cost first redacted
+ASSERT input tokens summed
+ASSERT output tokens summed
+ASSERT cost summed
+ASSERT provider axis redacted
+ASSERT model axis redacted
+ASSERT runtime row costs
+ASSERT global p50
+ASSERT global p95
+ASSERT global cost
+ASSERT window
+ASSERT bucket count
+ASSERT sub-second bucket count
+ASSERT 1s-4s bucket count
+
+enrichment.022.output
+ASSERT full window label
+ASSERT short window label
+
+enrichment.023.output
+ASSERT perAgent row count
+ASSERT per-agent p50 missing is null
+ASSERT per-agent p95 missing is null
+ASSERT global p50 missing is null
+ASSERT global p95 missing is null
+
+enrichment.024.output
+ASSERT has models
+ASSERT model id redacted
+ASSERT success_count
+ASSERT usage_sample_count
+ASSERT total_cost_usd = 0.05
+ASSERT has top_tools list
+ASSERT has recent_entries list
+ASSERT recent cache_read_tokens
+ASSERT recent cache_creation_tokens
+ASSERT total_error_entries
+
+enrichment.025.output
+ASSERT two account rows, no API-name join
+ASSERT unattributed decision remains explicit
+ASSERT exact cost merge preserves executed identity and one sample
+ASSERT paired usage uses normalized decision
+ASSERT account one cache only
+ASSERT account two cache only
+ASSERT recent success belongs to selected account
+
+pricing_firewall.000.output
+ASSERT cost does not alter planning feedback
+ASSERT cost does not alter planning feedback
+ASSERT planning feedback excludes cost=
+ASSERT planning feedback excludes cost_usd
+ASSERT planning feedback excludes $
+
+pricing_firewall.001.output
+ASSERT billing alone is not usage evidence
+ASSERT cache creation is usage evidence
+
+prompt_feedback.000.output
+ASSERT empty aggregate renders empty prompt block
+
+prompt_feedback.001.output
+ASSERT contains redacted lane label
+ASSERT contains total turns
+ASSERT contains error rate
+ASSERT does not expose provider
+ASSERT does not expose raw model
+
+thinking_fraction.000.output
+ASSERT entry_count
+ASSERT thinking_fraction present
+ASSERT thinking_fraction = 3/8
+
+thinking_fraction.001.output
+ASSERT thinking_fraction None
+
+thinking_fraction.002.output
+ASSERT thinking_fraction in JSON

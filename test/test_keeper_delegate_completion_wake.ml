@@ -1,0 +1,627 @@
+(** A delegated turn's answer reaches the Keeper that asked for it.
+
+    [masc_keeper_delegate] hands back an operation id and returns. Over
+    2026-08-17..24 the live workspace recorded 4 delegations started, 0 reads
+    of [masc_keeper_delegate_status], and 10 cancels: every answer was written
+    somewhere the asker never looked.
+
+    These tests drive [deliver] against a real workspace and read the asker's
+    durable queue, so an answer that stops at the enqueue boundary is a
+    failure. They also project the queued answer the way a turn does, because
+    an answer the Keeper is woken for but cannot read is the same loss with an
+    extra wake. *)
+
+open Alcotest
+module Workspace = Masc.Workspace
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Wake = Masc.Keeper_delegate_completion_wake
+module Ops = Masc.Keeper_tool_surface_ops
+module Keeper_registry = Masc.Keeper_registry
+module Queue_registry = Masc.Keeper_registry_event_queue
+module Event_queue = Keeper_event_queue
+module WO = Masc.Keeper_world_observation
+
+let asker = "alpha"
+let delegate = "beta"
+let operation_id = "kmsg-0001"
+
+let with_workspace f =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc_delegate_wake_%d_%d"
+         (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1000.)))
+  in
+  Unix.mkdir dir 0o755;
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Workspace.default_config dir in
+  ignore (Workspace.init config ~agent_name:(Some "operator"));
+  Fun.protect
+    ~finally:(fun () -> ignore (Workspace.reset config))
+    (fun () -> f config)
+;;
+
+let ensure_keeper config ~keeper_name =
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+            [ "name", `String keeper_name
+            ; "activation_mode", `String "manual"
+            ])
+    with
+    | Ok meta -> meta
+    | Error err -> fail ("keeper meta fixture failed: " ^ err)
+  in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok _ -> ()
+   | Error err -> fail ("write keeper meta failed: " ^ err));
+  (* Registry membership, not the meta file, is what [delegate_continuation_channel]
+     reads: the question it asks is whether this caller owns a queue somebody
+     drains, and a Keeper calling the tool from its own turn is up. *)
+  ignore
+    (Keeper_registry.register_offline
+       ~base_path:config.Workspace.base_path
+       keeper_name
+       meta
+     : Keeper_registry.registry_entry)
+;;
+
+let queued_answers ~base_path ~keeper_name =
+  match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+  | Error detail -> fail ("event queue load failed: " ^ detail)
+  | Ok queue ->
+    Event_queue.to_list queue
+    |> List.filter_map (fun (stimulus : Event_queue.stimulus) ->
+      match stimulus.payload with
+      | Event_queue.Delegate_completed completion -> Some (stimulus, completion)
+      | Event_queue.Board_signal _
+      | Event_queue.Board_attention _
+      | Event_queue.Bootstrap
+      | Event_queue.Fusion_completed _
+      | Event_queue.Schedule_due _
+      | Event_queue.Connector_attention _
+      | Event_queue.Hitl_resolved _
+      | Event_queue.Ask_answered _
+      | Event_queue.Completion_authority_rejected _
+      | Event_queue.Task_outcome _
+      | Event_queue.Task_cancelled _
+      | Event_queue.Workspace_message _
+      | Event_queue.Tool_result_ready _ | Event_queue.Owned_job_completed _ | Event_queue.Addon_operation_changed _
+      | Event_queue.Composition_completed _ -> None)
+;;
+
+let deliver_or_fail config ~terminal =
+  match
+    Wake.deliver
+      ~base_path:config.Workspace.base_path
+      ~asked_by:asker
+      ~operation_id
+      ~delegate
+      ~terminal
+  with
+  | Ok () -> ()
+  | Error detail -> fail ("deliver failed: " ^ detail)
+;;
+
+(* The whole point of the change: the reply lands on the asker's queue, not
+   the delegate's, and it carries the text rather than a pointer the asker
+   would have to go read. *)
+let reply_reaches_the_asker () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    ensure_keeper config ~keeper_name:delegate;
+    deliver_or_fail config ~terminal:(Event_queue.Delegate_replied "the answer");
+    let base_path = config.Workspace.base_path in
+    (match queued_answers ~base_path ~keeper_name:asker with
+     | [ (stimulus, completion) ] ->
+       check
+         string
+         "the answer is keyed on the operation the asker holds"
+         ("keeper-delegate:" ^ operation_id)
+         stimulus.post_id;
+       check string "the answer names who ran the turn" delegate completion.dc_keeper;
+       check
+         string
+         "the answer correlates to the asker's own operation id"
+         operation_id
+         completion.dc_operation_id;
+       (match completion.dc_terminal with
+        | Event_queue.Delegate_replied reply ->
+          check string "the reply text travels with the wake" "the answer" reply
+        | Event_queue.Delegate_no_reply | Event_queue.Delegate_failed _ ->
+          fail "a reply must arrive as Delegate_replied")
+     | [] -> fail "the asker's queue holds no answer"
+     | _ :: _ :: _ -> fail "one delegation produced more than one answer");
+    check
+      int
+      "the Keeper that ran the turn is not told about its own answer"
+      0
+      (List.length (queued_answers ~base_path ~keeper_name:delegate)))
+;;
+
+(* A failure is as much an answer as a reply: the asker stops waiting either
+   way, so the detail has to survive the trip. *)
+let failure_reaches_the_asker () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    deliver_or_fail config ~terminal:(Event_queue.Delegate_failed "provider timed out");
+    match queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker with
+    | [ (_, { dc_terminal = Event_queue.Delegate_failed detail; _ }) ] ->
+      check string "the failure detail travels with the wake" "provider timed out" detail
+    | _ -> fail "a failed delegation must arrive as Delegate_failed")
+;;
+
+(* Redelivery of the same answer collapses onto the entry already queued: the
+   operation id is the whole key, so a replay does not wake the asker twice
+   about one request. *)
+let the_same_answer_arrives_once () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    let terminal = Event_queue.Delegate_replied "the answer" in
+    deliver_or_fail config ~terminal;
+    deliver_or_fail config ~terminal;
+    check
+      int
+      "a replayed answer does not queue a second time"
+      1
+      (List.length
+         (queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker)))
+;;
+
+(* The wake is only worth anything if the turn can read what arrived. This is
+   the arm that decides it: the answer has no Board post behind its id, and
+   the block that renders a row's title and preview is the Board Activity one.
+   Routed anywhere else the Keeper wakes with nothing to read. *)
+let the_turn_can_read_the_answer () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    deliver_or_fail config ~terminal:(Event_queue.Delegate_replied "the answer");
+    match queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker with
+    | [ (stimulus, _) ] ->
+      let meta =
+        match Keeper_meta_store.read_meta config asker with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "the asker has no meta"
+        | Error err -> fail ("meta load failed: " ^ err)
+      in
+      (match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
+       | Error _ -> fail "the answer must project without a Board read"
+       | Ok None -> fail "the answer projects to nothing the turn can read"
+       | Ok (Some event) ->
+         check
+           bool
+           "the answer reaches the block that renders its title and preview"
+           true
+           (WO.is_board_activity_event event);
+         check string "the row is attributed to the Keeper that answered" delegate
+           event.WO.author;
+         check string "the row states who answered and how" (delegate ^ " replied")
+           event.WO.title;
+         check
+           bool
+           "the reply text is what the turn reads"
+           true
+           (String.equal event.WO.preview "the answer"))
+    | _ -> fail "the asker's queue holds no answer")
+;;
+
+(* A reply longer than the preview ceiling keeps only its head in the row, and
+   the exact tail -- export objects, code fences -- lives past the cut. A
+   delivered answer measured on 2026-10-07 lost an artifact marker to this
+   cut while the row said nothing, so the reader had no way to know the text
+   it held was partial. The cut is never silent: the row appends the status
+   read keyed on the operation id it already carries, so one call recovers
+   the original. *)
+let a_cut_reply_names_the_read_path () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    let long_op = operation_id ^ "-long" in
+    (* 480 mirrors delegate_reply_preview_max_len: the reply crosses it by a
+       tail the row cannot hold. *)
+    let long_reply = String.make (480 + 64) 'x' in
+    let deliver ?(op = operation_id) reply =
+      match
+        Wake.deliver
+          ~base_path:config.Workspace.base_path
+          ~asked_by:asker
+          ~operation_id:op
+          ~delegate
+          ~terminal:(Event_queue.Delegate_replied reply)
+      with
+      | Ok () -> ()
+      | Error detail -> fail ("deliver failed: " ^ detail)
+    in
+    deliver "the answer";
+    deliver ~op:long_op long_reply;
+    let meta =
+      match Keeper_meta_store.read_meta config asker with
+      | Ok (Some meta) -> meta
+      | Ok None -> fail "the asker has no meta"
+      | Error err -> fail ("meta load failed: " ^ err)
+    in
+    let rows =
+      queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker
+      |> List.map (fun (stimulus, _) ->
+             match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
+             | Error _ ->
+               fail "the answer must project without a Board read"
+             | Ok None -> fail "the answer projects to nothing the turn can read"
+             | Ok (Some event) -> event)
+    in
+    let short_row, long_row =
+      match
+        List.sort
+          (fun left right ->
+             compare (String.length left.WO.preview) (String.length right.WO.preview))
+          rows
+      with
+      | [ short_row; long_row ] -> (short_row, long_row)
+      | _ -> fail "two delegations must project two rows"
+    in
+    check string "a reply within the ceiling stays the whole text" "the answer"
+      short_row.WO.preview;
+    let first_line =
+      match String.index_opt long_row.WO.preview '\n' with
+      | None -> long_row.WO.preview
+      | Some i -> String.sub long_row.WO.preview 0 i
+    in
+    check
+      string
+      "the row holds the cut head and the ellipsis"
+      (String.make 480 'x' ^ "...")
+      first_line;
+    let contains needle hay =
+      let needle_len = String.length needle and hay_len = String.length hay in
+      let rec go i =
+        i + needle_len <= hay_len
+        && (String.equal (String.sub hay i needle_len) needle || go (i + 1))
+      in
+      go 0
+    in
+    let note =
+      String.sub long_row.WO.preview (String.length first_line + 1)
+        (String.length long_row.WO.preview - String.length first_line - 1)
+    in
+    check
+      bool
+      "the appended note names the exact read path and the ids to read with"
+      true
+      (contains "masc_keeper_delegate_status" note
+       && contains long_op note
+       && contains delegate note))
+;;
+
+(* The re-negotiated task-2192 contract: the cut row keeps its head and its
+   status note, and the full reply also rides in the event itself --
+   [Delegate_replied] carries the original string, the projection keeps it
+   typed, and the prompt's note fields restate it in full exactly when the
+   preview cut. The tail that was lost on 2026-10-07 (an artifact marker
+   past the 480B cut) is lossless from now on, without raising the ceiling
+   and without a store read the turn never holds. *)
+let the_full_reply_rides_lossless_through_the_projection () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    let tail = "끝\"}],\"isError\":false}" in
+    let long_reply =
+      "{\"content\":[{\"type\":\"text\",\"text\":\""
+      ^ String.make 610 'x'
+      ^ tail
+    in
+    let deliver ?(op = operation_id) terminal =
+      match
+        Wake.deliver
+          ~base_path:config.Workspace.base_path
+          ~asked_by:asker
+          ~operation_id:op
+          ~delegate
+          ~terminal
+      with
+      | Ok () -> ()
+      | Error detail -> fail ("deliver failed: " ^ detail)
+    in
+    deliver ~op:(operation_id ^ "-long") (Event_queue.Delegate_replied long_reply);
+    deliver ~op:(operation_id ^ "-short") (Event_queue.Delegate_replied "the answer");
+    deliver ~op:(operation_id ^ "-silent") Event_queue.Delegate_no_reply;
+    deliver ~op:(operation_id ^ "-failed") (Event_queue.Delegate_failed "provider timed out");
+    let meta =
+      match Keeper_meta_store.read_meta config asker with
+      | Ok (Some meta) -> meta
+      | Ok None -> fail "the asker has no meta"
+      | Error err -> fail ("meta load failed: " ^ err)
+    in
+    let fields_of op =
+      let hit =
+        List.find_opt
+          (fun ((_, completion) : _ * Event_queue.delegate_completion) ->
+            String.equal completion.dc_operation_id op)
+          (queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker)
+      in
+      match hit with
+      | None -> fail ("no queued answer for " ^ op)
+      | Some (stimulus, _) ->
+        (match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
+         | Ok (Some event) ->
+           Masc.Keeper_unified_prompt.For_testing.board_event_fields event
+         | _ -> fail ("the answer for " ^ op ^ " must project to a row"))
+    in
+    check int "the preview ceiling is unchanged" 480
+      WO.delegate_reply_preview_max_len;
+    check bool "the exported reply exceeds 648 bytes" true
+      (String.length long_reply >= 648);
+    let long_fields = fields_of (operation_id ^ "-long") in
+    (match List.assoc_opt "reply_full" long_fields with
+     | Some reply_full ->
+       check string "a cut reply is restated in full, byte for byte" long_reply
+         reply_full;
+       check string "the UTF-8 tail after the preview survives" tail
+         (String.sub reply_full
+            (String.length reply_full - String.length tail)
+            (String.length tail))
+     | None -> fail "a cut reply must carry its full text in the note fields");
+    (match List.assoc_opt "preview" long_fields with
+     | Some preview ->
+       check
+         bool
+         "the row preview stays the bounded head of the same text"
+         true
+         (String.length preview >= 483
+          && String.equal (String.sub preview 0 480) (String.sub long_reply 0 480))
+     | None -> fail "the long row must still render its cut preview");
+    let short_fields = fields_of (operation_id ^ "-short") in
+    check
+      bool
+      "an uncropped reply is not rendered twice"
+      true
+      (Option.is_none (List.assoc_opt "reply_full" short_fields));
+    let silent_fields = fields_of (operation_id ^ "-silent") in
+    check
+      bool
+      "no_reply carries no reply to restate"
+      true
+      (Option.is_none (List.assoc_opt "reply_full" silent_fields));
+    let failed_fields = fields_of (operation_id ^ "-failed") in
+    check
+      bool
+      "a failure detail is short by construction and rides in the row whole"
+      true
+      (Option.is_none (List.assoc_opt "reply_full" failed_fields));
+    (match List.assoc_opt "preview" failed_fields with
+     | Some preview -> check string "the failure detail survives whole" "provider timed out" preview
+     | None -> fail "the failed row must render its detail"))
+;;
+
+(* Regression (PR #41766 review): [short_preview] measures after
+   [String.trim], so the cut note must key on the trimmed bytes too. A reply
+   padded past the ceiling with whitespace is short after trimming -- adding
+   the status read note to it would mark a fully delivered answer as partial
+   and send the reader to fetch text it already holds. *)
+let a_padded_short_reply_is_not_cut () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    (* 544 raw bytes so the untrimmed length crosses the ceiling; "OK" after
+       trim stays well inside it. *)
+    let padded = "OK" ^ String.make (480 - 2 + 64) ' ' in
+    match
+      Wake.deliver
+        ~base_path:config.Workspace.base_path
+        ~asked_by:asker
+        ~operation_id
+        ~delegate
+        ~terminal:(Event_queue.Delegate_replied padded)
+    with
+    | Error detail -> fail ("deliver failed: " ^ detail)
+    | Ok () ->
+      let meta =
+        match Keeper_meta_store.read_meta config asker with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "the asker has no meta"
+        | Error err -> fail ("meta load failed: " ^ err)
+      in
+      match
+        queued_answers ~base_path:config.Workspace.base_path ~keeper_name:asker
+        |> List.map (fun (stimulus, _) ->
+               match WO.pending_board_event_of_stimulus ~base_path:config.Workspace.base_path ~meta stimulus with
+               | Error _ -> fail "the answer must project without a Board read"
+               | Ok None -> fail "the answer projects to nothing the turn can read"
+               | Ok (Some event) -> event)
+      with
+      | [ row ] ->
+        check string "the preview equals the trimmed answer" "OK" row.WO.preview;
+        check bool "no status read note on an uncut answer" true
+          (not (String.contains row.WO.preview '\n'))
+      | _ -> fail "one delegation must project one row")
+;;
+
+(* The queue is durable, so an answer that cannot be read back is lost on the
+   next restart — silently, because the reader has no other copy. *)
+let the_answer_survives_a_round_trip () =
+  List.iter
+    (fun terminal ->
+       let completion =
+         { Event_queue.dc_operation_id = operation_id
+         ; dc_keeper = delegate
+         ; dc_terminal = terminal
+         }
+       in
+       let stimulus : Event_queue.stimulus =
+         { Event_queue.post_id = Event_queue.delegate_completion_post_id completion
+         ; urgency = Event_queue.Normal
+         ; arrived_at = 1.0
+         ; payload = Event_queue.Delegate_completed completion
+         }
+       in
+       match Event_queue.stimulus_of_yojson (Event_queue.stimulus_to_yojson stimulus) with
+       | Error detail -> fail ("the answer cannot be read back: " ^ detail)
+       | Ok decoded ->
+         check
+           bool
+           "the answer is the same after a round trip"
+           true
+           (Event_queue.stimulus_identity_equal decoded stimulus))
+    [ Event_queue.Delegate_replied "the answer"
+    ; Event_queue.Delegate_no_reply
+    ; Event_queue.Delegate_failed "provider timed out"
+    ]
+;;
+
+(* Who reads the reply decides where it goes. A Keeper reads its own queue; an
+   operator driving the tool over HTTP is watching the dashboard, and sending
+   its answer to a queue no Keeper owns would leave it undrained. *)
+let only_a_keeper_is_answered_on_its_queue () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    (match Ops.delegate_continuation_channel ~config ~submitted_by:asker with
+     | Some (Keeper_continuation_channel.Keeper { keeper_name }) ->
+       check string "a Keeper is answered on its own queue" asker keeper_name
+     | Some other ->
+       fail
+         ("a Keeper must be answered on its own queue, got "
+          ^ Keeper_continuation_channel.kind_label other)
+     | None -> fail "a Keeper must be answered on its own queue");
+    check
+      bool
+      "a caller that owns no queue keeps the channel it is watching"
+      true
+      (Option.is_none
+         (Ops.delegate_continuation_channel ~config ~submitted_by:"operator")))
+;;
+
+(* RFC-0468 §3.2: the recipient records a Keeper's masc_keeper_msg /
+   delegate as that Keeper. Registry membership decides it, as it decides the
+   reply route above; an operator driving the tool is not a Keeper. The typed
+   sender then survives the durable operation source. *)
+let only_a_registered_keeper_is_the_sender () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:asker;
+    (match Ops.sender_keeper_of_submitter ~config ~submitted_by:asker with
+     | Some keeper_id ->
+       check string "a registered Keeper is the sender" asker
+         (Masc.Keeper_identity.Keeper_id.to_string keeper_id)
+     | None -> fail "a registered Keeper must be recorded as the sender");
+    check bool "an operator is not a sender Keeper" true
+      (Option.is_none
+         (Ops.sender_keeper_of_submitter ~config ~submitted_by:"operator"));
+    let thread_id = "keeper:" ^ delegate in
+    let continuation_channel =
+      match Keeper_continuation_channel.keeper ~keeper_name:asker with
+      | Ok channel -> channel
+      | Error detail -> fail detail
+    in
+    let sender_keeper = Ops.sender_keeper_of_submitter ~config ~submitted_by:asker in
+    let encoded =
+      match
+        Masc.Keeper_chat_operation_payload.source_to_json
+          ~submitted_by:asker ~thread_id ~continuation_channel
+          ~surface:Masc.Surface_ref.Agent ~channel:"agent" ~channel_user_id:""
+          ~channel_user_name:"" ~channel_workspace_id:"" ~conversation_id:None
+          ~external_message_id:None ~workspace_id:None ~extra_mentions:[]
+          ~sender_keeper ~user_row_origin:Masc.Keeper_chat_store.Needs_append
+      with
+      | Ok encoded -> encoded
+      | Error detail -> fail detail
+    in
+    match Masc.Keeper_chat_operation_payload.source_of_json encoded with
+    | Error detail -> fail detail
+    | Ok decoded ->
+      check (option string) "the sender Keeper survives the source" (Some asker)
+        (Option.map Masc.Keeper_identity.Keeper_id.to_string decoded.sender_keeper))
+;;
+
+(* Exercise the actual durable producer and the queue's selection API. These
+   are backlog sizes, not live Keeper/model cohorts. A pre-existing Immediate
+   source must retain its place while the answer passes earlier ambient work. *)
+let answer_is_selected_before_ambient_backlog () =
+  List.iter (fun backlog ->
+    List.iter (fun terminal ->
+      with_workspace (fun config ->
+        ensure_keeper config ~keeper_name:asker;
+        let base_path = config.Workspace.base_path in
+        let arrived_at = Unix.gettimeofday () in
+        let prior : Event_queue.stimulus =
+          {post_id="prior-immediate";urgency=Immediate;arrived_at;payload=Bootstrap} in
+        let ambient = List.init backlog (fun index ->
+          {Event_queue.post_id=Printf.sprintf "ambient-%d" index;
+           urgency=Normal;arrived_at;
+           payload=Board_signal
+             {kind=Post_created;author="other-keeper";title="ambient";
+              content="unrelated Board activity";hearth=None;updated_at=None}}) in
+        (match Keeper_event_queue_persistence.update_result ~base_path ~keeper_name:asker
+            (fun queue -> List.fold_left Event_queue.enqueue queue (prior::ambient)) with
+         | Ok () -> () | Error detail -> fail detail);
+        deliver_or_fail config ~terminal;
+        let selections = match Queue_registry.pending_selections_result
+            ~base_path asker with
+          | Ok selections -> selections | Error detail -> fail detail in
+        (match selections with
+         | earlier :: answer :: rest ->
+           check string "earlier Immediate source keeps its position" prior.post_id
+             earlier.Keeper_event_queue_state.source.post_id;
+           (match answer.Keeper_event_queue_state.source.payload with
+            | Delegate_completed completion ->
+              check string "selected original operation" operation_id completion.dc_operation_id;
+              check bool "selected original terminal" true (completion.dc_terminal=terminal)
+            | _ -> fail "ambient activity buried the delegation answer");
+           check (list string) "ambient rows retain original arrival order"
+             (List.map (fun (s : Event_queue.stimulus) -> s.post_id) ambient)
+             (List.map (fun (s : Keeper_event_queue_state.pending_selection) -> s.source.post_id) rest)
+         | _ -> fail "durable queue lost the answer or ambient work");
+        let ready (source : Event_queue.stimulus) = source.post_id<>prior.post_id in
+        match Keeper_event_queue_persistence.select_when_result ~base_path ~keeper_name:asker
+            ~now:(Unix.gettimeofday ()) ~ready with
+        | Ok (Some selection) ->
+          (match selection.Keeper_event_queue_state.source.payload with
+           | Delegate_completed completion ->
+             check string "ready selection reaches the original answer" operation_id completion.dc_operation_id
+           | _ -> fail "a ready delegation answer waited behind ambient Board rows")
+        | Ok None -> fail "durable delegation answer was not selectable"
+        | Error detail -> fail detail))
+      [Event_queue.Delegate_replied "original result";Delegate_no_reply;Delegate_failed "original failure"])
+    [10;100;300]
+;;
+
+let () =
+  run
+    "keeper delegate completion wake"
+    [ ( "delivery"
+      , [ test_case "the reply reaches the asker" `Quick reply_reaches_the_asker
+        ; test_case "a failure reaches the asker" `Quick failure_reaches_the_asker
+        ; test_case "the same answer arrives once" `Quick the_same_answer_arrives_once
+        ; test_case "ready answers pass ambient backlogs without reordering earlier urgent work"
+            `Quick answer_is_selected_before_ambient_backlog
+        ] )
+    ; ( "readability"
+      , [ test_case "the turn can read the answer" `Quick the_turn_can_read_the_answer
+        ; test_case
+            "a cut reply names the read path"
+            `Quick
+            a_cut_reply_names_the_read_path
+        ; test_case
+            "a padded short reply is not cut"
+            `Quick
+            a_padded_short_reply_is_not_cut
+        ; test_case
+            "the full reply rides lossless through the projection"
+            `Quick
+            the_full_reply_rides_lossless_through_the_projection
+        ; test_case
+            "the answer survives a round trip"
+            `Quick
+            the_answer_survives_a_round_trip
+        ] )
+    ; ( "routing"
+      , [ test_case
+            "only a Keeper is answered on its queue"
+            `Quick
+            only_a_keeper_is_answered_on_its_queue
+        ; test_case
+            "only a registered Keeper is the sender"
+            `Quick
+            only_a_registered_keeper_is_the_sender
+        ] )
+    ]
+;;

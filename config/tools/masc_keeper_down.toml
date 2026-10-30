@@ -1,0 +1,24 @@
+name = "masc_keeper_down"
+description = """
+Submit a durable, non-blocking Keeper shutdown. Returns an operation_id \
+immediately after admission is fenced and the ownership snapshot is \
+persisted. Repeating the call returns the existing operation state."""
+additional_properties = false
+
+[[params]]
+name = "name"
+type = "string"
+required = true
+description = "Keeper handle"
+
+[[params]]
+name = "remove_meta"
+type = "boolean"
+description = """
+Delete .masc/keepers/<name>.json (default: false). Set true only for \
+permanent removal."""
+
+[[params]]
+name = "remove_session"
+type = "boolean"
+description = "Delete .masc/traces/<trace_id>/ directory (default: false)."

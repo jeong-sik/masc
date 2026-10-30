@@ -1,0 +1,4 @@
+{"mode":"empty","iterations":2000000,"allocated_bytes":287298920,"cpu_seconds":0.010022000,"wall_seconds":0.010030031,"version":"baseline"}
+{"mode":"empty","iterations":2000000,"allocated_bytes":287298920,"cpu_seconds":0.009130000,"wall_seconds":0.009170055,"version":"candidate"}
+{"mode":"filled","iterations":2000000,"allocated_bytes":287298920,"cpu_seconds":0.010864000,"wall_seconds":0.010933161,"version":"baseline"}
+{"mode":"filled","iterations":2000000,"allocated_bytes":287298920,"cpu_seconds":0.010262000,"wall_seconds":0.010332108,"version":"candidate"}

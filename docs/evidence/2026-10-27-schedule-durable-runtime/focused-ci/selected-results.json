@@ -1,0 +1,56 @@
+{
+  "is_derivative": true,
+  "source_sha256": "03eb55364bcf04a870a097e1ecc32def7c9b0de09d2c24d56382817f5f0c138b",
+  "source_bytes": 43473,
+  "method": "1-based source line selection after removing ANSI SGR escapes; not original-byte copy.",
+  "selected": [
+    {
+      "source_line": 1,
+      "text": "[targeted] EIO_BACKEND=<unset> timeout=600s per suite"
+    },
+    {
+      "source_line": 2,
+      "text": "[targeted] dune build test/test_keeper_unified_verification_surface.exe test/test_keeper_run_tools_hooks.exe "
+    },
+    {
+      "source_line": 5,
+      "text": "[targeted] test/test_keeper_unified_verification_surface: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false"
+    },
+    {
+      "source_line": 6,
+      "text": "[targeted] test/test_keeper_unified_verification_surface: start 2026-10-26T20:23:13Z"
+    },
+    {
+      "source_line": 8,
+      "text": "Testing `keeper_unified_verification_surface'."
+    },
+    {
+      "source_line": 233,
+      "text": "Test Successful in 0.053s. 44 tests run."
+    },
+    {
+      "source_line": 235,
+      "text": "[targeted] test/test_keeper_unified_verification_surface: OK in 0s"
+    },
+    {
+      "source_line": 236,
+      "text": "[targeted] test/test_keeper_run_tools_hooks: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false MASC_KEEPER_DOCKER_PLAYGROUND=false"
+    },
+    {
+      "source_line": 237,
+      "text": "[targeted] test/test_keeper_run_tools_hooks: start 2026-10-26T20:23:13Z"
+    },
+    {
+      "source_line": 239,
+      "text": "Testing `keeper_run_tools_hooks'."
+    },
+    {
+      "source_line": 632,
+      "text": "Test Successful in 0.261s. 66 tests run."
+    },
+    {
+      "source_line": 634,
+      "text": "[targeted] test/test_keeper_run_tools_hooks: OK in 0s"
+    }
+  ]
+}

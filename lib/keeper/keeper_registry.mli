@@ -1,0 +1,589 @@
+(** Keeper_registry — Single source of truth for keeper state.
+
+    Replaces scattered state across keeper_keepalive Hashtbl,
+    keeper_supervisor Hashtbl, and file-based meta lookups.
+    All keeper state queries and mutations go through this module.
+
+    Thread-safety: all operations are non-yielding (in-memory map/ref
+    ops only).  In single-domain Eio, non-yielding code runs atomically
+    w.r.t. other fibers, so no mutex is needed. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+(** Failure-reason + turn_phase clusters live in Keeper_registry_types
+    (intra-library file split, 2026-05-16). Re-exported here so existing
+    126 callers keep using [Keeper_registry.failure_reason] /
+    [Keeper_registry.packed_turn_phase] etc. unchanged. *)
+include module type of Keeper_registry_types
+
+val install_state_change_observer : (unit -> unit) -> unit
+(** Install the process-wide non-yielding observer called after a successful
+    registry event CAS. Observer failures are logged and never roll back the
+    committed transition. *)
+
+
+
+(** Register a fresh keeper before its first keepalive fiber launch.
+    The entry starts in [Offline] and must receive [Fiber_started] when the
+    runtime actually launches the fiber. *)
+val register_offline : base_path:string -> string -> keeper_meta -> registry_entry
+
+type registration_error =
+  | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_intake_token_not_live
+  | Registration_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Registration_invalid of registry_entry_validation_error
+  | Registration_event_queue_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
+  | Registration_turn_failure_streak_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
+
+(** Production registration gate: the final registry CAS is serialized with
+    Keeper shutdown reservation. Durable event-queue and turn-failure-streak
+    loading remains outside the non-yielding fence critical section. A live [intake_token] preserves an
+    already-open create transaction through registry installation without
+    reacquiring the same per-Keeper intake mutex. *)
+val register_offline_if_admitted :
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
+  base_path:string ->
+  string ->
+  keeper_meta ->
+  (registry_entry, registration_error) result
+
+val register_offline_if_admitted_for_lifecycle :
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
+  Keeper_lifecycle_reservation.token ->
+  base_path:string ->
+  string ->
+  keeper_meta ->
+  (registry_entry, registration_error) result
+
+type register_restarting_error =
+  | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Restart_intake_token_not_live
+  | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+  | Restart_event_queue_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
+  | Restart_turn_failure_streak_unavailable of
+      { keeper_name : string
+      ; detail : string
+      }
+
+(** Register a keeper that is about to relaunch after a crash.
+    The entry starts in [Restarting] and must receive [Fiber_started] when the
+    replacement fiber launches. Durable pause admission is checked by the
+    caller before this registration CAS; the durable turn-failure streak is
+    restored before the entry becomes visible. *)
+val register_restarting :
+  base_path:string -> string -> keeper_meta ->
+  (registry_entry, register_restarting_error) result
+
+val register_restarting_for_lifecycle :
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
+  Keeper_lifecycle_reservation.token ->
+  base_path:string -> string -> keeper_meta ->
+  (registry_entry, register_restarting_error) result
+
+(** Prepare a registry entry for a newly launched keepalive fiber.
+    Clears stale per-fiber atomic latches before applying [Fiber_started] so
+    the runtime stop flag matches the state machine's restart semantics. *)
+val prepare_fiber_launch :
+  base_path:string -> string ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+val prepare_fiber_launch_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+type unregister_exact_result =
+  | Exact_unregistered
+  | Exact_entry_missing
+  | Exact_entry_replaced
+  | Exact_unregister_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+(** Remove [entry] only if its typed lane identity still owns the
+    [(base_path, name)] key. Immutable registry field updates may replace the
+    record value while preserving the same lane; a newer same-name lane has a
+    different identity and is retained. *)
+val unregister_exact : registry_entry -> unregister_exact_result
+
+val unregister_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  unregister_exact_result
+
+type restore_entry_result =
+  | Entry_restored
+  | Entry_restore_occupied of registry_entry
+  | Entry_restore_invalid of registry_entry_validation_error
+  | Entry_restore_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+(** Restore a transaction's original registry snapshot only when the key is
+    still absent and [token] owns the reservation. A newer lane is returned
+    untouched as [Entry_restore_occupied]. *)
+val restore_entry_if_absent_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  restore_entry_result
+
+(** Look up a keeper by name. *)
+val get : base_path:string -> string -> registry_entry option
+
+(** Return all registered keepers. *)
+val all : ?base_path:string -> unit -> registry_entry list
+
+val registry_entry_validation_error_to_string :
+  registry_entry_validation_error -> string
+
+(** Like [get] but returns the entry together with its health verdict.
+    Returns [Some _] even when the entry is corrupted, so callers can decide
+    whether to consume it. *)
+val get_with_health :
+  base_path:string -> string -> (registry_entry * registry_entry_health) option
+
+(** Insert or replace a registry entry.  Validates [entry] before installing;
+    on validation error returns the health reason and emits
+    [RegistryInvalidEntry] with [operation="put"]. *)
+val put_entry :
+  base_path:string ->
+  string ->
+  registry_entry ->
+  (unit, registry_entry_validation_error) result
+
+(** Result-returning update: validates [f entry] before installing.  On
+    validation error returns the health reason, emits
+    [RegistryInvalidEntry] with [operation="update"], and leaves the original
+    entry untouched.  Only CAS conflicts retry. *)
+val update_entry :
+  base_path:string ->
+  string ->
+  (registry_entry -> registry_entry) ->
+  (unit, registry_entry_validation_error) result
+
+type exact_update_result =
+  | Exact_updated
+  | Exact_update_missing
+  | Exact_update_replaced
+  | Exact_update_invalid of registry_entry_validation_error
+
+(** Update only while the lane identity captured in [expected] still owns the
+    registry key. CAS conflicts within that lane retry against the latest
+    immutable entry; a same-name replacement is never mutated. *)
+val update_entry_exact :
+  registry_entry ->
+  (registry_entry -> registry_entry) ->
+  exact_update_result
+
+val update_entry_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  (registry_entry -> registry_entry) ->
+  exact_update_result
+
+(* Runtime-attempt persistence + enrichment moved to
+   Keeper_registry_runtime_attempt (record / enrich_fiber_unresolved_outcome). *)
+
+(* [record_error] moved to [Keeper_registry_error_recording.record]. *)
+
+(** CAS-write the [last_error] slot for keeper [name]. Exposed for
+    [Keeper_registry_error_recording.record] which holds the dedup
+    logic. *)
+val set_last_error_entry : base_path:string -> name:string -> string -> unit
+
+(** Clear the last recorded error for a keeper. *)
+val clear_error : base_path:string -> string -> unit
+
+(** Set the structured failure reason for cohort detection. *)
+val set_failure_reason : base_path:string -> string -> failure_reason option -> unit
+
+(** Atomically replace a heartbeat failure observation. Returns [false] and
+    leaves the entry untouched if a newer cause or same-name lane has already
+    replaced it. *)
+val replace_heartbeat_failure_reason :
+  registry_entry -> failure_reason option -> bool
+
+
+(** Store the AGENT_CORE Event_bus [correlation_id] from the most recent turn. *)
+val set_last_correlation_id : base_path:string -> string -> string -> unit
+
+(** Mark the beginning of a keeper turn. Installs a fresh
+    [current_turn_observation] with [turn_id = usage.total_turns + 1] and
+    [wake] frozen for the turn's lifetime (#16, 38-bug campaign PR-5).
+    Supply a fresh [observation_token] for each attempt and capture it in
+    tool-count callbacks and [mark_turn_finished]. *)
+val mark_turn_started :
+  observation_token:Keeper_turn_observation_token.t ->
+  base_path:string -> wake:wake_reason -> string -> unit
+
+(* Callback setters below require the attempt token captured at construction.
+    [None] denotes a standalone invocation with no registry observation and is
+    always a no-op; it never selects whichever observation is current. *)
+
+(** Refresh the live turn's progress timestamp without changing its FSM
+    projection.  No-op when no turn is active.  [event_kind] must be a
+    low-cardinality diagnostic label. *)
+val record_turn_progress :
+  observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> event_kind:string -> unit
+
+(** Write-through observation of the turn event bus [pending_tool_count] in the
+    live turn's [active_tool_count]. No-op unless [observation_token] owns
+    the current observation. This is
+    telemetry only and has no timeout or lifecycle authority. *)
+val record_turn_tool_inflight :
+  observation_token:Keeper_turn_observation_token.t ->
+  base_path:string -> string -> count:int -> unit
+
+(** Mark the beginning of an agent-core turn within an existing keeper turn.
+
+    The Agent Core [run_loop] iterates N agent-core turns inside a single MASC
+    keeper-turn window. Each agent-core turn fires [before_turn_params] which
+    leads to [prepare_agent_setup] writing
+    [Decision_tool_policy_selected]/[Turn_prompting].
+    Without this boundary signal, the second-and-later agent-core turn writes
+    transition from the previous agent-core turn's terminal phase
+    ([Turn_finalizing]), which [validate_turn_phase_transition] rejects with
+    [Turn_phase_transition_violation].
+
+    This function resets the in-turn FSM fields ([turn_phase],
+    [decision_stage]) on the existing observation, the
+    same way [mark_turn_started] bypasses the validator with a fresh
+    install. [turn_id], [started_at], [selected_runtime], [measurement],
+    [measurement_bind_count], and progress timestamp are preserved across
+    agent-core turns inside one keeper turn (they are keeper-turn-scoped, not
+    agent-core-turn-scoped).
+
+    No-op when [current_turn_observation = None] (defensive: should not
+    happen in normal flow because [mark_turn_started] runs first). *)
+val mark_agent_core_turn_started : observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> unit
+
+(** Attach the most recent [Context_measured] snapshot to the live turn.
+    No-op if no turn is active or no pending measurement exists. *)
+val mark_turn_measurement : observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> unit
+
+(** Advance the live turn's projected decision stage. No-op if idle.
+    Input type [decision_stage_active] excludes [Decision_undecided];
+    the 3 spec-forbidden [<active>_to_undecided] transitions are therefore
+    unrepresentable at the call site (replaces prior runtime [invalid_arg]). *)
+val set_turn_decision_stage :
+  observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> decision_stage_active -> unit
+
+(** Mark runtime exhaustion on the live turn. *)
+val mark_turn_runtime_exhausted : observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> unit
+
+(** Mark runtime success on the live turn. *)
+val mark_turn_runtime_done : observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> unit
+
+(** Mark that the live turn has entered a provider attempt.
+
+    This materializes the registry-side projection that corresponds to
+    [Keeper_turn_fsm.Streaming]: [turn_phase] advances to [Turn_executing].
+    No-op when no turn is active. *)
+val mark_turn_provider_attempt_started : observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> unit
+
+(** Update the live turn's phase directly. No-op if idle. *)
+val set_turn_phase :
+  observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> packed_turn_phase -> unit
+
+(** Record the runtime that produced the current turn's outcome. No-op if
+    idle. *)
+val set_turn_selected_runtime :
+  observation_token:Keeper_turn_observation_token.t option ->
+  base_path:string -> string -> selected_runtime option -> unit
+
+(** Mark the end of a keeper turn. Clears [current_turn_observation]
+    so the composite observer reverts to idle and stamps
+    [runtime.usage.last_turn_ts] for the completed turn. Idempotent —
+    a stale token cannot finish a successor or clear its wakeup flag. *)
+val mark_turn_finished :
+  observation_token:Keeper_turn_observation_token.t ->
+  base_path:string -> string -> unit
+
+(** Store or clear the live [Eio.Switch.t] for the current turn.
+    The switch is used by [interrupt_current_turn] to cancel an
+    in-flight turn from the dashboard or operator tooling. *)
+val set_turn_switch :
+  base_path:string -> string -> Eio.Switch.t option -> unit
+
+(** Reset [current_turn_switch] to [None]. Idempotent no-op if the
+    keeper is not registered. *)
+val clear_turn_switch : base_path:string -> string -> unit
+
+val clear_turn_switch_if_current :
+  base_path:string -> string -> Eio.Switch.t -> unit
+
+type exact_turn_interrupt_result =
+  | Exact_turn_cancelled of int
+  | Exact_no_turn_in_flight
+  | Exact_turn_cancel_failed of
+      { turn_id : int option
+      ; detail : string
+      }
+
+(** Cancel the turn switch retained by this exact registry entry.
+
+    [Exact_turn_cancelled] states that the switch was failed, not that the
+    turn ended: the signal still has to reach the running fiber, and a fiber
+    parked in an uncancellable section never sees it. Callers must not report
+    it as a completed cancellation. *)
+val interrupt_current_turn_exact :
+  registry_entry -> exact_turn_interrupt_result
+
+(** Same, resolved by name. Returns [Exact_turn_cancel_failed] when the entry
+    is absent, so a failure is never reported as an absent turn. *)
+val interrupt_current_turn :
+  base_path:string -> string -> exact_turn_interrupt_result
+
+(** Record the verdict reasons from a [keeper_cycle_decision] that
+    chose to skip the next turn.  Stamps [last_skip_observation] with
+    [(now, reasons)] so the stale watchdog can surface *why* a keeper
+    was deliberately skipping turns when an [idle_stale=true]
+    termination fires.  No-op if no entry is registered for [name]. *)
+val record_skip_reasons :
+  base_path:string -> string -> reasons:string list -> unit
+
+(** Touch [last_turn_ts] in the registry entry so the stale watchdog
+    sees the keeper as recently active.  Called from the heartbeat
+    skip branch when a proactive keeper legitimately has no work to do.
+    No-op if no entry is registered for [name]. *)
+val touch_last_turn_ts : base_path:string -> string -> unit
+
+(** Increment turn consecutive failure counter. *)
+val increment_turn_failures : base_path:string -> string -> unit
+
+(** Reset turn consecutive failure counter (on success). *)
+val reset_turn_failures : base_path:string -> string -> unit
+
+(** Get current turn consecutive failure count. *)
+val get_turn_failures : base_path:string -> string -> int
+
+(** Record a crash entry in the crash log (keeps last 5). *)
+val record_crash : base_path:string -> string -> float -> string -> unit
+
+val set_last_error_exact : registry_entry -> string -> exact_update_result
+
+(** Observe an exact-lane update without discarding why it did not commit.
+    Returns [true] only for [Exact_updated]; all other outcomes are logged with
+    [site], and a newer same-name lane is never mutated. *)
+val exact_update_succeeded :
+  registry_entry -> site:string -> exact_update_result -> bool
+
+(** Check if a keeper is in Running state. *)
+val is_running : base_path:string -> string -> bool
+
+(** Check if a keeper has ANY registry entry (regardless of state).
+    Used by reconcile to skip keepers already owned by the registry. *)
+val is_registered : base_path:string -> string -> bool
+
+(** Return the started_at timestamp, or None if not registered. *)
+val started_at : base_path:string -> string -> float option
+
+(** Count keepers in Running state. *)
+val count_running : ?base_path:string -> unit -> int
+
+module For_testing : sig
+  (** Test-only bypass: install an entry without validation so tests can seed
+      corrupted registry state. *)
+  val unsafe_put_entry :
+    base_path:string -> string -> registry_entry -> unit
+
+  (** Register a keeper with an already-live fiber. Primarily used by tests and
+      direct fixtures that want a keeper to begin in [Running]. *)
+  val register : base_path:string -> string -> keeper_meta -> registry_entry
+
+  (** Unregister a keeper (removes from registry). *)
+  val unregister : base_path:string -> string -> unit
+
+  (** Clear the registry. For testing only. *)
+  val clear : unit -> unit
+
+  (** Record a restart. Increments restart_count. *)
+  val record_restart : base_path:string -> string -> unit
+
+  (** Test-only: override [started_at] for registry fixtures that need to
+      model a long-running fiber without waiting for wall-clock time. *)
+  val set_started_at_for_test : base_path:string -> string -> float -> unit
+
+  (** Recent crash entries (up to 5) for a keeper. *)
+  val crash_log_of : base_path:string -> string -> (float * string) list
+
+  (** Seed [restart_count] and [crash_log] (and clear [last_failure_reason]) on
+      a registered entry for supervisor test fixtures. Production restarts
+      update the replacement lane through {!update_entry_exact_for_lifecycle}. *)
+  val restore_supervisor_state :
+    base_path:string ->
+    string ->
+    restart_count:int ->
+    crash_log:(float * string) list ->
+    unit
+
+end
+
+type wakeup_intent =
+  | Reactive_signal
+  | Scheduled_signal
+  | Hitl_resolution
+  | Broadcast_signal
+  | Attention_result
+  | Runtime_parameter_change
+  | Turn_slot_released
+
+type wakeup_outcome =
+  | Signaled
+  | Deferred_unregistered
+  | Deferred_not_running of Keeper_state_machine.phase
+  | Deferred_lifecycle of Keeper_lifecycle_admission.autonomous_denial
+
+val wakeup_running :
+  intent:wakeup_intent -> base_path:string -> string -> wakeup_outcome
+(** Signal a registered Keeper only while its fiber phase is [Running]. The
+    typed deferred outcomes let durable event producers distinguish an absent
+    or inactive live hint without treating the already-committed payload as a
+    delivery failure. *)
+
+type exact_wakeup_outcome =
+  | Exact_wake_signaled
+  | Exact_wake_missing
+  | Exact_wake_replaced
+  | Exact_wake_not_running of Keeper_state_machine.phase
+  | Exact_wake_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Exact_wake_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+val wakeup_running_exact :
+  intent:wakeup_intent -> registry_entry -> exact_wakeup_outcome
+(** Signal only the Keeper lane captured by [registry_entry]. The current
+    registry entry is resolved by its existing canonical key and compared with
+    the captured entry through [Keeper_lane.Id]; an entry registered later
+    under the same name returns [Exact_wake_replaced] without signalling it.
+    Immutable record updates that preserve the lane id remain the same owner,
+    and lifecycle/phase admission is evaluated from that current record. The
+    ownership check and signal are serialized with lifecycle transactions for
+    this Keeper key; an unowned wake returns [Exact_wake_lifecycle_reserved]. *)
+
+type cadence_sleeper_wakeup_outcome =
+  | Cadence_sleeper_signaled
+  | Cadence_sleeper_missing
+  | Cadence_sleeper_replaced
+  | Cadence_sleeper_in_flight
+  | Cadence_sleeper_awake
+  | Cadence_sleeper_inactive of Keeper_state_machine.phase
+  | Cadence_sleeper_lifecycle_denied of
+      Keeper_lifecycle_admission.autonomous_denial
+  | Cadence_sleeper_lifecycle_reserved of
+      Keeper_lifecycle_reservation.snapshot
+
+val wakeup_cadence_sleeper_exact :
+  registry_entry -> cadence_sleeper_wakeup_outcome
+(** Break the inter-cycle sleep of the exact lifecycle-admitted lane after an
+    effective cadence decrease. [Running] and [Failing] lanes are signalable
+    only while their [cadence_sleeping] handshake is active. In-flight turns
+    and awake pre-turn/post-turn work are explicitly deferred, so a runtime
+    parameter write cannot queue an extra paid turn. *)
+
+(** Fiber-level health based on Promise resolution state.
+    Returns Fiber_unknown if the keeper is not registered. *)
+val fiber_health_of : base_path:string -> string -> fiber_health
+
+
+(** Reset tracking state (agent count + board wakeups) for a keeper. *)
+val cleanup_tracking : base_path:string -> string -> unit
+
+val cleanup_tracking_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token -> registry_entry -> exact_update_result
+
+(** Get board event cursor token. Returns [(0.0, None)] if not found. *)
+val get_board_cursor : base_path:string -> string -> float * string option
+
+(** Update board event cursor token. No-op if not found. *)
+val set_board_cursor :
+  base_path:string -> string -> float -> string option -> unit
+
+(** Record a tool call for a keeper. No-op if not found. *)
+val record_tool_use :
+  base_path:string -> string -> tool_name:string ->
+  disposition:('completed, 'deferred, 'failed) Tool_result.disposition -> unit
+
+(** Get tool usage sorted by call count descending. *)
+val tool_usage_of : base_path:string -> string ->
+  (string * Keeper_types.tool_call_entry) list
+
+(* Lookup API moved to Keeper_registry_lookup:
+   find_by_name / find_by_agent_name / find_by_id /
+   tool_usage_of_by_name. *)
+
+(* Tool usage persistence (flush_tool_usage / restore_tool_usage /
+   tool_usage_path) moved to Keeper_registry_tool_usage_persistence.
+   The CAS-bound write path is exposed below for that module's use. *)
+
+(** Replace (or insert) a single per-tool usage entry on a registered keeper.
+    Goes through the registry's CAS retry loop. Used by
+    [Keeper_registry_tool_usage_persistence.restore] to replay persisted
+    counters outside a lifecycle transaction. Launch-time replay uses the
+    exact, token-qualified update exposed to the persistence module. *)
+val set_tool_usage_entry :
+  base_path:string -> name:string -> tool_name:string
+  -> Keeper_types.tool_call_entry -> unit
+
+(** {1 RFC-0002 Event Dispatch} *)
+
+
+(** Dispatch a typed event through the state machine.
+    Updates conditions, derives new phase, syncs legacy state.
+    Returns the transition result or an error for invalid transitions.
+    Prefer this over [set_state] for new code. *)
+val dispatch_event :
+  base_path:string ->
+  string -> Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+(** Dispatch only while [entry]'s lane still owns the registry key. The event
+    is recomputed after same-lane CAS conflicts and is rejected before mutating
+    a same-name replacement lane. *)
+val dispatch_event_exact :
+  registry_entry ->
+  Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+val dispatch_event_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  registry_entry ->
+  Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+(** Like [dispatch_event], but preserves richer audit metadata when the event
+    causes a phase transition. *)
+val dispatch_event_with_audit :
+  base_path:string ->
+  ?events_fired:Keeper_state_machine.event list ->
+  ?selected_event:Keeper_state_machine.event ->
+  string -> Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+(** [dispatch_event_unit] wraps [dispatch_event_and_log] and logs a warning
+    on [Error] instead of returning the result. Replaces [ignore (...)] call sites
+    that previously swallowed transition errors silently. *)
+val dispatch_event_unit :
+  base_path:string ->
+  string -> Keeper_state_machine.event -> unit
+
+(** Get the fine-grained phase of a keeper. *)
+val get_phase : base_path:string -> string -> Keeper_state_machine.phase option
+
+(* Event-queue access (enqueue_event / event_queue_snapshot / dequeue_event /
+   drain_board_events) moved to Keeper_registry_event_queue. *)

@@ -1,0 +1,1730 @@
+[
+  {
+    "source_line": 8,
+    "text": "Testing `Schedule_domain'."
+  },
+  {
+    "source_line": 12,
+    "text": "  [OK]          request           0   request starts scheduled."
+  },
+  {
+    "source_line": 14,
+    "text": "  [OK]          request           1   payload requires object envelope."
+  },
+  {
+    "source_line": 16,
+    "text": "  [OK]          request           2   payload requires envelope fields."
+  },
+  {
+    "source_line": 18,
+    "text": "  [OK]          request           3   payload rejects retired schema_version."
+  },
+  {
+    "source_line": 20,
+    "text": "  [OK]          request           4   invalid recurrence rejected."
+  },
+  {
+    "source_line": 23,
+    "text": "  [OK]          request           5   mark due only affects scheduled."
+  },
+  {
+    "source_line": 25,
+    "text": "  [OK]          request           6   interval recurrence next due."
+  },
+  {
+    "source_line": 27,
+    "text": "  [OK]          request           7   daily recurrence next due uses fixed-of..."
+  },
+  {
+    "source_line": 29,
+    "text": "  [OK]          request           8   daily recurrence next due accepts expli..."
+  },
+  {
+    "source_line": 31,
+    "text": "  [OK]          request           9   daily recurrence rejects DST IANA timez..."
+  },
+  {
+    "source_line": 33,
+    "text": "  [OK]          request          10   cron recurrence next due weekdays."
+  },
+  {
+    "source_line": 35,
+    "text": "  [OK]          request          11   cron recurrence supports steps ranges a..."
+  },
+  {
+    "source_line": 40,
+    "text": "  [OK]          request          12   cron step admission and next due."
+  },
+  {
+    "source_line": 49,
+    "text": "  [OK]          request          13   cron day wildcards preserve selected va..."
+  },
+  {
+    "source_line": 51,
+    "text": "  [OK]          request          14   cron recurrence rejects invalid express..."
+  },
+  {
+    "source_line": 53,
+    "text": "  [OK]          request          15   cron recurrence finds occurrence beyond..."
+  },
+  {
+    "source_line": 58,
+    "text": "  [OK]          request          16   cron recurrence rejects impossible cale..."
+  },
+  {
+    "source_line": 60,
+    "text": "  [OK]          mark_due          0   all_schedule_statuses is populated."
+  },
+  {
+    "source_line": 68,
+    "text": "  [OK]          mark_due          1   expiry precedes becoming due."
+  },
+  {
+    "source_line": 76,
+    "text": "  [OK]          mark_due          2   only Scheduled advances to Due."
+  },
+  {
+    "source_line": 84,
+    "text": "  [OK]          mark_due          3   requests before due_at are untouched."
+  },
+  {
+    "source_line": 87,
+    "text": "  [OK]          mark_due          4   pass-through preserves other fields."
+  },
+  {
+    "source_line": 93,
+    "text": "  [OK]          codec             0   schedule roundtrip."
+  },
+  {
+    "source_line": 97,
+    "text": "  [OK]          codec             1   cron schedule roundtrip."
+  },
+  {
+    "source_line": 100,
+    "text": "  [OK]          codec             2   payload digest is the canonical SHA-256."
+  },
+  {
+    "source_line": 105,
+    "text": "  [OK]          codec             3   recurrence summary."
+  },
+  {
+    "source_line": 106,
+    "text": "  [OK]          codec             4   missing recurrence is rejected."
+  },
+  {
+    "source_line": 114,
+    "text": "  [OK]          codec             5   wake record roundtrip."
+  },
+  {
+    "source_line": 127,
+    "text": "  [OK]          codec             6   missing wake attempt ID stays unidentif..."
+  },
+  {
+    "source_line": 128,
+    "text": "  [OK]          codec             7   wake attempt ID rejects explicit null."
+  },
+  {
+    "source_line": 129,
+    "text": "  [OK]          codec             8   wake attempt ID rejects invalid types."
+  },
+  {
+    "source_line": 130,
+    "text": "  [OK]          codec             9   wake attempt ID rejects invalid UUIDs."
+  },
+  {
+    "source_line": 131,
+    "text": "  [OK]          codec            10   wake attempt ID rejects duplicate fields."
+  },
+  {
+    "source_line": 148,
+    "text": "  [OK]          codec            11   wake settlement kinds retain their exac..."
+  },
+  {
+    "source_line": 191,
+    "text": "  [OK]          codec            12   missing wake settlement kind stays absent."
+  },
+  {
+    "source_line": 192,
+    "text": "  [OK]          codec            13   wake settlement kind rejects explicit i..."
+  },
+  {
+    "source_line": 193,
+    "text": "  [OK]          codec            14   wake settlement kind rejects duplicate ..."
+  },
+  {
+    "source_line": 195,
+    "text": "Test Successful in 0.001s. 37 tests run."
+  },
+  {
+    "source_line": 201,
+    "text": "Testing `Schedule_store'."
+  },
+  {
+    "source_line": 214,
+    "text": "  [OK]          state               0   concurrent notes retain accepted appe..."
+  },
+  {
+    "source_line": 221,
+    "text": "  [OK]          state               1   note read failure differs from absence."
+  },
+  {
+    "source_line": 229,
+    "text": "  [OK]          state               2   insert persists and bumps version."
+  },
+  {
+    "source_line": 236,
+    "text": "  [OK]          state               3   duplicate insert rejected without bump."
+  },
+  {
+    "source_line": 247,
+    "text": "  [OK]          state               4   update replaces active definition wit..."
+  },
+  {
+    "source_line": 257,
+    "text": "  [OK]          state               5   update accepts due and refuses terminal."
+  },
+  {
+    "source_line": 268,
+    "text": "  [OK]          state               6   update refuses exactly where modify_a..."
+  },
+  {
+    "source_line": 274,
+    "text": "  [OK]          state               7   update requires existing schedule."
+  },
+  {
+    "source_line": 284,
+    "text": "  [OK]          state               8   update refuses only a changed due tim..."
+  },
+  {
+    "source_line": 293,
+    "text": "  [OK]          state               9   running wake missing says whether the..."
+  },
+  {
+    "source_line": 300,
+    "text": "  [OK]          state              10   a recurring occurrence is not settled..."
+  },
+  {
+    "source_line": 307,
+    "text": "  [OK]          state              11   corrupt primary recovers from last-good."
+  },
+  {
+    "source_line": 317,
+    "text": "  [OK]          state              12   a finished schedule leaves the ledger..."
+  },
+  {
+    "source_line": 325,
+    "text": "  [OK]          state              13   the retention window is the caller's ..."
+  },
+  {
+    "source_line": 331,
+    "text": "  [OK]          state              14   a clock behind the ledger forgets not..."
+  },
+  {
+    "source_line": 338,
+    "text": "  [OK]          state              15   a quiet tick forgets only what is pas..."
+  },
+  {
+    "source_line": 346,
+    "text": "  [OK]          state              16   a schedule expired past the retention..."
+  },
+  {
+    "source_line": 355,
+    "text": "  [OK]          state              17   a mutation encodes the ledger once on..."
+  },
+  {
+    "source_line": 364,
+    "text": "  [OK]          state              18   an unchanged ledger is decoded once."
+  },
+  {
+    "source_line": 374,
+    "text": "  [OK]          state              19   primary cache respects backend author..."
+  },
+  {
+    "source_line": 381,
+    "text": "  [OK]          state              20   a read that misses decodes on the pool."
+  },
+  {
+    "source_line": 382,
+    "text": "  [OK]          state              21   a schedule time that is not finite is..."
+  },
+  {
+    "source_line": 389,
+    "text": "  [OK]          state              22   a ledger that cannot be encoded fails..."
+  },
+  {
+    "source_line": 396,
+    "text": "  [OK]          corruption          0   absent ledger reads empty."
+  },
+  {
+    "source_line": 415,
+    "text": "  [OK]          corruption          1   read provenance preserves bytes and s..."
+  },
+  {
+    "source_line": 422,
+    "text": "  [OK]          corruption          2   both unparseable return read error."
+  },
+  {
+    "source_line": 429,
+    "text": "  [OK]          corruption          3   startup recovery refuses corrupt ledger."
+  },
+  {
+    "source_line": 434,
+    "text": "  [OK]          corruption          4   read_state raises on corrupt ledger."
+  },
+  {
+    "source_line": 442,
+    "text": "  [OK]          corruption          5   absent mirror separates uninitialised..."
+  },
+  {
+    "source_line": 449,
+    "text": "  [OK]          corruption          6   mutation refused and corrupt ledger p..."
+  },
+  {
+    "source_line": 456,
+    "text": "  [OK]          corruption          7   primary write failure is surfaced."
+  },
+  {
+    "source_line": 465,
+    "text": "  [OK]          corruption          8   recovery mirror write failure preserv..."
+  },
+  {
+    "source_line": 470,
+    "text": "  [OK]          corruption          9   cancel refused on corrupt ledger."
+  },
+  {
+    "source_line": 476,
+    "text": "  [OK]          corruption         10   last-good is parseable after good write."
+  },
+  {
+    "source_line": 485,
+    "text": "  [OK]          corruption         11   absent primary recovers from last-good."
+  },
+  {
+    "source_line": 495,
+    "text": "  [OK]          corruption         12   write after absent primary restores i..."
+  },
+  {
+    "source_line": 503,
+    "text": "  [OK]          corruption         13   absent primary and absent mirror read..."
+  },
+  {
+    "source_line": 513,
+    "text": "  [OK]          corruption         14   absent primary with unparseable mirro..."
+  },
+  {
+    "source_line": 518,
+    "text": "  [OK]          lifecycle           0   non-scheduled initial status rejected."
+  },
+  {
+    "source_line": 525,
+    "text": "  [OK]          lifecycle           1   cancel request marks cancelled."
+  },
+  {
+    "source_line": 532,
+    "text": "  [OK]          lifecycle           2   running wake stays live across refuse..."
+  },
+  {
+    "source_line": 539,
+    "text": "  [OK]          lifecycle           3   legacy running wake against cancelled..."
+  },
+  {
+    "source_line": 546,
+    "text": "  [OK]          due                 0   due candidates dispatch without sched..."
+  },
+  {
+    "source_line": 553,
+    "text": "  [OK]          due                 1   due candidate starts without authoriz..."
+  },
+  {
+    "source_line": 563,
+    "text": "  [OK]          due                 2   refresh_due expires scheduled and due."
+  },
+  {
+    "source_line": 573,
+    "text": "  [OK]          due                 3   reschedule due recurring rows."
+  },
+  {
+    "source_line": 582,
+    "text": "  [OK]          due                 4   reschedule due cron rows."
+  },
+  {
+    "source_line": 599,
+    "text": "  [OK]          due                 5   start and accept persist wake record."
+  },
+  {
+    "source_line": 608,
+    "text": "  [OK]          due                 6   durable acceptance completes wake rec..."
+  },
+  {
+    "source_line": 621,
+    "text": "  [OK]          due                 7   accepted backend commit survives loca..."
+  },
+  {
+    "source_line": 629,
+    "text": "  [OK]          due                 8   same-clock attempts fence all old set..."
+  },
+  {
+    "source_line": 645,
+    "text": "  [OK]          due                 9   repeated failed verdicts preserve exa..."
+  },
+  {
+    "source_line": 661,
+    "text": "  [OK]          due                10   terminal attempts require typed exact..."
+  },
+  {
+    "source_line": 672,
+    "text": "  [OK]          due                11   stale candidates and later occurrence..."
+  },
+  {
+    "source_line": 685,
+    "text": "  [OK]          due                12   attempt authority refuses mirror-only..."
+  },
+  {
+    "source_line": 692,
+    "text": "  [OK]          due                13   legacy recovery does not invent attem..."
+  },
+  {
+    "source_line": 699,
+    "text": "  [OK]          due                14   attempt capability survives primary f..."
+  },
+  {
+    "source_line": 712,
+    "text": "  [OK]          due                15   startup recovery returns only running..."
+  },
+  {
+    "source_line": 723,
+    "text": "  [OK]          due                16   startup recovery ignores wall-clock r..."
+  },
+  {
+    "source_line": 734,
+    "text": "  [OK]          due                17   fail due candidate records failed wake."
+  },
+  {
+    "source_line": 746,
+    "text": "  [OK]          due                18   recurring occurrences remain dispatch..."
+  },
+  {
+    "source_line": 753,
+    "text": "  [OK]          due                19   terminal wakes are bounded per schedule."
+  },
+  {
+    "source_line": 763,
+    "text": "  [OK]          due                20   wake list is scoped to its instance, ..."
+  },
+  {
+    "source_line": 773,
+    "text": "  [OK]          due                21   prune deletes terminal request and wa..."
+  },
+  {
+    "source_line": 782,
+    "text": "  [OK]          due                22   prune scopes wake receipt ownership b..."
+  },
+  {
+    "source_line": 864,
+    "text": "  [OK]          due                23   contract vocabularies own strings and..."
+  },
+  {
+    "source_line": 866,
+    "text": "Test Successful in 2.715s. 66 tests run."
+  },
+  {
+    "source_line": 872,
+    "text": "Testing `Schedule_runner'."
+  },
+  {
+    "source_line": 887,
+    "text": "  [OK]          tick            0   emits due candidate once."
+  },
+  {
+    "source_line": 895,
+    "text": "  [OK]          tick            1   a tick without a new signal leaves the se..."
+  },
+  {
+    "source_line": 905,
+    "text": "  [OK]          tick            2   prunes the key of a forgotten schedule."
+  },
+  {
+    "source_line": 919,
+    "text": "  [OK]          tick            3   prunes the key of an occurrence the sched..."
+  },
+  {
+    "source_line": 931,
+    "text": "  [OK]          tick            4   prune keeps a key the schedule can still ..."
+  },
+  {
+    "source_line": 939,
+    "text": "  [OK]          tick            5   recovers seen keys from the .last-good mi..."
+  },
+  {
+    "source_line": 946,
+    "text": "  [OK]          tick            6   reports failure when the seen-keys write ..."
+  },
+  {
+    "source_line": 957,
+    "text": "  [OK]          tick            7   dispatches due candidate to success."
+  },
+  {
+    "source_line": 972,
+    "text": "  [OK]          tick            8   stale snapshot cannot start a replacement."
+  },
+  {
+    "source_line": 987,
+    "text": "  [OK]          tick            9   stale snapshot rejection cannot fail a re..."
+  },
+  {
+    "source_line": 997,
+    "text": "  [OK]          tick           10   completes wake on durable acceptance."
+  },
+  {
+    "source_line": 1009,
+    "text": "  [OK]          tick           11   marks unsupported candidate failed."
+  },
+  {
+    "source_line": 1023,
+    "text": "  [OK]          tick           12   reschedules recurring candidate after sig..."
+  },
+  {
+    "source_line": 1035,
+    "text": "  [OK]          tick           13   dispatches recurring candidate to next due."
+  },
+  {
+    "source_line": 1057,
+    "text": "  [OK]          tick           14   stamps wakes from the clock and anchors r..."
+  },
+  {
+    "source_line": 1068,
+    "text": "  [OK]          tick           15   dispatches every recurring occurrence."
+  },
+  {
+    "source_line": 1079,
+    "text": "  [OK]          tick           16   sub-tick interval fires once per tick."
+  },
+  {
+    "source_line": 1089,
+    "text": "  [OK]          tick           17   marks terminal dispatch rejection failed."
+  },
+  {
+    "source_line": 1129,
+    "text": "  [OK]          tick           18   dispatch failure scope preserves only fut..."
+  },
+  {
+    "source_line": 1144,
+    "text": "  [OK]          tick           19   retries same occurrence without blocking ..."
+  },
+  {
+    "source_line": 1150,
+    "text": "  [OK]          tick           20   occurrence decode rejects tampered facts."
+  },
+  {
+    "source_line": 1164,
+    "text": "  [OK]          tick           21   defers held wake without advancing."
+  },
+  {
+    "source_line": 1205,
+    "text": "  [OK]          status          0   tracks liveness snapshot."
+  },
+  {
+    "source_line": 1209,
+    "text": "  [OK]          status          1   cross-domain updates are lossless."
+  },
+  {
+    "source_line": 1211,
+    "text": "Test Successful in 0.425s. 24 tests run."
+  },
+  {
+    "source_line": 1218,
+    "text": "Testing `Schedule_tool_wiring'."
+  },
+  {
+    "source_line": 1230,
+    "text": "  [OK]          wiring          0   cancel ledger write failure retains withd..."
+  },
+  {
+    "source_line": 1244,
+    "text": "  [OK]          wiring          1   cancel finds old target and all instances."
+  },
+  {
+    "source_line": 1255,
+    "text": "  [OK]          wiring          2   Keeper-to-Lane cancellation withdraws old..."
+  },
+  {
+    "source_line": 1270,
+    "text": "  [OK]          wiring          3   unfinished transfer refuses cancel then r..."
+  },
+  {
+    "source_line": 1281,
+    "text": "  [OK]          wiring          4   cancel refuses corrupt durable owner."
+  },
+  {
+    "source_line": 1291,
+    "text": "  [OK]          wiring          5   cancel refuses discovery failure."
+  },
+  {
+    "source_line": 1304,
+    "text": "  [OK]          wiring          6   partial cancel preserves durable effects ..."
+  },
+  {
+    "source_line": 1315,
+    "text": "  [OK]          wiring          7   note distinguishes absent schedule from u..."
+  },
+  {
+    "source_line": 1325,
+    "text": "  [OK]          wiring          8   note reports actual primary write failure."
+  },
+  {
+    "source_line": 1357,
+    "text": "  [OK]          wiring          9   flat tool surface."
+  },
+  {
+    "source_line": 1374,
+    "text": "  [OK]          wiring         10   create list get cancel."
+  },
+  {
+    "source_line": 1387,
+    "text": "  [OK]          wiring         11   update keeps public id and replaces insta..."
+  },
+  {
+    "source_line": 1399,
+    "text": "  [OK]          wiring         12   update omitted kind keeps daily."
+  },
+  {
+    "source_line": 1409,
+    "text": "  [OK]          wiring         13   update omitted kind keeps one-shot."
+  },
+  {
+    "source_line": 1421,
+    "text": "  [OK]          wiring         14   update requires id and active row."
+  },
+  {
+    "source_line": 1461,
+    "text": "  [OK]          wiring         15   content edit preserves time and recurrence."
+  },
+  {
+    "source_line": 1474,
+    "text": "  [OK]          wiring         16   content edit keeps the stored expiry."
+  },
+  {
+    "source_line": 1485,
+    "text": "  [OK]          wiring         17   content edit keeps a concurrent retime."
+  },
+  {
+    "source_line": 1501,
+    "text": "  [OK]          wiring         18   due edit keeps a concurrent daily-to-inte..."
+  },
+  {
+    "source_line": 1517,
+    "text": "  [OK]          wiring         19   due edit keeps a concurrent interval-to-o..."
+  },
+  {
+    "source_line": 1524,
+    "text": "  [OK]          wiring         20   results survive the checkpoint encoder."
+  },
+  {
+    "source_line": 1536,
+    "text": "  [OK]          wiring         21   creation boundary owns result delivery de..."
+  },
+  {
+    "source_line": 1546,
+    "text": "  [OK]          wiring         22   update keeps the creator's result delivery."
+  },
+  {
+    "source_line": 1556,
+    "text": "  [OK]          wiring         23   get recurring schedule after accept advance."
+  },
+  {
+    "source_line": 1574,
+    "text": "  [OK]          wiring         24   create accepts explicit ISO-8601 offset."
+  },
+  {
+    "source_line": 1584,
+    "text": "  [OK]          wiring         25   removed convenience input does not synthe..."
+  },
+  {
+    "source_line": 1596,
+    "text": "  [OK]          wiring         26   unregistered wake target rejected."
+  },
+  {
+    "source_line": 1598,
+    "text": "  [OK]          wiring         27   unknown payload kind rejected by the vali..."
+  },
+  {
+    "source_line": 1601,
+    "text": "  [OK]          wiring         28   unknown field rejected before persistence."
+  },
+  {
+    "source_line": 1605,
+    "text": "  [OK]          wiring         29   empty call rejected by name."
+  },
+  {
+    "source_line": 1613,
+    "text": "  [OK]          wiring         30   every declared field still creates."
+  },
+  {
+    "source_line": 1621,
+    "text": "  [OK]          wiring         31   payload contracts are schema only."
+  },
+  {
+    "source_line": 1631,
+    "text": "  [OK]          wiring         32   keeper wake schema validation."
+  },
+  {
+    "source_line": 1649,
+    "text": "  [OK]          wiring         33   lane act schedule is created from its own..."
+  },
+  {
+    "source_line": 1669,
+    "text": "  [OK]          wiring         34   due signal and dashboard projection."
+  },
+  {
+    "source_line": 1678,
+    "text": "  [OK]          wiring         35   schedule store error is explicit."
+  },
+  {
+    "source_line": 1691,
+    "text": "  [OK]          wiring         36   projection reports read failure as unknown."
+  },
+  {
+    "source_line": 1699,
+    "text": "  [OK]          wiring         37   tools response no longer carries the proj..."
+  },
+  {
+    "source_line": 1708,
+    "text": "  [OK]          wiring         38   Keeper wake target validation is fenced."
+  },
+  {
+    "source_line": 1718,
+    "text": "  [OK]          wiring         39   Keeper wake creation respects shutdown fe..."
+  },
+  {
+    "source_line": 1728,
+    "text": "  [OK]          wiring         40   tool response carries structured recurrence."
+  },
+  {
+    "source_line": 1739,
+    "text": "  [OK]          wiring         41   create refuses a due time behind the clock."
+  },
+  {
+    "source_line": 1749,
+    "text": "  [OK]          wiring         42   the current second is not past."
+  },
+  {
+    "source_line": 1761,
+    "text": "  [OK]          wiring         43   cancel refusal says the state and the las..."
+  },
+  {
+    "source_line": 1783,
+    "text": "  [OK]          wiring         44   list reads the owner it is asked for."
+  },
+  {
+    "source_line": 1793,
+    "text": "  [OK]          wiring         45   list pages by schedule_id."
+  },
+  {
+    "source_line": 1807,
+    "text": "  [OK]          wiring         46   an unnamed caller names the actor itself."
+  },
+  {
+    "source_line": 1823,
+    "text": "  [OK]          wiring         47   the recorded actor is the caller, not an ..."
+  },
+  {
+    "source_line": 1836,
+    "text": "  [OK]          wiring         48   a keeper cannot cancel another keeper's s..."
+  },
+  {
+    "source_line": 1848,
+    "text": "  [OK]          wiring         49   an update keeps the row's actors and its ..."
+  },
+  {
+    "source_line": 1864,
+    "text": "  [OK]          wiring         50   recipient edit rechecks the current target."
+  },
+  {
+    "source_line": 1882,
+    "text": "  [OK]          wiring         51   locked cancel refuses a former recipient ..."
+  },
+  {
+    "source_line": 1892,
+    "text": "  [OK]          wiring         52   locked replacement uses the current sched..."
+  },
+  {
+    "source_line": 1908,
+    "text": "  [OK]          wiring         53   a named caller is the actor, not the argu..."
+  },
+  {
+    "source_line": 1923,
+    "text": "  [OK]          wiring         54   a call gives exactly one due input."
+  },
+  {
+    "source_line": 1938,
+    "text": "  [OK]          wiring         55   create refuses an interval below the runn..."
+  },
+  {
+    "source_line": 1947,
+    "text": "  [OK]          wiring         56   due_in_sec counts from the dispatch clock."
+  },
+  {
+    "source_line": 1957,
+    "text": "  [OK]          wiring         57   a calendar first due counts from dispatch..."
+  },
+  {
+    "source_line": 1968,
+    "text": "  [OK]          wiring         58   update refuses a due time moved behind th..."
+  },
+  {
+    "source_line": 1980,
+    "text": "  [OK]          wiring         59   a limit outside its range is refused."
+  },
+  {
+    "source_line": 1997,
+    "text": "  [OK]          wiring         60   a cursor belongs to the filters that issu..."
+  },
+  {
+    "source_line": 2008,
+    "text": "  [OK]          wiring         61   status active lists every status that is ..."
+  },
+  {
+    "source_line": 2020,
+    "text": "  [OK]          wiring         62   a mistyped deciding argument is refused."
+  },
+  {
+    "source_line": 2027,
+    "text": "  [OK]          wiring         63   declared bounds match the handler."
+  },
+  {
+    "source_line": 2029,
+    "text": "Test Successful in 1.339s. 64 tests run."
+  },
+  {
+    "source_line": 2036,
+    "text": "Testing `Schedule_consumer_dispatch'."
+  },
+  {
+    "source_line": 2047,
+    "text": "  [OK]          keeper_wake          0   board post schedule is rejected with..."
+  },
+  {
+    "source_line": 2071,
+    "text": "  [OK]          keeper_wake          1   absent owner fails one occurrence an..."
+  },
+  {
+    "source_line": 2084,
+    "text": "  [OK]          keeper_wake          2   keeper wake for a not-current owner ..."
+  },
+  {
+    "source_line": 2150,
+    "text": "  [OK]          keeper_wake          3   keeper wake records wake receipt."
+  },
+  {
+    "source_line": 2161,
+    "text": "  [OK]          keeper_wake          4   routed schedule carries occurrence d..."
+  },
+  {
+    "source_line": 2175,
+    "text": "  [OK]          keeper_wake          5   a recurring wake supersedes the earl..."
+  },
+  {
+    "source_line": 2188,
+    "text": "  [OK]          keeper_wake          6   supersede withdraws the wake a faile..."
+  },
+  {
+    "source_line": 2196,
+    "text": "  [OK]          keeper_wake          7   one call cancels every pending occur..."
+  },
+  {
+    "source_line": 2206,
+    "text": "  [OK]          keeper_wake          8   reused schedule id does not match pr..."
+  },
+  {
+    "source_line": 2212,
+    "text": "  [OK]          keeper_wake          9   keeper purge cancels future schedule..."
+  },
+  {
+    "source_line": 2226,
+    "text": "  [OK]          keeper_wake         10   cancelled schedule enqueued wake lea..."
+  },
+  {
+    "source_line": 2239,
+    "text": "  [OK]          keeper_wake         11   schedule cancel tool withdraws the q..."
+  },
+  {
+    "source_line": 2254,
+    "text": "  [OK]          keeper_wake         12   schedule cancel mid-turn withdraws t..."
+  },
+  {
+    "source_line": 2266,
+    "text": "  [OK]          keeper_wake         13   retirement cancel withdraws the wake..."
+  },
+  {
+    "source_line": 2275,
+    "text": "  [OK]          keeper_wake         14   dispatch drops a wake withdrawn afte..."
+  },
+  {
+    "source_line": 2281,
+    "text": "  [OK]          keeper_wake         15   withdrawal skips an entry a turn set..."
+  },
+  {
+    "source_line": 2288,
+    "text": "  [OK]          keeper_wake         16   owner absent pending demand is drain..."
+  },
+  {
+    "source_line": 2298,
+    "text": "  [OK]          keeper_wake         17   shutdown fence rejects schedule inta..."
+  },
+  {
+    "source_line": 2334,
+    "text": "  [OK]          keeper_wake         18   fenced purge settles on the first ti..."
+  },
+  {
+    "source_line": 2348,
+    "text": "  [OK]          keeper_wake         19   delivered purge releases only its ow..."
+  },
+  {
+    "source_line": 2357,
+    "text": "  [OK]          keeper_wake         20   shutdown fence covers direct durable..."
+  },
+  {
+    "source_line": 2366,
+    "text": "  [OK]          keeper_wake         21   transferred retry uses resolved owne..."
+  },
+  {
+    "source_line": 2373,
+    "text": "  [OK]          keeper_wake         22   shutdown join waits for in-flight sc..."
+  },
+  {
+    "source_line": 2384,
+    "text": "  [OK]          keeper_wake         23   keeper wake durable state failure re..."
+  },
+  {
+    "source_line": 2400,
+    "text": "  [OK]          keeper_wake         24   cancelled occurrence recovery does n..."
+  },
+  {
+    "source_line": 2416,
+    "text": "  [OK]          keeper_wake         25   terminal retry repairs missing stimu..."
+  },
+  {
+    "source_line": 2423,
+    "text": "  [OK]          keeper_wake         26   terminal retry requires acceptance c..."
+  },
+  {
+    "source_line": 2432,
+    "text": "  [OK]          keeper_wake         27   retry before terminal reconciliation..."
+  },
+  {
+    "source_line": 2444,
+    "text": "  [OK]          keeper_wake         28   an unstarted owner accepts the occur..."
+  },
+  {
+    "source_line": 2460,
+    "text": "  [OK]          keeper_wake         29   an interval wake to an unstarted own..."
+  },
+  {
+    "source_line": 2474,
+    "text": "  [OK]          keeper_wake         30   interval wake retries acceptance com..."
+  },
+  {
+    "source_line": 2488,
+    "text": "  [OK]          keeper_wake         31   completed interval wake retries acce..."
+  },
+  {
+    "source_line": 2499,
+    "text": "  [OK]          keeper_wake         32   due wake bypasses proactive policy."
+  },
+  {
+    "source_line": 2509,
+    "text": "  [OK]          keeper_wake         33   dashboard resolver refreshes target ..."
+  },
+  {
+    "source_line": 2532,
+    "text": "  [OK]          keeper_wake         34   dashboard observes committed complet..."
+  },
+  {
+    "source_line": 2549,
+    "text": "  [OK]          keeper_wake         35   dashboard observes committed failure..."
+  },
+  {
+    "source_line": 2566,
+    "text": "  [OK]          keeper_wake         36   dashboard observes committed cancell..."
+  },
+  {
+    "source_line": 2584,
+    "text": "  [OK]          keeper_wake         37   dashboard observes committed transfe..."
+  },
+  {
+    "source_line": 2596,
+    "text": "  [OK]          keeper_wake         38   keeper wake queue evidence rejects s..."
+  },
+  {
+    "source_line": 2608,
+    "text": "  [OK]          keeper_wake         39   dashboard live supported non-termina..."
+  },
+  {
+    "source_line": 2618,
+    "text": "  [OK]          keeper_wake         40   dashboard live supported non-termina..."
+  },
+  {
+    "source_line": 2631,
+    "text": "  [OK]          keeper_wake         41   keeper wake ledger failure is retrya..."
+  },
+  {
+    "source_line": 2643,
+    "text": "  [OK]          keeper_wake         42   unattributed ledger damage does not ..."
+  },
+  {
+    "source_line": 2652,
+    "text": "  [OK]          keeper_wake         43   dashboard keeps unattributed damage ..."
+  },
+  {
+    "source_line": 2664,
+    "text": "  [OK]          keeper_wake         44   dashboard row names the occurrence t..."
+  },
+  {
+    "source_line": 2675,
+    "text": "  [OK]          keeper_wake         45   dashboard hold keeps the time a fail..."
+  },
+  {
+    "source_line": 2719,
+    "text": "  [OK]          keeper_wake         46   startup recovery retries before admi..."
+  },
+  {
+    "source_line": 2752,
+    "text": "  [OK]          keeper_wake         47   successful recovery survives a norma..."
+  },
+  {
+    "source_line": 2763,
+    "text": "  [OK]          keeper_wake         48   a runner tick refreshes the cached s..."
+  },
+  {
+    "source_line": 2774,
+    "text": "  [OK]          keeper_wake         49   dashboard projects quarantined and u..."
+  },
+  {
+    "source_line": 2785,
+    "text": "  [OK]          keeper_wake         50   keeper wake rejects invalid keeper n..."
+  },
+  {
+    "source_line": 2786,
+    "text": "  [OK]          keeper_wake         51   keeper wake receipt decoder rejects ..."
+  },
+  {
+    "source_line": 2796,
+    "text": "  [OK]          keeper_wake         52   consumed grant without outcome stays..."
+  },
+  {
+    "source_line": 2808,
+    "text": "  [OK]          keeper_wake         53   consumed grant with outcome retires ..."
+  },
+  {
+    "source_line": 2818,
+    "text": "  [OK]          keeper_wake         54   projection failure keeps spent repla..."
+  },
+  {
+    "source_line": 2830,
+    "text": "  [OK]          keeper_wake         55   rejection projection precedes turn i..."
+  },
+  {
+    "source_line": 2838,
+    "text": "  [OK]          keeper_wake         56   consumed occurrence retry does not e..."
+  },
+  {
+    "source_line": 2848,
+    "text": "  [OK]          keeper_wake         57   unconsumed grant replay stays action..."
+  },
+  {
+    "source_line": 2850,
+    "text": "Test Successful in 5.318s. 58 tests run."
+  },
+  {
+    "source_line": 2857,
+    "text": "Testing `dashboard_http_core'."
+  },
+  {
+    "source_line": 2864,
+    "text": "  [OK]          eval_feed_owned_boundary                              0   par..."
+  },
+  {
+    "source_line": 2879,
+    "text": "  [OK]          eval_feed_owned_boundary                              1   lin..."
+  },
+  {
+    "source_line": 2890,
+    "text": "  [OK]          eval_feed_owned_boundary                              2   lin..."
+  },
+  {
+    "source_line": 2897,
+    "text": "  [OK]          eval_feed_owned_boundary                              3   NUL..."
+  },
+  {
+    "source_line": 2935,
+    "text": "  [OK]          eval_feed_cache_selection                             0   fle..."
+  },
+  {
+    "source_line": 2971,
+    "text": "  [OK]          eval_feed_cache_selection                             1   fle..."
+  },
+  {
+    "source_line": 3012,
+    "text": "  [OK]          eval_feed_cache_selection                             2   age..."
+  },
+  {
+    "source_line": 3026,
+    "text": "  [OK]          effective_tool_quality_sampling                       0   win..."
+  },
+  {
+    "source_line": 3040,
+    "text": "  [OK]          effective_tool_quality_sampling                       1   rec..."
+  },
+  {
+    "source_line": 3054,
+    "text": "  [OK]          effective_tool_quality_sampling                       2   NaN..."
+  },
+  {
+    "source_line": 3073,
+    "text": "  [OK]          exact_query_cache_identity                            0   Kee..."
+  },
+  {
+    "source_line": 3084,
+    "text": "  [OK]          exact_query_cache_identity                            1   too..."
+  },
+  {
+    "source_line": 3101,
+    "text": "  [OK]          exact_query_cache_identity                            2   tel..."
+  },
+  {
+    "source_line": 3124,
+    "text": "  [OK]          exact_query_cache_identity                            3   tel..."
+  },
+  {
+    "source_line": 3137,
+    "text": "  [OK]          exact_query_cache_identity                            4   tel..."
+  },
+  {
+    "source_line": 3142,
+    "text": "  [OK]          executor_pool                                         0   no ..."
+  },
+  {
+    "source_line": 3147,
+    "text": "  [OK]          executor_pool                                         1   poo..."
+  },
+  {
+    "source_line": 3152,
+    "text": "  [OK]          executor_pool                                         2   poo..."
+  },
+  {
+    "source_line": 3174,
+    "text": "  [OK]          executor_pool                                         3   she..."
+  },
+  {
+    "source_line": 3180,
+    "text": "  [OK]          executor_pool                                         4   she..."
+  },
+  {
+    "source_line": 3186,
+    "text": "  [OK]          executor_pool                                         5   run..."
+  },
+  {
+    "source_line": 3193,
+    "text": "  [OK]          executor_pool                                         6   she..."
+  },
+  {
+    "source_line": 3199,
+    "text": "  [OK]          executor_pool                                         7   she..."
+  },
+  {
+    "source_line": 3206,
+    "text": "  [OK]          executor_pool                                         8   she..."
+  },
+  {
+    "source_line": 3213,
+    "text": "  [OK]          executor_pool                                         9   she..."
+  },
+  {
+    "source_line": 3223,
+    "text": "  [OK]          executor_pool                                        10   ope..."
+  },
+  {
+    "source_line": 3229,
+    "text": "  [OK]          executor_pool                                        11   too..."
+  },
+  {
+    "source_line": 3233,
+    "text": "  [OK]          executor_pool                                        12   das..."
+  },
+  {
+    "source_line": 3241,
+    "text": "  [OK]          executor_pool                                        13   das..."
+  },
+  {
+    "source_line": 3249,
+    "text": "  [OK]          executor_pool                                        14   das..."
+  },
+  {
+    "source_line": 3259,
+    "text": "  [OK]          executor_pool                                        15   cac..."
+  },
+  {
+    "source_line": 3278,
+    "text": "  [OK]          executor_pool                                        16   ope..."
+  },
+  {
+    "source_line": 3291,
+    "text": "  [OK]          executor_pool                                        17   ope..."
+  },
+  {
+    "source_line": 3302,
+    "text": "  [OK]          executor_pool                                        18   she..."
+  },
+  {
+    "source_line": 3327,
+    "text": "  [OK]          executor_pool                                        19   Gat..."
+  },
+  {
+    "source_line": 3338,
+    "text": "  [OK]          executor_pool                                        20   boo..."
+  },
+  {
+    "source_line": 3420,
+    "text": "  [OK]          executor_pool                                        21   Goa..."
+  },
+  {
+    "source_line": 3588,
+    "text": "  [OK]          executor_pool                                        22   Goa..."
+  },
+  {
+    "source_line": 3601,
+    "text": "  [OK]          executor_pool                                        23   kee..."
+  },
+  {
+    "source_line": 3634,
+    "text": "  [OK]          executor_pool                                        24   Goa..."
+  },
+  {
+    "source_line": 3640,
+    "text": "  [OK]          executor_pool                                        25   pla..."
+  },
+  {
+    "source_line": 3651,
+    "text": "  [OK]          executor_pool                                        26   pla..."
+  },
+  {
+    "source_line": 3662,
+    "text": "  [OK]          executor_pool                                        27   she..."
+  },
+  {
+    "source_line": 3669,
+    "text": "  [OK]          executor_pool                                        28   she..."
+  },
+  {
+    "source_line": 3681,
+    "text": "  [OK]          executor_pool                                        29   she..."
+  },
+  {
+    "source_line": 3693,
+    "text": "  [OK]          executor_pool                                        30   she..."
+  },
+  {
+    "source_line": 3699,
+    "text": "  [OK]          executor_pool                                        31   she..."
+  },
+  {
+    "source_line": 3704,
+    "text": "  [OK]          executor_pool                                        32   exe..."
+  },
+  {
+    "source_line": 3715,
+    "text": "  [OK]          executor_pool                                        33   exe..."
+  },
+  {
+    "source_line": 3730,
+    "text": "  [OK]          executor_pool                                        34   exe..."
+  },
+  {
+    "source_line": 3740,
+    "text": "  [OK]          executor_pool                                        35   exe..."
+  },
+  {
+    "source_line": 3752,
+    "text": "  [OK]          executor_pool                                        36   exe..."
+  },
+  {
+    "source_line": 3838,
+    "text": "  [OK]          executor_pool                                        37   war..."
+  },
+  {
+    "source_line": 3852,
+    "text": "  [OK]          executor_pool                                        38   Boa..."
+  },
+  {
+    "source_line": 3869,
+    "text": "  [OK]          executor_pool                                        39   Ite..."
+  },
+  {
+    "source_line": 3880,
+    "text": "  [OK]          executor_pool                                        40   exe..."
+  },
+  {
+    "source_line": 3899,
+    "text": "  [OK]          executor_pool                                        41   exe..."
+  },
+  {
+    "source_line": 3921,
+    "text": "  [OK]          executor_pool                                        42   exe..."
+  },
+  {
+    "source_line": 3934,
+    "text": "  [OK]          executor_pool                                        43   exe..."
+  },
+  {
+    "source_line": 3945,
+    "text": "  [OK]          executor_pool                                        44   exe..."
+  },
+  {
+    "source_line": 3961,
+    "text": "  [OK]          executor_pool                                        45   exe..."
+  },
+  {
+    "source_line": 3971,
+    "text": "  [OK]          executor_pool                                        46   exe..."
+  },
+  {
+    "source_line": 3981,
+    "text": "  [OK]          executor_pool                                        47   exe..."
+  },
+  {
+    "source_line": 3985,
+    "text": "  [OK]          executor_pool                                        48   mes..."
+  },
+  {
+    "source_line": 3991,
+    "text": "  [OK]          executor_pool                                        49   RFC..."
+  },
+  {
+    "source_line": 3997,
+    "text": "  [OK]          executor_pool                                        50   RFC..."
+  },
+  {
+    "source_line": 4003,
+    "text": "  [OK]          executor_pool                                        51   RFC..."
+  },
+  {
+    "source_line": 4012,
+    "text": "  [OK]          executor_pool                                        52   lig..."
+  },
+  {
+    "source_line": 4022,
+    "text": "  [OK]          executor_pool                                        53   she..."
+  },
+  {
+    "source_line": 4028,
+    "text": "  [OK]          executor_pool                                        54   lig..."
+  },
+  {
+    "source_line": 4034,
+    "text": "  [OK]          executor_pool                                        55   RFC..."
+  },
+  {
+    "source_line": 4051,
+    "text": "  [OK]          executor_pool                                        56   wor..."
+  },
+  {
+    "source_line": 4073,
+    "text": "  [OK]          executor_pool                                        57   too..."
+  },
+  {
+    "source_line": 4276,
+    "text": "  [OK]          executor_pool                                        58   too..."
+  },
+  {
+    "source_line": 4355,
+    "text": "  [OK]          executor_pool                                        59   aut..."
+  },
+  {
+    "source_line": 4410,
+    "text": "  [OK]          executor_pool                                        60   cac..."
+  },
+  {
+    "source_line": 4425,
+    "text": "  [OK]          executor_pool                                        61   a c..."
+  },
+  {
+    "source_line": 4431,
+    "text": "  [OK]          executor_pool                                        62   res..."
+  },
+  {
+    "source_line": 4436,
+    "text": "  [OK]          executor_pool                                        63   RFC..."
+  },
+  {
+    "source_line": 4441,
+    "text": "  [OK]          executor_pool                                        64   RFC..."
+  },
+  {
+    "source_line": 4448,
+    "text": "  [OK]          executor_pool                                        65   RFC..."
+  },
+  {
+    "source_line": 4456,
+    "text": "  [OK]          executor_pool                                        66   tel..."
+  },
+  {
+    "source_line": 4464,
+    "text": "  [OK]          executor_pool                                        67   an ..."
+  },
+  {
+    "source_line": 4469,
+    "text": "  [OK]          executor_pool                                        68   fle..."
+  },
+  {
+    "source_line": 4475,
+    "text": "  [OK]          executor_pool                                        69   sta..."
+  },
+  {
+    "source_line": 4481,
+    "text": "  [OK]          executor_pool                                        70   kee..."
+  },
+  {
+    "source_line": 4495,
+    "text": "  [OK]          executor_pool                                        71   ask..."
+  },
+  {
+    "source_line": 4500,
+    "text": "  [OK]          executor_pool                                        72   kee..."
+  },
+  {
+    "source_line": 4503,
+    "text": "  [OK]          executor_pool                                        73   kee..."
+  },
+  {
+    "source_line": 4519,
+    "text": "  [OK]          executor_pool                                        74   kee..."
+  },
+  {
+    "source_line": 4524,
+    "text": "  [OK]          executor_pool                                        75   Gat..."
+  },
+  {
+    "source_line": 4534,
+    "text": "  [OK]          executor_pool                                        76   Gat..."
+  },
+  {
+    "source_line": 4548,
+    "text": "  [OK]          executor_pool                                        77   HIT..."
+  },
+  {
+    "source_line": 4566,
+    "text": "  [OK]          executor_pool                                        78   kee..."
+  },
+  {
+    "source_line": 4593,
+    "text": "  [OK]          executor_pool                                        79   kee..."
+  },
+  {
+    "source_line": 4595,
+    "text": "  [OK]          executor_pool                                        80   int..."
+  },
+  {
+    "source_line": 4597,
+    "text": "  [OK]          executor_pool                                        81   run..."
+  },
+  {
+    "source_line": 4606,
+    "text": "  [OK]          executor_pool                                        82   eve..."
+  },
+  {
+    "source_line": 4660,
+    "text": "  [OK]          executor_pool                                        83   eve..."
+  },
+  {
+    "source_line": 4679,
+    "text": "  [OK]          executor_pool                                        84   com..."
+  },
+  {
+    "source_line": 4683,
+    "text": "  [OK]          executor_pool                                        85   obs..."
+  },
+  {
+    "source_line": 4693,
+    "text": "  [OK]          dashboard behavior contracts                          0   boa..."
+  },
+  {
+    "source_line": 4716,
+    "text": "  [OK]          dashboard behavior contracts                          1   Kee..."
+  },
+  {
+    "source_line": 4726,
+    "text": "  [OK]          dashboard behavior contracts                          2   Ski..."
+  },
+  {
+    "source_line": 4729,
+    "text": "  [OK]          dashboard behavior contracts                          3   Git..."
+  },
+  {
+    "source_line": 4731,
+    "text": "  [OK]          dashboard behavior contracts                          4   Git..."
+  },
+  {
+    "source_line": 4739,
+    "text": "  [OK]          dashboard behavior contracts                          5   Git..."
+  },
+  {
+    "source_line": 4767,
+    "text": "  [OK]          dashboard behavior contracts                          6   pau..."
+  },
+  {
+    "source_line": 4780,
+    "text": "  [OK]          dashboard behavior contracts                          7   nam..."
+  },
+  {
+    "source_line": 4791,
+    "text": "  [OK]          dashboard behavior contracts                          8   ope..."
+  },
+  {
+    "source_line": 4802,
+    "text": "  [OK]          dashboard behavior contracts                          9   ref..."
+  },
+  {
+    "source_line": 4807,
+    "text": "  [OK]          dashboard behavior contracts                         10   ope..."
+  },
+  {
+    "source_line": 4815,
+    "text": "  [OK]          dashboard behavior contracts                         11   ope..."
+  },
+  {
+    "source_line": 4823,
+    "text": "  [OK]          dashboard behavior contracts                         12   par..."
+  },
+  {
+    "source_line": 4832,
+    "text": "  [OK]          dashboard behavior contracts                         13   pro..."
+  },
+  {
+    "source_line": 4837,
+    "text": "  [OK]          dashboard behavior contracts                         14   sch..."
+  },
+  {
+    "source_line": 4846,
+    "text": "  [OK]          dashboard behavior contracts                         15   sch..."
+  },
+  {
+    "source_line": 4851,
+    "text": "  [OK]          dashboard behavior contracts                         16   sch..."
+  },
+  {
+    "source_line": 4864,
+    "text": "  [OK]          dashboard behavior contracts                         17   sch..."
+  },
+  {
+    "source_line": 4877,
+    "text": "  [OK]          dashboard behavior contracts                         18   sch..."
+  },
+  {
+    "source_line": 4884,
+    "text": "  [OK]          dashboard behavior contracts                         19   sch..."
+  },
+  {
+    "source_line": 4891,
+    "text": "  [OK]          dashboard behavior contracts                         20   age..."
+  },
+  {
+    "source_line": 4900,
+    "text": "  [OK]          dashboard behavior contracts                         21   exe..."
+  },
+  {
+    "source_line": 4907,
+    "text": "  [OK]          dashboard behavior contracts                         22   off..."
+  },
+  {
+    "source_line": 4913,
+    "text": "  [OK]          dashboard behavior contracts                         23   off..."
+  },
+  {
+    "source_line": 4922,
+    "text": "  [OK]          dashboard behavior contracts                         24   sta..."
+  },
+  {
+    "source_line": 4949,
+    "text": "  [OK]          dashboard behavior contracts                         25   act..."
+  },
+  {
+    "source_line": 4953,
+    "text": "  [OK]          dashboard behavior contracts                         26   rej..."
+  },
+  {
+    "source_line": 4965,
+    "text": "  [OK]          lifecycle event classification (#22071)               0   typ..."
+  },
+  {
+    "source_line": 5002,
+    "text": "  [OK]          lifecycle event classification (#22071)               1   cac..."
+  },
+  {
+    "source_line": 5019,
+    "text": "  [OK]          lifecycle event classification (#22071)               2   cac..."
+  },
+  {
+    "source_line": 5022,
+    "text": "  [OK]          lifecycle event classification (#22071)               3   pau..."
+  },
+  {
+    "source_line": 5027,
+    "text": "  [OK]          lifecycle event classification (#22071)               4   rec..."
+  },
+  {
+    "source_line": 5030,
+    "text": "  [OK]          lifecycle event classification (#22071)               5   sto..."
+  },
+  {
+    "source_line": 5033,
+    "text": "  [OK]          lifecycle event classification (#22071)               6   sto..."
+  },
+  {
+    "source_line": 5036,
+    "text": "  [OK]          lifecycle event classification (#22071)               7   cac..."
+  },
+  {
+    "source_line": 5050,
+    "text": "  [OK]          lifecycle event classification (#22071)               8   run..."
+  },
+  {
+    "source_line": 5060,
+    "text": "  [OK]          lifecycle event classification (#22071)               9   rec..."
+  },
+  {
+    "source_line": 5064,
+    "text": "  [OK]          lifecycle event classification (#22071)              10   lif..."
+  },
+  {
+    "source_line": 5074,
+    "text": "  [OK]          lifecycle event classification (#22071)              11   dec..."
+  },
+  {
+    "source_line": 5083,
+    "text": "  [OK]          lifecycle event classification (#22071)              12   rec..."
+  },
+  {
+    "source_line": 5092,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)           0   cac..."
+  },
+  {
+    "source_line": 5094,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)           1   cac..."
+  },
+  {
+    "source_line": 5105,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)           2   suc..."
+  },
+  {
+    "source_line": 5111,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)           3   shr..."
+  },
+  {
+    "source_line": 5112,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)           4   con..."
+  },
+  {
+    "source_line": 5116,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)           5   con..."
+  },
+  {
+    "source_line": 5117,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)           6   con..."
+  },
+  {
+    "source_line": 5142,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)           7   con..."
+  },
+  {
+    "source_line": 5156,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)           8   con..."
+  },
+  {
+    "source_line": 5167,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)           9   con..."
+  },
+  {
+    "source_line": 5183,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          10   con..."
+  },
+  {
+    "source_line": 5190,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          11   con..."
+  },
+  {
+    "source_line": 5199,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          12   con..."
+  },
+  {
+    "source_line": 5209,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          13   con..."
+  },
+  {
+    "source_line": 5243,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          14   sta..."
+  },
+  {
+    "source_line": 5253,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          15   dir..."
+  },
+  {
+    "source_line": 5277,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          16   rou..."
+  },
+  {
+    "source_line": 5286,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          17   raw..."
+  },
+  {
+    "source_line": 5313,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          18   raw..."
+  },
+  {
+    "source_line": 5321,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          19   dir..."
+  },
+  {
+    "source_line": 5331,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          20   dir..."
+  },
+  {
+    "source_line": 5337,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          21   com..."
+  },
+  {
+    "source_line": 5347,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          22   mis..."
+  },
+  {
+    "source_line": 5353,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          23   mix..."
+  },
+  {
+    "source_line": 5364,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          24   con..."
+  },
+  {
+    "source_line": 5371,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          25   con..."
+  },
+  {
+    "source_line": 5408,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          26   typ..."
+  },
+  {
+    "source_line": 5459,
+    "text": "  [OK]          context-window shrink guard (#25062/#25268)          27   typ..."
+  },
+  {
+    "source_line": 5474,
+    "text": "  [OK]          defined but never registered until task-1768          0   kee..."
+  },
+  {
+    "source_line": 5493,
+    "text": "  [OK]          defined but never registered until task-1768          1   a k..."
+  },
+  {
+    "source_line": 5495,
+    "text": "Test Successful in 4.885s. 171 tests run."
+  }
+]

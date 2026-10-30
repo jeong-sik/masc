@@ -1,0 +1,22 @@
+{
+  "web_tests": 42,
+  "native_pass": 16,
+  "native_known_failure": 1,
+  "known_issue": 41174,
+  "pty": "passed",
+  "tsc_exit": 0,
+  "eslint_exit": 0,
+  "python_checks": "ruff and pyright passed",
+  "files": {
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "red.log": "3189cca66f621a240680169abe85505007269d4a8c6b2f226db642f91b65065b",
+    "pyright.json": "14c74d4a34cdd0a354e63d358fb937d740336c86db7718ec8bc16ed99f6746f3",
+    "web.log": "92a4831298d57b6adabf09e6f63097db30ee6110d9055dee5a99743e892b809d",
+    "README.md": "db6e94d7839653a63115365f0da0a6dde535522a56ed8fd2fc57c6cd124d2cf1",
+    "pty2.log": "f3ebda43256efd41d3346d379805bc3e8e43706b821c7f98ab0085239c55e925",
+    "native.log": "11ce0bd3202973393133b15f08e2da7a5d2fe4b5b12ff4a007148e0fe81cf86b",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ruff2.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "build.log": "6a8eef0873ee3551fb693e3de170cbd8a3d90199db36034ad95ca0227c607c0f"
+  }
+}

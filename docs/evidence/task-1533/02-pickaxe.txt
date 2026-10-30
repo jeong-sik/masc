@@ -1,0 +1,80 @@
+commit 9dcf59e7b40657b348e5bc2852bd79d9487e2f4b
+Author: Jeong-Sik Yun <45959991+jeong-sik@users.noreply.github.com>
+Date:   Fri Sep 11 22:54:28 2026 +0900
+
+    fix(librarian): 슬롯 하나의 projection 실패가 exact 레인 전체를 죽이지 않게 한다 (#35234)
+    
+    * fix(librarian): a structurally unprojectable slot no longer kills the exact lane pre-flight
+    
+    The librarian lane's pre-flight projected the request body for every slot
+    in the ladder and failed the whole lane on the first slot that could not
+    project. A failover slot appended for resilience became a single point of
+    death: on 2026-09-11 openrouter.openrouter-deepseek-v4-flash refused
+    projection on every librarian run (56+) while the two slots ahead of it
+    were healthy, so the lane produced nothing all evening.
+    
+    The size decision is now made over the slots that can project: a refused
+    slot imposes no request-body bound because it cannot run, it is excluded
+    and reported (one WARN per run naming slot and reason), and the flow's
+    own advance keeps handling a slot failing at dispatch. A ladder with no
+    projectable slot at all is still a setup error, now naming each slot's
+    refusal instead of hiding it: Exact_request_projection_failed carries the
+    admission reason, rendered by a new Exact_output.admission_error_reason
+    (exhaustive over the wire errors, kind names matching the evidence JSON).
+    
+    Task: task-1515
+    
+    Co-Authored-By: Claude Code <noreply@anthropic.com>
+    
+    * fix(test): match the fitted_messages report slot in the no-shrink arm
+    
+    The first arm still matched the old two-element shape, so None was
+    matched against the new unusable-slot list and the suite did not compile.
+    
+    Co-Authored-By: Claude Code <noreply@anthropic.com>
+    
+    * fix(librarian): review S2/S3 -- vacuous fits, empty ladder, over-budget slot naming
+    
+    S2: the every-slot-refused test asserted fits=false, but fits speaks only
+    about usable slots and an empty usable set is vacuously true (the caller
+    guards emptiness itself and fails there naming every refusal). The test
+    now pins the vacuous truth so the exported meaning cannot drift.
+    
+    S3: fitted_messages on an empty ladder returned the all-refused error
+    with an unnamed slot and an empty reason -- a contract change from the
+    old Ok fit. The empty ladder again fits and reports nothing; the
+    production caller routes empty slot lists to the cli lane, and the mli
+    says so.
+    
+    Coverage the review called out: the over-budget error now names the
+    first usable slot, not the ladder head, when the head cannot project
+    (pinned: unusable head + tight tail); the exported empty-ladder verdict
+    is pinned.
+    
+    Co-Authored-By: Claude Code <noreply@anthropic.com>
+    
+    * fix(test): match fitted_messages tuple pattern in shrink test arms
+    
+    * fix(test): use reasoning-unsupported fixture for structural rejection test
+    
+    ---------
+    
+    Co-authored-by: Claude Code <noreply@anthropic.com>
+
+diff --git a/packages/agent_core/lib/llm_provider/exact_output.mli b/packages/agent_core/lib/llm_provider/exact_output.mli
+index 47055d8..d9fa3b2 100644
+--- a/packages/agent_core/lib/llm_provider/exact_output.mli
++++ b/packages/agent_core/lib/llm_provider/exact_output.mli
+@@ -478,6 +478,12 @@ val project_request_body
+   -> output_requirement
+   -> (request_body_projection, admission_error) result
+ 
++val admission_error_reason : admission_error -> string
++(** One readable line naming the refusing condition ("unsupported_image_input",
++    "wire_admission_rejected:unsupported_target_model(...)"), for logs and
++    failure records. Kind names match the evidence-JSON kinds so one grep
++    finds both spellings. *)
++
+ (** Pure admission. It performs no token-count request, estimation, provider
+     completion, or global admission. The returned immutable plan freezes one
+     selected target and one serialized request. *)

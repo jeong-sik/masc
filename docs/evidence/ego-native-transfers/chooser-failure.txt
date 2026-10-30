@@ -1,0 +1,25 @@
+INITIAL [p1 "Chooser cleanup owned fixture" | space "masc-ego-native-sdk-20261024"(4): 1 managed, 0 untracked — p1* "Chooser cleanup owned fixture"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=50]
+      button [ref=51]
+        text "파일 선택"
+      text "선택된 파일 없음"
+  text "ready"
+
+CHOOSER_CAPTURED
+TYPE_CHANGED "text"
+SET_FAILURE Node is not a file input element
+NO_SECOND_SET
+NEXT_CHOOSER_CAPTURED
+NEXT_SET {}
+FINAL [p1 "Chooser cleanup owned fixture" | space "masc-ego-native-sdk-20261024"(4): 1 managed, 0 untracked — p1* "Chooser cleanup owned fixture"]
+root
+  container
+    text "Attach fixture"
+    textbox [ref=52]
+      button [ref=53]
+        text "파일 선택"
+      text "staged.txt"
+  text "staged.txt:29"

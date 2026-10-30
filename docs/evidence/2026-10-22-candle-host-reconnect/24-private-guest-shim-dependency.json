@@ -1,0 +1,10 @@
+{
+  "at": "2026-10-21T17:08:58.240878+00:00",
+  "dependency": "Existing Linux arm64 guest exec shim; reused only binary and original digest sidecar. No operator configuration or credentials copied.",
+  "source_directory": "/Users/dancer/me/.masc/microvm/shim",
+  "destination": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/microvm/shim",
+  "sha256": "ca955b88245024c680868f5f803e9e3232e5458b87145c0e94ee9c0c1732c6d7",
+  "original_sidecar": "ca955b88245024c680868f5f803e9e3232e5458b87145c0e94ee9c0c1732c6d7  masc-exec-shim-linux-arm64",
+  "product_source": "eb484b0aabe699b46740bcb787a935fb67bbfa8e",
+  "limitation": "Shim is an independently installed released dependency, not compiled from the native product candidate."
+}

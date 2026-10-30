@@ -1,0 +1,44 @@
+{
+  "source_sha": "6f68dbc38d7c3dfd53fd1ded00f6a4bd3622609d",
+  "workflow_sha": "003f52e210d31abe087f0edeba335e5bb095f4af",
+  "scenario": "addon-lifecycle",
+  "platform": "macos-arm64",
+  "sha256": "1184f859e7183e9193229eac697918b296dfb2f0bfbd6cb5821b44aa62e79a05",
+  "key_reference": {
+    "path": "key-reference.md",
+    "sha256": "7aae284947e0a787ed89cf8d991b501ce60890803eadac6bf308b10291cf3fa9",
+    "producer": "bin/masc_tui_keys_doc_cli.exe"
+  },
+  "server_sha256": "070b48ec73a5da0b43a47e0977134482ef34b089d08bdcd01cff12ee23ac8a03",
+  "build_targets": [
+    "bin/masc_tui.exe",
+    "bin/masc_tui_keys_doc_cli.exe",
+    "bin/main_eio.exe",
+    "test/test_tui_lane_addons.exe",
+    "test/test_lane_addon_application.exe"
+  ],
+  "expected_tests": [
+    "test_tui_lane_addons",
+    "test_lane_addon_application"
+  ],
+  "executed_tests": [
+    "test_tui_lane_addons",
+    "test_lane_addon_application"
+  ],
+  "test_results": [
+    {
+      "suite": "test_tui_lane_addons",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_lane_addon_application",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    }
+  ],
+  "behavior_passed": true,
+  "installed_runtime_verified": false,
+  "visible_ui_verified": false,
+  "packaging": "native executable; see native-dependencies.txt for dynamic libraries"
+}

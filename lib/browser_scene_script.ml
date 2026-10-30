@@ -1,0 +1,451 @@
+(* Same fixed function as the extension; parity is checked by the Node regression. *)
+let runtime = {js|function browserScene(args) {
+  const linkHref = element => {
+    if (element.localName !== 'a') return null;
+    const value = element.href;
+    const raw = typeof value === 'string' ? value : value?.baseVal;
+    // XLink is the SVG spelling of href and only an SVG anchor is followed
+    // through it. An HTML anchor carrying only an xlink:href has an empty
+    // .href, and resolving "" against baseURI advertised the current page as
+    // the destination -- selecting that control reloaded the page instead of
+    // following the XLink value.
+    const xlink = typeof SVGAElement !== 'undefined' && element instanceof SVGAElement
+      && element.hasAttributeNS?.('http://www.w3.org/1999/xlink','href');
+    if (typeof raw !== 'string' || !(element.hasAttribute('href') || xlink)) return null;
+    try { return new URL(raw,element.baseURI || document.baseURI).href; }
+    catch { return null; }
+  };
+  // WAI-ARIA 1.2 roles are ordered fallbacks, not simultaneous declarations.
+  // https://www.w3.org/TR/wai-aria-1.2/#roles
+  const ariaRoles = new Set('alert alertdialog application article banner blockquote button caption cell checkbox code columnheader combobox complementary contentinfo definition deletion dialog directory document emphasis feed figure form generic grid gridcell group heading img insertion link list listbox listitem log main marquee math menu menubar menuitem menuitemcheckbox menuitemradio meter navigation none note option paragraph presentation progressbar radio radiogroup region row rowgroup rowheader scrollbar search searchbox separator slider spinbutton status strong subscript suggestion superscript switch tab table tablist tabpanel term textbox time timer toolbar tooltip tree treegrid treeitem'.split(' '));
+  const effectiveRole = element => (element.getAttribute('role') || '').split(/\s+/)
+    .find(role => ariaRoles.has(role)) || null;
+  const actionRoles = new Set('button link checkbox radio switch menuitem menuitemcheckbox menuitemradio tab option combobox'.split(' '));
+  const associatedControl = element => element.localName === 'label' ? (element.control ?? null) : null;
+  const labelledControl = element => {
+    const target=associatedControl(element);
+    return target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type) ? target : null;
+  };
+  const key = Symbol.for('masc.browser.scene.refs.v4');
+  let state = window[key];
+  const sameDocument = state && state.document === document && state.root === document.documentElement;
+  if (args.mode === 'resolve' || args.mode === 'resolve_link') {
+    if (!sameDocument || args.documentId !== state.id) throw new Error('scene_document_changed');
+    const ref = state.nodes.get(args.nodeId);
+    const element = ref && ref.deref();
+    if (!element || !element.isConnected || element.ownerDocument !== document)
+      throw new Error('scene_node_detached');
+    if (state.labels.has(args.nodeId)) {
+      const pinned = state.labels.get(args.nodeId), current = associatedControl(element);
+      if (current !== (pinned.target ? pinned.target.deref() : null)
+          || (current?.type ?? null) !== pinned.type)
+        throw new Error('scene_label_control_changed');
+    }
+    if (args.mode === 'resolve_link') {
+      if (!state.links.has(args.nodeId)) throw new Error('scene_link_not_observed');
+      if (linkHref(element) !== state.links.get(args.nodeId)) throw new Error('scene_link_destination_changed');
+    }
+    return element;
+  }
+  if (args.mode !== 'read' && args.mode !== 'viewport') throw new Error('unknown_scene_mode');
+  if (!sameDocument) {
+    // getRandomValues also works on ordinary HTTP pages, where randomUUID
+    // is unavailable. The document identity carries 128 cryptographic bits.
+    const id = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+      byte => byte.toString(16).padStart(2,'0')).join('');
+    state = {document, root:document.documentElement, id, next:0,
+      ids:new WeakMap(), nodes:new Map(), links:new Map(), labels:new Map()};
+    window[key] = state;
+  }
+  if (args.mode === 'viewport') return {documentId:state.id,width:innerWidth,height:innerHeight,scrollX,scrollY};
+  // Weak references preserve identity through reordering without retaining
+  // detached page nodes for the lifetime of a single-page application.
+  for (const [id, ref] of state.nodes) if (!ref.deref()?.isConnected) {
+    state.nodes.delete(id); state.links.delete(id); state.labels.delete(id);
+  }
+  const nodeId = element => {
+    let id = state.ids.get(element);
+    const href = linkHref(element), target = associatedControl(element);
+    const pinned = id && state.labels.get(id);
+    const labelChanged = element.localName === 'label' && (!pinned
+      || target !== (pinned.target ? pinned.target.deref() : null)
+      || (target?.type ?? null) !== pinned.type);
+    // A recycled anchor gets a new observation reference. Retire its old
+    // reference so connected virtualized anchors cannot accumulate revisions.
+    if (!id || (href !== null && state.links.get(id) !== href) || labelChanged) {
+      if (id) { state.nodes.delete(id); state.links.delete(id); state.labels.delete(id); }
+      id = 'n' + (++state.next); state.ids.set(element,id);
+      if (href !== null) state.links.set(id,href);
+      if (element.localName === 'label')
+        state.labels.set(id,{target:target === null ? null : new WeakRef(target),type:target?.type ?? null});
+    }
+    state.nodes.set(id,new WeakRef(element));
+    return id;
+  };
+  const regionContexts = new WeakMap();
+  // Region context is an observed semantic ancestor, not a site selector.
+  // Prefer the nearest article for feeds and threads, then the nearest main;
+  // otherwise retain the closest standard landmark that was actually exposed.
+  const attribute = (element, name) =>
+    typeof element.getAttribute === 'function' ? element.getAttribute(name) : null;
+  const regionRole = element => String(effectiveRole(element) || element.localName || '')
+    .trim().toLowerCase();
+  const regionTokens = new Set(['main','navigation','complementary','region','log',
+    'banner','contentinfo','search','form','article','header','footer','section']);
+  const semanticRegion = element => {
+    if (!element || element.nodeType !== 1) return false;
+    const tag = element.localName || '', role = attribute(element,'role') || '';
+    if (['main','nav','aside','section','article','header','footer','search'].includes(tag)) return true;
+    if (regionTokens.has(effectiveRole(element))) return true;
+    return tag === 'form' && (attribute(element,'aria-label') !== null
+      || attribute(element,'aria-labelledby') !== null);
+  };
+  // Only declared DOM semantics make a custom control actionable. A native
+  // label is itself an activation target, including a hidden radio's label.
+  const nativeControlSelector = 'button,input:not([type=hidden]),textarea,select,summary,[contenteditable=true]';
+  const controlSelector = nativeControlSelector + ',label,[onclick],[role]';
+  const isControl = element => linkHref(element) !== null
+    || element.hasAttribute('onclick') || actionRoles.has(effectiveRole(element))
+    || (element.localName === 'label' ? (() => {
+        const target=labelledControl(element);
+        return target !== null && !(visible(target) && boxes(target.getClientRects(),target).length);
+      })()
+      : element.matches(nativeControlSelector));
+  // WAI-ARIA mixed is supported by checkbox/menuitemcheckbox only.
+  const checkedState = element => {
+    const role=effectiveRole(element), value=attribute(element,'aria-checked');
+    if (!['checkbox','menuitemcheckbox','radio','menuitemradio','switch'].includes(role)
+        || !['true','false','mixed'].includes(value)) return undefined;
+    return value === 'mixed' && !['checkbox','menuitemcheckbox'].includes(role) ? 'false' : value;
+  };
+  const disabledControl = element => {
+    const target = associatedControl(element) || element;
+    if (target.matches(':disabled')) return true;
+    for (const start of new Set([element,target]))
+      for (let parent=start; parent; parent=parent.parentElement)
+      if (attribute(parent,'aria-disabled') === 'true') return true;
+    return false;
+  };
+  const maxChars = args.maxChars;
+  if (!Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > 100000)
+    throw new Error('invalid_scene_max_chars');
+  // Admit nodes by the complete scene's 1 MiB JSON/UTF-8 resource ceiling,
+  // below the native host's 8 MiB incoming reply bound. Count metadata and
+  // geometry as well as text, without imposing a separate node quota.
+  const responseByteLimit = 1024 * 1024;
+  const nodes = [], styles = new WeakMap();
+  let chars = 0, truncated = false, nodeBytes = 0;
+  const view = args.view === undefined ? 'content' : args.view;
+  if (view !== 'content' && view !== 'regions') throw new Error('unknown_scene_view');
+  const scene = {schema:'masc.browser.scene.v1',documentId:state.id,url:location.href,title:document.title,
+    viewport:{width:innerWidth,height:innerHeight,scrollX,scrollY},nodes,chars:0,truncated:false,
+    scope:args.scope || null,view,
+    coverage:'top-document DOM geometry; no paint-order, occlusion, pseudo-element or shadow-tree completeness'};
+  const encoder = new TextEncoder();
+  const jsonBytes = value => encoder.encode(JSON.stringify(value)).byteLength;
+  // The empty envelope includes both array brackets, chars:0 and false.
+  // Only the nodes, decimal chars digits and boolean spelling change below.
+  const envelopeBytes = jsonBytes(scene);
+  if (envelopeBytes > responseByteLimit) throw new Error('scene_response_exceeds_1_mib');
+  const css = element => {
+    if (!styles.has(element)) styles.set(element,getComputedStyle(element));
+    return styles.get(element);
+  };
+  const rendered = element => {
+    for (let parent=element; parent; parent=parent.parentElement) {
+      const style=css(parent);
+      if (style.display === 'none' || Number(style.opacity) === 0) return false;
+    }
+    return true;
+  };
+  const visible = element => rendered(element) && css(element).visibility === 'visible';
+  const boxes = (rects, element) => {
+    let left=0,top=0,right=innerWidth,bottom=innerHeight;
+    for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
+      const style=css(ancestor);
+      const clipsX=['auto','scroll','hidden','clip'].includes(style.overflowX);
+      const clipsY=['auto','scroll','hidden','clip'].includes(style.overflowY);
+      if (clipsX || clipsY) {
+        const r=ancestor.getBoundingClientRect();
+        if (clipsX) {left=Math.max(left,r.left);right=Math.min(right,r.right);}
+        if (clipsY) {top=Math.max(top,r.top);bottom=Math.min(bottom,r.bottom);}
+      }
+      // Positioned descendants can escape overflow ancestors before their
+      // containing block. We do not reconstruct CSS containing blocks here:
+      // retain uncertain geometry instead of hiding a visible popup. This
+      // can include positioned content clipped by a transformed ancestor.
+      if (style.position === 'fixed' || style.position === 'absolute') break;
+    }
+    return Array.from(rects).filter(r => Number.isFinite(r.x) && Number.isFinite(r.y))
+      .map(r => ({x:Math.max(left,r.x),y:Math.max(top,r.y),
+        width:Math.min(right,r.right)-Math.max(left,r.x),
+        height:Math.min(bottom,r.bottom)-Math.max(top,r.y)}))
+      .filter(r => r.width>0 && r.height>0);
+  };
+  const labelTextRects = (element, admit = rects => Array.from(rects)) => {
+    if (element.localName !== 'label') return [];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT), rects = [];
+    while (walker.nextNode()) {
+      const text = walker.currentNode, parent = text.parentElement;
+      if (!text.textContent.trim() || !parent || getComputedStyle(parent).visibility !== 'visible') continue;
+      let hidden = false;
+      for (let node = parent; node; node = node.parentElement) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || Number(style.opacity) === 0) { hidden = true; break; }
+      }
+      if (hidden) continue;
+      const range = document.createRange(); range.selectNodeContents(text);
+      rects.push(...admit(range.getClientRects(), parent).filter(r => r.width > 0 && r.height > 0));
+    }
+    return rects;
+  };
+  const visibleText = element => {
+    // innerText is the browser's whitespace/text-transform authority. Use it
+    // only when every painted text fragment is admitted by the scene geometry.
+    // innerText alone includes opacity-zero and clipped descendants; those
+    // retain the filtered traversal below rather than exposing hidden content.
+    const admitted=document.createTreeWalker(element,NodeFilter.SHOW_TEXT);
+    let complete=true;
+    while (admitted.nextNode()) {
+      const child=admitted.currentNode, parent=child.parentElement;
+      if (!parent || !child.textContent.trim()) continue;
+      let displayed=true, opaque=true;
+      for (let ancestor=parent;ancestor;ancestor=ancestor.parentElement) {
+        if (css(ancestor).display === 'none') displayed=false;
+        if (Number(css(ancestor).opacity) === 0) opaque=false;
+      }
+      if (!displayed || css(parent).visibility !== 'visible') continue;
+      const range=document.createRange(); range.selectNodeContents(child);
+      if (!opaque || !boxes(range.getClientRects(),parent).length) {complete=false;break;}
+    }
+    if (complete && typeof element.innerText === 'string') return element.innerText.trim();
+    const pending=Array.from(element.childNodes || []).reverse(), parts=[];
+    let separator=null;
+    const append = text => {
+      if (!text) return;
+      if (separator !== null && parts.length && !/[\n\t]$/.test(parts[parts.length-1])) parts.push(separator);
+      separator=null; parts.push(text);
+    };
+    while (pending.length) {
+      const child=pending.pop();
+      if (child.separator) {
+        if (separator !== '\n') separator=child.separator;
+        continue;
+      }
+      if (child.nodeType === 3) {
+        const parent=child.parentElement;
+        if (!parent || !child.textContent || !visible(parent)) continue;
+        const range=document.createRange(); range.selectNodeContents(child);
+        if (boxes(range.getClientRects(),parent).length) append(child.textContent);
+      } else if (child.nodeType === 1 && rendered(child)) {
+        if (child.localName === 'br' && visible(child)) { separator=null; parts.push('\n'); continue; }
+        const boundary = visible(child) && ['block','list-item','table-row','flex','grid'].includes(css(child).display);
+        const boundarySeparator = css(child).display === 'table-cell' ? '\t' : '\n';
+        if (boundary || css(child).display === 'table-cell') {
+          pending.push({separator:boundarySeparator});
+          // Opening and closing boundaries coalesce until actual text arrives.
+          if (separator !== '\n') separator=boundarySeparator;
+        }
+        for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
+      }
+    }
+    return parts.join('').trim();
+  };
+  const regionLabel = element => {
+    const labelledBy = (attribute(element,'aria-labelledby') || '').split(/\s+/).filter(Boolean)
+      .map(id => document.getElementById?.(id)?.textContent || '').join(' ').trim();
+    const heading = typeof element.querySelector === 'function'
+      ? element.querySelector('h1,h2,h3,h4,h5,h6,[role=heading]') : null;
+    const headingText = heading && visible(heading) ? visibleText(heading) : '';
+    const candidates = [attribute(element,'aria-label'), labelledBy, headingText];
+    if (semanticRegion(element)) candidates.push(regionRole(element));
+    for (const candidate of candidates) {
+      const label = typeof candidate === 'string' ? candidate.trim() : '';
+      if (label) return label;
+    }
+    return semanticRegion(element) ? regionRole(element) : '';
+  };
+  const ancestorRegion = element => {
+    let first = null, article = null, main = null;
+    for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
+      if (!semanticRegion(ancestor) || !visible(ancestor)) continue;
+      let candidate = regionContexts.get(ancestor);
+      if (!candidate) {
+        candidate = {nodeId:nodeId(ancestor),role:regionRole(ancestor),label:regionLabel(ancestor)};
+        regionContexts.set(ancestor,candidate);
+      }
+      if (!first) first = candidate;
+      if (!article && candidate.role === 'article') article = candidate;
+      if (!main && candidate.role === 'main') main = candidate;
+    }
+    return article || main || first;
+  };
+  const svgVisibleText = element => {
+    if (element.namespaceURI !== 'http://www.w3.org/2000/svg') return '';
+    const pending=Array.from(element.childNodes).reverse(), parts=[];
+    while (pending.length) {
+      const child=pending.pop();
+      if (child.nodeType === 3) {
+        const parent=child.parentElement;
+        if (!parent || !child.textContent || !visible(parent)) continue;
+        const range=document.createRange(); range.selectNodeContents(child);
+        if (boxes(range.getClientRects(),parent).length) parts.push(child.textContent);
+      } else if (child.nodeType === 1 && rendered(child)) {
+        for (let i=child.childNodes.length-1;i>=0;i--) pending.push(child.childNodes[i]);
+      }
+    }
+    return parts.join('').trim();
+  };
+  // A text node inside a heading often belongs to a span, while a link heading
+  // is observed as a control. Preserve
+  // that observed semantic ancestry without treating font size, CSS classes,
+  // or text resemblance as a heading signal. ARIA headings require an
+  // explicit valid level; an incomplete role stays unclassified.
+  const headingLevel = element => {
+    for (let ancestor=element; ancestor; ancestor=ancestor.parentElement) {
+      const tag=ancestor.localName || '';
+      if (/^h[1-6]$/.test(tag)) return Number(tag.slice(1));
+      if (effectiveRole(ancestor) === 'heading') {
+        const raw=ancestor.getAttribute('aria-level');
+        return /^[1-6]$/.test(raw || '') ? Number(raw) : null;
+      }
+    }
+    return null;
+  };
+  const sourceContext = element => {
+    const raw = element.getAttribute('data-masc-source');
+    if (raw === null) return null;
+    try { return JSON.parse(raw); }
+    catch { return {schema:'invalid'}; }
+  };
+  const describe = (kind, element, rawText, rects, extra={}) => {
+    if (!rects.length) return;
+    if (chars >= maxChars) { truncated=true; return; }
+    const style=css(element), points=Array.from(rawText);
+    const text=points.slice(0,maxChars-chars).join('');
+    const nextTruncated = text.length !== rawText.length;
+    const nextChars = chars + Array.from(text).length;
+    const observation = {kind,nodeId:nodeId(element),tag:element.localName,text,rects,sourceContext:sourceContext(element),
+      ancestorRegion:kind === 'region' ? null : ancestorRegion(element),
+      color:style.color,fontSize:Number.parseFloat(style.fontSize),
+      fontWeight:style.fontWeight,whiteSpace:style.whiteSpace,...extra};
+    const addedBytes = jsonBytes(observation) + (nodes.length ? 1 : 0);
+    const nextBytes = envelopeBytes + nodeBytes + addedBytes
+      + String(nextChars).length - 1 + (nextTruncated ? -1 : 0);
+    if (nextBytes > responseByteLimit) { truncated=true; return; }
+    nodes.push(observation); nodeBytes+=addedBytes; chars=nextChars; truncated=nextTruncated;
+  };
+  const root = args.scope ? browserScene({...args.scope,mode:'resolve'}) : document.body;
+  if (view === 'regions' && root) {
+    const selector = 'main,nav,aside,section,article,header,footer,search,form[aria-label],form[aria-labelledby],[role~=main],[role~=navigation],[role~=complementary],[role~=region],[role~=log],[role~=banner],[role~=contentinfo],[role~=search],[role~=form]';
+    const regions = [...(root.matches(selector) ? [root] : []),...root.querySelectorAll(selector)];
+    for (const region of regions) {
+      if (truncated) break;
+      if (!visible(region) || !semanticRegion(region)) continue;
+      const role = effectiveRole(region) || region.localName;
+      const name = regionLabel(region);
+      describe('region',region,name,boxes(region.getClientRects(),region),{role});
+    }
+  }
+  // Landmarks and scrollable panes are independent observed properties.
+  // A site instruction chooses the relevant scope; a header must not hide
+  // an unrelated message pane from the observation.
+  if (view === 'regions' && root && !truncated) {
+    for (const element of [root,...root.querySelectorAll('*')]) {
+      if (truncated) break;
+      if (!visible(element)) continue;
+      const style = css(element);
+      const scrollsY = ['auto','scroll'].includes(style.overflowY)
+        && element.scrollHeight > element.clientHeight;
+      const scrollsX = ['auto','scroll'].includes(style.overflowX)
+        && element.scrollWidth > element.clientWidth;
+      if (!scrollsY && !scrollsX) continue;
+      const rects = boxes(element.getClientRects(),element);
+      if (!rects.length) continue;
+      const name = regionLabel(element) || (scrollsY ? 'Vertical scroll area' : 'Horizontal scroll area');
+      // The same element may already be a landmark: keep one reference.
+      const existing = nodes.find(node => node.nodeId === state.ids.get(element));
+      if (!existing) describe('region',element,name,rects,{role:'scroll-area'});
+    }
+  }
+  const stack = root && view === 'content' ? Array.from(root.childNodes).reverse() : [];
+  while (stack.length && !truncated) {
+    const node=stack.pop();
+    if (node.nodeType === 3) {
+      const element=node.parentElement;
+      if (!element || !node.textContent.trim() || !visible(element)) continue;
+      const range=document.createRange(); range.selectNodeContents(node);
+      describe('text',element,node.textContent,boxes(range.getClientRects(),element),
+        {headingLevel:headingLevel(element)});
+      continue;
+    }
+    if (node.nodeType !== 1 || ['script','style','noscript','template'].includes(node.localName)
+        || !rendered(node)) continue;
+    const tag=node.localName;
+    const control=isControl(node);
+    const controlRects = control && visible(node)
+      ? boxes(node.getClientRects(),node) : [];
+    if (control && visible(node) && !controlRects.length)
+      controlRects.push(...labelTextRects(node, (rects, parent) => boxes(rects,parent)));
+    if (control && visible(node) && controlRects.length) {
+      const labelledBy = (attribute(node,'aria-labelledby') || '').split(/\s+/).filter(Boolean)
+        .map(id => document.getElementById?.(id)?.textContent || '').join(' ').trim();
+      const nativeLabel = Array.from(node.labels || []).map(visibleText).filter(Boolean).join(' ');
+      const label=node.getAttribute('aria-label') || labelledBy || nativeLabel
+        || node.getAttribute('placeholder') || visibleText(node) || svgVisibleText(node) || tag;
+      const input=node instanceof HTMLInputElement, textarea=node instanceof HTMLTextAreaElement;
+      const target=labelledControl(node) || node, disabled=disabledControl(node);
+      const editable=(textarea || (input && ['text','search','email','url','tel','password','number'].includes(node.type)))
+        && !node.readOnly && !disabled;
+      describe('control',node,label,controlRects,{
+        ...(linkHref(node) !== null ? {href:linkHref(node)} : {}),
+        controlType:input ? node.type : tag,disabled,editable,
+        role:effectiveRole(node),
+        ...(target instanceof HTMLInputElement && ['checkbox','radio'].includes(target.type)
+          ? {checked:!!target.checked,...(target.type === 'checkbox' ? {indeterminate:!!target.indeterminate} : {})} : {}),
+        ...(checkedState(node) !== undefined ? {ariaChecked:checkedState(node)} : {}),
+        ...(['tab','option','row','treeitem','gridcell'].includes(effectiveRole(node))
+          && ['true','false'].includes(attribute(node,'aria-selected'))
+          ? {ariaSelected:attribute(node,'aria-selected')} : {}),
+        clickable:typeof node.click === 'function' && !disabled,
+        headingLevel:headingLevel(node)});
+      // A delegated handler does not consume its heading, prose or raster
+      // descendants. Intrinsic/ARIA controls retain their own label semantics.
+      if (node.hasAttribute('onclick') && !node.matches(nativeControlSelector)
+          && !actionRoles.has(effectiveRole(node)) && tag !== 'label') {
+        for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);
+        continue;
+      }
+      // Visit the outermost nested controls; each visits its own descendants.
+      const nested=Array.from(node.querySelectorAll?.(controlSelector+',a') || [])
+        .filter(isControl);
+      const nestedSet=new Set(nested);
+      for (let i=nested.length-1;i>=0;i--) {
+        let ancestor=nested[i].parentElement;
+        while (ancestor && ancestor !== node && !nestedSet.has(ancestor)) ancestor=ancestor.parentElement;
+        if (ancestor === node) stack.push(nested[i]);
+      }
+      continue;
+    }
+    if (visible(node) && ['img','svg','canvas','video','iframe','frame'].includes(tag)) {
+      describe('raster',node,node.getAttribute('alt') || node.getAttribute('aria-label') || tag,
+        boxes(node.getClientRects(),node));
+      if (tag === 'svg') for (const anchor of Array.from(node.querySelectorAll('a')).reverse())
+        if (linkHref(anchor) !== null) stack.push(anchor);
+      continue;
+    }
+    for (let i=node.childNodes.length-1;i>=0;i--) stack.push(node.childNodes[i]);
+  }
+  scene.chars=chars; scene.truncated=truncated;
+  return scene;
+}
+|js}
+
+(* The call a read runs after the runtime, with the scene arguments. *)
+let read_call = "return browserScene(arguments[0]);"
+let read = runtime ^ "\n" ^ read_call
+let page_function ~answer_limit_units body =
+  "function(args) { " ^ runtime
+  ^ "\nconst answer = JSON.stringify((function(){" ^ body ^ "}).call(null,args));"
+  ^ Printf.sprintf "\nreturn typeof answer === 'string' && answer.length > %d ? answer.length : answer; }"
+      answer_limit_units

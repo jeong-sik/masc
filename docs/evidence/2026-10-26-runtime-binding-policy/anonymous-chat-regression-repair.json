@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "scope": "anonymous OpenAI-compatible capability regression repair",
+  "source_pr": 46075,
+  "original_pr": 46006,
+  "baseline": {
+    "workflow": "Test",
+    "run_id": 40291347752,
+    "run_attempt": 1,
+    "event": "workflow_dispatch",
+    "head": "a1e8d00dbf4ba4aa5fcc659e203ddf757ac14242",
+    "url": "https://github.com/jeong-sik/masc/actions/runs/40291347752",
+    "inputs": {
+      "minimal": true,
+      "suite": "packages/agent_core/test/test_provider_runtime_binding,packages/agent_core/test/test_provider_config"
+    },
+    "status": "completed",
+    "conclusion": "failure",
+    "job_id": 121466905260,
+    "results": [
+      {
+        "suite": "test_provider_runtime_binding",
+        "tests": 29,
+        "passed": 28,
+        "failed": 1
+      },
+      {
+        "suite": "test_provider_config",
+        "tests": 141,
+        "passed": 125,
+        "failed": 16
+      }
+    ],
+    "failure_class": "behavioral assertions",
+    "observation": "Anonymous schema and forced-tool admission succeeded where stale fixtures expected rejection.",
+    "log_excerpt": "2026-10-26T08:19:50.4993039Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite\n2026-10-26T08:19:50.5019168Z [targeted] @@packages/agent_core/test/runtest-test_provider_runtime_binding: start 2026-10-26T08:19:50Z (dune alias)\n2026-10-26T08:20:28.3410150Z FAIL bare zai glm named unexpectedly accepted named forced tool_choice\n2026-10-26T08:20:28.3419860Z 1 failure! in 0.081s. 29 tests run.\n2026-10-26T08:20:28.3657634Z [targeted] @@packages/agent_core/test/runtest-test_provider_runtime_binding: FAIL exit 1 in 38s\n2026-10-26T08:20:28.3681782Z [targeted] @@packages/agent_core/test/runtest-test_provider_config: start 2026-10-26T08:20:28Z (dune alias)\n2026-10-26T08:20:31.0102095Z FAIL bare OpenAI model does not select an unscoped catalog row\n2026-10-26T08:20:31.0112550Z FAIL official endpoint does not promote an unscoped OpenAI catalog row\n2026-10-26T08:20:31.0135507Z FAIL unknown OpenAI-compatible host rejected\n2026-10-26T08:20:31.0145549Z FAIL expected Ollama Cloud minimax-m3 capability rejection\n2026-10-26T08:20:31.0154005Z FAIL expected Ollama Cloud model capability rejection\n2026-10-26T08:20:31.0163436Z FAIL expected Ollama Cloud minimax-m3 capability rejection\n2026-10-26T08:20:31.0171765Z FAIL expected Ollama Cloud model capability rejection\n2026-10-26T08:20:31.0179767Z FAIL unknown model has no structured-output capability\n2026-10-26T08:20:31.0189748Z FAIL response_format JsonSchema is validated\n2026-10-26T08:20:31.0198722Z FAIL expected model capability rejection\n2026-10-26T08:20:31.0206765Z FAIL expected Ollama Cloud minimax-m3 capability rejection\n2026-10-26T08:20:31.0216867Z FAIL expected Ollama Cloud model capability rejection\n2026-10-26T08:20:31.0227426Z FAIL unknown OpenAI-compatible host rejects json_schema\n2026-10-26T08:20:31.0237012Z FAIL expected MiMo json_schema request to fail closed\n2026-10-26T08:20:31.0247320Z FAIL endpoint and recognizable model text do not establish a capability\n2026-10-26T08:20:31.0260005Z FAIL undeclared schema is refused before dispatch\n2026-10-26T08:20:31.0266896Z 16 failures! in 0.697s. 141 tests run.\n2026-10-26T08:20:31.0293166Z [targeted] @@packages/agent_core/test/runtest-test_provider_config: FAIL exit 1 in 3s\n2026-10-26T08:20:31.0303686Z ##[error]Process completed with exit code 1."
+  },
+  "candidate": {
+    "workflow": "Test",
+    "run_id": 40292569538,
+    "run_attempt": 1,
+    "event": "workflow_dispatch",
+    "head": "0291f1211754740b605136a8e08fd6e5a3099985",
+    "base": "726c619c426b6cf93f9b220963530627a4722579",
+    "url": "https://github.com/jeong-sik/masc/actions/runs/40292569538",
+    "inputs": {
+      "minimal": true,
+      "suite": "packages/agent_core/test/test_provider_runtime_binding,packages/agent_core/test/test_provider_config,packages/agent_core/test/test_pipeline"
+    },
+    "result_observation": "workflow metadata and completed job logs read",
+    "status": "completed",
+    "conclusion": "success",
+    "job_id": 121470860824,
+    "results": [
+      {
+        "suite": "test_provider_runtime_binding",
+        "tests": 34,
+        "passed": 34,
+        "failed": 0
+      },
+      {
+        "suite": "test_provider_config",
+        "tests": 142,
+        "passed": 142,
+        "failed": 0
+      },
+      {
+        "suite": "test_pipeline",
+        "tests": 82,
+        "passed": 82,
+        "failed": 0
+      }
+    ],
+    "log_excerpt": "2026-10-26T08:32:24.3637948Z [targeted] EIO_BACKEND=<unset> timeout=600s per suite\n2026-10-26T08:32:24.3660131Z [targeted] @@packages/agent_core/test/runtest-test_provider_runtime_binding: start 2026-10-26T08:32:24Z (dune alias)\n2026-10-26T08:33:00.6529950Z Test Successful in 0.077s. 34 tests run.\n2026-10-26T08:33:00.6683396Z [targeted] @@packages/agent_core/test/runtest-test_provider_runtime_binding: OK in 36s\n2026-10-26T08:33:00.6703944Z [targeted] @@packages/agent_core/test/runtest-test_provider_config: start 2026-10-26T08:33:00Z (dune alias)\n2026-10-26T08:33:03.2107846Z Test Successful in 0.660s. 142 tests run.\n2026-10-26T08:33:03.2246682Z [targeted] @@packages/agent_core/test/runtest-test_provider_config: OK in 3s\n2026-10-26T08:33:03.2267876Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: start 2026-10-26T08:33:03Z (dune alias)\n2026-10-26T08:33:06.5534867Z Test Successful in 1.025s. 82 tests run.\n2026-10-26T08:33:06.5708254Z [targeted] @@packages/agent_core/test/runtest-test_pipeline: OK in 3s"
+  },
+  "independent_source_review": {
+    "verdict": "PASS",
+    "by": "pr46006_review",
+    "head": "0291f1211754740b605136a8e08fd6e5a3099985",
+    "base": "726c619c426b6cf93f9b220963530627a4722579",
+    "canonical_diff": "13b098258900b0b011c141c816d4bf59a3d7c470bc2d9ed89af03ca1c5d5a650",
+    "scope": "complete seven-file diff and direct consumers",
+    "github_formal_approval": false
+  },
+  "limitations": [
+    "Baseline predates the merged declaration-snapshot and selection-capture layers; candidate is based on main including them.",
+    "The candidate adds one separately registered anonymous schema case and splits stream/fallback into two named cases; merged selection-capture adds five binding cases.",
+    "Selected source hashes identify reviewed inputs, not the complete dependency or toolchain closure.",
+    "No local Dune build/typecheck; six changed OCaml files passed parser-only checks.",
+    "Backend inline tests and the full regression suite were not requested.",
+    "No provider HTTP, installed-runtime, merge, deployment or whole-issue completion claim."
+  ],
+  "github_source_review": {
+    "review_id": 5649251571,
+    "author": "pangyo-preachers",
+    "by": "code-reviewer-brother",
+    "state": "APPROVED",
+    "head": "0291f1211754740b605136a8e08fd6e5a3099985",
+    "base": "726c619c426b6cf93f9b220963530627a4722579",
+    "canonical_diff": "13b098258900b0b011c141c816d4bf59a3d7c470bc2d9ed89af03ca1c5d5a650",
+    "url": "https://github.com/jeong-sik/masc/pull/46075#pullrequestreview-5649251571"
+  },
+  "selected_source_sha256": {
+    "packages/agent_core/lib/llm_provider/provider_config.ml": "446306f8ff9385df24d1b28d5baffc759758ca6313d3ec2e57b998fabe1d27a2",
+    "packages/agent_core/lib/llm_provider/provider_config.mli": "791a8de828a4413cd101f3338571e37c4d9010461d9e9cc1114be61d85a9ce32",
+    "packages/agent_core/lib/llm_provider/backend_openai.ml": "8fed6dd7f6ca480bae4de61cd7206d1b24f3dbb700c1cfc08dfa245b906a1fd0",
+    "packages/agent_core/lib/llm_provider/complete_common.ml": "44b10c9f31c4ed74c89d471ca79e623a87e75d9bbd9716a0a624ccde1e7c71f6",
+    "packages/agent_core/lib/llm_provider/provider_declarations.ml": "5ba4af9ce03de8b8bf67fa7f7cce2405ad57695be0ec3dc6bb750dc70932a3c4",
+    "packages/agent_core/lib/llm_provider/model_catalog.ml": "5eca5254efaf710a9e96c5a88e899ee5e680049d28baa09f6d58435087d17232",
+    "packages/agent_core/lib/provider_runtime_binding.ml": "febe3e4e001fecf4367aa18c8d729e7ef29be4bc8e016a70370c08991cb46f88",
+    "packages/agent_core/lib/provider_runtime_binding.mli": "1fb41ab0bcb8b94f1273200bdcf2dc52b899e55ceb82a920d91518ca8163b261",
+    "packages/agent_core/lib/pipeline/pipeline.ml": "2a93608608fc333aef98b79c06b69e305ad1dce92cd0765add72305c96b0c333",
+    "packages/agent_core/test/test_provider_runtime_binding.ml": "348c370fb2275eba150db55fea8ef274a47a50d5fd711b7913b4264072b33d59",
+    "packages/agent_core/test/test_provider_config.ml": "10ca9ae263c2431fd3a02d97da83300109165d5eba03aa713d8a788a802ebec2",
+    "packages/agent_core/test/test_pipeline.ml": "44a8c05ef741aa3f9e0c3f9ffd4a5b4a2f7f9f0b44d573fdd679de8150f1be61",
+    "packages/agent_core/test/dune": "27217ba02efecbf4e402633a2e6a0e3a2c81c83261ebc69cbe2b9cf420571623",
+    "packages/agent_core/models.toml": "aaa7b97444eaf6a201ec99ffb73107b85ddfd4be9f0c9254c99371566e3183d7",
+    "scripts/ci-run-targeted-tests.sh": "7391426895132a2c027aea2d6c85bfcae18a038fd4e9640cc3c0b9fa66a8ca72",
+    ".github/workflows/test.yml": "6fb355583ed464aa653687f6882c72d936507654ff25fa6c67a795d02cf0d191"
+  },
+  "suite_selection_sha256": {
+    "baseline": "0aec5c69a7097cf0f45989e7296e2bde5b874afb987ce1757d2fa0c95c55835e",
+    "candidate": "283d9e604f0561044e640b7f4ec45f93398e406ae21c5cdcd00108c67644bc06"
+  },
+  "delivery": {
+    "code_head": "82a7e1ad266eedc895f581706aadccc69e9f7be1",
+    "executed_head": "0291f1211754740b605136a8e08fd6e5a3099985",
+    "delta_since_execution": [
+      "changelog.d/46075.md"
+    ],
+    "selected_input_hashes_match": true,
+    "non_documentation_inputs_unchanged": true,
+    "new_native_execution_claimed": false,
+    "review_boundary": "Execution and review records above retain their original heads. Current delivery-head reviews are recorded in the PR descriptions."
+  }
+}

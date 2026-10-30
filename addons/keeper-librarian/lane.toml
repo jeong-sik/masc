@@ -1,0 +1,35 @@
+id = "keeper-librarian"
+revision = "0.2.3"
+title = "Keeper Librarian proposal worker"
+contributions = ["derive"]
+image = "masc-lane-keeper-librarian:0.2.3"
+command = ["python3", "server.py", "--state", "/state"]
+
+[world.state]
+mode = "persistent"
+
+[world.tools]
+export = ["admit_memory", "derive_memory"]
+invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
+
+[world.exact_outputs.admission]
+schema = "schemas/admission.json"
+request_schema = true
+
+[world.exact_outputs.durable]
+schema = "schemas/durable.json"
+request_schema = true
+
+[world.outputs.requests]
+lanes = ["keeper/librarian"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+binding_schema = '''{"type":"object","properties":{"sources":{"type":"array","maxItems":0,"items":{"type":"object","properties":{},"additionalProperties":false}}},"required":["sources"],"additionalProperties":false}'''
+presentation = '''{"description":"Original admission and completed-history proposals; absorption, Memory and ACK remain host-owned","readings":[{"lane_id":"keeper/librarian","path":["pending"],"label":"Pending requests","unit":"requests","format":"number"},{"lane_id":"keeper/librarian","path":["finished"],"label":"Retained results","unit":"requests","format":"number"}]}'''

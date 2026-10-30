@@ -1,0 +1,11 @@
+{
+  "source_parent": "895df663fb303ee2fa95c38bbd28b571db9abb62",
+  "author_receipt_source": "bf7927734d0822f2ed47e41a86121eed78ba3907",
+  "changed": [
+    "last Tool actual serializer receipt",
+    "exact changed Goal paragraph in System",
+    "canonical Goal measure description"
+  ],
+  "request_sha256": "21e11b08408e14661ab36a92caff3df828d68cf1b4b31dff015e9d6cc6d7d787",
+  "scope": "Frozen inference-only full source prompt/receipt candidate; no actual returned tool executed; no new-binary G3 proof"
+}

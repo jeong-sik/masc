@@ -1,0 +1,13 @@
+Testing `workspace_git_repo_owner'.
+This run has ID `HZKOT7S6'.
+
+  [OK]          finding          0   the clone below the playground.
+  [OK]          finding          1   a clone at the root.
+  [OK]          finding          2   the base itself.
+  [OK]          finding          3   the nearest wins.
+  [OK]          bounds           0   stops at the base.
+  [OK]          bounds           1   a trailing slash is the same root.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/workspace_git_repo_owner'.
+Test Successful in 0.009s. 6 tests run.
+exit=0

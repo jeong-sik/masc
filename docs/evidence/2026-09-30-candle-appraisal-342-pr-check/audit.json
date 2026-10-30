@@ -1,0 +1,12 @@
+{
+  "run_id": 36647962228,
+  "job_id": 109675238834,
+  "head": "3420179195605aa87b628c1eaa301a798e9c4d2e",
+  "outcome": "failure",
+  "failing_suite": "test_keeper_gate_effect_coverage",
+  "failing_case": "per-keeper exact lane / a lane that reads no preference is refused",
+  "cause": "expected published-lane refusal text omitted candle_appraiser",
+  "raw_log_sha256": "65aa6b887be93fe408518874fab882eb35fa9c2c1aa9f921aa3ef502457545b1",
+  "repair": "append candle_appraiser to the explicit expected published-lane list; keep exact error and no-write assertions",
+  "following_current_head_native_result": "not yet verified"
+}

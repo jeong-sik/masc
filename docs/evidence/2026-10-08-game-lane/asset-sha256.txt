@@ -1,0 +1,24 @@
+# Operator-owned media fingerprints observed on 2026-10-08.
+# No game or BIOS bytes are stored in this repository.
+
+[msx-bios]
+cbios_logo_msx2.rom  a6ecf0bee1d1aeae4a2df4ace1d711b8c5883cbed50f7d6c8c524f6b19f03ef4
+cbios_main_msx2.rom 8767fca1a1ca5928496bb6185a0e951c66d68f65361305134a25f7912085766b
+cbios_sub.rom        95db258195d1dea673b3826a8ef3d4b747f87f93587ae66e137acd2e39c3c0f1
+
+[msx-media]
+sangokushi-2.dsk       bdfcf4e43a44b294df4eba01b5c86038a19be62f6b21c3b5096729f2a7446979
+sangokushi-2-b.dsk     55072be0b570c0fcdccf598a169a41593e9bb600c6ce04ad1600166e9ab7d7a0
+sangokushi-2-data.dsk  13ba514571ed539c3a6b123f708fa7110e4b2415c10b71d5b05d406bd01fd3d6
+genghis-khan.rom       b47b62506c0564cfaa6325c092cb1bc0a186dd731e16325e338abb41683b2840
+l-empereur.dsk         7307a403ba79250f8c3f63e3013d5fbbf82846815fe672e2ceec26522a60e035
+europa-sensen.dsk      4f31abab54bf7d333cf83384769e401cd2d787836291e77d7679a7eed3d89732
+rune-master.dsk        bc1306004e040d697d920fa3f2b092dd5a28e9c890e3d44d99fa5b7cd5e202ef
+super-daisenryaku.dsk  667e057c3d9f8668d0ff0800d3729fac63eef3d53b1da45ff7c05c0c0a3de03e
+
+[dos-sangokushi3]
+KOEI.COM  7554e068d7980c1b6e02758667010e61c606d902ea1af2c4e0287599105b3dba
+END.EXE   3ddf73753583c1f02cab2310e88fb6c1e6b42013ad753bc8ecce5fa2d712606b
+MAIN.EXE  d867396840a3d7b97828882a4235f454ce55d2a0b873305257ce635fdcff77d6
+RTK3.EXE  de88e04fcd886b3de59ed03b1b00e053aecee960e9a051ecda378f2a19205ea8
+# ENDSTIL.DAT is absent from this inventory; END.EXE references ENDSTIL.

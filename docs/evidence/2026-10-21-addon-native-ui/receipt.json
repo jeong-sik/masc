@@ -1,0 +1,173 @@
+{
+  "scope": "A02/A03/G06 actual native TUI + matching server + Docker observer; retained refresh defect reproduced; repair not executed",
+  "observed_product": "7b16a9175711aefe744c5c704e038a42fd5b6b7b",
+  "artifact_run": "39595834943",
+  "artifact_id": "12343798542",
+  "workflow_sha": "97468f95df78f35a35bb3fe14a9670240cced930",
+  "binary_identity": {
+    "tui": {
+      "binary_sha256": "5b96375632e178754e700c0d7651c56059e0a42428392cdeddcbaf98c982490f",
+      "command_arguments": [
+        "--build-commit"
+      ],
+      "exit_code": 0,
+      "stdout": "7b16a9175711aefe744c5c704e038a42fd5b6b7b",
+      "identity_expected": "7b16a9175711aefe744c5c704e038a42fd5b6b7b"
+    },
+    "server": {
+      "binary_sha256": "7c0b6ddf2ee9252a6d5d2d1f0808d20410cfa10a83f79958e7b209c40c95fc36",
+      "command_arguments": [
+        "build-commit"
+      ],
+      "exit_code": 0,
+      "stdout": "7b16a9175711aefe744c5c704e038a42fd5b6b7b",
+      "identity_expected": "7b16a9175711aefe744c5c704e038a42fd5b6b7b"
+    }
+  },
+  "workspace": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn",
+  "port": 64247,
+  "terminal": {
+    "columns": 160,
+    "rows": 56,
+    "type": "manual PTY / pyte VT cell capture"
+  },
+  "capture_provenance": "Actual child PTY stream and pyte0.8.2 cells; PNGs are derived renders, not physical desktop screenshots. No screen/layout assertions.",
+  "terminal_renderer": {
+    "font": "/System/Library/Fonts/Menlo.ttc",
+    "font_size": 13,
+    "cell_width_px": 8,
+    "cell_height_px": 18,
+    "png_size_px": [
+      1280,
+      1008
+    ]
+  },
+  "input": "Synthetic phrase snapshot_file; no VST/audio/player/model/browser/agent action execution",
+  "engine_id": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7",
+  "image_digest": "sha256:6dc223be960dd1a2adb9da10c34dcd9610231478a8e2e74a324a459c0bc02745",
+  "same_installation": {
+    "id": "native-ui-proof",
+    "source_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-native-ui-20261021-at4jf4xn/.masc/config/lane-addons/native-ui.toml",
+    "desired_revision": "230da07a548ac327c4d9c5339b35909cc90bf6629b5f52cc25df1c360967f2ca"
+  },
+  "original_worker": {
+    "instance": "01a15e68-fe1a-7000-a88d-b24037b9d7c8",
+    "incarnation": "01a15e68-fe1a-7000-a88d-b24037b9d7c8",
+    "container": "daabc0b0e7dc27732b9dae1f5be668097a3227cfe4c3ad6cd227461daf0e4ca1",
+    "row": "01a15e68-fe1a-7000-a88d-b24037b9d7c8/1/7bbdaca358143a01ffa148fa9819a5151148984cdd7f4427062b53f1219baa9d",
+    "evidence": [
+      {
+        "uri": "lane-evidence:0badb991bcc9088eef5b11f513437dec169a9cd4b182ad9eea5bf7a755f52f3b",
+        "sha256": "0badb991bcc9088eef5b11f513437dec169a9cd4b182ad9eea5bf7a755f52f3b"
+      }
+    ]
+  },
+  "new_worker": {
+    "instance": "01a15e78-1615-7000-b53a-3ae8691b7b31",
+    "incarnation": "01a15e78-1615-7000-b53a-3ae8691b7b31",
+    "container": "7db15b1ec4199bdff95e3d32f5f5890b9cf34c7f615b0260920a801feab5c1d9",
+    "row": "01a15e78-1615-7000-b53a-3ae8691b7b31/1/bf8ec278a8d10665fd4ef7639b5ab467d2ee125371073e446acdcaf0a39110b0",
+    "evidence": [
+      {
+        "uri": "lane-evidence:8d418493d99307f252799487dd7e42fcbbd590d7f773ef7df963306346497a5d",
+        "sha256": "8d418493d99307f252799487dd7e42fcbbd590d7f773ef7df963306346497a5d"
+      }
+    ]
+  },
+  "observed": [
+    {
+      "stage": "On",
+      "evidence": [
+        "05-on-overview.txt",
+        "06-on-detail.txt",
+        "on-before-off.json",
+        "container-on.json"
+      ],
+      "fact": "Applied, attached live worker; original synthetic stop_requested result"
+    },
+    {
+      "stage": "Off draft/save/cleanup",
+      "evidence": [
+        "08-off-draft.txt",
+        "09-off-save.txt",
+        "10-off-application.txt",
+        "off-document.json",
+        "off-after-save.json",
+        "container-off.json"
+      ],
+      "fact": "Explicit Space draft, s durable save; Cleaning then Inactive/Released; old exact container absent on original engine; original result readable from slice"
+    },
+    {
+      "stage": "retained refresh defect",
+      "evidence": [
+        "11-off-retained-detail.txt",
+        "12-off-retained-refreshed.txt",
+        "off-slice.json",
+        "15-off-history-detail.txt"
+      ],
+      "fact": "Manual/cadence Inspect replaces detail with live-only rows. History Enter temporarily restores original row. This is not a successful retained refresh."
+    },
+    {
+      "stage": "reconnect",
+      "evidence": [
+        "23-on-draft.txt",
+        "24-on-save.txt",
+        "25-reconnected-application.txt",
+        "29-on-new-overview.txt",
+        "31-on-new-result.txt",
+        "on-reconnected.json",
+        "container-reconnected.json"
+      ],
+      "fact": "Same TOML/installation/revision, new incarnation/container, new input2 pause_requested result"
+    },
+    {
+      "stage": "original result after reconnect",
+      "evidence": [
+        "33-old-result-after-reconnect.txt",
+        "on-reconnected-slice.json"
+      ],
+      "fact": "TUI history detail and API retain original row/evidence; next cadence can still erase visible rows in the broken binary"
+    },
+    {
+      "stage": "retained execution refusal",
+      "evidence": [
+        "14-off-history-overview.txt",
+        "34-retained-observe-refused.txt"
+      ],
+      "fact": "Retained controls omit Observe/action; manual o is refused locally; no action schema exists in this observer"
+    },
+    {
+      "stage": "teardown",
+      "evidence": [
+        "37-final-off-save.txt",
+        "39-final-cleanup-observed.txt",
+        "final-off.json",
+        "container-final-off.json",
+        "shutdown-request.json",
+        "shutdown-observed.json"
+      ],
+      "fact": "Same TUI Off save; both exact containers released/absent on same engine; only isolated server/TUI SIGTERM; later ps confirmed both PIDs absent"
+    }
+  ],
+  "failure_and_limits": [
+    "A02 remains incomplete until repaired native candidate is executed with retained refresh preserved.",
+    "Raw detail can show previously received attached inventory beside a separately fresh Off application receipt; those observations are not one atomic snapshot.",
+    "After original selection disappears, current installation is unselected until j/k chooses the replacement declaration; E with no current selection refuses. This avoids implicitly retargeting an effect.",
+    "No EDITOR/VISUAL was configured: first E retained the draft and reported that absence; Space/s works without launching an editor.",
+    "Observed source is earlier G01 product7b16. It does not include later G04/G03 or this repair. No combined Dashboard observation on this source, operator installation, action receipt/provider/real app or full 54-item completion.",
+    "File receipt status/revision is visible in actual terminal captures. The original HTTP POST response body was not separately recorded; GET documents are current owner reads, not reconstructed POST receipts.",
+    "Driver initial attempt failed on pyte private CPR support before correction; captured product interactions use successful child19489. Initial capture-tool failure is not product failure.",
+    "Terminal driver WNOHANG status is not a native exit-code receipt; stopped PIDs were separately observed absent."
+  ],
+  "repair": {
+    "pr": 44838,
+    "source_review": "PASS on b217eacd614a4845aef270f62f6f27f182de6d54; no new P0-P2 in bounded target correction",
+    "local_parser": "repair-parser.json",
+    "native_execution": "not performed",
+    "source_review_head": "b217eacd614a4845aef270f62f6f27f182de6d54",
+    "reviewed_base": "8feb8ea28f748c9e8c8ea905dc13b64671f04401",
+    "complete_diff_sha256": "d082102f2b65dc8ac263e3b91c9f8583e7b3ea686c3ad291585588b7343951f1",
+    "remaining_known_issue": "Successful Inspect followed by failed retained Slice still replaces previous rows; separate G06 follow-up, not reproduced in this runtime."
+  },
+  "secret_handling": "Allowlist copied only observations; private login/token files excluded; exact original bearer token absent from every copied evidence file."
+}

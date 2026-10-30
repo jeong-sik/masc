@@ -1,0 +1,13 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41191-parent-sync-20261005/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/components/settings-surface.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/fix-pr41191-parent-sync-20261005/dashboard
+
+
+ Test Files  1 passed (1)
+      Tests  63 passed (63)
+   Start at  05:21:03
+   Duration  2.59s (transform 39%, import 27%, tests 19%, environment 8%, setup 7%)
+

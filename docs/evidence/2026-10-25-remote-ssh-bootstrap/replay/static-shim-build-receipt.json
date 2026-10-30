@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "source_commit": "327fd90f7fec1a07f4ca7e5836d5cad3e8e39c15",
+  "source_tree": "0a5fda27e520c69c441ca1200fba66e9f2a73ef7",
+  "workflow_head": "9eadb31bb73bd4d66e43cb34bc6e7715a5106810",
+  "run_id": "40199085663",
+  "run_attempt": "1",
+  "platform": "linux-arm64",
+  "binary_sha256": "a53e5b79eda98a5a4a97c13e772b7b6c0fe724640078690c0445c848b6c88861",
+  "binary_bytes": 5472720,
+  "file_description": "/home/runner/work/masc/masc/dist/remote-ssh-probe/masc-exec-shim-linux-arm64: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, BuildID[sha1]=c5098098fea2d09d9d8dc10dd1d888b8dccef2cd, with debug_info, not stripped",
+  "probe": {
+    "name": "masc-exec-shim",
+    "version": "3.0.0",
+    "capabilities": [
+      "observe",
+      "user_notif"
+    ],
+    "release": "0.64.0"
+  },
+  "framed_config_execution": {
+    "exit": 0,
+    "stdout": "config-loaded",
+    "trailer": {
+      "v": 3,
+      "exit": 0,
+      "signal": null,
+      "timed_out": false,
+      "shim_error": null,
+      "execution_receipt": {
+        "mode": "effect",
+        "plan": "unrestricted",
+        "boundary": "sandbox_applied"
+      }
+    }
+  },
+  "driver_sha256": "2527e780befa1ea9697458f90df250511474396e620e9c986215ff8e13d840a1",
+  "installed": false,
+  "ssh_transport_exercised": false,
+  "keeper_exercised": false,
+  "production": false,
+  "release_verified": false
+}

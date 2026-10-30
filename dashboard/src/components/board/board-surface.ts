@@ -1,0 +1,1582 @@
+import { isImeComposing } from '../../lib/keyboard'
+import { scanMascReferences, postsSharingReferences } from '../../lib/masc-reference'
+import { html } from 'htm/preact'
+import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
+import { AtSign, Mic, Paperclip, Sparkles, Square, Trophy, X } from 'lucide-preact'
+import { ActionButton } from '../common/button'
+import { TimeAgo } from '../common/time-ago'
+import { showToast } from '../common/toast'
+import { requestConfirm } from '../common/confirm-dialog'
+import { EmptyState, LoadingState } from '../state-surfaces'
+import { TextInput } from '../common/input'
+import { Select } from '../common/select'
+import { Checkbox } from '../common/checkbox'
+import { BoardRichContent } from './board-rich-content'
+import { CursorPagination } from '../common/pagination'
+import { route } from '../../router'
+import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
+import { fetchBoardReactionsBatch, votePost } from '../../api/board'
+import type { BoardReactionSummary } from '../../types'
+import { broadcastReceiptMessage, createPost, currentDashboardActor, sendBroadcast } from '../../api'
+import { deleteBoardPost, setBoardPostPinned } from '../../api/actions'
+import { dispatchOperatorAction, operatorActionBusy } from '../../operator-store'
+import { registerBoardHearthsRefresh } from '../../sse-store'
+import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
+import { MessageWorkspaceTimeline } from './message-workspace-timeline'
+import { BoardCurationPanel } from './board-curation-panel'
+import { BoardKarmaPanel } from './board-karma-panel'
+import { extractMentionTargets, MentionInbox, MentionInboxPanel } from './mention-inbox'
+import { PostDetail, CommentThread, CommentForm } from './post-detail'
+import { PostAttachments } from './post-attachments'
+import { FusionBoardEvidence } from './fusion-evidence'
+import { ReactionBar } from './reaction-bar'
+import { PostShareActions } from './post-share-actions'
+import {
+  appendVoiceTranscriptDraft,
+  composerAttachmentDeliveryReason,
+  composerAttachmentTrayMeta,
+  ComposerV2,
+  formatFileSize,
+  serializeComposerBody,
+  uniqueComposerAttachmentId,
+} from './composer-v2'
+import type { ComposerAttachmentDraft, ComposerV2Mode } from './composer-v2'
+import { stableAttachmentId } from '../chat/attachments'
+import { useVoiceInput } from '../chat/voice-input'
+import { navigateBoard } from './board-route'
+import {
+  boardActorDisplayName,
+  boardActorSigilLabel,
+  boardActorTitle,
+  navigateToAuthor,
+  stripInlineMarkdown,
+  dedupeLeadingHeading,
+} from '../../lib/board-utils'
+import {
+  firstMentionNameFromMessage,
+  keeperNameFromTarget,
+  mentionQueryFromMessage,
+  replaceTrailingMentionDraft,
+} from '../../lib/mention-utils'
+import { useOperatorMentionContext } from '../common/use-operator-mention-context'
+import { ringFocusClasses } from '../common/ring'
+import {
+  boardPosts,
+  boardHearthFilter,
+  boardHearths,
+  boardFlairs,
+  boardLoading,
+  boardLoadingMore,
+  boardHasMore,
+  boardTotal,
+  boardHiddenCategories,
+  lastBoardRefreshAt,
+  refreshBoard,
+  loadMoreBoardPosts,
+  PAGE_SIZE,
+  feedVisibleLimit,
+  CONTENT_CATEGORIES,
+  detailPost,
+  detailLoading,
+  detailReadPhase,
+  detailLoadingOlder,
+  detailPostId,
+  detailFocusedCommentId,
+  detailComments,
+  detailCommentPage,
+  loadOlderPostComments,
+  deletingPostId,
+  selectedPostIds,
+  loadPostDetail,
+  togglePostSelection,
+  splitVisiblePosts,
+  contentCategory,
+  categoryLabel,
+  refreshBoardHearths,
+  refreshBoardFlairs,
+  selectedBoardPostId,
+  boardSortMode,
+  boardComposerMode,
+  SORT_MODES,
+} from './board-state'
+import type { BoardPost, BoardSortMode } from './board-state'
+
+export const BOARD_DETAIL_WIDTH_STORAGE_KEY = 'dashboard:board-detail-width'
+export const BOARD_DETAIL_WIDTH_DEFAULT = 360
+export const BOARD_DETAIL_WIDTH_MIN = 290
+// Raised 520 → 760: threads carry root-cause analyses with code blocks that
+// read poorly at 520px. The feed column is minmax(0, 1fr) so the user drives
+// the trade-off via the resize handle; the cap just lets it go wider.
+export const BOARD_DETAIL_WIDTH_MAX = 760
+
+/** What this post points at, and who else points there.
+ *
+ * Read from the references the writer actually wrote. An id spelled in prose
+ * is not a link: the TUI writes masc:// references beside what it names, and
+ * those are the ones that go where they say.
+ *
+ * Draws nothing when the post points at nothing — an empty heading would say
+ * the post was checked and found bare, which is not what silence means here.
+ */
+function PostReferences({ post }: { post: BoardPost }) {
+  const referenced = scanMascReferences(post.body)
+  if (referenced.length === 0) return null
+  const related = postsSharingReferences(post, boardPosts.value)
+  return html`
+    <div class="mt-3 border-t border-[var(--color-border-subtle)] pt-2">
+      <div class="text-2xs font-semibold text-[var(--color-fg-muted)]">가리키는 것</div>
+      <ul class="mt-1 space-y-0.5">
+        ${referenced.map(hit => html`
+          <li class="text-xs text-[var(--color-fg-primary)]">
+            <span class="text-[var(--color-fg-muted)]">${hit.kind}</span> ${hit.id}
+          </li>
+        `)}
+      </ul>
+      ${related.length > 0 ? html`
+        <div class="mt-2 text-2xs font-semibold text-[var(--color-fg-muted)]">
+          같은 것을 가리키는 글 ${related.length}
+        </div>
+        <ul class="mt-1 space-y-0.5">
+          ${related.slice(0, 5).map(other => html`
+            <li>
+              <button
+                type="button"
+                class="text-left text-xs text-[var(--color-fg-link)] hover:underline"
+                onClick=${() => navigateBoard({ post: other.id })}
+              >${other.title || other.id}</button>
+            </li>
+          `)}
+        </ul>
+      ` : null}
+    </div>
+  `
+}
+
+export function normalizeBoardDetailWidth(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric)) return BOARD_DETAIL_WIDTH_DEFAULT
+  return Math.min(BOARD_DETAIL_WIDTH_MAX, Math.max(BOARD_DETAIL_WIDTH_MIN, Math.round(numeric)))
+}
+
+function readStoredBoardDetailWidth(): number {
+  if (typeof window === 'undefined' || window.localStorage === undefined) {
+    return BOARD_DETAIL_WIDTH_DEFAULT
+  }
+  try {
+    const raw = window.localStorage.getItem(BOARD_DETAIL_WIDTH_STORAGE_KEY)
+    if (!raw) return BOARD_DETAIL_WIDTH_DEFAULT
+    try {
+      return normalizeBoardDetailWidth(JSON.parse(raw))
+    } catch {
+      return normalizeBoardDetailWidth(raw)
+    }
+  } catch {
+    return BOARD_DETAIL_WIDTH_DEFAULT
+  }
+}
+
+function writeStoredBoardDetailWidth(width: number): void {
+  if (typeof window === 'undefined' || window.localStorage === undefined) return
+  try {
+    window.localStorage.setItem(BOARD_DETAIL_WIDTH_STORAGE_KEY, JSON.stringify(width))
+  } catch {
+    // localStorage can be unavailable; keep the in-memory rail width.
+  }
+}
+
+/**
+ * Pure filter for board posts.
+ *
+ * Case-insensitive substring match on `post.title` and `post.body` so the
+ * operator can locate a post by a keyword in the headline or anywhere in
+ * the content. Title is checked first (cheapest, strongest signal), then
+ * body. Existing server-side `boardAuthorFilter` handles the author axis,
+ * so this client-side filter is intentionally scoped to textual content.
+ *
+ * Empty/whitespace query returns the input reference unchanged (no new
+ * array allocation, preserves referential equality for memoisation).
+ *
+ * Input is never mutated; BoardPost is treated as readonly.
+ */
+function filterBoardPosts(
+  posts: readonly BoardPost[],
+  query: string,
+): readonly BoardPost[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return posts
+  return posts.filter(post => {
+    if (post.title && post.title.toLowerCase().includes(needle)) return true
+    if (post.body && post.body.toLowerCase().includes(needle)) return true
+    return false
+  })
+}
+
+// ── Scroll marker (IntersectionObserver auto-load) ──────────────
+function ScrollMarker({ onVisible }: { onVisible: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const cb = useCallback(onVisible, [onVisible])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      (entries) => { if (entries[0]?.isIntersecting) cb() },
+      { rootMargin: '200px' },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [cb])
+  return html`<div ref=${ref} class="h-1" />`
+}
+
+// ── Board summary stats (compact inline) ─────────────────────────
+function renderLatencyChip(label: string, metric: BoardLatencyMetric) {
+  if (metric.last_latency_ms === null) return null
+  const failed = metric.last_ok === false
+  return html`
+    <span
+      class=${`text-2xs tabular-nums px-1.5 py-0.5 rounded-[var(--r-0)] border ${
+        failed
+          ? 'text-[var(--color-status-err)] border-[var(--bad-30)] bg-[var(--bad-10)]'
+          : 'text-[var(--color-fg-muted)] border-[var(--color-border-divider)] bg-[var(--color-bg-hover)]'
+      }`}
+      title=${failed && metric.last_error ? metric.last_error : `${label} latency`}
+      aria-label=${failed ? `${label} 지연 ${metric.last_latency_ms}밀리초 실패` : `${label} 지연 ${metric.last_latency_ms}밀리초`}
+    >
+      ${label} ${metric.last_latency_ms}ms${failed ? ' 실패' : ''}
+    </span>
+  `
+}
+
+function BoardSummary() {
+  const grouped = splitVisiblePosts(boardPosts.value)
+  const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
+  const metrics = boardLatencyMetrics.value
+  return html`
+    <div class="bd-summary v2-workspace-panel ss-card mx-6 flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 text-xs text-text-secondary" data-testid="bd-summary">
+      <h1 class="sr-only">Board</h1>
+      <span class="font-semibold text-text-primary tabular-nums text-md">${visibleCount}</span>
+      <span>개 표시 중</span>
+      ${grouped.groups.map(g => {
+        const meta = CONTENT_CATEGORIES.find(c => c.id === g.category)
+        return html`
+          <span class="text-[var(--color-fg-muted)]" aria-hidden="true">·</span>
+          <span>${meta?.icon ?? ''} ${g.posts.length}</span>
+        `
+      })}
+      ${renderLatencyChip('목록', metrics.list)}
+      ${renderLatencyChip('리액션', metrics.reaction_toggle)}
+      ${lastBoardRefreshAt.value ? html`
+        <span class="ml-auto text-2xs">갱신 <${TimeAgo} timestamp=${lastBoardRefreshAt.value} /></span>
+      ` : null}
+      <${ActionButton}
+        variant="ghost"
+        size="sm"
+        class="v2-workspace-action bd-summary-action ${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
+        onClick=${() => navigateBoard({ focus: 'curation' })}
+        ariaLabel="보드 큐레이션 열기"
+      >
+        <span class="inline-flex items-center gap-1">
+          <${Sparkles} size=${12} aria-hidden="true" />
+          큐레이션
+        </span>
+      <//>
+      <${ActionButton}
+        variant="ghost"
+        size="sm"
+        class="v2-workspace-action bd-summary-action !px-2"
+        onClick=${() => navigateBoard({ focus: 'karma' })}
+        ariaLabel="보드 카르마 열기"
+      >
+        <span class="inline-flex items-center gap-1">
+          <${Trophy} size=${12} aria-hidden="true" />
+          Karma
+        </span>
+      <//>
+    </div>
+  `
+}
+
+// ── Author sigil (v2) ──────────────────────────────────────────────
+function BdAuthor({ label, size = 24 }: { label: string; size?: number }) {
+  const isOperator = label.toLowerCase() === 'operator' || label.toLowerCase() === 'dashboard'
+  // Prototype board.jsx:8 renders the operator avatar as the literal "OP"
+  // glyph; keepers use a 2-letter monogram (SigilBadge style, fleet.jsx:8).
+  const sigil = isOperator ? 'OP' : label.slice(0, 2).toUpperCase()
+  return html`<span class=${`bd-sigil ${isOperator ? 'op' : ''}`} style=${{ width: size, height: size }}>${sigil}</span>`
+}
+
+// ── Post card (v2 list item) ───────────────────────────────────────
+function PostCard({ post, reactions, supportedEmojis, reactionsArriving = false }: {
+  post: BoardPost
+  reactions?: BoardReactionSummary[]
+  supportedEmojis?: readonly string[]
+  reactionsArriving?: boolean
+}) {
+  const isDeleting = deletingPostId.value === post.id
+  const previewBody = dedupeLeadingHeading(post.title, post.body)
+  const authorLabel = boardActorDisplayName(post.author, post.author_identity)
+  const authorSigilLabel = boardActorSigilLabel(post.author, post.author_identity)
+  const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const upvoteActive = post.current_vote === 'up'
+  const downvoteActive = post.current_vote === 'down'
+  const voteScoreLabel = String(post.votes)
+  const voteScoreAria = `점수 ${post.votes}`
+  const selected = selectedBoardPostId.value === post.id
+  const category = contentCategory(post)
+  const categoryMeta = CONTENT_CATEGORIES.find(item => item.id === category)
+
+  const handleVote = async (dir: 'up' | 'down', event: Event) => {
+    event.stopPropagation()
+    try {
+      await votePost(post.id, dir)
+      refreshBoard()
+    } catch (err) {
+      console.warn(`[board] vote failed (post=${post.id}, dir=${dir})`, err instanceof Error ? err.message : err)
+      showToast('투표에 실패했습니다', 'error')
+    }
+  }
+
+  const handleDelete = async (event: Event) => {
+    event.stopPropagation()
+    const confirmed = await requestConfirm({
+      title: '게시글 삭제',
+      message: `"${post.title}" 게시글을 삭제하시겠습니까?`,
+      tone: 'danger'
+    })
+    if (!confirmed) return
+    deletingPostId.value = post.id
+    try {
+      const outcome = await deleteBoardPost(post.id)
+      if (outcome.status === 'persistence_pending') {
+        showToast('게시글 삭제를 적용했습니다. 저장이 아직 완료되지 않았습니다.', 'warning')
+      } else {
+        showToast('게시글을 삭제했습니다', 'success')
+      }
+      refreshBoard()
+    } catch (err) {
+      console.warn('[board] post delete failed', err instanceof Error ? err.message : err)
+      showToast('게시글 삭제에 실패했습니다', 'error')
+    } finally {
+      deletingPostId.value = null
+    }
+  }
+
+  const handlePin = async (event: Event) => {
+    event.stopPropagation()
+    const next = !post.pinned
+    try {
+      await setBoardPostPinned(post.id, next)
+      showToast(next ? '게시글을 고정했습니다' : '고정을 해제했습니다', 'success')
+      refreshBoard()
+    } catch (err) {
+      console.warn(`[board] pin toggle failed (post=${post.id})`, err instanceof Error ? err.message : err)
+      showToast('고정 변경에 실패했습니다', 'error')
+    }
+  }
+
+  const openPost = () => {
+    selectedBoardPostId.value = post.id
+    void loadPostDetail(post.id, null)
+  }
+  const handlePostKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    openPost()
+  }
+
+  return html`
+    <article
+      role="button"
+      tabIndex=${0}
+      aria-label=${`게시글 열기: ${stripInlineMarkdown(post.title)}`}
+      class=${`bd-post group ${selected ? 'sel' : ''} ${ringFocusClasses()}`}
+      data-testid=${`bd-post-${post.id}`}
+      onClick=${openPost}
+      onKeyDown=${handlePostKeyDown}
+    >
+      <div class="bd-post-h">
+        <${BdAuthor} label=${authorSigilLabel} />
+        <a
+          class="who bd-author-action"
+          href=${`#monitoring/agents/${encodeURIComponent(post.author_identity?.raw ?? post.author)}`}
+          title=${authorTitle}
+          onClick=${(e: Event) => {
+            e.stopPropagation()
+            navigateToAuthor(post.author, e, post.author_identity)
+          }}
+        >${authorLabel}</a>
+        ${post.pinned ? html`<span class="bd-badge pin" title="고정된 게시글">고정</span>` : null}
+        ${post.closed
+          ? html`<span class="bd-badge closed" title=${`${post.closed.closed_by}님이 닫음`}>닫힘${
+              post.closed.successor_id
+                ? html` → <a
+                    href=${`#board/${post.closed.successor_id}`}
+                    onClick=${(e: Event) => e.stopPropagation()}
+                    >${post.closed.successor_id}</a
+                  >`
+                : null
+            }</span>`
+          : null}
+        <span class="bd-badge" title="게시글 분류">${categoryMeta?.icon ?? ''} ${categoryLabel(category)}</span>
+        ${post.flair ? html`<span class="bd-badge">flair:${post.flair}</span>` : null}
+        ${boardHearthFilter.value === '' && post.hearth ? html`<span class="bd-badge">${post.hearth}</span>` : null}
+        <span class="ts"><${TimeAgo} timestamp=${post.created_at} /></span>
+        <label class="bd-post-select-target v2-mobile-operator-target" onClick=${(e: Event) => e.stopPropagation()}>
+          <${Checkbox}
+            ariaLabel=${`게시글 선택: ${post.id}`}
+            class="!w-4 !h-4"
+            checked=${selectedPostIds.value.has(post.id)}
+            onClick=${(e: Event) => togglePostSelection(post.id, e)}
+          />
+        </label>
+      </div>
+      <div class="bd-post-title">${stripInlineMarkdown(post.title)}</div>
+      <div class="bd-post-body">
+        <${BoardRichContent} audience=${post.audience} text=${previewBody} previewLimit=${1} />
+      </div>
+      ${post.attachments
+        ? html`<div onClick=${(event: Event) => event.stopPropagation()} onKeyDown=${(event: KeyboardEvent) => event.stopPropagation()}>
+            <${PostAttachments} attachments=${post.attachments} compact />
+          </div>`
+        : null}
+      <div class="bd-post-foot">
+        <div onClick=${(event: Event) => event.stopPropagation()} onKeyDown=${(event: KeyboardEvent) => event.stopPropagation()}>
+          <${ReactionBar}
+            targetType="post"
+            targetId=${post.id}
+            compact
+            initialSummaries=${reactions ?? post.reactions ?? []}
+            supportedEmojis=${supportedEmojis ?? post.supported_reaction_emojis}
+            summariesArriving=${reactionsArriving}
+          />
+        </div>
+        <span class="karma" aria-label=${voteScoreAria} title=${voteScoreLabel}>karma <b>${voteScoreLabel}</b></span>
+        <button type="button"
+          aria-label="추천"
+          aria-pressed=${upvoteActive ? 'true' : 'false'}
+          disabled=${upvoteActive}
+          class="bd-react ${upvoteActive ? 'mine' : ''}"
+          onClick=${(event: Event) => handleVote('up', event)}
+        >▲</button>
+        <button type="button"
+          aria-label="비추천"
+          aria-pressed=${downvoteActive ? 'true' : 'false'}
+          disabled=${downvoteActive}
+          class="bd-react ${downvoteActive ? 'mine' : ''}"
+          onClick=${(event: Event) => handleVote('down', event)}
+        >▼</button>
+        <span class="replies">답글 ${post.comment_count}</span>
+        <${PostShareActions} post=${post} compact />
+        <span class="ml-auto hidden group-hover:inline-flex items-center gap-1">
+          <${ActionButton}
+            variant="ghost"
+            size="sm"
+            class="v2-workspace-action !py-0.5"
+            onClick=${handlePin}
+            pressed=${post.pinned ?? false}
+            ariaLabel=${post.pinned ? `고정 해제: ${post.id}` : `고정: ${post.id}`}
+          >${post.pinned ? '고정 해제' : '고정'}<//>
+          <${ActionButton}
+            variant="danger"
+            size="sm"
+            class="v2-workspace-action !py-0.5"
+            onClick=${handleDelete}
+            disabled=${isDeleting}
+            ariaBusy=${isDeleting}
+            ariaLabel=${`게시글 삭제: ${post.id}`}
+          >${isDeleting ? '삭제 중...' : '삭제'}<//>
+        </span>
+      </div>
+    </article>
+  `
+}
+
+// ── v2 board chrome ────────────────────────────────────────────────
+// Glyph vocabulary mirrors the keeper-v2 prototype (data-surfaces.jsx:7-12):
+// all→◈, incidents→⚠, watercooler→◌, every other hearth→⌗. Live hearth
+// names are data-driven, so the generic ⌗ default matches the prototype's
+// per-hearth glyph while the two named specials keep their prototype glyphs.
+const SUB_BOARD_GLYPHS: Record<string, string> = {
+  all: '◈',
+  incidents: '⚠',
+  watercooler: '◌',
+  default: '⌗',
+}
+
+function countMentionMessages(): number {
+  return messages.value.filter(message => extractMentionTargets(message.content).length > 0).length
+}
+
+function BdRail({ activeSub, onSub, onMentions }: {
+  activeSub: string
+  onSub: (sub: string) => void
+  onMentions: () => void
+}) {
+  const hearths = boardHearths.value
+  const allCount = boardTotal.value ?? boardPosts.value.length
+  const allCountLabel = boardTotal.value === null && boardHasMore.value ? `${allCount}+` : String(allCount)
+  const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
+
+  return html`
+    <nav class="bd-rail" aria-label="서브보드">
+      <div class="bd-hearth-scroll" tabindex="0" aria-label="서브보드 목록">
+        <h4>서브보드</h4>
+        <button
+          type="button"
+          class=${`bd-sub ${activeSub === '' ? 'on' : ''}`}
+          onClick=${() => onSub('')}
+          data-testid="bd-sub-all"
+        >
+          <span class="glyph">${SUB_BOARD_GLYPHS.all}</span>
+          <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>전체</span>
+          <span
+            class="n"
+            title=${boardTotal.value === null && boardHasMore.value ? `${allCount}개 이상 · 현재 불러온 게시글 기준` : `전체 ${allCount}개`}
+          >${allCountLabel}</span>
+        </button>
+        ${hearths.map(hearth => html`
+          <button
+            key=${hearth.name}
+            type="button"
+            class=${`bd-sub ${activeSub === hearth.name ? 'on' : ''}`}
+            onClick=${() => onSub(hearth.name)}
+            data-testid=${`bd-sub-${hearth.name}`}
+          >
+            <span class="glyph">${SUB_BOARD_GLYPHS[hearth.name] ?? SUB_BOARD_GLYPHS.default}</span>
+            <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${hearth.name}</span>
+            <span class="n">${hearth.count}</span>
+          </button>
+        `)}
+      </div>
+      <div class="bd-queue-section">
+        <div class="div"></div>
+        <h4>큐</h4>
+        <button type="button" class="bd-sub" onClick=${onMentions} data-testid="bd-queue-mentions">
+          <span class="glyph">＠</span>
+          멘션 인박스
+          <span class="n">${mentionCount}</span>
+        </button>
+      </div>
+    </nav>
+  `
+}
+
+function BdFeedHead({ countLabel, contentQuery, onContentQuery, sortMode, onSort }: {
+  countLabel: string
+  contentQuery: string
+  onContentQuery: (value: string) => void
+  sortMode: BoardSortMode
+  onSort: (sortMode: BoardSortMode) => void
+}) {
+  const activeHearth = boardHearthFilter.value
+  // Prototype board.jsx:158 renders the bare hearth label (e.g. "core/scheduler")
+  // with no "#" prefix; the hearth name already carries its namespace path.
+  const title = activeHearth === '' ? '전체 피드' : activeHearth
+
+  return html`
+    <div class="bd-feed-head">
+      <h2>${title}</h2>
+      <span class="ns">${countLabel}</span>
+      <${TextInput}
+        type="search"
+        value=${contentQuery}
+        placeholder="제목/본문에서 검색"
+        ariaLabel="게시글 본문 필터"
+        onInput=${(e: Event) => onContentQuery((e.target as HTMLInputElement).value)}
+        class="min-w-40 max-w-64 !px-2 !py-1 !text-xs"
+      />
+      <${Select}
+        value=${sortMode}
+        options=${SORT_MODES.map(mode => ({ value: mode.id, label: mode.label }))}
+        ariaLabel="게시글 정렬"
+        testId="bd-sort-mode"
+        class="!w-auto min-w-32 !px-2 !py-1 !text-xs"
+        onInput=${(value: string) => onSort(value as BoardSortMode)}
+      />
+    </div>
+  `
+}
+
+function BdDetailResizeHandle({
+  width,
+  onWidthChange,
+}: {
+  width: number
+  onWidthChange: (width: number) => void
+}) {
+  const handlePointerDown = (event: PointerEvent) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = width
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      onWidthChange(startWidth + startX - moveEvent.clientX)
+    }
+    const stopTracking = () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', stopTracking)
+      window.removeEventListener('pointercancel', stopTracking)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', stopTracking, { once: true })
+    window.addEventListener('pointercancel', stopTracking, { once: true })
+  }
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      onWidthChange(width + 10)
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      onWidthChange(width - 10)
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      onWidthChange(BOARD_DETAIL_WIDTH_MIN)
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      onWidthChange(BOARD_DETAIL_WIDTH_MAX)
+    }
+  }
+
+  return html`
+    <button
+      type="button"
+      class="bd-detail-resize"
+      aria-label="Resize board detail rail"
+      aria-orientation="vertical"
+      aria-valuemin=${BOARD_DETAIL_WIDTH_MIN}
+      aria-valuemax=${BOARD_DETAIL_WIDTH_MAX}
+      aria-valuenow=${width}
+      data-testid="bd-detail-resize"
+      onPointerDown=${handlePointerDown}
+      onKeyDown=${handleKeyDown}
+    />
+  `
+}
+
+function BdThreadDetail({
+  post,
+  detailWidth,
+  onDetailWidthChange,
+  onClose,
+}: {
+  post: BoardPost
+  detailWidth: number
+  onDetailWidthChange: (width: number) => void
+  onClose: () => void
+}) {
+  useEffect(() => {
+    if (detailPostId.value !== post.id || detailFocusedCommentId.value !== null) {
+      void loadPostDetail(post.id, null)
+    }
+  }, [post.id])
+
+  const authorLabel = boardActorDisplayName(post.author, post.author_identity)
+  const authorSigilLabel = boardActorSigilLabel(post.author, post.author_identity)
+  const evidencePost = detailPostId.value === post.id && detailPost.value ? detailPost.value : post
+
+  return html`
+    <aside class="bd-detail has-post" data-testid="bd-thread-detail">
+      <${BdDetailResizeHandle} width=${detailWidth} onWidthChange=${onDetailWidthChange} />
+      <div class="bd-detail-h">
+        <h3>스레드</h3>
+        <button type="button" class="bd-detail-x" onClick=${onClose} aria-label="닫기">✕</button>
+      </div>
+      <div class="bd-detail-scroll">
+        <div class="bd-th">
+          <${BdAuthor} label=${authorSigilLabel} size=${26} />
+          <div>
+            <div class="bd-th-hd"><span class="who">${authorLabel}</span><span class="ts mono"><${TimeAgo} timestamp=${post.created_at} /></span></div>
+            <div class="bd-th-body">
+              <div class="text-sm font-semibold mb-1">${stripInlineMarkdown(post.title)}</div>
+              <div class="mb-2 flex flex-wrap items-center gap-2">
+                <${ActionButton}
+                  variant="ghost"
+                  size="sm"
+                  class="v2-workspace-action"
+                  onClick=${() => navigateBoard({ post: post.id })}
+                  ariaLabel=${`전체 상세 보기: ${post.id}`}
+                  testId=${`bd-open-full-detail-${post.id}`}
+                >전체 상세 보기<//>
+                <${PostShareActions} post=${post} />
+              </div>
+              <${BoardRichContent} audience=${post.audience} text=${post.body} previewLimit=${4} />
+              <${PostReferences} post=${post} />
+              <${FusionBoardEvidence} post=${evidencePost} class="mt-3" />
+            </div>
+          </div>
+        </div>
+        ${detailLoading.value
+          ? html`<${LoadingState} title="댓글 불러오는 중…" />`
+          : html`<${CommentThread}
+              comments=${detailComments.value}
+              postId=${post.id}
+              totalCount=${detailCommentPage.value.total}
+              olderCount=${detailCommentPage.value.offset}
+              loadingOlder=${detailLoadingOlder.value}
+              onLoadOlder=${() => loadOlderPostComments(post.id)}
+            />`}
+        <${CommentForm} postId=${post.id} />
+      </div>
+    </aside>
+  `
+}
+
+function BdDetail({
+  post,
+  detailWidth,
+  mentionsOpen,
+  onDetailWidthChange,
+  onClose,
+  onCloseMentions,
+}: {
+  post: BoardPost | null
+  detailWidth: number
+  mentionsOpen: boolean
+  onDetailWidthChange: (width: number) => void
+  onClose: () => void
+  onCloseMentions: () => void
+}) {
+  if (post) return html`
+    <${BdThreadDetail}
+      post=${post}
+      detailWidth=${detailWidth}
+      onDetailWidthChange=${onDetailWidthChange}
+      onClose=${onClose}
+    />
+  `
+  // No post selected and the mention inbox is closed: render nothing so the
+  // detail grid track collapses to 0 (two-column rail + feed). The mention
+  // inbox is reachable from the rail (bd-queue-mentions). Matches the v2
+  // prototype, which only expands the detail column on demand.
+  if (!mentionsOpen) return null
+  return html`
+    <aside class="bd-detail is-mentions is-mobile-open" data-testid="bd-mention-detail">
+      <${BdDetailResizeHandle} width=${detailWidth} onWidthChange=${onDetailWidthChange} />
+      <div class="bd-detail-h">
+        <h3>멘션 인박스</h3>
+        <button type="button" class="bd-detail-x bd-detail-mobile-close" onClick=${onCloseMentions} aria-label="멘션 인박스 닫기">✕</button>
+      </div>
+      <div class="bd-detail-scroll">
+        <${MentionInboxPanel} />
+      </div>
+    </aside>
+  `
+}
+
+function BdComposer() {
+  const mode = boardComposerMode.value
+  const [localTitle, setLocalTitle] = useState('')
+  const [localBody, setLocalBody] = useState('')
+  const [localHearth, setLocalHearth] = useState(boardHearthFilter.value)
+  const [localFlair, setLocalFlair] = useState('')
+  const [mobileKeeperTarget, setMobileKeeperTarget] = useState('')
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [mobileAttachments, setMobileAttachments] = useState<ComposerAttachmentDraft[]>([])
+  const [submitting, setSubmitting] = useState(false)
+  const mobileFileInputRef = useRef<HTMLInputElement>(null)
+  const mobileVoice = useVoiceInput({
+    onTranscribed: (text) => {
+      setLocalBody(current => appendVoiceTranscriptDraft(current, text))
+      showToast('Voice transcribed.', 'success')
+    },
+    onError: (message) => {
+      showToast(message, 'error')
+    },
+  })
+
+  useEffect(() => {
+    if (boardHearthFilter.value !== localHearth) {
+      setLocalHearth(boardHearthFilter.value)
+    }
+  }, [boardHearthFilter.value])
+
+  const tabs: Array<{ key: 'post' | 'mention'; label: string }> = [
+    { key: 'post', label: '게시' },
+    { key: 'mention', label: '멘션' },
+  ]
+  const activeModeLabel = tabs.find(tab => tab.key === mode)?.label ?? '게시'
+
+  const placeholder = mode === 'post'
+    ? `${boardHearthFilter.value ? `#${boardHearthFilter.value}` : '보드'}에 게시…`
+    : '@keeper 를 멘션해 직접 지시…'
+
+  const composerMode: ComposerV2Mode = mode === 'post' ? 'broadcast' : 'dm'
+  const mobileMention = useOperatorMentionContext({
+    message: localBody,
+    target: mobileKeeperTarget,
+    dmActive: mode === 'mention',
+    listboxId: 'bd-mobile-mention-listbox',
+    fallbackKeepers: dashboardKeepers.value,
+  })
+  const mobileMentionOptions = mobileMention.onlineKeepers
+  const mobileMentionOptionNames = mobileMentionOptions.map(keeper => keeper.name).join('\0')
+  const selectedMobileKeeper = keeperNameFromTarget(mobileKeeperTarget)
+  const selectedMobileKeeperAvailable =
+    !!selectedMobileKeeper && mobileMentionOptions.some(keeper => keeper.name === selectedMobileKeeper)
+  const typedMobileMention = mode === 'mention' ? firstMentionNameFromMessage(localBody) : null
+  const matchedTypedMobileMention = typedMobileMention
+    ? mobileMentionOptions.find(keeper => keeper.name.toLowerCase() === typedMobileMention.toLowerCase())?.name ?? null
+    : null
+  const mobileMentionTarget = mode === 'mention'
+    ? mobileMention.trailingMentionTarget
+      ?? matchedTypedMobileMention
+      ?? (selectedMobileKeeperAvailable ? selectedMobileKeeper : null)
+      ?? (mobileMentionOptions.length === 0 ? typedMobileMention : null)
+    : null
+  const mobileMentionUnresolved =
+    mode === 'mention'
+    && !!typedMobileMention
+    && !mobileMentionTarget
+    && mobileMentionOptions.length > 0
+  const mobileQuickBusy = submitting || operatorActionBusy.value
+  const mobileAttachmentDeliveryReason = mode === 'mention'
+    ? composerAttachmentDeliveryReason(mobileAttachments)
+    : null
+  const mobileMentionHasDraft = mode === 'mention'
+    && (localBody.trim() !== '' || mobileAttachments.length > 0)
+  const mobileQuickHasDraft = mode === 'mention' ? mobileMentionHasDraft : localBody.trim() !== ''
+  const mobileQuickDisabled = mobileQuickBusy
+    || mobileVoice.state !== 'idle'
+    || !mobileQuickHasDraft
+    || mobileAttachmentDeliveryReason !== null
+    || (mode === 'mention' && (!mobileMentionTarget || mobileMentionUnresolved))
+
+  useEffect(() => {
+    if (mode !== 'mention') return
+    if (selectedMobileKeeperAvailable) return
+    const firstKeeper = mobileMentionOptions[0]?.name
+    setMobileKeeperTarget(firstKeeper ? `keeper:${firstKeeper}` : '')
+  }, [mode, mobileMentionOptionNames, selectedMobileKeeperAvailable])
+
+  useEffect(() => {
+    if (mode !== 'mention') return
+    if (mobileMentionOptions.length > 0) return
+    void refreshExecution()
+  }, [mode, mobileMentionOptions.length])
+
+  function mobilePostTitle(body: string): string {
+    const firstLine = body
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .find(Boolean)
+    if (!firstLine) return 'Board post'
+    return firstLine.replace(/\s+/g, ' ').slice(0, 72)
+  }
+
+  function chooseMobileMentionTarget(value: string): void {
+    const keeperName = keeperNameFromTarget(value)
+    setMobileKeeperTarget(value)
+    if (!keeperName) return
+    setLocalBody(current => mentionQueryFromMessage(current) !== null ? replaceTrailingMentionDraft(current, keeperName) : current)
+  }
+
+  function chooseMobileMentionCandidate(keeperName: string): void {
+    setMobileKeeperTarget(`keeper:${keeperName}`)
+    setLocalBody(current => replaceTrailingMentionDraft(current, keeperName))
+  }
+
+  function attachMobileMentionFiles(files: FileList | File[]): void {
+    const nextFiles = Array.from(files).slice(0, 6)
+    if (nextFiles.length === 0) return
+    setMobileAttachments(current => {
+      const pending: ComposerAttachmentDraft[] = []
+      for (const file of nextFiles) {
+        const kind = file.type.startsWith('image/') ? 'image' : 'file'
+        const baseId = stableAttachmentId({
+          name: file.name,
+          type: kind,
+          mimeType: file.type || null,
+          size: file.size,
+        })
+        pending.push({
+          id: uniqueComposerAttachmentId(baseId, current, pending),
+          kind,
+          name: file.name,
+          size: formatFileSize(file.size),
+          sizeBytes: file.size,
+          mime: file.type || null,
+        })
+      }
+      return [...current, ...pending].slice(0, 6)
+    })
+  }
+
+  function resetMobileMentionDrafts(): void {
+    setMobileAttachments([])
+  }
+
+  async function submitPost(event?: Event, options: { compactMobile?: boolean } = {}): Promise<void> {
+    event?.stopPropagation()
+    const body = localBody.trim()
+    const title = options.compactMobile ? mobilePostTitle(body) : localTitle.trim()
+    if (!title || !body) return
+    setSubmitting(true)
+    try {
+      const contentWithFlair = localFlair
+        ? `[flair:${localFlair}]\n${body.replace(/^\[flair:[a-z]+\]\s*/i, '')}`
+        : body
+      await createPost(title, contentWithFlair, 'dashboard-user', { hearth: localHearth || undefined })
+      setLocalTitle('')
+      setLocalBody('')
+      setLocalFlair('')
+      setMobileOpen(false)
+      showToast('글을 등록했습니다', 'success')
+      refreshBoard()
+    } catch (err) {
+      console.warn('[board] post submit failed', err instanceof Error ? err.message : err)
+      showToast('글 등록에 실패했습니다', 'error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function submitMobileQuick(event?: Event): Promise<void> {
+    if (mode === 'post') {
+      await submitPost(event, { compactMobile: true })
+      return
+    }
+
+    event?.stopPropagation()
+    const body = localBody.trim()
+    if (mobileQuickDisabled) return
+    const message = mode === 'mention'
+      ? serializeComposerBody({ text: localBody, attachments: [], voice: null })
+      : body
+    if (!message) return
+    setSubmitting(true)
+    try {
+      if (mode === 'mention') {
+        const keeperId = mobileMentionTarget
+        if (!keeperId) return
+        await dispatchOperatorAction({
+          actor: currentDashboardActor(),
+          action_type: 'keeper_message',
+          target_type: 'keeper',
+          target_id: keeperId,
+          payload: { message },
+        })
+      } else {
+        const receipt = await sendBroadcast(currentDashboardActor(), message)
+        if (!receipt.ok) {
+          setLocalBody('')
+          resetMobileMentionDrafts()
+          setMobileOpen(false)
+          showToast(broadcastReceiptMessage(receipt), 'warning')
+          return
+        }
+      }
+      setLocalBody('')
+      resetMobileMentionDrafts()
+      setMobileOpen(false)
+      showToast('Message sent.', 'success')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Message send failed.'
+      console.warn('[board] mobile quick compose failed', message)
+      showToast(message, 'error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return html`
+    <div class="bd-composer" data-testid="bd-composer" data-mobile-open=${mobileOpen ? 'true' : 'false'}>
+      <div class="bd-composer-mobile-summary" data-testid="bd-composer-mobile-summary">
+        <div class="bd-composer-mobile-copy">
+          <span class="bd-composer-mobile-kicker">${localHearth ? `#${localHearth}` : 'Board'}</span>
+          <span class="bd-composer-mobile-title">${activeModeLabel} 작성</span>
+        </div>
+        <button
+          type="button"
+          class="bd-composer-mobile-toggle"
+          aria-expanded=${mobileOpen ? 'true' : 'false'}
+          aria-controls="bd-composer-fields"
+          onClick=${() => setMobileOpen(open => !open)}
+          data-testid="bd-composer-mobile-toggle"
+        >${mobileOpen ? '접기' : '새 글'}</button>
+      </div>
+      <div class="bd-composer-fields" id="bd-composer-fields">
+        <div class="bd-comp-tabs" role="tablist" aria-label="Composer mode">
+          ${tabs.map(tab => html`
+            <button
+              key=${tab.key}
+              type="button"
+              role="tab"
+              aria-selected=${mode === tab.key ? 'true' : 'false'}
+              class=${`bd-comp-tab ${mode === tab.key ? 'on' : ''}`}
+              onClick=${() => { boardComposerMode.value = tab.key }}
+              data-testid=${`bd-comp-tab-${tab.key}`}
+            >${tab.label}</button>
+          `)}
+        </div>
+        ${mode === 'mention' ? html`
+          <div class="bd-mobile-mention-targets" aria-label="Mobile mention target picker">
+            <span class="bd-mobile-mention-icon" aria-hidden="true">
+              <${AtSign} size=${13} strokeWidth=${2.2} />
+            </span>
+            <select
+              class="bd-mobile-mention-select"
+              aria-label="Mobile mention target"
+              value=${selectedMobileKeeperAvailable ? mobileKeeperTarget : ''}
+              onInput=${(event: Event) => chooseMobileMentionTarget((event.target as HTMLSelectElement).value)}
+              disabled=${mobileQuickBusy || mobileMentionOptions.length === 0}
+              data-testid="bd-composer-mobile-mention-target"
+            >
+              ${mobileMentionOptions.length === 0
+                ? html`<option value="">No keeper targets</option>`
+                : mobileMentionOptions.map(keeper => html`
+                  <option key=${keeper.name} value=${`keeper:${keeper.name}`}>${keeper.name}</option>
+                `)}
+            </select>
+            <span class="bd-mobile-mention-current" aria-live="polite">
+              ${mobileMentionUnresolved
+                ? `No @${typedMobileMention} match`
+                : mobileMentionTarget
+                  ? `@${mobileMentionTarget}`
+                  : 'No target'}
+            </span>
+          </div>
+          ${mobileMention.mentionListOpen
+            ? html`
+              <div
+                id="bd-mobile-mention-listbox"
+                class="bd-mobile-mention-listbox"
+                role="listbox"
+                aria-label=${`Mobile mention autocomplete (${mobileMention.mentionMatches.length} matches)`}
+                data-testid="bd-composer-mobile-mention-listbox"
+              >
+                ${mobileMention.mentionMatches.length > 0
+                  ? mobileMention.mentionMatches.map((candidate, index) => html`
+                    <button
+                      id=${`bd-mobile-mention-listbox-option-${index}`}
+                      key=${candidate.name}
+                      type="button"
+                      class=${`bd-mobile-mention-option ${candidate.selected || index === mobileMention.activeMentionIndex ? 'on' : ''}`}
+                      role="option"
+                      aria-selected=${candidate.selected || index === mobileMention.activeMentionIndex ? 'true' : 'false'}
+                      disabled=${mobileQuickBusy}
+                      onClick=${() => chooseMobileMentionCandidate(candidate.name)}
+                    >
+                      <${AtSign} size=${12} strokeWidth=${2.2} aria-hidden="true" />
+                      <span class="bd-mobile-mention-option-name">${candidate.name}</span>
+                      <span class="bd-mobile-mention-option-status">${candidate.status ?? 'online'}</span>
+                    </button>
+                  `)
+                  : html`<div class="bd-mobile-mention-empty">No keeper target matches @${mobileMention.mentionQuery}</div>`}
+              </div>
+            `
+            : null}
+          ${mobileAttachments.length > 0
+            ? html`
+              <div class="bd-mobile-draft-tray composer-tray" data-testid="bd-composer-mobile-draft-tray">
+                ${mobileAttachments.map(attachment => html`
+                  <div class="cdraft att" key=${attachment.id}>
+                    <div class="cdraft-thumb">
+                      <span class="cdraft-glyph">${attachment.kind === 'image' ? '▧' : '◫'}</span>
+                    </div>
+                    <div class="cdraft-meta">
+                      <span class="cdraft-name mono">${attachment.name}</span>
+                      <span class="cdraft-sub mono">${composerAttachmentTrayMeta(attachment)} · transport unavailable</span>
+                    </div>
+                    <button
+                      type="button"
+                      class="cdraft-x"
+                      title="첨부 제거"
+                      aria-label=${`Remove mobile attachment ${attachment.name}`}
+                      onClick=${() => { setMobileAttachments(current => current.filter(item => item.id !== attachment.id)) }}
+                      disabled=${mobileQuickBusy}
+                    >
+                      <${X} size=${10} aria-hidden="true" />
+                    </button>
+                  </div>
+                `)}
+              </div>
+            `
+            : null}
+          ${mobileVoice.state !== 'idle'
+            ? html`
+              <div class="bd-mobile-rec-bar rec-bar" data-testid="bd-composer-mobile-recorder">
+                <span class="rec-dot" aria-hidden="true"></span>
+                <span class="rec-lbl">${mobileVoice.state === 'recording' ? '녹음 중' : '전사 중'}</span>
+                <div class="rec-wave" aria-hidden="true">
+                  ${[0.4, 0.8, 0.5, 0.9, 0.45, 0.75, 0.52, 0.84, 0.48, 0.7].map((height, index) => html`<span class="rbar" key=${index} style=${{ height: `${Math.round(3 + height * 20)}px` }} />`)}
+                </div>
+                <button
+                  type="button"
+                  class="rec-btn stop"
+                  onClick=${mobileVoice.stop}
+                  disabled=${mobileQuickBusy || mobileVoice.state !== 'recording'}
+                  data-testid="bd-composer-mobile-voice-stop"
+                >
+                  <${Square} size=${11} aria-hidden="true" />
+                  완료
+                </button>
+              </div>
+            `
+            : null}
+        ` : null}
+        <div class="bd-mobile-quick-compose bd-comp-box" data-mode=${mode}>
+          <textarea
+            rows=${1}
+            class="bg-transparent border-0 outline-0 text-[var(--text-bright)] text-sm placeholder:text-[var(--text-dim)] resize-none"
+            placeholder=${placeholder}
+            value=${localBody}
+            role=${mode === 'mention' ? 'combobox' : undefined}
+            aria-autocomplete=${mode === 'mention' ? 'list' : undefined}
+            aria-controls=${mode === 'mention' && mobileMention.mentionListOpen ? 'bd-mobile-mention-listbox' : undefined}
+            aria-expanded=${mode === 'mention' ? String(mobileMention.mentionListOpen) : undefined}
+            aria-activedescendant=${mobileMention.activeMentionOptionId}
+            onInput=${(e: Event) => {
+              if (mobileMention.dismissedMentionQuery !== null) mobileMention.setDismissedMentionQuery(null)
+              setLocalBody((e.target as HTMLTextAreaElement).value)
+            }}
+            onKeyDown=${(event: KeyboardEvent) => {
+              if (isImeComposing(event)) return
+              if (mode === 'mention' && mobileMention.mentionListOpen && mobileMention.mentionMatches.length > 0) {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  mobileMention.setActiveMentionIndex(index => (index + 1) % mobileMention.mentionMatches.length)
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  mobileMention.setActiveMentionIndex(index => (index - 1 + mobileMention.mentionMatches.length) % mobileMention.mentionMatches.length)
+                  return
+                }
+                if (event.key === 'Enter' && !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) {
+                  event.preventDefault()
+                  chooseMobileMentionCandidate(mobileMention.mentionMatches[mobileMention.activeMentionIndex]?.name ?? mobileMention.mentionMatches[0]!.name)
+                  return
+                }
+              }
+              if (mode === 'mention' && mobileMention.mentionListOpen && event.key === 'Escape') {
+                event.preventDefault()
+                mobileMention.setDismissedMentionQuery(mobileMention.mentionQuery ?? '')
+              }
+            }}
+            data-testid="bd-composer-mobile-body"
+          />
+          ${mode === 'mention' ? html`
+            <input
+              ref=${mobileFileInputRef}
+              type="file"
+              accept="image/*,.pdf,.txt,.log,.json,.csv,.md"
+              multiple
+              hidden
+              data-testid="bd-composer-mobile-file-input"
+              onChange=${(event: Event) => {
+                const input = event.target as HTMLInputElement
+                if (input.files) attachMobileMentionFiles(input.files)
+                input.value = ''
+              }}
+            />
+            <button
+              type="button"
+              class="bd-mobile-compose-tool"
+              title="이미지·파일 첨부"
+              aria-label="Attach mobile mention file"
+              disabled=${mobileQuickBusy || mobileAttachments.length >= 6}
+              onClick=${() => { mobileFileInputRef.current?.click() }}
+              data-testid="bd-composer-mobile-attach"
+            >
+              <${Paperclip} size=${15} strokeWidth=${2.2} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="bd-mobile-compose-tool"
+              title="음성 입력"
+              aria-label="Start mobile mention voice input"
+              disabled=${mobileQuickBusy || mobileVoice.state !== 'idle' || !mobileVoice.supported}
+              onClick=${() => { void mobileVoice.start() }}
+              data-testid="bd-composer-mobile-voice"
+            >
+              <${Mic} size=${15} strokeWidth=${2.2} aria-hidden="true" />
+            </button>
+          ` : null}
+          <button
+            type="button"
+            class="send"
+            disabled=${mobileQuickDisabled}
+            onClick=${(e: Event) => { void submitMobileQuick(e) }}
+            data-testid="bd-composer-mobile-send"
+          >${submitting ? '등록 중...' : '게시 ↑'}</button>
+        </div>
+        ${mode === 'post' ? html`
+          <div class="bd-desktop-post-form bd-comp-box grid gap-2">
+            <input
+              type="text"
+              class="bg-transparent border-0 outline-0 text-[var(--text-bright)] text-sm placeholder:text-[var(--text-dim)]"
+              placeholder="제목"
+              value=${localTitle}
+              onInput=${(e: Event) => setLocalTitle((e.target as HTMLInputElement).value)}
+              data-testid="bd-composer-title"
+            />
+            <textarea
+              rows=${2}
+              class="bg-transparent border-0 outline-0 text-[var(--text-bright)] text-sm placeholder:text-[var(--text-dim)] resize-none"
+              placeholder=${placeholder}
+              value=${localBody}
+              onInput=${(e: Event) => setLocalBody((e.target as HTMLTextAreaElement).value)}
+              data-testid="bd-composer-body"
+            />
+            <div class="bd-comp-meta flex gap-2">
+              <${Select}
+                value=${localHearth}
+                options=${[{ value: '', label: 'No category' }, ...boardHearths.value.map(h => ({ value: h.name, label: h.name }))]}
+                ariaLabel="게시 category"
+                onInput=${(value: string) => setLocalHearth(value)}
+              />
+              <${Select}
+                value=${localFlair}
+                options=${[{ value: '', label: 'No flair' }, ...boardFlairs.value.map(f => ({ value: f.name, label: `${f.emoji ? `${f.emoji} ` : ''}${f.label}` }))]}
+                ariaLabel="게시 flair"
+                onInput=${(value: string) => setLocalFlair(value)}
+              />
+              <button
+                type="button"
+                class="send ml-auto"
+                disabled=${!localTitle.trim() || !localBody.trim() || submitting}
+                onClick=${(e: Event) => { void submitPost(e) }}
+                data-testid="bd-composer-send"
+              >${submitting ? '등록 중...' : '게시 ↑'}</button>
+            </div>
+          </div>
+        ` : html`
+          <div class="bd-desktop-composer-v2 bd-comp-box">
+            <${ComposerV2}
+              workspaceId=${localHearth || 'default'}
+              mode=${composerMode}
+              showModeSelector=${false}
+              modeLabels=${{ broadcast: '게시', dm: '멘션' }}
+            />
+          </div>
+        `}
+      </div>
+    </div>
+  `
+}
+
+function BdMobileQueues({
+  mentionCount,
+  onMentions,
+}: {
+  mentionCount: number
+  onMentions: () => void
+}) {
+  return html`
+    <div class="bd-mobile-queues" aria-label="Board mobile queues" data-testid="bd-mobile-queues">
+      <button
+        type="button"
+        class="bd-mobile-queue"
+        onClick=${onMentions}
+        data-testid="bd-mobile-queue-mentions"
+      >
+        <span class="glyph">＠</span>
+        멘션 인박스
+        <span class="n">${mentionCount}</span>
+      </button>
+    </div>
+  `
+}
+
+function UnifiedBoardFeed({
+  posts,
+  visibleLimit,
+  onVisibleLimitChange,
+}: {
+  posts: BoardPost[]
+  visibleLimit: number
+  onVisibleLimitChange: (limit: number) => void
+}) {
+  // One request answers every row this feed draws. The board list is a public,
+  // cached projection and reaction state is per viewer, so it cannot ride in
+  // that response -- and asking per row made twenty of the twenty-three
+  // requests that opening the board sent.
+  const drawnIds = posts.slice(0, visibleLimit).map(post => post.id).join(',')
+  const [batchedReactions, setBatchedReactions] = useState<{
+    byTargetId: Map<string, BoardReactionSummary[]>
+    supportedEmojis: readonly string[]
+  } | null>(null)
+  useEffect(() => {
+    const ids = drawnIds === '' ? [] : drawnIds.split(',')
+    if (ids.length === 0) {
+      setBatchedReactions({ byTargetId: new Map(), supportedEmojis: [] })
+      return
+    }
+    let cancelled = false
+    setBatchedReactions(null)
+    void fetchBoardReactionsBatch('post', ids)
+      .then(next => { if (!cancelled) setBatchedReactions(next) })
+      .catch(err => {
+        // Each bar falls back to fetching its own, which is what it did before.
+        console.warn('[board] reaction batch failed', err instanceof Error ? err.message : err)
+        if (!cancelled) setBatchedReactions({ byTargetId: new Map(), supportedEmojis: [] })
+      })
+    return () => { cancelled = true }
+  }, [drawnIds])
+
+  const hasMoreLocal = posts.length > visibleLimit
+  const hasMoreRemote = boardHasMore.value
+  const hasMore = hasMoreLocal || hasMoreRemote
+  const loadingMore = boardLoadingMore.value
+  const visibleCount = Math.min(visibleLimit, posts.length)
+  const remainingLabel = hasMoreLocal
+    ? `${posts.length - visibleLimit}개 남음`
+    : '다음 페이지 불러오기'
+  const cursorLabel = hasMoreRemote && !hasMoreLocal
+    ? `${visibleCount} / ${posts.length}+`
+    : `${visibleCount} / ${posts.length}`
+
+  const expand = () => {
+    if (loadingMore) return
+    const nextLimit = visibleLimit + PAGE_SIZE
+    onVisibleLimitChange(nextLimit)
+    if (nextLimit >= posts.length && boardHasMore.value) void loadMoreBoardPosts()
+  }
+
+  return html`
+    <div class="flex flex-col gap-2" data-testid="bd-unified-feed">
+      ${posts.slice(0, visibleLimit).map(post => html`<${PostCard}
+        key=${post.id}
+        post=${post}
+        reactions=${batchedReactions?.byTargetId.get(post.id)}
+        supportedEmojis=${batchedReactions && batchedReactions.supportedEmojis.length > 0
+          ? batchedReactions.supportedEmojis
+          : undefined}
+        reactionsArriving=${batchedReactions === null} />`)}
+    </div>
+    ${hasMore ? html`
+      <${ScrollMarker} onVisible=${expand} />
+      <div class="flex justify-center py-3">
+        <${CursorPagination}
+          class="bd-feed-pagination"
+          cursor=${cursorLabel}
+          cursorLabel="표시"
+          hasPrevious=${visibleLimit > PAGE_SIZE}
+          hasNext=${hasMore}
+          previousLabel="줄이기"
+          nextLabel=${loadingMore ? '불러오는 중...' : `더 보기 (${remainingLabel})`}
+          ariaLabel="전체 게시글 페이지"
+          disabled=${loadingMore}
+          testId="board-feed-pagination"
+          onPrevious=${() => onVisibleLimitChange(Math.max(PAGE_SIZE, visibleLimit - PAGE_SIZE))}
+          onNext=${expand}
+        />
+      </div>
+    ` : null}
+  `
+}
+
+function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => void }) {
+  const [contentQuery, setContentQuery] = useState('')
+  const visibleLimit = feedVisibleLimit.value
+  const filteredPosts = useMemo(
+    () => filterBoardPosts(posts, contentQuery),
+    [posts, contentQuery],
+  )
+  const isFiltering = contentQuery.trim() !== ''
+  const visiblePosts = useMemo(
+    () => filteredPosts.filter(post => !boardHiddenCategories.value.has(contentCategory(post))),
+    [filteredPosts, boardHiddenCategories.value],
+  )
+  const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
+  const countLabel = isFiltering
+    ? `${visiblePosts.length}개 표시`
+    : boardTotal.value !== null
+      ? `전체 ${boardTotal.value}개`
+      : boardHasMore.value
+        ? `현재 ${visiblePosts.length}개 불러옴 · 더 있음`
+        : `전체 ${visiblePosts.length}개`
+
+  return html`
+    <section class="bd-feed">
+      <${BdFeedHead}
+        countLabel=${countLabel}
+        contentQuery=${contentQuery}
+        onContentQuery=${(query: string) => {
+          setContentQuery(query)
+          feedVisibleLimit.value = PAGE_SIZE
+        }}
+        sortMode=${boardSortMode.value}
+        onSort=${(sortMode: BoardSortMode) => {
+          if (boardSortMode.value === sortMode) return
+          boardSortMode.value = sortMode
+          feedVisibleLimit.value = PAGE_SIZE
+          selectedBoardPostId.value = null
+          refreshBoard()
+        }}
+      />
+      <${BdMobileQueues}
+        mentionCount=${mentionCount}
+        onMentions=${onMentions}
+      />
+      <div class="bd-list">
+        ${isFiltering && visiblePosts.length === 0 && posts.length > 0
+          ? html`<div class="ov-empty">필터 결과 없음 (${posts.length} items)</div>`
+          : visiblePosts.length === 0 && boardLoading.value
+            ? html`<${LoadingState} title="게시판 불러오는 중…" />`
+            : visiblePosts.length === 0
+              ? html`<${EmptyState} title="아직 게시글이 없습니다" hint="에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
+              : html`<${UnifiedBoardFeed}
+                  posts=${visiblePosts}
+                  visibleLimit=${visibleLimit}
+                  onVisibleLimitChange=${(limit: number) => { feedVisibleLimit.value = limit }}
+                />`}
+      </div>
+      <${BdComposer} />
+    </section>
+  `
+}
+
+// ── Main Board component (public API) ──────────────────────────────
+export function BoardSurface() {
+  // The mention inbox opens on demand (from the rail's bd-queue-mentions button),
+  // on desktop and mobile alike. When neither a post nor the mention inbox is open
+  // the detail column collapses to a two-column rail + feed layout — see the
+  // --bd-detail-width computation below. Matches the standalone v2 prototype.
+  const [mentionInboxOpen, setMentionInboxOpen] = useState(false)
+  const [detailWidth, setDetailWidth] = useState<number>(readStoredBoardDetailWidth)
+  useEffect(() => () => { selectedPostIds.value = new Set() }, [])
+  useEffect(() => registerBoardHearthsRefresh(() => {
+    void refreshBoardHearths()
+  }), [])
+  useEffect(() => {
+    if (boardHearths.value.length === 0) void refreshBoardHearths()
+  }, [])
+  useEffect(() => {
+    if (boardFlairs.value.length === 0) void refreshBoardFlairs()
+  }, [])
+  const grouped = splitVisiblePosts(boardPosts.value)
+  const posts = grouped.groups.flatMap(g => g.posts)
+  const focus = route.value.params.focus ?? null
+  const postId = route.value.params.post ?? null
+  const post = postId
+    ? posts.find(row => row.id === postId) ?? (detailPostId.value === postId ? detailPost.value : null)
+    : null
+
+  useEffect(() => {
+    if (postId && !post
+      && (detailPostId.value !== postId
+        || (!detailLoading.value && detailReadPhase.value === 'failed'))) {
+      void loadPostDetail(postId, route.value.params.comment ?? null)
+    }
+  }, [postId, post?.id, route.value.params.comment])
+
+  if (postId) {
+    return post
+      ? html`
+          <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
+            <${BoardSummary} />
+            <${PostDetail} post=${post} />
+          </div>
+        `
+      : html`
+          <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
+            <${BoardSummary} />
+            <button type="button"
+              class="v2-workspace-action mb-4 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] transition-colors cursor-pointer"
+              onClick=${() => navigateBoard()}
+            >← 게시판으로 돌아가기</button>
+            ${detailLoading.value
+              ? html`<${LoadingState} title="글 불러오는 중…" />`
+              : html`<${EmptyState} title="글을 찾지 못했습니다" compact />`}
+          </div>
+        `
+  }
+
+  if (focus === 'mention-inbox') {
+    return html`
+      <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
+        <${BoardSummary} />
+        <${MentionInbox} />
+      </div>
+    `
+  }
+
+  if (focus === 'messages-workspace') {
+    return html`
+      <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
+        <${BoardSummary} />
+        <${MessageWorkspaceTimeline} />
+      </div>
+    `
+  }
+
+  if (focus === 'curation') {
+    return html`
+      <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
+        <${BoardSummary} />
+        <${BoardCurationPanel} />
+      </div>
+    `
+  }
+
+  if (focus === 'karma') {
+    return html`
+      <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
+        <${BoardSummary} />
+        <${BoardKarmaPanel} />
+      </div>
+    `
+  }
+
+  const activeSub = boardHearthFilter.value
+  const selectedPost = selectedBoardPostId.value
+    ? posts.find(p => p.id === selectedBoardPostId.value) ?? null
+    : null
+
+  function openMentionInbox(): void {
+    selectedBoardPostId.value = null
+    setMentionInboxOpen(true)
+  }
+
+  function setPersistentDetailWidth(width: number): void {
+    const normalized = normalizeBoardDetailWidth(width)
+    setDetailWidth(normalized)
+    writeStoredBoardDetailWidth(normalized)
+  }
+
+  // Detail column is reserved only when a post thread or the mention inbox is
+  // open; otherwise the grid track collapses to 0 (two-column rail + feed).
+  const detailOpen = !!selectedPost || mentionInboxOpen
+
+  return html`
+    <div
+      class="v2-board-surface ss-surface bg-surface-page text-text-primary"
+      data-detail-width=${String(detailWidth)}
+      data-detail-open=${String(detailOpen)}
+    >
+      <h1 class="sr-only">Board</h1>
+      <!-- Collapse is driven by the inline --bd-detail-width custom property
+           (0 when no detail is open), which BOTH the legacy board-v2.css and the
+           keeper-v2 surfaces.css .bd-body grids consume as their third track.
+           This is the single source of truth: it does not depend on a separate
+           .no-detail rule winning a same-specificity (0,2,0) cascade by load
+           order (the #22098/#22103 split-brain), and it survives the legacy
+           board-v2.css removal (main.ts:114 migration). -->
+      <div class="bd-body" style=${`--bd-detail-width: ${detailOpen ? detailWidth : 0}px;`}>
+        <${BdRail}
+          activeSub=${activeSub}
+          onSub=${(sub: string) => {
+            boardHearthFilter.value = sub
+            selectedBoardPostId.value = null
+            setMentionInboxOpen(false)
+            refreshBoard()
+          }}
+          onMentions=${openMentionInbox}
+        />
+        <${BdFeed} posts=${boardPosts.value} onMentions=${openMentionInbox} />
+        <${BdDetail}
+          post=${selectedPost}
+          detailWidth=${detailWidth}
+          mentionsOpen=${mentionInboxOpen}
+          onDetailWidthChange=${setPersistentDetailWidth}
+          onClose=${() => { selectedBoardPostId.value = null }}
+          onCloseMentions=${() => setMentionInboxOpen(false)}
+        />
+      </div>
+    </div>
+  `
+}

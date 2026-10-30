@@ -1,0 +1,227 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Selection-time path/digest mapping of selected immutable artifacts, including explicitly labelled derived projections. Not an earlier producer manifest.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "selection-time-manifest.json",
+    "sha256": "7317393ddf4a758fc85a26ec8dc112746205056cbb29bd67e8745474674e0f08"
+  },
+  "files": {
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/review.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/trial4-request-state-independent-review.json",
+      "recorded_sha256": "0795e7baab443428fc31c0ef2268dcbda418a0be77256e88526f434a643aed99",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/provenance.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/provenance.json",
+      "recorded_sha256": "fd5d1796f5145928c1e5420a50c9633d45d68ef0e2167bdc1f7ccfaf48381ae6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/checks.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/checks.json",
+      "recorded_sha256": "167c1530331184daad4ef8645c893e3a04235698ba21aff22e904066484bbda7",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/result.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/result.json",
+      "recorded_sha256": "3b7ffe4bae53c42f1fb381e5b8c87c90912def8aac6bf5cb8886f599b8c1f38a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/first-input-readiness.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/first-input-readiness.json",
+      "recorded_sha256": "a455c03122169f7d3a0a1db3f84d5decf6c1886b9e2e37e6dbf3efbd14fd0a49",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/pty-input-trace.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/pty-input-trace.json",
+      "recorded_sha256": "b8b0501bfcf5d317d057689fafa7c9b9a51a3234c33b74ce1b245e49551ae2a2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/tui-process.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/tui-process.json",
+      "recorded_sha256": "1d287f67a93b1c5ac6d4c2632584c4e90c73ef2acd3e45e44860686207b3957e",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/tui-http-selected.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/tui-http-selected.json",
+      "recorded_sha256": "913da6c46fe918a3efcaddc48c12811c8e0a998b162ab32bc3e362ad569db5f4",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/root-relay-health-prerequisite.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/root-relay-health-prerequisite.json",
+      "recorded_sha256": "96b9c78e193566cdbccc8830d07183cdb361eb514ba3584910234fbe833a6d4a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/operations-before.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/operations-before.json",
+      "recorded_sha256": "a0d27bb7862e6323042a2ef0583286e29b5f787ac7d6ace7667c5cf7fa9267cb",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/operations-after.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/operations-after.json",
+      "recorded_sha256": "f586a753558f88250fa97832bd16f4dab7db8e288d8f7a589f11fa8d730d5bf5",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/queue-accepted-audit-tui-a.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/queue-accepted-audit-tui-a.json",
+      "recorded_sha256": "3ce74ca6e125027921e77aa89879f696371d8612483078058ca45860b1af12a7",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/queue-accepted-audit-tui-b.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/queue-accepted-audit-tui-b.json",
+      "recorded_sha256": "817bdffcdd614ba46de629292a290e454e91cfd99dbfb74b6c626ef1b565408d",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/pending-accepted.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/pending-accepted.json",
+      "recorded_sha256": "21b112ed5a0415f465a466463c76ae16812d4a434bf58c00dc8757641a5594c0",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/refresh-observation.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/refresh-observation.json",
+      "recorded_sha256": "774ffdb635e8b117cd6d5f209769872004afa02c9039d6085cd5ea8f39f7fb2f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/cleanup.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/cleanup.json",
+      "recorded_sha256": "edf92b48a955ae0d81d2b1c42c2221fec502c6faa006cacbfea9c0d8bfcd070f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/owned-lifecycle.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/owned-lifecycle.json",
+      "recorded_sha256": "2267a97a863e84ae76820435bea1dfb4522e4b9b0a9ce2460498e8052853a6f5",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/http/events.jsonl": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/http/events.jsonl",
+      "recorded_sha256": "e2df6235f9109a8b8af7807b4ed3e5a4a39050bcfa43075b89fcb00452e7e1f8",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/http/00043-response.bin": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/http/00043-response.bin",
+      "recorded_sha256": "5bf2673f99455050630d5562ccbb32be1b005760d49dee16ddfb403920a283a3",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/http/00044-response.bin": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/http/00044-response.bin",
+      "recorded_sha256": "378448e5d08776c2c0118d2359d67035646e740b4a6099055309e5df50da048a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/http/00045-response.bin": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/http/00045-response.bin",
+      "recorded_sha256": "1769d207bee8ab5b48948dc5fbbd958c627a74a8776e1ece35ed770ba621d6fb",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/http/00047-response.bin": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/http/00047-response.bin",
+      "recorded_sha256": "b8503403194f07cf7b992c43990b3eb45d1d28d732bd081b2817fe6c8b9eb1e3",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/http/00048-response.bin": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/http/00048-response.bin",
+      "recorded_sha256": "0a12fbc0ce74a9cb1300ea0c003cd5fd88faaeb957ea88f7d4d0e5dcf2bf90b9",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/http/00050-response.bin": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/http/00050-response.bin",
+      "recorded_sha256": "cc65661922a1c3de152fe2a8f23a1747dccd2d599e738454b207fa821e1ffee6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/owned-request-identity-config.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/owned-request-identity-config.json",
+      "recorded_sha256": "37ba58a709352038ab58e3f10486193c9c9c4dabb948206a23d03c37d62e3918",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/projections/trial4-owner-status-projection.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/retention-preparation/trial4-owner-status-projection.json",
+      "recorded_sha256": "df24fa9392c7dd037a858ee0ddf47073984ae98c40c873aa30c1831f91786c84",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/projections/trial4-readiness-log-prefix.jsonl": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/retention-preparation/trial4-readiness-log-prefix.jsonl",
+      "recorded_sha256": "3f634ee02fc631a840d0c2cd28770ef748bd25e7b639fcb9bd1fedfbcfc3d1ff",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial4/projections/trial4-readiness-log-prefix-provenance.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/retention-preparation/trial4-readiness-log-prefix-provenance.json",
+      "recorded_sha256": "b8db9db761622905e229a21a8095dc4ab1e313bfef7763ccf00ad03db5819bb2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/controllers/owned_tui_request_state_v4.py": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v4.py",
+      "recorded_sha256": "2180b2f37a34a40ad9670188901a33a1d62f541b38f2a75c2285deb819a92a2d",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/controllers/owned_tui_request_state_v5.py": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/owned_tui_request_state_v5.py",
+      "recorded_sha256": "a97ec74d24c7cca29263d3ad4a78ec80c9e2fa996f31c40b382f51f9c0f00b97",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/controllers/v4-to-v5.diff": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/v4-to-v5.diff",
+      "recorded_sha256": "8f443bcfa663599eb53ad1ca70636c53199092e49623889742eff868b8062360",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/controllers/preparation-v5.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/preparation-v5.json",
+      "recorded_sha256": "8042a4ff851107437f09d7de9e122ecebf0ba6d4510fca596c92e979cbcd94df",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/controllers/root-actual-invocation-v4.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/root-actual-invocation-v4.json",
+      "recorded_sha256": "a77d4af55e0ad3d6a66eb4643250fb1b4de948be23b3c145752bf8917ba426b1",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/controllers/root-actual-invocation-v5.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/root-actual-invocation-v5.json",
+      "recorded_sha256": "280e74304dc2598e28a1b32a6b3e7c0fc1da2358c839cf245e8bb3b0f6927f05",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/controllers/root-file-preflight-v5.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/root-file-preflight-v5.json",
+      "recorded_sha256": "8b6e622578fa178c4aa63201852c0af62fd595613111d5f8c74e3b7c0b2d04fd",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial3/result.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3/result.json",
+      "recorded_sha256": "a13726509d17c34d994ba31bbfb9ab12c0326a82a0f5925071ecedc84975c4ed",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial3/cleanup.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3/cleanup.json",
+      "recorded_sha256": "ab69b68a438016aca6ca5e93870d700c282a9a8448071f90cde84405763ede79",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial3/provenance.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3/provenance.json",
+      "recorded_sha256": "9384a52a68216825f427e8d5fe91a8a88fcc0e43b30890c263c621c01980e450",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial3/pty-input-trace.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3/pty-input-trace.json",
+      "recorded_sha256": "64ef4284eaf783f693a2e46274590539324faca42e463fcb7dc2b5731d45af06",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial3/root-observer-stop-reason.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3/root-observer-stop-reason.json",
+      "recorded_sha256": "93148eb10e9bd5ff9a36454af722ef07df6ffb1d398dfdad900f07efe2493f16",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/trial3/root-readiness-causal-limit-correction.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-3/root-readiness-causal-limit-correction.json",
+      "recorded_sha256": "9e6ebec6c241e2439d87055c63eb979d57cb6bbc987466ae82e795632d3b2b87",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/native/receipt.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/receipt.json",
+      "recorded_sha256": "db9d24e84c3364d6c87120381121ab70254400db1e036bff3c98dafd2c8b42b1",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-tui-request-state/native/identity-verification.json": {
+      "recorded_path": "artifacts/schedule-durable-candidate-20261027/native40396800146/identity-verification.json",
+      "recorded_sha256": "770efa19e25e10e3c52516e624b637ed107b51d23e4409836e95377348abfdce",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

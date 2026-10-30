@@ -1,0 +1,20 @@
+name = "keeper_tool_search"
+description = """
+Make a held-back tool callable. This Keeper is offered more tools than one \
+request can carry, so their argument schemas are left out and only their names \
+are listed below. Pass the exact names you need in "names"; each becomes \
+callable from your next message in this same turn, and the answer says what \
+each one does. A name below that is not already among your tools is not \
+callable until you pass it here; a call to it before then is refused.
+
+If you do not know which name fits the task, keeper_capability_search can find \
+Tools and Skills by name and description. This loader only loads the requested \
+schemas; call the chosen tool separately to execute it.
+
+Tools that can be loaded:"""
+
+[[params]]
+name = "names"
+type = "array"
+required = true
+items = { type = "string" }

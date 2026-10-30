@@ -1,0 +1,18 @@
+Testing `Channel_gate_metrics'.
+This run has ID `94FXN4SV'.
+
+  [OK]          metrics          0   error kind round trip.
+  [OK]          metrics          1   carries the previous keeper and workspace.
+  [OK]          metrics          2   records connector diagnostics.
+  [OK]          metrics          3   records internal exception diagnostics.
+  [OK]          metrics          4   records validation diagnostics with requ...
+  [OK]          metrics          5   records validation diagnostics for inval...
+  [OK]          metrics          6   serializes health and latency.
+  [OK]          metrics          7   serializes workspace bindings.
+  [OK]          metrics          8   serializes filtered recent events.
+  [OK]          metrics          9   keeps the last failure after a success.
+  [OK]          metrics         10   bounds tracked workspaces.
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/baseline-main-197f568-20261028/_build/_tests/Channel_gate_metrics'.
+Test Successful in 0.092s. 11 tests run.
+exit=0

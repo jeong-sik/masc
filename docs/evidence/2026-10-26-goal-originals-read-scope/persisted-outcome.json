@@ -1,0 +1,51 @@
+{
+  "goal": {
+    "id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "d6f0451381b7f9076e956759253e0fae",
+    "title": "Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다",
+    "metric": "MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.",
+    "target_value": "G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다.",
+    "due_date": null,
+    "priority": 3,
+    "phase": "awaiting_confirmation",
+    "last_review_note": null,
+    "last_review_at": "2026-10-25T19:24:59Z",
+    "created_at": "2026-10-25T19:17:46Z",
+    "updated_at": "2026-10-25T19:24:59Z"
+  },
+  "verification": {
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "completion": {
+      "state": "proof_proven",
+      "verdict": {
+        "outcome": "proven",
+        "reason": null,
+        "request_id": "c69ddd0cf5f534dfe202252101a29877",
+        "criterion": {
+          "revision": "d6f0451381b7f9076e956759253e0fae",
+          "title": "Goal의 실제 성공조건을 중심으로 Task를 수행하고 평가·증거의 신뢰성을 실측한다",
+          "metric": "MASC host .masc/playground 상대 파일 codex-mcp-client/goal-outcomes-20261024/acceptance.json의 required_case_ids와 cases 및 연결된 원문 증거를 읽는다. G1~G4와 A1~A7을 정확히 한 번 보존한다. 각 항목은 소스/후보 빌드/격리 실제 실행/운영 적용을 구분하고 실제 행동을 확인한 원문으로 판정한다. Task 개수나 연결 비율은 진단용이며 성공조건이 아니다.",
+          "target_value": "G1~G4,A1~A7 필수 11개 실제 행동 충족 11/11, not_measured=0. Goal 현재 revision과 증거 identity 불일치=0, 검사만 바꾼 허위 평가 성공=0, 다른 모델/실험 결과 혼합=0. 독립 Task 허용 유지. Goal 완료는 별도 verifier와 사람의 최종 확인을 거친다."
+        },
+        "verification_run_id": "01a1747f-5f6e-7000-b943-9d98ded9e5d1",
+        "authority": {
+          "kind": "system_llm_agent",
+          "actor": "verifier_exact"
+        },
+        "evidence": "측정값 존재를 확인하고 원문과 대조했다. (1) codex-mcp-client/goal-outcomes-20261024/acceptance.json 전체 통독: required_case_ids=G1~G4,A1~A7 11개 정확히 1회, cases 11개 전부 measured_pass, summary required=11/measured_pass=11/passed_case_ids 11개/remaining=[]/measured_fail_case_ids=[]/reopened_cases=[]/measured_at 2026-10-24T18:31:26Z. delivery index(공유 루트 goal-outcome-driven-work-20261024-evidence-index.json과 동일)와 manifest가 measured_pass=11/not_measured=0/all_at_one_head=false/new_execution=false로 같은 11개를 원문 경로+SHA로 연결. (2) 케이스별 실제 행동 원문을 직접 열람: G2=g2-alpha-checkpoint(owner Goal hint 없이 모델이 keeper_task_create에 goal_id=goal-canary-three-results 선택, 권위 goal_task_links 일치), G3=actual-tool-sequence-and-receipts+diagnosis(승인 후 Read→1/3 수신증 c43ffbe4→Edit beta/gamma→Read 53B all-true→3/3 ff7a4f86→task-002 제출→request_complete, reported_only/unchanged, proof_pending 유지로 완료 추론 없음), G4=goalless create/execution/submit/approval 4원문(goal_id null, 실제 Node Docker 2+2=4 exit 0, human_operator done), G1=73127B 요청 프로젝션(SHA a84280…, 기준·측정·0/3 최신 관측 슬라이스)+server-extraction-receipt+네이티브 와이어 로그 5케이스 OK, A1=coding-boundary README+실측 Docker 호출(network none/readonly/cap-drop, 3228 보충은 별도 표기), A2=observations.json(oracle-only 2케이스 exit1+broken_target_unchanged=true, 대조군 exit0), A3=보존 ci-run-tests.log(301,480B)+test_verification/test_verification_operator_evidence(11 OK)/test_tui_decode 블록, A4/A5=cohort observations(model별 pass@k 1/0, cost null 보존)+duplicate-keys exit1 거부+after.txt 7 tests OK(skip1 명시), A6=보존 7501 clean 로그(667,501B)+response identity 18 checks/eval_calibration 22 OK(미측정 rate null·unknown 보존)/anti-rationalization, A7=outcome-api-runtime 원문들(실제 API 재독: Goal executing·0/3 유지, 승인·외부 수용·사람 확인 구분). (3) 범위·identity: index/manifest/canonical acceptance/케이스 파일의 criterion 306708fa…, canonical SHA 4fdd1ec8…, 케이스 SHA와 canonical_state/source_sha가 acceptance와 일치, 보존 원문 불변 표기 일관. 소스(7501/328/dca/2d92)·후보 빌드(격리 62470, no production deployment)·격리 실제 실행·운영 적용 구분이 각 scope와 limits에 명시. 과거 G2/G3 measured_fail 이력은 중첩 보존되고 3228 보충은 dca로 재라벨링 금지 표기 — 혼합 0, 검사만 바꾼 허위 성공 없음(A2 실측으로 대조), 연결비율은 진단 전용이며 독립 Task 허용(G4) 유지 확인. GitHub CI 링크(40078581651 등)는 미fetch했으나 해당 실행의 보존 로그 원문을 팩에서 직접 열어 확인했다. (4) 비교: 측정값 11/11 = target 11/11, not_measured=0, identity 불일치 0으로 선언된 조건을 충족. 본 판정은 관측 검증이며 사람 최종 확인은 별도 단계로 유지된다는 점도 원문과 일치한다.",
+        "recorded_at": "2026-10-25T19:24:59Z"
+      }
+    },
+    "submitted_evidence": [],
+    "updated_at": "2026-10-25T19:24:59Z"
+  },
+  "measurement": {
+    "id": "ed38d5f1af49212a42bf17195b141ffc",
+    "goal_id": "goal-outcome-driven-work-20261024",
+    "criterion_revision": "d6f0451381b7f9076e956759253e0fae",
+    "observed_value": "11/11 original fixed behavior cases within retained per-source and isolated actual execution scopes; not_measured=0. G1/G4/A1-A7 historical scopes and 328 G2/G3 preserved, 3228 supplements separate. Not a single-head rerun or production-install result.",
+    "evidence": "note:Shared Goal-tool playground-root relative delivery index codex-mcp-client/goal-outcomes-delivery-20261026-v1/index.json links exact11 case leaf files and byte-exact pinned repository/result mirrors; manifest codex-mcp-client/goal-outcomes-delivery-20261026-v1/manifest.json SHA256 2003ed2a127f1dfdbf9d174685d982632c6af99c42c78deed607ad5e749018a8. Canonical codex-mcp-client/goal-outcomes-20261024/acceptance.json stays byte-for-byte SHA2564fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e and criterion306708facbfb9379a9e51b8f7c815678 unchanged. Delivery-only mirror, no new execution or pooled cohorts. The actual source/result files are provided for separate verifier judgment; reported11/11 is not that judgment or human final confirmation.",
+    "actor": "originals-428e-replay-operator",
+    "recorded_at": "2026-10-25T19:17:46Z"
+  }
+}

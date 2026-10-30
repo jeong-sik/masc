@@ -1,0 +1,100 @@
+{
+  "schema": "schedule-busy-effect-counterexample.v1",
+  "observed_at_unix": 1793020737.488492,
+  "first_source": {
+    "projection_status": "matched_terminal_completed",
+    "source": "durable_event_queue_snapshot",
+    "queue": "keeper_event_queue",
+    "stimulus": "schedule_due",
+    "keeper_name": "audit-live-deepseek",
+    "schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+    "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+    "post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+    "wake_due_at": 1793020665.483936,
+    "wake_due_at_iso": "2026-10-26T13:17:45Z",
+    "wake_payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+    "schedule_status": "succeeded",
+    "pending_count": 0,
+    "read_errors": [],
+    "resolved_owner": "audit-live-deepseek",
+    "terminal_outcome": "completed",
+    "terminal_reason": null,
+    "matched_bucket": "terminal",
+    "matched_post_id": "c14f1b18e012ea104a0661752729960fd1b51a0c8532c8a54757ea7e649373d7",
+    "matched_payload_kind": "schedule_due",
+    "matched_arrived_at": 1793020666.348629,
+    "matched_arrived_at_iso": "2026-10-26T13:17:46Z",
+    "matched_schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+    "matched_schedule_instance_id": "01a1785c-16bc-7000-9383-31a8ff7bf361",
+    "matched_due_at": 1793020665.483936,
+    "matched_due_at_iso": "2026-10-26T13:17:45Z",
+    "matched_payload_digest": "0ece90ce6ac124f949a1e3083f7366ce7bd9268889e38a39aced907e2157d197",
+    "matched_age_seconds": 71.13165211677551
+  },
+  "second_source": {
+    "projection_status": "matched_terminal_completed",
+    "source": "durable_event_queue_snapshot",
+    "queue": "keeper_event_queue",
+    "stimulus": "schedule_due",
+    "keeper_name": "audit-live-deepseek",
+    "schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+    "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+    "post_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+    "wake_due_at": 1793020668.61034,
+    "wake_due_at_iso": "2026-10-26T13:17:48Z",
+    "wake_payload_digest": "36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb",
+    "schedule_status": "succeeded",
+    "pending_count": 0,
+    "read_errors": [],
+    "resolved_owner": "audit-live-deepseek",
+    "terminal_outcome": "completed",
+    "terminal_reason": null,
+    "matched_bucket": "terminal",
+    "matched_post_id": "b372c3361d1c3d7390e993d8ab189c92555db3e969338c0ef605628698b373be",
+    "matched_payload_kind": "schedule_due",
+    "matched_arrived_at": 1793020669.384855,
+    "matched_arrived_at_iso": "2026-10-26T13:17:49Z",
+    "matched_schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+    "matched_schedule_instance_id": "01a1785c-22f2-7000-8c71-3ee04a1a38f2",
+    "matched_due_at": 1793020668.61034,
+    "matched_due_at_iso": "2026-10-26T13:17:48Z",
+    "matched_payload_digest": "36edcbdbed3116ac98076cc004c4714fa186b78a7a07c35f286a04b24b12ddfb",
+    "matched_age_seconds": 68.09727001190186
+  },
+  "live_turns": {
+    "status": 200,
+    "response": {
+      "schema": "masc.keeper_turns.v1",
+      "keepers": [
+        {
+          "status": "ok",
+          "keeper_name": "audit-live-deepseek",
+          "turn": null
+        }
+      ]
+    }
+  },
+  "first_notes": {
+    "status": "ok",
+    "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262",
+    "limit": 50,
+    "notes": []
+  },
+  "second_notes": {
+    "status": "ok",
+    "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+    "limit": 50,
+    "notes": [
+      {
+        "note_id": "10",
+        "schedule_id": "audit-real-model-098cc5076f9b489ebaa5d6a740d6b262-second",
+        "author_id": "audit-live-deepseek",
+        "author_kind": "automated_actor",
+        "created_at": 1793020677.656421,
+        "body": "SCHEDULE_EFFECT_a24ca95cd85f4d8ebffe0321ee185ee5_SECOND"
+      }
+    ]
+  },
+  "verdict": "FAIL: original exact request has no required effect after a scheduled handoff, but both sources are durably completed/acked and no turn remains live.",
+  "scope": "One actual two-schedule interleaving on installed 6a2d8dd6171e1d732ca15f918fb084e462e4d371; no further input, recovery, or reexecution was requested."
+}

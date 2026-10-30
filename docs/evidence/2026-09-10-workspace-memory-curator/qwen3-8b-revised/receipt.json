@@ -1,0 +1,11 @@
+{
+  "started_at": "2026-09-09T17:49:12.161813+00:00",
+  "context_sha256": "c2caf257d0c54e468d6df3a9341211b5458b7f67a0bdd6f0a838c6b2c330a4d4",
+  "model": "qwen3:8b",
+  "endpoint": "http://127.0.0.1:11434",
+  "semantic_verification": "not_performed",
+  "runtime_mutation": false,
+  "status": "failed",
+  "error": "A source cannot be both used and excluded or excluded twice",
+  "elapsed_seconds": 25.858800666988827
+}

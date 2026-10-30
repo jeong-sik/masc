@@ -1,0 +1,101 @@
+/* StyleSeed — semantic token bridge + light theme
+ *
+ * Provides the StyleSeed vocabulary (bg-card, text-text-primary, etc.) as
+ * Tailwind v4 @theme tokens. Fallback values map to the existing dashboard
+ * token ladder so components render correctly under the default dark-fantasy
+ * theme. The [data-theme="styleseed"] block supplies the canonical light
+ * StyleSeed palette and is activated by the theme-switch / app shell.
+ */
+
+@theme {
+  /* Backgrounds & surfaces */
+  --color-background: var(--color-bg-page);
+  --color-foreground: var(--color-fg-primary);
+  --color-card: var(--color-bg-surface);
+  --color-card-border: var(--color-border-default);
+  --color-surface-page: var(--color-bg-page);
+  --color-surface-subtle: var(--color-bg-panel-alt);
+  --color-surface-muted: var(--color-bg-hover);
+  --color-brand-tint: var(--color-accent-soft);
+
+  /* Text hierarchy */
+  --color-text-primary: var(--color-fg-primary);
+  --color-text-secondary: var(--color-fg-secondary);
+  --color-text-tertiary: var(--color-fg-muted);
+  --color-text-disabled: var(--color-fg-disabled);
+  --color-icon-default: var(--color-fg-secondary);
+
+  /* Action / accent / status */
+  --color-brand: var(--color-accent-fg);
+  --color-brand-hover: var(--color-accent-fg);
+  --color-primary: var(--color-fg-primary);
+  --color-secondary: var(--color-bg-elevated);
+  --color-muted: var(--color-bg-hover);
+  --color-accent: var(--color-accent-fg);
+  --color-destructive: var(--color-status-err);
+  --color-success: var(--color-status-ok);
+  --color-warning: var(--color-status-warn);
+  --color-info: var(--color-status-info);
+
+  /* Borders & form */
+  --color-border: var(--color-border-default);
+  --color-border-subtle: var(--color-border-divider);
+  --color-input: var(--color-bg-elevated);
+  --color-ring: var(--color-accent-fg);
+  --color-alert-badge: var(--color-status-err);
+}
+
+/* Canonical StyleSeed light theme (Toss skin default) */
+[data-theme="styleseed"] {
+  color-scheme: light;
+
+  /* Backgrounds & surfaces */
+  --color-background: #ffffff;
+  --color-foreground: #2a2a2a;
+  --color-card: #ffffff;
+  --color-card-border: rgba(0, 0, 0, 0.06);
+  --color-surface-page: #fafafa;
+  --color-surface-subtle: #fafaf9;
+  --color-surface-muted: #e8e6e1;
+  --color-brand-tint: #f0e8ff;
+
+  /* Text hierarchy */
+  --color-text-primary: #3c3c3c;
+  --color-text-secondary: #6a6a6a;
+  --color-text-tertiary: #7a7a7a;
+  --color-text-disabled: #9b9b9b;
+  --color-icon-default: #4a5568;
+
+  /* Action / accent / status */
+  --color-brand: #721fe5;
+  --color-brand-hover: #5a1ab8;
+  --color-primary: #030213;
+  --color-secondary: #f3f4f5;
+  --color-muted: #f3f3f5;
+  --color-accent: #721fe5;
+  --color-destructive: #d4183d;
+  --color-success: #6b9b7a;
+  --color-warning: #d97706;
+  --color-info: #3b82f6;
+
+  /* Borders & form */
+  --color-border: #e8e6e1;
+  --color-border-subtle: #f3f3f5;
+  --color-input: #f3f3f5;
+  --color-ring: #721fe5;
+  --color-alert-badge: #ff4444;
+
+  /* Glow triplets for rgb() alpha composition */
+  --color-accent-glow: 114 31 229;
+  --color-success-glow: 107 155 122;
+  --color-destructive-glow: 212 24 61;
+  --color-warning-glow: 217 119 6;
+  --color-info-glow: 59 130 246;
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-button: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.08);
+  --shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.12);
+}

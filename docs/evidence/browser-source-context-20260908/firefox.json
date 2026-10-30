@@ -1,0 +1,368 @@
+{
+  "checks": [
+    "scene exposes source for observed control",
+    "at least twenty mounted source targets",
+    "checkout containment heading",
+    "original file hash heading",
+    "declared source position heading",
+    "checkout containment unicode",
+    "original file hash unicode",
+    "declared source position unicode",
+    "checkout containment actions",
+    "original file hash actions",
+    "declared source position actions",
+    "checkout containment counter",
+    "original file hash counter",
+    "declared source position counter",
+    "checkout containment nested",
+    "original file hash nested",
+    "declared source position nested",
+    "checkout containment open",
+    "original file hash open",
+    "declared source position open",
+    "checkout containment reverse",
+    "original file hash reverse",
+    "declared source position reverse",
+    "checkout containment input",
+    "original file hash input",
+    "declared source position input",
+    "checkout containment output",
+    "original file hash output",
+    "declared source position output",
+    "checkout containment list",
+    "original file hash list",
+    "declared source position list",
+    "checkout containment row-1",
+    "original file hash row-1",
+    "declared source position row-1",
+    "checkout containment row-2",
+    "original file hash row-2",
+    "declared source position row-2",
+    "checkout containment row-3",
+    "original file hash row-3",
+    "declared source position row-3",
+    "checkout containment details",
+    "original file hash details",
+    "declared source position details",
+    "checkout containment link",
+    "original file hash link",
+    "declared source position link",
+    "checkout containment label",
+    "original file hash label",
+    "declared source position label",
+    "checkout containment select",
+    "original file hash select",
+    "declared source position select",
+    "checkout containment textarea",
+    "original file hash textarea",
+    "declared source position textarea",
+    "checkout containment disabled",
+    "original file hash disabled",
+    "declared source position disabled",
+    "checkout containment status",
+    "original file hash status",
+    "declared source position status",
+    "checkout containment image",
+    "original file hash image",
+    "declared source position image",
+    "checkout containment jsx",
+    "original file hash jsx",
+    "declared source position jsx",
+    "checkout containment dialog",
+    "original file hash dialog",
+    "declared source position dialog",
+    "checkout containment close",
+    "original file hash close",
+    "declared source position close",
+    "JSX gets element precision",
+    "handler still works after instrumentation",
+    "selected source belongs to owned fixture",
+    "source digest matches immediately before edit",
+    "single exact edit anchor",
+    "source change reaches browser on reload",
+    "old source digest is now stale",
+    "old document cannot actuate the new source",
+    "changed implementation remains interactive"
+  ],
+  "mapped_targets": 24,
+  "source_targets": [
+    {
+      "id": "heading",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "unicode",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "actions",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "counter",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "nested",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 7,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "open",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "reverse",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "input",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "output",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "list",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "row-1",
+      "source": {
+        "column": 52,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 26,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "row-2",
+      "source": {
+        "column": 52,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 26,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "row-3",
+      "source": {
+        "column": 52,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 26,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "details",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "link",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "label",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "select",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "textarea",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "disabled",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "status",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "image",
+      "source": {
+        "column": 10,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 15,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "jsx",
+      "source": {
+        "column": 7,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "element",
+        "line": 36,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "dialog",
+      "source": {
+        "column": 14,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 35,
+        "schema": "masc.source.v1"
+      }
+    },
+    {
+      "id": "close",
+      "source": {
+        "column": 14,
+        "digest": "28828b1fc4436147ee84be2a45bf0244f2a304bd694335d016f952285dd6691e",
+        "file": "dashboard/src/demo/browser-source-fixture.tsx",
+        "kind": "template",
+        "line": 35,
+        "schema": "masc.source.v1"
+      }
+    }
+  ],
+  "browserVersion": "155.0.1",
+  "screenshots": [
+    {
+      "file": "before.png",
+      "bytes": 50560,
+      "sha256": "9a1c84a751d95503379380d4d4ddc6d5b0f9d33153bb3f8488d369dc9eb12e6c"
+    },
+    {
+      "file": "after.png",
+      "bytes": 50498,
+      "sha256": "57e39af6c317b7b8747e249530809101ec6a4e91f98ac4f8e1c858cd1c9271de"
+    }
+  ],
+  "scope": "real Vite instrumentation + Gecko shared scene script + exact source edit + reload + interaction; not a new OCaml/TUI binary or autonomous Keeper benchmark"
+}

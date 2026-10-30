@@ -1,0 +1,6 @@
+test suite	Test	2026-10-22T00:18:55.7282927Z Test Successful in 0.019s. 11 tests run.
+test suite	Test	2026-10-22T00:18:55.7320597Z [targeted] test/test_run_registry_current_disk: OK in 0s
+test suite	Test	2026-10-22T00:18:55.9763625Z Test Successful in 0.131s. 14 tests run.
+test suite	Test	2026-10-22T00:18:55.9793523Z [targeted] test/test_fusion_run_registry_persist: OK in 0s
+test suite	Test	2026-10-22T00:18:56.0642128Z Test Successful in 0.018s. 6 tests run.
+test suite	Test	2026-10-22T00:18:56.0686156Z [targeted] test/test_run_registry_concurrent_mutation: OK in 0s

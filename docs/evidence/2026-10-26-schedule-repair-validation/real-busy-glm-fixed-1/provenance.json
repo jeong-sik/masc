@@ -1,0 +1,112 @@
+{
+  "review_type": "independent static raw-artifact review; no process or API actions",
+  "runtime_product_head": "94b2df25abcdfe20c658322f4156ad63f5546c34",
+  "runtime_executable_sha256": "a0bd5c3903ef6425024e47b9dc92a7615f4efbb941357ea36e74ac5a18284668",
+  "observer_checkout_head": "e883ccc0ad91ff0ab8dcab60837aee6290eb7a88",
+  "observer_script": "artifacts/scheduled-job-runtime-audit-20261026/probe_real_busy_notes_v3.py",
+  "observer_script_sha256": "6ef94873203553b493c5b0d586070fc124f25d945028cab298f2f2dd5275eeff",
+  "runtime_id": "glm-coding.glm-5-3",
+  "provider_endpoint": "https://api.z.ai/api/coding/paas/v4",
+  "raw_sources": [
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/provenance.json",
+      "sha256": "1167fd2b871d63eafea4e98c853f6bffe629592df842696ae5acd84f632419ee"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/checks.json",
+      "sha256": "62a70b1df2374820a4f75049626dd3d77cb19d668ddc76ad498d0f96ed74a86e"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/process.json",
+      "sha256": "ed472f263d400e41d94dbc41fc69d295f59e330b61ae9a2e45782c759181091c"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/overlap.json",
+      "sha256": "f27725c7f210b774537a829eb0a476e6e1eb75d315154c79a9216f7992327713"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/first-busy.json",
+      "sha256": "eb2c12e9865f9ea801c0d6d849c7f0ef91f50445a9a652e003b30db5627e88a9"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/last-observation.json",
+      "sha256": "dea966ad6a31c3b3bc8719cec3fcd78f138e91fcf082f6dbcb131e19bf7d015b"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/api-records.json",
+      "sha256": "817b415ca6bef8215a47313dfcc390bb3cbaa739d7b37990034afa0f87a67d4d"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/process-ended.json",
+      "sha256": "586d584908d266bfde5536246836a1fc3d7a6028f15f18f3ee2cf45e5705a11e"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/server.log",
+      "sha256": "f04242c63c02778a4e26697dc3a5638e52a87e982a17bb8489c536ffa37edb44"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/workspace/.masc/keepers/audit-live-glm/reaction-ledger/v7/2026-10/26.jsonl",
+      "sha256": "0cf0d8c879bf96ba53d920aa82c5347cd19d2b3e4599e7e2990b25cc6e87c6ea"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/workspace/.masc/tool_calls/2026-10/26.jsonl",
+      "sha256": "df1b38296ab06b3abc6c1f21f2744e56a29594b142e804dc2ebd851d2ae7239f"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/workspace/.masc/schedules.json",
+      "sha256": "0f07e788fcfaa924c08981f8f181b5eb219a8b6a9b2145b7f609011ec999f0fd"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/real-busy-glm-fixed-1/workspace/.masc/keepers/audit-live-glm/event-queue-v19.json",
+      "sha256": "e478eb507bfdbf425cb8632673131d1763863642487d78398e0871b011b055be"
+    },
+    {
+      "path": "artifacts/scheduled-job-runtime-audit-20261026/probe_real_busy_notes_v3.py",
+      "sha256": "6ef94873203553b493c5b0d586070fc124f25d945028cab298f2f2dd5275eeff"
+    }
+  ],
+  "binary_path": "artifacts/scheduled-job-runtime-audit-20261026/native40339887803/runtime/masc",
+  "original_inputs_unchanged_during_review": true,
+  "transformations": [
+    "Reaction rows: select identity/time/kind/disposition; retain exact ACK identity/incarnation/digest/receipt fields, omit payload message. Preserve every raw ledger row and original row order.",
+    "Tool receipts: select all note-add/notes-list records with exact input/output and execution/trace/turn fields; exclude all other tool calls.",
+    "Final state: select exact schedule/source identities, durable notes and zero pending/outbox, idle and shutdown facts.",
+    "Checks: derived from immutable raw artifact reads; do not replace or repair original failing checks.",
+    "Server log: select only checkpoint/yield/resume/SIGTERM/shutdown-complete lines.",
+    "No model thinking, credentials, chat/interrupt/control tokens or auth files copied."
+  ],
+  "derived_files": [
+    {
+      "path": "selected-reactions.json",
+      "sha256": "a75df589bacbd549821b83c66df1b1ec5c592851eb45c37d1e785f08318e4260"
+    },
+    {
+      "path": "selected-note-receipts.json",
+      "sha256": "3b838504031c0e280fcfca428f6f3ff3b22f33abc8c57398d3f660c64eb75a5c"
+    },
+    {
+      "path": "selected-final-state.json",
+      "sha256": "bd4289b51726e519273e92aeb6d06822a66f1e73cca8ced6481e36a9fbd69010"
+    },
+    {
+      "path": "timeline.json",
+      "sha256": "005f5752719d01b86cbab9d981c694ef313f2ee0e72dc38daffaa624e96e2832"
+    },
+    {
+      "path": "review-checks.json",
+      "sha256": "507004ef0548d2184174ce3778bf65d2c6cfcb5f5d897358de029222fdffa4b7"
+    },
+    {
+      "path": "selected-server-log.json",
+      "sha256": "6f4b28c32ff587d04cb18c624b8ab454368425a337562857a04040b13ac25a4b"
+    },
+    {
+      "path": "README.md",
+      "sha256": "62e42122ce488b648e8ecb87e516662ba4a4aa7f29f76a837adee7a429f1134a"
+    },
+    {
+      "path": "finding.json",
+      "sha256": "0bb28c687b02a4756d278971695768754f283f9f507c2143ddc5f605a26ee3db"
+    }
+  ]
+}

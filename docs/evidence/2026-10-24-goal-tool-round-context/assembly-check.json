@@ -1,0 +1,32 @@
+{
+  "scope": "whole pure Prompt_block_id/Context_layers/Context_assembly plus exact request-assembly function slice; no producer hook, SDK HTTP dispatch, native receiver suite or live Keeper run",
+  "source_modules": [
+    {
+      "path": "lib/types/prompt_block_id.mli",
+      "sha256": "9f0fb7337a8301265ba0f1624bf5223e874f6c302473608cf45b8ae5e363b59f"
+    },
+    {
+      "path": "lib/types/prompt_block_id.ml",
+      "sha256": "41ef23675e52f6422265ad9254df1906f5d01cae3d8a6919be14df4f8063aa68"
+    },
+    {
+      "path": "lib/keeper/keeper_context_layers.mli",
+      "sha256": "e1c4e1e44e1ccf629c7709424880a91af6d3c7552709523e1af5ff43fee85741"
+    },
+    {
+      "path": "lib/keeper/keeper_context_layers.ml",
+      "sha256": "2fbefab7ec5f8686eb1a0b936646e28569191f1799608b590f9eb14a62db9259"
+    },
+    {
+      "path": "lib/keeper/keeper_context_assembly.mli",
+      "sha256": "1a042efc2b6a45052c2890c046f61e37a21b80510efbd316f4592713eac07330"
+    },
+    {
+      "path": "lib/keeper/keeper_context_assembly.ml",
+      "sha256": "b2179b04f5380b85f06e2358f9e50503372dfa25f8a1effa62db309954754dc2"
+    }
+  ],
+  "request_function_fragment_sha256": "b3f3cd730fd50a26af1cdb6fda16e08d95a71eef8c984ea643544469e4d3cb7a",
+  "compile_exit": 0,
+  "run_exit": 0
+}

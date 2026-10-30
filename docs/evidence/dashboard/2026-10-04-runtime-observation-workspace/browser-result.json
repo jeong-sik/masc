@@ -1,0 +1,124 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "Actual styled components and API parsers with synthetic HTTP. No real backend, CLI, full SPA, native TUI or deployment.",
+  "checks": [
+    "initial A metrics, probe and provider usage through actual API decoders",
+    "B failures never retain A metrics/probe/usage",
+    "late A observations and manual login result remain hidden",
+    "explicit B retries restore current measurements and matching spec",
+    "unconfirmed workspace withdraws readings and prevents requests",
+    "A return reads new observations without restoring old A",
+    "mobile has no horizontal overflow",
+    "one explicit login probe POST; no config writes, page errors or unexpected routes"
+  ],
+  "requests": [
+    {
+      "workspace": "A",
+      "path": "/api/v1/models/metrics",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/providers",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/dashboard/runtime-probe",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/runtime/resolved",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/runtime/official-client/probe",
+      "method": "POST"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/providers",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/models/metrics",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/runtime/resolved",
+      "method": "GET"
+    },
+    {
+      "workspace": "A",
+      "path": "/api/v1/dashboard/runtime-probe",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/providers",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/models/metrics",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/dashboard/runtime-probe",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/runtime/resolved",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/providers",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/models/metrics",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/runtime/resolved",
+      "method": "GET"
+    },
+    {
+      "workspace": "B",
+      "path": "/api/v1/dashboard/runtime-probe",
+      "method": "GET"
+    },
+    {
+      "workspace": "A-returned",
+      "path": "/api/v1/providers",
+      "method": "GET"
+    },
+    {
+      "workspace": "A-returned",
+      "path": "/api/v1/models/metrics",
+      "method": "GET"
+    },
+    {
+      "workspace": "A-returned",
+      "path": "/api/v1/dashboard/runtime-probe",
+      "method": "GET"
+    },
+    {
+      "workspace": "A-returned",
+      "path": "/api/v1/runtime/resolved",
+      "method": "GET"
+    }
+  ],
+  "errors": [],
+  "unexpected": []
+}

@@ -1,0 +1,199 @@
+{
+  "captured_at_utc": "2026-10-24T13:10:37.039122+00:00",
+  "candidate_head": "c6e54ff523772596ce70a9b158f89c74fedeab17",
+  "repair_base_head": "51b59a7a16943e3cf5245c7fb380ae6c0e3c66df",
+  "scope": "actual raw multi-request HTTP input/response metadata; no provider Thinking retained",
+  "markers": {
+    "goal_id": "goal-canary-three-results",
+    "criterion_revision": "68399e4c1a98a3dc460fa9fe4b79a9fe",
+    "measurement_id": "25597a9eb16a8d5b4497be7ee2464c5b"
+  },
+  "requests": [
+    {
+      "request": "request-000002.request",
+      "bytes": 75330,
+      "sha256": "66885cfdea9a134c035876d955b46adb517385a958866c6b687b936bed1a2b9c",
+      "markers_anywhere": {
+        "goal_id": true,
+        "criterion_revision": true,
+        "measurement_id": true
+      },
+      "current_carriers": [
+        {
+          "goal_id": true,
+          "criterion_revision": true,
+          "measurement_id": true
+        }
+      ],
+      "response_sha256": "01e075be8ce17cef71f6c46207e31081cf80acbb50cba4bf57972d1a3391cb6a",
+      "response_calls": [
+        {
+          "id": "call_fw4g7217",
+          "name": "Edit",
+          "goal_id": null
+        }
+      ]
+    },
+    {
+      "request": "request-000003.request",
+      "bytes": 77166,
+      "sha256": "382bb2bbe9bdd67b4df2d8d896b96209b502a91004fd7de16e4065984ed5178f",
+      "markers_anywhere": {
+        "goal_id": true,
+        "criterion_revision": false,
+        "measurement_id": false
+      },
+      "current_carriers": [],
+      "response_sha256": "c5b6dbd86c25cc8f471374e492bfed6610937904b5e2dc9c2135f16ca53f9845",
+      "response_calls": [
+        {
+          "id": "call_xeypps3p",
+          "name": "Read",
+          "goal_id": null
+        }
+      ]
+    },
+    {
+      "request": "request-000004.request",
+      "bytes": 78803,
+      "sha256": "150f768e1e2a221bee70f0889b9cc8d0494aa2263c675383ee3a4e2cbad719d3",
+      "markers_anywhere": {
+        "goal_id": true,
+        "criterion_revision": false,
+        "measurement_id": false
+      },
+      "current_carriers": [],
+      "response_sha256": "58f13bb2b8fe1b9e21dc92246161b580fb35deaf44bab714c3ce84028e22acc3",
+      "response_calls": [
+        {
+          "id": "call_qkomlmek",
+          "name": "Edit",
+          "goal_id": null
+        }
+      ]
+    },
+    {
+      "request": "request-000005.request",
+      "bytes": 80216,
+      "sha256": "6e3bbbc5122852d1c389899916d479917f0c75da6425e554210604f3213991dc",
+      "markers_anywhere": {
+        "goal_id": true,
+        "criterion_revision": false,
+        "measurement_id": false
+      },
+      "current_carriers": [],
+      "response_sha256": "b012e96a4fb239ec7bd32d46f0d4727f9025a076ec57f4a690a47b54e0aa241d",
+      "response_calls": [
+        {
+          "id": "call_ysd2q8ft",
+          "name": "Read",
+          "goal_id": null
+        }
+      ]
+    },
+    {
+      "request": "request-000006.request",
+      "bytes": 81312,
+      "sha256": "56d9faeccbface0195cc130c84c4e9c104193478ef6ffe0f627b2a514c162046",
+      "markers_anywhere": {
+        "goal_id": true,
+        "criterion_revision": false,
+        "measurement_id": false
+      },
+      "current_carriers": [],
+      "response_sha256": "6a94a7bdaeedf41b645658abd43d790e3dd529241ebf00918c8daae3df4dabba",
+      "response_calls": [
+        {
+          "id": "call_tiohl44n",
+          "name": "keeper_task_create",
+          "goal_id": null
+        }
+      ]
+    },
+    {
+      "request": "request-000007.request",
+      "bytes": 82632,
+      "sha256": "003a2e535ffc2861f6b81d00c6ce3a1e9d19454ce0c439f93227ea5a3090179c",
+      "markers_anywhere": {
+        "goal_id": true,
+        "criterion_revision": false,
+        "measurement_id": false
+      },
+      "current_carriers": [],
+      "response_sha256": "6a737888f0989b0f91207e8ee453b204532cc75cd73451ba962bd059873bff07",
+      "response_calls": [
+        {
+          "id": "call_xe90axs6",
+          "name": "keeper_task_create",
+          "goal_id": null
+        }
+      ]
+    },
+    {
+      "request": "request-000008.request",
+      "bytes": 84776,
+      "sha256": "ef931bd3779108f5f1f3b9cb10847575893d1fe79390663bfd4f059d9ebca772",
+      "markers_anywhere": {
+        "goal_id": true,
+        "criterion_revision": false,
+        "measurement_id": false
+      },
+      "current_carriers": [],
+      "response_sha256": "3b5ce6857846a6cf95cfbb64538ece0a0b3fbb36133c70df2caa4e9e3a0c3ab1",
+      "response_calls": [
+        {
+          "id": "call_gndcig34",
+          "name": "keeper_task_claim",
+          "goal_id": null
+        }
+      ]
+    },
+    {
+      "request": "request-000009.request",
+      "bytes": 85796,
+      "sha256": "24174e40c7fbbb12e4ff8b11ec30a29e223c27ed2b20753e966dc17844c3009c",
+      "markers_anywhere": {
+        "goal_id": true,
+        "criterion_revision": false,
+        "measurement_id": false
+      },
+      "current_carriers": [],
+      "response_sha256": "9f2dee6513f42f21180bc35f180b491effac3543da8aed81891bfbbdb942e4cf",
+      "response_calls": [
+        {
+          "id": "call_4stb79w2",
+          "name": "keeper_task_done",
+          "goal_id": null
+        }
+      ]
+    },
+    {
+      "request": "request-000010.request",
+      "bytes": 86909,
+      "sha256": "9e587cbb3c0c29ad5a99efcc3a099d279f1cea97e559f7b7024dcad36f5e9bc4",
+      "markers_anywhere": {
+        "goal_id": true,
+        "criterion_revision": false,
+        "measurement_id": false
+      },
+      "current_carriers": [],
+      "response_sha256": "a215205e3d4194d3349cab2ca0b35250a7ac7f77e06925cf90f70b6e3aa4a05f",
+      "response_calls": []
+    }
+  ],
+  "backlog_sha256": "b4a419f9d54b83f51ef934ef0421a20e00409827bfdf987b90f2f9949395588c",
+  "task_summaries": [
+    {
+      "id": "task-001",
+      "description": "workspace/acceptance.json 파일에서 'alpha' 값을 false에서 true로 변경합니다. 변경 후 파일 내용을 다시 읽어 검증을 제출합니다.",
+      "contract": {
+        "strict": true,
+        "required_evidence": [
+          "masc:blob sha256=bcb758e7c496f1bf85bf17a72ddb853099ae2ea6d36a5afc5197ffc8ab949630"
+        ]
+      },
+      "status": "awaiting_verification"
+    }
+  ],
+  "result": "Goal revision and measurement disappear after the first tool; accepted Task creation was driven by a request without that snapshot. Goal ID alone appears elsewhere and is not proof of snapshot delivery."
+}

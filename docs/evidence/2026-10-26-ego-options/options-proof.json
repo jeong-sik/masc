@@ -1,0 +1,1025 @@
+{
+  "spaceId": 32,
+  "finished": false,
+  "request": {
+    "expectedUrl": "http://localhost:64130/options",
+    "steps": [
+      {
+        "method": "goto",
+        "url": "http://localhost:64130/options",
+        "options": {
+          "waitUntil": "commit",
+          "referer": "http://localhost:64130/options?from=fixture"
+        }
+      },
+      {
+        "method": "waitForLoadState",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      {
+        "method": "reload",
+        "options": {
+          "waitUntil": "domcontentloaded",
+          "timeout": 5000
+        }
+      },
+      {
+        "method": "waitForLoadState",
+        "state": "networkidle",
+        "options": {
+          "idleMs": 50,
+          "timeout": 5000
+        }
+      },
+      {
+        "method": "focus",
+        "selector": "loc=css:#editor",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      {
+        "method": "fill",
+        "selector": "loc=css:#editor",
+        "text": " appended",
+        "options": {
+          "clearFirst": false,
+          "timeout": 3000
+        }
+      },
+      {
+        "method": "keyboard.type",
+        "text": " visible native typing",
+        "options": {
+          "delay": 50
+        }
+      },
+      {
+        "method": "press",
+        "selector": "loc=css:#editor",
+        "key": "End",
+        "options": {
+          "delay": 50,
+          "timeout": 3000
+        }
+      },
+      {
+        "method": "keyboard.press",
+        "key": "End",
+        "options": {
+          "delay": 50
+        }
+      },
+      {
+        "method": "selectOption",
+        "selector": "loc=css:#single",
+        "selectionJson": "{\"label\":\"Beta disabled\"}",
+        "options": {
+          "timeout": 3000
+        }
+      },
+      {
+        "method": "evaluate",
+        "source": "document.querySelector(\"#single\").value"
+      },
+      {
+        "method": "selectOption",
+        "selector": "loc=css:#single",
+        "selectionJson": "{\"index\":2}"
+      },
+      {
+        "method": "selectOption",
+        "selector": "loc=css:#single",
+        "selectionJson": "\"Alpha\""
+      },
+      {
+        "method": "selectOption",
+        "selector": "loc=css:#multi",
+        "selectionJson": "[\"a\",{\"index\":2},{\"value\":\"b\"}]"
+      },
+      {
+        "method": "evaluate",
+        "source": "Array.from(document.querySelector(\"#multi\").selectedOptions,o=>o.value)"
+      },
+      {
+        "method": "selectOption",
+        "selector": "loc=css:#multi",
+        "selectionJson": "null"
+      },
+      {
+        "method": "selectOption",
+        "selector": "loc=css:#multi",
+        "selectionJson": "[]"
+      },
+      {
+        "method": "hover",
+        "selector": "loc=css:#action",
+        "options": {
+          "position": {
+            "x": 15,
+            "y": 15
+          },
+          "force": false,
+          "timeout": 3000,
+          "label": "Point at native target"
+        }
+      },
+      {
+        "method": "click",
+        "selector": "loc=css:#action",
+        "options": {
+          "button": "right",
+          "delay": 150,
+          "position": {
+            "x": 15,
+            "y": 15
+          },
+          "force": false,
+          "timeout": 3000,
+          "label": "Open fixture context action"
+        }
+      },
+      {
+        "method": "dblclick",
+        "selector": "loc=css:#action",
+        "options": {
+          "button": "left",
+          "delay": 100,
+          "position": {
+            "x": 15,
+            "y": 15
+          },
+          "timeout": 3000,
+          "label": "Double click fixture target"
+        }
+      },
+      {
+        "method": "dragAndDrop",
+        "selector": "loc=css:#source",
+        "destination": "loc=css:#target",
+        "options": {
+          "button": "left",
+          "sourcePosition": {
+            "x": 15,
+            "y": 15
+          },
+          "targetPosition": {
+            "x": 15,
+            "y": 15
+          },
+          "force": false,
+          "timeout": 3000,
+          "label": "Drag into fixture target"
+        }
+      },
+      {
+        "method": "fetch",
+        "url": "/api",
+        "options": {
+          "method": "POST",
+          "body": "native relative fetch",
+          "headers": {
+            "X-Fixture": "native-options"
+          },
+          "timeout": 3000
+        }
+      }
+    ],
+    "snapshotScope": "full_page",
+    "maxChars": 14000
+  },
+  "result": {
+    "completed": [
+      {
+        "index": 0,
+        "method": "goto",
+        "receipt": {}
+      },
+      {
+        "index": 1,
+        "method": "waitForLoadState",
+        "receipt": null
+      },
+      {
+        "index": 2,
+        "method": "reload",
+        "receipt": {}
+      },
+      {
+        "index": 3,
+        "method": "waitForLoadState",
+        "receipt": null
+      },
+      {
+        "index": 4,
+        "method": "focus",
+        "receipt": {}
+      },
+      {
+        "index": 5,
+        "method": "fill",
+        "receipt": {}
+      },
+      {
+        "index": 6,
+        "method": "keyboard.type",
+        "receipt": null
+      },
+      {
+        "index": 7,
+        "method": "press",
+        "receipt": {}
+      },
+      {
+        "index": 8,
+        "method": "keyboard.press",
+        "receipt": {}
+      },
+      {
+        "index": 9,
+        "method": "selectOption",
+        "receipt": [
+          "b"
+        ]
+      },
+      {
+        "index": 10,
+        "method": "evaluate",
+        "receipt": "b"
+      },
+      {
+        "index": 11,
+        "method": "selectOption",
+        "receipt": [
+          "c"
+        ]
+      },
+      {
+        "index": 12,
+        "method": "selectOption",
+        "receipt": [
+          "a"
+        ]
+      },
+      {
+        "index": 13,
+        "method": "selectOption",
+        "receipt": [
+          "a",
+          "b",
+          "c"
+        ]
+      },
+      {
+        "index": 14,
+        "method": "evaluate",
+        "receipt": [
+          "a",
+          "b",
+          "c"
+        ]
+      },
+      {
+        "index": 15,
+        "method": "selectOption",
+        "receipt": []
+      },
+      {
+        "index": 16,
+        "method": "selectOption",
+        "receipt": []
+      },
+      {
+        "index": 17,
+        "method": "hover",
+        "receipt": {}
+      },
+      {
+        "index": 18,
+        "method": "click",
+        "receipt": {}
+      },
+      {
+        "index": 19,
+        "method": "dblclick",
+        "receipt": {}
+      },
+      {
+        "index": 20,
+        "method": "dragAndDrop",
+        "receipt": {}
+      },
+      {
+        "index": 21,
+        "method": "fetch",
+        "receipt": {
+          "ok": true,
+          "status": 200,
+          "statusText": "OK",
+          "url": "http://localhost:64130/api",
+          "headers": {
+            "connection": "keep-alive",
+            "content-length": "74",
+            "content-type": "application/json",
+            "date": "Mon, 26 Oct 2026 10:59:41 GMT",
+            "keep-alive": "timeout=5"
+          },
+          "body": "{\"method\":\"POST\",\"body\":\"native relative fetch\",\"header\":\"native-options\"}"
+        }
+      }
+    ],
+    "effectStarted": true,
+    "completedEffect": true,
+    "inputReleased": true,
+    "failure": null,
+    "urlBefore": "http://localhost:64130/options",
+    "url": "http://localhost:64130/options",
+    "title": "MASC · Ego native options verification",
+    "snapshot": "[p1 \"MASC · Ego native options verification\" | space \"MASC Ego native full support 20261026\"(32): 1 managed, 0 untracked — p1* \"MASC · Ego native options verification\"]\nroot\n  heading\n    text \"MASC · Ego native options verification\"\n  paragraph\n    text \"Native input ready · this is an owned local fixture\"\n  container\n    text \"Editor\"\n    textbox [ref=20]\n      text \"appended visible native typingseed\"\n  container\n    text \"Single\"\n    combobox [ref=21]\n      text \"Alpha\"\n  container\n    text \"Multiple\"\n    listbox [ref=22]\n      text \"Alpha\"\n      text \"Beta disabled\"\n      text \"Gamma\"\n  button [ref=23]\n    text \"Pointer target\"\n  container\n    text \"Drag source\"\n    text \"Drop target\"\n  container [ref=24]\n    text \"Scroll this panel with native wheel input.\"\n    text \"Observe the native cursor labels while the agent acts.\"\n    paragraph\n      text \"Panel bottom\"\n",
+    "truncated": false,
+    "chars": 880
+  },
+  "mouseRequest": {
+    "expectedUrl": "http://localhost:64130/options",
+    "steps": [
+      {
+        "method": "mouse.move",
+        "x": 574.25390625,
+        "y": 314.25,
+        "options": {
+          "steps": 5,
+          "label": "Move to observed target"
+        }
+      },
+      {
+        "method": "mouse.click",
+        "x": 574.25390625,
+        "y": 314.25,
+        "options": {
+          "button": "left",
+          "clickCount": 2,
+          "delay": 100,
+          "label": "Click observed target twice"
+        }
+      },
+      {
+        "method": "mouse.move",
+        "x": 363,
+        "y": 489.5,
+        "options": {
+          "steps": 5,
+          "label": "Move over scroll panel"
+        }
+      },
+      {
+        "method": "mouse.wheel",
+        "x": 0,
+        "y": 180,
+        "options": {
+          "label": "Scroll observed fixture panel"
+        }
+      },
+      {
+        "method": "waitForFunction",
+        "source": "document.querySelector(\"#scroll\").scrollTop > 0",
+        "options": {
+          "timeout": 3000,
+          "polling": 10
+        }
+      }
+    ],
+    "snapshotScope": "full_page",
+    "maxChars": 14000
+  },
+  "mouseResult": {
+    "completed": [
+      {
+        "index": 0,
+        "method": "mouse.move",
+        "receipt": null
+      },
+      {
+        "index": 1,
+        "method": "mouse.click",
+        "receipt": {}
+      },
+      {
+        "index": 2,
+        "method": "mouse.move",
+        "receipt": null
+      },
+      {
+        "index": 3,
+        "method": "mouse.wheel",
+        "receipt": null
+      },
+      {
+        "index": 4,
+        "method": "waitForFunction",
+        "receipt": true
+      }
+    ],
+    "effectStarted": true,
+    "completedEffect": true,
+    "inputReleased": true,
+    "failure": null,
+    "urlBefore": "http://localhost:64130/options",
+    "url": "http://localhost:64130/options",
+    "title": "MASC · Ego native options verification",
+    "snapshot": "[p1 \"MASC · Ego native options verification\" | space \"MASC Ego native full support 20261026\"(32): 1 managed, 0 untracked — p1* \"MASC · Ego native options verification\"]\nroot\n  heading\n    text \"MASC · Ego native options verification\"\n  paragraph\n    text \"Native input ready · this is an owned local fixture\"\n  container\n    text \"Editor\"\n    textbox [ref=20]\n      text \"appended visible native typingseed\"\n  container\n    text \"Single\"\n    combobox [ref=21]\n      text \"Alpha\"\n  container\n    text \"Multiple\"\n    listbox [ref=22]\n      text \"Alpha\"\n      text \"Beta disabled\"\n      text \"Gamma\"\n  button [ref=23]\n    text \"Pointer target\"\n  container\n    text \"Drag source\"\n    text \"Drop target\"\n  container [ref=24]\n    text \"Scroll this panel with native wheel input.\"\n    text \"Observe the native cursor labels while the agent acts.\"\n    paragraph\n      text \"Panel bottom\"\n",
+    "truncated": false,
+    "chars": 880
+  },
+  "observed": {
+    "editor": " appended visible native typingseed",
+    "single": "a",
+    "multiple": [],
+    "events": [
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "input",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "input",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "input",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "input",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "input",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "pointerdown",
+        "target": "action",
+        "trusted": true,
+        "button": 2
+      },
+      {
+        "type": "change",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "contextmenu",
+        "target": "action",
+        "trusted": true,
+        "button": 2
+      },
+      {
+        "type": "pointerup",
+        "target": "action",
+        "trusted": true,
+        "button": 2
+      },
+      {
+        "type": "pointerdown",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerup",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "click",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerdown",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerup",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "click",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "dblclick",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerdown",
+        "target": "source",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "dragstart",
+        "target": "source",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "drop",
+        "target": "target",
+        "trusted": true,
+        "button": 0
+      }
+    ],
+    "geometry": {
+      "action": {
+        "x": 574.25390625,
+        "y": 314.25
+      },
+      "scroll": {
+        "x": 363,
+        "y": 489.5
+      }
+    }
+  },
+  "final": {
+    "editor": " appended visible native typingseed",
+    "scrollTop": 133.5,
+    "events": [
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "input",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "input",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "input",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "single",
+        "trusted": false
+      },
+      {
+        "type": "input",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "input",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "input",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "change",
+        "target": "multi",
+        "trusted": false
+      },
+      {
+        "type": "pointerdown",
+        "target": "action",
+        "trusted": true,
+        "button": 2
+      },
+      {
+        "type": "change",
+        "target": "editor",
+        "trusted": true
+      },
+      {
+        "type": "contextmenu",
+        "target": "action",
+        "trusted": true,
+        "button": 2
+      },
+      {
+        "type": "pointerup",
+        "target": "action",
+        "trusted": true,
+        "button": 2
+      },
+      {
+        "type": "pointerdown",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerup",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "click",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerdown",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerup",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "click",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "dblclick",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerdown",
+        "target": "source",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "dragstart",
+        "target": "source",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "drop",
+        "target": "target",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerdown",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerup",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "click",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerdown",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "pointerup",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "click",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      },
+      {
+        "type": "dblclick",
+        "target": "action",
+        "trusted": true,
+        "button": 0
+      }
+    ]
+  },
+  "posts": [
+    {
+      "method": "POST",
+      "body": "native relative fetch",
+      "header": "native-options"
+    }
+  ],
+  "script_sha256": "788d22efc9cfab3d84faea133f7c6a0becde9097f768b1dbeaca17091c89f6b6",
+  "scope": "Production workflow JS on installed Ego with owned fixture; not full OCaml host, installed Keeper or operator-observed motion proof."
+}

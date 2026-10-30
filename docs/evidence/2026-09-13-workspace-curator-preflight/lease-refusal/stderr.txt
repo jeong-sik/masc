@@ -1,0 +1,3 @@
+masc-deployment-preflight-helper: workspace writer lease is already owned
+                                  base_path=/Users/dancer/.masc-integration/collaboration-baseline-68c7668
+                                  pid=90054

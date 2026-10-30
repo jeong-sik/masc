@@ -1,0 +1,29 @@
+{
+  "id": "vrf-a42e77c7eac0e45281d6cd2245840243",
+  "task_id": "task-001",
+  "output": {
+    "producer_execution": null,
+    "evidence_refs": [
+      "artifact:workspace/acceptance.json",
+      "note:Set alpha to true in acceptance.json with beta/gamma as false"
+    ],
+    "task_title": "Set alpha to true in acceptance.json",
+    "required_artifacts": [ "artifact:workspace/acceptance.json" ],
+    "submitted_evidence": [
+      {
+        "kind": "artifact",
+        "reference": "artifact:workspace/acceptance.json",
+        "content": "{\n  \"alpha\": true,\n  \"beta\": false,\n  \"gamma\": false\n}\n",
+        "bytes": 55,
+        "truncated": false
+      },
+      {
+        "kind": "note",
+        "content": "Set alpha to true in acceptance.json with beta/gamma as false"
+      }
+    ]
+  },
+  "criteria": [ "alpha is explicitly set to true" ],
+  "worker": "goal-canary",
+  "created_at": 1792863172.152029
+}

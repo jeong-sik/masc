@@ -1,0 +1,24 @@
+name = "keeper_wiki_search"
+description = """
+Search the wiki by keyword.
+
+A page matches when it contains the whole query, or every \
+whitespace-separated word of it in any order. Pages containing \
+the whole query come first, and inside each group the closest match \
+comes first. Only a page's title, summary, tags and body are read. \
+A word of one or two ASCII letters matches only as a whole word, so \
+"ci" does not match "decision". Returns one line per matching page: \
+its title and file name. Use to discover relevant pages before \
+reading full content with keeper_wiki_read."""
+
+# Held back from the request until the model asks for it by name.
+# 2026-08-25..08-31 across the fleet: called 9 times in 6 turns, 415 bytes of
+# schema on every request. Deferring saves those bytes on ~254 requests
+# a day and costs at most 6 extra requests over the same week.
+defer_loading = true
+
+[[params]]
+name = "query"
+type = "string"
+description = """
+Search query string; empty or missing returns a workflow error"""

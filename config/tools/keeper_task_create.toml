@@ -1,0 +1,71 @@
+name = "keeper_task_create"
+description = """
+Create a new task on the MASC backlog. The task appears for any keeper to \
+claim."""
+
+[[params]]
+name = "title"
+type = "string"
+required = true
+description = """
+Task title: verb + object + scope (e.g. 'Fix CI timeout in \
+keeper_agent_run.ml')"""
+min_length = 5
+max_length = 200
+
+[[params]]
+name = "description"
+type = "string"
+required = true
+description = """
+What to do, why, and acceptance criteria. Another keeper reads this to start \
+working."""
+min_length = 10
+
+[[params]]
+name = "priority"
+type = "integer"
+description = "1=critical 2=high 3=medium 4=low 5=backlog"
+minimum = 1
+maximum = 5
+default = 3
+
+[[params]]
+name = "goal_id"
+type = "string"
+description = """
+Link to an existing Goal when this task advances that Goal's success criterion, \
+including a single-task contribution. Read Active Goals first and state the \
+unmet criterion and evidence in description/contract. Omit for independent work \
+with no related Goal; never attach unrelated work to increase a count."""
+
+[[params]]
+name = "contract"
+type = "object"
+description = """
+Optional persisted task contract for deterministic completion and \
+verification evidence."""
+
+[[params.params]]
+name = "strict"
+type = "boolean"
+
+[[params.params]]
+name = "completion_contract"
+type = "array"
+items = { type = "string" }
+
+[[params.params]]
+name = "required_evidence"
+type = "array"
+items = { type = "string" }
+
+[[params.params]]
+name = "inspect_gate_evidence"
+type = "array"
+items = { type = "string" }
+
+[[params.params]]
+name = "verify_gate_evidence"
+type = "array"
+items = { type = "string" }

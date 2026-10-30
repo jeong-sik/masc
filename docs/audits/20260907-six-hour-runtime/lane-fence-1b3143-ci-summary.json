@@ -1,0 +1,46 @@
+{
+  "observed_at": "2026-09-07T13:51:43.301644+00:00",
+  "pr_number": 34012,
+  "head_sha": "1b3143fbdc84adffd8e06286db57f856ffd3e1f8",
+  "run_id": 34128774058,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/34128774058",
+  "conclusion": "success",
+  "passed_total": 115,
+  "failed_total": 0,
+  "suites": [
+    {
+      "suite": "test_heartbeat_integration",
+      "passed": 61,
+      "failed": 0
+    },
+    {
+      "suite": "test_keeper_owner",
+      "passed": 45,
+      "failed": 0
+    },
+    {
+      "suite": "test_keeper_connector_attention_batch",
+      "passed": 9,
+      "failed": 0
+    }
+  ],
+  "original_deadline_seconds": 1.0,
+  "fence_wait": "Actual Owner shutdown publication resolves a promise; busy yield loop removed.",
+  "previous_trace": "24c26 reached write_job_started at0.950569s after roughly50ms completion steps; same1s deadline failed.",
+  "temporary_diagnostics": "Removed from final production writer/update paths.",
+  "limits": [
+    "Selected integration tests only; no live native semantic lifecycle or deployment proof."
+  ],
+  "merge_verified_at": "2026-09-07T14:07:17.918404+00:00",
+  "merge": {
+    "number": 34012,
+    "merged": true,
+    "merged_at": "2026-09-07T13:55:05Z",
+    "merge_commit_sha": "438689dc53b31c4eabb3f58463405a76d83881f0"
+  },
+  "required_checks": {
+    "run_id": 34128661346,
+    "conclusion": "success",
+    "head_sha": "1b3143fbdc84adffd8e06286db57f856ffd3e1f8"
+  }
+}

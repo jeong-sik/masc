@@ -1,0 +1,11 @@
+{
+  "execution_id": "exec-1788984374294-0002",
+  "keeper": "memory-reader-proof",
+  "tool": "keeper_workspace_memory_read",
+  "input": {},
+  "output": "{\"ok\":true,\"proposals\":[{\"id\":\"d0420c0c2fbcca66a97f27d2152351dc9544e288601ea21962b7235e8ec3395f\",\"context_sha256\":\"c2caf257d0c54e468d6df3a9341211b5458b7f67a0bdd6f0a838c6b2c330a4d4\",\"proposal\":{\"conflicts\":[{\"description\":\"Report R format/generation is disputed: writer says Report R was generated as PDF (s1), while reviewer says Report R contains plain Markdown bytes and PDF generation failed (s2).\",\"source_ids\":[\"s1\",\"s2\"]}],\"excluded\":[],\"shared_claims\":[{\"claim\":\"Measurement M was corrected to 21 seconds by the analyst, superseding the analyst's earlier value of 12 seconds (s3, s4).\",\"source_ids\":[\"s3\",\"s4\"]}]},\"source_count\":4,\"source_bindings\":[{\"source_id\":\"s1\",\"snapshot_id\":\"snapshot1\"},{\"source_id\":\"s2\",\"snapshot_id\":\"snapshot2\"},{\"source_id\":\"s3\",\"snapshot_id\":\"snapshot3\"},{\"source_id\":\"s4\",\"snapshot_id\":\"snapshot3\"}],\"gaps\":[{\"keeper_id\":\"writer\",\"observation\":{\"status\":\"missing\"},\"store\":\"source_bound\"},{\"keeper_id\":\"reviewer\",\"observation\":{\"status\":\"missing\"},\"store\":\"source_bound\"},{\"keeper_id\":\"analyst\",\"observation\":{\"status\":\"missing\"},\"store\":\"source_bound\"}],\"snapshots\":[{\"keeper_id\":\"writer\",\"metadata\":{\"revision\":1,\"updated_at\":1},\"snapshot_id\":\"snapshot1\",\"snapshot_sha256\":\"0f0c487e03a16e2ebaeb0fb0ede36c747039a2ab02457fa44fad457846169eec\",\"store\":\"ordinary\"},{\"keeper_id\":\"reviewer\",\"metadata\":{\"revision\":1,\"updated_at\":1},\"snapshot_id\":\"snapshot2\",\"snapshot_sha256\":\"c45597f12084bc080be57e54319992c4a90082eddb55a45f4d2b22d87eb41a46\",\"store\":\"ordinary\"},{\"keeper_id\":\"analyst\",\"metadata\":{\"revision\":1,\"updated_at\":1},\"snapshot_id\":\"snapshot3\",\"snapshot_sha256\":\"ddb6bea677a53bf443f967bea04d07ce562732a218b5b32ce8d79dea2e3086ed\",\"store\":\"ordinary\"}],\"status\":\"model_proposed\",\"semantic_verification\":\"not_performed\"}]}",
+  "success": true,
+  "duration_ms": 1.7919540405273438,
+  "runtime_profile": "glm-coding.glm-5-3",
+  "turn_kind": "direct"
+}

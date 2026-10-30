@@ -1,0 +1,152 @@
+module StringMap = Set_util.StringMap
+
+type purpose = Keeper_registry_types.lifecycle_transaction_purpose =
+  | Paused_work_disposition
+  | Keepalive_launch
+  | Configuration_removal
+
+type snapshot = Keeper_registry_types.lifecycle_reservation_snapshot =
+  { owner_id : string
+  ; purpose : purpose
+  }
+
+type token =
+  { key : string
+  ; base_path : string
+  ; keeper_name : string
+  ; snapshot : snapshot
+  }
+
+type acquire_error = Already_reserved of snapshot
+
+type release_outcome =
+  | Released
+  | Release_missing
+  | Release_not_owner of snapshot
+
+let reservations : snapshot StringMap.t Atomic.t = Atomic.make StringMap.empty
+
+module Lock_key = struct
+  type t = string
+
+  let equal = String.equal
+  let hash = Hashtbl.hash
+end
+
+module Lock_table = Ephemeron.K1.Make (Lock_key)
+
+type lock_entry =
+  { key : string
+  ; mutex : Cross_context_mutex.t
+  }
+
+(* No fleet-size guess or TTL belongs at this boundary. The entry keeps its
+   ephemeron key reachable while a holder or waiter owns [lock_entry]; once no
+   caller references it, the table no longer retains an inactive Keeper key. *)
+let key_locks : lock_entry Lock_table.t = Lock_table.create 0
+let key_locks_mutex = Mutex.create ()
+
+let purpose_to_string = function
+  | Paused_work_disposition -> "paused_work_disposition"
+  | Keepalive_launch -> "keepalive_launch"
+  | Configuration_removal -> "configuration_removal"
+;;
+
+let snapshot_to_string snapshot =
+  Printf.sprintf
+    "owner=%s purpose=%s"
+    snapshot.owner_id
+    (purpose_to_string snapshot.purpose)
+;;
+
+let release_outcome_to_string = function
+  | Released -> "released"
+  | Release_missing -> "release_missing"
+  | Release_not_owner owner -> "release_not_owner: " ^ snapshot_to_string owner
+;;
+
+let canonical_key ~base_path ~keeper_name =
+  Keeper_registry_types.registry_key ~base_path (String.trim keeper_name)
+;;
+
+let lock_for_key key =
+  Mutex.protect key_locks_mutex (fun () ->
+    Lock_table.clean key_locks;
+    match Lock_table.find_opt key_locks key with
+    | Some entry -> entry
+    | None ->
+      let entry = { key; mutex = Cross_context_mutex.create () } in
+      Lock_table.add key_locks key entry;
+      entry)
+;;
+
+let with_key_lock ~base_path ~keeper_name f =
+  let key = canonical_key ~base_path ~keeper_name in
+  let entry = lock_for_key key in
+  (* A use before [f] is not sufficient: [f] can suspend through a major GC.
+     Retain the ephemeron key until the mutex has actually been released. *)
+  match Cross_context_mutex.with_lock entry.mutex f with
+  | value ->
+    (* See the ephemeron ownership above: keep the key live until mutex release. *)
+    ignore (Sys.opaque_identity entry.key);
+    value
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (* See the normal-return barrier: exceptions must retain the same key through unlock. *)
+    ignore (Sys.opaque_identity entry.key);
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
+let acquire ~base_path ~keeper_name ~purpose =
+  let base_path = Keeper_registry_types.canonical_base_path_exn base_path in
+  let keeper_name = String.trim keeper_name in
+  let key = canonical_key ~base_path ~keeper_name in
+  let snapshot =
+    { owner_id = Keeper_id.Uid.(generate () |> to_string)
+    ; purpose
+    }
+  in
+  with_key_lock ~base_path ~keeper_name (fun () ->
+    let current = Atomic.get reservations in
+    match StringMap.find_opt key current with
+    | Some owner -> Error (Already_reserved owner)
+    | None ->
+      Atomic.set reservations (StringMap.add key snapshot current);
+      Ok { key; base_path; keeper_name; snapshot })
+;;
+
+let token_owns_current (token : token) current =
+  String.equal token.snapshot.owner_id current.owner_id
+  && token.snapshot.purpose = current.purpose
+;;
+
+let authorize ?token ~base_path ~keeper_name () =
+  let key = canonical_key ~base_path ~keeper_name in
+  match StringMap.find_opt key (Atomic.get reservations) with
+  | None -> Ok ()
+  | Some current ->
+    (match token with
+     | Some (token : token)
+       when String.equal token.key key && token_owns_current token current ->
+       Ok ()
+     | Some _ | None -> Error current)
+;;
+
+let owner_id token = token.snapshot.owner_id
+
+let release token =
+  with_key_lock ~base_path:token.base_path ~keeper_name:token.keeper_name (fun () ->
+    let current = Atomic.get reservations in
+    match StringMap.find_opt token.key current with
+    | None -> Release_missing
+    | Some owner when not (token_owns_current token owner) -> Release_not_owner owner
+    | Some _ ->
+      Atomic.set reservations (StringMap.remove token.key current);
+      Released)
+;;
+
+let current ~base_path ~keeper_name =
+  StringMap.find_opt
+    (canonical_key ~base_path ~keeper_name)
+    (Atomic.get reservations)
+;;

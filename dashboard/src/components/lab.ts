@@ -1,0 +1,49 @@
+import { html } from 'htm/preact'
+import { route } from '../router'
+import { Tools } from './tools/tools-main'
+import { HarnessHealth } from './harness-health'
+import { KeeperMemoryHealth } from './memory/keeper-memory-health'
+import { WorkspaceMemoryContextPanel } from './memory/workspace-memory-context'
+import { WorkspaceMemoryLedgerPanel } from './memory/workspace-memory-ledger'
+import { SectionNav } from './common/section-nav'
+import { SurfaceHeader } from './common/surface-header'
+
+type LabSection =
+  | 'tools'
+  | 'harness'
+  | 'keeper-memory-health'
+
+function currentSection(): LabSection {
+  const section = route.value.params.section
+  if (
+    section === 'harness'
+    || section === 'keeper-memory-health'
+  ) {
+    return section
+  }
+  return 'tools'
+}
+
+export function Lab() {
+  const section = currentSection()
+
+  return html`
+    <div class="v2-lab-surface ss-surface bg-surface-page flex flex-col gap-6" data-testid="lab-surface">
+      <${SectionNav} tab="lab" current=${section} />
+      <${SurfaceHeader} />
+      ${section === 'tools' ? html`
+        <${Tools} />
+      ` : null}
+
+      ${section === 'harness' ? html`
+        <${HarnessHealth} />
+      ` : null}
+
+      ${section === 'keeper-memory-health' ? html`
+        <${KeeperMemoryHealth} />
+        <${WorkspaceMemoryContextPanel} />
+        <${WorkspaceMemoryLedgerPanel} />
+      ` : null}
+    </div>
+  `
+}

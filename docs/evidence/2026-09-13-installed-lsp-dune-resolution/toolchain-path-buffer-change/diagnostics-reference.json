@@ -1,0 +1,79 @@
+{
+  "schema": "masc.lsp_diagnostics_reference.v1",
+  "scope": "Direct native ocamllsp buffer-only change on existing registered fixture; no installed acceptance",
+  "uri": "file:///private/tmp/masc-installed-ide-lsp-fixture-20260913/lsp-acceptance-sample.ml",
+  "initial": {
+    "source_sha256": "d1f021862d146057a2b76b421764c8421beddafa2a43d09e3b24c9c695b24975",
+    "diagnostics": [
+      {
+        "message": "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+        "range": {
+          "end": {
+            "character": 0,
+            "line": 1
+          },
+          "start": {
+            "character": 0,
+            "line": 0
+          }
+        },
+        "severity": 1,
+        "source": "ocamllsp"
+      },
+      {
+        "code": "hole",
+        "message": "This typed hole should be replaced with an expression of type 'a",
+        "range": {
+          "end": {
+            "character": 11,
+            "line": 0
+          },
+          "start": {
+            "character": 11,
+            "line": 0
+          }
+        },
+        "severity": 1,
+        "source": "ocamllsp"
+      },
+      {
+        "message": "Syntax error, expecting fun_expr",
+        "range": {
+          "end": {
+            "character": 0,
+            "line": 1
+          },
+          "start": {
+            "character": 0,
+            "line": 1
+          }
+        },
+        "severity": 1,
+        "source": "ocamllsp"
+      }
+    ]
+  },
+  "updated": {
+    "source_sha256": "ccdab916a2664126bae77709d63891fea8e32421e01f33fa9814de8abe9ba3e3",
+    "diagnostics": [
+      {
+        "message": "No config found for file lsp-acceptance-sample.ml. Try calling 'dune build'.",
+        "range": {
+          "end": {
+            "character": 0,
+            "line": 1
+          },
+          "start": {
+            "character": 0,
+            "line": 0
+          }
+        },
+        "severity": 1,
+        "source": "ocamllsp"
+      }
+    ]
+  },
+  "versioned_reports": false,
+  "observed_pid": 97202,
+  "process_exit_code": 0
+}

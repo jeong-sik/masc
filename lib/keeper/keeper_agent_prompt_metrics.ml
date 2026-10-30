@@ -1,0 +1,465 @@
+(** Prompt metrics for keeper Agent.run turns. *)
+
+
+(** Structured prompt result from [build_turn_prompt] callback.
+    [dynamic_context] contains soft context (continuity, skill route,
+    worktree changes, turn instructions) injected via AGENT_CORE
+    [extra_system_context] at request assembly. The system prompt is the
+    run context's base prompt and is not returned here (#38354). *)
+type turn_prompt =
+  { dynamic_context : string
+  ; dynamic_context_for_tools : (Keeper_request_tool_access.t -> Keeper_context_layers.rendered) option
+      (** Optional transmission view, evaluated only after the actual offered
+          tool surface is known. [dynamic_context] remains the full source. *)
+  }
+
+(** Prompt segment metrics for effective keeper input attribution.
+    Bytes are stored rather than character counts because prompts are UTF-8. *)
+type prompt_segment_metrics =
+  { bytes : int
+  ; fingerprint : string option
+  }
+
+(** Effective byte metrics for a keeper turn. *)
+type prompt_metrics =
+  { fingerprint : string
+  ; total_bytes : int
+  ; cacheable_bytes : int
+  ; system_prompt_segment : prompt_segment_metrics
+  ; dynamic_context_segment : prompt_segment_metrics
+  ; user_message_segment : prompt_segment_metrics
+  }
+
+let rec split_at count rev_prefix values =
+  if count = 0
+  then Some (List.rev rev_prefix, values)
+  else
+    match values with
+    | value :: rest -> split_at (count - 1) (value :: rev_prefix) rest
+    | [] -> None
+;;
+
+type provenance_failure =
+  | Input_prefix_dropped of
+      { projection_input_messages : int
+      ; projected_messages : int
+      }
+  | Input_prefix_rewritten of { first_divergent_index : int }
+  | Prompt_context_carrier_repeated
+  | Prompt_context_presence_mismatch of
+      { carrier_observed : bool
+      ; prompt_context_present : bool
+      }
+
+let provenance_failure_reason = function
+  | Input_prefix_dropped _ -> "projection_dropped_input_prefix"
+  | Input_prefix_rewritten _ -> "projection_rewrote_input_prefix"
+  | Prompt_context_carrier_repeated -> "prompt_context_carrier_repeated"
+  | Prompt_context_presence_mismatch _ -> "prompt_context_presence_mismatch"
+;;
+
+(* [None] rather than [""]: a failure that carries no measured value and one
+   whose value is legitimately empty are different facts, and a sentinel makes
+   the second silently read as the first. *)
+let provenance_failure_detail = function
+  | Input_prefix_dropped { projection_input_messages; projected_messages } ->
+    Some
+      (Printf.sprintf "handed=%d returned=%d" projection_input_messages
+         projected_messages)
+  | Input_prefix_rewritten { first_divergent_index } ->
+    Some (Printf.sprintf "first_divergent_index=%d" first_divergent_index)
+  | Prompt_context_carrier_repeated -> None
+  | Prompt_context_presence_mismatch { carrier_observed; prompt_context_present }
+    ->
+    Some
+      (Printf.sprintf "carrier_observed=%b prompt_context_present=%b"
+         carrier_observed prompt_context_present)
+;;
+
+(* The one place the two halves are joined. It used to live at the call site,
+   which left the no-detail branch untested: a test that rebuilds the line
+   itself agrees with whatever it rebuilt, not with what the keeper logs. *)
+let provenance_failure_summary failure =
+  let reason = provenance_failure_reason failure in
+  match provenance_failure_detail failure with
+  | None -> reason
+  | Some detail -> reason ^ " " ^ detail
+;;
+
+(* Why a turn carries no byte attribution. Three constructors, because the
+   three are fixed differently: the first says no request reached a provider
+   on this attempt, the second says a request went out and the messages it
+   carried could not be resolved back to provider content, the third says the
+   request went out on a lane that had nothing to resolve because the
+   conversation lives in the client's session rather than in this process. *)
+type attribution_gap =
+  | Dispatch_not_reached
+  | Input_provenance_unresolved of provenance_failure
+  | Client_session_holds_input
+
+let attribution_gap_reason = function
+  | Dispatch_not_reached -> "dispatch_not_reached"
+  | Input_provenance_unresolved failure -> provenance_failure_reason failure
+  | Client_session_holds_input -> "client_session_holds_input"
+;;
+
+let attribution_gap_detail = function
+  | Dispatch_not_reached -> None
+  | Input_provenance_unresolved failure -> provenance_failure_detail failure
+  | Client_session_holds_input ->
+    Some
+      "resumed official-client session; only this turn's new material was \
+       transmitted from here"
+;;
+
+(* The total is not a field. A stored sum can disagree with the segments it
+   claims to sum, and this record is read by a panel that draws the segments
+   against that total; [attributed_bytes] computes it so the two cannot
+   diverge. *)
+type ctx_attribution =
+  | Attributed of
+      { runtime_profile : string
+      ; segments : (Turn_record.input_component_id * prompt_segment_metrics) list
+      }
+  | Not_measured of attribution_gap
+
+type ctx_composition_metrics =
+  { actual_input_tokens : int option
+  ; attribution : ctx_attribution
+  }
+
+let segment_bytes_total
+    (segments : (Turn_record.input_component_id * prompt_segment_metrics) list)
+  =
+  List.fold_left
+    (fun total (_, (segment : prompt_segment_metrics)) -> total + segment.bytes)
+    0
+    segments
+;;
+
+let attributed_bytes = function
+  | Not_measured _ -> None
+  | Attributed { segments; runtime_profile = _ } ->
+    Some (segment_bytes_total segments)
+;;
+
+(* Carrier removal alone, with no statement about ordering. The prefix checks
+   in [provider_content_messages] compare a projection against what it was
+   handed; a caller holding the list a runtime actually transmitted has no
+   such pair, and on a lane whose tail window cuts the head by design those
+   checks would refuse every turn. *)
+let remove_prompt_context ~prompt_context_present messages =
+  let rec walk seen rev_retained = function
+    | [] ->
+      if Bool.equal seen prompt_context_present
+      then Ok (List.rev rev_retained)
+      else
+        Error
+          (Prompt_context_presence_mismatch
+             { carrier_observed = seen; prompt_context_present })
+    | (message : Agent_core.Types.message) :: rest ->
+      (match
+         message.origin
+       with
+       | Agent_core.Types.Conversation
+       | Agent_core.Types.Historical_system_context
+       | Recovery_instruction | Tool_result_followup | Agent_instruction ->
+         walk seen (message :: rev_retained) rest
+       | Agent_core.Types.System_context
+         when prompt_context_present && not seen -> walk true rev_retained rest
+       | Agent_core.Types.System_context ->
+         if seen
+         then Error Prompt_context_carrier_repeated
+         else
+           Error
+             (Prompt_context_presence_mismatch
+                { carrier_observed = true; prompt_context_present }))
+  in
+  walk false [] messages
+;;
+
+let provider_content_of_transmitted ~prompt_context_present ~messages =
+  remove_prompt_context ~prompt_context_present messages
+;;
+
+(* The index is reported rather than a bare "not equal" because the two
+   rewrites this separates need different fixes: a carrier the assembler
+   inserted lands at a low index, a reordered tail lands near the end. *)
+let first_divergent_index prefix input =
+  let rec walk index prefix input =
+    match prefix, input with
+    | [], [] -> None
+    | prefix_head :: prefix_rest, input_head :: input_rest ->
+      if prefix_head = input_head
+      then walk (index + 1) prefix_rest input_rest
+      else Some index
+    | [], _ :: _ | _ :: _, [] -> Some index
+  in
+  walk 0 prefix input
+;;
+
+let provider_content_messages
+      ~prompt_context_present
+      ~(projection_input : Agent_core.Types.message list)
+      ~(projected_messages : Agent_core.Types.message list)
+  =
+  let projection_input_count = List.length projection_input in
+  match split_at projection_input_count [] projected_messages with
+  | None ->
+    Error
+      (Input_prefix_dropped
+         { projection_input_messages = projection_input_count
+         ; projected_messages = List.length projected_messages
+         })
+  | Some (projected_prefix, projection_suffix) ->
+    (match first_divergent_index projected_prefix projection_input with
+     | Some first_divergent_index ->
+       Error (Input_prefix_rewritten { first_divergent_index })
+     | None ->
+       Result.map
+         (fun retained_input -> retained_input @ projection_suffix)
+         (remove_prompt_context ~prompt_context_present projection_input))
+;;
+
+let prompt_segment_metrics_of_sanitized_text (text : string) : prompt_segment_metrics =
+  {
+    bytes = String.length text;
+    fingerprint =
+      (if text = ""
+       then None
+       else Some Agent_core_sha256.(digest_string text |> to_hex));
+  }
+
+let build_prompt_metrics_with_sanitizer ~sanitize
+    ~(system_prompt : string) ~(dynamic_context : string)
+    ~(user_message : string) : prompt_metrics =
+  let system_prompt = sanitize system_prompt in
+  let dynamic_context = sanitize dynamic_context in
+  let user_message = sanitize user_message in
+  (* These values were sanitized above for the fingerprint input. Reusing that
+     exact text avoids scanning every prompt segment a second time merely to
+     compute byte lengths and per-segment digests. *)
+  let system_prompt_metrics =
+    prompt_segment_metrics_of_sanitized_text system_prompt
+  in
+  let dynamic_context_metrics =
+    prompt_segment_metrics_of_sanitized_text dynamic_context
+  in
+  let user_message_metrics =
+    prompt_segment_metrics_of_sanitized_text user_message
+  in
+  let fingerprint_input =
+    `Assoc
+      [
+        ("system_prompt", `String system_prompt);
+        ("dynamic_context", `String dynamic_context);
+        ("user_message", `String user_message);
+      ]
+    |> Yojson.Safe.to_string
+  in
+  {
+    fingerprint = Agent_core_sha256.(digest_string fingerprint_input |> to_hex);
+    total_bytes =
+      (system_prompt_metrics.bytes
+       + dynamic_context_metrics.bytes
+       + user_message_metrics.bytes);
+    cacheable_bytes = system_prompt_metrics.bytes;
+    system_prompt_segment = system_prompt_metrics;
+    dynamic_context_segment = dynamic_context_metrics;
+    user_message_segment = user_message_metrics;
+  }
+
+let build_prompt_metrics ~system_prompt ~dynamic_context ~user_message =
+  build_prompt_metrics_with_sanitizer
+    ~sanitize:Inference_utils.sanitize_text_utf8
+    ~system_prompt
+    ~dynamic_context
+    ~user_message
+
+module For_testing = struct
+  let build_prompt_metrics_with_sanitizer = build_prompt_metrics_with_sanitizer
+end
+
+let prompt_segment_metrics_to_json (segment : prompt_segment_metrics) :
+    Yojson.Safe.t =
+  `Assoc
+    [
+      ("bytes", `Int segment.bytes);
+      ("fingerprint", Json_util.string_opt_to_json segment.fingerprint);
+    ]
+
+let prompt_metrics_to_json (metrics : prompt_metrics) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("fingerprint", `String metrics.fingerprint);
+      ("total_bytes", `Int metrics.total_bytes);
+      ("cacheable_bytes", `Int metrics.cacheable_bytes);
+      ("system_prompt", prompt_segment_metrics_to_json metrics.system_prompt_segment);
+      ("dynamic_context", prompt_segment_metrics_to_json metrics.dynamic_context_segment);
+      ("user_message", prompt_segment_metrics_to_json metrics.user_message_segment);
+    ]
+
+(* A bucket that receives one contribution keeps its fingerprint; a bucket
+   that receives several loses it. Summing bytes is arithmetic, but there is
+   no digest of two digests that names the concatenation, and answering with
+   the first contribution's would name a part while the row says the whole.
+   [Tool_schemas] is the single-contribution case the tool array needs: it is
+   the provider's cache prefix, and only a fingerprint over the whole array in
+   the order sent says whether two turns could share one. *)
+let add_segment_metric
+    (totals : (Turn_record.input_component_id, prompt_segment_metrics) Hashtbl.t)
+    ~(bucket : Turn_record.input_component_id)
+    (metric : prompt_segment_metrics) : unit =
+  match Hashtbl.find_opt totals bucket with
+  | None -> Hashtbl.replace totals bucket metric
+  | Some prev ->
+    Hashtbl.replace totals bucket
+      { bytes = prev.bytes + metric.bytes; fingerprint = None }
+
+let metric_of_block
+    ~role:(_ : Agent_core.Types.role)
+    (block : Agent_core.Types.content_block) : prompt_segment_metrics =
+  let bytes =
+    match block with
+    | Agent_core.Types.ToolResult { tool_use_id; content; json; _ } ->
+        String.length (Inference_utils.sanitize_text_utf8 tool_use_id)
+        + String.length (Inference_utils.sanitize_text_utf8 content)
+        + (match json with
+           | Some value -> String.length (Yojson.Safe.to_string value)
+           | None -> 0)
+    | Agent_core.Types.ToolUse { id; name; input } ->
+        String.length (Inference_utils.sanitize_text_utf8 id)
+        + String.length (Inference_utils.sanitize_text_utf8 name)
+        + String.length (Yojson.Safe.to_string input)
+    | Agent_core.Types.Text text ->
+        String.length (Inference_utils.sanitize_text_utf8 text)
+    | Agent_core.Types.Thinking { content; _ } ->
+        String.length (Inference_utils.sanitize_text_utf8 content)
+    | Agent_core.Types.ReasoningDetails { reasoning_content; details } ->
+        Agent_core.Types.reasoning_details_text ~reasoning_content ~details
+        |> Inference_utils.sanitize_text_utf8
+        |> String.length
+    | Agent_core.Types.RedactedThinking text ->
+        String.length (Inference_utils.sanitize_text_utf8 text)
+    | Agent_core.Types.Image _ | Agent_core.Types.Document _ | Agent_core.Types.Audio _ ->
+        (* The base64 the request carries, not the stored reference. *)
+        Agent_core.History.media_wire_length block
+  in
+  { bytes; fingerprint = None }
+
+let input_component_of_block
+    ~(role : Agent_core.Types.role)
+    (block : Agent_core.Types.content_block) : Turn_record.input_component_id =
+  match block with
+  | Agent_core.Types.ToolUse _ -> Turn_record.Message_tool_use
+  | Agent_core.Types.ToolResult _ -> Turn_record.Message_tool_result
+  | Agent_core.Types.Text _ -> (
+      match role with
+      | Agent_core.Types.User -> Turn_record.Message_user
+      | Agent_core.Types.System -> Turn_record.Message_system
+      | Agent_core.Types.Assistant -> Turn_record.Message_assistant_text
+      | Agent_core.Types.Tool -> Turn_record.Message_tool_result)
+  | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _ ->
+      Turn_record.Message_thinking
+  | Agent_core.Types.RedactedThinking _ -> Turn_record.Message_redacted_thinking
+  | Agent_core.Types.Image _ -> Turn_record.Message_image
+  | Agent_core.Types.Document _ -> Turn_record.Message_document
+  | Agent_core.Types.Audio _ -> Turn_record.Message_audio
+
+let build_ctx_segments
+    ~(prompt_blocks : Turn_record.prompt_block list)
+    ~(tools : Agent_core.Tool.t list)
+    ~(input_messages : Agent_core.Types.message list) :
+    (Turn_record.input_component_id * prompt_segment_metrics) list =
+  let totals :
+      (Turn_record.input_component_id, prompt_segment_metrics) Hashtbl.t =
+    Hashtbl.create 16
+  in
+  List.iter
+    (fun (block : Turn_record.prompt_block) ->
+      if block.bytes > 0
+      then
+        add_segment_metric totals
+          ~bucket:(Turn_record.Prompt_block block.block)
+          { bytes = block.bytes; fingerprint = Some block.digest })
+    prompt_blocks;
+  (* The tool array is the first segment of the provider's cache prefix, and
+     what makes it reusable is byte-for-byte sameness including order. The
+     digest is taken over the schemas as they are sent, so a reordering reads
+     as a different tool surface here even when the same tools are present:
+     two turns of one keeper whose fingerprints differ are two turns that
+     could not share a cached prefix. *)
+  let tool_schema_json =
+    List.map (fun tool ->
+      let json = Agent_core.Tool.schema_to_json tool in
+      Agent_core.Base.Schema_observation.encode
+        ~site:Prompt_metrics_encode ~schema:tool.Agent_core.Tool.schema
+        (fun () -> Yojson.Safe.to_string json)) tools
+  in
+  let tool_schema_bytes =
+    List.fold_left (fun total json -> total + String.length json) 0 tool_schema_json
+  in
+  if tool_schema_bytes > 0
+  then
+    add_segment_metric totals
+      ~bucket:Turn_record.Tool_schemas
+      { bytes = tool_schema_bytes
+      ; fingerprint =
+          Some
+            Agent_core_sha256.(
+              digest_string (String.concat "\n" tool_schema_json) |> to_hex)
+      };
+  List.iter
+    (fun (message : Agent_core.Types.message) ->
+      List.iter
+        (fun block ->
+          let bucket = input_component_of_block ~role:message.role block in
+          let metric = metric_of_block ~role:message.role block in
+          if metric.bytes > 0 then add_segment_metric totals ~bucket metric)
+        message.content)
+    input_messages;
+  Hashtbl.to_seq totals
+  |> List.of_seq
+  |> List.sort (fun (left, _) (right, _) ->
+    String.compare
+      (Turn_record.input_component_id_to_string left)
+      (Turn_record.input_component_id_to_string right))
+
+let segments_to_json
+    (segments : (Turn_record.input_component_id * prompt_segment_metrics) list)
+    : Yojson.Safe.t =
+  `Assoc
+    (List.map
+       (fun (key, value) ->
+         ( Turn_record.input_component_id_to_string key
+         , prompt_segment_metrics_to_json value ))
+       segments)
+
+(* [not_measured] carries neither [attributed_bytes] nor [segments]. A reader
+   that finds no total has to decide what to show; a reader handed a zero
+   shows a turn that cost nothing, which is the reading this record exists to
+   stop. *)
+let ctx_attribution_to_json (attribution : ctx_attribution) : Yojson.Safe.t =
+  match attribution with
+  | Attributed { runtime_profile; segments } ->
+    `Assoc
+      [
+        ("status", `String "attributed");
+        ("runtime_profile", `String runtime_profile);
+        ("attributed_bytes", `Int (segment_bytes_total segments));
+        ("segments", segments_to_json segments);
+      ]
+  | Not_measured gap ->
+    `Assoc
+      [
+        ("status", `String "not_measured");
+        ("reason", `String (attribution_gap_reason gap));
+        ("detail", Json_util.string_opt_to_json (attribution_gap_detail gap));
+      ]
+
+let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("actual_input_tokens", Json_util.int_opt_to_json metrics.actual_input_tokens);
+      ("attribution", ctx_attribution_to_json metrics.attribution);
+    ]

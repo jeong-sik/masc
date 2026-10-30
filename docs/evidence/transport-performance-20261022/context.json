@@ -1,0 +1,51 @@
+{
+  "cpu": "Apple M3 Max",
+  "ram_bytes": 137438953472,
+  "os": "macOS 26.6.1 arm64",
+  "network": "loopback HTTP/1.1 and WS, identity response encoding",
+  "runner_sha256": "9543ead0698597854a6dd0ae20aa61d0079d2b063b2ed494fbab9c03139ea85d",
+  "runs": [
+    {
+      "method": "ping",
+      "binary_commit": "b43722cb596bed252b7c4bb626173773550d1438",
+      "sha256": "5753a7d54b223acb673462a8ebe17ad1588535129fc2f143ba39144600a5e7e3",
+      "keeper_fibers": 0,
+      "workspace_auth_enabled": false,
+      "node_version": "v26.3.0",
+      "fixture_runtime_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+      "environment_keys": [
+        "LANG",
+        "MASC_BASE_PATH",
+        "MASC_CONFIG_BOOTSTRAP",
+        "MASC_CONFIG_DIR",
+        "MASC_GRPC_ENABLED",
+        "MASC_KEEPER_AUTONOMOUS_ENABLED",
+        "MASC_ORCHESTRATOR_ENABLED",
+        "MASC_WS_ENABLED",
+        "PATH"
+      ],
+      "owned_server_exit": 0
+    },
+    {
+      "method": "tools/list",
+      "binary_commit": "b43722cb596bed252b7c4bb626173773550d1438",
+      "sha256": "5753a7d54b223acb673462a8ebe17ad1588535129fc2f143ba39144600a5e7e3",
+      "keeper_fibers": 0,
+      "workspace_auth_enabled": false,
+      "node_version": "v26.3.0",
+      "fixture_runtime_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+      "environment_keys": [
+        "LANG",
+        "MASC_BASE_PATH",
+        "MASC_CONFIG_BOOTSTRAP",
+        "MASC_CONFIG_DIR",
+        "MASC_GRPC_ENABLED",
+        "MASC_KEEPER_AUTONOMOUS_ENABLED",
+        "MASC_ORCHESTRATOR_ENABLED",
+        "MASC_WS_ENABLED",
+        "PATH"
+      ],
+      "owned_server_exit": 0
+    }
+  ]
+}

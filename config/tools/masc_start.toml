@@ -1,0 +1,19 @@
+name = "masc_start"
+description = """
+One-step onboarding: sets the active project root, joins as agent, and \
+optionally creates+claims a task."""
+additional_properties = false
+
+[[params]]
+name = "path"
+type = "string"
+description = """
+Project directory path (absolute, relative, or ~/...). Omit if the active \
+project scope is already set."""
+
+[[params]]
+name = "task_title"
+type = "string"
+description = """
+If provided, creates a task with this title, claims it, and sets it as \
+current_task. Omit to just join without a task."""

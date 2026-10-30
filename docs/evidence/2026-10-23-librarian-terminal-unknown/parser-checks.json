@@ -1,0 +1,100 @@
+{
+  "observed_at": "2026-10-23T07:12:10.030493+00:00",
+  "scope": "OCaml parsing only; no typing, build, tests or CI",
+  "results": [
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/keeper/keeper_librarian_durable_commit.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/keeper/keeper_librarian_durable_commit.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/keeper/keeper_librarian_durable_execution.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/keeper/keeper_librarian_durable_execution.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/keeper/keeper_librarian_durable_owner.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/keeper/keeper_librarian_durable_owner.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_keeper_librarian_durable_execution.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "request_id": "tui-draft-29afd24f86d1463699bf29da7d19c54f",
+    "name": "audit-tui-b",
+    "message": "TUI_SEED_2e50170d8ce64a5d8b482afd7605d63d",
+    "expected_workspace": {
+      "base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace",
+      "masc_root": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/workspace/.masc"
+    }
+  },
+  "accepted": {
+    "operation_id": "tui-draft-29afd24f86d1463699bf29da7d19c54f",
+    "state": "Queued",
+    "queued_count": 1
+  },
+  "scope": "client stream closed only after accepted Queued; no cancel/resume"
+}

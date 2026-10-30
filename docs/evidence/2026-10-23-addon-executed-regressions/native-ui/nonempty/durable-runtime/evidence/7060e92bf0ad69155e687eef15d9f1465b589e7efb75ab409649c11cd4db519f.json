@@ -1,0 +1,35 @@
+{
+  "source_id": "vst-phrase",
+  "incarnation": "declared-local-fixture",
+  "cursor": "2",
+  "complete": true,
+  "detail": "Explicit local input fixture v2 with two observations; not real playback",
+  "observations": [
+    {
+      "id": "declared-local-fixture:2:1",
+      "kind": "vst_phrase",
+      "observed_at": 1792748112.272373,
+      "actor": null,
+      "evidence": [],
+      "fields": {
+        "state": "failed",
+        "selection": null,
+        "render": null,
+        "error": "Declared input v2 observation 1"
+      }
+    },
+    {
+      "id": "declared-local-fixture:2:2",
+      "kind": "vst_phrase",
+      "observed_at": 1792748112.2723782,
+      "actor": null,
+      "evidence": [],
+      "fields": {
+        "state": "failed",
+        "selection": null,
+        "render": null,
+        "error": "Declared input v2 observation 2"
+      }
+    }
+  ]
+}

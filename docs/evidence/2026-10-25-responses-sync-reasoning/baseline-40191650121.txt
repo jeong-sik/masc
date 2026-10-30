@@ -1,0 +1,24 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40191650121
+Head: 0b49be0d9296bfdd3eb9c9887a0f19edf712ebb9
+Full raw log SHA256: beccbfc83b94993de724ff71ccd41263613fcd7d419e41927ab67eea02398fbc
+Trailing whitespace normalized.
+test suite	Checkout	2026-10-25T12:06:15.4854977Z   ref: 0b49be0d9296bfdd3eb9c9887a0f19edf712ebb9
+test suite	Test	2026-10-25T12:07:31.4486365Z [targeted] dune build packages/agent_core/test/test_responses_reasoning_content.exe
+test suite	Test	2026-10-25T12:07:41.5137811Z [targeted] packages/agent_core/test/test_responses_reasoning_content: stanza env
+test suite	Test	2026-10-25T12:07:41.5156030Z [targeted] packages/agent_core/test/test_responses_reasoning_content: start 2026-10-25T12:07:41Z
+test suite	Test	2026-10-25T12:07:41.5249028Z ASSERT full output content retained
+test suite	Test	2026-10-25T12:07:41.5249417Z   [FAIL]        public history          0   full content through tool and lat...
+test suite	Test	2026-10-25T12:07:41.5250082Z ASSERT full reasoning takes precedence over condensation
+test suite	Test	2026-10-25T12:07:41.5250442Z   [FAIL]        public history          1   full text precedes summary.
+test suite	Test	2026-10-25T12:07:41.5393192Z [llm_provider] [INFO] [backend_openai_responses] {"event":"reasoning_replay_dropped","component":"backend_openai_responses","stream":false,"target":{"provider_kind":"openai_compat","provider_instance_id":"6751356a08fc21bd6701ac6af462206ac9c1e67223f4c108dc7bbd1a84ba9c95","canonical_model_id":"gpt-5.5","replay_contract":{"replay_policy":["Provider_opaque_state"],"streaming":["Delta_field","reasoning"],"output_wire":["No_output_control"],"content_carrier":["Canonical_blocks"]}},"drop_count":1,"replay_policy_excluded":1,"missing_source":0,"incompatible_source":0,"reasoning_on_non_assistant":0}
+test suite	Test	2026-10-25T12:07:41.5394397Z   [FAIL]        public history          2   existing summary control.
+test suite	Test	2026-10-25T12:07:41.5395076Z   [OK]          public history          3   blank full content fallback.
+test suite	Test	2026-10-25T12:07:41.5396781Z   [OK]          public history          4   opaque carrier control.
+test suite	Test	2026-10-25T12:07:41.5397114Z ASSERT distinct native items retain order
+test suite	Test	2026-10-25T12:07:41.5397529Z   [FAIL]        public history          5   multiple native reasoning items.
+test suite	Test	2026-10-25T12:07:41.5398513Z │ [FAIL]        public history          0   full content through tool and ...  │
+test suite	Test	2026-10-25T12:07:41.5403741Z │ [FAIL]        public history          1   full text precedes summary.        │
+test suite	Test	2026-10-25T12:07:41.5412013Z │ [FAIL]        public history          2   existing summary control.          │
+test suite	Test	2026-10-25T12:07:41.5412786Z Yojson__Safe.Util.Type_error("Expected array, got null", 870828711)
+test suite	Test	2026-10-25T12:07:41.5417096Z │ [FAIL]        public history          5   multiple native reasoning items.   │
+test suite	Test	2026-10-25T12:07:41.5425552Z [targeted] packages/agent_core/test/test_responses_reasoning_content: FAIL exit 1 in 0s

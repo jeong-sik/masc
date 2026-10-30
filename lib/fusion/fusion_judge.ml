@@ -1,0 +1,383 @@
+(* Fusion — 심판 (구현).
+   계약/문서: fusion_judge.mli, docs/rfc/RFC-0252 §7.2
+
+   일반 에이전트 실행(Fusion_agent_core) + Fusion_judge_parse(LLM-facing JSON). *)
+
+(* 질문·패널 답변은 신뢰 불가(모델/사용자 생성)다. XML 메타문자를
+   [String_util.escape_xml]로 escape하고 <question>/<panel_answers> 태그로 감싸,
+   패널이 가짜 judge 지시나 JSON을 답변에 섞어 심판 프롬프트 구조를 탈취(prompt
+   injection)하는 것을 방어한다. *)
+
+let render_instruction key vars =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok prompt -> prompt
+  | Error detail -> invalid_arg (Printf.sprintf "missing or invalid prompt %s: %s" key detail)
+
+let output_contract () =
+  let guidance = render_instruction Prompt_names.fusion_judge_output [] in
+  guidance ^ "\n\nJSON schema for this answer:\n"
+  ^ Yojson.Safe.to_string Fusion_judge_parse.output_schema
+
+let compose_prompt ~question ~panel =
+  let answers =
+    Fusion_types.answered_of panel
+    |> List.map (fun (a : Fusion_types.panel_answer) ->
+           Printf.sprintf "<panel model=\"%s\">%s</panel>"
+             (String_util.escape_xml a.model)
+             (String_util.escape_xml a.answer))
+    |> String.concat "\n"
+  in
+  render_instruction Prompt_names.fusion_judge
+    [ "question", String_util.escape_xml question
+    ; "panel_answers", answers
+    ; "output_contract", output_contract () ]
+
+(* REFINE 위상의 2차 심판 프롬프트. [compose_prompt]와 동일한 untrusted-content 방어
+   (escape + <question>/<panel_answers> 태그)에 더해, 1차 심판 종합을 <prior_synthesis>
+   블록으로 lossless 제공한다([render_prior_synthesis] = 7필드 + 닫힌 합 decision 전부 보존,
+   resolved_answer로 collapse하지 않음). prior synthesis도 모델 생성물이라 escape 대상이다.
+   2차 심판은 패널 증거에 비추어 1차 종합을 비판적으로 재검토해 개선본을 *같은* JSON으로
+   낸다 — synthesis_as_panel 같은 가짜 panel_answer 날조 없이(B2 회피). 순수 — 테스트 가능. *)
+let compose_refine_prompt ~question ~panel ~prior =
+  let answers =
+    Fusion_types.answered_of panel
+    |> List.map (fun (a : Fusion_types.panel_answer) ->
+           Printf.sprintf "<panel model=\"%s\">%s</panel>"
+             (String_util.escape_xml a.model)
+             (String_util.escape_xml a.answer))
+    |> String.concat "\n"
+  in
+  render_instruction Prompt_names.fusion_judge_refine
+    [ "question", String_util.escape_xml question
+    ; "panel_answers", answers
+    ; "prior_synthesis", String_util.escape_xml (Fusion_types.render_prior_synthesis prior)
+    ; "output_contract", output_contract () ]
+
+(* JOJ(judge-of-judges, RFC-0283) meta 심판 프롬프트. [compose_refine_prompt]와 동형이되
+   1개가 아니라 N개 1차 종합을 [<judge id="...">] 블록으로 각각 lossless 렌더한다([priors]는
+   (정체성, synthesis) 쌍 — id로 어느 1차 심판인지 attribute). meta 심판은 N개 종합을 패널
+   증거에 비추어 reconcile해 하나의 개선본을 *같은* JSON으로 낸다. id/종합 모두 모델 생성물이라
+   escape 대상. 순수 — 테스트 가능. *)
+let compose_meta_prompt ~question ~panel ~priors =
+  let answers =
+    Fusion_types.answered_of panel
+    |> List.map (fun (a : Fusion_types.panel_answer) ->
+           Printf.sprintf "<panel model=\"%s\">%s</panel>"
+             (String_util.escape_xml a.model)
+             (String_util.escape_xml a.answer))
+    |> String.concat "\n"
+  in
+  let judge_blocks =
+    priors
+    |> List.map (fun (judge_id, synthesis) ->
+           Printf.sprintf "<judge id=\"%s\">\n%s\n</judge>"
+             (String_util.escape_xml judge_id)
+             (String_util.escape_xml (Fusion_types.render_prior_synthesis synthesis)))
+    |> String.concat "\n"
+  in
+  render_instruction Prompt_names.fusion_judge_meta
+    [ "question", String_util.escape_xml question
+    ; "panel_answers", answers
+    ; "judge_syntheses", judge_blocks
+    ; "output_contract", output_contract () ]
+
+(* 심판이 응답을 생성한 뒤의 파싱 결과(성공/실패)에 그 호출이 소비한 [usage]를
+   양 분기 모두에 묶는다. 파싱 실패 시 usage를 버리면 orchestrator의 refine degrade
+   경로가 소비 토큰을 0으로 집계해 비용을 undercount한다(적대 리뷰 #22087 §1: 응답은
+   생성됐으나 JSON 파싱 실패 → 토큰은 이미 태움). 순수 — 테스트 가능. *)
+let attach_usage
+    (parsed : (Fusion_types.judge_synthesis, string) result)
+    (usage : Fusion_types.usage) :
+    ( Fusion_types.judge_synthesis * Fusion_types.usage
+    , Fusion_types.judge_failure * Fusion_types.usage )
+    result =
+  match parsed with
+  | Ok synthesis -> Ok (synthesis, usage)
+  | Error msg -> Error (Fusion_types.Parse_error msg, usage)
+
+let parse_response ~record_invalid text usage =
+  let parsed =
+    Fusion_judge_parse.of_string_detailed text
+    |> Result.map_error (fun failure ->
+      let reason, detail = match failure with
+        | Fusion_judge_parse.Invalid_json detail -> Agent_core.Error.Invalid_json, detail
+        | Invalid_synthesis detail -> Agent_core.Error.Schema_rejected, detail
+      in
+      Agent_core.Error.structured_output_parse_error ~reason ~detail ~raw:text
+      |> record_invalid)
+  in
+  attach_usage parsed usage
+;;
+
+let core_error_detail (e : Agent_core.Error.t) : string =
+  match e with
+  | Agent_core.Error.Api api_error -> Agent_core.Error.Retry.error_message api_error
+  | Agent_core.Error.Provider provider_error ->
+    Llm_provider.Error.to_string provider_error
+  | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried { message = _; _ } ->
+    Agent_core.Error.to_string e
+
+(* [Agent_core.Error.t]를 typed {!judge_failure}로 변환한다. 두 타임아웃 variant를
+   모두 [Timeout]으로 propagate한다: 외곽 실행 래퍼 [Api (Retry.Timeout _)]와
+   provider-level [Provider (Llm_provider.Error.Timeout _)](비스트리밍 sync 경로의
+   connect_timeout이 본문 전체를 바운드해 발생, detail "timeout phase=http_operation").
+   후자는 [Fusion_panel.attempt_of_result]와 대칭으로, 이전에는 [_] catch-all에서
+   [Provider_error]로 오귀속됐다. 그 외는 [Provider_error]에 사람-가독 detail을 보존한다.
+   Non-timeout detail은 표시용이며 재분류에 쓰지 않는다; provider 오류는
+   [Llm_provider.Error.to_string] 경로로 렌더해 provider/status/retry/phase metadata를
+   유지한다. 이 match가 "to_string 직렬화 → substring 역분류" round-trip 안티패턴의 근본
+   해소다: timeout 분류가 컴파일 타입에 묶인다. [prefix]는 호출 context(run 실패 vs
+   provider 에러)의 로그/관측 prefix를 보존한다. *)
+let failure_of_core_error ~runtime_id ~prefix (e : Agent_core.Error.t) :
+    Fusion_types.judge_failure =
+  match e with
+  | Agent_core.Error.Api (Agent_core.Error.Retry.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _) -> Timeout
+  | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _ | (Llm_provider.Retry.Overloaded _ | (Llm_provider.Retry.ServerError _ | (Llm_provider.Retry.AuthError _ | (Llm_provider.Retry.AuthorizationError _ | (Llm_provider.Retry.PaymentRequired _ | (Llm_provider.Retry.InvalidRequest _ | (Llm_provider.Retry.NotFound _ | (Llm_provider.Retry.ContextOverflow _ | (Llm_provider.Retry.InputCapacity _ | Llm_provider.Retry.NetworkError _))))))))))
+  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _ | (Llm_provider.Error.InvalidConfig _ | (Llm_provider.Error.ParseError _ | (Llm_provider.Error.ProviderWireError _ | (Llm_provider.Error.ProviderReportedError _ | (Llm_provider.Error.UnknownVariant _ | (Llm_provider.Error.ProviderUnavailable _ | (Llm_provider.Error.EmptyCompletion _ | ((Llm_provider.Error.RateLimit _ | (Llm_provider.Error.HardQuota _ | (Llm_provider.Error.CapacityExhausted _ | (Llm_provider.Error.AuthError _ | (Llm_provider.Error.AuthorizationError _ | (Llm_provider.Error.ServerError _ | (Llm_provider.Error.NetworkError _ | (Llm_provider.Error.InvalidRequest _ | (Llm_provider.Error.NotFound _ | Llm_provider.Error.ProviderTerminal _))))))))))))))))))
+  | Agent_core.Error.Agent _ | Agent_core.Error.Mcp _ | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _ | Agent_core.Error.Io _ | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ -> Provider_error
+      (prefix ^ Fusion_agent_core.provider_error_detail ~runtime_id (core_error_detail e))
+
+(* 심판 출력 계약은 프롬프트와 파서가 진다. 요청은 wire response format을 싣지
+   않는다. [Fusion_judge_parse]의 typed field 정의가 parser와 JSON output schema를
+   함께 만들고, [fusion.judge.output]의 의미 지침 뒤에 그 schema를 붙인다.
+   위반은 [Fusion_judge_parse.of_string]의 strict 파싱이 [Parse_error]로
+   fail-loud 한다. 프롬프트가 파서의 schema를 포함하는지는 테스트로 확인한다.
+
+   tier 선택을 걷어내는 근거는 이 파일이 이미 기록해둔 두 사실이다:
+   (1) capability 사실이 거짓일 수 있다 — ollama.com cloud는 declared인데
+   json_schema를 조용히 무시한다(2026-07-02 probe). 현재 심판 런타임이 가리키는
+   엔드포인트가 정확히 그것이므로, native tier가 선택되어도 와이어 강제는 실제로
+   일어나지 않는다. 계약을 지켜온 것은 내내 프롬프트와 파서다.
+   (2) #22768("native schema or fail before HTTP")이 native 미선언을 빌드 실패로
+   만들었다가 뒤집힌 이력이 있다 — 미지원 preset의 fusion을 영구 불능으로 만들기
+   때문이며, 2026-06-17~06-30 prompt 계약만으로 성공한 run이 다수다. *)
+let apply_fusion_judge_output_contract provider_cfg =
+  Ok (Keeper_structured_output_schema.without_response_format provider_cfg)
+
+(* 공식 클라이언트가 돌려준 패널 실패를 심판 실패로 옮긴다. 두 합은 겹치는 갈래가
+   많지만 같은 타입이 아니다([judge_failure] 에는 패널 전용 갈래가 없다). 갈래마다
+   명시해서, 패널 쪽에 새 갈래가 생기면 여기서 컴파일이 멈춘다. *)
+let judge_failure_of_official_failure
+  : Fusion_types.panel_failure -> Fusion_types.judge_failure
+  = function
+  | Fusion_types.Timeout -> Fusion_types.Timeout
+  | Fusion_types.Provider_error detail -> Fusion_types.Provider_error detail
+  | Fusion_types.Empty_response detail -> Fusion_types.Empty_response detail
+  | Fusion_types.Invalid_structured_response detail -> Fusion_types.Parse_error detail
+  | Fusion_types.Bridge_error detail -> Fusion_types.Build_error detail
+  | Fusion_types.Invalid_max_output_tokens n ->
+    Fusion_types.Build_error (Printf.sprintf "invalid max_output_tokens %d" n)
+  | Fusion_types.Invalid_timeout_s s ->
+    Fusion_types.Build_error (Printf.sprintf "invalid timeout_s %g" s)
+  | Fusion_types.Unknown_route route -> Fusion_types.Unknown_route route
+  | Fusion_types.Route_unavailable detail -> Fusion_types.Route_unavailable detail
+
+let judge_failure_of_route_failure
+  : Fusion_seat.route_failure -> Fusion_types.judge_failure
+  = function
+  | Fusion_seat.Unknown_route route -> Fusion_types.Unknown_route route
+  | Fusion_seat.Route_unavailable detail -> Fusion_types.Route_unavailable detail
+
+(* 공식 클라이언트(Claude Code·Codex·Antigravity) 후보 한 번. 이 런타임은 spawn 되는
+   프로세스라 [build_agent] 가 Agent 를 만들 수 없으므로, 여기서 한 턴을 직접 돌린다.
+
+   출력 계약은 HTTP 심판과 같다: 프롬프트의 [fusion.judge.output] 지시 + strict
+   파서. 클라이언트의 schema 채널(--json-schema, outputSchema)은 쓰지 않는다 —
+   HTTP 쪽이 wire response format 을 싣지 않는 것과 같은 한 가지 계약을 유지한다.
+
+   공식 클라이언트가 보고한 사용량은 빈 응답과 파싱 실패에서도 유지한다. [max_tokens] 와 masc web 도구는 이 경로에 실을 곳이 없다. *)
+let attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prompt
+    ~record_invalid () :
+    ( Fusion_types.judge_synthesis * Fusion_types.usage
+    , Fusion_types.judge_failure * Fusion_types.usage )
+    result =
+  match
+    Fusion_official_client.run_panelist ~base_dir ~runtime_id
+      ~system_prompt:judge_system_prompt ?timeout_s ~prompt ()
+  with
+  | Error (failure, usage) ->
+    Error (judge_failure_of_official_failure failure, usage)
+  | Ok (text, usage) when String.length (String.trim text) = 0 ->
+    Error
+      ( Fusion_types.Empty_response
+          (Printf.sprintf "judge: %s: official client returned no text" runtime_id)
+      , usage )
+  | Ok (text, usage) -> parse_response ~record_invalid text usage
+
+(* Agent_core 후보 한 번. 에러도 usage를 동반한다: 토큰을 태운 뒤 실패(빈 응답/파싱
+   실패)는 소비분을, 토큰 소비 전 실패(빌드/실행/빈 결과/provider 에러)는
+   [zero_usage]를 싣는다. *)
+let attempt_agent_core ~sw ~net ?max_tokens ?timeout_s ?event_bus ~judge_system_prompt
+    ~runtime_id ~web_tools ~prompt ~record_invalid () :
+    ( Fusion_types.judge_synthesis * Fusion_types.usage
+    , Fusion_types.judge_failure * Fusion_types.usage )
+    result =
+  let tools = if web_tools then Fusion_agent_core.web_tool_bundle () else [] in
+  match
+    Fusion_agent_core.build_agent ~sw ~net ~system_prompt:judge_system_prompt
+      ?event_bus ~tools ?max_tokens ?timeout_s
+      ~provider_config_transform:apply_fusion_judge_output_contract
+      runtime_id
+  with
+  | Error reason ->
+    Error
+      ( Fusion_types.Build_error
+          (Printf.sprintf "judge build failed: %s"
+             (Fusion_agent_core.panel_failure_detail ~runtime_id reason))
+      , Fusion_types.zero_usage )
+  | Ok agent ->
+    (match
+       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_judge (fun () ->
+         Ok
+           (Agent_core.Async_agent.all ~sw
+              ?clock:(Fusion_agent_core.deadline_clock ())
+              [ (agent, prompt) ]))
+     with
+     | Error e ->
+       Error
+         ( failure_of_core_error ~runtime_id ~prefix:"judge run failed: " e
+         , Fusion_types.zero_usage )
+     | Ok [] -> Error (Fusion_types.Empty_result, Fusion_types.zero_usage)
+     | Ok ((_name, Ok resp) :: _) ->
+       let text = Fusion_agent_core.answer_text resp in
+       (* 응답은 받았으므로 소비 토큰을 회계한다 — 빈 응답이든 파싱 실패든 동일. *)
+       let usage = Fusion_agent_core.usage_of resp in
+       if String.length (String.trim text) = 0 then
+         Error
+           ( Empty_response
+               ("judge: " ^ Fusion_agent_core.empty_response_detail resp)
+           , usage )
+       else
+         (* 성공 종합·파싱 실패 모두에 심판이 소비한 토큰을 묶는다(panel_answer.usage와 대칭). *)
+         parse_response ~record_invalid text usage
+     | Ok ((_name, Error e) :: _) ->
+       Error
+         ( failure_of_core_error ~runtime_id ~prefix:"judge provider error: " e
+         , Fusion_types.zero_usage ))
+
+(* 합성된 프롬프트를 받아 심판 자리를 실행한다. [run]/[run_refine]/[run_meta]가
+   서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체.
+
+   [judge_model] 은 자리에 적힌 경로 이름이다(Fusion_seat). 후보를 차례로 시도하고
+   처음 파싱을 통과한 종합에서 멈춘다 — 파싱 실패도 다음 후보로 넘어간다. 실패한
+   시도가 쓴 토큰도 결과 usage 에 더한다.
+
+   도구 기록은 시도마다 한 조각이다. Agent_core 시도는 private EventBus 관측을,
+   공식 클라이언트 시도는 [Official_client_uninstrumented] gap 을 남긴다 — 빈 ledger 는
+   도구를 안 불렀다는 증명으로 읽히므로 관측할 수 없는 시도를 빈칸으로 두지 않는다. *)
+let run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt
+    ~judge_model ~web_tools ~prompt ?tool_trace ?seat_route () :
+    ( Fusion_types.judge_synthesis * Fusion_types.usage
+    , Fusion_types.judge_failure * Fusion_types.usage )
+    result =
+  let route = judge_model in
+  let report build =
+    Option.iter
+      (fun (role, send) -> send (build ~seat:(Fusion_types.Judge_seat role)))
+      seat_route
+  in
+  match Fusion_seat.resolve route with
+  | Error failure ->
+    report (fun ~seat -> Fusion_seat.unresolved_seat_route ~seat ~route);
+    Error (judge_failure_of_route_failure failure, Fusion_types.zero_usage)
+  | Ok candidates ->
+    let actor = Option.map fst tool_trace in
+    let traces = ref [] in
+    let invocation_id = Structured_response_evidence.invocation_id () in
+    let next_attempt_index = ref 0 in
+    let attempt runtime_id =
+      let attempt_index = !next_attempt_index in
+      incr next_attempt_index;
+      let record_invalid error =
+        Structured_response_evidence.record_failure ~base_path:(Some base_dir)
+          ~attempt:{source=Fusion_judge; invocation_id; runtime_id; attempt_index;
+            tool_use_id=None; trace_id=None} error
+      in
+      if Fusion_official_client.is_official_client ~runtime_id
+      then (
+        Option.iter
+          (fun actor ->
+             traces :=
+               { Fusion_types.empty_tool_trace with
+                 gaps =
+                   [ { Fusion_types.actor
+                     ; reason = Fusion_types.Official_client_uninstrumented
+                     }
+                   ]
+               }
+               :: !traces)
+          actor;
+        attempt_official ~base_dir ?timeout_s ~judge_system_prompt ~runtime_id ~prompt
+          ~record_invalid ())
+      else (
+        let observer =
+          Option.map (fun actor -> Fusion_agent_core.create_tool_observer ~actor) actor
+        in
+        let event_bus = Option.map Fusion_agent_core.tool_observer_event_bus observer in
+        let result =
+          attempt_agent_core ~sw ~net ?max_tokens ?timeout_s ?event_bus
+            ~judge_system_prompt ~runtime_id ~web_tools ~prompt ~record_invalid ()
+        in
+        Option.iter
+          (fun observer ->
+             traces := Fusion_agent_core.finish_tool_observer observer :: !traces)
+          observer;
+        result)
+    in
+    let walk = Fusion_seat.walk candidates ~attempt in
+    Option.iter
+      (fun (_actor, send) -> send (Fusion_types.merge_tool_traces (List.rev !traces)))
+      tool_trace;
+    report (fun ~seat ->
+      Fusion_seat.seat_route ~seat ~route
+        ~to_attempt_failure:(fun (failure, _usage) ->
+          Fusion_types.Judge_attempt_failed failure)
+        walk);
+    let failed_usage failed =
+      List.fold_left
+        (fun total (_runtime, (_failure, usage)) -> Fusion_types.add_usage total usage)
+        Fusion_types.zero_usage failed
+    in
+    (match walk with
+     | Fusion_seat.Answered { answer = (synthesis, usage); failed; runtime = _ } ->
+       Ok (synthesis, Fusion_types.add_usage usage (failed_usage failed))
+     | Fusion_seat.Exhausted { last = (failure, _usage); failed } ->
+       Error (failure, failed_usage failed))
+
+let run ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
+    ~question ~panel ~web_tools ?tool_trace ?seat_route () :
+    ( Fusion_types.judge_synthesis * Fusion_types.usage
+    , Fusion_types.judge_failure * Fusion_types.usage )
+    result =
+  run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
+    ~web_tools ~prompt:(compose_prompt ~question ~panel) ?tool_trace
+    ?seat_route ()
+
+let run_refine ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
+    ~question ~panel ~prior ~web_tools ?tool_trace ?seat_route () :
+    ( Fusion_types.judge_synthesis * Fusion_types.usage
+    , Fusion_types.judge_failure * Fusion_types.usage )
+    result =
+  run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
+    ~web_tools ~prompt:(compose_refine_prompt ~question ~panel ~prior) ?tool_trace
+    ?seat_route ()
+
+let run_meta ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
+    ~question ~panel ~priors ~web_tools ?tool_trace ?seat_route () :
+    ( Fusion_types.judge_synthesis * Fusion_types.usage
+    , Fusion_types.judge_failure * Fusion_types.usage )
+    result =
+  run_composed ~base_dir ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_model
+    ~web_tools ~prompt:(compose_meta_prompt ~question ~panel ~priors) ?tool_trace
+    ?seat_route ()
+
+module For_testing = struct
+  let apply_output_contract = apply_fusion_judge_output_contract
+  let failure_of_core_error = failure_of_core_error
+  let parse_response = parse_response
+end

@@ -1,0 +1,51 @@
+(** Server_routes_http_routes_play — invites to the shared machine (RFC
+    play-link-for-the-shared-machine §2.4).
+
+    [POST], [GET] and [DELETE <name>] under {!invites_path}, each needing
+    [CanAdmin] from a bearer. A workspace with auth off or without
+    [require_token] never reaches them: the bearer check answers 401 first.
+    A refusal is a {!Server_refusal.json} body: [error] is the sentence and
+    the names below are its [code].
+
+    Issuing answers [201 {name, expires_at, link}]. Without
+    [MASC_HTTP_BASE_URL] it answers [409 {code: "not_ready", missing}]; a name
+    a keeper or credential already has answers
+    [409 {code: "name_taken", taken_by}]. One issue or revoke runs at a time,
+    so two requests for one name cannot both be issued.
+
+    Listing reads current named credential authority. Unknown storage answers
+    [503 {code: "credentials_unreadable"}], rather than showing old UUID data
+    as an active invite. Listing refuses an invalid expiry projection with
+    [503 {code: "invalid_credential_expiry"}], rather than inventing an
+    expired invite row. The answer is [200 {invites, controller}]: each invite
+    is [{name, expires_at, expired}], and [controller] says once who holds the
+    DOS controller: [{state: "held", name}], [{state: "free"}],
+    [{state: "no_machine"}] when no program is loaded, or
+    [{state: "unobserved", reason}] when the machine cannot be asked. Every
+    invite is listed in all four cases.
+
+    Revoking deletes the [Player] credential and frees the DOS controller the
+    name still holds: [200 {name, revoked: true, released_controller}]. A name
+    that is another role's credential answers [409 {code: "not_an_invite"}]
+    and changes nothing. A present credential that cannot be read or resolves
+    to another owner answers [503] with [code: "credential_unreadable"] or
+    [code: "credential_identity_mismatch"], preserving the controller.
+    A name with no credential and no keeper that holds
+    the controller -- taken back by a request sent before the delete, or kept
+    by a release that failed -- is freed:
+    [200 {name, revoked: false, released_controller: true}]. Otherwise it
+    answers [404 {code: "no_such_invite"}]. *)
+
+(** TUI issue requests carry [expected_workspace] in their JSON body;
+    list and revoke requests carry [expected_base_path] and
+    [expected_masc_root] query fields, both or neither. A mismatch returns 409
+    before any credential is listed or any credential/controller mutation. *)
+val invites_path : string
+
+val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
+
+module For_testing : sig
+  val revoke_response :
+    config:Workspace.config -> by:string -> raw_name:string ->
+    Httpun.Status.t * Yojson.Safe.t
+end

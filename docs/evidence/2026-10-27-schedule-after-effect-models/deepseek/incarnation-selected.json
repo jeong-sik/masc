@@ -1,0 +1,174 @@
+{
+  "is_derivative": true,
+  "observations_in_source": 128,
+  "contiguous_equal_identity_groups": [
+    {
+      "pending": [
+        {
+          "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+          "admitted_revision": 0,
+          "checkpoint_retentions": 0,
+          "payload": {
+            "kind": "schedule_due",
+            "occurrence_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+            "schedule_instance_id": "01a179c7-723c-7000-a67d-68227ecd2ccc",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "due_at_unix": 1793044477.475823,
+            "payload_digest": "770020f2139140e636a5c8a98db9dd9c79d6ef8d40a7bef6cfd6a7f6830b89fc"
+          }
+        }
+      ],
+      "first_observation": {
+        "observed_at_unix": 1793044478.4461381,
+        "revision": 1,
+        "sha256": "f733b078f2d8089b121483f2d2013d1ab6bc4325cd0c9e908eaa56167c84346c",
+        "bytes": 1952,
+        "source_index": 0
+      },
+      "last_observation": {
+        "observed_at_unix": 1793044492.560875,
+        "revision": 1,
+        "sha256": "f733b078f2d8089b121483f2d2013d1ab6bc4325cd0c9e908eaa56167c84346c",
+        "bytes": 1952,
+        "source_index": 27
+      }
+    },
+    {
+      "pending": [
+        {
+          "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+          "admitted_revision": 0,
+          "checkpoint_retentions": 0,
+          "payload": {
+            "kind": "schedule_due",
+            "occurrence_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+            "schedule_instance_id": "01a179c7-723c-7000-a67d-68227ecd2ccc",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "due_at_unix": 1793044477.475823,
+            "payload_digest": "770020f2139140e636a5c8a98db9dd9c79d6ef8d40a7bef6cfd6a7f6830b89fc"
+          }
+        },
+        {
+          "post_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+          "admitted_revision": 1,
+          "checkpoint_retentions": 0,
+          "payload": {
+            "kind": "schedule_due",
+            "occurrence_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+            "schedule_instance_id": "01a179c7-aabb-7000-9c8e-fa7c65385ef4",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second",
+            "due_at_unix": 1793044491.93922,
+            "payload_digest": "80d8e690ba8472a305f5366e51242ef24853c50a684f93a76ca206ef4699d360"
+          }
+        }
+      ],
+      "first_observation": {
+        "observed_at_unix": 1793044492.801346,
+        "revision": 2,
+        "sha256": "92fdb1127527cc4885652e60a33df6607fcacb1fbd96063c4d0f4c74068ab0ed",
+        "bytes": 3028,
+        "source_index": 28
+      },
+      "last_observation": {
+        "observed_at_unix": 1793044494.224122,
+        "revision": 2,
+        "sha256": "92fdb1127527cc4885652e60a33df6607fcacb1fbd96063c4d0f4c74068ab0ed",
+        "bytes": 3028,
+        "source_index": 33
+      }
+    },
+    {
+      "pending": [
+        {
+          "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+          "admitted_revision": 0,
+          "checkpoint_retentions": 1,
+          "payload": {
+            "kind": "schedule_due",
+            "occurrence_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+            "schedule_instance_id": "01a179c7-723c-7000-a67d-68227ecd2ccc",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "due_at_unix": 1793044477.475823,
+            "payload_digest": "770020f2139140e636a5c8a98db9dd9c79d6ef8d40a7bef6cfd6a7f6830b89fc"
+          }
+        },
+        {
+          "post_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+          "admitted_revision": 1,
+          "checkpoint_retentions": 0,
+          "payload": {
+            "kind": "schedule_due",
+            "occurrence_id": "0ec4673e0322a692d6e9b9760fc8bb94d49d03945e62db3f935e02f322813645",
+            "schedule_instance_id": "01a179c7-aabb-7000-9c8e-fa7c65385ef4",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second",
+            "due_at_unix": 1793044491.93922,
+            "payload_digest": "80d8e690ba8472a305f5366e51242ef24853c50a684f93a76ca206ef4699d360"
+          }
+        }
+      ],
+      "first_observation": {
+        "observed_at_unix": 1793044494.535651,
+        "revision": 3,
+        "sha256": "5d4ba81537f3d0cb528e8613855f468b57c9c21516a86ee91e3430909b43017b",
+        "bytes": 3028,
+        "source_index": 34
+      },
+      "last_observation": {
+        "observed_at_unix": 1793044498.9434109,
+        "revision": 3,
+        "sha256": "5d4ba81537f3d0cb528e8613855f468b57c9c21516a86ee91e3430909b43017b",
+        "bytes": 3028,
+        "source_index": 53
+      }
+    },
+    {
+      "pending": [
+        {
+          "post_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+          "admitted_revision": 0,
+          "checkpoint_retentions": 1,
+          "payload": {
+            "kind": "schedule_due",
+            "occurrence_id": "8490fbe042ddce312c31affb7bf661ef6d65afd787ef1f3112dc0f1627138032",
+            "schedule_instance_id": "01a179c7-723c-7000-a67d-68227ecd2ccc",
+            "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+            "due_at_unix": 1793044477.475823,
+            "payload_digest": "770020f2139140e636a5c8a98db9dd9c79d6ef8d40a7bef6cfd6a7f6830b89fc"
+          }
+        }
+      ],
+      "first_observation": {
+        "observed_at_unix": 1793044499.178824,
+        "revision": 4,
+        "sha256": "16d9cf212665ba104f0ce52f51111c0e7a3f3517a6fe401ce3698904f53884c9",
+        "bytes": 3489,
+        "source_index": 54
+      },
+      "last_observation": {
+        "observed_at_unix": 1793044517.081968,
+        "revision": 4,
+        "sha256": "16d9cf212665ba104f0ce52f51111c0e7a3f3517a6fe401ce3698904f53884c9",
+        "bytes": 3489,
+        "source_index": 126
+      }
+    },
+    {
+      "pending": [],
+      "first_observation": {
+        "observed_at_unix": 1793044517.358418,
+        "revision": 5,
+        "sha256": "5d6258b08b87ed6aea77d25410475557c963d62f89e766bc613d7151c292a0af",
+        "bytes": 2414,
+        "source_index": 127
+      },
+      "last_observation": {
+        "observed_at_unix": 1793044517.358418,
+        "revision": 5,
+        "sha256": "5d6258b08b87ed6aea77d25410475557c963d62f89e766bc613d7151c292a0af",
+        "bytes": 2414,
+        "source_index": 127
+      }
+    }
+  ],
+  "scope": "First/last samples of each contiguous identical pending identity+retention projection. Not continuous monitoring or proof of intervening states."
+}

@@ -1,0 +1,33 @@
+{
+  "provenance": "existing parent-worktree helper; build source not independently established, parent author reported a local test/dune duplicate workaround",
+  "binary_sha256": "30bcf5988c88a7fc9373238ac021d85cc0894559efd2162e60c9f9e50d3a9f67",
+  "euid": 502,
+  "cases": [
+    {
+      "mode": "absent",
+      "exit_code": 0,
+      "transcript_output": [
+        "keeper chat transcripts rows=0 refused=0"
+      ],
+      "permission_fixture_denied": null
+    },
+    {
+      "mode": "regular-file",
+      "exit_code": 0,
+      "transcript_output": [
+        "keeper chat transcripts rows=0 refused=0"
+      ],
+      "permission_fixture_denied": null
+    },
+    {
+      "mode": "unreadable-directory",
+      "exit_code": 0,
+      "transcript_output": [
+        "keeper chat transcripts rows=0 refused=0"
+      ],
+      "permission_fixture_denied": true
+    }
+  ],
+  "new_build": false,
+  "patched_run": false
+}

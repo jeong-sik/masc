@@ -1,0 +1,36 @@
+{
+  "observed_at": "2026-10-21T05:44:23.740418+00:00",
+  "engine_before": {
+    "command": [
+      "docker",
+      "info",
+      "--format",
+      "{{.ID}}"
+    ],
+    "exit_code": 0,
+    "stdout": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7\n",
+    "stderr": ""
+  },
+  "container_inspect": {
+    "command": [
+      "docker",
+      "container",
+      "inspect",
+      "b0154e7c2aa049639535e3918d93fee1dac539c05ac7e0efb9a6883c29b4fd0d"
+    ],
+    "exit_code": 1,
+    "stdout": "[]\n",
+    "stderr": "Error response from daemon: No such container: b0154e7c2aa049639535e3918d93fee1dac539c05ac7e0efb9a6883c29b4fd0d\n"
+  },
+  "engine_after": {
+    "command": [
+      "docker",
+      "info",
+      "--format",
+      "{{.ID}}"
+    ],
+    "exit_code": 0,
+    "stdout": "ae0e98fe-d402-4dc7-88a8-685efbd65ae7\n",
+    "stderr": ""
+  }
+}

@@ -1,0 +1,804 @@
+(** Masc_tui_link_preview — Web link previews, OpenGraph extraction,
+    rich embed cards, and the preview overlay. *)
+
+type link_kind =
+  | Github of {
+      label : string;
+      owner : string;
+      repo : string;
+    }
+  | Arxiv of { id : string }
+  | HackerNews of { item_id : string }
+  | YouTube of { video_id : string }
+  | Image_direct of { ext : string }
+  | Web_page
+
+type og_preview = {
+  url : string;
+  title : string option;
+  description : string option;
+  site_name : string option;
+  image_url : string option;
+  kind : link_kind;
+  has_metadata : bool;
+}
+
+let preview_cache_capacity = 256
+let preview_cache_mu = Stdlib.Mutex.create ()
+let preview_cache : (string, og_preview) Masc_tui_lru.t ref =
+  ref (Masc_tui_lru.create ~capacity:preview_cache_capacity)
+
+let preview_generation = ref 0
+
+let cache_generation () =
+  Stdlib.Mutex.protect preview_cache_mu (fun () -> !preview_generation)
+
+let cache_lookup url =
+  Stdlib.Mutex.protect preview_cache_mu (fun () ->
+      Masc_tui_lru.find !preview_cache url)
+
+let cache_store preview =
+  Stdlib.Mutex.protect preview_cache_mu (fun () ->
+      if Masc_tui_lru.find !preview_cache preview.url <> Some preview then
+        incr preview_generation;
+      Masc_tui_lru.set !preview_cache preview.url preview)
+
+type mosaic_refusal =
+  | Fetch_failed of { detail : string }
+  | Empty_body
+  | Cache_unreadable of { detail : string }
+  | Decode_failed of { detail : string }
+
+type mosaic_entry =
+  | Mosaic of string list
+  | Refused of mosaic_refusal
+
+let mosaic_refusal_text = function
+  | Fetch_failed { detail } -> "the image URL could not be fetched: " ^ detail
+  | Empty_body -> "the image URL answered with an empty body"
+  | Cache_unreadable { detail } -> "the cached image could not be read: " ^ detail
+  | Decode_failed { detail } -> "the image could not be decoded: " ^ detail
+
+(* What the background fetch decided about an image URL, keyed by that URL and
+   filled asynchronously off the render loop. Read by [render_modal_card]; a
+   miss simply draws no preview. Refusals are retained for display, not treated
+   as permanent: only an explicit modal retry consumes them. *)
+let mosaic_cache_mu = Stdlib.Mutex.create ()
+type mosaic_pending = { mutable discard_result : bool }
+type mosaic_state = Decided of mosaic_entry | Pending of mosaic_pending
+type mosaic_request = Load_missing | Retry_refused
+let mosaic_cache : (string, mosaic_state) Hashtbl.t = Hashtbl.create 64
+
+(* The entry for an image URL, or [None] if the background fetch has not
+   decided it yet. *)
+let mosaic_lookup url =
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
+    match Hashtbl.find_opt mosaic_cache url with
+    | Some (Decided entry) -> Some entry
+    | Some (Pending _) | None -> None)
+
+let compute_mosaic request ~compute url =
+  let claimed =
+    Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
+      let previous = Hashtbl.find_opt mosaic_cache url in
+      match request, previous with
+      (* A retry also claims a URL nothing has decided. A direct image link is
+         never fetched as a page ([get_preview] skips the background fetch for
+         [Image_direct]), so no mosaic was ever computed for it and there was no
+         refusal to claim: the explicit retry did nothing at all and every later
+         view reused the body the first one cached -- across restarts, because
+         that body is a file on disk. A decided mosaic is still left alone,
+         there being nothing to retry, and so is pending work, which would
+         otherwise have two writers. *)
+      | Load_missing, None | Retry_refused, (None | Some (Decided (Refused _))) ->
+        let pending = { discard_result = false } in
+        Hashtbl.replace mosaic_cache url (Pending pending);
+        Some (pending, previous)
+      | Load_missing, Some _ | Retry_refused, Some (Decided (Mosaic _) | Pending _) ->
+        None)
+  in
+  match claimed with
+  | None -> ()
+  | Some (pending, previous) ->
+    let finish outcome =
+      Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
+        match outcome with
+        | Some state when not pending.discard_result -> Hashtbl.replace mosaic_cache url state
+        | Some _ | None -> Hashtbl.remove mosaic_cache url)
+    in
+    match compute () with
+    | entry -> finish (Some (Decided entry))
+    | exception exn ->
+      (* Cleanup is non-yielding; propagate every exception, including cancellation. *)
+      let backtrace = Printexc.get_raw_backtrace () in
+      finish previous;
+      Printexc.raise_with_backtrace exn backtrace
+
+let load_mosaic ~compute url = compute_mosaic Load_missing ~compute url
+let retry_mosaic ~retry url = compute_mosaic Retry_refused ~compute:retry url
+
+let clear_cache () =
+  Stdlib.Mutex.protect preview_cache_mu (fun () ->
+      preview_cache := Masc_tui_lru.create ~capacity:preview_cache_capacity);
+  Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
+    Hashtbl.filter_map_inplace (fun _ -> function
+      | Decided _ -> None
+      | Pending pending -> pending.discard_result <- true; Some (Pending pending))
+      mosaic_cache)
+
+let path_segments uri =
+  Uri.path uri
+  |> String.split_on_char '/'
+  |> List.filter (fun s -> not (String.equal s ""))
+
+let is_image_extension ext =
+  match String.lowercase_ascii ext with
+  | "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "avif" | "bmp" -> true
+  | _ -> false
+
+let file_extension path =
+  match String.rindex_opt path '.' with
+  | Some idx -> String.sub path (idx + 1) (String.length path - idx - 1)
+  | None -> ""
+
+let synthesize_preview url =
+  let uri = Uri.of_string url in
+  let host = Option.value ~default:"" (Uri.host uri) |> String.lowercase_ascii in
+  let segments = path_segments uri in
+  let ext = file_extension (Uri.path uri) in
+  match Masc_tui_link_label.label url with
+  | Some label_text ->
+      let owner, repo =
+        match segments with
+        | o :: r :: _ -> o, r
+        | _ -> "github", "repo"
+      in
+      { url
+      ; title = Some label_text
+      ; description = Some (Printf.sprintf "GitHub resource %s" label_text)
+      ; site_name = Some "GitHub"
+      ; image_url = Some (Printf.sprintf "https://opengraph.githubassets.com/1/%s/%s" owner repo)
+      ; kind = Github { label = label_text; owner; repo }
+      ; has_metadata = true
+      }
+  | None ->
+      if is_image_extension ext then
+        let filename =
+          match List.rev segments with
+          | last :: _ -> last
+          | [] -> "image." ^ ext
+        in
+        { url
+        ; title = Some filename
+        ; description = Some (Printf.sprintf "%s Image (%s)" (String.uppercase_ascii ext) filename)
+        ; site_name = Some (if host = "" then "Image" else host)
+        ; image_url = Some url
+        ; kind = Image_direct { ext }
+        ; has_metadata = true
+        }
+      else if String.equal host "arxiv.org" || String.ends_with ~suffix:".arxiv.org" host then
+        let id =
+          match segments with
+          | "abs" :: paper_id :: _ | "pdf" :: paper_id :: _ -> paper_id
+          | last :: _ -> last
+          | [] -> "paper"
+        in
+        { url
+        ; title = Some (Printf.sprintf "arXiv %s" id)
+        ; description = Some (Printf.sprintf "Preprint archive paper: arXiv:%s" id)
+        ; site_name = Some "arXiv.org"
+        ; image_url = None
+        ; kind = Arxiv { id }
+        ; has_metadata = true
+        }
+      else if String.equal host "news.ycombinator.com" then
+        let item_id =
+          match Uri.get_query_param uri "id" with
+          | Some id -> id
+          | None -> "item"
+        in
+        { url
+        ; title = Some (Printf.sprintf "Hacker News item #%s" item_id)
+        ; description = Some "Hacker News discussion"
+        ; site_name = Some "Hacker News"
+        ; image_url = None
+        ; kind = HackerNews { item_id }
+        ; has_metadata = true
+        }
+      else if String.equal host "youtube.com" || String.equal host "www.youtube.com"
+              || String.equal host "youtu.be" then
+        let video_id =
+          if String.equal host "youtu.be" then
+            match segments with vid :: _ -> vid | [] -> "video"
+          else
+            match Uri.get_query_param uri "v" with
+            | Some vid -> vid
+            | None -> "video"
+        in
+        { url
+        ; title = Some (Printf.sprintf "YouTube %s" video_id)
+        ; description = Some "YouTube video broadcast"
+        ; site_name = Some "YouTube"
+        ; image_url = Some (Printf.sprintf "https://img.youtube.com/vi/%s/hqdefault.jpg" video_id)
+        ; kind = YouTube { video_id }
+        ; has_metadata = true
+        }
+      else
+        { url
+        ; title = None
+        ; description = None
+        ; site_name = Some (if host = "" then "Web Link" else host)
+        ; image_url = None
+        ; kind = Web_page
+        ; has_metadata = false
+        }
+
+(* ---- Real OpenGraph fetch upgrade ----
+
+   [synthesize_preview] above builds a card from the URL shape alone: the
+   instant, offline fallback. The parser below reads a fetched page's <title>
+   and og:* meta tags so a card shows the real title/description/image instead
+   of a guess. It is a pure, reentrant scanner -- [Str] keeps global match state
+   that is unsafe across the fetch fibers, and a scanner is unit-testable with no
+   network. The HTTP call itself lives in the TUI layer (which owns the HTTP
+   client and the redraw mailbox) and is injected through [set_background_fetch],
+   so this render library keeps no network dependency. *)
+
+(* Allocation-free forward substring search. *)
+let index_sub ~sub s from =
+  let ls = String.length s and lsub = String.length sub in
+  if lsub = 0 then Some (max 0 from)
+  else begin
+    let last = ls - lsub in
+    let rec loop i =
+      if i > last then None
+      else begin
+        let rec eq j = j >= lsub || (s.[i + j] = sub.[j] && eq (j + 1)) in
+        if eq 0 then Some i else loop (i + 1)
+      end
+    in
+    loop (max 0 from)
+  end
+
+let is_ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r'
+
+let skip_ws s i =
+  let n = String.length s in
+  let rec loop i = if i < n && is_ws s.[i] then loop (i + 1) else i in
+  loop i
+
+(* Decode the few HTML entities that occur in meta content. Unknown entities are
+   kept verbatim rather than dropped, so no text is silently lost. *)
+let decode_entities s =
+  let n = String.length s in
+  let buf = Buffer.create n in
+  let i = ref 0 in
+  while !i < n do
+    if s.[!i] = '&' then begin
+      match String.index_from_opt s !i ';' with
+      | Some semi when semi - !i <= 8 ->
+          let ent =
+            String.lowercase_ascii (String.sub s (!i + 1) (semi - !i - 1))
+          in
+          let repl =
+            match ent with
+            | "amp" -> "&"
+            | "lt" -> "<"
+            | "gt" -> ">"
+            | "quot" -> "\""
+            | "apos" | "#39" -> "'"
+            | "#47" | "#x2f" -> "/"
+            | _ -> ""
+          in
+          if repl = "" then (Buffer.add_char buf '&'; incr i)
+          else (Buffer.add_string buf repl; i := semi + 1)
+      | _ -> Buffer.add_char buf '&'; incr i
+    end
+    else (Buffer.add_char buf s.[!i]; incr i)
+  done;
+  Buffer.contents buf
+
+(* Value of [name="v"] / [name='v'] inside a single tag body. [lower] is the
+   lowercased [tag]; the name match is case-insensitive and boundary-guarded so
+   ["name"] does not match inside a longer attribute. Only quoted values. *)
+let tag_attr ~tag ~lower name =
+  let name = String.lowercase_ascii name in
+  let n = String.length tag in
+  let rec search from =
+    match index_sub ~sub:name lower from with
+    | None -> None
+    | Some i ->
+        let boundary_ok = i = 0 || is_ws lower.[i - 1] in
+        let j = skip_ws lower (i + String.length name) in
+        if boundary_ok && j < n && tag.[j] = '=' then begin
+          let k = skip_ws lower (j + 1) in
+          if k < n && (tag.[k] = '"' || tag.[k] = '\'') then
+            match String.index_from_opt tag (k + 1) tag.[k] with
+            | Some e -> Some (String.sub tag (k + 1) (e - k - 1))
+            | None -> None
+          else search (i + String.length name)
+        end
+        else search (i + String.length name)
+  in
+  search 0
+
+(* [content] of the first <meta> whose property or name attribute equals [key]
+   (already lowercased). [head]/[lhead] are the page head and its lowercase. *)
+let meta_content ~head ~lhead key =
+  let n = String.length head in
+  let rec loop from =
+    match index_sub ~sub:"<meta" lhead from with
+    | None -> None
+    | Some i ->
+        let close =
+          match String.index_from_opt head i '>' with Some c -> c | None -> n
+        in
+        let tag = String.sub head i (close - i) in
+        let lower = String.lowercase_ascii tag in
+        let prop =
+          match tag_attr ~tag ~lower "property" with
+          | Some _ as p -> p
+          | None -> tag_attr ~tag ~lower "name"
+        in
+        (match prop with
+         | Some p when String.equal (String.lowercase_ascii (String.trim p)) key ->
+             (match tag_attr ~tag ~lower "content" with
+              | Some c -> Some (decode_entities (String.trim c))
+              | None -> loop (close + 1))
+         | _ -> loop (close + 1))
+  in
+  loop 0
+
+(* Text of the first <title>...</title>. *)
+let title_tag ~head ~lhead =
+  match index_sub ~sub:"<title" lhead 0 with
+  | None -> None
+  | Some i -> (
+      match String.index_from_opt head i '>' with
+      | None -> None
+      | Some gt -> (
+          match index_sub ~sub:"</title" lhead (gt + 1) with
+          | None -> None
+          | Some e ->
+              Some (decode_entities (String.trim (String.sub head (gt + 1) (e - gt - 1))))))
+
+(* Merge a fetched page's real metadata onto the URL-synthesized base, keeping
+   its [kind] (and thus its banner styling). Returns the base unchanged when the
+   page yielded no title or og:* at all, so [has_metadata] never claims fetched
+   data we do not have. The whole body is scanned rather than a head window:
+   real pages (YouTube, for one) place og:* hundreds of KB in, after large inline
+   scripts, so a small window would silently miss them. The body is already
+   capped at 8 MB by the fetch, and the scan is a linear byte walk. *)
+let parse_og_html ~url ~body =
+  let base = synthesize_preview url in
+  let lhead = String.lowercase_ascii body in
+  let meta key = meta_content ~head:body ~lhead key in
+  (* Collapse newlines/tabs and runs of spaces to single spaces so a multi-line
+     og:description (a GitHub PR body, say) stays one card row instead of
+     splitting the row and misaligning the banner beside it. ASCII-only, so
+     UTF-8 text passes through untouched. *)
+  let sanitize s =
+    let b = Buffer.create (String.length s) in
+    let prev_space = ref true in
+    String.iter
+      (fun c ->
+        let c = if c = '\n' || c = '\r' || c = '\t' then ' ' else c in
+        if c = ' ' then (
+          if not !prev_space then Buffer.add_char b ' ';
+          prev_space := true)
+        else (
+          Buffer.add_char b c;
+          prev_space := false))
+      s;
+    String.trim (Buffer.contents b)
+  in
+  let non_empty = function
+    | Some s when not (String.equal (sanitize s) "") -> Some (sanitize s)
+    | _ -> None
+  in
+  let og_title = non_empty (meta "og:title") in
+  let og_desc = non_empty (meta "og:description") in
+  let og_image = non_empty (meta "og:image") in
+  let og_site = non_empty (meta "og:site_name") in
+  let html_title = non_empty (title_tag ~head:body ~lhead) in
+  let got_real =
+    og_title <> None || og_desc <> None || og_image <> None || html_title <> None
+  in
+  if not got_real then base
+  else
+    let title =
+      match og_title with
+      | Some _ as t -> t
+      | None -> ( match html_title with Some _ as t -> t | None -> base.title)
+    in
+    let description = match og_desc with Some _ as d -> d | None -> base.description in
+    let image_url = match og_image with Some _ as im -> im | None -> base.image_url in
+    let site_name = match og_site with Some _ as s -> s | None -> base.site_name in
+    { base with title; description; site_name; image_url; has_metadata = true }
+
+(* Injected by the TUI at startup: given a URL, spawn a background fetch that
+   replaces the synthesized cache entry with fetched metadata and requests a
+   redraw. A no-op until registered, so [get_preview] stays pure in tests. *)
+let background_fetch : (string -> unit) ref = ref (fun _ -> ())
+
+let set_background_fetch f = background_fetch := f
+
+let has_informative_preview p = p.has_metadata
+
+let get_preview url =
+  match cache_lookup url with
+  | Some p -> p
+  | None ->
+      let p = synthesize_preview url in
+      cache_store p;
+      (* Kick off a real fetch exactly once -- this is the only cache miss for
+         the url. Its result replaces this synthesized card on the next render;
+         a failed or unregistered fetch simply leaves the synthesized card. A
+         direct image URL has no HTML page to read, so it is not fetched. *)
+      (match p.kind with
+        | Image_direct _ -> ()
+        | Github _ | Arxiv _ | HackerNews _ | YouTube _ | Web_page -> !background_fetch url);
+      p
+
+let site_icon p =
+  match p.kind with
+  | Github _ -> "\xf0\x9f\x90\x99" (* 🐙 *)
+  | Arxiv _ -> "\xf0\x9f\x93\x84" (* 📄 *)
+  | HackerNews _ -> "\xf0\x9f\x9f\xa7" (* 🟧 *)
+  | YouTube _ -> "\xe2\x96\xb6\xef\xb8\x8f" (* ▶️ *)
+  | Image_direct _ -> "\xf0\x9f\x96\xbc\xef\xb8\x8f" (* 🖼️ *)
+  | Web_page -> "\xf0\x9f\x8c\x90" (* 🌐 *)
+
+let site_label p =
+  match p.site_name with
+  | Some name -> name
+  | None ->
+      let uri = Uri.of_string p.url in
+      Option.value ~default:"Web Link" (Uri.host uri)
+
+
+let make_hline n =
+  let buf = Buffer.create (max 0 n * 3) in
+  for _ = 1 to max 0 n do
+    Buffer.add_string buf "\xe2\x94\x80"
+  done;
+  Buffer.contents buf
+
+let truecolor_bg r g b = Masc_tui_theme.Sgr.truecolor_background ~r ~g ~b
+let truecolor_fg r g b = Masc_tui_theme.Sgr.truecolor_foreground ~r ~g ~b
+
+type card_field =
+  | Card_site | Card_domain | Card_title | Card_description | Card_address
+  | Card_browser_action | Card_copy_action | Card_visual_action
+  | Banner_brand | Banner_repository | Banner_paper_id | Banner_image_format
+  | Banner_service_label | Banner_content_label | Banner_action
+
+type card_band = Header_band | Title_band | Description_band | Address_band | Actions_band
+type card_column = Primary_column | Banner_column
+type card_order = { band : card_band; column : card_column }
+
+type card_source_span = {
+  field : card_field;
+  order : card_order;
+  value : string;
+  row : int;
+  row_start_byte : int;
+  source_start_byte : int;
+  source_end_byte : int;
+}
+
+let render_compact_badge_internal ?on_field p =
+  if not (has_informative_preview p) then None
+  else
+    let icon = site_icon p in
+    let site = site_label p in
+    let title = Option.value ~default:p.url p.title in
+    let prefix = "\xe2\x95\xb0\xe2\x94\x80 " ^ icon ^ " [" in
+    let title_prefix = prefix ^ site ^ "] " in
+    Option.iter (fun emit ->
+      List.iter (fun (field,band,value,row_start_byte) ->
+        emit {field;order={band;
+          column=Primary_column};value;row=0;row_start_byte;source_start_byte=0;source_end_byte=String.length value})
+        [Card_site,Header_band,site,String.length prefix;
+         Card_title,Title_band,title,String.length title_prefix]) on_field;
+    Some (title_prefix ^ title)
+
+let render_compact_badge p = render_compact_badge_internal p
+
+(* The formatter owns each field's placement. Clipping is computed before
+   styling; source bytes are never recovered by finding text in a rendered row. *)
+let report_card_fields on_field ~band ~column ~row ~width ~row_prefix ~opening ~plain fields =
+  Option.iter (fun emit ->
+    let visible = Masc_tui_message_layout.fitted_source_bytes plain width in
+    List.iter (fun (field, value, start) ->
+      let length = min (String.length value) (max 0 (visible - start)) in
+      if length > 0 then emit {field; order={band;column}; value; row;
+        row_start_byte=String.length row_prefix + String.length opening + start;
+        source_start_byte=0; source_end_byte=length}) fields) on_field
+
+let card_actions ~gap p =
+  let actions = [Card_browser_action,"[o:Browser]"; Card_copy_action,"[y:Copy]"]
+    @ (if p.image_url <> None then [Card_visual_action,"[v:Visual]"] else []) in
+  let _, fields = List.fold_left (fun (offset, fields) (field, value) ->
+    offset + String.length value + String.length gap, (field, value, offset) :: fields)
+    (0, []) actions in
+  String.concat gap (List.map snd actions), List.rev fields
+
+let pad_banner_cell ~width ~bg ~fg text =
+  let dw = Masc_tui_message_layout.display_width text in
+  let centered =
+    if dw >= width then
+      Masc_tui_message_layout.fit_width text width
+    else
+      let pad = width - dw in
+      let lpad = pad / 2 in
+      let rpad = pad - lpad in
+      String.make lpad ' ' ^ text ^ String.make rpad ' '
+  in
+  bg ^ fg ^ centered ^ Masc_tui_theme.Sgr.reset
+
+let render_og_banner ?on_field ~width p =
+  let field_cell ~band ~row ~field ~value ~start ?source_limit ~bg ~fg text =
+    let left_pad = max 0 ((width - Masc_tui_message_layout.display_width text) / 2) in
+    let plain = String.make left_pad ' ' ^ text in
+    let emit = Option.map (fun emit span ->
+      let limit = Option.value source_limit ~default:(String.length value) in
+      emit {span with source_end_byte=min span.source_end_byte limit}) on_field in
+    report_card_fields emit ~band ~column:Banner_column ~row ~width ~row_prefix:"" ~opening:(bg ^ fg)
+      ~plain [field,value,left_pad + start];
+    pad_banner_cell ~width ~bg ~fg text
+  in
+  let inset_cell ~band ~row ~field ~value ?source_limit ~prefix ~suffix ~bg ~fg shown =
+    field_cell ~band ~row ~field ~value ~start:(String.length prefix) ?source_limit ~bg ~fg
+      (prefix ^ shown ^ suffix)
+  in
+  match p.kind with
+  | Github { repo; _ } ->
+      let bg = truecolor_bg 22 27 34 in
+      let fg_hi = truecolor_fg 88 166 255 in
+      let fg_sub = truecolor_fg 201 209 217 in
+      let short_repo =
+        if String.length repo > width - 4 then
+          String_util.utf8_prefix ~max_bytes:(width - 6) repo ^ ".."
+        else repo
+      in
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"GITHUB" ~start:0 ~bg ~fg:fg_hi "GITHUB"
+      ; pad_banner_cell ~width ~bg ~fg:fg_sub "/\\___/\\"
+      ; pad_banner_cell ~width ~bg ~fg:fg_sub "(  o o  )"
+      ; pad_banner_cell ~width ~bg ~fg:fg_sub "(  =^=  )"
+      ; field_cell ~band:Actions_band ~row:4 ~field:Banner_repository ~value:repo ~start:0
+          ~source_limit:(if String.length repo > width - 4 then max 0 (width - 6) else String.length repo)
+          ~bg ~fg:fg_hi short_repo
+      ]
+  | YouTube { video_id = _ } ->
+      let bg = truecolor_bg 180 20 20 in
+      let fg = truecolor_fg 255 255 255 in
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"YOUTUBE" ~start:0 ~bg ~fg "YOUTUBE"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x94\x82   \xe2\x96\xb6     \xe2\x94\x82"
+      ; inset_cell ~band:Address_band ~row:3 ~field:Banner_content_label ~value:"VIDEO" ~prefix:"│  " ~suffix:"  │" ~bg ~fg "VIDEO"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf"
+      ]
+  | Arxiv { id } ->
+      let bg = truecolor_bg 15 32 67 in
+      let fg = truecolor_fg 220 235 255 in
+      let short_id =
+        if String.length id > 7 then String.sub id 0 7 else id
+      in
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"ARXIV" ~start:0 ~bg ~fg "ARXIV"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae"
+      ; inset_cell ~band:Description_band ~row:2 ~field:Banner_content_label ~value:"e-Print" ~prefix:"│ " ~suffix:" │" ~bg ~fg "e-Print"
+      ; inset_cell ~band:Address_band ~row:3 ~field:Banner_paper_id ~value:id ~source_limit:(String.length short_id)
+          ~prefix:"│ " ~suffix:" │" ~bg ~fg (Printf.sprintf "%-7s" short_id)
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf"
+      ]
+  | HackerNews { item_id = _ } ->
+      let bg = truecolor_bg 255 102 0 in
+      let fg = truecolor_fg 20 20 20 in
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"HACKER NEWS" ~start:0 ~bg ~fg "HACKER NEWS"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x94\x82    Y    \xe2\x94\x82"
+      ; inset_cell ~band:Address_band ~row:3 ~field:Banner_service_label ~value:"YC:HN" ~prefix:"│  " ~suffix:"  │" ~bg ~fg "YC:HN"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf"
+      ]
+  | Image_direct { ext } ->
+      let bg = truecolor_bg 12 44 58 in
+      let fg = truecolor_fg 79 214 238 in
+      let ext_str = String.uppercase_ascii ext in
+      let ext_padded =
+        if String.length ext_str > 5 then String.sub ext_str 0 5 else ext_str
+      in
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"IMAGE EMBED" ~start:0 ~bg ~fg "IMAGE EMBED"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae"
+      ; inset_cell ~band:Description_band ~row:2 ~field:Banner_image_format ~value:ext_str ~source_limit:(String.length ext_padded)
+          ~prefix:"│  " ~suffix:"  │" ~bg ~fg (Printf.sprintf "%-5s" ext_padded)
+      ; inset_cell ~band:Address_band ~row:3 ~field:Banner_action ~value:"[v:View]" ~prefix:"│ " ~suffix:"│" ~bg ~fg "[v:View]"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf"
+      ]
+  | Web_page ->
+      let bg = truecolor_bg 33 37 43 in
+      let fg = truecolor_fg 215 220 228 in
+      [ field_cell ~band:Header_band ~row:0 ~field:Banner_brand ~value:"WEB LINK" ~start:0 ~bg ~fg "WEB LINK"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae"
+      ; inset_cell ~band:Description_band ~row:2 ~field:Banner_service_label ~value:"WWW" ~prefix:"│   " ~suffix:"   │" ~bg ~fg "WWW"
+      ; inset_cell ~band:Address_band ~row:3 ~field:Banner_content_label ~value:"BOOKMARK" ~prefix:"│ " ~suffix:"│" ~bg ~fg "BOOKMARK"
+      ; pad_banner_cell ~width ~bg ~fg "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf"
+      ]
+
+let render_narrow_card ?on_field ~width p =
+  let card_w = max 4 (width - 2) in
+  let content_w = card_w - 4 in
+  let icon = site_icon p in
+  let site = site_label p in
+  let header = Printf.sprintf "%s %s" icon site in
+  let title = Option.value ~default:p.url p.title in
+  let top_border = Printf.sprintf "\xe2\x95\xad%s\xe2\x95\xae" (make_hline (card_w - 2)) in
+  let bot_border = Printf.sprintf "\xe2\x95\xb0%s\xe2\x95\xaf" (make_hline (card_w - 2)) in
+  let pad_row ~band ~row ~fields text =
+    report_card_fields on_field ~band ~column:Primary_column ~row ~width:content_w ~row_prefix:"│ " ~opening:"" ~plain:text fields;
+    let fitted = Masc_tui_message_layout.fit_width text content_w in
+    Printf.sprintf "\xe2\x94\x82 %s \xe2\x94\x82" fitted
+  in
+  let r0 = pad_row ~band:Header_band ~row:1 ~fields:[Card_site,site,String.length icon + 1] header in
+  let title_prefix = "\xe2\xaf\x88 " in
+  let r1 = pad_row ~band:Title_band ~row:2 ~fields:[Card_title,title,String.length title_prefix] (title_prefix ^ title) in
+  let r2 =
+    match p.description with
+    | Some d when String.trim d <> "" -> [ pad_row ~band:Description_band ~row:3 ~fields:[Card_description,d,0] d ]
+    | _ -> []
+  in
+  let r3 =
+    let pills, fields = card_actions ~gap:" " p in
+    pad_row ~band:Actions_band ~row:(3 + List.length r2) ~fields pills
+  in
+  [ top_border; r0; r1 ] @ r2 @ [ r3; bot_border ]
+
+let render_notion_card_internal ?on_field ~width p =
+  if width < 55 then
+    render_narrow_card ?on_field ~width p
+  else
+    let banner_w = 20 in
+    let left_w = max 24 (width - banner_w - 3) in
+    let top_border =
+      Printf.sprintf "\xe2\x95\xad%s\xe2\x94\xac%s\xe2\x95\xae"
+        (make_hline left_w) (make_hline banner_w)
+    in
+    let bot_border =
+      Printf.sprintf "\xe2\x95\xb0%s\xe2\x94\xb4%s\xe2\x95\xaf"
+        (make_hline left_w) (make_hline banner_w)
+    in
+    let left_inner_w = max 10 (left_w - 2) in
+    let pad_left ~band ~row ~fields ?(opening="") ?(closing="") plain =
+      report_card_fields on_field ~band ~column:Primary_column ~row ~width:left_inner_w ~row_prefix:"│ " ~opening ~plain fields;
+      let text = opening ^ plain ^ closing in
+      let fitted = Masc_tui_message_layout.fit_width text left_inner_w in
+      Printf.sprintf " %s " fitted
+    in
+    let icon = site_icon p in
+    let site = site_label p in
+    let uri = Uri.of_string p.url in
+    let host = Option.value ~default:"" (Uri.host uri) in
+    let domain_suffix =
+      if host <> "" && not (String.equal host site) then " \xc2\xb7 " ^ host else ""
+    in
+    let header = Printf.sprintf "%s %s%s" icon site domain_suffix in
+    let title = Option.value ~default:p.url p.title in
+    let desc =
+      match p.description with
+      | Some d when String.trim d <> "" -> d
+      | _ -> p.url
+    in
+    let pills, action_fields = card_actions ~gap:"  " p in
+    let header_fields = [Card_site,site,String.length icon + 1]
+      @ (if domain_suffix = "" then [] else
+          [Card_domain,host,String.length icon + 1 + String.length site + String.length " · "]) in
+    let title_prefix = "⯈ " and address_prefix = "↗ " in
+    let left_rows =
+      [| pad_left ~band:Header_band ~row:1 ~fields:header_fields header
+       ; pad_left ~band:Title_band ~row:2 ~fields:[Card_title,title,String.length title_prefix]
+           ~opening:Masc_tui_theme.Sgr.bold ~closing:Masc_tui_theme.Sgr.reset (title_prefix ^ title)
+       ; pad_left ~band:Description_band ~row:3 ~fields:[Card_description,desc,0]
+           ~opening:Masc_tui_theme.Sgr.dim ~closing:Masc_tui_theme.Sgr.reset desc
+       ; pad_left ~band:Address_band ~row:4 ~fields:[Card_address,p.url,String.length address_prefix]
+           ~opening:Masc_tui_theme.Sgr.dim ~closing:Masc_tui_theme.Sgr.reset (address_prefix ^ p.url)
+       ; pad_left ~band:Actions_band ~row:5 ~fields:action_fields
+           ~opening:Masc_tui_theme.Sgr.dim ~closing:Masc_tui_theme.Sgr.reset pills
+      |]
+    in
+    let banner_emit = Option.map (fun emit span ->
+      let prefix = "│" ^ left_rows.(span.row) ^ "│" in
+      emit {span with row=span.row + 1; row_start_byte=String.length prefix + span.row_start_byte}) on_field in
+    let banner_rows = Array.of_list (render_og_banner ?on_field:banner_emit ~width:banner_w p) in
+    let content_lines =
+      List.init 5 (fun i ->
+          Printf.sprintf "\xe2\x94\x82%s\xe2\x94\x82%s\xe2\x94\x82"
+            left_rows.(i) banner_rows.(i))
+    in
+    [ top_border ] @ content_lines @ [ bot_border ]
+
+let render_notion_card ~width p = render_notion_card_internal ~width p
+
+let render_inline_card ~width p =
+  render_notion_card ~width p
+
+type card_render = {
+  rows : string list;
+  fields : card_source_span list;
+}
+
+let render_compact_badge_with_spans p =
+  let fields=ref [] in
+  Option.map (fun row -> {rows=[row];fields=List.rev !fields})
+    (render_compact_badge_internal ~on_field:(fun field -> fields:=field :: !fields) p)
+
+let render_inline_card_with_spans ~width p =
+  let fields = ref [] in
+  let rows = render_notion_card_internal ~on_field:(fun span -> fields := span :: !fields) ~width p in
+  {rows; fields=List.sort (fun a b -> compare (a.row, a.row_start_byte) (b.row, b.row_start_byte)) !fields}
+
+(* The key row of the link preview overlay. A modal swallows every key it does
+   not handle, so [?] never reaches the key sheet while one is open and this row
+   is the only place these keys are named. It named six of the fourteen the
+   modal answers: the page keys, the ends and the image retry were reachable
+   from nowhere. Cycling and retry are named only when they do something -- one
+   link has nothing to cycle to, and a preview with no image has nothing to
+   retry. Order is what survives a narrow window: [drop_hint_items] gives up
+   whole items from the back and never gives up Esc. *)
+let modal_hints ~total_links ~has_image =
+  "o:browser  y:copy  v:image  "
+  ^ (if total_links > 1 then "n/p:cycle  " else "")
+  ^ "j/k:scroll  d/u:page  g/G:first/last  "
+  ^ (if has_image then "r:retry image  " else "")
+  ^ "Esc:close"
+
+let render_modal_card ~width ~height:_ p =
+  let card = render_notion_card ~width:(max 1 (width - 4)) p in
+  let inner_width = max 1 (width - 2) in
+  let lines = ref [] in
+  let add s = lines := s :: !lines in
+  let add_text text =
+    Masc_tui_message_layout.wrap_words ~max_cells:inner_width
+      (String.trim (Masc.Tui_terminal_text.sanitize_terminal_text text))
+    |> List.iter (fun line -> add ("  " ^ line)) in
+  List.iter add card;
+  add "";
+  (match p.image_url with
+   | Some img -> (
+       match mosaic_lookup img with
+       | Some (Mosaic (first :: _ as mosaic))
+         when Masc_tui_message_layout.display_width first + 2 <= inner_width ->
+           add "  preview";
+           List.iter (fun l -> add ("  " ^ l)) mosaic;
+           add ""
+       | Some (Refused refusal) ->
+           (* Said out loud, so a card with no picture is not mistaken for a
+              page with no og:image. *)
+           add_text ("  preview: " ^ mosaic_refusal_text refusal);
+           add_text "  [r] fetch the preview again";
+           add ""
+       | Some (Mosaic _) | None -> ())
+   | None -> ());
+  (match p.kind with
+   | Image_direct { ext } ->
+       add_text (Printf.sprintf "  \xf0\x9f\x96\xbc\xef\xb8\x8f  Direct Image: %s format" (String.uppercase_ascii ext));
+       add_text "  Press [v] to view this image directly inside the terminal graphics engine."
+   | YouTube { video_id } ->
+       add_text (Printf.sprintf "  \xe2\x96\xb6\xef\xb8\x8f  YouTube Video Stream (ID: %s)" video_id);
+       add_text "  Press [o] to open the video in your default system browser.";
+       add_text "  Press [v] to view the high-resolution video thumbnail in the terminal."
+   | Arxiv { id } ->
+       add_text (Printf.sprintf "  \xf0\x9f\x93\x84  arXiv e-Print Archive Paper %s" id);
+       add_text "  Press [o] to read the paper and abstract in your browser."
+   | HackerNews { item_id } ->
+       add_text (Printf.sprintf "  \xf0\x9f\x9f\xa7  Hacker News Item #%s" item_id);
+       add_text "  Press [o] to join the discussion thread in your browser."
+   | Github { label; owner; repo } ->
+       add_text (Printf.sprintf "  \xf0\x9f\x90\x99  %s/%s \xc2\xb7 %s" owner repo label);
+       add_text "  Press [o] to inspect the pull request / issue in GitHub.";
+       add_text "  Press [v] to preview the GitHub social card in terminal graphics."
+   | Web_page ->
+       add_text "  \xf0\x9f\x8c\x90  Web Resource Bookmark";
+       add_text "  Press [o] to open in default browser.");
+  add "";
+  add_text (Printf.sprintf "  \xe2\x86\x97 URL: %s" p.url);
+  List.rev !lines

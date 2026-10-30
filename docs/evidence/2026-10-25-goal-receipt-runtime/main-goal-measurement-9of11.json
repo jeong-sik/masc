@@ -1,0 +1,48 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "_meta": {
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "masc",
+        "title": "MASC MCP Server",
+        "version": "0.64.0"
+      },
+      "com.github.yousleepwhen.masc/call": {
+        "envelope": {
+          "kind": "tool_call",
+          "summary": "{\"status\":\"ok\",\"measurement\":{\"id\":\"920e3f4e283091150f2f4a3a83c2f7b8\",\"goal_id\":\"goal-outcome-driven-work-20261024\",\"criterion_revision\":\"306708facbfb9379a9e51b8f7c815678\",\"observed_value\":\"9/11 fixed acceptance cases; latest3014 Qwen G2FAIL/G3FAIL; A1–A7/G1/G4 retained within explicit earlier scopes; historical10/11 is not latest acceptance\",\"evidence\":\"note:Canonical host measurement .masc/playground/codex-mcp-client/goal-outcomes-20261024/acceptance.json SHA256 d13ab0cbea8ef70983469b2349d8be2078b641ce014955b8a84711384b17e9d4; latest real3014 cohort terminal+persisted evidence. No production deployment or Goal proof inferred.\",\"actor\":\"codex-goal-outcomes-20261024\",\"recorded_at\":\"2026-10-24T16:47:40Z\"},\"verification\":\"reported_only\"}",
+          "status": "ok",
+          "tool": "masc_goal_measure"
+        },
+        "trace_id": "2",
+        "agent_id": "codex-goal-outcomes-20261024",
+        "tool": "masc_goal_measure",
+        "duration_ms": 6,
+        "attempts": 1,
+        "timestamp": "2026-10-24T16:47:40Z"
+      }
+    },
+    "resultType": "complete",
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"status\":\"ok\",\"measurement\":{\"id\":\"920e3f4e283091150f2f4a3a83c2f7b8\",\"goal_id\":\"goal-outcome-driven-work-20261024\",\"criterion_revision\":\"306708facbfb9379a9e51b8f7c815678\",\"observed_value\":\"9/11 fixed acceptance cases; latest3014 Qwen G2FAIL/G3FAIL; A1–A7/G1/G4 retained within explicit earlier scopes; historical10/11 is not latest acceptance\",\"evidence\":\"note:Canonical host measurement .masc/playground/codex-mcp-client/goal-outcomes-20261024/acceptance.json SHA256 d13ab0cbea8ef70983469b2349d8be2078b641ce014955b8a84711384b17e9d4; latest real3014 cohort terminal+persisted evidence. No production deployment or Goal proof inferred.\",\"actor\":\"codex-goal-outcomes-20261024\",\"recorded_at\":\"2026-10-24T16:47:40Z\"},\"verification\":\"reported_only\"}"
+      }
+    ],
+    "isError": false,
+    "structuredContent": {
+      "status": "ok",
+      "measurement": {
+        "id": "920e3f4e283091150f2f4a3a83c2f7b8",
+        "goal_id": "goal-outcome-driven-work-20261024",
+        "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+        "observed_value": "9/11 fixed acceptance cases; latest3014 Qwen G2FAIL/G3FAIL; A1–A7/G1/G4 retained within explicit earlier scopes; historical10/11 is not latest acceptance",
+        "evidence": "note:Canonical host measurement .masc/playground/codex-mcp-client/goal-outcomes-20261024/acceptance.json SHA256 d13ab0cbea8ef70983469b2349d8be2078b641ce014955b8a84711384b17e9d4; latest real3014 cohort terminal+persisted evidence. No production deployment or Goal proof inferred.",
+        "actor": "codex-goal-outcomes-20261024",
+        "recorded_at": "2026-10-24T16:47:40Z"
+      },
+      "verification": "reported_only"
+    }
+  }
+}

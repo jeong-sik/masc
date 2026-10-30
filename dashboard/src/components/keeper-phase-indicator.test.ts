@@ -1,0 +1,123 @@
+import { describe, it, expect } from 'vitest'
+import { PHASE_STYLES, getPhaseStyle, pipelineStageDetailLabel } from './keeper-phase-indicator'
+
+// ================================================================
+// PHASE_STYLES
+// ================================================================
+
+describe('PHASE_STYLES', () => {
+  it('has all 8 phases', () => {
+    const phases = Object.keys(PHASE_STYLES)
+    expect(phases).toHaveLength(8)
+    expect(phases).toContain('Offline')
+    expect(phases).toContain('Running')
+    expect(phases).toContain('Failing')
+    expect(phases).toContain('Draining')
+    expect(phases).toContain('Paused')
+    expect(phases).toContain('Stopped')
+    expect(phases).toContain('Crashed')
+    expect(phases).toContain('Restarting')
+  })
+
+  it('each phase has label, color, bg, border, glow, icon', () => {
+    for (const [_key, style] of Object.entries(PHASE_STYLES)) {
+      expect(style).toHaveProperty('label')
+      expect(style).toHaveProperty('color')
+      expect(style).toHaveProperty('bg')
+      expect(style).toHaveProperty('border')
+      expect(style).toHaveProperty('glow')
+      expect(style).toHaveProperty('icon')
+      expect(typeof style.label).toBe('string')
+      expect(typeof style.color).toBe('string')
+    }
+  })
+
+  it('each label is Korean', () => {
+    for (const style of Object.values(PHASE_STYLES)) {
+      expect(style.label.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('color / bg / border reference design-system CSS variables', () => {
+    // After #8235 + #8240 + the keeper-phase migration, hue values
+    // live in tokens (ok / warn / accent / paused / bad-light /
+    // text-muted) so paper theme can swap palettes without editing
+    // this file. Hardcoded rgb / hex would reintroduce drift.
+    for (const style of Object.values(PHASE_STYLES)) {
+      expect(style.color).toMatch(/^var\(--/)
+      expect(style.bg).toMatch(/^var\(--/)
+      expect(style.border).toMatch(/^var\(--/)
+    }
+  })
+})
+
+// ================================================================
+// getPhaseStyle
+// ================================================================
+
+describe('getPhaseStyle', () => {
+  it('returns the unknown style for null', () => {
+    expect(getPhaseStyle(null).label).toBe('확인 필요')
+  })
+
+  it('returns the unknown style for undefined', () => {
+    expect(getPhaseStyle(undefined).label).toBe('확인 필요')
+  })
+
+  it('returns the unknown style for empty string', () => {
+    expect(getPhaseStyle('').label).toBe('확인 필요')
+  })
+
+  it('returns correct style for Running (ok group)', () => {
+    const s = getPhaseStyle('Running')
+    expect(s.label).toBe('실행 중')
+    expect(s.color).toBe('var(--color-status-ok)')
+    expect(s.bg).toBe('var(--ok-10)')
+  })
+
+  it('returns correct style for Crashed (error group)', () => {
+    const s = getPhaseStyle('Crashed')
+    expect(s.label).toBe('비정상 종료')
+    expect(s.color).toBe('var(--bad-light)')
+    expect(s.bg).toBe('var(--bad-10)')
+  })
+
+  it('Paused resolves to the paused (plum) token', () => {
+    const s = getPhaseStyle('Paused')
+    expect(s.label).toBe('일시정지')
+    expect(s.color).toBe('var(--paused)')
+  })
+
+  it('Draining / Restarting share the accent (slate/working) tone', () => {
+    const tones = (['Draining', 'Restarting'] as const).map(
+      (p) => getPhaseStyle(p).color,
+    )
+    expect(new Set(tones).size).toBe(1)
+    expect(tones[0]).toBe('var(--color-accent-fg)')
+  })
+
+  it('returns the unknown style for an unrecognized phase string', () => {
+    expect(getPhaseStyle('UnknownPhase').label).toBe('확인 필요')
+  })
+
+  it('returns correct style for all phases', () => {
+    const phases: string[] = ['Offline', 'Running', 'Failing', 'Draining', 'Paused', 'Stopped', 'Crashed', 'Restarting']
+    for (const phase of phases) {
+      const style = getPhaseStyle(phase)
+      expect(style.label).toBeTruthy()
+      expect(style.color).toMatch(/^var\(--/)
+    }
+  })
+})
+
+describe('pipelineStageDetailLabel', () => {
+  it('renders operator-facing labels for offline detail reasons', () => {
+    expect(pipelineStageDetailLabel('launch_pending_no_fiber')).toBe('기동 대기')
+    expect(pipelineStageDetailLabel('clean_stop_terminal')).toBe('정상 정지')
+    expect(pipelineStageDetailLabel('structural_failure_terminal')).toBe('구조 실패')
+  })
+
+  it('keeps unknown future details readable', () => {
+    expect(pipelineStageDetailLabel('future_detail_value')).toBe('future detail value')
+  })
+})

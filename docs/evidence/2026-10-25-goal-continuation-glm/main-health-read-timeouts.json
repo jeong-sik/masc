@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-24T18:26:32.469493+00:00",
+  "base_path": "/Users/dancer/me",
+  "server_pid": 7995,
+  "checks": [
+    {
+      "path": "/health",
+      "error_type": "TimeoutError",
+      "error": "timed out"
+    },
+    {
+      "path": "/health?full=1",
+      "error_type": "TimeoutError",
+      "error": "timed out"
+    }
+  ],
+  "note": "Read-only observation; no server restart, production change or Goal-measure write."
+}

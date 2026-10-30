@@ -1,0 +1,13 @@
+{
+  "verdict": "PASS",
+  "scope": "Owned actual TUI HTTP requests and canonical queued-state observations only",
+  "not_proven": [
+    "visible UI/paint/screenshot",
+    "F9 expanded/folded state",
+    "canonical UI resize-processing acknowledgement or causal narrow-guard proof",
+    "late-response UI generation handling",
+    "draft survives process restart",
+    "model execution",
+    "whole audit rows 52-57"
+  ]
+}

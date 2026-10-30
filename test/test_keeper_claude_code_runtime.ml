@@ -1,0 +1,6751 @@
+let frozen_librarian_position point : Masc.Keeper_turn_driver_try_provider.librarian_position =
+  let snapshot=match point with
+    | Masc.Keeper_turn_driver_try_provider.Librarian_snapshot snapshot -> snapshot.unread_messages
+    | Masc.Keeper_turn_driver_try_provider.Librarian_progress _ | Masc.Keeper_turn_driver_try_provider.No_position -> [] in
+  {point;unread=Masc.Keeper_librarian_request_unread.of_results ~snapshot:(Ok snapshot) ~memory:(Ok [])}
+;;
+
+open Alcotest
+open Masc
+
+let unavailable_native_unread = Keeper_librarian_request_unread.of_results
+    ~snapshot:(Error "fixture has no snapshot reader")
+    ~memory:(Error "fixture has no Memory reader")
+;;
+
+(* Native clients retain an explicit frozen observation even when it is empty
+   or unavailable. Check that pinned carrier before comparing durable history. *)
+let attach_native_unread
+    ?(unread = unavailable_native_unread) messages =
+  Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System
+    unread messages
+;;
+
+let without_native_unread
+    ?(unread = unavailable_native_unread) messages =
+  let carriers = List.filter Runtime_model_input_tail_window.is_unread_context messages in
+  let encode = List.map Keeper_official_client_host.encode_history_message in
+  check (list string) "native request carries exactly its frozen unread observation"
+    (encode (attach_native_unread ~unread [])) (encode carriers);
+  check int "the unread observation adds no durable atom" 0
+    (snd (Runtime_model_input_tail_window.annotate carriers));
+  List.filter (fun message -> not (Runtime_model_input_tail_window.is_unread_context message)) messages
+;;
+
+let require_ok to_string = function
+  | Ok value -> value
+  | Error error -> fail (to_string error)
+
+let carried_digest = function
+  | Model_input_front.At_atom digest -> digest
+  | Model_input_front.After_history _ | Model_input_front.Empty_history ->
+    Alcotest.fail "expected a nonempty carried window"
+;;
+
+let shell_quote value =
+  "'" ^ String.concat "'\"'\"'" (String.split_on_char '\'' value) ^ "'"
+;;
+
+let auth_subscription =
+  {|{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"team","apiProvider":"firstParty"}|}
+;;
+
+let assistant ~turn_id text =
+  Printf.sprintf
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-%s","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"text","text":%S}]}}|}
+    turn_id
+    text
+;;
+
+let compact_boundary =
+  {|{"type":"system","subtype":"compact_boundary","session_id":"__SESSION__","uuid":"compact-1","compact_metadata":{"trigger":"auto","pre_tokens":1}}|}
+;;
+
+let result ~turn_id text =
+  Printf.sprintf
+    {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":%S,"result":%S,"api_error_status":null}|}
+    turn_id
+    text
+;;
+
+let rate_limit_rejected =
+  {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","resetsAt":1786356000,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
+;;
+
+let quota_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-1","result":"not inspected","api_error_status":429,"terminal_reason":"api_error"}|}
+;;
+
+let generic_provider_rejection =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rejected-1","result":"API Error: Sonnet safeguards flagged this message","api_error_status":null}|}
+;;
+
+let access_rejection status =
+  Printf.sprintf
+    {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-access-rejected","result":"Your organization has disabled Claude subscription access for Claude Code","api_error_status":%d,"terminal_reason":"api_error"}|}
+    status
+;;
+
+let prompt_too_long_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400,"terminal_reason":"prompt_too_long"}|}
+;;
+
+(* CLI 2.1.278 refuses to send when its count reaches the window minus 3000:
+   it emits a synthetic API-error assistant message and ends the loop with
+   [terminal_reason = "blocking_limit"] and no API status. Seen live on
+   2026-09-19 as "terminal subtype=success api_status=unknown
+   reason=blocking_limit: Prompt is too long". *)
+let blocking_limit_diagnostic =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-blocking-limit-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Prompt is too long"}]}}|}
+;;
+
+let blocking_limit_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-blocking-limit-1","result":"Prompt is too long","terminal_reason":"blocking_limit"}|}
+;;
+
+(* The same CLI context_limit stop cause, with a different diagnostic. The
+   typed terminal reason, not either sentence, selects the shrink path. *)
+let rapid_refill_breaker_diagnostic =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-rapid-refill-1","is_api_error_message":true,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"Autocompact is thrashing"}]}}|}
+;;
+
+let rapid_refill_breaker_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rapid-refill-1","result":"Autocompact is thrashing","terminal_reason":"rapid_refill_breaker"}|}
+;;
+
+let mcp_initialize =
+  {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
+;;
+
+let mcp_initialized_notification =
+  {|{"type":"control_request","request_id":"mcp-notify-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}}}|}
+;;
+
+let mcp_list =
+  {|{"type":"control_request","request_id":"mcp-list-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}}}|}
+;;
+
+let mcp_call_with_id id =
+  Printf.sprintf
+    {|{"type":"control_request","request_id":"mcp-call-%s","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":"call-%s","method":"tools/call","params":{"name":"masc_probe","arguments":{"marker":"from-claude"}}}}}|}
+    id
+    id
+;;
+
+let mcp_call = mcp_call_with_id "1"
+
+let mcp_tool_call ~request_id ~tool_name ~arguments =
+  let message =
+    `Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", `String request_id
+      ; "method", `String "tools/call"
+      ; "params",
+        `Assoc
+          [ "name", `String tool_name
+          ; "arguments", arguments
+          ]
+      ]
+  in
+  `Assoc
+    [ "type", `String "control_request"
+    ; "request_id", `String ("mcp-call-" ^ request_id)
+    ; "request",
+      `Assoc
+        [ "subtype", `String "mcp_message"
+        ; "server_name", `String "masc"
+        ; "message", message
+        ]
+    ]
+  |> Yojson.Safe.to_string
+;;
+
+let native_tool_call_block ~turn_id ~call_id ~tool_name =
+  Printf.sprintf
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-%s","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"%s","name":"%s"}]}}|}
+    turn_id
+    call_id
+    tool_name
+;;
+
+let native_tool_result ~call_id ~content =
+  Printf.sprintf
+    {|{"type":"user","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"user-native-result-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":%S}]}}|}
+    call_id
+    content
+;;
+
+let parent_tool_assistant =
+  {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"parent-assistant","message":{"id":"parent-message","role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"parent-agent","name":"Agent","input":{}}],"usage":{"input_tokens":200,"output_tokens":1,"cache_read_input_tokens":5}}}|}
+;;
+
+let child_tool_assistant =
+  {|{"type":"assistant","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-assistant","message":{"id":"child-message","role":"assistant","model":"child-model","content":[{"type":"tool_use","id":"child-read","name":"Read","input":{}}],"usage":{"input_tokens":900,"output_tokens":1,"cache_read_input_tokens":90}}}|}
+;;
+
+let child_tool_result =
+  {|{"type":"user","parent_tool_use_id":"parent-agent","session_id":"__SESSION__","uuid":"child-result","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"child-read","is_error":false,"content":"child tool output"}]}}|}
+;;
+
+type fixture_step =
+  | Emit of string
+  | Emit_with_input of string
+  | Emit_and_read of string
+  | Close_transport
+
+let fixture_script ?system_marker ?prompt_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
+    ?(exit_before_turn_admitted = false) ?(block_user_write = false)
+    ?(auth_body = auth_subscription) ?(auth_exit = 0) ?auth_stderr ?auth_first_body
+    lines =
+  let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
+  let output = open_out_bin path in
+  output_string output "#!/bin/sh\n";
+  output_string output "set -eu\n";
+  (* The client puts its flags ahead of the subcommand, so the probe arrives
+     as `--setting-sources=<layers> auth status --json`. Matching the
+     subcommand pair anywhere in argv keeps this fixture answering the probe
+     when a flag is added or moved; pinning a position sends the probe into
+     the turn body instead, which answers it with turn output and reports
+     nothing. *)
+  output_string output "case \" $* \" in *\" auth status \"*)\n";
+  Option.iter (fun first ->
+    output_string output
+      ("  marker=\"$0.auth-first\"\n  if [ ! -e \"$marker\" ]; then\n    : > \"$marker\"\n    printf '%s\\n' "
+       ^ shell_quote first ^ "\n    exit 0\n  fi\n")) auth_first_body;
+  output_string output ("  printf '%s\\n' " ^ shell_quote auth_body ^ "\n");
+  Option.iter (fun text ->
+    output_string output ("  printf '%s\\n' " ^ shell_quote text ^ " >&2\n")) auth_stderr;
+  if remove_after_auth
+  then output_string output "  rm -- \"$0\"\n";
+  output_string output (Printf.sprintf "  exit %d\n" auth_exit);
+  output_string output "  ;;\nesac\n";
+  Option.iter (fun marker ->
+    output_string output ("previous_arg=''\nfor arg in \"$@\"; do\n" ^
+      "  if [ \"$previous_arg\" = '--system-prompt-file' ]; then cat -- \"$arg\" > " ^
+      shell_quote marker ^ "; printf '%s' \"$arg\" > " ^ shell_quote (marker ^ ".path") ^
+      "; fi\n  previous_arg=$arg\ndone\n")) system_marker;
+  output_string output "session=''\n";
+  output_string output "for arg in \"$@\"; do\n";
+  output_string output "  case \"$arg\" in\n";
+  output_string output "    --session-id=*) session=${arg#--session-id=} ;;\n";
+  output_string output "    --resume=*) session=${arg#--resume=} ;;\n";
+  if forbid_mcp
+  then
+    output_string output
+      "    --mcp-config|--strict-mcp-config|--allowedTools) exit 98 ;;\n";
+  output_string output "  esac\n";
+  output_string output "done\n";
+  output_string output "[ -n \"$session\" ] || exit 94\n";
+  output_string output
+    "emit() { printf '%s\\n' \"$1\" | sed \"s/__SESSION__/$session/g\"; }\n";
+  output_string output "IFS= read -r initialize\n";
+  if exit_before_turn_admitted
+  then (
+    output_string output "printf 'client died before turn admission\\n' >&2\n";
+    output_string output "exit 1\n");
+  output_string output
+    "request_id=$(printf '%s' \"$initialize\" | sed -n 's/.*\"request_id\":\"\\([^\"]*\\)\".*/\\1/p')\n";
+  output_string output "[ -n \"$request_id\" ] || exit 95\n";
+  output_string output
+    "printf '{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"%s\",\"response\":{}}}\\n' \"$request_id\"\n";
+  if block_user_write then
+    (* Consume a real byte, then stop reading before the complete user line.
+       The host's write deadline, rather than a provider response, ends it. *)
+    output_string output "dd bs=1 count=1 >/dev/null 2>/dev/null\nexec sleep 30\n";
+  output_string output "IFS= read -r user_message\n";
+  Option.iter
+    (fun marker ->
+      output_string output
+        ("printf '%s\\n' \"$user_message\" > " ^ shell_quote marker ^ "\n"))
+    prompt_marker;
+  List.iter
+    (function
+      | Emit line -> output_string output ("emit " ^ shell_quote line ^ "\n")
+      | Emit_with_input line ->
+        let stamp = "import json,sys; frame=json.loads(sys.argv[1]); " ^
+          "frame['user_message_uuid']=json.loads(sys.argv[2])['uuid']; print(json.dumps(frame))" in
+        output_string output ("emit \"$(python3 -c " ^ shell_quote stamp ^ " " ^
+          shell_quote line ^ " \"$user_message\")\"\n")
+      | Emit_and_read line ->
+        output_string output ("emit " ^ shell_quote line ^ "\n");
+        output_string output "IFS= read -r ignored_response\n"
+      | Close_transport -> output_string output "exit 0\n")
+    lines;
+  output_string output "while IFS= read -r ignored; do :; done\n";
+  close_out output;
+  Unix.chmod path 0o700;
+  path
+;;
+
+let with_fixture ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
+    ?auth_stderr ?auth_first_body lines f =
+  let path =
+    fixture_script ?system_marker ?prompt_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
+      ?auth_stderr ?auth_first_body lines
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      let marker = path ^ ".auth-first" in
+      if Sys.file_exists marker then Sys.remove marker;
+      if Sys.file_exists path then Sys.remove path)
+    (fun () -> f path)
+;;
+
+let with_fixture_sequence
+    ?first_system_marker
+    ?second_system_marker
+    ?first_prompt_marker
+    ?second_prompt_marker
+    ?(later_lines = [])
+    first_lines
+    second_lines
+    f =
+  let first_path = fixture_script ?system_marker:first_system_marker ?prompt_marker:first_prompt_marker first_lines in
+  let second_path = fixture_script ?system_marker:second_system_marker ?prompt_marker:second_prompt_marker second_lines in
+  let paths = first_path :: second_path :: List.map (fun lines -> fixture_script lines) later_lines in
+  let counter_path = Filename.temp_file "masc-keeper-claude-sequence-" ".txt" in
+  Sys.remove counter_path;
+  let path = Filename.temp_file "masc-keeper-claude-sequence-" ".sh" in
+  let output = open_out_bin path in
+  output_string output "#!/bin/sh\n";
+  output_string output "set -eu\n";
+  output_string output "case \" $* \" in *\" auth status \"*)\n";
+  output_string output ("  printf '%s\\n' " ^ shell_quote auth_subscription ^ "\n");
+  output_string output "  exit 0\n";
+  output_string output "  ;;\nesac\n";
+  output_string output "count=0\n";
+  output_string output
+    ("if [ -f " ^ shell_quote counter_path ^ " ]; then\n"
+     ^ "  IFS= read -r count < " ^ shell_quote counter_path ^ "\n"
+     ^ "fi\n");
+  output_string output "count=$((count + 1))\n";
+  output_string output
+    ("printf '%s\\n' \"$count\" > " ^ shell_quote counter_path ^ "\n");
+  output_string output "case \"$count\" in\n";
+  List.iteri (fun index target ->
+    output_string output (Printf.sprintf "  %d) exec %s \"$@\" ;;\n"
+      (index + 1) (shell_quote target))) paths;
+  let last_path = List.hd (List.rev paths) in
+  output_string output ("  *) exec " ^ shell_quote last_path ^ " \"$@\" ;;\nesac\n");
+  close_out output;
+  Unix.chmod path 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun candidate ->
+           if Sys.file_exists candidate then Sys.remove candidate)
+        (path :: counter_path :: paths))
+    (fun () -> f path)
+;;
+
+let runtime_toml ?(tools_support = true) cli_path =
+  Printf.sprintf
+    "[providers.claude]\n\
+     protocol = \"claude-code\"\n\
+     command = %S\n\
+     is-non-interactive = true\n\
+     \n\
+     [models.claude]\n\
+     api-name = \"claude-fixture\"\n\
+     max-context = 200000\n\
+     tools-support = %b\n\
+     \n\
+     [claude.claude]\n\
+     \n\
+     [runtime]\n\
+     default = \"claude.claude\"\n"
+    cli_path
+    tools_support
+;;
+
+let with_runtime_config ?tools_support cli_path f =
+  let path = Filename.temp_file "masc-keeper-claude-runtime-" ".toml" in
+  let output = open_out_bin path in
+  output_string output (runtime_toml ?tools_support cli_path);
+  close_out output;
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
+;;
+
+let temp_workspace () =
+  let path = Filename.temp_file "masc-keeper-claude-" "" in
+  Unix.unlink path;
+  Unix.mkdir path 0o755;
+  path
+;;
+
+let cleanup_tree root =
+  let rec remove path =
+    if Sys.file_exists path
+    then if Sys.is_directory path
+      then (
+        Sys.readdir path |> Array.iter (fun name -> remove (Filename.concat path name));
+        Unix.rmdir path)
+      else Unix.unlink path
+  in
+  try remove root with
+  | _ -> ()
+;;
+
+let keeper_response_text (result : Runtime_agent.run_result) =
+  result.response.content
+  |> List.filter_map (function Llm_provider.Types.Text text -> Some text | _ -> None)
+  |> String.concat ""
+;;
+
+let message role text : Agent_core.Types.message =
+  { origin = Llm_provider.Types.Conversation;  role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+;;
+
+(* [Runtime_claude_code.user_message] always sends a content-block array —
+   "never the bare-string form", as its own comment puts it — so the text a
+   turn carries is the text block inside that array, not the member itself.
+   Reading the member as a string was right until #30567 gave the array an
+   image block to hold in front of the text. Images are dropped here on
+   purpose: every caller of this helper asks what prompt text went out. *)
+let content_of_wire_message raw =
+  Yojson.Safe.from_string raw
+  |> Yojson.Safe.Util.member "message"
+  |> Yojson.Safe.Util.member "content"
+  |> Yojson.Safe.Util.to_list
+  |> List.filter_map (fun block ->
+       match Yojson.Safe.Util.member "type" block with
+       | `String "text" -> Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "text" block))
+       | _ -> None)
+  |> String.concat ""
+;;
+
+(* A session trace whose boundary store holds no completed turn: the
+   official-client lanes read the turn boundary as atom 0, so the whole
+   offered history is the carried range. This Keeper fixture always declares
+   that history owner, including calls without an explicit test trace. *)
+let fixture_trace_with_no_completed_turn = "fixture-trace-no-completed-turn"
+
+let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
+    ?required_native_posture
+    ?event_capture ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event ?agent_core_checkpoint ?runtime_manifest_context
+    ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
+    ?on_official_client_usage_report ?on_runtime_attempt
+    ?(system_prompt = "pre-dispatch fixture system prompt")
+    ?on_request_attribution ?official_client_continuation ?session_id ?accept ~base_path ~cli_path ~goal () =
+  let input_source = Masc.Keeper_request_source.Keeper_history
+      { trace_id = Option.value session_id ~default:fixture_trace_with_no_completed_turn } in
+  Masc_test_deps.declare_fixture_keeper
+    ~base_path ~sandbox_profile:None "claude-fixture";
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_runtime_config ~tools_support cli_path (fun runtime_path ->
+         Eio_main.run (fun env ->
+           Eio.Switch.run (fun sw ->
+             Eio_context.set_env env;
+             Eio_context.with_test_env
+               ~net:(Eio.Stdenv.net env)
+               ~clock:(Eio.Stdenv.clock env)
+               ~mono_clock:(Eio.Stdenv.mono_clock env)
+               ~sw
+               (fun () ->
+                  match Runtime.init_default ~config_path:runtime_path with
+                  | Error error -> fail error
+                  | Ok () ->
+                    let context =
+                      match tools with
+                      | [] -> None
+                      | _ :: _ -> Some (Agent_core.Context.create ())
+                    in
+                    let run () =
+                      Result.map
+                        (fun selected -> selected.Keeper_turn_driver.run_result)
+                        (Keeper_turn_driver.run_named ~input_source ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                           ~runtime_id:"claude.claude"
+                           ~keeper_name:"claude-fixture"
+                           ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+                           ~goal
+                           ~system_prompt
+                           ~tools
+                           ~agent_core_tools:tools
+                           ?required_native_posture
+                           ~initial_messages
+                           ?context
+                           ?event_bus
+                           ?on_child_content_observation ?on_native_task_observation ?on_native_tool_progress ?on_native_tool_completion ?on_event
+                           ?agent_core_checkpoint
+                           ?runtime_manifest_context
+                           ?runtime_manifest_append
+                           ~raw_trace
+                           ?on_official_client_native_action
+                           ?on_official_client_usage_report ?on_runtime_attempt
+                           ?on_request_attribution
+                           ?official_client_continuation
+                           ?accept
+                           ~sw
+                           ~net:(Eio.Stdenv.net env)
+                           ())
+                    in
+                    (match event_bus, event_capture with
+                     | Some bus, Some capture ->
+                       let subscription =
+                         Runtime_event_bus.subscribe
+                           ~capacity:16
+                           ~overflow:Agent_core.Event_bus.Drop_oldest
+                           ~purpose:"claude-code-lifecycle-test"
+                           bus
+                       in
+                       Fun.protect
+                         ~finally:(fun () ->
+                           Runtime_event_bus.unsubscribe bus subscription)
+                         (fun () ->
+                            let result = run () in
+                            capture := Runtime_event_bus.drain subscription;
+                            result)
+                     | _, None -> run ()
+                     | None, Some _ ->
+                       invalid_arg "event_capture requires event_bus"))))))
+;;
+
+let run_unified_autonomous_read_cycles ~base_path ~cli_path =
+  let keeper_name = "claude-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "activation_mode", `String "autonomous"
+          ])
+    with
+    | Ok meta -> meta
+    | Error detail -> fail ("keeper meta fixture failed: " ^ detail)
+  in
+  let shared_context = ref (Agent_core.Context.create ()) in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_runtime_config cli_path (fun runtime_path ->
+         Eio_main.run (fun env ->
+           Eio.Switch.run (fun sw ->
+             Eio_context.set_env env;
+             Eio_context.with_test_env
+               ~net:(Eio.Stdenv.net env)
+               ~clock:(Eio.Stdenv.clock env)
+               ~mono_clock:(Eio.Stdenv.mono_clock env)
+               ~sw
+               (fun () ->
+                  Masc_test_deps.init_eio_clock ~sw env;
+                  Fs_compat.set_fs (Eio.Stdenv.fs env);
+                  let config = Workspace.default_config base_path in
+                  ignore (Workspace.init config ~agent_name:None);
+                  (* The real call ledger is initialized only by the server
+                     bootstrap (server_bootstrap_maintenance.ml), which no unit
+                     fixture runs; without this every turn-level log_call here
+                     degrades to Commit_required_but_store_unavailable and the
+                     cross-cycle ledger assertions below would have no rows to
+                     read. The fixture crosses the real Owner child boundary
+                     before requesting a canonical input writer. *)
+                  Keeper_tool_call_log.init ~base_path:config.base_path ();
+                  Masc_test_deps.declare_fixture_keeper
+                    ~base_path
+                    ~sandbox_profile:(Some Masc.Keeper_types_profile.Docker)
+                    keeper_name;
+                  let keeper_config_path =
+                    Config_dir_resolver.keeper_toml_path_for_base_path
+                      ~base_path
+                      keeper_name
+                  in
+                  let keeper_config = Fs_compat.load_file keeper_config_path in
+                  Fs_compat.save_file keeper_config_path
+                    (keeper_config
+                     ^ "sandbox_image = \"base\"\n");
+                  Masc_test_deps.init_unified_tool_registry ();
+                  (* The unified cycle resolves turn resources from the
+                     in-memory Keeper_registry, not the TOML file, so the
+                     fixture keeper must be registered before the cycle. *)
+                  ignore
+                    (Masc.Keeper_registry.For_testing.register
+                       ~base_path:config.base_path
+                       meta.name
+                       meta
+                      : Masc.Keeper_registry.registry_entry);
+                  (match
+                     Masc.Keeper_meta_store.replace_snapshot config meta
+                   with
+                   | Ok () -> ()
+                   | Error detail -> fail detail);
+                  match Runtime.init_default ~config_path:runtime_path with
+                  | Error error -> fail error
+                  | Ok () ->
+                    (match
+                       Masc.Keeper_owner_registry.install_from_store
+                         ~sw
+                         ~operation_runner:None
+                         ~on_turn_slot_released:None
+                         config
+                     with
+                     | Ok _count -> ()
+                     | Error error ->
+                       fail
+                         (Masc.Keeper_owner_registry.install_error_to_string
+                            error));
+                    let trace_id =
+                      Keeper_id.Trace_id.to_string meta.runtime.trace_id
+                    in
+                    let checkpoint_path =
+                      Keeper_checkpoint_store.agent_core_checkpoint_path
+                        ~session_dir:
+                          (Keeper_types_support.keeper_session_dir config trace_id)
+                        ~session_id:trace_id
+                    in
+                    check bool
+                      "fresh fixture has no AGENT_CORE checkpoint"
+                      false
+                      (Sys.file_exists checkpoint_path);
+                    let run meta =
+                      let observation =
+                        Keeper_world_observation.observe
+                          ~pending_board_events:(Some [])
+                          ~config
+                          ~meta
+                      in
+                      let turn_decision =
+                        Keeper_world_observation.keeper_cycle_decision
+                          ~wake:Keeper_world_observation.Periodic_tick
+                          ~meta
+                          observation
+                      in
+                      check bool
+                        "the periodic autonomous cycle is admitted"
+                        true
+                        turn_decision.should_run;
+                      let turn_input =
+                        Keeper_heartbeat_source_batch.for_turn
+                          ~reactive:false
+                          Keeper_heartbeat_source_batch.empty
+                      in
+                      match Keeper_owner_registry.run_autonomous_if_idle
+                          ~base_path:config.base_path ~keeper_name (fun () ->
+                            Keeper_unified_turn.run_keeper_cycle
+                              ~before_dispatch_authority:(fun () -> Ok ())
+                              ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
+                              ~config ~meta
+                              ~publication_recovery_provider:
+                                Keeper_publication_recovery_availability.non_runtime_provider
+                              ~observation ~turn_input ~turn_decision
+                              ~shared_context:!shared_context ()) with
+                      | Ok (`Ran result) -> result
+                      | Ok (`Busy reason) -> fail (Keeper_owner.autonomous_block_to_string reason)
+                      | Ok `Interrupted -> fail "fixture autonomous child was interrupted"
+                      | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+                    in
+                    let completed meta = match run meta with
+                      | Error failure -> fail (Agent_core.Error.to_string failure.error)
+                      | Ok (Keeper_unified_turn.Turn_completed {meta; _}) -> meta
+                      | Ok (Turn_checkpointed _ | Turn_input_required _ | Turn_cancelled _ | Turn_skipped _) ->
+                        fail "provider terminal did not complete the autonomous cycle" in
+                    let next_meta = completed meta in
+                    check bool "first official cycle writes no AGENT_CORE checkpoint" false
+                      (Sys.file_exists checkpoint_path);
+                    (match Agent_core.Context.of_json ~eio:true
+                        (Agent_core.Context.to_json !shared_context) with
+                     | Ok restored -> shared_context := restored
+                     | Error error -> fail (Agent_core.Context.decode_error_to_string error));
+                    ignore (completed next_meta);
+                    check bool "second official cycle also writes no AGENT_CORE checkpoint" false
+                      (Sys.file_exists checkpoint_path);
+                    let rows = match Keeper_tool_call_log.read_recent ~keeper_name ~n:100 () with
+                      | Error (Keeper_tool_call_log.Index_unavailable detail) -> fail detail
+                      | Ok rows -> List.filter (fun row -> Yojson.Safe.Util.(
+                          member "tool" row = `String "keeper_tasks_list"
+                          && member "trace_id" row = `String trace_id)) rows in
+                    check (list int) "real ledger keeps all repeated reads in their original cycles"
+                      [1;1;2] (List.map (fun row -> Yojson.Safe.Util.(member "keeper_turn_id" row |> to_int)) rows);
+                    check (list string) "all reads execute successfully without a repeat-count stop"
+                      ["ok";"ok";"ok"] (List.map (fun row -> Yojson.Safe.Util.(member "wire_outcome" row |> to_string)) rows);
+                    List.iter (fun field -> match List.map (Yojson.Safe.Util.member field) rows with
+                      | [first;second;third] -> check bool ("same actual " ^ field ^ " is retained across cycles")
+                          true (first=second && second=third)
+                      | _ -> fail "expected three actual retained reads") ["input";"output"])))))
+;;
+
+let check_usage_scope ~frames ~expected_scope ~input_tokens ~output_tokens
+    ~cache_read_input_tokens () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture frames (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"USAGE_SCOPE" () with
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok turn ->
+           (match turn.response.usage with
+            | None -> fail "known CLI usage was dropped"
+            | Some usage ->
+              check int "inclusive input preserved" input_tokens usage.input_tokens;
+              check int "output preserved" output_tokens usage.output_tokens;
+              check int "cache read preserved" cache_read_input_tokens
+                usage.cache_read_input_tokens;
+              check int "absent cache creation remains zero" 0
+                usage.cache_creation_input_tokens);
+           (match turn.runtime_observation with
+            | None -> fail "runtime observation was dropped"
+            | Some observation ->
+              check string "scope follows the usage producer" expected_scope
+                (Runtime_usage_scope.to_string observation.usage_scope))))
+;;
+
+let result_with_aggregate_usage =
+  {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-usage","result":"USAGE_OK","api_error_status":null,"usage":{"input_tokens":123456,"output_tokens":789,"cache_read_input_tokens":42}}|}
+;;
+
+let test_result_only_usage_keeps_client_turn_scope () =
+  check_usage_scope
+    ~frames:
+      [ Emit (assistant ~turn_id:"usage" "USAGE_OK")
+      ; Emit result_with_aggregate_usage
+      ]
+    ~expected_scope:"turn_total"
+    ~input_tokens:123498 ~output_tokens:789 ~cache_read_input_tokens:42 ()
+;;
+
+(* A quota refusal after the model already answered once still carries the
+   turn's spend on its result frame. The turn driver hands it to the Keeper's
+   usage observer although the turn fails, with the inclusive input the
+   ledger reads (5000 exclusive + 4000 cache read). *)
+let test_refused_turn_reports_its_spend_to_the_keeper () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let reports = ref [] in
+       let on_official_client_usage_report (report : Keeper_client_usage_report.t) =
+         let usage =
+           match report.count with
+           | Keeper_client_usage_report.Running_count usage -> usage
+           | Keeper_client_usage_report.Count_replaced ->
+             Alcotest.fail "a Claude Code count was reported as replaced"
+         in
+         reports :=
+           ( report.response_id
+           , report.model
+           , Runtime_usage_scope.to_string report.usage_scope
+           , (usage.input_tokens, usage.output_tokens) )
+           :: !reports
+       in
+       with_fixture
+         [ Emit (assistant ~turn_id:"quota-usage" "partial answer")
+         ; Emit child_tool_assistant
+         ; Emit child_tool_result
+         ; Emit rate_limit_rejected
+         ; Emit
+             {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-usage","result":"not inspected","api_error_status":429,"terminal_reason":"api_error","usage":{"input_tokens":5000,"output_tokens":30,"cache_read_input_tokens":4000}}|}
+         ]
+         (fun cli_path ->
+            (match
+               run_keeper_turn ~on_official_client_usage_report ~base_path ~cli_path
+                 ~goal:"QUOTA_USAGE" ()
+             with
+             | Error _ -> ()
+             | Ok _ -> fail "quota refusal completed the turn");
+            match List.rev !reports with
+            | [ ("turn-quota-usage", "claude-fixture", "turn_total", (9000, 30)) ] -> ()
+            | reports ->
+              failf "expected the refused turn's total reported once, got %d reports"
+                (List.length reports)))
+;;
+
+(* Claude Code 2.1.280, 2026-09-23: one client turn of two provider requests.
+   The assistant frames' output counts (3, 2) are streaming snapshots; the
+   result frame's 270 is what the turn spent. The spend goes to the response
+   usage, the one the cost ledger reads; the second request's input goes to
+   the observation's request context, the one the turn record's context
+   readers read. Before this the turn was recorded as one request with
+   output 2. *)
+let test_real_two_request_turn_routes_spend_and_occupancy_apart () =
+  let frames =
+    In_channel.with_open_bin
+      (Masc_test_deps.source_path
+         "test/fixtures/claude_code/cc-2.1.280-two-request-turn.jsonl")
+      In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.map (fun line -> Emit line)
+  in
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture frames (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"USAGE_SCOPE" () with
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok turn ->
+           (match turn.response.usage with
+            | None -> fail "the result frame's spend was dropped"
+            | Some usage ->
+              check int "spend output is the result frame's" 270 usage.output_tokens;
+              check int "spend input is inclusive" (18 + 7734 + 40681) usage.input_tokens;
+              check int "spend cache read" 40681 usage.cache_read_input_tokens;
+              check int "spend cache creation" 7734 usage.cache_creation_input_tokens);
+           (match turn.runtime_observation with
+            | None -> fail "runtime observation was dropped"
+            | Some observation ->
+              check string "spend is a client-turn total" "turn_total"
+                (Runtime_usage_scope.to_string observation.usage_scope);
+              (match observation.request_context with
+               | None -> fail "the newest request's occupancy was dropped"
+               | Some context ->
+                 check int "occupancy is the second request's inclusive input"
+                   (8 + 2747 + 22834) context.input_tokens;
+                 (match context.cache with
+                  | None -> fail "the request's cache split was dropped"
+                  | Some cache ->
+                    check int "occupancy cache read" 22834 cache.cache_read_input_tokens;
+                    check int "occupancy cache creation" 2747
+                      cache.cache_creation_input_tokens)))))
+;;
+
+(* An assistant frame reported usage but the result frame carried none: the
+   turn's spend is not observed, so the response carries no usage and the
+   scope is unavailable. The assistant frame's output (20 here) is a streaming
+   snapshot and must not stand in for it. The request's occupancy still
+   travels. *)
+let test_assistant_usage_without_result_usage_keeps_spend_unavailable () =
+  let counted_assistant =
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-counted","message":{"id":"msg-counted","role":"assistant","model":"claude-fixture","content":[{"type":"text","text":"USAGE_OK"}],"usage":{"input_tokens":200,"output_tokens":20,"cache_read_input_tokens":5}}}|}
+  in
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit counted_assistant; Emit (result ~turn_id:"turn-no-usage" "USAGE_OK") ]
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"USAGE_SCOPE" () with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok turn ->
+              check bool "spend is not observed" true (Option.is_none turn.response.usage);
+              (match turn.runtime_observation with
+               | None -> fail "runtime observation was dropped"
+               | Some observation ->
+                 check string "spend scope is unavailable" "unavailable"
+                   (Runtime_usage_scope.to_string observation.usage_scope);
+                 (match observation.request_context with
+                  | None -> fail "the request's occupancy was dropped"
+                  | Some context ->
+                    check int "occupancy is the request's inclusive input" 205
+                      context.input_tokens))))
+;;
+
+let test_child_tool_metadata_does_not_replace_root_observation () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let native_actions = ref [] in
+    with_fixture
+      [Emit parent_tool_assistant; Emit child_tool_assistant; Emit child_tool_result;
+       Emit result_with_aggregate_usage]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"CHILD_METADATA"
+            ~on_official_client_native_action:(fun ~runtime_id:_ ~official_turn:_ ~identity ~tool_name ->
+              native_actions := (identity, tool_name) :: !native_actions) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok turn ->
+            check string "Keeper response model belongs to the root" "claude-fixture"
+              turn.response.model;
+            (match turn.runtime_observation with
+             | Some {request_context=Some context; _} ->
+                 check int "Keeper root occupancy excludes child input and cache" 205
+                   context.input_tokens
+             | _ -> fail "root request context was dropped");
+            check bool "child native effect still reaches the observer" true
+              (List.mem (Runtime_native_tools.Call_id "child-read", "Read") !native_actions)))
+;;
+
+let checkpoint_with_messages
+      (messages : Agent_core.Types.message list)
+  : Agent_core.Checkpoint.t
+  =
+  { provider_binding = None; version = Agent_core.Checkpoint.checkpoint_version
+  ; session_id = "agent_core-session"
+  ; agent_name = "agent_core-agent"
+  ; model = "agent_core-model"
+  ; system_prompt = None
+  ; messages
+  ; usage = Agent_core.Types.empty_usage
+  ; turn_count = 1
+  ; created_at = 1.0
+  ; tools = []
+  ; tool_choice = None
+  ; disable_parallel_tool_use = false
+  ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
+  ; enable_thinking = None
+  ; preserve_thinking = None
+  ; response_format = Off
+  ; reasoning_effort = None
+  ; cache_system_prompt = false
+  ; context = Agent_core.Context.create ()
+  ; pending_input = None; mcp_sessions = []
+  ; working_context = None
+  }
+;;
+
+let test_agent_core_checkpoint_starts_official_client_turn () =
+  let base_path = temp_workspace () in
+  let prompt_marker = Filename.concat base_path "checkpoint-prompt.json" in
+  let manifests = ref [] in
+  let checkpoint_history : Agent_core.Types.message list =
+    [ { origin = Llm_provider.Types.Conversation;  role = Assistant
+      ; content =
+          [ ToolUse
+              { id = "agent_core-tool-call"
+              ; name = "agent_core_tool"
+              ; input = `Assoc []
+              }
+          ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    ; Agent_core.Types.tool_result_msg
+        ~tool_use_id:"agent_core-tool-call"
+        ~content:"agent_core tool result"
+        ()
+    ]
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         ~prompt_marker
+         [ Emit (assistant ~turn_id:"turn-checkpoint-1" "MASC_CLAUDE_CHECKPOINT")
+         ; Emit (result ~turn_id:"turn-checkpoint-1" "MASC_CLAUDE_CHECKPOINT")
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~initial_messages:checkpoint_history
+                ~agent_core_checkpoint:(checkpoint_with_messages checkpoint_history)
+                ~runtime_manifest_context:
+                  { Keeper_runtime_manifest.manifest_keeper_name =
+                      "claude-fixture"
+                  ; manifest_trace_id = "claude-fixture-trace"
+                  ; manifest_keeper_turn_id = Some 1
+                  }
+                ~runtime_manifest_append:(fun manifest ->
+                  manifests := manifest :: !manifests)
+                ~base_path
+                ~cli_path
+                ~goal:"CHECKPOINT_GOAL"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok turn ->
+              check string
+                "checkpoint response"
+                "MASC_CLAUDE_CHECKPOINT"
+                (keeper_response_text turn));
+       let input = open_in_bin prompt_marker in
+       let raw =
+         Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
+       in
+       let projected =
+         content_of_wire_message raw |> Yojson.Safe.from_string
+       in
+       let open Yojson.Safe.Util in
+       check string
+         "typed initial-turn schema"
+         "masc.claude-code.initial-turn.v1"
+         (projected |> member "schema" |> to_string);
+       check string
+         "current goal"
+         "CHECKPOINT_GOAL"
+         (projected |> member "current_goal" |> to_string);
+       check int
+         "canonical history length"
+         2
+         (projected |> member "history" |> to_list |> List.length);
+       let routed_rows_with_status status =
+         List.filter
+           (fun (manifest : Keeper_runtime_manifest.t) ->
+             manifest.event = Keeper_runtime_manifest.Runtime_routed
+             && String.equal manifest.status status)
+           !manifests
+       in
+       (match routed_rows_with_status "fresh_session" with
+        | [] -> ()
+        | _ :: _ ->
+          fail "the retired fresh_session manifest row must not reappear");
+       match routed_rows_with_status "checkpoint_not_replayed" with
+       | [ manifest ] ->
+         let decision =
+           Keeper_runtime_manifest.public_projection_of_decision
+             manifest.decision
+         in
+         check string
+           "checkpoint routing action"
+           "official_client_checkpoint_not_replayed"
+           (decision |> member "routing_action" |> to_string);
+         check string
+           "checkpoint routing reason"
+           "official_client_session_store_owns_resume"
+           (decision |> member "routing_reason" |> to_string)
+       | [] -> fail "checkpoint_not_replayed manifest row was not observable"
+       | _ :: _ :: _ -> fail "expected exactly one checkpoint_not_replayed row")
+;;
+
+let test_keeper_projects_typed_tool_history_and_lifecycle () =
+  let base_path = temp_workspace () in
+  let prompt_marker = Filename.concat base_path "typed-history-prompt.json" in
+  let bus = Agent_core.Event_bus.create () in
+  let captured_events = ref [] in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let tool_use : Agent_core.Types.message =
+         { origin = Llm_provider.Types.Conversation;  role = Assistant
+         ; content =
+             [ ToolUse
+                 { id = "prior-tool-call"
+                 ; name = "prior_tool"
+                 ; input = `Assoc [ "path", `String "README.md" ]
+                 }
+             ]
+         ; name = None
+         ; tool_call_id = None
+         ; metadata = []
+         }
+       in
+       let tool_result =
+         Agent_core.Types.tool_result_msg
+           ~tool_use_id:"prior-tool-call"
+           ~content:"prior result"
+           ()
+       in
+       with_fixture
+         ~prompt_marker
+         [ Emit (assistant ~turn_id:"turn-history-1" "MASC_CLAUDE_HISTORY")
+         ; Emit (result ~turn_id:"turn-history-1" "MASC_CLAUDE_HISTORY")
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~initial_messages:[ tool_use; tool_result ]
+                ~event_bus:bus
+                ~event_capture:captured_events
+                ~base_path
+                ~cli_path
+                ~goal:"CURRENT_GOAL"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok turn ->
+              check string
+                "history response"
+                "MASC_CLAUDE_HISTORY"
+                (keeper_response_text turn));
+       let input = open_in_bin prompt_marker in
+       let raw =
+         Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
+       in
+       let history =
+         content_of_wire_message raw
+         |> Yojson.Safe.from_string
+         |> Yojson.Safe.Util.member "history"
+         |> Yojson.Safe.Util.to_list
+       in
+       (match history with
+        | [ assistant_history; tool_history ] ->
+          let envelope_message value =
+            let open Yojson.Safe.Util in
+            check string
+              "history envelope schema"
+              Keeper_official_client_context_codec.schema
+              (value |> member "schema" |> to_string);
+            value |> member "message"
+          in
+          let assistant_history = envelope_message assistant_history in
+          let tool_history = envelope_message tool_history in
+          check string
+            "assistant history role"
+            "assistant"
+            Yojson.Safe.Util.(assistant_history |> member "role" |> to_string);
+          let tool_use_block =
+            Yojson.Safe.Util.(assistant_history |> member "content_blocks" |> to_list)
+            |> List.hd
+          in
+          check string
+            "typed tool use"
+            "tool_use"
+            Yojson.Safe.Util.(tool_use_block |> member "type" |> to_string);
+          check string
+            "tool result history role"
+            "tool"
+            Yojson.Safe.Util.(tool_history |> member "role" |> to_string)
+        | _ -> fail "typed history projection did not preserve the tool cycle");
+       let lifecycle_kinds =
+         !captured_events
+         |> List.map (fun event ->
+           Agent_core.Event_bus.payload_kind event.Agent_core.Event_bus.payload)
+       in
+       check
+         (list string)
+         "official-client lifecycle"
+         [ "agent_started"; "agent_completed" ]
+         lifecycle_kinds)
+;;
+
+let test_keeper_projects_masc_tool () =
+  let base_path = temp_workspace () in
+  let raw_trace_path = Filename.concat base_path "claude-raw-trace.jsonl" in
+  let raw_trace =
+    Agent_core.Raw_trace.create ~path:raw_trace_path ()
+    |> Result.map_error (fun error -> fail (Agent_core.Error.to_string error))
+    |> Result.get_ok
+  in
+  let observed = ref `Null in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:[ marker_param ]
+      (fun input ->
+        observed := input;
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit_and_read mcp_call
+         ; Emit (assistant ~turn_id:"turn-tool-1" "MASC_CLAUDE_TOOL")
+         ; Emit (result ~turn_id:"turn-tool-1" "MASC_CLAUDE_TOOL")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~base_path
+               ~cli_path
+               ~goal:"USE_TOOL"
+               ~raw_trace
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             check string
+               "tool response"
+               "MASC_CLAUDE_TOOL"
+               (keeper_response_text turn);
+             check string
+               "tool arguments"
+               {|{"marker":"from-claude"}|}
+               (Yojson.Safe.to_string !observed);
+             (match turn.trace_ref with
+              | Some trace_ref ->
+                check string "RAW trace path" raw_trace_path trace_ref.path
+              | None -> fail "Claude Code turn did not expose its RAW trace reference");
+             let input = open_in_bin raw_trace_path in
+             let raw =
+               Fun.protect
+                 ~finally:(fun () -> close_in input)
+                 (fun () -> really_input_string input (in_channel_length input))
+             in
+             check bool
+               "RAW trace contains tool input"
+               true
+               (String_util.contains_substring raw "from-claude");
+             check bool
+               "RAW trace contains tool output"
+               true
+               (String_util.contains_substring raw "MASC_TOOL_RESULT")))
+;;
+
+let test_checkpointless_reads_cross_unified_owner_cycles () =
+  let base_path = temp_workspace () in
+  let query =
+    `Assoc
+      [ "status", `String "todo"
+      ; "limit", `Int 10
+      ; "projection", `String "compact"
+      ]
+  in
+  let call request_id =
+    mcp_tool_call
+      ~request_id
+      ~tool_name:"keeper_tasks_list"
+      ~arguments:query
+  in
+  let first_lines =
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read (call "tasks-1")
+    ; Emit_and_read (call "tasks-2")
+    ; Emit (assistant ~turn_id:"unified-turn-1" "POLL_TURN_ONE_COMPLETE")
+    ; Emit (result ~turn_id:"unified-turn-1" "POLL_TURN_ONE_COMPLETE")
+    ]
+  in
+  let second_lines =
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read (call "tasks-3")
+    ; Emit (assistant ~turn_id:"unified-turn-2" "POLL_TURN_TWO_COMPLETE")
+    ; Emit (result ~turn_id:"unified-turn-2" "POLL_TURN_TWO_COMPLETE")
+    ]
+  in
+  Masc_test_deps.with_process_env
+    "MASC_KEEPER_AUTONOMOUS_ENABLED"
+    (Some "true")
+    (fun () ->
+       Fun.protect
+         ~finally:(fun () -> cleanup_tree base_path)
+         (fun () ->
+            with_fixture_sequence first_lines second_lines (fun cli_path ->
+              run_unified_autonomous_read_cycles ~base_path ~cli_path)))
+;;
+
+(* WP1 completion trigger (native tool provenance): each official-client
+   runtime fixture must emit a native tool event that is distinguishable from
+   a MASC/MCP dynamic-tool event by a typed record_type, not by a string
+   heuristic over tool names, with matching counts and zero unknown-origin
+   events. antigravity (test_keeper_antigravity_runtime.ml) and codex
+   (test_runtime_codex_app_server.ml) already cover this; before this test,
+   claude_code had zero coverage even though runtime_claude_code.ml emits
+   [Native_tool_started]/[Native_tool_finished] (see await_terminal) alongside
+   [Dynamic_tool_started]/[Dynamic_tool_finished] for MCP/MASC tool calls on a
+   separate control-request channel. This fixture drives one of each in a
+   single turn and asserts the RAW trace record_type counts. *)
+let test_keeper_distinguishes_native_and_masc_tool_provenance () =
+  let base_path = temp_workspace () in
+  let raw_trace_path = Filename.concat base_path "claude-native-raw-trace.jsonl" in
+  let raw_trace =
+    Agent_core.Raw_trace.create ~path:raw_trace_path ()
+    |> Result.map_error (fun error -> fail (Agent_core.Error.to_string error))
+    |> Result.get_ok
+  in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:[ marker_param ]
+      (fun _ -> Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  let native_actions = ref [] in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit
+             (native_tool_call_block
+                ~turn_id:"turn-mcp-1"
+                ~call_id:"provider-mcp-call-1"
+                ~tool_name:"mcp__masc__masc_probe")
+         ; Emit_and_read mcp_call
+         ; Emit
+             (native_tool_result
+                ~call_id:"provider-mcp-call-1"
+                ~content:"MASC_TOOL_RESULT")
+         ; Emit
+             (native_tool_call_block
+                ~turn_id:"turn-native-1"
+                ~call_id:"native-call-1"
+                ~tool_name:"Bash")
+         ; Emit (native_tool_result ~call_id:"native-call-1" ~content:"native tool output")
+         ; Emit (assistant ~turn_id:"turn-native-1" "MASC_CLAUDE_NATIVE")
+         ; Emit (result ~turn_id:"turn-native-1" "MASC_CLAUDE_NATIVE")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~base_path
+               ~cli_path
+               ~goal:"USE_NATIVE_AND_MASC_TOOLS"
+               ~raw_trace
+               ~on_official_client_native_action:
+                 (fun ~runtime_id ~official_turn ~identity ~tool_name ->
+                    native_actions :=
+                      (runtime_id, official_turn, identity, tool_name)
+                      :: !native_actions)
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             check string
+               "native+masc tool response"
+               "MASC_CLAUDE_NATIVE"
+               (keeper_response_text turn);
+             let records =
+               match Agent_core.Raw_trace.read_all ~path:raw_trace_path () with
+               | Ok records -> records
+               | Error error -> fail (Agent_core.Error.to_string error)
+             in
+             let records_of_type record_type =
+               List.filter
+                 (fun (record : Agent_core.Raw_trace.record) ->
+                    record.record_type = record_type)
+                 records
+             in
+             check int
+               "native tool start count"
+               2
+               (List.length (records_of_type Native_tool_started));
+             check int
+               "native tool finish count"
+               2
+               (List.length (records_of_type Native_tool_finished));
+             check int
+               "MASC tool execution start count"
+               1
+               (List.length (records_of_type Tool_execution_started));
+             check int
+               "MASC tool execution finish count"
+               1
+               (List.length (records_of_type Tool_execution_finished));
+             let native_starts = records_of_type Native_tool_started in
+             check bool "MCP wrapper is typed in RAW" true
+               (List.exists
+                  (fun (record : Agent_core.Raw_trace.record) ->
+                     record.native_tool_identity
+                     = Some (Agent_core.Raw_trace.Call_id "provider-mcp-call-1")
+                     && record.native_tool_origin = Some Agent_core.Raw_trace.Mcp_wrapper)
+                  native_starts);
+             check bool "built-in action is typed in RAW" true
+               (List.exists
+                  (fun (record : Agent_core.Raw_trace.record) ->
+                     record.native_tool_identity
+                     = Some (Agent_core.Raw_trace.Call_id "native-call-1")
+                     && record.native_tool_origin = Some Agent_core.Raw_trace.Built_in)
+                  native_starts);
+             check bool "only the built-in reaches Skill native action observer" true
+               (match List.rev !native_actions with
+                | [ ( "claude.claude"
+                    , 1
+                    , Runtime_native_tools.Call_id "native-call-1"
+                    , "Bash" ) ] -> true
+                | _ -> false)))
+;;
+
+let test_keeper_streams_text_and_tool_events () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:[ marker_param ]
+      (fun _ ->
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit (assistant ~turn_id:"turn-stream-1" "MASC_")
+         ; Emit_and_read mcp_call
+         ; Emit (result ~turn_id:"turn-stream-1" "MASC_CLAUDE_STREAM")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~on_event:(fun event -> events := event :: !events)
+               ~base_path
+               ~cli_path
+               ~goal:"USE_TOOL"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok _ ->
+             match List.rev !events with
+             | [ Agent_core.Types.MessageStart
+                   { id = "assistant-turn-stream-1"
+                   ; model = "claude-fixture"
+                   ; usage = None
+                   }
+               ; ContentBlockDelta { index = 0; delta = TextDelta "MASC_" }
+               ; ContentBlockStop {index=0}
+               ; ContentBlockStart
+                   { index = 1
+                   ; content_type = "tool_use"
+                   ; tool_id = Some "call-1"
+                   ; tool_name = Some "masc_probe"
+                   }
+               ; ContentBlockDelta
+                   { index = 1
+                   ; delta = InputJsonSnapshot arguments
+                   }
+               ; ContentBlockStop { index = 1 }
+               ; ContentBlockDelta
+                   { index = 2; delta = TextDelta "CLAUDE_STREAM" }
+               ; ContentBlockStop {index=2}
+               ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+               ; MessageStop
+               ] ->
+               check string
+                 "exact keeper tool arguments"
+                 {|{"marker":"from-claude"}|}
+                 arguments
+             | _ -> fail "Keeper did not project the exact Claude stream") )
+;;
+
+(* Claude Code writes each content block of a model response as its own
+   assistant frame, and the blocks of one response share [message.id]
+   (measured 2026-09-25, Claude Code 2.1.282: text and tool_use under one
+   id, the text after the tool result under the next id, and a result
+   carrying that last text). The text goes through Yojson so a Korean
+   answer stays JSON; [%S] would write OCaml byte escapes. *)
+let response_frame ~uuid ~message_id block =
+  Printf.sprintf
+    {|{"type":"assistant","parent_tool_use_id":null,"session_id":"__SESSION__","uuid":"assistant-%s","message":{"id":"%s","role":"assistant","model":"claude-fixture","content":[%s]}}|}
+    uuid
+    message_id
+    (Yojson.Safe.to_string block)
+;;
+
+let response_text ~turn_id ~message_id text =
+  response_frame ~uuid:(turn_id ^ "-" ^ message_id) ~message_id
+    (`Assoc [ "type", `String "text"; "text", `String text ])
+;;
+
+let response_native_tool ~turn_id ~message_id ~call_id ~tool_name =
+  response_frame ~uuid:(turn_id ^ "-" ^ message_id ^ "-" ^ call_id) ~message_id
+    (`Assoc
+        [ "type", `String "tool_use"; "id", `String call_id; "name", `String tool_name ])
+;;
+
+let result_text ~turn_id text =
+  Printf.sprintf
+    {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"%s","result":%s,"api_error_status":null}|}
+    turn_id
+    (Yojson.Safe.to_string (`String text))
+;;
+
+let streamed_text events =
+  List.filter_map
+    (function
+      | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta text; _ } ->
+        Some text
+      | _ -> None)
+    events
+  |> String.concat ""
+;;
+
+(* Two responses around a built-in tool call. The native tool block is not a
+   row on any chat surface, so without a break the viewer read
+   "확인할게요.완료". The result repeats the last response, which already
+   streamed, so the end of the turn adds nothing. *)
+let test_keeper_preserves_claude_thinking_before_tools () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [Emit (response_frame ~uuid:"thinking-envelope" ~message_id:"thinking-message"
+          (`Assoc ["type", `String "thinking"; "thinking", `String "Inspect the state";
+            "signature", `String "opaque-signature"]));
+       Emit (response_native_tool ~turn_id:"thinking-turn" ~message_id:"thinking-message"
+          ~call_id:"thinking-tool" ~tool_name:"Read");
+       (* The same envelope again while the call is open: still one start. *)
+       Emit (response_native_tool ~turn_id:"thinking-turn" ~message_id:"thinking-message"
+          ~call_id:"thinking-tool" ~tool_name:"Read");
+       Emit (native_tool_result ~call_id:"thinking-tool" ~content:"observed");
+       Emit (response_text ~turn_id:"thinking-turn" ~message_id:"answer-message" "Answer");
+       Emit (result_text ~turn_id:"thinking-turn" "Answer")]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"THINK_THEN_ANSWER"
+            ~on_event:(fun event -> events := event :: !events) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok turn ->
+            (match List.rev !events with
+             | [Agent_core.Types.MessageStart _;
+                ContentBlockDelta {index=1; delta=ThinkingDelta "Inspect the state"};
+                ContentBlockStop {index=1};
+                ContentBlockStart {index=2; content_type="native_tool_use";
+                  tool_id=Some "thinking-tool"; tool_name=Some "Read"};
+                ContentBlockStop {index=2};
+                ContentBlockDelta {index=0; delta=TextDelta "Answer"};
+                ContentBlockStop {index=0};
+                MessageDelta _; MessageStop] -> ()
+             | _ -> fail "thinking, native tool, and answer lost their order or separate indices");
+            check string "thinking does not enter final response" "Answer" (keeper_response_text turn)))
+;;
+
+let test_partial_content_boundaries_keep_message_and_channel_identity () =
+  let frame event = Yojson.Safe.to_string (`Assoc ["type", `String "stream_event";
+    "session_id", `String "__SESSION__"; "parent_tool_use_id", `Null; "event", event]) in
+  let message id = frame (`Assoc ["type", `String "message_start";
+    "message", `Assoc ["id", `String id; "model", `String "claude-fixture"]]) in
+  let block index kind = frame (`Assoc ["type", `String "content_block_start";
+    "index", `Int index; "content_block", `Assoc ["type", `String kind; kind, `String ""]]) in
+  let piece index kind text = frame (`Assoc ["type", `String "content_block_delta";
+    "index", `Int index; "delta", `Assoc ["type", `String (kind ^ "_delta"); kind, `String text]]) in
+  let stop index = frame (`Assoc ["type", `String "content_block_stop"; "index", `Int index]) in
+  let complete ~uuid id kind text = response_frame ~uuid ~message_id:id
+      (`Assoc ["type", `String kind; kind, `String text]) in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let events = ref [] in
+    with_fixture [
+      Emit (message "old"); Emit (block 0 "text"); Emit (piece 0 "text" "Before");
+      Emit (complete ~uuid:"old-envelope" "old" "text" "Before"); Emit (stop 0); Emit (stop 0);
+      Emit (response_native_tool ~turn_id:"native" ~message_id:"native" ~call_id:"background" ~tool_name:"Read");
+      Emit (message "thinking"); Emit (block 0 "thinking"); Emit (piece 0 "thinking" "Inspect ");
+      Emit (stop 0);
+      Emit (message "answer"); Emit (block 0 "text"); Emit (piece 0 "text" "An");
+      Emit (native_tool_result ~call_id:"background" ~content:"done");
+      (* The old thinking envelope completes after the answer is open. *)
+      Emit (complete ~uuid:"thinking-envelope" "thinking" "thinking" "Inspect state");
+      Emit (piece 0 "text" "swer"); Emit (stop 0);
+      Emit (complete ~uuid:"answer-envelope" "answer" "text" "Answer");
+      Emit (complete ~uuid:"answer-envelope" "answer" "text" "Answer"); Emit (stop 0);
+      Emit (complete ~uuid:"same-first" "same" "text" "echo");
+      Emit (complete ~uuid:"same-second" "same" "text" "echo");
+      Emit (complete ~uuid:"same-second" "same" "text" "echo");
+      Emit (result_text ~turn_id:"finished" "echoecho")]
+      (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"BOUNDARIES"
+          ~on_event:(fun event -> events := event :: !events) () with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok _ ->
+            let observed = List.rev !events |> List.filter_map (function
+              | Agent_core.Types.ContentBlockDelta {index; delta=TextDelta text} -> Some (`Text (index,text))
+              | ContentBlockDelta {index; delta=ThinkingDelta text} -> Some (`Thinking (index,text))
+              | ContentBlockStart {index; content_type="native_tool_use"; _} -> Some (`Tool index)
+              | ContentBlockStop {index} -> Some (`Stop index)
+              | _ -> None) in
+            check bool "only the exact completed content closes, once" true
+              (observed = [`Text (0,"Before"); `Stop 0; `Tool 1;
+                `Thinking (2,"Inspect "); `Text (3,"\n\nAn"); `Stop 1;
+                `Thinking (2,"state"); `Stop 2; `Text (3,"swer"); `Stop 3;
+                `Text (4,"\n\necho"); `Stop 4; `Text (5,"echo"); `Stop 5])))
+;;
+
+let test_native_completion_reaches_tui () =
+  List.iter (fun is_error ->
+    let base_path = temp_workspace () in
+    let fixture = Native_tool_outcome_fixture.create () in
+    let native_result = `Assoc ["type", `String "user"; "parent_tool_use_id", `Null;
+      "session_id", `String "__SESSION__"; "uuid", `String "native-result";
+      "message", `Assoc ["role", `String "user"; "content", `List [
+        `Assoc (["type", `String "tool_result"; "tool_use_id", `String "native-call";
+          "content", `String "provider observation"]
+          @ Option.to_list (Option.map (fun b -> "is_error", `Bool b) is_error))]]]
+      |> Yojson.Safe.to_string in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture
+        [Emit (response_native_tool ~turn_id:"native-turn" ~message_id:"native-message"
+          ~call_id:"native-call" ~tool_name:"Read");
+         Emit native_result;
+         Emit (response_text ~turn_id:"native-turn" ~message_id:"answer-message" "Answer");
+         Emit (result_text ~turn_id:"native-turn" "Answer")]
+        (fun cli_path ->
+          match run_keeper_turn ~base_path ~cli_path ~goal:"OBSERVE_NATIVE"
+            ~on_event:(Native_tool_outcome_fixture.on_event fixture)
+            ~on_native_tool_completion:(Native_tool_outcome_fixture.on_completion fixture) () with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok _ -> Native_tool_outcome_fixture.check fixture
+              ~expected:[{Runtime_native_tools.outcome=Result_received {is_error}; exit_code=None}])))
+    [None; Some false; Some true]
+;;
+
+let test_root_heartbeat_reaches_scoped_journal_and_tui ?(retry = false) () =
+  let module F = Native_tool_outcome_fixture in
+  let module Stream = Keeper_autonomous_stream in
+  let module J = Keeper_chat_event_log in
+  let module E = Keeper_chat_events in
+  let module T = Masc_tui_keeper_chat_transcript in
+  let module Chat_log = Masc_tui_keeper_chat_log in
+  List.iter (fun thinking ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let keeper_name = "heartbeat-fixture" in
+      let secret = "heartbeat-private-cobalt-forest-value" in
+      let prefix = "heartbeat-private-" in
+      let suffix = "cobalt-forest-value\n" in
+      let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+      Fs_compat.mkdir_p (Filename.dirname token_file);
+      Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+      let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let expected = Keeper_secret_redaction.redact_text redaction (secret ^ "\n") in
+      check bool "exact configured secret is masked" false (expected=secret ^ "\n");
+      let direct = F.create ~redaction () in
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"claude-heartbeat" ~absolute_turn:1 in
+      let autonomous = ref None in
+      let stream () = match !autonomous with
+        | Some stream -> stream
+        | None -> let stream = Stream.create ~base_path ~keeper_name ~turn_ref in
+            autonomous := Some stream; stream in
+      let journal_path = J.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
+      let read_journal () = match J.read_journal_path_result journal_path with
+        | Ok lines -> lines | Error _ -> fail "heartbeat journal unreadable" in
+      let fragments events = List.filter_map (function
+        | E.Text_delta {text=value; _} | E.Agent_core_thinking_delta {delta=value;_} -> Some value
+        | _ -> None) events in
+      let failures = ref [] and reports = ref 0 in
+      let verify f = try f () with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> failures := exn :: !failures in
+      let on_event event =
+        F.on_event direct event; Stream.on_event (stream ()) event;
+        match event with
+        | Agent_core.Types.MessageStop -> Stream.finish (stream ())
+            (Stream.Completed {reply="Answer";turn_outcome=Keeper_turn_outcome.Visible_reply})
+        | _ -> () in
+      let on_progress ~block_index ~tool_call_id progress =
+        incr reports;
+        F.on_progress direct ~block_index ~tool_call_id progress;
+        Stream.on_tool_stream_observation (stream ())
+          (Keeper_hooks_agent_core.Native_tool_progress {block_index;tool_call_id;progress});
+        verify (fun () ->
+          List.iter (fun events -> check (list string)
+            "actual heartbeat never flushes a retained model secret prefix" [] (fragments events))
+            [F.events direct; List.map (fun (line:J.journaled_event) -> line.event) (read_journal ())]) in
+      let on_completion ~block_index ~tool_call_id completion =
+        F.on_completion direct ~block_index ~tool_call_id completion;
+        Stream.on_tool_stream_observation (stream ())
+          (Keeper_hooks_agent_core.Native_tool_completion {block_index;tool_call_id;completion}) in
+      let frame event = Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+        "session_id",`String "__SESSION__";"parent_tool_use_id",`Null;"event",event]) in
+      let kind = if thinking then "thinking" else "text" in
+      let piece value = frame (`Assoc ["type",`String "content_block_delta";"index",`Int 0;
+        "delta",`Assoc ["type",`String (kind ^ "_delta");kind,`String value]]) in
+      let tool_name = if retry then "Agent" else "Read" in
+      let heartbeat uuid seconds = Yojson.Safe.to_string (`Assoc ["type",`String "tool_progress";
+        "session_id",`String "__SESSION__";"uuid",`String uuid;"heartbeat",`Bool true;
+        "parent_tool_use_id",`String "native-heartbeat";"tool_use_id",`String "opaque-observation";
+        "tool_name",`String tool_name;"elapsed_time_seconds",`Int seconds]) in
+      let retry_frames = if not retry then [] else
+        List.map (fun clear -> Emit (Yojson.Safe.to_string (`Assoc (
+          ["type",`String "tool_progress";"session_id",`String "__SESSION__";
+           "uuid",`String (if clear then "retry-clear" else "retry-note");
+           "parent_tool_use_id",`String "native-heartbeat";"tool_use_id",`String "opaque-agent-progress";
+           "tool_name",`String "Agent";"elapsed_time_seconds",`Int 0;"subagent_type",`String "Explore"]
+          @ if clear then [] else ["subagent_retry",`Assoc ["agent_id",`String "child-agent";
+            "attempt",`Int 1;"max_retries",`Int 3;"retry_delay_ms",`Int 1500;
+            "error_status",`Int 529;"error_category",`String "overloaded"]])))) [false;true] in
+      let first = heartbeat "heartbeat-first" 30 in
+      with_fixture ([
+        Emit (response_native_tool ~turn_id:"native" ~message_id:"native" ~call_id:"native-heartbeat" ~tool_name);
+        Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc ["id",`String "body";"model",`String "claude-fixture"]]));
+        Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;"content_block",`Assoc ["type",`String kind;kind,`String ""]]));
+        Emit (piece prefix); Emit first; Emit first; Emit (heartbeat "heartbeat-second" 3)]
+        @ retry_frames @ [
+        Emit (piece suffix);
+        Emit (frame (`Assoc ["type",`String "content_block_stop";"index",`Int 0]));
+        Emit (response_frame ~uuid:"body-complete" ~message_id:"body" (`Assoc ["type",`String kind;kind,`String (secret ^ "\n")]));
+        Emit (native_tool_result ~call_id:"native-heartbeat" ~content:"observed");
+        Emit (heartbeat "heartbeat-late" 100);
+        Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+        Emit (result_text ~turn_id:"final" "Answer")])
+        (fun cli_path ->
+         let run () = run_keeper_turn ~base_path ~cli_path ~goal:"HEARTBEAT"
+           ?required_native_posture:(if retry then Some Runtime_native_tools.Native_full else None)
+           ~on_event ~on_native_tool_progress:on_progress ~on_native_tool_completion:on_completion () in
+         let result =
+           if not retry then run ()
+           else
+             let modes = Keeper_tool_approval_mode.shared () in
+             (* [run_keeper_turn] dispatches this exact keeper. Native_full
+                requires explicit approval even for a controlled fake CLI. *)
+             let keeper_name = "claude-fixture" in
+             let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
+             Fun.protect
+               ~finally:(fun () ->
+                 ignore
+                   (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
+                      ~keeper_name previous))
+               (fun () ->
+                 ignore
+                   (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
+                      ~keeper_name Keeper_tool_approval_mode.Yolo);
+                 run ()) in
+         match result with
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ ->
+           List.iter raise (List.rev !failures);
+           check int "actual receiver preserves each owned observation once" (if retry then 4 else 2) !reports;
+           let lines = read_journal () in
+           let replay = Chat_log.create_for_source ~keeper_name ~source:(Chat_log.Autonomous_turn turn_ref) ~started_at:0. in
+           ignore (Chat_log.add_journaled replay lines);
+           let live,durable = F.snapshots direct in
+           List.iter (fun log ->
+             let t = T.of_log ~now:2000. log in
+             check bool "projection remains readable" true (Option.is_none (T.unreadable t));
+             check bool "model text and thinking never reconstruct the secret" false
+               (Astring.String.is_infix ~affix:secret (T.text t ^ T.thinking t));
+             match T.tool_calls t with
+             | [call] ->
+                 check bool "native end stays an observation" true (call.outcome=T.Native_ended);
+                 check (option string) "heartbeat cannot mint a receipt" None call.execution_id;
+                 check (option int) "decreasing provider elapsed is retained" (Some 3)
+                   (Option.bind call.native_progress (fun p -> p.provider_elapsed_seconds));
+                 if retry then check bool "actual Agent clear reaches live and durable native observation" true
+                   (call.native_retry=Some (Runtime_native_tools.Retry_cleared
+                     {agent_id="child-agent";subagent_type="Explore"}))
+             | _ -> fail "heartbeat did not retain one exact native occurrence") [live;durable;replay];
+           List.iter (fun events ->
+             let body = String.concat "" (fragments events) in
+             check bool "safe model content is retained" true (Astring.String.is_infix ~affix:expected body);
+             check bool "journal never reconstructs the configured secret" false
+               (Astring.String.is_infix ~affix:secret body))
+             [F.events direct; List.map (fun (line:J.journaled_event) -> line.event) lines]))) [false;true]
+;;
+
+let test_keeper_streams_two_claude_responses_apart () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit (response_text ~turn_id:"turn-apart-1" ~message_id:"msg-1" "확인할게요.")
+         ; Emit
+             (response_native_tool
+                ~turn_id:"turn-apart-1"
+                ~message_id:"msg-1"
+                ~call_id:"native-call-1"
+                ~tool_name:"Bash")
+         ; Emit (native_tool_result ~call_id:"native-call-1" ~content:"native tool output")
+         ; Emit (response_text ~turn_id:"turn-apart-1" ~message_id:"msg-2" "완료")
+         ; Emit (result_text ~turn_id:"turn-apart-1" "완료")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~on_event:(fun event -> events := event :: !events)
+               ~base_path
+               ~cli_path
+               ~goal:"TWO_RESPONSES"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             let events = List.rev !events in
+             (match events with
+              | [ Agent_core.Types.MessageStart { id = _; _ }
+                ; ContentBlockDelta { index = 0; delta = TextDelta "확인할게요." }
+                ; ContentBlockStop {index=0}
+                ; ContentBlockStart
+                    { index = 1
+                    ; content_type = "native_tool_use"
+                    ; tool_id = Some "native-call-1"
+                    ; tool_name = Some "Bash"
+                    }
+                ; ContentBlockStop { index = 1 }
+                ; ContentBlockDelta { index = 2; delta = TextDelta "\n\n완료" }
+                ; ContentBlockStop {index=2}
+                ; MessageDelta { stop_reason = Some EndTurn; usage = None }
+                ; MessageStop
+                ] -> ()
+              | _ -> fail "Keeper did not stream the two Claude responses apart");
+             check string "each response once, apart" "확인할게요.\n\n완료"
+               (streamed_text events);
+             check string "Keeper response" "완료" (keeper_response_text turn)))
+;;
+
+(* A MASC tool call is a tool row on the chat surfaces, which already shows
+   the responses before and after it apart, so no break goes in: one would
+   start the later stretch with blank lines. *)
+let test_keeper_adds_no_break_across_a_masc_tool_row () =
+  let base_path = temp_workspace () in
+  let events = ref [] in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:
+        [ { Agent_core.Types.name = "marker"
+          ; description = "Fixture marker"
+          ; param_type = String
+          ; required = true
+          }
+        ]
+      (fun _ ->
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit (response_text ~turn_id:"turn-row-1" ~message_id:"msg-1" "확인할게요.")
+         ; Emit_and_read mcp_call
+         ; Emit (response_text ~turn_id:"turn-row-1" ~message_id:"msg-2" "완료")
+         ; Emit (result_text ~turn_id:"turn-row-1" "완료")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~on_event:(fun event -> events := event :: !events)
+               ~base_path
+               ~cli_path
+               ~goal:"USE_TOOL"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             let indexed_texts =
+               List.filter_map
+                 (function
+                   | Agent_core.Types.ContentBlockDelta
+                       { index; delta = Agent_core.Types.TextDelta text } ->
+                     Some (index, text)
+                   | _ -> None)
+                 (List.rev !events)
+             in
+             check (list string) "text on each side of the tool row, unbroken"
+               [ "확인할게요."; "완료" ] (List.map snd indexed_texts);
+             check bool "responses retain separate content identities" true
+               (match indexed_texts with
+                | [ (before, _); (after, _) ] -> before <> after
+                | _ -> false);
+             check string "Keeper response" "완료" (keeper_response_text turn)))
+;;
+
+let test_tools_support_false_omits_mcp_bridge () =
+  let base_path = temp_workspace () in
+  let called = ref false in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Must not reach a tools-disabled Claude runtime"
+      ~parameters:[]
+      (fun _ ->
+        called := true;
+        Ok { Agent_core.Types.content = "unexpected"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         ~forbid_mcp:true
+         [ Emit (assistant ~turn_id:"turn-no-mcp" "MASC_CLAUDE_NO_MCP")
+         ; Emit (result ~turn_id:"turn-no-mcp" "MASC_CLAUDE_NO_MCP")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~tools_support:false
+               ~base_path
+               ~cli_path
+               ~goal:"NO_MCP"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             check bool "tool callback not installed" false !called;
+             check string
+               "response"
+               "MASC_CLAUDE_NO_MCP"
+               (keeper_response_text turn)))
+;;
+
+(* The suite drives two runners under different keeper names, and the session
+   store is keyed by that name: the main runner uses [claude-fixture] and
+   [run_direct_attempt] uses [claude-pre-dispatch]. Loading under a fixed name
+   reads an empty store for the other runner's tests and reports it as state
+   that disappeared. *)
+let load_state ?(keeper_name = "claude-fixture") base_path =
+  match Keeper_official_client_session_store.load ~base_path ~keeper_name |> Result.map_error Keeper_official_client_session_store.read_error_to_string with
+  | Error detail -> fail detail
+  | Ok None -> fail "Claude Code current-owner state disappeared"
+  | Ok (Some state) -> state
+;;
+
+let prompt_history path =
+  let raw =
+    In_channel.with_open_bin path (fun input -> In_channel.input_line input)
+  in
+  match raw with
+  | None -> fail "Claude fixture did not capture a prompt"
+  | Some raw ->
+    raw
+    |> content_of_wire_message
+    |> Yojson.Safe.from_string
+    |> Yojson.Safe.Util.member "history"
+    |> Yojson.Safe.Util.to_list
+;;
+
+let history_uses_current_schema history =
+  List.for_all
+    (fun value ->
+       Yojson.Safe.Util.(value |> member "schema" |> to_string)
+       = Keeper_official_client_context_codec.schema)
+    history
+;;
+
+let test_keeper_shrinks_history_after_statusless_context_error
+    ?(native_gate=false)
+    ~overflow_frames
+    () =
+  let base_path = temp_workspace () in
+  let first_system_marker = Filename.concat base_path "full-system.txt" in
+  let second_system_marker = Filename.concat base_path "shrunk-system.txt" in
+  let first_prompt_marker = Filename.concat base_path "overflow-full-prompt.json" in
+  let second_prompt_marker = Filename.concat base_path "overflow-shrunk-prompt.json" in
+  let initial_messages =
+    List.init 240 (fun index ->
+      message
+        (if index mod 2 = 0 then User else Assistant)
+        (Printf.sprintf "%03d:%s" index (String.make 1_024 'x')))
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let official_client_continuation, gate_seed_held_context =
+         if not native_gate then None, [] else (
+         with_fixture
+           [ Emit (assistant ~turn_id:"turn-gated" "GATE_WAIT")
+           ; Emit (result ~turn_id:"turn-gated" "GATE_WAIT") ]
+           (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"GATE" () with
+             | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+         let stored = load_state base_path in
+         let held = match stored.context_frontier with
+           | Some frontier -> frontier.held_context
+           | None -> fail "native Gate seed did not record its exact context frontier" in
+         match stored.phase with
+         | Settled {session_id; turn_id} ->
+           Some ({ client_kind=stored.client_kind; runtime_id=stored.runtime_id;
+             session_id; turn_id; tool_surface_sha256=stored.tool_surface_sha256;
+             frame=Keeper_repetition_snapshot.empty } : Keeper_semantic_execution.official_client_checkpoint), held
+         | _ -> fail "native Gate seed did not settle") in
+       with_fixture_sequence
+         ~first_system_marker ~second_system_marker
+         ~first_prompt_marker
+         ~second_prompt_marker
+         (List.map (fun frame -> Emit frame) overflow_frames)
+         [ Emit (assistant ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
+         ; Emit (result ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ?official_client_continuation
+                ~initial_messages
+                ~session_id:fixture_trace_with_no_completed_turn
+                ~base_path
+                ~cli_path
+                ~goal:"SHRINK_HISTORY"
+                ()
+            with
+            | Error error ->
+              if not native_gate then fail (Agent_core.Error.to_string error)
+            | Ok turn ->
+              if native_gate then fail "a Gate resume refused for size completed the turn";
+              check string
+                "Keeper response"
+                "MASC_CLAUDE_SHRUNK"
+                (keeper_response_text turn));
+       if native_gate then (
+         (* A resumed session is refused on the vendor's own conversation, and
+            the resume prompt is the same at every capacity, so shrinking
+            cannot help. A Gate must stay in its original session, so the turn
+            ends on the overflow instead of respawning the same input. *)
+         check bool "the Gate resume is not respawned" false
+           (Sys.file_exists second_prompt_marker);
+         let raw = In_channel.with_open_bin first_prompt_marker In_channel.input_line in
+         (match raw with
+          | None -> fail "native Gate fixture did not capture its resume input"
+          | Some raw ->
+            (* Both dispatches read the same known-empty unread state. Bind
+               the omitted carrier to the actual seed frontier before
+               asserting that Resume sends only the new owner input. *)
+            let expected = attach_native_unread
+                ~unread:Keeper_librarian_request_unread.empty []
+              |> List.map Keeper_official_client_host.encode_history_message
+            in
+            List.iter (fun encoded ->
+              let digest = Agent_core_sha256.(digest_string encoded |> to_hex) in
+              check bool "same known-empty unread observation is already held" true
+                (List.exists (fun (item : Keeper_official_client_session_store.held_context) ->
+                  item.context = Librarian_unread && item.sha256 = digest) gate_seed_held_context)) expected;
+            check string "a Gate resume omits already-held unread and sends new input only"
+              "SHRINK_HISTORY"
+              (content_of_wire_message raw));
+         check bool "resume system file carries no canonical snapshot" false
+           (String_util.contains_substring
+              (In_channel.with_open_bin first_system_marker In_channel.input_all)
+              "masc.official-client-canonical-context.v1");
+         let checkpoint = match official_client_continuation with
+           | Some checkpoint -> checkpoint
+           | None -> fail "native Gate seed produced no continuation" in
+         let full = load_state base_path in
+         let recovery_id = match full.phase with
+           | Recovery_required
+               { failure =
+                   Keeper_official_client_session_store.Vendor_session_full
+                     Keeper_official_client_session_store.No_activity_observed
+               ; recovery_id
+               ; _
+               } -> recovery_id
+           | _ -> fail "a Gate resume refused for size did not record Vendor_session_full" in
+         (* The operation fails with this cause: the Gate cannot continue in
+            any session other than the full one. *)
+         (match Keeper_direct_gate_continuation.session_full_cause ~checkpoint
+             ~approval_id:"approval-full" (Some full) with
+          | Some (Keeper_request_failure.Gate_session_full
+              { approval_id; runtime_id; session_id; recovery_id = recorded
+              ; activity = Keeper_internal_error.No_activity_observed }) ->
+            check string "the failure names the Gate" "approval-full" approval_id;
+            check string "the failure names the runtime" checkpoint.runtime_id runtime_id;
+            check string "the failure names the full session" checkpoint.session_id session_id;
+            check string "the failure names the session record" recovery_id recorded
+          | Some _ | None -> fail "a full Gate session did not end the operation with its cause");
+         check bool "the full session no longer admits the continuation" true
+           (Result.is_error
+              (Keeper_official_client_session_store.validate_continuation ~checkpoint
+                 ~expected:(Some full) ~client_kind:checkpoint.client_kind
+                 ~runtime_id:checkpoint.runtime_id
+                 ~tool_surface_sha256:checkpoint.tool_surface_sha256));
+         (match Eio_main.run (fun _ ->
+             Keeper_official_client_session_store.resolve_recovery ~base_path
+               ~keeper_name:"claude-fixture" ~expected:full ~recovery_id
+               ~resolution:Keeper_official_client_session_store.Retry_previous
+               ~resolved_by:"test"
+               ~resolved_at:(Unix.gettimeofday ())) with
+          | Error Keeper_official_client_session_store.Retry_previous_unavailable -> ()
+          | Error _ | Ok _ -> fail "a full session offered to resend the same resume");
+         (* The next ordinary turn is not held for an operator: it supersedes
+            the record and starts a new session. *)
+         with_fixture
+           [ Emit (assistant ~turn_id:"turn-fresh" "MASC_CLAUDE_FRESH")
+           ; Emit (result ~turn_id:"turn-fresh" "MASC_CLAUDE_FRESH") ]
+           (fun cli_path ->
+              match run_keeper_turn ~base_path ~cli_path ~goal:"AFTER_FULL" () with
+              | Ok turn ->
+                check string "the next turn answers" "MASC_CLAUDE_FRESH"
+                  (keeper_response_text turn)
+              | Error error -> fail (Agent_core.Error.to_string error));
+         let fresh = load_state base_path in
+         check int "the new session restarts the ordinal" 1 fresh.turn_count;
+         match fresh.phase with
+         | Settled { turn_id = "turn-fresh"; session_id } ->
+           check bool "the new session is not the full one" false
+             (String.equal session_id checkpoint.session_id)
+         | _ -> fail "the turn after a full Gate session did not settle a new session")
+       else (
+       List.iter (fun marker ->
+         let scoped_path = In_channel.with_open_bin (marker ^ ".path") In_channel.input_all in
+         check bool "System file cleaned after rejected and successful turns" false (Sys.file_exists scoped_path))
+         [first_system_marker; second_system_marker];
+       let full_history = prompt_history first_prompt_marker in
+       let shrunk_history = prompt_history second_prompt_marker in
+       let full_count = List.length full_history in
+       let shrunk_count = List.length shrunk_history in
+       check int "first attempt keeps full history" 240 full_count;
+       check bool "full history uses current codec" true
+         (history_uses_current_schema full_history);
+       check bool "retry keeps non-empty history" true (shrunk_count > 0);
+       check bool "retry history uses current codec" true
+         (history_uses_current_schema shrunk_history);
+       check bool
+         "retry shrinks provider-bound history"
+         true
+         (shrunk_count < full_count);
+       let state = load_state base_path in
+       check int "retry keeps the turn ordinal" 1 state.turn_count;
+       match state.phase with
+       | Settled { turn_id = "turn-shrunk"; _ } -> ()
+       | _ -> fail "shrunk Claude Code retry did not settle"))
+;;
+
+let test_post_effect_transport_enters_recovery () =
+  let base_path = temp_workspace () in
+  let call_count = ref 0 in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Record one deterministic fixture effect"
+      ~parameters:[ marker_param ]
+      (fun _input ->
+        incr call_count;
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         (* This notification still has a Claude control request ID, so read
+            its control acknowledgement before the tool-list/call replies. *)
+         ; Emit_and_read mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         (* Receiving the actual tool reply orders the disconnect after the
+            effect. Closing stdin before emitting the call races the pending
+            control replies and can interrupt before the tool ever executes. *)
+         ; Emit_and_read mcp_call
+         ; Close_transport
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~tools:[ tool ]
+                ~base_path
+                ~cli_path
+                ~goal:"USE_TOOL_ONCE"
+                ()
+            with
+            | Error error ->
+              (* Since #28178 the provider-attempt effect fence wraps the
+                 provider error once an effect was attempted, so the caller no
+                 longer sees the raw [ProviderUnavailable]. The recovery phase
+                 asserted below is what this test is named for and is
+                 unchanged; here we only pin that the failure is the fence and
+                 that it forbids same-turn retry. *)
+              (match Keeper_internal_error.classify_masc_internal_error error with
+               | Some
+                   (Keeper_internal_error.Provider_attempt_effect_fenced
+                      { effect_disposition; _ }) ->
+                 check
+                   string
+                   "the fence records the tool the client ran before the transport broke"
+                   "effect_attempted"
+                   (Keeper_provider_attempt_effect.to_string effect_disposition);
+                 check
+                   bool
+                   "post-effect failure is fenced against same-turn retry"
+                   false
+                   (Keeper_provider_attempt_effect.allows_same_turn_retry
+                      effect_disposition)
+               | _ -> fail (Agent_core.Error.to_string error))
+            | Ok _ -> fail "post-effect response failure completed the Keeper turn");
+       check int "tool effect count" 1 !call_count;
+       let state = load_state base_path in
+       match state.phase with
+       | Recovery_required { failure = Transport_interrupted; _ } -> ()
+       | _ -> fail "post-effect transport failure released the durable claim")
+;;
+
+let test_operator_interrupt_preserves_previous_native_settlement () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [ Emit (assistant ~turn_id:"original-turn" "ORIGINAL_OK")
+      ; Emit (result ~turn_id:"original-turn" "ORIGINAL_OK") ]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"ORIGINAL" () with
+        | Ok _ -> ()
+        | Error error -> fail (Agent_core.Error.to_string error));
+    let original = load_state base_path in
+    let observed : Keeper_semantic_execution.official_client_checkpoint =
+      match original.phase with
+      | Settled { session_id; turn_id } ->
+        { client_kind = original.client_kind; runtime_id = original.runtime_id;
+          session_id; turn_id; tool_surface_sha256 = original.tool_surface_sha256;
+          frame = Keeper_repetition_snapshot.empty }
+      | Ready | Start _ | Active _ | Turn_inflight _ | Recovery_required _ ->
+        fail "original native turn did not settle" in
+    let observed_terminal_event = ref false in
+    with_fixture
+      [ Emit (assistant ~turn_id:"interrupted-turn" "INTERRUPTED")
+      ; Emit (result ~turn_id:"interrupted-turn" "INTERRUPTED") ]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"NEWER"
+          ~on_event:(function
+            | Agent_core.Types.MessageStop ->
+              observed_terminal_event := true;
+              raise Keeper_registry_types.Operator_interrupt
+            | _ -> ()) () with
+        | exception exn when Keeper_registry_types.is_operator_interrupt exn -> ()
+        | exception exn -> fail (Printexc.to_string exn)
+        | Ok _ | Error _ -> fail "operator interrupt was converted to a provider result");
+    check bool "native terminal callback was reached" true !observed_terminal_event;
+    let restored = load_state base_path in
+    check bool "operator interruption restores prior settlement" true
+      (restored.phase = original.phase);
+    (match restored.last_transient_release with
+     | Some release ->
+       check bool "typed owner stop was recorded" true
+         (release.failure = Owner_stopped_turn)
+     | None -> fail "owner stop release evidence was not persisted");
+    let resumed =
+      Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
+        ~observed ~expected:(Some restored) |> Result.get_ok in
+    check string "previous checkpoint remains resumable" observed.turn_id resumed.turn_id)
+;;
+
+let test_keeper_does_not_retry_context_error_after_tool_effect () =
+  let base_path = temp_workspace () in
+  let call_count = ref 0 in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Record one deterministic fixture effect"
+      ~parameters:[ marker_param ]
+      (fun _input ->
+        incr call_count;
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit_and_read mcp_call
+         ; Emit prompt_too_long_result
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~tools:[ tool ]
+                ~base_path
+                ~cli_path
+                ~goal:"USE_TOOL_THEN_OVERFLOW"
+                ()
+            with
+            | Error error ->
+              (match Keeper_internal_error.classify_masc_internal_error error with
+               | Some
+                   (Keeper_internal_error.Provider_attempt_effect_fenced
+                      { effect_disposition; _ }) ->
+                 check
+                   bool
+                   "post-effect overflow is fenced"
+                   false
+                   (Keeper_provider_attempt_effect.allows_same_turn_retry
+                      effect_disposition)
+               | _ -> fail (Agent_core.Error.to_string error))
+            | Ok _ -> fail "post-effect context overflow completed the Keeper turn");
+       check int "tool effect is not replayed" 1 !call_count;
+       let state = load_state base_path in
+       match state.phase with
+       | Recovery_required
+           { failure =
+               Input_rejected
+                 Keeper_official_client_session_store.Effect_fenced
+           ; _
+           } -> ()
+       | phase ->
+         fail
+           ("post-effect context overflow did not durably fence the input: "
+            ^ (match phase with
+               | Recovery_required { failure; _ } ->
+                 Keeper_official_client_session_store
+                 .recovery_failure_to_string failure
+               | _ -> "not-in-recovery")))
+;;
+
+let test_blank_completion_rejected_without_losing_session () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [Emit (assistant ~turn_id:"blank" ""); Emit (result ~turn_id:"blank" "")]
+      (fun cli_path ->
+        (match run_keeper_turn ~base_path ~cli_path ~goal:"Reply to this request"
+            ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress () with
+         | Error error ->
+             (match Keeper_internal_error.classify_masc_internal_error error with
+              (* Claude's spawned process cannot prove absence of native
+                 effects. The driver fences automatic retry while preserving
+                 the exact typed acceptance cause and the settled session. *)
+              | Some (Keeper_internal_error.Provider_attempt_effect_fenced
+                  { runtime_id = "claude.claude"
+                  ; effect_disposition = Keeper_provider_attempt_effect.Observation_unavailable
+                  ; cause = Keeper_internal_error.Fenced_masc
+                      (Keeper_internal_error.Accept_rejected
+                        { reason_kind = Some Accept_no_usable_progress
+                        ; response_shape = Some Accept_response_blank_text_only
+                        ; stop_reason = Some Agent_core.Types.EndTurn
+                        ; _ }) }) -> ()
+              | _ -> fail ("blank completion was not a fenced blank-progress rejection: "
+                           ^ Agent_core.Error.to_string error))
+         | Ok _ -> fail "blank completion was accepted as progress");
+        let module Store = Keeper_official_client_session_store in
+        let binding = load_state base_path in
+        let settled_session = match binding.phase with
+          | Store.Settled {session_id; turn_id = "blank"} -> session_id
+          | _ -> fail "blank response was misclassified as protocol recovery" in
+        match Store.plan_claim ~expected:(Some binding) ~client_kind:Claude_code
+                ~runtime_id:"claude.claude" with
+        | Ok {previous_settlement = Some previous; _} ->
+            check string "next turn resumes the completed session"
+              settled_session previous.session_id
+        | _ -> fail "next turn would abandon the resumable session"));
+  List.iter (fun result_field ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let fields = result ~turn_id:"missing" "" |> Yojson.Safe.from_string
+        |> Yojson.Safe.Util.to_assoc |> List.remove_assoc "result" in
+      let terminal = Yojson.Safe.to_string (`Assoc (fields @ result_field)) in
+      with_fixture [Emit (assistant ~turn_id:"missing" ""); Emit terminal]
+        (fun cli_path ->
+          check bool "missing or malformed result still fails" true
+            (Result.is_error (run_keeper_turn ~base_path ~cli_path ~goal:"Reply" ()));
+          match (load_state base_path).phase with
+          | Recovery_required {failure = Protocol_failed; _} -> ()
+          | _ -> fail "missing or malformed completion lost its protocol classification")))
+    [[]; ["result", `Null]; ["result", `Int 7]]
+;;
+
+let test_keeper_settles_and_resumes () =
+  let effect_count = ref 0 in
+  let tool = Agent_core.Tool.create ~name:"masc_probe" ~description:"Record one effect"
+    ~parameters:[{Agent_core.Types.name="marker";description="marker";param_type=String;required=true}]
+    (fun _ -> incr effect_count;
+      Ok {Agent_core.Types.content="completed official effect";content_blocks=None;_meta=None}) in
+  let base_path = temp_workspace () in
+  let system_marker = Filename.concat base_path "resume-system.txt" in
+  let native_history = [message User "Native correction after the official turn";
+    Agent_core.Types.make_message ~role:Tool [Agent_core.Types.ToolResult
+      {tool_use_id="native-call";content="completed native effect";outcome=Tool_succeeded;
+       json=Some (`Assoc ["receipt",`String "native-proof"]);content_blocks=None}]] in
+  let prompt_marker = Filename.concat base_path "resume-prompt.json" in
+  let start_system_marker = Filename.concat base_path "start-system.txt" in
+  (* The two messages the host composes for each turn: the per-turn context
+     carrier and the Librarian working state. *)
+  let carrier : Agent_core.Types.message =
+    { origin = Llm_provider.Types.System_context;  role = System
+    ; content = [ Text "MASC_TURN_CONTEXT memory revision 903" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let working_state : Agent_core.Types.message =
+    { origin = Llm_provider.Types.Agent_instruction;  role = System
+    ; content = [ Text "MASC_WORKING_STATE two asks answered" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Runtime_model_input_tail_window.working_state_metadata
+    }
+  in
+  let rendered (message : Agent_core.Types.message) =
+    Keeper_official_client_host.history_role_label message.role
+    ^ Keeper_official_client_host.encode_history_message message
+  in
+  let has_canonical_snapshot wire =
+    String_util.contains_substring wire "masc.official-client-canonical-context.v1"
+  in
+  (* What each turn reported about its own model input. The start/resume split
+     the rest of this test pins on the wire has to be the same split the
+     record carries, or the metrics row describes a request that was not
+     sent. *)
+  let reports = ref [] in
+  let on_request_attribution ~runtime_id:_ ~tools:_ ~transmitted =
+    reports := transmitted :: !reports
+  in
+  let reported_input () =
+    match !reports with
+    | [ latest ] -> latest
+    | other ->
+      fail
+        (Printf.sprintf
+           "expected exactly one input report for the turn, got %d"
+           (List.length other))
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         ~system_marker:start_system_marker
+         [ Emit_and_read mcp_initialize; Emit mcp_initialized_notification;
+           Emit_and_read mcp_list; Emit_and_read mcp_call;
+           Emit (assistant ~turn_id:"turn-1" "MASC_CLAUDE_FIRST")
+         ; Emit (result ~turn_id:"turn-1" "MASC_CLAUDE_FIRST")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[tool]
+               ~initial_messages:
+                 [ message User "earlier user"; message Assistant "earlier assistant"
+                 ; carrier ]
+               ~base_path
+               ~cli_path
+               ~goal:"FIRST_GOAL"
+               ~on_request_attribution
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             check string
+               "first response"
+               "MASC_CLAUDE_FIRST"
+               (keeper_response_text turn);
+             check int "first turn" 1 turn.turns);
+       (* A start renders the whole prepared list into the prompt, so the
+          record may attribute it. *)
+       (match reported_input () with
+        | Keeper_official_client_host.Whole_input_transmitted messages ->
+          check bool
+            "a started conversation reports the history it rendered"
+            true
+            (List.length messages > 0)
+        | Keeper_official_client_host.Held_by_client_session ->
+          fail "a started conversation reported nothing to attribute");
+       (* A start still writes the composed context into the system prompt
+          the client records for the session. *)
+       let start_system_wire =
+         In_channel.with_open_bin start_system_marker In_channel.input_all
+       in
+       check bool "a start's system prompt carries the turn context" true
+         (String_util.contains_substring start_system_wire
+            (Keeper_official_client_host.encode_history_message carrier));
+       check bool "a start's system prompt carries no canonical snapshot" false
+         (has_canonical_snapshot start_system_wire);
+       (match (load_state base_path).context_frontier with
+        | Some { delivery = Prepared_start_context; _ } -> ()
+        | Some _ | None -> fail "a start did not record its prepared context");
+       reports := [];
+       let first = load_state base_path in
+       let session_id =
+         match first.phase with
+         | Settled { session_id; turn_id = "turn-1" } -> session_id
+         | _ -> fail "first Claude Code turn did not settle"
+       in
+       with_fixture
+         ~prompt_marker ~system_marker
+         [ Emit (assistant ~turn_id:"turn-2" "MASC_CLAUDE_SECOND")
+         ; Emit (result ~turn_id:"turn-2" "MASC_CLAUDE_SECOND")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[tool]
+               ~initial_messages:(carrier :: working_state :: native_history)
+               ~system_prompt:"Updated core instructions"
+               ~base_path
+               ~cli_path
+               ~goal:"SECOND_GOAL"
+               ~on_request_attribution
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             check string "session identity" session_id turn.session_id;
+             check int "resumed turn" 2 turn.turns;
+             check string
+               "second response"
+               "MASC_CLAUDE_SECOND"
+               (keeper_response_text turn));
+       let input = open_in_bin prompt_marker in
+       let raw =
+         Fun.protect ~finally:(fun () -> close_in input) (fun () -> input_line input)
+       in
+       (* Claude Code resumes with the system prompt it recorded at the
+          session's first launch, so what changed since the session last held
+          it rides in front of the resume prompt and the conversation the
+          session holds is not sent again. The start put the unchanged turn
+          context in the session, so only the new working state goes. *)
+       let resume_prompt = content_of_wire_message raw in
+       check string "resume prompt carries only the context the session lacks"
+         (rendered working_state ^ "\n\nSECOND_GOAL") resume_prompt;
+       check bool "resume prompt does not replay the conversation" false
+         (String_util.contains_substring resume_prompt "Native correction");
+       let system_wire = In_channel.with_open_bin system_marker In_channel.input_all in
+       let scoped_path = In_channel.with_open_bin (system_marker ^ ".path") In_channel.input_all in
+       check bool "replacement context file removed after child settles" false (Sys.file_exists scoped_path);
+       check bool "core instructions lead the resume system prompt" true
+         (String.starts_with ~prefix:"Updated core instructions" system_wire);
+       check bool "resume system prompt carries no canonical snapshot" false
+         (has_canonical_snapshot system_wire);
+       check bool "resume system prompt carries no conversation" false
+         (String_util.contains_substring system_wire "Native correction");
+       check bool "resume system prompt carries no composed context" false
+         (String_util.contains_substring system_wire "MASC_TURN_CONTEXT"
+          || String_util.contains_substring system_wire "MASC_WORKING_STATE");
+       (match reported_input () with
+        | Keeper_official_client_host.Held_by_client_session -> ()
+        | Keeper_official_client_host.Whole_input_transmitted _ ->
+          fail "a resume reported the conversation the vendor session holds as sent");
+       check int "resumed context does not repeat official tool effect" 1 !effect_count;
+       let second = load_state base_path in
+       let held_contexts (state : Keeper_official_client_session_store.t) =
+         match state.context_frontier with
+         | Some { held_context; _ } ->
+           List.map
+             (fun (held : Keeper_official_client_session_store.held_context) ->
+                held.context)
+             held_context
+         | None -> fail "no context frontier"
+       in
+       (match second.context_frontier with
+        | Some {acknowledged_turn=Some receipt;delivery=Held_by_vendor_session;message_count;_} ->
+          check string "frontier bound to resumed vendor turn" "turn-2" receipt.turn_id;
+          check int "frontier counts the canonical history, not the composed context"
+            (List.length native_history) message_count
+        | Some _ | None -> fail "a resume did not record that the vendor session holds the context");
+       check bool "the session holds exactly the turn context, working state and unread observation" true
+         (List.sort Stdlib.compare (held_contexts second)
+          = List.sort Stdlib.compare
+            [ Keeper_official_client_session_store.Context_carrier
+            ; Keeper_official_client_session_store.Librarian_working_state
+            ; Keeper_official_client_session_store.Librarian_unread
+            ]);
+       check int "durable cumulative turns" 2 second.turn_count;
+       (match second.phase with
+        | Settled { session_id = settled_session; turn_id = "turn-2" } ->
+          check string "settled session" session_id settled_session
+        | _ -> fail "resumed Claude Code turn did not settle");
+       (* Nothing changed, so the third turn sends the goal alone. The client
+          compacts the conversation during it, so the copies it held are a
+          summary afterwards and the settlement records that it holds none. *)
+       with_fixture
+         ~prompt_marker
+         [ Emit compact_boundary
+         ; Emit (assistant ~turn_id:"turn-3" "MASC_CLAUDE_THIRD")
+         ; Emit (result ~turn_id:"turn-3" "MASC_CLAUDE_THIRD")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[tool]
+               ~initial_messages:(carrier :: working_state :: native_history)
+               ~system_prompt:"Updated core instructions"
+               ~base_path
+               ~cli_path
+               ~goal:"THIRD_GOAL"
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn -> check string "third turn session" session_id turn.session_id);
+       let third_prompt =
+         let input = open_in_bin prompt_marker in
+         Fun.protect ~finally:(fun () -> close_in input) (fun () ->
+           content_of_wire_message (input_line input))
+       in
+       check string "an unchanged context is not sent again" "THIRD_GOAL" third_prompt;
+       check bool "a compacted session holds no carried context" true
+         (held_contexts (load_state base_path) = []))
+;;
+
+(* The historical task reference only exists on a resume of the operation's
+   own vendor session, so it has to ride in the resume prompt too: the system
+   prompt file it used to land in is not what a resumed session reads. *)
+let test_resume_prompt_carries_the_task_reference () =
+  let reference : Agent_core.Types.message =
+    { (Agent_core.Types.system_msg "MASC_TASK_REFERENCE") with
+      metadata = [ "masc_official_historical_task", `String "v1" ] }
+  in
+  let carrier : Agent_core.Types.message =
+    { origin = Llm_provider.Types.System_context;  role = System
+    ; content = [ Text "MASC_TURN_CONTEXT" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  check bool "the reference is recognised" true
+    (Keeper_official_task_reference.is_reference reference);
+  let rendered (message : Agent_core.Types.message) =
+    Keeper_official_client_host.history_role_label message.role
+    ^ Keeper_official_client_host.encode_history_message message
+  in
+  check string "reference, then turn context, then the goal; history left out"
+    (rendered reference ^ "\n\n" ^ rendered carrier ^ "\n\nGOAL")
+    (Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held:[]
+       [ reference; message User "held by the vendor session"; carrier ])
+      .prompt
+;;
+
+(* A resumed session stores every prompt it is sent. With the carrier's typed
+   blocks named, a block goes out only when the session does not hold the
+   same bytes, the ones sent together read as one carrier, and an operator
+   note goes out every time it is composed. *)
+let test_resume_prompt_sends_only_changed_blocks () =
+  let blocks texts =
+    [ Prompt_block_id.Memory_os_recall, List.nth texts 0
+    ; Prompt_block_id.Dynamic_context, List.nth texts 1
+    ; Prompt_block_id.Temporal_summary, List.nth texts 2
+    ; Prompt_block_id.Operator_note, List.nth texts 3
+    ; Prompt_block_id.Librarian_working_context, List.nth texts 4
+    ]
+  in
+  let turn texts =
+    let blocks = blocks texts in
+    let assembled = String.concat "\n\n" (List.map snd blocks) in
+    let carrier : Agent_core.Types.message =
+      { origin = Llm_provider.Types.System_context;  role = System
+      ; content = [ Text assembled ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    in
+    ( Some
+        (Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks)
+    , [ message User "held by the vendor session"; carrier ] )
+  in
+  let rendered_blocks texts =
+    Keeper_official_client_host.history_role_label Agent_core.Types.System
+    ^ Keeper_official_client_host.encode_history_message
+        ({ origin = Llm_provider.Types.System_context;  role = System
+         ; content = [ Text (String.concat "\n\n" texts) ]
+         ; name = None
+         ; tool_call_id = None
+         ; metadata = []
+         }
+         : Agent_core.Types.message)
+  in
+  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 1"; "NOTE"; "LIBRARIAN 1" ] in
+  let held = Keeper_official_client_host.start_held_context ?composed_context messages in
+  check int "a start holds every block except the note" 4 (List.length held);
+  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 1"; "NOTE"; "LIBRARIAN 2" ] in
+  let librarian_delivery =
+    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held ?composed_context messages
+  in
+  check string "a Librarian revision does not replay unchanged ordinary Recall"
+    (rendered_blocks [ "NOTE"; "LIBRARIAN 2" ] ^ "\n\nGOAL")
+    librarian_delivery.prompt;
+  let composed_context, messages = turn [ "MEMORY"; "DYNAMIC"; "CLOCK 2"; "NOTE"; "LIBRARIAN 1" ] in
+  let delivery =
+    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held ?composed_context messages
+  in
+  check string "the changed clock and the note go; held blocks stay out"
+    (rendered_blocks [ "CLOCK 2"; "NOTE" ] ^ "\n\nGOAL")
+    delivery.prompt;
+  let composed_context, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE"; "LIBRARIAN 1" ] in
+  check string "the session now holds the clock it was sent"
+    (rendered_blocks [ "MEMORY 2"; "NOTE" ] ^ "\n\nGOAL")
+    (Keeper_official_client_host.resume_prompt
+       ~goal:"GOAL" ~held:delivery.held_context ?composed_context messages)
+      .prompt;
+  let _, messages = turn [ "MEMORY 2"; "DYNAMIC"; "CLOCK 2"; "NOTE"; "LIBRARIAN 1" ] in
+  check bool "a carrier its assembly does not name is carried whole" true
+    (String_util.contains_substring
+       (Keeper_official_client_host.resume_prompt
+          ~goal:"GOAL" ~held:delivery.held_context messages)
+         .prompt
+       "DYNAMIC")
+;;
+
+(* A turn that sends the whole carrier supersedes the block digests the
+   session held: its latest copy of every block is inside that carrier. When
+   the next turn composes the earlier blocks again, none of them is held. *)
+let test_whole_carrier_supersedes_held_blocks () =
+  let blocks texts =
+    [ Prompt_block_id.Memory_os_recall, List.nth texts 0
+    ; Prompt_block_id.Dynamic_context, List.nth texts 1
+    ]
+  in
+  let carrier_of assembled : Agent_core.Types.message =
+    { origin = Llm_provider.Types.System_context;  role = System
+    ; content = [ Text assembled ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let turn texts =
+    let blocks = blocks texts in
+    let assembled = String.concat "\n\n" (List.map snd blocks) in
+    ( Some
+        (Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks)
+    , [ message User "held by the vendor session"; carrier_of assembled ] )
+  in
+  let rendered texts =
+    Keeper_official_client_host.history_role_label Agent_core.Types.System
+    ^ Keeper_official_client_host.encode_history_message
+        (carrier_of (String.concat "\n\n" texts))
+  in
+  let composed_context, messages = turn [ "RECALL A"; "DYNAMIC" ] in
+  let held = Keeper_official_client_host.start_held_context ?composed_context messages in
+  (* The assembly is not named, so the carrier goes whole. *)
+  let _, messages = turn [ "RECALL B"; "DYNAMIC" ] in
+  let whole =
+    Keeper_official_client_host.resume_prompt ~goal:"GOAL" ~held messages
+  in
+  check string "the unnamed carrier is sent whole"
+    (rendered [ "RECALL B"; "DYNAMIC" ] ^ "\n\nGOAL")
+    whole.prompt;
+  let composed_context, messages = turn [ "RECALL A"; "DYNAMIC" ] in
+  check string "every block goes again after the whole carrier"
+    (rendered [ "RECALL A"; "DYNAMIC" ] ^ "\n\nGOAL")
+    (Keeper_official_client_host.resume_prompt
+       ~goal:"GOAL" ~held:whole.held_context ?composed_context messages)
+      .prompt
+;;
+
+let test_pre_effect_provider_rejection_keeps_failover_open () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture [ Emit generic_provider_rejection ] (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"READ_ONLY_SLACK" () with
+         | Error
+             (Agent_core.Error.Provider
+                (Llm_provider.Error.ProviderReportedError { detail; _ })) ->
+           check
+             bool
+             "provider safeguard diagnostic survives without an effect fence"
+             true
+             (Astring.String.is_infix ~affix:"safeguards flagged" detail);
+           let state = load_state base_path in
+           (match state.phase with
+            | Recovery_required required ->
+              check bool
+                "pre-effect provider rejection remains recoverable"
+                true
+                (required.failure = Provider_rejected)
+            | _ -> fail "pre-effect provider rejection did not enter recovery")
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "provider rejection completed the Keeper turn"))
+;;
+
+let test_quota_enters_typed_recovery () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun cli_path ->
+         (match run_keeper_turn ~base_path ~cli_path ~goal:"QUOTA_GOAL" () with
+          | Error
+              (Agent_core.Error.Provider
+                 (Llm_provider.Error.HardQuota { detail; _ })) ->
+            check bool "quota diagnostic survives" true
+              (Astring.String.is_infix ~affix:"quota" detail)
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok _ -> fail "quota rejection completed the Keeper turn");
+         let state = load_state base_path in
+         match state.phase with
+         | Recovery_required required ->
+           check bool
+             "provider rejection"
+             true
+             (required.failure = Provider_rejected);
+           check bool
+             "measured session"
+             true
+             (Option.is_some required.observed_session_id);
+           check (option string) "no fabricated turn" None required.observed_turn_id
+         | _ -> fail "quota rejection did not require explicit recovery"))
+;;
+
+let test_access_refusal_uses_status_and_keeps_pre_effect_rotation () =
+  List.iter (fun status ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      with_fixture [ Emit (access_rejection status) ] (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"REVIEW_ACCESS" () with
+        | Ok _ -> fail "provider access rejection completed the turn"
+        | Error error ->
+          let route = Keeper_runtime_failure_route.route_of_error
+              ~boundary:Keeper_runtime_failure_route.Agent_core_execution error in
+          let expected = match status with
+            | 401 -> Keeper_runtime_failure_route.Auth_failed
+            | 403 -> Keeper_runtime_failure_route.Authorization_refused
+            | _ -> Keeper_runtime_failure_route.Provider_reported_failure in
+          check bool "numeric status selects the existing typed route" true
+            (route = Keeper_runtime_failure_route.Rotate_now { rotate = expected });
+          check bool "access rejection does not resume the same failed path" false
+            (Keeper_runtime_failure_route.route_resumes_on_same_path route);
+          if status = 403 then
+            check bool "receipt retains authorization refusal" true
+              (match Keeper_agent_error.terminal_reason_code_of_core_error error
+                 |> Keeper_terminal_reason.of_wire with
+               | Keeper_terminal_reason.Authorization_refused _ -> true
+               | _ -> false);
+          (match (load_state base_path).phase with
+           | Recovery_required { failure = Provider_rejected; _ } -> ()
+           | _ -> fail "account refusal lost the durable provider rejection"))))
+    [401; 403; 400]
+;;
+
+let test_access_refusal_after_native_tool_remains_fenced () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture
+      [ Emit (native_tool_call_block ~turn_id:"native-access"
+          ~call_id:"native-access-call" ~tool_name:"Write")
+      ; Emit (native_tool_result ~call_id:"native-access-call" ~content:"written")
+      ; Emit (access_rejection 403)
+      ] (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"TOOL_THEN_ACCESS_REFUSAL" () with
+        | Error error ->
+          (match Keeper_internal_error.classify_masc_internal_error error with
+           | Some (Keeper_internal_error.Provider_attempt_effect_fenced { effect_disposition; _ }) ->
+             check bool "account refusal cannot bypass an observed effect" false
+               (Keeper_provider_attempt_effect.allows_same_turn_retry effect_disposition)
+           | _ -> fail (Agent_core.Error.to_string error))
+        | Ok _ -> fail "post-effect access rejection completed the turn"))
+;;
+
+let test_quota_after_tool_effect_remains_fenced () =
+  let base_path = temp_workspace () in
+  let call_count = ref 0 in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Record one deterministic fixture effect"
+      ~parameters:[ marker_param ]
+      (fun _input ->
+        incr call_count;
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit_and_read mcp_call
+         ; Emit rate_limit_rejected
+         ; Emit quota_result
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~tools:[ tool ]
+                ~base_path
+                ~cli_path
+                ~goal:"USE_TOOL_THEN_QUOTA"
+                ()
+            with
+            | Error error ->
+              (match Keeper_internal_error.classify_masc_internal_error error with
+               | Some
+                   (Keeper_internal_error.Provider_attempt_effect_fenced
+                      { effect_disposition; _ }) ->
+                 check bool "post-effect quota remains fenced" false
+                   (Keeper_provider_attempt_effect.allows_same_turn_retry
+                      effect_disposition);
+                 (* The quota frame arrives after MASC ran the tool. The
+                    fence names that effect instead of an unknown one: the
+                    failure route reads it as a response the model produced. *)
+                 check
+                   string
+                   "a quota after a tool records the effect the tool made"
+                   "effect_attempted"
+                   (Keeper_provider_attempt_effect.to_string effect_disposition)
+               | _ -> fail (Agent_core.Error.to_string error))
+            | Ok _ -> fail "post-effect quota completed the Keeper turn");
+       check int "tool effect is not replayed" 1 !call_count)
+;;
+
+let test_quota_after_native_tool_remains_fenced () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit
+             (native_tool_call_block
+                ~turn_id:"native-quota"
+                ~call_id:"native-quota-call"
+                ~tool_name:"Write")
+         ; Emit
+             (native_tool_result
+                ~call_id:"native-quota-call"
+                ~content:"native tool output")
+         ; Emit rate_limit_rejected
+         ; Emit quota_result
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~base_path
+                ~cli_path
+                ~goal:"NATIVE_TOOL_THEN_QUOTA"
+                ()
+            with
+            | Error error ->
+              (match Keeper_internal_error.classify_masc_internal_error error with
+               | Some
+                   (Keeper_internal_error.Provider_attempt_effect_fenced
+                      { effect_disposition; _ }) ->
+                 check bool "post-native-tool quota remains fenced" false
+                   (Keeper_provider_attempt_effect.allows_same_turn_retry
+                      effect_disposition)
+               | _ -> fail (Agent_core.Error.to_string error))
+            | Ok _ -> fail "post-native-tool quota completed the Keeper turn"))
+;;
+
+let test_spawn_failure_fences_claim () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let reports = ref 0 in
+       with_fixture ~remove_after_auth:true [] (fun cli_path ->
+         (match run_keeper_turn ~base_path ~cli_path ~goal:"SPAWN_GOAL"
+             ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ -> incr reports) () with
+          | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field = "claude_code"; _ })) ->
+            ()
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok _ -> fail "removed CLI unexpectedly completed the Keeper turn");
+         check int "prepared turn with missing CLI reports no input" 0 !reports;
+         let state = load_state base_path in
+         (match state.phase with
+          | Recovery_required { failure = Protocol_failed; _ } -> ()
+          | _ ->
+            fail "a fatal missing-CLI spawn failure did not fence the claim for recovery");
+         match state.last_transient_release with
+         | None -> ()
+         | Some _ ->
+           fail "a fatal missing-CLI spawn failure persisted a transient release"))
+;;
+
+let run_direct_attempt
+      ?admission_timeout_s
+      ?on_memory_capacity_refusal
+      ?required_native_posture ?on_native_task_observation ?on_child_content_observation ?on_event
+      ?hooks
+      ?terminal_effect_state
+      ?composed_context
+      ?argument_source ?librarian_front
+      ?(initial_messages = [])
+      ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ?(on_transmitted_model_input = fun _ -> ())
+      ?(system_prompt = "pre-dispatch fixture system prompt")
+      ~base_path
+      ~cli_path
+      ~goal
+      ~tools
+      ()
+  =
+  Masc_test_deps.declare_fixture_keeper
+    ~base_path ~sandbox_profile:None "claude-pre-dispatch";
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_call_log.reset_for_testing ();
+      Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_runtime_config cli_path (fun runtime_path ->
+         Eio_main.run (fun env ->
+           Eio.Switch.run (fun sw ->
+             Eio_context.set_env env;
+             Eio_context.with_test_env
+               ~net:(Eio.Stdenv.net env)
+               ~clock:(Eio.Stdenv.clock env)
+               ~mono_clock:(Eio.Stdenv.mono_clock env)
+               ~sw
+               (fun () ->
+                  Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+                  let config =
+                    match Runtime.get_runtime_by_id "claude.claude" with
+                    | Some
+                        { Runtime_instance.execution = Runtime_execution.Claude_code config
+                        ; _
+                        } ->
+                      config
+                    | Some _ | None -> fail "Claude runtime fixture did not resolve"
+                  in
+                  let config = match admission_timeout_s with
+                    | None -> config
+                    | Some timeout_s -> { config with Runtime_execution.timeout_s }
+                  in
+                  Keeper_claude_code_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-pre-dispatch" })
+                    ?terminal_effect_state
+                    ?composed_context
+                    ?argument_source ?librarian_front
+                    ?on_memory_capacity_refusal
+                    ?required_native_posture ?on_native_task_observation ?on_child_content_observation
+                    ~turn_start
+                    ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
+                      ~runtime:(Runtime.get_runtime_by_id "claude.claude" |> Option.get))
+                    ~pre_tool_rejects:(ref [])
+                    ~runtime_id:"claude.claude"
+                    ~keeper_name:"claude-pre-dispatch"
+                    ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+                    ~goal
+                    ~goal_blocks:None
+                    (* Defaults to non-empty text. The keeper mainline refuses a
+                       composed system prompt that comes out blank rather than
+                       omitting [--system-prompt] and running the turn under
+                       the client's built-in prompt, so [""] would make every
+                       attempt below fail on config instead of reaching the
+                       behaviour each one asserts. The text is a don't-care;
+                       only its non-emptiness is load-bearing. *)
+                    ~system_prompt
+                    ~tools
+                    ~initial_messages
+                    ~model_input_projection:None
+                    ~on_transmitted_model_input
+                    ~hooks
+                    ~context_injector:None
+                      (* Dynamic tools require the Keeper shared context
+                         ([Keeper_official_client_host.dynamic_tools] rejects
+                         [tools <> []] with [context = None]). Supply one
+                         unconditionally: with [~tools:[]] the gate returns
+                         [Ok []] either way, so the no-tools attempts are
+                         unaffected. *)
+                    ~context:(Some (Agent_core.Context.create ()))
+                    ~event_bus:None
+                    ~raw_trace:None
+                    ~on_event
+                    ~config
+                    ())))))
+;;
+
+(* Capture the actual first-launch System file and stdin User packet at the
+   official process boundary. The fixture CLI does not model vendor System
+   retention: avoiding the standing event is proved by the submitted bytes. *)
+let test_start_authority_is_user_context_not_standing_system () =
+  let module A = Keeper_context_assembly in
+  let module Host = Keeper_official_client_host in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let unread = Keeper_librarian_request_unread.empty in
+    let librarian_front _ = Ok
+      {Keeper_turn_driver_try_provider.point=No_position; unread} in
+    let goal_text = "GOAL revision-current measurement=1/4" in
+    let first_event = "Approved task-first vrf-first human_operator operator-first" in
+    let new_event = "Rejected task-other vrf-new human_operator operator-second" in
+    List.iteri (fun index event ->
+      let system_marker = Filename.concat base_path (Printf.sprintf "authority-system-%d" index) in
+      let prompt_marker = Filename.concat base_path (Printf.sprintf "authority-input-%d" index) in
+      let assembly = A.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None ~blocks:[]
+        |> A.with_system_observations ~base_text:"BASE"
+          ~observations:(A.Active_goals goal_text ::
+            Option.to_list (Option.map (fun text -> A.Completion_authority text) event)) in
+      let reads = ref 0 in
+      let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+        | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+          Agent_core.Hooks.AdjustParams {current_params with
+            system_prompt_override=A.system_prompt_override
+              ~previous:current_params.system_prompt_override assembly}
+        | BeforeTurn _ | AfterTurn _ | PreToolUse _ | PostToolUse _ | PostToolUseFailure _
+        | OnStop _ | OnError _ | OnToolError _ -> Agent_core.Hooks.Continue)} in
+      with_fixture ~system_marker ~prompt_marker
+        [Emit (assistant ~turn_id:(string_of_int index) "ANSWER");
+         Emit (result ~turn_id:(string_of_int index) "ANSWER")]
+        (fun cli_path ->
+          let attempt = run_direct_attempt ~hooks ~librarian_front
+            ~composed_context:(fun () -> incr reads; Some assembly)
+            ~system_prompt:"BASE" ~base_path ~cli_path ~goal:"OWNER" ~tools:[] () in
+          (match attempt.result with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok _ -> ());
+          match Option.bind attempt.settled_session (fun state -> state.Keeper_official_client_session_store.context_frontier) with
+          | Some frontier -> check bool "first Start then held Resume" (index > 0)
+              (frontier.delivery = Keeper_official_client_session_store.Held_by_vendor_session)
+          | None -> fail "actual adapter did not settle an input frontier");
+      check int "actual adapter shares one post-hook issuer snapshot" 1 !reads;
+      let system = In_channel.with_open_bin system_marker In_channel.input_all in
+      let raw = In_channel.with_open_bin prompt_marker input_line in
+      let user = content_of_wire_message raw in
+      let standing = "BASE\n\n" ^ goal_text in
+      let expected_system = if index = 0 then
+          String.concat "\n\n" (standing :: List.map Host.encode_history_message
+            (attach_native_unread ~unread []))
+        else standing in
+      check string "complete System keeps the native unread contract and excludes authority"
+        expected_system system;
+      let expected = match event with
+        | None -> "OWNER"
+        | Some text -> "USER:\n" ^ Host.encode_history_message (Agent_core.Types.user_msg text) ^ "\n\nOWNER" in
+      check string "current event delivered once; absent event sends owner only" expected user;
+      if index > 1 then check bool "later owner cannot borrow first approval keys" false
+        (String_util.contains_substring user first_event))
+      [Some first_event; Some first_event; None; Some new_event])
+;;
+
+let test_task_callback_keeps_closed_native_owner_and_model_content () =
+  let module F = Native_tool_outcome_fixture in
+  List.iter (fun thinking ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let keeper_name = "claude-pre-dispatch" in
+      let secret = "task-private-cobalt-forest-value" in
+      let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+      Fs_compat.mkdir_p (Filename.dirname token_file);
+      Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+      let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let projection = F.create ~redaction () in
+      let events = ref [] and snapshots = ref [] in
+      let on_event event = events := event :: !events; F.on_event projection event in
+      let on_native_task_observation (bound : Keeper_claude_task_binding.bound) =
+        let observation = bound.observation in
+        check string "input session is the native owner's actual session"
+          observation.owner.invocation.session_id bound.ticket.session_id;
+        (match bound.evidence with
+         | Keeper_claude_task_binding.Explicit_group group ->
+             check string "native envelope uses the actual host input UUID"
+               bound.ticket.client_uuid group.primary
+         | Response_inherited _ | Command_inherited _ -> fail "explicit parent evidence required");
+        snapshots := (observation, List.rev !events, F.events projection) :: !snapshots in
+      let frame event = Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+        "session_id",`String "__SESSION__";"parent_tool_use_id",`Null;"event",event]) in
+      let kind = if thinking then "thinking" else "text" in
+      let piece value = frame (`Assoc ["type",`String "content_block_delta";"index",`Int 0;
+        "delta",`Assoc ["type",`String (kind ^ "_delta");kind,`String value]]) in
+      let task uuid subtype fields = Yojson.Safe.to_string (`Assoc
+        (["type",`String "system";"subtype",`String subtype;"session_id",`String "__SESSION__";
+          "uuid",`String uuid;"task_id",`String "child-task";"run_id",`String "run-alpha";
+          "tool_use_id",`String "parent-agent"] @ fields)) in
+      with_fixture [
+        Emit_with_input (response_native_tool ~turn_id:"parent" ~message_id:"parent" ~call_id:"parent-agent" ~tool_name:"Agent");
+        Emit (native_tool_result ~call_id:"parent-agent" ~content:"background launch");
+        Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc ["id",`String "body";"model",`String "claude-fixture"]]));
+        Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;"content_block",`Assoc ["type",`String kind;kind,`String ""]]));
+        Emit (piece "task-private-");
+        Emit (task "task-register" "task_started" ["task_type",`String "local_agent";
+          "spawn_depth",`Int 1;"description",`String "not root speech";"is_backgrounded",`Bool true]);
+        Emit (task "task-progress" "task_progress" ["description",`String "not root thinking";
+          "usage",`Assoc ["total_tokens",`Int 9;"tool_uses",`Int 1;"duration_ms",`Int 30]]);
+        Emit (task "task-completed" "task_notification" ["status",`String "completed";
+          "summary",`String "not root answer";"output_file",`String "/private/child-output"]);
+        Emit (piece "cobalt-forest-value\n");
+        Emit (frame (`Assoc ["type",`String "content_block_stop";"index",`Int 0]));
+        Emit (response_frame ~uuid:"body-complete" ~message_id:"body" (`Assoc ["type",`String kind;kind,`String (secret ^ "\n")]));
+        Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+        Emit (result_text ~turn_id:"final" "Answer")]
+        (fun cli_path ->
+          let modes = Keeper_tool_approval_mode.shared () in
+          let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
+          let attempt = Fun.protect
+            ~finally:(fun () ->
+              ignore
+                (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
+                   ~keeper_name previous))
+            (fun () ->
+              ignore
+                (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
+                   ~keeper_name Keeper_tool_approval_mode.Yolo);
+              run_direct_attempt ~base_path ~cli_path ~goal:"TASK_METADATA" ~tools:[]
+                ~required_native_posture:Runtime_native_tools.Native_full
+                ~on_event ~on_native_task_observation ()) in
+          (match attempt.result with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok _ -> ());
+          let observations = List.rev !snapshots in
+          check (list string) "typed task callback survives removal of native content index"
+            ["task-register";"task-progress";"task-completed"]
+            (List.map (fun ((o:Runtime_claude_code.native_task_observation),_,_) -> o.uuid) observations);
+          check (list bool) "only the actual task terminal seals its observation boundary"
+            [false;false;true] (List.map (fun ((o:Runtime_claude_code.native_task_observation),_,_) ->
+              o.boundary=Task_terminal_observed) observations);
+          List.iter (fun ((o:Runtime_claude_code.native_task_observation),sse,chat) ->
+            check string "task owns the exact original native call" "parent-agent" o.owner.call_id;
+            check int "root occurrence ordinal stays available" 0 o.owner.call_ordinal;
+            check int "one native block is already closed" 1
+              (List.length (List.filter (function Agent_core.Types.ContentBlockStop _ -> true | _ -> false) sse));
+            check bool "task completion cannot stop the model response" false
+              (List.exists (function Agent_core.Types.MessageStop -> true | _ -> false) sse);
+            check (list string) "task metadata never flushes the held secret prefix" []
+              (List.filter_map (function Keeper_chat_events.Text_delta {text; _}
+                | Agent_core_thinking_delta {delta=text;_} -> Some text | _ -> None) chat)) observations;
+          (match observations with
+           | [(_,first,_);(_,second,_);(_,third,_)] ->
+               check bool "no task edge emits an Agent Core content/lifecycle event" true
+                 (first=second && second=third)
+           | _ -> fail "three actual task edges required");
+          let body = F.events projection |> List.filter_map (function Keeper_chat_events.Text_delta {text; _}
+            | Agent_core_thinking_delta {delta=text;_} -> Some text | _ -> None) |> String.concat "" in
+          check bool "task observations never publish the configured secret" false
+            (Astring.String.is_infix ~affix:secret body);
+          check bool "safe authored content survives the task interleave" true
+            (Astring.String.is_infix ~affix:(Keeper_secret_redaction.redact_text redaction (secret ^ "\n")) body))))
+    [false;true]
+;;
+
+let task_binding_frame ~uuid ~task_id ~call_id subtype fields =
+  Yojson.Safe.to_string (`Assoc (["type",`String "system";"subtype",`String subtype;
+    "session_id",`String "__SESSION__";"uuid",`String uuid;
+    "task_id",`String task_id;"run_id",`String "run-alpha";
+    "tool_use_id",`String call_id] @ fields))
+;;
+
+let task_binding_start ~uuid ~task_id ~call_id =
+  task_binding_frame ~uuid ~task_id ~call_id "task_started"
+    ["task_type",`String "local_agent";"spawn_depth",`Int 1;
+     "description",`String "provider task metadata";"is_backgrounded",`Bool true]
+;;
+
+let task_binding_native_result ~uuid ~call_id =
+  Yojson.Safe.to_string (`Assoc ["type",`String "user";"parent_tool_use_id",`Null;
+    "session_id",`String "__SESSION__";"uuid",`String uuid;"message",`Assoc
+      ["role",`String "user";"content",`List [`Assoc ["type",`String "tool_result";
+        "tool_use_id",`String call_id;"content",`String "background launch"]]]])
+;;
+
+let with_fixture_yolo ~base_path ~keeper_name f =
+  let modes = Keeper_tool_approval_mode.shared () in
+  let previous = Keeper_tool_approval_mode.resolve modes ~keeper_name in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test" ~keeper_name
+           previous))
+    (fun () ->
+      ignore
+        (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test" ~keeper_name
+           Keeper_tool_approval_mode.Yolo);
+      f ())
+;;
+
+let child_content_frame ?(diagnostic=false) ~uuid ~parent ~text () =
+  Yojson.Safe.to_string (`Assoc ["type",`String "assistant";
+    "parent_tool_use_id",`String parent;"session_id",`String "__SESSION__";
+    "uuid",`String uuid;"is_api_error_message",`Bool diagnostic;
+    "message",`Assoc ["id",`String ("child-message-" ^ uuid);"role",`String "assistant";
+      "model",`String "child-model";"usage",`Assoc ["input_tokens",`Int 999];
+      "content",`List [`Assoc ["type",`String "redacted_thinking";"data",`String "NOT_BODY"];
+        `Assoc ["type",`String "text";"text",`String text];
+        `Assoc ["type",`String "thinking";"thinking",`String "CHILD_THINKING"]]]])
+;;
+
+let test_child_callback_binds_original_input_without_root_events () =
+  let module Binding = Keeper_claude_task_binding in
+  let module F = Native_tool_outcome_fixture in
+  List.iter (fun task_subscribed ->
+    let base_path=temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let keeper_name="claude-pre-dispatch" in
+      let secret="child-private-cobalt-value" in
+      let token_file=Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+      Fs_compat.mkdir_p (Filename.dirname token_file);
+      Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+      let redaction=Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+      let projection=F.create ~redaction () in
+      let events=ref [] and children=ref [] and tasks=ref [] in
+      let on_event event=events:=event :: !events; F.on_event projection event in
+      let on_child_content_observation observation=
+        children:=(observation,List.rev !events,F.events projection) :: !children in
+      let on_native_task_observation=if task_subscribed then
+        Some (fun bound -> tasks:=bound :: !tasks) else None in
+      let frame event=Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+        "session_id",`String "__SESSION__";"parent_tool_use_id",`Null;"event",event]) in
+      let delta text=frame (`Assoc ["type",`String "content_block_delta";"index",`Int 0;
+        "delta",`Assoc ["type",`String "text_delta";"text",`String text]]) in
+      let later=match Yojson.Safe.from_string (response_text ~turn_id:"later" ~message_id:"later" "Answer") with
+        | `Assoc fields -> Yojson.Safe.to_string (`Assoc
+            (["user_message_uuid",`String "later-input";
+              "user_message_uuids",`List [`String "later-input"]] @ fields))
+        | _ -> fail "later root frame object" in
+      let child uuid parent=Emit (child_content_frame ~uuid ~parent ~text:("CHILD_" ^ secret) ()) in
+      with_fixture ([child "unknown" "parent-agent";
+        Emit (child_content_frame ~diagnostic:true ~uuid:"diagnostic" ~parent:"parent-agent" ~text:"NOT_CONTENT" ());
+        Emit_with_input (response_native_tool ~turn_id:"parent" ~message_id:"parent" ~call_id:"parent-agent" ~tool_name:"Agent");
+        Emit (task_binding_native_result ~uuid:"parent-return" ~call_id:"parent-agent");
+        Emit (frame (`Assoc ["type",`String "message_start";"message",`Assoc
+          ["id",`String "body";"model",`String "claude-fixture"]]));
+        Emit (frame (`Assoc ["type",`String "content_block_start";"index",`Int 0;
+          "content_block",`Assoc ["type",`String "text";"text",`String ""]]));
+        Emit (delta "child-private-"); child "before-task" "parent-agent"] @
+        (if task_subscribed then [Emit (task_binding_start ~uuid:"task-start" ~task_id:"one" ~call_id:"parent-agent")] else []) @
+        [child "after-task" "parent-agent";Emit (delta "cobalt-value");
+         Emit (frame (`Assoc ["type",`String "content_block_stop";"index",`Int 0]));
+         Emit (response_text ~turn_id:"body-complete" ~message_id:"body" secret);
+         Emit later;child "after-later-input" "parent-agent";
+         Emit (result_text ~turn_id:"final" "Answer")]) (fun cli_path ->
+          let attempt=with_fixture_yolo ~base_path ~keeper_name (fun () ->
+            run_direct_attempt ~base_path ~cli_path ~goal:"CHILD_INPUT" ~tools:[]
+              ~required_native_posture:Runtime_native_tools.Native_full
+              ?on_native_task_observation ~on_child_content_observation
+              ?on_event:(if task_subscribed then Some on_event else None) ()) in
+          (match attempt.result with Error error -> fail (Agent_core.Error.to_string error) | Ok _ -> ());
+          let observations=List.rev !children in
+          check int "unknown and three known complete envelopes retain text/thinking; diagnostic excluded" 8
+            (List.length observations);
+          let bound=List.filter_map (fun (observation,sse,chat) -> match observation with
+            | Binding.Child_rejected {content;reason} ->
+                check bool "only unknown parent is refused" true (reason=Binding.Unknown_parent);
+                check bool "unknown still carries its actual receiving invocation" true
+                  (String.length content.invocation.receiver_generation>0);
+                check (option bool) "unknown has no invented parent" None
+                  (Option.map (fun _ -> true) content.parent_occurrence);
+                None
+            | Child_bound bound -> Some (bound,sse,chat)) observations in
+          check int "known child body binds before task and after native return/later input" 6 (List.length bound);
+          List.iter (fun ((b:Binding.bound_child),_,_) ->
+            check string "reported child model remains separate" "child-model" b.content.model;
+            check string "literal parent agrees with admitted occurrence" b.parent_input.parent.call_id b.content.parent_tool_use_id;
+            check bool "private child and original input refer to same actual invocation" true
+              (b.content.invocation==b.parent_input.ticket);
+            (match b.parent_input.evidence with
+             | Binding.Explicit_group group -> check string "original input survives later different stamp"
+                 b.parent_input.ticket.client_uuid group.primary
+             | Response_inherited _ | Command_inherited _ -> fail "original explicit parent group required");
+            (match b.content.block,b.content.channel with
+             | Runtime_claude_code.Assistant_block {ordinal=1;_},Text_content ->
+                 check string "side callback preserves provider body; separate sink redacts it" ("CHILD_" ^ secret) b.content.text
+             | Assistant_block {ordinal=2;_},Thinking_content -> check string "provider child thinking remains scoped" "CHILD_THINKING" b.content.text
+             | _ -> fail "complete child wire ordinal/channel changed")) bound;
+          if task_subscribed then begin
+            check int "same binding also admits one actual task" 1 (List.length !tasks);
+            let task=List.hd !tasks in
+            let first,_,_=List.hd bound in
+            check bool "task and child share original private evidence" true
+              (task.evidence=first.parent_input.evidence && task.ticket==first.parent_input.ticket);
+            (match bound with
+             | (_,one_sse,one_chat)::(_,two_sse,two_chat)::(_,three_sse,three_chat)::(_,four_sse,four_chat)::_ ->
+                 check bool "child/task side callbacks emit no root lifecycle/content and do not flush held prefix" true
+                   (one_sse=two_sse && two_sse=three_sse && three_sse=four_sse
+                    && one_chat=two_chat && two_chat=three_chat && three_chat=four_chat)
+             | _ -> fail "four consecutive known snapshots required");
+            check bool "child reported model never starts a root response" true
+              (List.for_all (function Agent_core.Types.MessageStart {model;_} -> model="claude-fixture" | _ -> true) !events);
+            let body=F.events projection |> List.filter_map (function
+              | Keeper_chat_events.Text_delta {text;_} | Agent_core_thinking_delta {delta=text;_} -> Some text
+              | _ -> None) |> String.concat "" in
+            check bool "child text/thinking never enters root transcript" false
+              (Astring.String.is_infix ~affix:"CHILD_" body);
+            check bool "configured secret remains redacted on independent root path" false
+              (Astring.String.is_infix ~affix:secret body);
+            check bool "root authored text survives independent redaction" true
+              (Astring.String.is_infix ~affix:(Keeper_secret_redaction.redact_text redaction secret) body)
+          end else check int "child-only subscription does not require root event observer" 0 (List.length !events))))
+    [false;true]
+;;
+
+let test_child_and_task_callbacks_share_failed_original_evidence () =
+  let module Binding = Keeper_claude_task_binding in
+  List.iter (fun task_first ->
+    let base_path=temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let children=ref [] and tasks=ref [] in
+      let child uuid parent=Emit (child_content_frame ~uuid ~parent ~text:"SCOPED_CHILD" ()) in
+      let old_task=Emit (task_binding_start ~uuid:"old-task" ~task_id:"old" ~call_id:"old-call") in
+      let old_child=child "old-child" "old-call" in
+      let order=if task_first then [old_task;old_child] else [old_child;old_task] in
+      with_fixture ([Emit (native_tool_call_block ~turn_id:"unattributed-parent" ~call_id:"old-call" ~tool_name:"Agent")] @ order @
+        [Emit (task_binding_native_result ~uuid:"old-return" ~call_id:"old-call");
+         Emit_with_input (response_text ~turn_id:"input-stamp" ~message_id:"stamp" "Stamp");
+         child "old-after-input" "old-call";
+         Emit (task_binding_frame ~uuid:"old-progress" ~task_id:"old" ~call_id:"old-call" "task_progress"
+           ["description",`String "metadata";"usage",`Assoc ["total_tokens",`Int 1;"tool_uses",`Int 1;"duration_ms",`Int 1]]);
+         Emit (native_tool_call_block ~turn_id:"command-parent" ~call_id:"new-call" ~tool_name:"Agent");
+         Emit (task_binding_native_result ~uuid:"new-return" ~call_id:"new-call");
+         child "new-child" "new-call";
+         Emit (task_binding_start ~uuid:"new-task" ~task_id:"new" ~call_id:"new-call");
+         Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+         Emit_with_input (result_text ~turn_id:"final" "Answer")]) (fun cli_path ->
+          let attempt=with_fixture_yolo ~base_path ~keeper_name:"claude-pre-dispatch" (fun () ->
+            run_direct_attempt ~base_path ~cli_path ~goal:"CHILD_FAILURE" ~tools:[]
+              ~required_native_posture:Runtime_native_tools.Native_full
+              ~on_child_content_observation:(fun observation -> children:=observation :: !children)
+              ~on_native_task_observation:(fun bound -> tasks:=bound :: !tasks) ()) in
+          (match attempt.result with Error error -> fail (Agent_core.Error.to_string error) | Ok _ -> ());
+          let rejected=List.filter_map (function
+            | Binding.Child_rejected {content;reason} -> Some (content,reason)
+            | Child_bound _ -> None) (List.rev !children) in
+          check int "both old snapshots retain text/thinking despite refusal" 4 (List.length rejected);
+          List.iter (fun ((content:Runtime_claude_code.complete_child_content),reason) ->
+            check bool "shared failed-first authority never adopts later input" true (reason=Binding.Unattributed_assistant);
+            check string "refused content retains literal parent" "old-call" content.parent_tool_use_id) rejected;
+          let bound=List.filter_map (function Binding.Child_bound bound -> Some bound | Child_rejected _ -> None) !children in
+          check int "only genuinely witnessed new parent binds child text/thinking" 2 (List.length bound);
+          check int "same shared binding admits only new task" 1 (List.length !tasks);
+          let task=List.hd !tasks in
+          List.iter (fun (child:Binding.bound_child) ->
+            check bool "new task/child preserve exact same canonical evidence" true
+              (child.parent_input.evidence=task.evidence && child.parent_input.ticket==task.ticket);
+            match child.parent_input.evidence with
+            | Binding.Command_inherited _ -> ()
+            | Explicit_group _ | Response_inherited _ -> fail "actual root stamp command evidence required") bound)))
+    [false;true]
+;;
+
+let test_task_binding_freezes_exact_envelope_and_dispatch () =
+  let generations = ref [] and dispatches = ref [] in
+  for invocation = 1 to 2 do
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let envelope = Yojson.Safe.to_string (`Assoc ["type",`String "assistant";
+        "parent_tool_use_id",`Null;"session_id",`String "__SESSION__";
+        "uuid",`String "two-agents";"message",`Assoc ["id",`String "task-response";"role",`String "assistant";
+          "model",`String "claude-fixture";"content",`List (List.map (fun id ->
+            `Assoc ["type",`String "tool_use";"id",`String id;"name",`String "Agent";
+              "input",`Assoc ["prompt",`String "Complete the delegated fixture task.";
+                "description",`String "provider task metadata";
+                "subagent_type",`String "general-purpose"]]) ["call-a";"call-b"])]]) in
+      let seen = ref [] and streams = ref [] and admitted = ref None in
+      let parent_frames = if invocation = 1 then [Emit_with_input envelope] else
+        [Emit_with_input (Yojson.Safe.to_string (`Assoc ["type",`String "stream_event";
+          "uuid",`String "partial-input-stamp";"session_id",`String "__SESSION__";
+          "parent_tool_use_id",`Null;"event",`Assoc ["type",`String "message_start";
+            "message",`Assoc ["id",`String "task-response";"model",`String "claude-fixture"]]]));
+         Emit envelope] in
+      with_fixture (parent_frames @ [
+        Emit (native_tool_result ~call_id:"call-a" ~content:"background launch");
+        Emit (task_binding_start ~uuid:"task-a" ~task_id:"a" ~call_id:"call-a");
+        Emit (task_binding_start ~uuid:"task-b" ~task_id:"b" ~call_id:"call-b");
+        Emit (task_binding_native_result ~uuid:"return-b" ~call_id:"call-b");
+        Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+        Emit (result_text ~turn_id:"final" "Answer")])
+        (fun cli_path ->
+          let result = with_fixture_yolo ~base_path ~keeper_name:"claude-fixture" (fun () ->
+            run_keeper_turn ~base_path ~cli_path ~goal:"TASK_BINDING" ~tools:[]
+              ~required_native_posture:Runtime_native_tools.Native_full
+              ~on_runtime_attempt:(fun attempt -> admitted := Some attempt)
+              ~on_event:(fun event -> streams := event :: !streams)
+              ~on_native_task_observation:(fun ~attempt bound ->
+                let response_stopped = List.exists
+                    (function Agent_core.Types.MessageStop -> true | _ -> false) !streams in
+                seen := (attempt,bound,response_stopped) :: !seen) ()) in
+          (match result with Error error -> fail (Agent_core.Error.to_string error)
+           | Ok result -> check string "authored final response survives task binding" "Answer" (keeper_response_text result));
+          let observed = List.rev !seen in
+          check (list bool) "both task callbacks precede root response stop"
+            [false;false] (List.map (fun (_,_,stopped) -> stopped) observed);
+          check (list (pair string int)) "two native ordinals share their exact envelope, not a latest call"
+            ["call-a",0;"call-b",1]
+            (List.map (fun (_, (b:Keeper_claude_task_binding.bound), _) ->
+              b.observation.owner.call_id,b.observation.owner.call_ordinal) observed);
+          let admitted = match !admitted with Some value -> value | None -> fail "driver did not report dispatch" in
+          List.iter (fun ((attempt:Runtime_native_tasks.attempt), (b:Keeper_claude_task_binding.bound), _) ->
+            check string "routing run captured by actual dispatch" admitted.routing_run_id attempt.routing_run_id;
+            check string "runtime captured by actual dispatch" admitted.runtime_id attempt.runtime_id;
+            check int "lane captured by actual dispatch" admitted.lane_attempt_index attempt.lane_attempt_index;
+            check string "original envelope survives native closure" "two-agents" b.observation.owner.call_envelope_uuid;
+            check string "ticket/native session match" b.ticket.session_id b.observation.owner.invocation.session_id;
+            (match b.evidence with
+             | Keeper_claude_task_binding.Explicit_group group when invocation = 1 ->
+                 check string "actual written input owns both calls" b.ticket.client_uuid group.primary
+             | Response_inherited group when invocation = 2 ->
+                 check string "exact partial response evidence owns the complete envelope" b.ticket.client_uuid group.primary
+             | Explicit_group _ | Response_inherited _ | Command_inherited _ ->
+                 fail "expected explicit then response-inherited envelope evidence")) observed;
+          match observed with
+          | (attempt,bound,_) :: _ ->
+              generations := bound.ticket.receiver_generation :: !generations;
+              dispatches := attempt.routing_run_id :: !dispatches
+          | [] -> fail "missing bound task callback"))
+  done;
+  (match !generations,!dispatches with
+   | [second;first],[second_run;first_run] ->
+       check bool "separate actual CLI invocations retain separate input generations" false (String.equal first second);
+       check bool "another dispatch cannot overwrite the first routed attempt" false (String.equal first_run second_run)
+   | _ -> fail "two actual driver calls required")
+;;
+
+module Task_journal = Keeper_native_task_journal
+
+let task_journal_ok (outcome : 'a Task_journal.outcome) =
+  match outcome.result, outcome.cleanup_failure with
+  | Ok value, [] -> value
+  | Error error, _ -> fail (Task_journal.error_to_string error)
+  | Ok _, failure :: _ -> fail (Task_journal.cleanup_failure_to_string failure)
+;;
+
+let task_journal_rows reader = (task_journal_ok (Task_journal.read reader)).records
+;;
+
+let task_journal_operation name =
+  match Keeper_chat_operation.Operation_id.of_string name with
+  | Ok id -> Task_journal.Operation id | Error detail -> fail detail
+;;
+
+(* The store tests cannot manufacture a privileged binding with JSON. Obtain
+   one through the real fake-CLI -> runtime -> adapter -> driver callback. *)
+let with_task_journal_bindings ?on_bound f =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let envelope = Yojson.Safe.to_string (`Assoc ["type",`String "assistant";
+      "parent_tool_use_id",`Null;"session_id",`String "__SESSION__";
+      "uuid",`String "task-parent-envelope";"message",`Assoc ["id",`String "task-parent-response";
+      "role",`String "assistant";"model",`String "claude-fixture";"content",`List [
+        `Assoc ["type",`String "tool_use";"id",`String "task-parent-call";
+          "name",`String "Agent";"input",`Assoc ["prompt",`String "Complete the delegated fixture task.";
+          "description",`String "background task persistence";"subagent_type",`String "general-purpose"]]]]]) in
+    let frame ~uuid subtype fields = task_binding_frame ~uuid ~task_id:"task/id"
+        ~call_id:"task-parent-call" subtype fields in
+    let observed = ref [] in
+    with_fixture [Emit_with_input envelope;
+      Emit (task_binding_native_result ~uuid:"task-parent-return" ~call_id:"task-parent-call");
+      Emit (frame ~uuid:"task-journal-start" "task_started"
+        ["task_type",`String "local_agent";"spawn_depth",`Int 1;
+         "description",`String "EXCLUDED_DESCRIPTION";"subagent_type",`String "general-purpose";
+         "is_backgrounded",`Bool true]);
+      Emit (frame ~uuid:"task-journal-progress" "task_progress"
+        ["description",`String "EXCLUDED_PROGRESS";"usage",`Assoc
+          ["total_tokens",`Int 12;"tool_uses",`Int 1;"duration_ms",`Int (-3)];
+         "last_tool_name",`String "Read"]);
+      Emit (frame ~uuid:"task-journal-end" "task_notification"
+        ["status",`String "completed";"summary",`String "EXCLUDED_SUMMARY";
+         "output_file",`String "/EXCLUDED_PATH"]);
+      Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Unchanged answer");
+      Emit (result_text ~turn_id:"final" "Unchanged answer")]
+      (fun cli_path ->
+        let result = with_fixture_yolo ~base_path ~keeper_name:"claude-fixture" (fun () ->
+          run_keeper_turn ~base_path ~cli_path ~goal:"TASK_JOURNAL"
+            ~required_native_posture:Runtime_native_tools.Native_full
+            ~on_native_task_observation:(fun ~attempt bound ->
+              observed := (attempt,bound) :: !observed;
+              Option.iter (fun observe -> observe ~base_path ~attempt bound) on_bound) ()) in
+        (match result with Error error -> fail (Agent_core.Error.to_string error)
+         | Ok result -> check string "root answer is unchanged" "Unchanged answer" (keeper_response_text result));
+        let observations = List.rev !observed in
+        check int "actual driver yielded all owned task edges" 3 (List.length observations);
+        f ~base_path observations))
+;;
+
+module Child_journal = Keeper_child_content_journal
+
+let child_journal_ok (outcome : 'a Child_journal.outcome) =
+  match outcome.result,outcome.cleanup_failure with
+  | Ok value,[] -> value
+  | Error error,_ -> fail (Child_journal.error_to_string error)
+  | Ok _,_ -> fail "unexpected child journal cleanup warning"
+;;
+
+(* This fixture enters the actual turn Driver, not only the direct adapter.
+   The provider emits complete child frames before/after the original Agent;
+   all assertions run outside callbacks, whose exceptions runtime may catch. *)
+let with_child_journal_observations ?on_observed f =
+  let base_path=temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let observed=ref [] and admitted=ref None in
+    let child=child_content_frame ~uuid:"same-child-envelope" ~parent:"child-parent"
+      ~text:"CHILD_SECRET_BODY" () in
+    with_fixture [Emit child;
+      Emit_with_input (native_tool_call_block ~turn_id:"child-parent-envelope"
+        ~call_id:"child-parent" ~tool_name:"Agent");
+      Emit (task_binding_native_result ~uuid:"child-parent-return" ~call_id:"child-parent");
+      Emit child;
+      Emit (child_content_frame ~diagnostic:true ~uuid:"diagnostic-child"
+        ~parent:"child-parent" ~text:"NOT_A_BODY" ());
+      Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Unchanged child sink answer");
+      Emit (result_text ~turn_id:"final" "Unchanged child sink answer")] (fun cli_path ->
+      let result=with_fixture_yolo ~base_path ~keeper_name:"claude-fixture" (fun () ->
+        run_keeper_turn ~base_path ~cli_path ~goal:"CHILD_JOURNAL" ~tools:[]
+          ~required_native_posture:Runtime_native_tools.Native_full
+          ~on_runtime_attempt:(fun attempt -> admitted:=Some attempt)
+          ~on_child_content_observation:(fun ~attempt observation ->
+            observed:=(attempt,observation)::!observed;
+            Option.iter (fun observe -> observe ~base_path ~attempt observation) on_observed) ()) in
+      (match result with Error error -> fail (Agent_core.Error.to_string error)
+       | Ok result -> check string "root reply unaffected by child persistence"
+           "Unchanged child sink answer" (keeper_response_text result));
+      let observations=List.rev !observed in
+      check int "actual driver captures two channels of unknown then known; no diagnostic" 4 (List.length observations);
+      let admitted=match !admitted with Some attempt -> attempt | None -> fail "missing actual dispatch" in
+      List.iter (fun ((attempt:Runtime_native_tasks.attempt),_) ->
+        check string "child captures actual routing attempt" admitted.routing_run_id attempt.routing_run_id;
+        check string "child captures actual runtime" admitted.runtime_id attempt.runtime_id;
+        check int "child captures actual lane" admitted.lane_attempt_index attempt.lane_attempt_index) observations;
+      f ~base_path observations))
+;;
+
+let test_child_journal_driver_replay_redaction_and_scope () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let secret="CHILD_SECRET_BODY" in
+    let token_file=Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let redact_text=Keeper_secret_redaction.redact_text
+      (Keeper_secret_redaction.snapshot ~base_path ~keeper_name) in
+    let source=task_journal_operation "child-operation" in
+    let sink=Child_journal.create ~base_path ~keeper_name ~source ~redact_text in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    let reader=Child_journal.reader_of_publication (List.hd publications) in
+    (match (Child_journal.read reader).result with
+     | Error Child_journal.Missing_store -> () | _ -> fail "missing read must remain distinct");
+    check bool "READONLY missing read does not create receiver file" false (Sys.file_exists (Child_journal.path reader));
+    let commits=List.map (fun publication -> child_journal_ok (Child_journal.append publication)) publications in
+    let snapshot=child_journal_ok (Child_journal.read reader) in
+    let rows=snapshot.records in
+    check (list int) "disk sequence includes every original ordinal/channel" [1;2;3;4]
+      (List.map (fun (r:Child_journal.record) -> r.seq) rows);
+    List.iter2 (fun publication receipt ->
+      match receipt,child_journal_ok (Child_journal.append publication) with
+      | Child_journal.Appended first,Child_journal.Replayed replay ->
+          check bool "same publication exact replay preserves sequence/time/payload" true (first=replay)
+      | _ -> fail "expected replay") publications commits;
+    (match rows with
+     | [one;two;three;four] ->
+         check bool "all channels of actual accepted envelope share observation identity" true
+           (one.observation.observation_id=two.observation.observation_id
+            && three.observation.observation_id=four.observation.observation_id);
+         check bool "same provider envelope replay is a distinct accepted snapshot" false
+           (one.observation.observation_id=three.observation.observation_id);
+         check bool "provider envelope correlation remains same" true
+           (one.observation.envelope_uuid=three.observation.envelope_uuid);
+         check bool "unknown is not upgraded by later parent" true
+           (one.observation.attribution=Keeper_child_content.Parent_input_refused Keeper_claude_task_binding.Unknown_parent);
+         (match three.observation.attribution with
+          | Keeper_child_content.Original_parent_input _ -> ()
+          | Parent_input_refused _ -> fail "known actual parent must retain evidence")
+     | _ -> fail "four durable observations required");
+    check (list int) "original redacted-thinking hole preserved" [1;2;1;2]
+      (List.map (fun (r:Child_journal.record) -> r.observation.ordinal) rows);
+    let bytes=In_channel.with_open_bin (Child_journal.path reader) In_channel.input_all in
+    check bool "secret body is redacted before disk" false (Astring.String.is_infix ~affix:secret bytes);
+    let after=Child_journal.next_cursor snapshot in
+    check int "validated unchanged suffix is empty" 0
+      (List.length (child_journal_ok (Child_journal.read ~after reader)).records);
+    let invocation=(List.hd rows).observation.origin.invocation in
+    let foreign=Result.get_ok (Child_journal.open_reader ~base_path ~keeper_name
+      ~receiver_generation:invocation.receiver_generation ~session_id:invocation.session_id
+      ~client_uuid:(invocation.client_uuid ^ "foreign")) in
+    (match (Child_journal.read foreign).result with
+     | Error Child_journal.Missing_store -> () | _ -> fail "foreign client cannot read this store");
+    check bool "foreign missing store is not created" false (Sys.file_exists (Child_journal.path foreign));
+    Fs_compat.mkdir_p (Filename.dirname (Child_journal.path foreign));
+    Out_channel.with_open_bin (Child_journal.path foreign) (fun out -> output_string out bytes);
+    (match (Child_journal.read foreign).result with
+     | Error (Child_journal.Corrupt _) -> () | _ -> fail "copied rows cannot establish foreign client scope");
+    let forged=Result.get_ok (Child_journal.cursor ~store_id:"foreign-incarnation" ~after_sequence:0) in
+    (match (Child_journal.read ~after:forged reader).result with
+     | Error Child_journal.Cursor_store_mismatch -> () | _ -> fail "foreign incarnation cannot look empty");
+    let attempt,observation=List.hd observations in
+    let other=Child_journal.create ~base_path ~keeper_name ~redact_text
+      ~source:(task_journal_operation "other-source") in
+    (match (Child_journal.observe other ~attempt observation).result with
+     | Error (Child_journal.Conflicting_observation _) -> () | _ -> fail "same composite key with changed source cannot replay");
+    check int "failure retained by exact collector" 1 (List.length (Child_journal.health other));
+    check int "collision adds no sequence" 4 (List.length (child_journal_ok (Child_journal.read reader)).records);
+    Unix.rename (Child_journal.path reader) (Child_journal.path reader ^ ".previous");
+    ignore (child_journal_ok (Child_journal.append (List.hd publications)));
+    (match (Child_journal.read ~after reader).result with
+     | Error Child_journal.Cursor_store_mismatch -> () | _ -> fail "replacement cannot inherit old incarnation cursor"))
+;;
+
+let test_child_journal_concurrent_exact_replay () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let collector=Child_journal.create ~base_path ~keeper_name:"claude-fixture"
+      ~source:(task_journal_operation "child-concurrent") ~redact_text:Fun.id in
+    let attempt,observation=List.hd observations in
+    let publication=Result.get_ok (Child_journal.prepare collector ~attempt observation) in
+    let workers=List.init 4 (fun _ -> Domain.spawn (fun () ->
+      Eio_main.run (fun _ -> Child_journal.append publication))) in
+    let outcomes=List.map Domain.join workers |> List.map (fun outcome ->
+      match outcome.Child_journal.result with
+      | Error (Child_journal.Store_unavailable _ | Child_journal.Commit_unconfirmed _) ->
+          (* Immediate SQLite busy refusal or unconfirmed commit is explicit, then
+             the test retries the same publication once all concurrent workers have joined. *)
+          child_journal_ok (Child_journal.append publication)
+      | Ok _ | Error _ -> child_journal_ok outcome) in
+    check int "concurrent received duplicate commits exactly once" 1
+      (List.length (List.filter (function Child_journal.Appended _ -> true | Replayed _ -> false) outcomes));
+    let reader=Child_journal.reader_of_publication publication in
+    check int "one disk sequence after concurrent replay" 1
+      (child_journal_ok (Child_journal.read reader)).validation.through_sequence)
+;;
+
+let test_child_journal_commit_uncertainty_and_cleanup () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let sink=Child_journal.create ~base_path ~keeper_name:"claude-fixture"
+      ~source:(task_journal_operation "child-outcomes") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    let first=List.hd publications in
+    let warning=Child_journal.For_testing.append_with_io ~commit:(fun db -> Sqlite3.exec db "COMMIT")
+      ~close:(fun db -> ignore (Sqlite3.db_close db);false) first in
+    (match warning.result,warning.cleanup_failure with
+     | Ok (Child_journal.Appended row),[_] -> check int "close failure preserves known commit" 1 row.seq
+     | _ -> fail "cleanup overwrote primary receipt");
+    let second=List.nth publications 1 in
+    let uncertain=Child_journal.For_testing.append_with_io
+      ~commit:(fun db -> ignore (Sqlite3.exec db "COMMIT");Sqlite3.Rc.IOERR)
+      ~close:Sqlite3.db_close second in
+    (match uncertain.result with
+     | Error (Child_journal.Commit_unconfirmed _) -> () | _ -> fail "uncertain commit cannot be guessed");
+    (match child_journal_ok (Child_journal.append second) with
+     | Child_journal.Replayed row -> check int "same sealed publication reconciles uncertain commit" 2 row.seq
+     | _ -> fail "uncertain retry must not remint or duplicate");
+    let reader=Child_journal.reader_of_publication first in
+    check int "one receipt per complete block, not all four envelope blocks" 2
+      (List.length (child_journal_ok (Child_journal.read reader)).records))
+;;
+
+let test_child_journal_full_audit_cannot_hide_prefix () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let sink=Child_journal.create ~base_path ~keeper_name:"claude-fixture"
+      ~source:(task_journal_operation "child-corruption") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    List.iter (fun p -> ignore (child_journal_ok (Child_journal.append p))) publications;
+    let reader=Child_journal.reader_of_publication (List.hd publications) in
+    let after=Child_journal.next_cursor (child_journal_ok (Child_journal.read reader)) in
+    let db=Sqlite3.db_open (Child_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt=Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger=Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing immutable trigger") in
+      let sql value=match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='{}' WHERE seq=1";sql trigger;sql "COMMIT");
+    (match (Child_journal.read ~after reader).result with
+     | Error (Child_journal.Corrupt {seq=1;_}) -> ()
+     | _ -> fail "unchanged cursor must still refuse corrupted prefix"))
+;;
+
+let test_child_journal_received_after_closed_root () =
+  with_child_journal_observations (fun ~base_path observations ->
+    Eio_main.run (fun _ ->
+      let keeper_name="claude-fixture" in
+      let turn_ref=Ids.Turn_ref.make ~trace_id:"child-closed-root" ~absolute_turn:1 in
+      let stream=Keeper_autonomous_stream.create ~base_path ~keeper_name ~turn_ref in
+      Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+      let root_path=Keeper_chat_event_log.turn_journal_path ~base_dir:base_path ~keeper_name ~turn_ref in
+      let before=In_channel.with_open_bin root_path In_channel.input_all in
+      List.iter (fun (attempt,observation) -> Keeper_autonomous_stream.on_tool_stream_observation stream
+        (Keeper_hooks_agent_core.Child_content_observed {attempt;observation})) observations;
+      check string "real sink commits received child after closure without root events"
+        before (In_channel.with_open_bin root_path In_channel.input_all);
+      check int "closed root does not reject durable child callback" 0
+        (List.length (Keeper_autonomous_stream.child_journal_health stream));
+      let attempt,observation=List.hd observations in
+      let collector=Child_journal.create ~base_path ~keeper_name ~redact_text:Fun.id
+        ~source:(Keeper_native_task_journal.Autonomous_turn turn_ref) in
+      let reader=Child_journal.reader_of_publication (Result.get_ok (Child_journal.prepare collector ~attempt observation)) in
+      let rows=(child_journal_ok (Child_journal.read reader)).records in
+      check int "all received unknown/known channels remain durable" 4 (List.length rows);
+      List.iter (fun (row:Child_journal.record) -> match row.observation.origin.source with
+        | Runtime_native_tasks.Autonomous_turn {turn_ref=actual} ->
+            check string "collector keeps captured autonomous origin" (Ids.Turn_ref.to_string turn_ref) actual
+        | Operation _ -> fail "wrong collector source") rows;
+      check bool "durable child does not reopen root" true
+        (Keeper_autonomous_stream.current ~base_path ~keeper_name=None)))
+;;
+
+let test_child_journal_failure_preserves_root () =
+  let failures=ref [] in
+  with_child_journal_observations
+    ~on_observed:(fun ~base_path ~attempt observation ->
+      let blocker=Filename.concat base_path "child-blocker" in
+      if not (Sys.file_exists blocker) then Out_channel.with_open_bin blocker (fun out -> output_string out "fixture");
+      let sink=Child_journal.create ~base_path:blocker ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "failed-child") ~redact_text:Fun.id in
+      failures:=Child_journal.observe sink ~attempt observation :: !failures)
+    (fun ~base_path:_ _ ->
+      check int "all driver child callbacks return typed failures without root mutation" 4 (List.length !failures);
+      List.iter (fun (outcome:Child_journal.commit Child_journal.outcome) -> match outcome.result with
+        | Error _ -> () | Ok _ -> fail "failed path cannot acknowledge body") !failures)
+;;
+
+module Child_read = Keeper_child_content_read
+
+let with_child_read_snapshot f =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let collector=Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-read") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,observation) ->
+      Result.get_ok (Child_journal.prepare collector ~attempt observation)) observations in
+    List.iter (fun publication -> ignore (child_journal_ok (Child_journal.append publication))) publications;
+    let reader=Child_journal.reader_of_publication (List.hd publications) in
+    let snapshot=child_journal_ok (Child_journal.read reader) in
+    let invocation=(List.hd snapshot.records).observation.origin.invocation in
+    let scope:Child_read.scope={keeper_name;receiver={receiver_generation=invocation.receiver_generation;
+      session_id=invocation.session_id;client_uuid=invocation.client_uuid}} in
+    f ~base_path ~reader ~snapshot ~scope ~publications)
+;;
+
+let test_child_read_closed_codec_and_exact_suffix () =
+  with_child_read_snapshot (fun ~base_path ~reader ~snapshot ~scope ~publications:_ ->
+    let module Read = Child_read in
+    let token=Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name:scope.keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token);
+    Out_channel.with_open_bin token (fun out -> output_string out "CHILD_SECRET_BODY");
+    let redact_text=Keeper_secret_redaction.redact_text
+      (Keeper_secret_redaction.snapshot ~base_path ~keeper_name:scope.keeper_name) in
+    let wire response=Read.to_json response |> Yojson.Safe.to_string |> Yojson.Safe.from_string in
+    let decoded json=match Read.of_json json with
+      | Ok response -> response | Error error -> fail (Read.decode_error_to_string error) in
+    let body=wire (Read.records_of_journal ~redact_text ~scope ~snapshot ~cleanup_failures:[]) in
+    let response=decoded body in
+    let request:Read.records_request={scope;after=None} in
+    let page=Result.get_ok (Read.records_of_response ~request response) in
+    check int "actual private journal projection roundtrip keeps all snapshots" 4 (List.length page.records);
+    check bool "collector failure coverage unavailable, never zero success history" true (page.coverage=Read.Unavailable);
+    List.iter (fun (row:Read.record) ->
+      check bool "redaction again on public read keeps configured body secret absent" false
+        (Astring.String.is_infix ~affix:"CHILD_SECRET_BODY" row.observation.text)) page.records;
+    check (list string) "opaque invocation unchanged across read redaction"
+      (List.map (fun (r:Child_journal.record) -> r.observation.origin.invocation.client_uuid) snapshot.records)
+      (List.map (fun (r:Read.record) -> r.observation.origin.invocation.client_uuid) page.records);
+    let set name value = function
+      | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+      | _ -> fail "fixture object required" in
+    let member=Yojson.Safe.Util.member in
+    let rows=body |> member "records" |> Yojson.Safe.Util.to_list in
+    let malformed json=match Read.of_json json with Error _ -> () | Ok _ -> fail "malformed Child read accepted" in
+    malformed (set "unexpected" (`Bool true) body);
+    malformed (match body with `Assoc fields -> `Assoc (("schema",`String "masc.child_content.records.v1")::fields) | _ -> body);
+    malformed (set "scope" `Null body);
+    malformed (set "persistence_failure_history" (`String "complete") body);
+    malformed (set "schema" (`String "masc.native_tasks.records.v1") body);
+    let replace_first row=set "records" (`List (row::List.tl rows)) body in
+    malformed (replace_first (set "seq" (`Intlit "9007199254740992") (List.hd rows)));
+    malformed (replace_first (set "recorded_at" (`Float Float.infinity) (List.hd rows)));
+    malformed (set "records" (`List (List.rev rows)) body);
+    malformed (set "records" (`List [List.nth rows 0;List.nth rows 2;List.nth rows 3]) body);
+    let first=List.hd rows and second=List.nth rows 1 in
+    let duplicate=set "observation" (member "observation" first) second in
+    malformed (set "records" (`List [first;duplicate;List.nth rows 2;List.nth rows 3]) body);
+    let observation=member "observation" first in
+    let origin=member "origin" observation in let invocation=member "invocation" origin in
+    let foreign=set "invocation" (set "client_uuid" (`String "foreign-client") invocation) origin in
+    malformed (replace_first (set "observation" (set "origin" foreign observation) first));
+    let refused request=match Read.records_of_response ~request response with
+      | Error _ -> () | Ok _ -> fail "foreign/invalid request accepted" in
+    refused {scope={scope with receiver={scope.receiver with client_uuid="foreign"}};after=None};
+    let foreign_scope:Read.scope={scope with receiver={scope.receiver with client_uuid="foreign"}} in
+    let mislabelled snapshot=match Read.records_of_journal ~redact_text ~scope:foreign_scope ~snapshot
+        ~cleanup_failures:[] with
+      | Read.Failure {error=Read.Invalid_scope;_} -> ()
+      | Records _ | Receivers _ | Hints _ | Failure _ -> fail "projection labelled a page with a foreign scope" in
+    mislabelled snapshot;
+    refused {scope;after=Some {store_id=page.next_cursor.store_id;after_sequence=(-1)}};
+    refused {scope;after=Some {store_id="";after_sequence=0}};
+    refused {scope;after=Some {store_id="other";after_sequence=0}};
+    refused {scope;after=Some {store_id=page.next_cursor.store_id;after_sequence=9007199254740992}};
+    let suffix=decoded (set "records" (`List (List.tl rows)) body) in
+    (match Read.records_of_response ~request suffix with Error Read.Sequence_mismatch -> () | _ -> fail "missing first row hidden");
+    let after_one:Read.records_request={scope;after=Some {store_id=page.next_cursor.store_id;after_sequence=1}} in
+    check int "complete requested suffix begins after exact cursor" 3
+      (List.length (Result.get_ok (Read.records_of_response ~request:after_one suffix)).records);
+    let after=Child_journal.next_cursor snapshot in
+    let caught=child_journal_ok (Child_journal.read ~after reader) in
+    check int "caught-up suffix has no row to carry scope" 0 (List.length caught.records);
+    mislabelled caught;
+    let caught=decoded (wire (Read.records_of_journal ~redact_text ~scope ~snapshot:caught ~cleanup_failures:[])) in
+    check int "actual caught-up empty suffix accepted" 0 (List.length
+      (Result.get_ok (Read.records_of_response ~request:{scope;after=Some page.next_cursor} caught)).records);
+    (match Read.records_of_response ~request caught with Error Read.Sequence_mismatch -> () | _ -> fail "empty cannot conceal requested history");
+    let discovered=child_journal_ok (Child_journal.discover ~base_path ~keeper_name:scope.keeper_name) in
+    let receivers=decoded (wire (Read.receivers_of_journal ~keeper_name:scope.keeper_name ~entries:discovered ~cleanup_failures:[])) in
+    let inventory=Result.get_ok (Read.receivers_of_response ~keeper_name:scope.keeper_name receivers) in
+    check int "full ticket3 receiver retained" 1 (List.length inventory.receivers);
+    let hinted=child_journal_ok (Child_journal.discover_hints ~base_path ~keeper_name:scope.keeper_name) in
+    let hints=decoded (wire (Read.hints_of_journal ~keeper_name:scope.keeper_name ~entries:hinted ~cleanup_failures:[])) in
+    let hints_page=Result.get_ok (Read.hints_of_response ~keeper_name:scope.keeper_name hints) in
+    check int "hint receiver is distinct from audited receiver" 1 (List.length hints_page.hints);
+    (match Read.receivers_of_response ~keeper_name:scope.keeper_name hints with Error Read.Unexpected_response -> () | _ -> fail "hint became audit");
+    let failed=decoded (wire (Read.failure Read.Store_missing)) in
+    (match failed with Read.Failure failure -> check bool "typed missing survives" true (failure.error=Read.Store_missing)
+     | Records _ | Receivers _ | Hints _ -> fail "missing became success");
+    (match Read.records_of_response ~request failed with Error Read.Unexpected_response -> () | _ -> fail "typed failure became empty"))
+;;
+
+let test_child_read_hints_do_not_audit_tampered_history () =
+  with_child_read_snapshot (fun ~base_path ~reader ~snapshot:_ ~scope ~publications ->
+    let before=child_journal_ok (Child_journal.read_hint reader) in
+    let db=Sqlite3.db_open (Child_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt=Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger=Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing trigger") in
+      let sql value=match Sqlite3.exec db value with Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='{}' WHERE seq=1";sql trigger;sql "COMMIT");
+    let after=child_journal_ok (Child_journal.read_hint reader) in
+    check bool "same metadata/tail hint does not certify historical integrity" true (before=after);
+    let hints=child_journal_ok (Child_journal.discover_hints ~base_path ~keeper_name:scope.keeper_name) in
+    (match hints with [entry] -> check bool "discovery hint remains explicitly unchecked success" true (Result.is_ok entry.state)
+     | _ -> fail "one hint required");
+    (match (Child_journal.read reader).result with Error (Child_journal.Corrupt {seq=1;_}) -> ()
+     | _ -> fail "full audit concealed same-tail corruption");
+    let entries=child_journal_ok (Child_journal.discover ~base_path ~keeper_name:scope.keeper_name) in
+    (match entries with [entry] -> (match entry.state with Error (Child_journal.Corrupt _) -> ()
+       | _ -> fail "audited discovery became hint") | _ -> fail "one audited entry required");
+    Unix.rename (Child_journal.path reader) (Child_journal.path reader ^ ".corrupt");
+    ignore (child_journal_ok (Child_journal.append (List.hd publications)));
+    let one=child_journal_ok (Child_journal.read_hint reader) in
+    ignore (child_journal_ok (Child_journal.append (List.nth publications 1)));
+    let two=child_journal_ok (Child_journal.read_hint reader) in
+    check (list int) "append changes unchecked disk tail" [1;2] [one.through_sequence;two.through_sequence];
+    List.iter (fun publication -> ignore (child_journal_ok (Child_journal.append publication)))
+      [List.nth publications 2;List.nth publications 3];
+    let replacement=child_journal_ok (Child_journal.read_hint reader) in
+    check int "replacement may have same tail" before.through_sequence replacement.through_sequence;
+    check bool "same-tail replacement has distinct actual store incarnation" false
+      (before.store_id=replacement.store_id))
+;;
+
+let test_child_read_discovery_bound_directory_authority () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let collector=Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-directories") ~redact_text:Fun.id in
+    let attempt,observation=List.hd observations in
+    let publication=Result.get_ok (Child_journal.prepare collector ~attempt observation) in
+    let reader=Child_journal.reader_of_publication publication in
+    let session_path=Filename.dirname (Child_journal.path reader) in
+    let generation_path=Filename.dirname session_path in
+    let keeper_path=Filename.dirname generation_path in
+    (match (Child_journal.read_hint reader).result with Error Child_journal.Missing_store -> ()
+     | _ -> fail "missing hint must refuse without creating store");
+    check bool "missing hint never creates leaf" false (Sys.file_exists (Child_journal.path reader));
+    let masc_root=Common.masc_dir_from_base_path ~base_path in
+    let mode=(Unix.stat masc_root).Unix.st_perm in
+    Fun.protect ~finally:(fun () -> Unix.chmod masc_root mode) (fun () ->
+      Unix.chmod masc_root 0o777;
+      (match (Child_journal.discover_hints ~base_path ~keeper_name).result with
+       | Error (Child_journal.Store_unavailable _) -> () | _ -> fail "unsafe ancestor cannot grant cold absence"));
+    check int "cold missing descendant is valid empty discovery" 0
+      (List.length (child_journal_ok (Child_journal.discover_hints ~base_path ~keeper_name)));
+    List.iter (fun directory ->
+      Fs_compat.mkdir_p directory;
+      let mode=(Unix.stat directory).Unix.st_perm in
+      Fun.protect ~finally:(fun () -> Unix.chmod directory mode) (fun () ->
+        Unix.chmod directory 0o777;
+        (match (Child_journal.discover_hints ~base_path ~keeper_name).result with
+         | Error (Child_journal.Store_unavailable _) -> () | _ -> fail "unsafe empty directory was authoritative")))
+      [keeper_path;generation_path;session_path];
+    let result=Child_journal.For_testing.discover_hints ~base_path ~keeper_name
+      ~before_read:(fun _ -> ()) ~after_read:(fun directory ->
+        if directory=generation_path then Unix.rmdir session_path) in
+    (match result.result with Error (Child_journal.Store_unavailable _) -> ()
+     | _ -> fail "enumerated session disappearance became cold empty");
+    ignore (child_journal_ok (Child_journal.append publication));
+    let removed=ref false in
+    let result=Child_journal.For_testing.discover_hints ~base_path ~keeper_name
+      ~before_read:(fun _ -> ()) ~after_read:(fun directory ->
+        if directory=session_path && not !removed then begin removed:=true;
+          Unix.rename (Child_journal.path reader) (Child_journal.path reader ^ ".gone") end) in
+    let entries=child_journal_ok result in
+    (match entries with [entry] -> (match entry.state with Error Child_journal.Missing_store -> ()
+       | _ -> fail "enumerated leaf disappearance became success") | _ -> fail "captured receiver identity lost"))
+;;
+
+let test_native_task_journal_commit_replay_and_scope () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let secret = "general-purpose" and keeper_name = "claude-fixture" in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let redact_text = Keeper_secret_redaction.redact_text
+        (Keeper_secret_redaction.snapshot ~base_path ~keeper_name) in
+    let source = task_journal_operation "execution-operation" in
+    let sink = Task_journal.create ~base_path ~keeper_name ~source ~redact_text in
+    let publications = List.map (fun (attempt,bound) ->
+      match Task_journal.prepare sink ~attempt bound with Ok p -> p
+      | Error e -> fail (Task_journal.error_to_string e)) observations in
+    let committed = List.map (fun publication -> task_journal_ok (Task_journal.append publication)) publications in
+    let reader = Task_journal.reader_of_publication (List.hd publications) in
+    let rows = task_journal_rows reader in
+    check (list int) "one durable contiguous receiver sequence" [1;2;3]
+      (List.map (fun (r:Task_journal.record) -> r.seq) rows);
+    List.iter2 (fun publication expected ->
+      match expected, task_journal_ok (Task_journal.append publication) with
+      | Task_journal.Appended old, Task_journal.Replayed replay ->
+          check bool "replay retains exact original receipt and recorded time" true (old=replay)
+      | _ -> fail "expected append then exact replay") publications committed;
+    List.iter (fun (r:Task_journal.record) ->
+      match r.observation.origin.source with
+      | Runtime_native_tasks.Operation {operation_id} ->
+          check string "canonical execution operation is retained" "execution-operation" operation_id
+      | Autonomous_turn _ -> fail "operation changed to autonomous source") rows;
+    (match List.map (fun (r:Task_journal.record) -> r.observation.event) rows with
+     | [Runtime_native_tasks.Task_registered {subagent_type=Some value;_};
+        Task_progress_reported {usage;_};Task_terminal_reported _] ->
+          check string "only supplied metadata leaf is redacted" (redact_text secret) value;
+          check int "signed provider duration survives journal" (-3) usage.duration_ms
+     | _ -> fail "wrong typed disk events");
+    let bytes = In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all in
+    List.iter (fun value -> check bool "private source strings never reach journal" false
+      (Astring.String.is_infix ~affix:value bytes))
+      [secret;"EXCLUDED_DESCRIPTION";"EXCLUDED_PROGRESS";"EXCLUDED_SUMMARY";"EXCLUDED_PATH"];
+    let attempt,bound = List.hd observations in
+    let foreign_source = Task_journal.create ~base_path ~keeper_name
+        ~source:(task_journal_operation "member-request-alias") ~redact_text in
+    (match (Task_journal.observe foreign_source ~attempt bound).result with
+     | Error (Task_journal.Conflicting_uuid "task-journal-start") -> ()
+     | _ -> fail "same UUID with different source was acknowledged");
+    check int "conflict is retained as task persistence health" 1
+      (List.length (Task_journal.health foreign_source));
+    check int "conflict cannot append a row" 3 (List.length (task_journal_rows reader));
+    let alias = Task_journal.create ~base_path:(Filename.concat base_path ".")
+        ~keeper_name ~source ~redact_text in
+    (match (Task_journal.observe alias ~attempt bound).result with
+     | Ok (Task_journal.Replayed _) -> () | _ -> fail "canonical root alias split the receiver journal");
+    let separate_root = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree separate_root) (fun () ->
+      let other = Task_journal.create ~base_path:separate_root ~keeper_name ~source ~redact_text in
+      (match task_journal_ok (Task_journal.observe other ~attempt bound) with
+       | Task_journal.Appended r -> check int "other canonical root has its own sequence" 1 r.seq
+       | Replayed _ -> fail "other workspace inherited a receipt"));
+    let other_keeper = Task_journal.create ~base_path ~keeper_name:"claude/fixture" ~source ~redact_text in
+    let other = match Task_journal.prepare other_keeper ~attempt bound with
+      | Ok p -> p | Error e -> fail (Task_journal.error_to_string e) in
+    let other_reader = Task_journal.reader_of_publication other in
+    check bool "slash is encoded, never a path segment" false
+      (String.equal (Task_journal.path reader) (Task_journal.path other_reader));
+    ignore (task_journal_ok (Task_journal.append other));
+    (* Copying a valid row from another authority cannot establish that scope. *)
+    Out_channel.with_open_bin (Task_journal.path other_reader) (fun out -> output_string out bytes);
+    (match (Task_journal.append other).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "foreign-scope copied journal was accepted"))
+;;
+
+let test_native_task_journal_atomicity_recovery_and_failure () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let sink = Task_journal.create ~base_path ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "operation") ~redact_text:Fun.id in
+    let publications = List.map (fun (attempt,bound) ->
+      Result.get_ok (Task_journal.prepare sink ~attempt bound)) observations in
+    let first = List.hd publications and second = List.nth publications 1 and third = List.nth publications 2 in
+    let reader = Task_journal.reader_of_publication first in
+    let workers = List.init 4 (fun _ -> Domain.spawn (fun () ->
+      Eio_main.run (fun _ -> Task_journal.append first))) in
+    let outcomes = List.map Domain.join workers |> List.map (fun outcome ->
+      match outcome.Task_journal.result with
+      | Error (Task_journal.Store_unavailable _ | Task_journal.Commit_unconfirmed _) ->
+          (* SQLITE_BUSY is an immediate explicit refusal; COMMIT failure is
+             unconfirmed. Reconcile after the concurrent workers have completed,
+             with the identical UUID. *)
+          task_journal_ok (Task_journal.append first)
+      | Ok _ | Error _ -> task_journal_ok outcome) in
+    check int "concurrent duplicate writers commit exactly once" 1
+      (List.length (List.filter (function Task_journal.Appended _ -> true | Replayed _ -> false) outcomes));
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let sql statement = match Sqlite3.exec db statement with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";
+      sql "UPDATE metadata SET next_sequence=99";
+      sql "ROLLBACK");
+    check int "rolled-back transaction changes no committed rows" 1
+      (List.length (task_journal_rows reader));
+    (match task_journal_ok (Task_journal.append second) with
+     | Task_journal.Appended r -> check int "rollback preserves next committed sequence" 2 r.seq
+     | Replayed _ -> fail "new event became replay");
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      match Sqlite3.exec db "UPDATE metadata SET next_sequence=99" with
+      | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc));
+    (match (Task_journal.append third).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "inconsistent sequence metadata was accepted");
+    let blocked = Filename.concat base_path "file-instead-of-directory" in
+    Out_channel.with_open_bin blocked (fun out -> output_string out "unchanged");
+    let unavailable = Task_journal.create ~base_path:blocked ~keeper_name:"claude-fixture"
+        ~source:(task_journal_operation "operation") ~redact_text:Fun.id in
+    let attempt,bound = List.hd observations in
+    (match (Task_journal.observe unavailable ~attempt bound).result with
+     | Error _ -> () | Ok _ -> fail "I/O failure produced a committed receipt");
+    check int "failed observation remains explicitly unhealthy" 1
+      (List.length (Task_journal.health unavailable));
+    check string "filesystem failure cannot overwrite unrelated file" "unchanged"
+      (In_channel.with_open_bin blocked In_channel.input_all))
+;;
+
+let test_child_http_reads_actual_driver_observations () =
+  with_child_journal_observations (fun ~base_path observations ->
+    let module Api = Server_dashboard_http_keeper_child_content in
+    let module Read = Keeper_child_content_read in
+    let keeper_name = "claude-fixture" in
+    let sink = Child_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "child-http") ~redact_text:Fun.id in
+    let publications = List.map (fun (attempt, observation) ->
+      Result.get_ok (Child_journal.prepare sink ~attempt observation)) observations in
+    List.iter (fun publication -> ignore (child_journal_ok (Child_journal.append publication))) publications;
+    let reader = Child_journal.reader_of_publication (List.hd publications) in
+    let original = child_journal_ok (Child_journal.read reader) in
+    let invocation = (List.hd original.records).observation.origin.invocation in
+    let receiver : Read.receiver = {receiver_generation=invocation.receiver_generation;
+      session_id=invocation.session_id;client_uuid=invocation.client_uuid} in
+    let scope : Read.scope = {keeper_name;receiver} in
+    (* The actual store predates this secret policy; HTTP must apply current
+       redaction without changing original correlations or typed attribution. *)
+    let secret = "CHILD_SECRET_BODY" in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let state = Mcp_server.For_testing.create_state ~base_path in
+    let prefix = "/api/v1/keepers/" ^ keeper_name ^ "/child-content/" in
+    let receiver_query = ["receiver_generation",receiver.receiver_generation;
+      "session_id",receiver.session_id;"client_uuid",receiver.client_uuid] in
+    let get endpoint query =
+      let target = Uri.to_string (Uri.with_query' (Uri.of_string (prefix ^ endpoint)) query) in
+      let request = Httpun.Request.create `GET target in
+      let route = match Api.route (Uri.path (Uri.of_string target)) with
+        | Some route -> route | None -> fail "Child read route not recognized" in
+      let status, body = Api.response state request route in
+      Httpun.Status.to_code status, body in
+    let decode body = require_ok Read.decode_error_to_string
+      (Read.of_json (Yojson.Safe.from_string (Yojson.Safe.to_string body))) in
+    let status, body = get "records" receiver_query in
+    check int "actual Child store HTTP read" 200 status;
+    check bool "newly learned secret is redacted on HTTP read" false
+      (Astring.String.is_infix ~affix:secret (Yojson.Safe.to_string body));
+    let page = require_ok Read.decode_error_to_string
+      (Read.records_of_response ~request:{scope;after=None} (decode body)) in
+    check (list int) "actual four captured channel snapshots survive HTTP" [1;2;3;4]
+      (List.map (fun (row:Read.record) -> row.seq) page.records);
+    List.iter2 (fun (stored:Child_journal.record) (row:Read.record) ->
+      check bool "HTTP keeps exact complete-frame correlations and refusal" true
+        (stored.observation.origin=row.observation.origin
+         && stored.observation.observation_id=row.observation.observation_id
+         && stored.observation.envelope_uuid=row.observation.envelope_uuid
+         && stored.observation.ordinal=row.observation.ordinal
+         && stored.observation.channel=row.observation.channel
+         && stored.observation.message_id=row.observation.message_id
+         && stored.observation.attribution=row.observation.attribution)) original.records page.records;
+    let after = page.next_cursor in
+    let cursor_query = receiver_query @ ["store_id",after.store_id;
+      "after_sequence",string_of_int after.after_sequence] in
+    let status, suffix = get "records" cursor_query in
+    check int "actual caught-up Child suffix" 200 status;
+    let suffix = require_ok Read.decode_error_to_string
+      (Read.records_of_response ~request:{scope;after=Some after} (decode suffix)) in
+    check int "caught-up suffix is empty only with matching receipt" 0 (List.length suffix.records);
+    let status, foreign = get "records" (receiver_query @
+      ["store_id","foreign-incarnation";"after_sequence","0"]) in
+    check int "foreign Child incarnation refuses" 409 status;
+    (match decode foreign with Read.Failure {error=Read.Cursor_store_mismatch;_} -> ()
+     | _ -> fail "foreign cursor lost typed refusal");
+    let foreign_query = List.map (fun (key,value) ->
+      key,(if key="client_uuid" then value ^ "+&/%foreign" else value)) receiver_query in
+    let status, foreign = get "records" foreign_query in
+    check int "opaque different client UUID cannot select original store" 404 status;
+    (match decode foreign with Read.Failure {error=Read.Store_missing;_} -> ()
+     | _ -> fail "foreign invocation lost missing-store refusal");
+    let status, hints = get "hints" [] in
+    check int "Child HTTP unchecked hints" 200 status;
+    let decoded_hints = decode hints in
+    let hints = require_ok Read.decode_error_to_string
+      (Read.hints_of_response ~keeper_name decoded_hints) in
+    (match hints.hints with
+     | [{receiver=held;hint=Read.Unchecked cursor}] ->
+         check bool "actual hint retains full invocation and tail" true
+           (held=receiver && cursor=page.next_cursor)
+     | _ -> fail "actual store hint missing or falsely audited");
+    check bool "hint cannot become audited discovery" true
+      (Read.receivers_of_response ~keeper_name decoded_hints=Error Read.Unexpected_response);
+    let status, receivers = get "receivers" [] in
+    check int "Child HTTP audited discovery" 200 status;
+    let receivers = require_ok Read.decode_error_to_string
+      (Read.receivers_of_response ~keeper_name (decode receivers)) in
+    (match receivers.receivers with
+     | [{receiver=held;storage=Read.Audited cursor}] ->
+         check bool "audited discovery retains same actual ticket and tail" true
+           (held=receiver && cursor=page.next_cursor)
+     | _ -> fail "actual Child audited discovery missing");
+    check bool "Child read does not invent persistence failure history" true
+      (page.coverage=Read.Unavailable && hints.coverage=Read.Unavailable
+       && receivers.coverage=Read.Unavailable))
+;;
+
+let test_native_task_http_reads_actual_bound_observations () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let module Api = Server_dashboard_http_keeper_native_tasks in
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "http-observation") ~redact_text:Fun.id in
+    List.iter (fun (attempt,bound) ->
+      ignore (task_journal_ok (Task_journal.observe sink ~attempt bound))) observations;
+    let attempt,(bound : Keeper_claude_task_binding.bound) = List.hd observations in
+    (* The secret is learned after persistence: reads must use current policy. *)
+    let secret = "general-purpose" in
+    let token_file = Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name in
+    Fs_compat.mkdir_p (Filename.dirname token_file);
+    Out_channel.with_open_bin token_file (fun out -> output_string out secret);
+    let state = Mcp_server.For_testing.create_state ~base_path in
+    let prefix = "/api/v1/keepers/" ^ keeper_name ^ "/native-tasks/" in
+    let query = "?receiver_generation=" ^ Uri.pct_encode bound.ticket.receiver_generation
+      ^ "&session_id=" ^ Uri.pct_encode bound.ticket.session_id in
+    let get suffix =
+      let target = prefix ^ suffix in
+      let request = Httpun.Request.create `GET target in
+      let route = match Api.route (Uri.path (Uri.of_string target)) with
+        | Some route -> route | None -> fail "native task route not recognized" in
+      let status, body = Api.response state request route in
+      Httpun.Status.to_code status, body in
+    let member = Yojson.Safe.Util.member in
+    let status, body = get ("records" ^ query) in
+    check int "production handler reads real bound journal" 200 status;
+    check bool "read applies current redaction to previously stored metadata" false
+      (Astring.String.is_infix ~affix:secret (Yojson.Safe.to_string body));
+    let rows = body |> member "records" |> Yojson.Safe.Util.to_list in
+    check (list int) "actual committed sequence returned" [1;2;3]
+      (List.map (fun row -> row |> member "seq" |> Yojson.Safe.Util.to_int) rows);
+    check string "read does not certify provider completeness" "unknown"
+      (body |> member "provider_completeness" |> Yojson.Safe.Util.to_string);
+    check string "absent terminal is never inferred complete" "unknown"
+      (body |> member "terminal_without_observation" |> Yojson.Safe.Util.to_string);
+    let module Read = Keeper_native_task_read in
+    let wire_decode body =
+      body |> Yojson.Safe.to_string |> Yojson.Safe.from_string |> Read.of_json
+      |> Result.get_ok in
+    let scope : Read.scope = {keeper_name;receiver={
+      receiver_generation=bound.ticket.receiver_generation;session_id=bound.ticket.session_id}} in
+    let request : Read.records_request = {scope;after=None} in
+    let decoded = wire_decode body in
+    let page = match Read.records_of_response ~request decoded with
+      | Ok page -> page | Error e -> fail (Read.decode_error_to_string e) in
+    check (list int) "actual HTTP JSON to shared closed read view retains commit order" [1;2;3]
+      (List.map (fun (row:Read.record) -> row.seq) page.records);
+    (match List.map (fun (row:Read.record) -> row.observation.event) page.records with
+     | [Runtime_native_tasks.Task_registered _;
+        Task_progress_reported {usage;_};Task_terminal_reported _] ->
+         check int "public page retains signed provider duration" (-3) usage.duration_ms
+     | _ -> fail "closed public read changed observation kinds");
+    let set name value = function
+      | `Assoc fields -> `Assoc ((name,value)::List.remove_assoc name fields)
+      | _ -> fail "expected actual HTTP JSON object" in
+    let malformed value = match Read.of_json value with
+      | Error _ -> () | Ok _ -> fail "malformed actual record page was accepted" in
+    let original_rows = rows in
+    malformed (set "records" (`List (List.rev original_rows)) body);
+    malformed (set "records" (`List [List.hd original_rows;List.nth original_rows 2]) body);
+    let replace_first row = set "records" (`List (row::List.tl original_rows)) body in
+    malformed (replace_first (set "seq" (`Int 0) (List.hd original_rows)));
+    malformed (replace_first (set "seq" (`Intlit "9007199254740992") (List.hd original_rows)));
+    (match Read.of_json (replace_first (set "recorded_at" (`Float Float.infinity) (List.hd original_rows))) with
+     | Error (Read.Invalid_number _) -> () | _ -> fail "nonfinite timestamp was accepted");
+    let first_uuid=List.hd original_rows |> member "observation" |> member "uuid" in
+    let second=List.nth original_rows 1 in
+    let duplicate=set "observation" (set "uuid" first_uuid (member "observation" second)) second in
+    (match Read.of_json (set "records" (`List [List.hd original_rows;duplicate;List.nth original_rows 2]) body) with
+     | Error Read.Duplicate_event_uuid -> () | _ -> fail "duplicate event UUID with valid sequence was accepted");
+    let foreign_row = List.hd original_rows in
+    let foreign_observation=foreign_row |> member "observation" in
+    let foreign_origin=foreign_observation |> member "origin" in
+    (match Read.of_json (replace_first (set "observation"
+      (set "origin" (set "keeper_name" (`String "foreign") foreign_origin) foreign_observation) foreign_row)) with
+     | Error Read.Scope_mismatch -> () | _ -> fail "foreign row scope with valid sequence was accepted");
+    malformed (set "validation" (`Assoc ["kind",`String "full_committed_history";"through_sequence",`Int 4]) body);
+    malformed (set "next_cursor" (`Assoc ["store_id",`String "store";"after_sequence",`Int (-1)]) body);
+    let refusal request = match Read.records_of_response ~request decoded with
+      | Error _ -> () | Ok _ -> fail "foreign/malformed public request cursor accepted" in
+    refusal {request with scope={scope with keeper_name="foreign"}};
+    refusal {request with scope={scope with receiver={scope.receiver with session_id="foreign"}}};
+    refusal {scope;after=Some {page.next_cursor with store_id="foreign"}};
+    refusal {scope;after=Some {page.next_cursor with after_sequence=(-1)}};
+    refusal {scope;after=Some {page.next_cursor with after_sequence=9007199254740992}};
+    refusal {scope;after=Some {page.next_cursor with store_id=" "}};
+    (* A suffix is structurally legal, but only the matching request may accept
+       its first sequence. This prevents silent cursor skipping/reset. *)
+    let suffix_json = set "records" (`List (List.tl original_rows)) body in
+    let suffix = wire_decode suffix_json in
+    (match Read.records_of_response ~request suffix with
+     | Error Read.Sequence_mismatch -> ()
+     | _ -> fail "structural suffix was accepted for a Beginning request");
+    let after_one : Read.records_request =
+      {scope;after=Some {page.next_cursor with after_sequence=1}} in
+    (match Read.records_of_response ~request:after_one suffix with
+     | Ok suffix -> check int "correct request accepts complete two-row suffix" 2 (List.length suffix.records)
+     | Error e -> fail (Read.decode_error_to_string e));
+    let cursor = body |> member "next_cursor" in
+    let cursor_query = "&store_id=" ^ Uri.pct_encode
+      (cursor |> member "store_id" |> Yojson.Safe.Util.to_string)
+      ^ "&after_sequence=3" in
+    let status, replay = get ("records" ^ query ^ cursor_query) in
+    check int "exact cursor accepted" 200 status;
+    check int "no repeated committed rows" 0
+      (List.length (replay |> member "records" |> Yojson.Safe.Util.to_list));
+    let caught_up = wire_decode replay in
+    (match Read.records_of_response ~request:{scope;after=Some page.next_cursor} caught_up with
+     | Ok page -> check int "actual caught-up HTTP suffix remains existing empty success" 0 (List.length page.records)
+     | Error e -> fail (Read.decode_error_to_string e));
+    (match Read.records_of_response ~request caught_up with
+     | Error Read.Sequence_mismatch -> () | _ -> fail "empty suffix reset a Beginning cursor");
+    let status,foreign = get ("records" ^ query ^ "&store_id=foreign&after_sequence=3") in
+    check int "foreign store cursor refused" 409 status;
+    (match wire_decode foreign with
+     | Read.Failure {error=Read.Cursor_store_mismatch;health=Some _} -> ()
+     | _ -> fail "HTTP cursor refusal lost its typed service error");
+    let status, discovery = get "receivers" in
+    check int "production discovery" 200 status;
+    check int "actual receiver discoverable" 1
+      (List.length (discovery |> member "receivers" |> Yojson.Safe.Util.to_list));
+    (match Read.receivers_of_response ~keeper_name (wire_decode discovery) with
+     | Ok {receivers=[{receiver;storage=Read.Audited cursor}];_} ->
+         check bool "actual HTTP discovery names the same cursor incarnation and receiver" true
+           (receiver=scope.receiver && cursor=page.next_cursor)
+     | Ok _ -> fail "actual receiver did not remain audited"
+     | Error e -> fail (Read.decode_error_to_string e));
+    let conflict = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "other-source") ~redact_text:Fun.id in
+    (match (Task_journal.observe conflict ~attempt bound).result with
+     | Error (Task_journal.Conflicting_uuid _) -> ()
+     | _ -> fail "fixture failed to produce real persistence conflict");
+    let _, discovery = get "receivers" in
+    let health = discovery |> member "observed_persistence_health" in
+    check string "health explicitly process scoped" "issues_observed_in_this_process_only"
+      (health |> member "coverage" |> Yojson.Safe.Util.to_string);
+    check bool "actual failed observation exposed" true
+      (List.exists (fun issue -> issue |> member "error" |> member "error" = `String "conflicting_uuid")
+        (health |> member "issues" |> Yojson.Safe.Util.to_list));
+    let reader = Task_journal.reader_of_publication
+      (Result.get_ok (Task_journal.prepare sink ~attempt bound)) in
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt = Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger = Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing immutable trigger") in
+      let sql value = match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE"; sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='{}' WHERE seq=1";
+      sql trigger; sql "COMMIT");
+    let status,_ = get ("records" ^ query ^ cursor_query) in
+    check int "cursor cannot hide corrupt historical row" 503 status)
+;;
+
+let test_native_task_journal_callback_failure_preserves_root_answer () =
+  let outcomes = ref [] in
+  with_task_journal_bindings
+    ~on_bound:(fun ~base_path ~attempt bound ->
+      let blocker = Filename.concat base_path "task-store-blocker" in
+      Out_channel.with_open_bin blocker (fun out -> output_string out "fixture");
+      let sink = Task_journal.create ~base_path:blocker ~keeper_name:"claude-fixture"
+          ~source:(task_journal_operation "callback-operation") ~redact_text:Fun.id in
+      outcomes := Task_journal.observe sink ~attempt bound :: !outcomes)
+    (fun ~base_path:_ _ ->
+      check int "all actual driver callbacks returned typed persistence failures" 3 (List.length !outcomes);
+      List.iter (fun (outcome:Task_journal.commit Task_journal.outcome) ->
+        match outcome.result with Error _ -> ()
+        | Ok _ -> fail "blocked task store reported a receipt") !outcomes)
+;;
+
+let test_native_task_journal_autonomous_closed_root () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    Eio_main.run (fun _ ->
+      let turn_ref = Ids.Turn_ref.make ~trace_id:"task-journal-autonomous" ~absolute_turn:1 in
+      let stream = Keeper_autonomous_stream.create ~base_path ~keeper_name:"claude-fixture" ~turn_ref in
+      Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+      let root_path = Keeper_chat_event_log.turn_journal_path ~base_dir:base_path
+          ~keeper_name:"claude-fixture" ~turn_ref in
+      let root_before = In_channel.with_open_bin root_path In_channel.input_all in
+      List.iter (fun (attempt,bound) ->
+        Keeper_autonomous_stream.on_tool_stream_observation stream
+          (Keeper_hooks_agent_core.Native_task_observed {attempt;bound})) observations;
+      check string "late tasks append no root events or fabricated lifecycle"
+        root_before (In_channel.with_open_bin root_path In_channel.input_all);
+      check int "task writes remain healthy after root journal closure" 0
+        (List.length (Keeper_autonomous_stream.task_journal_health stream));
+      let _,(bound:Keeper_claude_task_binding.bound) = List.hd observations in
+      let reader = Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name:"claude-fixture"
+        ~receiver_generation:bound.ticket.receiver_generation ~session_id:bound.ticket.session_id) in
+      let rows = task_journal_rows reader in
+      check int "all late bound observations persisted without reopening root" 3 (List.length rows);
+      List.iter (fun (r:Task_journal.record) -> match r.observation.origin.source with
+        | Runtime_native_tasks.Autonomous_turn {turn_ref=actual} ->
+            check string "actual autonomous reference retained" (Ids.Turn_ref.to_string turn_ref) actual
+        | Operation _ -> fail "invented operation for autonomous task") rows;
+      check bool "task writes never restore the closed root current identity" true
+        (Keeper_autonomous_stream.current ~base_path ~keeper_name:"claude-fixture" = None)))
+;;
+
+let test_native_task_journal_wait_does_not_hold_root_stream () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    Eio_main.run (fun env ->
+      Eio.Switch.run (fun sw ->
+        let keeper_name = "claude-fixture" in
+        let turn_ref = Ids.Turn_ref.make ~trace_id:"task-journal-lock" ~absolute_turn:1 in
+        let stream = Keeper_autonomous_stream.create ~base_path ~keeper_name ~turn_ref in
+        let attempt, (bound : Keeper_claude_task_binding.bound) = List.hd observations in
+        let reader = Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name
+          ~receiver_generation:bound.ticket.receiver_generation ~session_id:bound.ticket.session_id) in
+        let entered, signal_entered = Eio.Promise.create () in
+        let release, signal_release = Eio.Promise.create () in
+        let callback_entered, signal_callback = Eio.Promise.create () in
+        let task_done, signal_done = Eio.Promise.create () in
+        let root_done, signal_root = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          match Keeper_fs_durable_directory.ensure ~ownership_root:base_path
+            ~before_prepare:(fun () ->
+              Eio.Promise.resolve signal_entered ();
+              Eio.Promise.await release)
+            ~before_directory_fsync:(fun _ -> ())
+            (Filename.dirname (Task_journal.path reader)) with
+          | Ok _ -> ()
+          | Error _ -> fail "fixture directory preparation failed");
+        Eio.Promise.await entered;
+        Fun.protect ~finally:(fun () -> Eio.Promise.resolve signal_release ()) (fun () ->
+          Eio.Fiber.fork ~sw (fun () ->
+            (* No yielding operation separates this signal from entry into the
+               real callback. Its first filesystem wait retains the old root
+               mutex on the regression path. *)
+            Eio.Promise.resolve signal_callback ();
+            Keeper_autonomous_stream.on_tool_stream_observation stream
+              (Keeper_hooks_agent_core.Native_task_observed {attempt;bound});
+            Eio.Promise.resolve signal_done ());
+          Eio.Promise.await callback_entered;
+          Eio.Fiber.fork ~sw (fun () ->
+            Keeper_autonomous_stream.finish stream Keeper_autonomous_stream.Cancelled;
+            Eio.Promise.resolve signal_root ());
+          (* Timeout only the waiter: finish itself masks cancellation. The
+             finally releases task preparation before the switch joins either
+             protected callback, including on the old implementation. *)
+          Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 5. (fun () ->
+            Eio.Promise.await root_done);
+          check bool "root closes while task directory preparation is held" true
+            (Keeper_autonomous_stream.current ~base_path ~keeper_name = None);
+          check bool "blocked task has not committed a receiver file" false
+            (Sys.file_exists (Task_journal.path reader)));
+        Eio.Promise.await task_done;
+        let rows = task_journal_rows reader in
+        check (list string) "released callback persists its original task UUID"
+          [bound.observation.uuid]
+          (List.map (fun (row : Task_journal.record) -> row.observation.uuid) rows);
+        check bool "task completion cannot reopen the closed root" true
+          (Keeper_autonomous_stream.current ~base_path ~keeper_name = None))))
+;;
+
+let test_native_task_sqlite_validation_scope_and_cursor () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let sink () = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "sqlite-validation") ~redact_text:Fun.id in
+    let collector = sink () in
+    let publications = List.map (fun (attempt,bound) ->
+      Result.get_ok (Task_journal.prepare collector ~attempt bound)) observations in
+    let first = List.hd publications and second = List.nth publications 1
+    and third = List.nth publications 2 in
+    let reader = Task_journal.reader_of_publication first in
+    (match (Task_journal.read reader).result with
+     | Error Task_journal.Missing_store -> () | _ -> fail "missing read must not create a database");
+    check bool "read leaves missing database absent" false (Sys.file_exists (Task_journal.path reader));
+    ignore (task_journal_ok (Task_journal.append first));
+    let snapshot = task_journal_ok (Task_journal.read reader) in
+    let cursor = Task_journal.next_cursor snapshot in
+    ignore (task_journal_ok (Task_journal.append second));
+    let suffix = task_journal_ok (Task_journal.read ~after:cursor reader) in
+    check (list int) "incarnation cursor returns only later committed rows" [2]
+      (List.map (fun (r:Task_journal.record) -> r.seq) suffix.records);
+    check int "full audit still names entire snapshot boundary" 2 suffix.validation.through_sequence;
+    let foreign = Result.get_ok (Task_journal.cursor ~store_id:"another-store" ~after_sequence:0) in
+    (match (Task_journal.read ~after:foreign reader).result with
+     | Error Task_journal.Cursor_store_mismatch -> () | _ -> fail "foreign cursor accepted");
+    let ahead = Result.get_ok (Task_journal.cursor ~store_id:cursor.store_id ~after_sequence:3) in
+    (match (Task_journal.read ~after:ahead reader).result with
+     | Error Task_journal.Cursor_ahead -> () | _ -> fail "future cursor accepted");
+    (* Deliberate bypass of the application immutability trigger. Restore its
+       exact schema so this isolates changed OLD payload detection timing. *)
+    let db = Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt = Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger = Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with
+        | Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0 | _ -> fail "missing immutable trigger") in
+      let sql value = match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE"; sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='!' || substr(payload,2) WHERE seq=1";
+      sql trigger; sql "COMMIT");
+    (match task_journal_ok (Task_journal.append third) with
+     | Task_journal.Appended row -> check int "warm append does not audit unrelated historical payload" 3 row.seq
+     | Replayed _ -> fail "third event was not new");
+    (match (Task_journal.read reader).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "full read failed to detect old corruption");
+    (match (Task_journal.append first).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "addressed UUID corruption was acknowledged");
+    let attempt,bound = List.nth observations 2 in
+    (match (Task_journal.observe (sink ()) ~attempt bound).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "fresh writer skipped complete startup audit");
+    let inventory = task_journal_ok (Task_journal.discover ~base_path ~keeper_name) in
+    check int "corrupt canonical receiver remains discoverable" 1 (List.length inventory);
+    match (List.hd inventory).state with
+    | Error (Task_journal.Corrupt _) -> () | _ -> fail "discovery advertised corrupt history as validated")
+;;
+
+let test_native_task_change_hints_keep_full_audit_separate () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name="claude-fixture" in
+    let collector=Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "change-hints") ~redact_text:Fun.id in
+    let publications=List.map (fun (attempt,bound) ->
+      Result.get_ok (Task_journal.prepare collector ~attempt bound)) observations in
+    let first=List.hd publications and second=List.nth publications 1 in
+    let reader=Task_journal.reader_of_publication first in
+    (match (Task_journal.read_hint reader).result with
+     | Error Task_journal.Missing_store -> () | _ -> fail "missing hint created a store");
+    check bool "hint leaves missing database absent" false (Sys.file_exists (Task_journal.path reader));
+    check int "cold hints return explicit empty inventory" 0
+      (List.length (task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name)));
+    check bool "cold discovery creates no receiver directory" false
+      (Sys.file_exists (Filename.dirname (Task_journal.path reader)));
+    ignore (task_journal_ok (Task_journal.append first));
+    let initial=task_journal_ok (Task_journal.read_hint reader) in
+    check int "hint sees committed first sequence" 1 initial.through_sequence;
+    ignore (task_journal_ok (Task_journal.append second));
+    let before=task_journal_ok (Task_journal.read_hint reader) in
+    check bool "append changes tail without replacing incarnation" true
+      (before.store_id=initial.store_id && before.through_sequence=2);
+    (* Bypass row immutability deliberately, then restore the exact trigger.
+       Metadata/tail/schema are unchanged: no hint can certify this payload. *)
+    let db=Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      let stmt=Sqlite3.prepare db "SELECT sql FROM sqlite_master WHERE name='immutable_observations'" in
+      let trigger=Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+        match Sqlite3.step stmt with Sqlite3.Rc.ROW -> Sqlite3.column_text stmt 0
+        | _ -> fail "missing immutable trigger") in
+      let sql value=match Sqlite3.exec db value with
+        | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc) in
+      sql "BEGIN IMMEDIATE";sql "DROP TRIGGER immutable_observations";
+      sql "UPDATE observations SET payload='!' || substr(payload,2) WHERE seq=1";
+      sql trigger;sql "COMMIT");
+    let after=task_journal_ok (Task_journal.read_hint reader) in
+    check bool "same-tail semantic tamper leaves only unchecked hint equal" true (before=after);
+    let hints=task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name) in
+    (match hints with
+     | [{Task_journal.state=Ok hint;_}] -> check bool "hint discovery preserves unchecked result" true (hint=after)
+     | _ -> fail "hint discovery performed historical audit or lost receiver");
+    (match (Task_journal.read reader).result with
+     | Error (Task_journal.Corrupt {line=1;_}) -> () | _ -> fail "full read lost historical corruption refusal");
+    let audited=task_journal_ok (Task_journal.discover ~base_path ~keeper_name) in
+    (match audited with
+     | [{Task_journal.state=Error (Task_journal.Corrupt {line=1;_});_}] -> ()
+     | _ -> fail "audited discovery adopted unchecked hint semantics");
+    let foreign=Result.get_ok (Task_journal.open_reader ~base_path ~keeper_name
+      ~receiver_generation:"another generation" ~session_id:"another session") in
+    Fs_compat.mkdir_p (Filename.dirname (Task_journal.path foreign));
+    let bytes=In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all in
+    Out_channel.with_open_bin (Task_journal.path foreign) (fun out -> output_string out bytes);
+    (match (Task_journal.read_hint foreign).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "hint accepted copied foreign-scope database");
+    Sys.remove (Task_journal.path foreign);
+    Sys.remove (Task_journal.path reader);
+    ignore (task_journal_ok (Task_journal.append first));
+    let replacement=task_journal_ok (Task_journal.read_hint reader) in
+    check bool "replacement store has distinct unchecked incarnation" true
+      (replacement.store_id<>before.store_id && replacement.through_sequence=1);
+    let db=Sqlite3.db_open (Task_journal.path reader) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+      match Sqlite3.exec db "UPDATE metadata SET next_sequence=3" with
+      | Sqlite3.Rc.OK -> () | rc -> fail (Sqlite3.Rc.to_string rc));
+    (match (Task_journal.read_hint reader).result with
+     | Error (Task_journal.Corrupt _) -> () | _ -> fail "hint ignored tail/metadata disagreement");
+    let hints=task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name) in
+    match hints with
+    | [{Task_journal.state=Error (Task_journal.Corrupt _);_}] -> ()
+    | _ -> fail "failed hint became absent or successful receiver")
+;;
+
+let test_native_task_change_hint_directory_authority () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let attempt,bound=List.hd observations in
+    let keeper_name="claude-fixture" in
+    let collector=Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "hint-directory") ~redact_text:Fun.id in
+    let publication=Result.get_ok (Task_journal.prepare collector ~attempt bound) in
+    let reader=Task_journal.reader_of_publication publication in
+    let generation=Filename.dirname (Task_journal.path reader) in
+    let keeper=Filename.dirname generation in
+    Fs_compat.mkdir_p keeper;
+    Unix.chmod keeper 0o777;
+    Fun.protect ~finally:(fun () -> Unix.chmod keeper 0o700) (fun () ->
+      match (Task_journal.discover_hints ~base_path ~keeper_name).result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "empty unsafe Keeper became successful hint inventory");
+    Fs_compat.mkdir_p generation;
+    let removed=ref false in
+    Fun.protect ~finally:(fun () -> if !removed then Unix.mkdir generation 0o700) (fun () ->
+      let outcome=Task_journal.For_testing.discover_hints ~base_path ~keeper_name
+        ~before_read:(fun _ -> ()) ~after_read:(fun path ->
+          if path=keeper then (Unix.rmdir generation;removed:=true)) in
+      check bool "hint fixture reached actual enumeration boundary" true !removed;
+      match outcome.result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "enumerated generation disappearance became cold hint absence"))
+;;
+
+let test_native_task_sqlite_commit_cleanup_and_known_issues () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let make () = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "sqlite-outcomes") ~redact_text:Fun.id in
+    let collector = make () in
+    let first_attempt,first_bound = List.hd observations in
+    let publication = Result.get_ok (Task_journal.prepare collector ~attempt:first_attempt first_bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    let commit db = Sqlite3.exec db "COMMIT" in
+    let warning = Task_journal.For_testing.append_with_io ~commit
+      ~close:(fun db -> ignore (Sqlite3.db_close db);false) publication in
+    (match warning.result,warning.cleanup_failure with
+     | Ok (Task_journal.Appended row),[_] -> check int "cleanup warning retains committed sequence" 1 row.seq
+     | _ -> fail "close warning rewrote known commit");
+    let warning_exception = Task_journal.For_testing.append_with_io ~commit
+      ~close:(fun db -> ignore (Sqlite3.db_close db);raise (Sqlite3.SqliteError "injected close")) publication in
+    (match warning_exception.result,warning_exception.cleanup_failure with
+     | Ok (Task_journal.Replayed row),[_] -> check int "close exception retains replay receipt" 1 row.seq
+     | _ -> fail "close exception replaced primary receipt");
+    let attempt,bound = List.nth observations 1 in
+    let second = Result.get_ok (Task_journal.prepare collector ~attempt bound) in
+    let uncertain = Task_journal.For_testing.append_with_io
+      ~commit:(fun db -> ignore (Sqlite3.exec db "COMMIT");Sqlite3.Rc.IOERR)
+      ~close:Sqlite3.db_close second in
+    (match uncertain.result with
+     | Error (Task_journal.Commit_unconfirmed _) -> () | _ -> fail "ambiguous commit reported definite failure or success");
+    (match task_journal_ok (Task_journal.append second) with
+     | Task_journal.Replayed row -> check int "same UUID reconciles an uncertain committed write" 2 row.seq
+     | Appended _ -> fail "uncertain commit was duplicated");
+    let uncertain_exception = Task_journal.For_testing.append_with_io
+      ~commit:(fun db -> ignore (Sqlite3.exec db "COMMIT");raise (Sqlite3.SqliteError "injected commit"))
+      ~close:Sqlite3.db_close second in
+    (match uncertain_exception.result with
+     | Error (Task_journal.Commit_unconfirmed _) -> ()
+     | Error _ | Ok _ -> fail "commit exception lost unknown-outcome classification");
+    (* Block only this receiver file after binding. The process registry must
+       expose a failed first append even though no authority DB exists. *)
+    let failure_keeper = "failed-first-append" in
+    let sink = Task_journal.create ~base_path ~keeper_name:failure_keeper
+      ~source:(task_journal_operation "failed") ~redact_text:Fun.id in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt:first_attempt first_bound) in
+    let failed_reader = Task_journal.reader_of_publication publication in
+    Fs_compat.mkdir_p (Filename.dirname (Task_journal.path failed_reader));
+    Unix.mkdir (Task_journal.path failed_reader) 0o700;
+    (match (Task_journal.observe sink ~attempt:first_attempt first_bound).result with
+     | Error _ -> () | Ok _ -> fail "directory masquerading as authority store accepted");
+    Unix.rmdir (Task_journal.path failed_reader);
+    let known = Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name:failure_keeper) in
+    check int "failed first append is registered without a database" 1 (List.length known.issues);
+    let inventory = task_journal_ok (Task_journal.discover ~base_path ~keeper_name:failure_keeper) in
+    check int "discovery preserves failed receiver identity without a file" 1 (List.length inventory);
+    (match (List.hd inventory).state with Error Task_journal.Missing_store -> ()
+     | _ -> fail "failed receiver advertised committed history");
+    let hints=task_journal_ok (Task_journal.discover_hints ~base_path ~keeper_name:failure_keeper) in
+    (match hints with
+     | [{Task_journal.state=Error Task_journal.Missing_store;_}] -> ()
+     | _ -> fail "unchecked inventory dropped known failed first-append receiver");
+    let after_hint=Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name:failure_keeper) in
+    check bool "hint does not clear process failure evidence" true (after_hint=known);
+    ignore (task_journal_ok (Task_journal.observe sink ~attempt:first_attempt first_bound));
+    let after = Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name:failure_keeper) in
+    check string "issue epoch stays process scoped" known.process_epoch after.process_epoch;
+    check int "later success cannot erase prior failure" 1 (List.length after.issues);
+    check int "original receiver remains separately readable" 2 (List.length (task_journal_rows reader)))
+;;
+
+let test_native_task_invalid_database_remains_typed () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+      ~source:(task_journal_operation "invalid-database") ~redact_text:Fun.id in
+    let attempt,bound = List.hd observations in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    Fs_compat.mkdir_p (Filename.dirname (Task_journal.path reader));
+    Out_channel.with_open_bin (Task_journal.path reader) (fun out ->
+      output_string out "not a SQLite database");
+    (match (Task_journal.read reader).result with
+     | Error (Task_journal.Store_unavailable _) -> ()
+     | Error _ | Ok _ -> fail "non-SQLite read did not retain typed SQLite failure");
+    (match (Task_journal.observe sink ~attempt bound).result with
+     | Error (Task_journal.Store_unavailable _) -> ()
+     | Error _ | Ok _ -> fail "non-SQLite append did not retain typed SQLite failure");
+    check int "observe records failed prepare/statement as process issue" 1
+      (List.length (Result.get_ok (Task_journal.issue_snapshot ~base_path ~keeper_name)).issues);
+    check string "failed append never rewrites unrelated bytes" "not a SQLite database"
+      (In_channel.with_open_bin (Task_journal.path reader) In_channel.input_all))
+;;
+
+let test_native_task_sqlite_empty_directory_authority () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let attempt,bound = List.hd observations in
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+        ~source:(task_journal_operation "sqlite-discovery") ~redact_text:Fun.id in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    let generation = Filename.dirname (Task_journal.path reader) in
+    let keeper = Filename.dirname generation in
+    let discover () = Task_journal.discover ~base_path ~keeper_name in
+    let expect_failure outcome = match outcome.Task_journal.result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "unsafe empty directory became authoritative discovery" in
+    let writable directory f =
+      let permissions = (Unix.stat directory).Unix.st_perm in
+      Unix.chmod directory 0o777;
+      Fun.protect ~finally:(fun () -> Unix.chmod directory permissions) f in
+    Fs_compat.mkdir_p keeper;
+    writable keeper (fun () -> expect_failure (discover ()));
+    check int "owned empty Keeper retains a valid empty inventory" 0
+      (List.length (task_journal_ok (discover ())));
+    Fs_compat.mkdir_p generation;
+    writable generation (fun () -> expect_failure (discover ()));
+    check int "owned empty generation retains a valid empty inventory" 0
+      (List.length (task_journal_ok (discover ())));
+    Unix.rmdir generation;
+    Unix.rmdir keeper;
+    let ancestor = Filename.dirname keeper in
+    writable ancestor (fun () -> expect_failure (discover ()));
+    check int "cold descendant absence needs an owned bound ancestor" 0
+      (List.length (task_journal_ok (discover ()))))
+;;
+
+let test_native_task_sqlite_bound_directory_failure () =
+  with_task_journal_bindings (fun ~base_path observations ->
+    let attempt,bound = List.hd observations in
+    let keeper_name = "claude-fixture" in
+    let sink = Task_journal.create ~base_path ~keeper_name
+        ~source:(task_journal_operation "sqlite-discovery") ~redact_text:Fun.id in
+    let publication = Result.get_ok (Task_journal.prepare sink ~attempt bound) in
+    let reader = Task_journal.reader_of_publication publication in
+    let generation = Filename.dirname (Task_journal.path reader) in
+    let keeper = Filename.dirname generation in
+    check int "initial absent subtree below captured root is an empty inventory" 0
+      (List.length (task_journal_ok (Task_journal.discover ~base_path ~keeper_name)));
+    Fs_compat.mkdir_p keeper;
+    let bound_path = ref None in
+    let after_binding = Task_journal.For_testing.discover ~base_path ~keeper_name
+        ~before_read:(fun path -> bound_path := Some path;
+          raise (Unix.Unix_error (Unix.ENOENT,"injected-after-directory-bind",path)))
+        ~after_read:(fun _ -> ()) in
+    check bool "fault reached the actual Keeper directory bind" true (!bound_path=Some keeper);
+    (match after_binding.result with
+     | Error (Task_journal.Store_unavailable _) -> ()
+     | _ -> fail "bound directory ENOENT became initial empty discovery");
+    Fs_compat.mkdir_p generation;
+    let removed = ref false in
+    Fun.protect ~finally:(fun () -> if !removed then Unix.mkdir generation 0o700) (fun () ->
+      let after_enumeration = Task_journal.For_testing.discover ~base_path ~keeper_name
+          ~before_read:(fun _ -> ())
+          ~after_read:(fun path -> if String.equal path keeper then begin
+            Unix.rmdir generation; removed := true
+          end) in
+      check bool "generation removed after names were read" true !removed;
+      match after_enumeration.result with
+      | Error (Task_journal.Store_unavailable _) -> ()
+      | _ -> fail "enumerated generation disappearance became successful partial inventory"))
+;;
+
+let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let seen = ref [] in
+    let progress ~uuid ~task_id ~call_id = task_binding_frame ~uuid ~task_id ~call_id "task_progress"
+      ["description",`String "not root body";"usage",`Assoc
+        ["total_tokens",`Int 1;"tool_uses",`Int 1;"duration_ms",`Int 1]] in
+    let new_start = task_binding_start ~uuid:"new-start" ~task_id:"new-task" ~call_id:"new-call" in
+    with_fixture [
+      Emit (native_tool_call_block ~turn_id:"unattributed" ~call_id:"old-call" ~tool_name:"Agent");
+      Emit (task_binding_start ~uuid:"old-start" ~task_id:"old-task" ~call_id:"old-call");
+      Emit (task_binding_native_result ~uuid:"old-return" ~call_id:"old-call");
+      Emit_with_input (response_text ~turn_id:"command-stamp" ~message_id:"stamp-message" "Stamp");
+      Emit (progress ~uuid:"old-progress" ~task_id:"old-task" ~call_id:"old-call");
+      Emit (native_tool_call_block ~turn_id:"command-child" ~call_id:"new-call" ~tool_name:"Agent");
+      Emit (native_tool_result ~call_id:"new-call" ~content:"background launch");
+      Emit new_start; Emit new_start;
+      Emit (progress ~uuid:"unknown-progress" ~task_id:"unknown-task" ~call_id:"new-call");
+      Emit (response_text ~turn_id:"answer" ~message_id:"answer" "Answer");
+      Emit_with_input (result_text ~turn_id:"final" "Answer")]
+      (fun cli_path ->
+        let result = with_fixture_yolo ~base_path ~keeper_name:"claude-pre-dispatch" (fun () ->
+          run_direct_attempt ~base_path ~cli_path ~goal:"COMMAND_BINDING" ~tools:[]
+            ~required_native_posture:Runtime_native_tools.Native_full
+            ~on_native_task_observation:(fun bound -> seen := bound :: !seen) ()) in
+        (match result.result with Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> ());
+        match List.rev !seen with
+        | [bound] ->
+            check string "unowned old call and unknown task never acquire the later input" "new-task" bound.observation.owner.task_id;
+            check string "complete-only envelope remains original native owner" "assistant-command-child" bound.observation.owner.call_envelope_uuid;
+            check string "exact task replay adds no callback" "new-start" bound.observation.uuid;
+            (match bound.evidence with
+             | Keeper_claude_task_binding.Command_inherited witness ->
+                 check string "command provenance is the real prior root stamp" "assistant-command-stamp-stamp-message" witness.stamp_uuid;
+                 check string "command witness belongs to the actual input" bound.ticket.client_uuid witness.group.primary
+             | Explicit_group _ | Response_inherited _ -> fail "complete-only command inheritance required")
+        | _ -> fail "exactly the witnessed new native owner must bind"))
+;;
+
+let check_pre_dispatch_attempt label attempt =
+  (match attempt.Keeper_claude_code_runtime.result with
+   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field = "claude_code"; _ })) ->
+     ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail (label ^ " unexpectedly ran"));
+  check string
+    (label ^ " is proven pre-dispatch")
+    "no_effect_observed"
+    (Keeper_provider_attempt_effect.to_string attempt.effect_disposition)
+;;
+
+let test_subscription_spawn_failure_is_pre_dispatch () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       let missing_cli = Filename.concat base_path "missing-claude" in
+       run_direct_attempt
+         ~base_path
+         ~cli_path:missing_cli
+         ~goal:"subscription probe should fail"
+         ~tools:[]
+         ()
+       |> check_pre_dispatch_attempt "subscription probe spawn failure")
+;;
+
+(* A CLI that dies mid-status leaves its reason on stderr: the probe keeps
+   an excerpt with the parse failure instead of only the cut. *)
+let test_truncated_auth_probe_keeps_cli_stderr () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1
+         ~auth_stderr:"boom:\tkeychain denied" []
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+                check bool "truncated probe names the stage" true
+                  (String.starts_with ~prefix:"auth status: invalid JSON: " detail);
+                check bool "truncated probe keeps the cli stderr" true
+                  (Astring.String.is_infix ~affix:"; stderr: boom: keychain denied" detail)
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
+let test_cut_auth_probe_is_retried_once () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_first_body:"{\"loggedIn\":true,"
+         [Emit (assistant ~turn_id:"auth-retry-complete" "AUTH_RETRY_COMPLETE");
+          Emit (result ~turn_id:"auth-retry-complete" "AUTH_RETRY_COMPLETE")]
+         (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok turn ->
+             check string "successful auth retry reaches actual provider terminal"
+               "AUTH_RETRY_COMPLETE" (keeper_response_text turn);
+             (* The fixture leaves this marker on its first, cut answer. *)
+             check bool "the cut first probe ran" true
+               (Sys.file_exists (cli_path ^ ".auth-first"))))
+;;
+
+let test_cut_auth_probe_reports_stdout_bytes () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+             check bool "persistent cut names the byte count" true
+               (Astring.String.is_infix ~affix:"(stdout 18 bytes)" detail)
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "cut auth probe completed the Keeper turn"))
+;;
+
+let test_truncated_auth_probe_without_stderr_keeps_detail () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 [] (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+         | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+             check bool "truncated probe names the stage" true
+               (String.starts_with ~prefix:"auth status: invalid JSON: " detail);
+             check bool "no stderr marker without stderr" false
+               (Astring.String.is_infix ~affix:"; stderr:" detail)
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
+let test_truncated_auth_probe_truncates_long_stderr () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1
+         ~auth_stderr:(String.make 400 'a') []
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+                check bool "long stderr is capped with an ellipsis" true
+                  (Astring.String.is_infix
+                     ~affix:("; stderr: " ^ String.make 300 'a' ^ "…") detail)
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
+let test_blank_auth_stderr_keeps_detail_bare () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~auth_body:"{\"loggedIn\":true," ~auth_exit:1 ~auth_stderr:"   " []
+         (fun cli_path ->
+            match run_keeper_turn ~base_path ~cli_path ~goal:"AUTH_PROBE" () with
+            | Error (Agent_core.Error.Provider (Llm_provider.Error.ParseError { detail })) ->
+                check bool "no stderr marker for blank stderr" false
+                  (Astring.String.is_infix ~affix:"; stderr:" detail)
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ -> fail "truncated auth probe completed the Keeper turn"))
+;;
+
+let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
+  let base_path = temp_workspace () in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Must not execute when the turn process cannot spawn"
+      ~parameters:[]
+      (fun _input ->
+        fail "turn-spawn fixture unexpectedly executed a dynamic tool")
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~remove_after_auth:true [] (fun cli_path ->
+         run_direct_attempt
+           ~base_path
+           ~cli_path
+           ~goal:"turn process spawn should fail"
+           ~tools:[ tool ]
+           ()
+         |> check_pre_dispatch_attempt "turn process spawn failure"))
+;;
+
+let test_unbounded_turn_keeps_subscription_probe_bounded () =
+  let turn_config =
+    { (Runtime_claude_code.default_config ~cwd:"/tmp") with timeout_s = None }
+  in
+  let probe_config =
+    Keeper_claude_code_runtime.For_testing.bounded_probe_config
+      ~fallback_timeout_s:17.0
+      turn_config
+  in
+  match probe_config.timeout_s with
+  | Some seconds -> check (float 0.0) "probe fallback" 17.0 seconds
+  | None -> fail "unbounded turn config leaked into the subscription probe"
+;;
+
+let repeated_read_frames =
+  [ Emit_and_read mcp_initialize
+  ; Emit mcp_initialized_notification
+  ; Emit_and_read mcp_list
+  ; Emit_and_read (mcp_call_with_id "repeat-1")
+  ; Emit_and_read (mcp_call_with_id "repeat-2")
+  ; Emit_and_read (mcp_call_with_id "repeat-3")
+  ]
+;;
+
+let repeated_tool ?(on_call = fun () -> ()) () =
+  Agent_core.Tool.create
+    ~name:"masc_probe"
+    ~description:"Return the same deterministic result"
+    ~parameters:
+      [ { Agent_core.Types.name = "marker"
+        ; description = "Fixture marker"
+        ; param_type = String
+        ; required = true
+        }
+      ]
+    (fun _ ->
+      on_call ();
+      Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+;;
+
+(* A context-limit refusal and an empty history leave no smaller view to try,
+   so the attempt ends on the overflow. No answer or tool activity was
+   observed, so the attempt must report no effect: that is what lets
+   the lane move to its next runtime instead of fencing the turn. *)
+let test_memory_capacity_reprojection_reaches_cli_input () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let module Host = Keeper_workspace_memory_host_recall in
+    let module IO = Keeper_workspace_memory_selection_io in
+    let config = Workspace.default_config base_path in
+    let destination : Typesafeai_client.destination =
+      {endpoint="https://fixture.invalid/evaluate";model="fixture";api_key="fixture"} in
+    let adapter = IO.create ~config ~keeper_id:"claude-pre-dispatch" ~destinations:(destination,[]) in
+    let row id = `Assoc ["id",`String id;"use",`String "comparison";
+      "sources",`String ("MEMORY-" ^ id ^ "-" ^ String.make 2000 'x')] in
+    let payload = `Assoc ["selection_id",`String (IO.selection_id adapter);
+      "status",`String "selected";"selected",`List (List.map row ["A";"B";"C";"D"])] in
+    let prepared = Host.For_testing.prepare_projection ~payload
+      ~validate:(fun _ -> Ok ()) ~retain:(IO.retain_projection adapter) in
+    let hooks = {Agent_core.Hooks.empty with before_turn_params=Some (function
+      | Agent_core.Hooks.BeforeTurnParams {current_params;_} ->
+        AdjustParams {current_params with extra_system_context=Some (Host.render_prepared prepared)}
+      | _ -> Continue)} in
+    let first_system_marker = Filename.concat base_path "memory-first-system" in
+    let second_system_marker = Filename.concat base_path "memory-second-system" in
+    let first_prompt_marker = Filename.concat base_path "memory-first-input" in
+    let second_prompt_marker = Filename.concat base_path "memory-second-input" in
+    with_fixture_sequence ~first_system_marker ~second_system_marker
+      ~first_prompt_marker ~second_prompt_marker
+      [Emit blocking_limit_diagnostic;Emit blocking_limit_result]
+      [Emit (assistant ~turn_id:"memory-recovered" "RECOVERED");
+       Emit (result ~turn_id:"memory-recovered" "RECOVERED")]
+      (fun cli_path ->
+        let attempt = run_direct_attempt ~hooks
+            ~on_memory_capacity_refusal:(Host.defer_for_capacity prepared)
+            ~base_path ~cli_path ~goal:"MEMORY_CAPACITY_GOAL" ~tools:[] () in
+        match attempt.result with
+        | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+    let read path = In_channel.with_open_bin path In_channel.input_all in
+    (* Start transmits composed context through --system-prompt-file.
+       Stdin carries the current goal. *)
+    let first = read first_system_marker and second = read second_system_marker in
+    let second_input = read second_prompt_marker in
+    check bool "the CLI received a strictly smaller system context" true (String.length second < String.length first);
+    List.iter (fun id -> check bool (id ^ " originally transmitted") true
+      (String_util.contains_substring first ("MEMORY-" ^ id ^ "-"))) ["A";"B";"C";"D"];
+    List.iter (fun id -> check bool (id ^ " retained whole on the wire") true
+      (String_util.contains_substring second ("MEMORY-" ^ id ^ "-" ^ String.make 2000 'x'))) ["A";"B"];
+    List.iter (fun id -> check bool (id ^ " deferred from the wire") false
+      (String_util.contains_substring second ("MEMORY-" ^ id ^ "-"))) ["C";"D"];
+    check bool "the retry tells the model evidence is incomplete" true
+      (String_util.contains_substring second "capacity_deferred_count");
+    check bool "the user's goal survives memory reduction" true
+      (String_util.contains_substring second_input "MEMORY_CAPACITY_GOAL");
+    let receipts = read (IO.journal_path adapter) |> String.split_on_char '\n'
+      |> List.filter (fun row -> row<>"") |> List.map Yojson.Safe.from_string in
+    check (list string) "one retained memory projection, no new Jev evaluation"
+      ["delivery_projection_prepared"]
+      (List.map (fun row -> Yojson.Safe.Util.(row |> member "status" |> to_string)) receipts))
+;;
+
+let test_unshrinkable_context_limit_reports_no_effect ~overflow_frames () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture (List.map (fun frame -> Emit frame) overflow_frames)
+         (fun cli_path ->
+            let attempt =
+              run_direct_attempt ~base_path ~cli_path ~goal:"BLOCKED" ~tools:[] ()
+            in
+            (match attempt.result with
+             | Error (Agent_core.Error.Api (Llm_provider.Retry.ContextOverflow _)) -> ()
+             | Error error -> fail (Agent_core.Error.to_string error)
+             | Ok _ -> fail "a context-limit refusal completed the attempt");
+            check
+              string
+              "a refusal without observed activity has no effect"
+              "no_effect_observed"
+              (Keeper_provider_attempt_effect.to_string attempt.effect_disposition)))
+;;
+
+(* A blank composition must not reach [Runtime_claude_code.config.system_prompt]
+   as [None]. [None] means "omit --system-prompt", which since #33072 hands the
+   turn Claude Code's built-in coding-agent prompt while masc's tool set and
+   [--permission-mode dontAsk] stay in place. The refusal is checked on the
+   typed [InvalidConfig] field rather than by substring so a reworded detail
+   does not silently stop proving anything. The CLI fixture is deliberately a
+   working one: the refusal has to land before spawn, so reaching a spawn
+   failure here would mean the check ran too late. *)
+let test_blank_system_prompt_is_refused_not_defaulted () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture repeated_read_frames (fun cli_path ->
+         let attempt =
+           run_direct_attempt
+             ~system_prompt:"   "
+             ~base_path
+             ~cli_path
+             ~goal:"REPEAT_TOOL"
+             ~tools:[ repeated_tool () ]
+             ()
+         in
+         match attempt.result with
+         | Error
+             (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ }))
+           -> check string "refused field" "system_prompt" field
+         | Error error ->
+           fail
+             ("blank system prompt produced the wrong error: "
+              ^ Agent_core.Error.to_string error)
+         | Ok _ -> fail "blank system prompt was sent as the client default"))
+;;
+
+let test_provider_terminal_after_repeated_reads_keeps_root_context () =
+  let base_path = temp_workspace () in
+  let calls = ref 0 in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         ([Emit parent_tool_assistant; Emit child_tool_assistant; Emit child_tool_result]
+          @ repeated_read_frames
+          @ [Emit (result ~turn_id:"turn-read-complete" "READS_COMPLETE")]) (fun cli_path ->
+         let attempt =
+           run_direct_attempt
+             ~base_path
+             ~cli_path
+             ~goal:"REPEAT_TOOL"
+             ~tools:[ repeated_tool ~on_call:(fun () -> incr calls) () ]
+             ()
+         in
+         (match attempt.result with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok result ->
+            (match result.runtime_observation with
+             | Some {request_context=Some context; _} ->
+                 check int "terminal retains observed root occupancy after child activity" 205
+                   context.input_tokens
+             | _ -> fail "terminal dropped observed root request context");
+            (match result.stop_reason with
+             | Runtime_agent.Completed _ -> ()
+             | _ -> fail "actual provider terminal did not complete the read turn"));
+         check int "each same read executes before the explicit terminal" 3 !calls;
+         match
+           (load_state ~keeper_name:"claude-pre-dispatch" base_path).phase
+         with
+         | Settled { turn_id; _ } ->
+           check
+             string
+             "durable turn identity comes from the actual provider terminal"
+             "turn-read-complete"
+             turn_id
+         | _ -> fail "provider terminal did not settle durable state"))
+;;
+
+let test_typed_terminal_stop_records_pre_result_turn_identity () =
+  let base_path = temp_workspace () in
+  (* This state is the fixture's explicit terminal-producer port. No external
+     effect or durable stimulus is manufactured by this test. The real Host
+     consumes its typed deferral and must settle before a vendor result UUID. *)
+  let producer_state = ref Keeper_tools_agent_core.Terminal_effect_open in
+  let calls = ref 0 in
+  let terminal_tool = Agent_core.Tool.create
+    ~descriptor:(Agent_core.Tool.terminal_descriptor
+      Agent_core.Tool_contract.Proven_pre_effect)
+    ~name:"masc_probe" ~description:"Defer at the fixture terminal boundary"
+    ~parameters:[{Agent_core.Types.name="marker";description="Fixture marker";
+      param_type=String;required=true}]
+    (fun _ ->
+      incr calls;
+      producer_state := Keeper_tools_agent_core.Deferred_tool_result;
+      Ok {Agent_core.Types.content="FIXTURE_DEFERRED";content_blocks=None;_meta=None})
+  in
+  let terminal_fixture =
+    [ Emit parent_tool_assistant; Emit child_tool_assistant; Emit child_tool_result
+    ; Emit_and_read mcp_initialize; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list; Emit_and_read (mcp_call_with_id "terminal-1") ]
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture terminal_fixture (fun cli_path ->
+         let attempt =
+           run_direct_attempt
+             ~terminal_effect_state:(fun () -> !producer_state)
+             ~base_path ~cli_path ~goal:"TYPED_TERMINAL" ~tools:[terminal_tool] ()
+         in
+         (match attempt.result with
+          | Error error -> fail (Agent_core.Error.to_string error)
+          | Ok result ->
+            check int "one explicitly terminal invocation reaches the Host" 1 !calls;
+            (match result.runtime_observation with
+             | Some {request_context=Some context;_} ->
+               check int "host stop retains root occupancy after child activity"
+                 205 context.input_tokens
+             | _ -> fail "host stop dropped root request context");
+            (match result.stop_reason with
+             | Runtime_agent.Yielded_to_durable_stimulus _ -> ()
+             | Runtime_agent.Completed _
+             | Yielded_to_operation_queued _
+             | Yielded_after_repeated_tool_call _
+             | Yielded_after_repeated_assistant_text _
+             | InputRequired _ ->
+               fail "typed terminal deferral did not settle the host boundary"));
+         match (load_state ~keeper_name:"claude-pre-dispatch" base_path).phase with
+         | Settled {session_id;turn_id;_} ->
+           check string "deterministic pre-result turn identity"
+             (Keeper_claude_code_runtime.For_testing.host_stop_turn_identity
+                ~session_id ~turn_count:1) turn_id
+         | _ -> fail "typed terminal boundary did not settle durable state"))
+;;
+
+let test_post_tool_hook_failure_survives_provider_terminal () =
+  let base_path = temp_workspace () in
+  let hooks =
+    { Agent_core.Hooks.empty with
+      post_tool_use =
+        Some
+          (fun _ ->
+             raise (Failure "post-tool fixture terminal failure"))
+    }
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         (repeated_read_frames
+          @ [Emit (assistant ~turn_id:"turn-hook-complete" "READS_COMPLETE");
+             Emit (result ~turn_id:"turn-hook-complete" "READS_COMPLETE")])
+         (fun cli_path ->
+         let attempt =
+           run_direct_attempt
+             ~hooks
+             ~base_path
+             ~cli_path
+             ~goal:"REPEAT_FAILED_HOOK"
+             ~tools:[ repeated_tool () ]
+             ()
+         in
+         match attempt.result with
+         | Ok _ -> fail "provider terminal hid the terminal hook failure"
+         | Error error ->
+           check bool
+             "terminal hook detail survives"
+             true
+             (String_util.contains_substring
+                (Agent_core.Error.to_string error)
+                "post-tool fixture terminal failure")))
+;;
+
+(* The activity axis decides which admission fence the durable session gets:
+   an overflow with any observed activity is effect-fenced, an activity-free
+   overflow that exhausted the in-run shrink floor is floor-exceeded. Both
+   must stop the next cycle from replaying the same over-capacity input. *)
+let test_context_overflow_maps_to_input_rejected_recovery () =
+  let map = Keeper_claude_code_runtime.For_testing.recovery_failure_of_client_error in
+  let overflow ~tool_effect_attempted ~response_emitted =
+    Runtime_claude_code.Context_window_exceeded
+      { message = "Prompt is too long"; tool_effect_attempted; response_emitted }
+  in
+  check bool "no-activity overflow is floor-exceeded"
+    (map (overflow ~tool_effect_attempted:false ~response_emitted:false)
+    = Keeper_official_client_session_store.(
+         Input_rejected Bootstrap_floor_exceeded))
+    true;
+  check bool "response observed is effect-fenced"
+    (map (overflow ~tool_effect_attempted:false ~response_emitted:true)
+    = Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true;
+  check bool "tool effect observed is effect-fenced"
+    (map (overflow ~tool_effect_attempted:true ~response_emitted:false)
+    = Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true;
+  check bool "other provider rejections stay generic"
+    (map (Runtime_claude_code.Subscription_required "auth required")
+    = Keeper_official_client_session_store.Provider_rejected)
+    true
+;;
+
+(* A Gate continuation's resume refused as full ends the Gate whatever it did
+   first; the record keeps whether a response or tool effect came first. *)
+let test_gate_resume_overflow_is_session_full () =
+  let map = Keeper_claude_code_runtime.For_testing.recovery_failure_of_attempt in
+  let overflow ~tool_effect_attempted ~response_emitted =
+    Runtime_claude_code.Context_window_exceeded
+      { message = "Prompt is too long"; tool_effect_attempted; response_emitted }
+  in
+  let resume = Runtime_claude_code.Resume { session_id = "session-1" } in
+  check bool "no activity"
+    (map ~session_mode:resume ~gate_continuation:true
+       (overflow ~tool_effect_attempted:false ~response_emitted:false)
+     = Keeper_official_client_session_store.(Vendor_session_full No_activity_observed))
+    true;
+  check bool "after a tool effect"
+    (map ~session_mode:resume ~gate_continuation:true
+       (overflow ~tool_effect_attempted:true ~response_emitted:false)
+     = Keeper_official_client_session_store.(Vendor_session_full Activity_observed))
+    true;
+  check bool "after a response"
+    (map ~session_mode:resume ~gate_continuation:true
+       (overflow ~tool_effect_attempted:false ~response_emitted:true)
+     = Keeper_official_client_session_store.(Vendor_session_full Activity_observed))
+    true;
+  check bool "an ordinary resume keeps the input fence"
+    (map ~session_mode:resume ~gate_continuation:false
+       (overflow ~tool_effect_attempted:true ~response_emitted:false)
+     = Keeper_official_client_session_store.(Input_rejected Effect_fenced))
+    true
+;;
+
+let test_native_action_observer_keeps_exact_provider_identity () =
+  let seen = ref [] in
+  let observe ~official_turn ~identity ~tool_name =
+    seen := (official_turn, identity, tool_name) :: !seen
+  in
+  Keeper_claude_code_runtime.For_testing.observe_stream_native_action ~turn_count:9 ~observe
+    (Runtime_claude_code.Native_tool_started
+       { Runtime_native_tools.identity = Some (Call_id "claude-call")
+       ; tool_name = Some "Edit"
+       ; origin = Built_in
+       });
+  Keeper_claude_code_runtime.For_testing.observe_stream_native_action ~turn_count:10 ~observe
+    (Runtime_claude_code.Native_tool_started
+       { Runtime_native_tools.identity = Some (Call_id "claude-call-2")
+       ; tool_name = None
+       ; origin = Built_in
+       });
+  check
+    bool
+    "exact only"
+    true
+    (match List.rev !seen with
+     | [ 9, Runtime_native_tools.Call_id "claude-call", "Edit" ] -> true
+     | _ -> false)
+;;
+
+(* [--tools] narrows the CLI's built-in set to the names it lists, and the
+   CLI defers MCP tool schemas only while its own [ToolSearch] is among them.
+   A posture that drops the name therefore sends every masc tool schema
+   inline on every request, so each posture keeps it. *)
+let test_every_posture_names_the_schema_lookup () =
+  check
+    string
+    "none carries the lookup alone"
+    "ToolSearch"
+    (Runtime_native_tools.claude_code_tools_arg Runtime_native_tools.Native_none);
+  check
+    string
+    "read carries it after the read set"
+    "Read,Glob,Grep,ToolSearch"
+    (Runtime_native_tools.claude_code_tools_arg Runtime_native_tools.Native_read);
+  check
+    string
+    "full is the whole built-in set, which already carries it"
+    "default"
+    (Runtime_native_tools.claude_code_tools_arg Runtime_native_tools.Native_full)
+;;
+
+(* RFC-0454 P2. A Claude Code client that exited, or whose stdout reached EOF,
+   is the twin of the Codex runtime's closed connection. It shared one rendered
+   sentence with a failed spawn, which is what the chat pane had to read back;
+   now the two are separate values and the spawn keeps its old carriage. *)
+let test_a_closed_client_connection_is_typed () =
+  let core =
+    Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
+      (Runtime_claude_code.Process_exited
+         { detail = "stdout closed"; turn_admitted = true })
+  in
+  (match Keeper_internal_error.classify_masc_internal_error core with
+   | Some
+       (Keeper_internal_error.Runtime_connection_closed
+          { runtime_id; detail; turn_accepted }) ->
+     check string "runtime" "claude_code" runtime_id;
+     check string "detail" "stdout closed" detail;
+     check bool "turn was admitted" true turn_accepted
+   | Some _ | None -> fail "a closed Claude Code connection did not decode");
+  match
+    Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
+      (Runtime_claude_code.Spawn_failed "executable not found")
+  with
+  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
+  | other ->
+    failf
+      "a failed spawn must stay provider-unavailable, got %s"
+      (Agent_core.Error.to_string other)
+;;
+
+(* A real partial user-message write must retain uncertainty on timeout. *)
+let test_incomplete_user_write_timeout_fences_retry () =
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture ~block_user_write:true [] (fun cli_path ->
+      let attempt = run_direct_attempt ~admission_timeout_s:2.0
+          ~base_path ~cli_path ~goal:(String.make (512 * 1024) 'x') ~tools:[] () in
+      (match attempt.result with
+       | Error (Agent_core.Error.Api (Llm_provider.Retry.Timeout _)) -> ()
+       | Error error -> fail (Agent_core.Error.to_string error)
+       | Ok _ -> fail "incomplete user-message write unexpectedly completed");
+      check string "unknown delivery is recorded without native task observers"
+        "observation_unavailable"
+        (Keeper_provider_attempt_effect.to_string attempt.effect_disposition);
+      check bool "the driver's effect admission forbids candidate rotation" false
+        (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition)))
+;;
+
+(* #42212: when a Claude Code child exits before the turn prompt is sent
+   ([turn_admitted = false]), no turn was submitted, so [effect_disposition]
+   stays [No_effect_observed] and the lane walk rotates to the next candidate.
+   Once the prompt is sent ([turn_admitted = true]), an exit before a terminal
+   result fences the turn with [Observation_unavailable]. *)
+let test_exit_before_turn_admission_rotates_to_next_candidate () =
+  let run_failover_lane ~base_path ~first_cli ~second_cli =
+    Masc_test_deps.declare_fixture_keeper
+      ~base_path ~sandbox_profile:None "claude-fixture";
+    let runtime_snapshot = Runtime.For_testing.snapshot () in
+    let config_path = Filename.temp_file "masc-keeper-claude-failover-" ".toml" in
+    let toml =
+      Printf.sprintf
+        "[providers.claude_first]\n\
+         protocol = \"claude-code\"\n\
+         command = %S\n\
+         is-non-interactive = true\n\
+         \n\
+         [providers.claude_second]\n\
+         protocol = \"claude-code\"\n\
+         command = %S\n\
+         is-non-interactive = true\n\
+         \n\
+         [models.claude]\n\
+         api-name = \"claude-fixture\"\n\
+         max-context = 200000\n\
+         tools-support = true\n\
+         \n\
+         [claude_first.claude]\n\
+         \n\
+         [claude_second.claude]\n\
+         \n\
+         [runtime.lanes.claude_failover]\n\
+         candidates = [\"claude_first.claude\", \"claude_second.claude\"]\n\
+         \n\
+         [runtime]\n\
+         default = \"claude_failover\"\n"
+        first_cli
+        second_cli
+    in
+    let attempted = ref [] in
+    Fun.protect
+      ~finally:(fun () ->
+        if Sys.file_exists config_path then Sys.remove config_path;
+        Keeper_tool_call_log.reset_for_testing ();
+        Runtime.For_testing.restore runtime_snapshot)
+      (fun () ->
+         Out_channel.with_open_bin config_path (fun oc -> output_string oc toml);
+         Eio_main.run (fun env ->
+           Eio.Switch.run (fun sw ->
+             Eio_context.set_env env;
+             Eio_context.with_test_env
+               ~net:(Eio.Stdenv.net env)
+               ~clock:(Eio.Stdenv.clock env)
+               ~mono_clock:(Eio.Stdenv.mono_clock env)
+               ~sw
+               (fun () ->
+                  Runtime.init_default ~config_path |> Result.get_ok;
+                  let outcome =
+                    Keeper_turn_driver.run_named ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "claude-fixture" })
+                      ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+                      ~runtime_id:"claude_failover"
+                      ~keeper_name:"claude-fixture"
+                      ~base_path ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+                      ~goal:"FAILOVER_GOAL"
+                      ~system_prompt:"pre-dispatch fixture system prompt"
+                      ~tools:[]
+                      ~agent_core_tools:[]
+                      ~initial_messages:[]
+                      ~raw_trace:None
+                      ~on_runtime_attempt:(fun (attempt : Keeper_turn_driver.runtime_attempt) ->
+                        attempted := !attempted @ [ attempt.runtime_id ])
+                      ~sw
+                      ~net:(Eio.Stdenv.net env)
+                      ()
+                  in
+                  !attempted, outcome))))
+  in
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture ~exit_before_turn_admitted:true [] (fun pre_admission_cli ->
+         with_fixture
+           [ Emit (assistant ~turn_id:"turn-fallback" "MASC_CLAUDE_FAILOVER_OK")
+           ; Emit (result ~turn_id:"turn-fallback" "MASC_CLAUDE_FAILOVER_OK")
+           ]
+           (fun fallback_cli ->
+              let direct =
+                run_direct_attempt
+                  ~base_path
+                  ~cli_path:pre_admission_cli
+                  ~goal:"PRE_ADMISSION_DIRECT"
+                  ~tools:[]
+                  ()
+              in
+              check string
+                "pre-admission exit leaves effect disposition unobserved"
+                "no_effect_observed"
+                (Keeper_provider_attempt_effect.to_string direct.effect_disposition);
+              (match direct.result with
+               | Error error ->
+                 (match Keeper_internal_error.classify_masc_internal_error error with
+                  | Some
+                      (Keeper_internal_error.Runtime_connection_closed
+                         { runtime_id = "claude_code"; detail; turn_accepted = false }) ->
+                    check string "stderr detail preserved"
+                      "client died before turn admission" detail
+                  | _ -> fail (Agent_core.Error.to_string error))
+               | Ok _ -> fail "pre-admission exit completed the direct attempt");
+              let attempted, outcome =
+                run_failover_lane
+                  ~base_path
+                  ~first_cli:pre_admission_cli
+                  ~second_cli:fallback_cli
+              in
+              check (list string)
+                "pre-admission exit rotates to second candidate"
+                [ "claude_first.claude"; "claude_second.claude" ]
+                attempted;
+              match outcome with
+              | Error error -> fail (Agent_core.Error.to_string error)
+              | Ok selected ->
+                check string "selected fallback candidate"
+                  "claude_second.claude" selected.selected_runtime_id;
+                check string "fallback answer"
+                  "MASC_CLAUDE_FAILOVER_OK"
+                  (keeper_response_text selected.run_result))));
+  let post_admission_base = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree post_admission_base)
+    (fun () ->
+       with_fixture [ Close_transport ] (fun post_admission_cli ->
+         with_fixture
+           [ Emit (assistant ~turn_id:"turn-never" "NEVER_REACHED")
+           ; Emit (result ~turn_id:"turn-never" "NEVER_REACHED")
+           ]
+           (fun fallback_cli ->
+              let attempted, outcome =
+                run_failover_lane
+                  ~base_path:post_admission_base
+                  ~first_cli:post_admission_cli
+                  ~second_cli:fallback_cli
+              in
+              check (list string)
+                "post-admission exit fences at first candidate"
+                [ "claude_first.claude" ]
+                attempted;
+              match outcome with
+              | Ok _ -> fail "post-admission exit rotated and completed"
+              | Error error ->
+                match Keeper_internal_error.classify_masc_internal_error error with
+                | Some
+                    (Keeper_internal_error.Provider_attempt_effect_fenced
+                       { runtime_id = "claude_first.claude"
+                       ; effect_disposition =
+                           Keeper_provider_attempt_effect.Observation_unavailable
+                       ; _
+                       }) -> ()
+                | _ -> fail (Agent_core.Error.to_string error))))
+;;
+
+(* #39768: an exception nothing in the runtime expected -- here the refused
+   process-group signal that ended a finished turn -- is a masc internal
+   failure. As a protocol error it read "Parse error" although nothing was
+   misread. The lane walk stops on either; test_keeper_rotation_eligibility_census
+   pins that. *)
+let test_an_unhandled_runtime_exception_is_internal () =
+  let exn_repr = "Unix.Unix_error(Unix.EPERM, \"kill\", \"\")" in
+  let core =
+    Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
+      (Runtime_claude_code.Unhandled_exception exn_repr)
+  in
+  match Keeper_internal_error.classify_masc_internal_error core with
+  | Some
+      (Keeper_internal_error.Internal_unhandled_exception
+         { site; exn_repr = recorded; transport_error_kind }) ->
+    check string "site" "claude_code.runtime_boundary" site;
+    check string "exception" exn_repr recorded;
+    check bool "not a transport failure" true (Option.is_none transport_error_kind)
+  | Some _ | None ->
+    failf
+      "an unhandled runtime exception must be a masc internal error, got %s"
+      (Agent_core.Error.to_string core)
+;;
+
+(* No recovery kind names a host exception. It takes the one whose disposition
+   is Ambiguous -- what the client did is unknown -- so the next claim starts
+   a fresh session rather than resuming one of unknown state. *)
+let test_an_unhandled_runtime_exception_recovers_as_protocol_failed () =
+  let map = Keeper_claude_code_runtime.For_testing.recovery_failure_of_client_error in
+  check bool "the recovery kind"
+    (map (Runtime_claude_code.Unhandled_exception "Failure(\"boom\")")
+    = Keeper_official_client_session_store.Protocol_failed)
+    true
+;;
+
+(* A start seed begins where the last completed turn's range did, whichever
+   runtime measured it: this lane cuts from the keeper's checkpoint history
+   like every Agent Core candidate, so the same position names the same atoms
+   (RFC keeper-context-window-in-tokens §10.4). The declared ceiling keeps its
+   own cut and the later of the two positions wins, so a ceiling never widens
+   a seeded range and a seed never widens the ceiling's. *)
+let start_seed_history () =
+  let message role text : Agent_core.Types.message =
+    { origin = Llm_provider.Types.Conversation;  role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
+  in
+  List.concat
+    (List.init 60 (fun i ->
+       [ message Agent_core.Types.User (Printf.sprintf "ask %02d" i)
+       ; message Agent_core.Types.Assistant (Printf.sprintf "answer %02d" i)
+       ]))
+;;
+
+let completed_record ~messages ~transmitted : Turn_record.t =
+  let total_atoms = snd (Runtime_model_input_tail_window.annotate messages) in
+  let model_input_front =
+    match
+      Runtime_model_input_tail_window.atom_opening_digest
+        messages
+        (total_atoms - transmitted)
+    with
+    | Some digest -> digest
+    | None -> fail "the record's own history has that atom"
+  in
+  { request_observations = [];  execution_ids = []
+  ; keeper = "alpha"
+  ; agent_name = "alpha-agent"
+  ; turn_kind = Turn_record.Direct
+  ; trace_id = "trace-1"
+  ; absolute_turn = 1260
+  ; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1260
+  ; blocks = []
+  ; input_components = None
+  ; tool_surface_ref = None
+  ; runtime_profile = "kimi_coding.kimi-k3"
+  ; selected_model = None
+  ; finish_reason = Some "completed"
+  ; context_window = None
+  ; provider_context_window = None
+  ; price_input_per_million = None
+  ; price_output_per_million = None
+  ; request_latency_ms = None
+  ; ttfrc_ms = None
+  ; request_wire_observation = None
+  ; model_input_window =
+      Some
+        { Turn_record.transmitted_atoms = transmitted
+        ; total_atoms
+        ; measurement = Turn_record.Wire_shape
+        ; model_input_front = Model_input_front.At_atom model_input_front
+        }
+  ; response_observed_model_input =
+      Some
+        { runtime_profile = "kimi_coding.kimi-k3"
+        ; window =
+            { transmitted_atoms = transmitted
+            ; total_atoms
+            ; measurement = Turn_record.Wire_shape
+            ; model_input_front = Model_input_front.At_atom model_input_front
+            }
+        }
+  ; raw_trace_run_ref = None
+  ; sampling =
+      { temperature = None; top_p = None; max_tokens = None; enable_thinking = None }
+  ; usage =
+      { input_tokens = None
+      ; output_tokens = None
+      ; cache_creation_input_tokens = None
+      ; cache_read_input_tokens = None
+      ; scope = Runtime_usage_scope.Per_request
+      }
+  ; turn_output_tokens = None
+  ; ts = 0.
+  }
+;;
+
+let seed_read_of records =
+  { Keeper_carried_front.seed =
+      Keeper_carried_front.of_records
+        ~trace_id:"trace-1"
+        records
+  ; unreadable = None
+  ; boundary_error = None
+  }
+;;
+
+(* What the Agent Core path composes for the same front, so the assertion is
+   "the same range", not "this many atoms". *)
+let agent_core_range ?(turn_start = 0) ~front messages =
+  (Keeper_turn_driver_try_provider.For_testing.compose_carried_model_input
+     ~measure_message_bytes:(Keeper_context_core.message_measurer ())
+     ~accepted:None ~front
+     ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
+     ~current_turn_results:Keeper_turn_driver_try_provider.Current_turn_verbatim
+     ~base_path:""
+     ~demote_before:0
+     ~turn_boundary:(Keeper_carried_front.Turn_boundary { end_atom = turn_start })
+     messages)
+    .Keeper_turn_driver_try_provider.projection
+    .Runtime_model_input_tail_window.messages
+;;
+
+let encoded = List.map Keeper_official_client_host.encode_history_message
+
+let test_a_start_seed_begins_at_the_carried_front () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  let seed_read = seed_read_of [ completed_record ~messages ~transmitted:7 ] in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+      ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read)
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check (list string) "the same range the Agent Core path composes"
+      (encoded (agent_core_range ~front:seed_read.Keeper_carried_front.seed messages))
+      (encoded (without_native_unread carried));
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "the reading counts the whole history" 120
+         observation.Runtime_model_input_tail_window.total_atoms;
+       check int "and says seven atoms went" 7
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* The declared ceiling names a front of its own. When it is the later of the
+   two, it decides, so the shrink ladder that answers a typed overflow
+   (#37063) keeps narrowing a seeded start instead of being widened back by
+   the seed on the retry. *)
+let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  let seed_read = seed_read_of [ completed_record ~messages ~transmitted:7 ] in
+  (* The zero-history floor is what the framing alone costs; two more
+     messages above it leaves the exact cut room for about two atoms, well
+     inside the seed's seven and far below the 60-atom quantum, so the cut is
+     exact rather than quantized. *)
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let newest_two =
+    match List.rev messages with
+    | newest :: before :: _ -> measure newest + measure before
+    | _ -> fail "the history has at least two messages"
+  in
+  let capacity_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        (attach_native_unread messages)
+    with
+    | Some floor_bytes -> floor_bytes + newest_two
+    | None -> fail "a history this long has a framed floor"
+  in
+  let ceiling_only =
+    match
+      Runtime_model_input_tail_window.project_with_drop
+        ~allow_empty_history:true
+        ~measure_message_bytes:Keeper_official_client_host.measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes:0
+        (attach_native_unread messages)
+    with
+    | Ok projection -> projection
+    | Error error ->
+      fail (Runtime_model_input_tail_window.budget_error_to_string error)
+  in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+      ~capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read)
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check bool "the ceiling cuts deeper than the seed here" true
+      (ceiling_only.Runtime_model_input_tail_window.dropped_atoms > 113);
+    check bool "and still carries the turn" true
+      (ceiling_only.Runtime_model_input_tail_window.dropped_atoms < 120);
+    check (list string) "so the ceiling decides the range"
+      (encoded (without_native_unread ceiling_only.Runtime_model_input_tail_window.messages))
+      (encoded (without_native_unread carried));
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "and the reading is the ceiling's"
+         (120 - ceiling_only.Runtime_model_input_tail_window.dropped_atoms)
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* Cold start on a history with no completed turn: no record names a front
+   and the turn start is 0, so everything the history has goes. *)
+let test_a_cold_start_with_no_completed_turn_carries_everything () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+      ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read_of [])
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check (list string) "the same range the Agent Core path composes"
+      (encoded (agent_core_range ~front:None messages))
+      (encoded (without_native_unread carried));
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "every atom went" 120
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* No record names a front but the history has completed turns: the range
+   starts where the last of them ended, this turn's own atoms, the same
+   place the Agent Core path starts (RFC keeper-context-window-in-tokens
+   §13.4). *)
+let test_a_cold_start_begins_at_the_turn_start () =
+  let observed = ref None in
+  let messages = start_seed_history () in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+      ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
+      ~carried_front_seed:(fun () -> seed_read_of [])
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 112 })
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok carried ->
+    check (list string) "the same range the Agent Core path composes"
+      (encoded (agent_core_range ~turn_start:112 ~front:None messages))
+      (encoded (without_native_unread carried));
+    (match !observed with
+     | None -> fail "the projection reported no window"
+     | Some observation ->
+       check int "the reading counts the whole history" 120
+         observation.Runtime_model_input_tail_window.total_atoms;
+       check int "and says this turn's eight atoms went" 8
+         observation.Runtime_model_input_tail_window.transmitted_atoms)
+;;
+
+(* A snapshot the Librarian wrote after reading [messages] through
+   [end_atom], on a history whose one completed turn ended there. *)
+let snapshot_through ~messages ~end_atom ~working_state =
+  let covered = List.filteri (fun i _ -> i < end_atom) messages in
+  let position =
+    match Keeper_turn_boundaries.position_of_messages covered with
+    | Ok position -> position
+    | Error detail -> fail detail
+  in
+  let line =
+    ( 1
+    , Ok
+        { Keeper_turn_boundaries.recorded_at = 1.
+        ; event =
+            Keeper_turn_boundaries.Turn_ended
+              { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
+              ; history_at_start = Keeper_turn_boundaries.Fresh_history
+              ; position
+              }
+        } )
+  in
+  match
+    Librarian_continuity_snapshot.capture ~unread_messages:[] ~trace_id:"trace-1" ~lines:[ line ] ~messages:covered
+      ~working_state
+  with
+  | Ok snapshot -> snapshot
+  | Error error -> fail (Librarian_continuity_snapshot.error_to_string error)
+;;
+
+let text_of (message : Agent_core.Types.message) =
+  match message.content with
+  | [ Agent_core.Types.Text text ] -> text
+  | _ -> ""
+;;
+
+(* The Librarian front reaches the list this lane sends -- a read position
+   as the start, a working state carried in place of the atoms before it --
+   and a list the turn's choice no longer describes refuses the request,
+   as it refuses an Agent Core request, instead of going out from the seed. *)
+let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
+  let messages = start_seed_history () in
+  let seen_front = ref None in
+  let project librarian_front =
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+      ~capacity_bytes:Keeper_claude_code_runtime.For_testing.unbounded_capacity_bytes
+      ~librarian_front
+      ~on_carried_front:(fun front ~transmitted_bytes -> seen_front := Some (front, transmitted_bytes))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  in
+  (match project (fun _ -> Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 100 }))) with
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok carried ->
+     check (list string) "the range starts at the read position"
+       (encoded (List.filteri (fun i _ -> i >= 100) messages))
+       (encoded (without_native_unread ~unread:Keeper_librarian_request_unread.empty carried)));
+  (match !seen_front with
+   | Some (Keeper_official_client_host.Librarian_progress { end_atom = 100 }, bytes) ->
+     check bool "the front is reported with the range's bytes" true (bytes > 0)
+   | Some _ -> fail "the reported front is not the read position"
+   | None -> fail "the composition reported no front");
+  let snapshot =
+    snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
+  in
+  (match project (fun _ -> Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))) with
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok carried ->
+     (match without_native_unread ~unread:Keeper_librarian_request_unread.empty carried with
+      | working :: rest ->
+        check string "the working state leads the list"
+          (Keeper_turn_driver_try_provider.working_state_text snapshot)
+          (text_of working);
+        check (list string) "and the atoms it covers are not sent"
+          (encoded (List.filteri (fun i _ -> i >= 100) messages))
+          (encoded rest)
+      | [] -> fail "nothing was composed"));
+  let refused _ =
+    Error
+      (Agent_core.Error.Config
+         (Agent_core.Error.InvalidConfig
+            { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
+  in
+  match project refused with
+  | Error _ -> ()
+  | Ok _ -> fail "a list the turn's choice no longer describes went out"
+;;
+
+let working_state_not_carried ~reason =
+  Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string WorkingStateNotCarried)
+    ~labels:
+      [ "keeper", "alpha"; "runtime", "claude_code.claude-sonnet-5"; "reason", reason ]
+    ()
+;;
+
+(* The declared ceiling cuts before the working state is known (RFC-0460).
+   A working state carried in front of a range the ceiling then has to cut
+   would push out atoms it does not cover, so it stays out and the
+   Librarian's position goes alone: the same range, every atom of it. The
+   turn is not refused, and the counter says the summary was left out and
+   why. *)
+let test_a_working_state_that_would_displace_atoms_stays_out () =
+  let messages = start_seed_history () in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let bytes lo hi =
+    List.fold_left
+      (fun total message -> total + measure message)
+      0
+      (List.filteri (fun i _ -> i >= lo && i < hi) messages)
+  in
+  (* Charge the omission preamble and the native known-empty unread carrier
+     together; only the conversation atoms may be displaced by a summary. *)
+  let preamble_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        (attach_native_unread ~unread:Keeper_librarian_request_unread.empty messages)
+    with
+    | Some bytes -> bytes
+    | None -> fail "the fixture history has no shrinkable atom"
+  in
+  (* Room for the carrier, preamble and twenty messages from atom 100, where
+     the Librarian read to, and nothing for a working state on top. *)
+  let capacity_bytes = preamble_bytes + bytes 100 120 in
+  let observed = ref None in
+  let project snapshot =
+    observed := None;
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+      ~capacity_bytes
+      ~librarian_front:(fun _ ->
+        Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  in
+  let is_atom (message : Agent_core.Types.message) =
+    (not (Runtime_model_input_tail_window.is_synthetic_preamble message))
+    && message.role <> Agent_core.Types.System
+  in
+  let goes_alone ~reason snapshot =
+    let before = working_state_not_carried ~reason in
+    match project snapshot with
+    | Error error -> fail (Agent_core.Error.to_string error)
+    | Ok sent ->
+      ignore (without_native_unread ~unread:Keeper_librarian_request_unread.empty sent);
+      let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+      check int "the working state stays out" 0
+        (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
+      check (list string) "and every atom from the Librarian's position goes"
+        (encoded (List.filteri (fun i _ -> i >= 100) messages))
+        (encoded (List.filter is_atom sent));
+      check bool "inside the ceiling" true
+        (List.fold_left (fun total m -> total + measure m) 0 sent <= capacity_bytes);
+      (match !observed with
+       | None -> fail "the projection reported no window"
+       | Some (observation : Runtime_model_input_tail_window.window_observation) ->
+         check int "the window reports the twenty atoms that went" 20
+           observation.transmitted_atoms;
+         check int "of the whole history" 120 observation.total_atoms);
+      check (float 0.) ("counted as " ^ reason) (before +. 1.)
+        (working_state_not_carried ~reason)
+  in
+  goes_alone ~reason:"displaces_atoms"
+    (snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far.");
+  (* A working state the ceiling cannot hold beside the pinned messages at
+     all is the same answer: the position goes alone. *)
+  goes_alone ~reason:"does_not_fit"
+    (snapshot_through ~messages ~end_atom:100 ~working_state:(String.make 4_000 'w'))
+;;
+
+(* A range the ceiling already fits goes out as it was cut. When the cut
+   lands on an assistant turn the range opens with the omission preamble,
+   and a window handed that list must charge the preamble once: it is the
+   message the window itself would put back, not an atom of the range.
+   Charged twice, a range that fit loses atoms at its front, and the reading
+   names a later front that the next turn's seed then holds. *)
+(* The live warning this pins: a Claude Code request that carried a working
+   state and the turn's own context carrier failed the composition check as a
+   repeated carrier, because both wore the carrier's tag. *)
+let test_a_working_state_beside_the_turn_carrier_passes_the_composition_check () =
+  let messages = start_seed_history () in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let snapshot =
+    snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
+  in
+  let capacity_bytes =
+    List.fold_left (fun total message -> total + measure message) 0 (attach_native_unread ~unread:Keeper_librarian_request_unread.empty messages) * 2
+  in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+      ~capacity_bytes
+      ~librarian_front:(fun _ ->
+        Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok sent ->
+    ignore (without_native_unread ~unread:Keeper_librarian_request_unread.empty sent);
+    let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+    check int "the working state is sent" 1
+      (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
+    let carrier : Agent_core.Types.message =
+      { origin = Llm_provider.Types.System_context;  role = System
+      ; content = [ Text "turn context" ]
+      ; name = None
+      ; tool_call_id = None
+      ; metadata = []
+      }
+    in
+    (match
+       Keeper_agent_prompt_metrics.provider_content_of_transmitted
+         ~prompt_context_present:true
+         ~messages:(sent @ [ carrier ])
+     with
+     | Ok retained ->
+       check int "only the carrier is removed" (List.length sent) (List.length retained)
+     | Error _ -> fail "the working state was read as a second carrier")
+;;
+
+let test_a_range_the_ceiling_fits_goes_as_cut () =
+  (* One ask in front of the fixture puts an assistant turn at atom 60, the
+     first multiple the window's quantized cut tries, and leaves 61 atoms
+     from there: more than one quantum, so a window that failed at 0 would
+     jump to 60 rather than drop the preamble alone. *)
+  let messages =
+    ({ origin = Llm_provider.Types.Conversation;  role = User; content = [ Text "ask intro" ]; name = None; tool_call_id = None
+     ; metadata = [] }
+     : Agent_core.Types.message)
+    :: start_seed_history ()
+  in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let preamble_bytes =
+    match
+      Runtime_model_input_tail_window.minimum_capacity_bytes
+        ~measure_message_bytes:measure
+        messages
+    with
+    | Some bytes -> bytes
+    | None -> fail "the fixture history has no shrinkable atom"
+  in
+  (* Exactly the preamble and the atoms from 60, an assistant turn. *)
+  let capacity_bytes =
+    preamble_bytes
+    + List.fold_left
+        (fun total message -> total + measure message)
+        0
+        (List.filteri (fun i _ -> i >= 60) messages)
+  in
+  let observed = ref None in
+  let project ?librarian_front () =
+    observed := None;
+    let unread = match librarian_front with
+      | None -> unavailable_native_unread
+      | Some _ -> Keeper_librarian_request_unread.empty in
+    let capacity_bytes = capacity_bytes
+      + List.fold_left (fun total message -> total + measure message) 0
+          (attach_native_unread ~unread []) in
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+      ~capacity_bytes
+      ?librarian_front
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  in
+  let goes_as_cut ~unread label sent =
+    (match without_native_unread ~unread sent with
+     | head :: rest ->
+       check bool (label ^ ": the range opens with the preamble") true
+         (Runtime_model_input_tail_window.is_synthetic_preamble head);
+       check (list string) (label ^ ": and every atom from the cut follows")
+         (encoded (List.filteri (fun i _ -> i >= 60) messages))
+         (encoded rest)
+     | [] -> fail (label ^ ": nothing went out"));
+    match !observed with
+    | None -> fail (label ^ ": the projection reported no window")
+    | Some (observation : Runtime_model_input_tail_window.window_observation) ->
+      check int (label ^ ": the reading counts the sixty-one atoms") 61
+        observation.transmitted_atoms;
+      check (option string) (label ^ ": and names atom 60 as its front")
+        (Runtime_model_input_tail_window.atom_opening_digest messages 60)
+        (Some (carried_digest observation.model_input_front))
+  in
+  (match project () with
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok sent -> goes_as_cut ~unread:unavailable_native_unread "no Librarian position" sent);
+  (* A snapshot behind the cut does not win the range: the same range goes,
+     only the unread observation is pinned, and no working state is counted
+     as left out. *)
+  let before = working_state_not_carried ~reason:"displaces_atoms" in
+  match
+    project
+      ~librarian_front:(fun _ ->
+        Ok
+          (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot
+             (snapshot_through ~messages ~end_atom:50 ~working_state:"Twenty-five asks."))))
+      ()
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok sent ->
+    goes_as_cut ~unread:Keeper_librarian_request_unread.empty "a snapshot behind the cut" sent;
+    check (float 0.) "and no working state is counted as left out" before
+      (working_state_not_carried ~reason:"displaces_atoms")
+;;
+
+(* A ceiling that holds the working state and the whole range sends both. *)
+let test_a_working_state_that_displaces_nothing_goes () =
+  let messages = start_seed_history () in
+  let measure = Keeper_official_client_host.measure_message_bytes in
+  let snapshot =
+    snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
+  in
+  let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+  let pinned : Agent_core.Types.message =
+    { origin = Llm_provider.Types.Agent_instruction;  role = System
+    ; content = [ Text working_state ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = Runtime_model_input_tail_window.working_state_metadata
+    }
+  in
+  (* Exactly the unread carrier, working state, preamble and twenty atoms
+     from 100. *)
+  let capacity_bytes =
+    (match
+       Runtime_model_input_tail_window.minimum_capacity_bytes
+         ~measure_message_bytes:measure
+         (attach_native_unread ~unread:Keeper_librarian_request_unread.empty (pinned :: messages))
+     with
+     | Some bytes -> bytes
+     | None -> fail "the fixture history has no shrinkable atom")
+    + List.fold_left
+        (fun total message -> total + measure message)
+        0
+        (List.filteri (fun i _ -> i >= 100) messages)
+  in
+  let before = working_state_not_carried ~reason:"displaces_atoms" in
+  match
+    Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
+      ~capacity_bytes
+      ~librarian_front:(fun _ ->
+        Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
+      ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+      ~keeper_name:"alpha"
+      ~runtime_id:"claude_code.claude-sonnet-5"
+      messages
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok sent ->
+    ignore (without_native_unread ~unread:Keeper_librarian_request_unread.empty sent);
+    check int "the working state goes, once" 1
+      (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
+    check (list string) "with every atom it abuts"
+      (encoded (List.filteri (fun i _ -> i >= 100) messages))
+      (encoded
+         (List.filter
+            (fun (m : Agent_core.Types.message) ->
+               (not (Runtime_model_input_tail_window.is_synthetic_preamble m))
+               && m.role <> Agent_core.Types.System)
+            sent));
+    check (float 0.) "and nothing is counted as left out" before
+      (working_state_not_carried ~reason:"displaces_atoms")
+;;
+
+(* Exercise the actual adapter writer, then recover its serialized argument
+   through the same canonical reader tool that the prepared surface advertises. *)
+module Argument_start_fixture = struct
+  module T = Agent_core.Types
+  module Host = Keeper_official_client_host
+  let old_input = `Assoc ["command", `String (String.make 4000 'a')]
+  let current_input = `Assoc ["command", `String (String.make 4000 'c')]
+  let exchange id input =
+    [ T.make_message ~role:T.Assistant [T.ToolUse {id;name="record";input}]
+    ; T.tool_result_msg ~tool_use_id:id ~content:"done" () ]
+  let seed = T.make_message ~role:T.User [T.Text "Earlier completed work"]
+             :: exchange "historical-argument" old_input
+  let history = seed @ [T.make_message ~role:T.User [T.Text "Current work"]]
+                @ exchange "current-argument" current_input
+  let boundary messages = Keeper_carried_front.Turn_boundary
+      {end_atom=snd (Runtime_model_input_tail_window.annotate messages)}
+  let source ~base_path ~keeper_name seed =
+    Host.create_argument_source ~input_policy:Keeper_input_policy.Small ~base_path ~keeper_name
+      ~seed:(Some seed) ~replay_prefix:Keeper_replay_prefix.unchanged ~turn_start:(boundary seed)
+  let librarian_front _ : (Host.librarian_position, Agent_core.Error.t) result = Ok
+      {point=Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1};
+       unread=Keeper_librarian_request_unread.empty}
+  let snapshot () = List.map Agent_core.Checkpoint.message_to_json history
+  let reader base_path =
+    let schema = Keeper_runtime_schemas_toml.artifact_read in
+    Tool_bridge.agent_core_tool_of_masc_with_execution_env ~base_path
+      ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+      ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
+      ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
+      (fun _ args ->
+        let execution = Keeper_artifact_read.handle ~base_path ~args in
+        match execution.disposition with
+        | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
+            ~start_time:(Tool_timing.start ()) ?data:execution.data ()
+        | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
+            ~start_time:(Tool_timing.start ()) execution.raw_output
+        | Tool_result.Deferred () -> fail "canonical reader cannot defer")
+  let wire_input id envelopes =
+    let open Yojson.Safe.Util in
+    let blocks = List.concat_map (fun envelope ->
+      envelope |> member "message" |> member "content_blocks" |> to_list) envelopes in
+    match List.find_opt (fun block -> member "type" block=`String "tool_use"
+      && member "id" block=`String id) blocks with
+    | Some block -> member "input" block
+    | None -> fail ("actual wire omitted tool occurrence " ^ id)
+  let check_start ~enabled ~reader envelopes =
+    check bool "current-turn argument is exact on the actual wire" true
+      (wire_input "current-argument" envelopes=current_input);
+    let historical = wire_input "historical-argument" envelopes in
+    if not enabled then
+      check bool "without the actual reader the historical argument stays raw" true
+        (historical=old_input)
+    else match Tool_output.normalized_artifact_ref_of_json historical with
+      | Tool_output.Not_normalized_artifact_ref | Invalid_normalized_artifact_ref _ ->
+        fail "actual Start did not serialize a normalized argument reference"
+      | Tool_output.Decoded_normalized_artifact_ref reference ->
+        check string "argument MIME" "application/json" reference.mime;
+        let bytes = Buffer.create reference.bytes in
+        let rec read offset =
+          let result = match Agent_core.Tool.execute reader
+              (`Assoc ["sha256",`String reference.sha256;"offset",`Int offset]) with
+            | Ok result -> result | Error error -> fail error.message in
+          let page = Yojson.Safe.from_string result.content in
+          let open Yojson.Safe.Util in
+          let content = page |> member "content" |> to_string in
+          Buffer.add_string bytes (match page |> member "encoding" |> to_string with
+            | "utf-8" -> content | "base64" -> Base64.decode_exn content
+            | other -> fail ("unexpected page encoding " ^ other));
+          if not (page |> member "eof" |> to_bool) then
+            read (page |> member "next_offset" |> to_int) in
+        read 0;
+        check string "canonical tool reconstructs exact original JSON"
+          (Yojson.Safe.to_string old_input) (Buffer.contents bytes)
+  let check_resume_did_not_store base_path =
+    let sha256=Agent_core_sha256.(to_hex (digest_string (Yojson.Safe.to_string current_input))) in
+    match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+    | Ok None -> ()
+    | Ok (Some _) -> fail "Resume materialized the newly eligible argument"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
+end
+
+let test_actual_start_demotes_arguments_but_resume_keeps_them_held () =
+  let module F = Argument_start_fixture in
+  List.iter (fun enabled ->
+    let base_path = temp_workspace () in
+    Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+      let before = F.snapshot () in
+      let reader = F.reader base_path in
+      let tools = if enabled then [reader] else [] in
+      let first_prompt_marker = Filename.concat base_path "argument-start.json" in
+      let second_prompt_marker = Filename.concat base_path "argument-resume.json" in
+      let lines turn = [Emit (assistant ~turn_id:turn "ARGUMENT_OK");
+                        Emit (result ~turn_id:turn "ARGUMENT_OK")] in
+      with_fixture_sequence ~first_prompt_marker ~second_prompt_marker
+        (lines "argument-turn-1") (lines "argument-turn-2") (fun cli_path ->
+          let transmissions = ref [] in
+          let run seed =
+            let attempt = run_direct_attempt ~base_path ~cli_path ~goal:"Continue the work"
+              ~tools ?argument_source:(F.source ~base_path ~keeper_name:"claude-pre-dispatch" seed)
+              ~initial_messages:F.history ~turn_start:(F.boundary seed)
+              ~librarian_front:F.librarian_front
+              ~on_transmitted_model_input:(fun input -> transmissions:=input :: !transmissions) () in
+            match attempt.result with
+            | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error) in
+          run F.seed;
+          let envelopes = In_channel.with_open_bin first_prompt_marker In_channel.input_all
+            |> content_of_wire_message |> Yojson.Safe.from_string
+            |> Yojson.Safe.Util.member "history" |> Yojson.Safe.Util.to_list in
+          F.check_start ~enabled ~reader envelopes;
+          F.check_resume_did_not_store base_path;
+          (* Same raw history, but its last closed cycle is now completed.
+             A fresh memo would store this distinct SHA if Resume projected it. *)
+          run F.history;
+          (match List.rev !transmissions with
+           | [Keeper_official_client_host.Whole_input_transmitted _;
+              Keeper_official_client_host.Held_by_client_session] -> ()
+           | _ -> fail "expected one Start and one client-held Resume");
+          let resumed = In_channel.with_open_bin second_prompt_marker In_channel.input_all
+            |> content_of_wire_message in
+          check bool "Resume does not resend the historical argument" false
+            (String_util.contains_substring resumed (Yojson.Safe.to_string F.old_input));
+          F.check_resume_did_not_store base_path;
+          check bool "raw checkpoint source remains unchanged" true (F.snapshot ()=before))))
+    [true;false]
+;;
+
+let test_original_outbox_result_is_delivered_on_start_and_resume () =
+  let base_path = temp_workspace () in
+  let keeper_name = "claude-fixture" in
+  let store f = Eio_main.run (fun env ->
+    Fs_compat.set_fs env#fs;
+    Fun.protect ~finally:Fs_compat.clear_fs f) in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  let retain turn_id value = store (fun () ->
+    Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+      {thread_id="original-codex-session";turn_id;call_id="original-call";
+       tool_name="Execute";arguments=`String "original-effect-no-replay";response=`String value}
+    |> get) in
+  let count () = store (fun () -> Keeper_client_tool_outbox.load ~base_path ~keeper_name
+    |> get |> Keeper_client_tool_outbox.receipt_ids |> List.length) in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let system_path = Filename.concat base_path "outbox-start.txt"
+    and prompt_path = Filename.concat base_path "outbox-resume.json" in
+    let transmissions = ref [] in
+    let on_request_attribution ~runtime_id:_ ~tools:_ ~transmitted =
+      transmissions := transmitted :: !transmissions in
+    with_fixture_sequence ~first_system_marker:system_path ~second_prompt_marker:prompt_path
+      [Emit (assistant ~turn_id:"outbox-start" "read original result");
+       Emit (result ~turn_id:"outbox-start" "read original result")]
+      [Emit (assistant ~turn_id:"outbox-resume" "read newer original result");
+       Emit (result ~turn_id:"outbox-resume" "read newer original result")]
+      (fun cli_path ->
+        let run goal = match run_keeper_turn ~base_path ~cli_path ~goal ~on_request_attribution () with
+          | Ok result -> result | Error error -> fail (Agent_core.Error.to_string error) in
+        retain "original-1" "ORIGINAL_RESULT_FOR_CLAUDE_START";
+        let first = run "Use the original result" in
+        check bool "Claude Start receives original cross-runtime result" true
+          (String_util.contains_substring (In_channel.with_open_bin system_path In_channel.input_all)
+             "ORIGINAL_RESULT_FOR_CLAUDE_START");
+        check int "completed Start acknowledges the original result" 0 (count ());
+        retain "original-2" "ORIGINAL_RESULT_FOR_CLAUDE_RESUME";
+        let second = run "Use the newer original result" in
+        check bool "the same vendor session consumes the newer result" true
+          (first.session_id = second.session_id);
+        (match List.rev !transmissions with
+         | [Keeper_official_client_host.Whole_input_transmitted _;
+            Keeper_official_client_host.Held_by_client_session] -> ()
+         | _ -> fail "original result must pass through an actual Start and held Resume");
+        check bool "Claude Resume receives exact newer original result" true
+          (String_util.contains_substring (In_channel.with_open_bin prompt_path In_channel.input_all)
+             "ORIGINAL_RESULT_FOR_CLAUDE_RESUME");
+        check int "completed Resume acknowledges only its loaded result" 0 (count ())))
+;;
+
+let test_rejecting_keeper_accept_preserves_loaded_and_new_originals () =
+  let base_path = temp_workspace () in
+  let keeper_name = "claude-fixture" in
+  let effects = ref 0 and accept_calls = ref 0 in
+  let store f = Eio_main.run (fun env ->
+    Fs_compat.set_fs env#fs;
+    Fun.protect ~finally:Fs_compat.clear_fs f) in
+  let get = function Ok value -> value | Error detail -> fail detail in
+  let pending () = store (fun () ->
+    Keeper_client_tool_outbox.load ~base_path ~keeper_name |> get) in
+  let tool = Agent_core.Tool.create ~name:"masc_probe" ~description:"Complete one original effect"
+    ~parameters:[{Agent_core.Types.name="marker";description="Fixture marker";param_type=String;required=true}]
+    (fun _ -> incr effects;
+      Ok {Agent_core.Types.content="MASC_TOOL_RESULT";content_blocks=None;_meta=None}) in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    store (fun () -> Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+      {thread_id="previous-thread";turn_id="previous-turn";call_id="previous-call";
+       tool_name="Execute";arguments=`String "no-effect-replay";
+       response=`String "PREVIOUS_ORIGINAL_RESULT"} |> get);
+    with_fixture_sequence
+      [Emit_and_read mcp_initialize; Emit mcp_initialized_notification;
+       Emit_and_read mcp_list; Emit_and_read mcp_call;
+       Emit (assistant ~turn_id:"rejected-after-tool" "TOOL_EXECUTED");
+       Emit (result ~turn_id:"rejected-after-tool" "TOOL_EXECUTED")]
+      [Emit (assistant ~turn_id:"accepted-originals" "USED_ORIGINAL_RESULTS");
+       Emit (result ~turn_id:"accepted-originals" "USED_ORIGINAL_RESULTS")]
+      (fun cli_path ->
+        let rejected = run_keeper_turn ~tools:[tool] ~base_path ~cli_path
+          ~goal:"Use the earlier result and complete one independent tool"
+          ~accept:(fun _ -> incr accept_calls;false) () in
+        check bool "the real routed Keeper rejects its caller acceptance predicate" true
+          (Result.is_error rejected);
+        check int "caller acceptance actually ran" 1 !accept_calls;
+        check int "the fixture effect ran exactly once before rejection" 1 !effects;
+        let originals = pending () in
+        check int "both previously loaded and newly written originals survive actual rejection" 2
+          (List.length (Keeper_client_tool_outbox.receipt_ids originals));
+        let context = String.concat "" (Keeper_client_tool_outbox.developer_context originals) in
+        List.iter (fun bytes -> check bool "original data survives caller rejection" true
+          (String_util.contains_substring context bytes))
+          ["PREVIOUS_ORIGINAL_RESULT";"MASC_TOOL_RESULT"];
+        (match run_keeper_turn ~tools:[tool] ~base_path ~cli_path
+          ~goal:"Continue from the exact original results"
+          ~accept:(fun _ -> incr accept_calls;true) () with
+         | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+        check int "later acceptance runs without replaying the original tool" 1 !effects;
+        check int "the accepted later consumer ACKs the exact original set" 0
+          (List.length (Keeper_client_tool_outbox.receipt_ids (pending ())))))
+;;
+
+let () =
+  (* Pin the prompt directory explicitly. Under dune the registry falls back to
+     [DUNE_SOURCEROOT], but a test executable run directly has neither that
+     variable nor a [config/prompts] under its cwd; the unified autonomous
+     cycle then dies in setup with "missing prompt keeper.worldview", which
+     reads like a lifecycle regression and has already been misattributed as
+     one. Sibling keeper suites pin the same directory the same way. *)
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  run
+    "keeper_claude_code_runtime"
+    [ ( "async result outbox",[test_case "original result is delivered on Start and Resume" `Quick
+           test_original_outbox_result_is_delivered_on_start_and_resume;
+         test_case "real Keeper acceptance rejection preserves loaded and new originals" `Quick
+           test_rejecting_keeper_accept_preserves_loaded_and_new_originals])
+    ; ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
+        ; test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    ; ( "usage scope"
+      , [ test_case "result-only usage keeps client-turn scope" `Quick
+            test_result_only_usage_keeps_client_turn_scope
+        ; test_case "refused turn reports its spend to the Keeper" `Quick
+            test_refused_turn_reports_its_spend_to_the_keeper
+        ; test_case "real two-request turn routes spend and occupancy apart" `Quick
+            test_real_two_request_turn_routes_spend_and_occupancy_apart
+        ; test_case "assistant usage without result usage keeps spend unavailable" `Quick
+            test_assistant_usage_without_result_usage_keeps_spend_unavailable
+        ; test_case "child tool metadata does not replace the root observation" `Quick
+            test_child_tool_metadata_does_not_replace_root_observation
+        ] )
+    ; ( "lifecycle"
+      , [ test_case "actual Start authority User and later absent/changed Resume" `Quick
+            test_start_authority_is_user_context_not_standing_system
+        ; test_case "actual argument Start and held Resume" `Quick test_actual_start_demotes_arguments_but_resume_keeps_them_held
+        ; test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
+        ; test_case "blank completion rejects progress but preserves session" `Quick
+            test_blank_completion_rejected_without_losing_session
+        ; test_case "resume prompt carries the task reference" `Quick
+            test_resume_prompt_carries_the_task_reference
+        ; test_case "resume prompt sends only changed blocks" `Quick
+            test_resume_prompt_sends_only_changed_blocks
+        ; test_case "a whole carrier supersedes held blocks" `Quick
+            test_whole_carrier_supersedes_held_blocks
+        ; test_case
+            "Agent Core checkpoint starts official-client turn"
+            `Quick
+            test_agent_core_checkpoint_starts_official_client_turn
+        ; test_case "native Gate resume refused as full ends the Gate and frees the session" `Quick
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~native_gate:true
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
+        ; test_case
+            "shrinks history after the CLI's blocking_limit refusal"
+            `Quick
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
+        ; test_case
+            "shrinks history after the CLI's rapid_refill_breaker refusal"
+            `Quick
+            (test_keeper_shrinks_history_after_statusless_context_error
+               ~overflow_frames:[ rapid_refill_breaker_diagnostic; rapid_refill_breaker_result ])
+        ; test_case
+            "projects typed tool history and lifecycle"
+            `Quick
+            test_keeper_projects_typed_tool_history_and_lifecycle
+        ; test_case "projects MASC tool" `Quick test_keeper_projects_masc_tool
+        ; test_case
+            "checkpointless repeated reads cross Owner autonomous cycles"
+            `Quick
+            test_checkpointless_reads_cross_unified_owner_cycles
+        ; test_case
+            "distinguishes native and MASC tool provenance"
+            `Quick
+            test_keeper_distinguishes_native_and_masc_tool_provenance
+        ; test_case
+            "streams text and tool events"
+            `Quick
+            test_keeper_streams_text_and_tool_events
+        ; test_case
+            "two Claude responses stream apart"
+            `Quick
+            test_keeper_streams_two_claude_responses_apart
+        ; test_case "thinking stays ahead of tools and outside answer text" `Quick
+            test_keeper_preserves_claude_thinking_before_tools
+        ; test_case "native completion through adapter, journal, SSE and TUI" `Quick test_native_completion_reaches_tui
+        ; test_case "root heartbeat through receiver, scoped redaction, autonomous journal and TUI" `Quick
+            (fun () -> test_root_heartbeat_reaches_scoped_journal_and_tui ())
+        ; test_case "root Agent retry through adapter, held content and both journals" `Quick
+            (fun () -> test_root_heartbeat_reaches_scoped_journal_and_tui ~retry:true ())
+        ; test_case
+            "no break across a MASC tool row"
+            `Quick
+            test_keeper_adds_no_break_across_a_masc_tool_row
+        ; test_case
+            "tools-support false omits MCP bridge"
+            `Quick
+            test_tools_support_false_omits_mcp_bridge
+        ; test_case
+            "post-effect transport enters recovery"
+            `Quick
+            test_post_effect_transport_enters_recovery
+        ; test_case "operator interruption preserves previous native settlement" `Quick
+            test_operator_interrupt_preserves_previous_native_settlement
+        ; test_case
+            "does not retry context error after tool effect"
+            `Quick
+            test_keeper_does_not_retry_context_error_after_tool_effect
+        ; test_case
+            "context overflow maps to input-rejected recovery"
+            `Quick
+            test_context_overflow_maps_to_input_rejected_recovery
+        ; test_case "Gate resume overflow is session-full" `Quick
+            test_gate_resume_overflow_is_session_full
+        ; test_case
+            "pre-effect provider rejection keeps failover open"
+            `Quick
+            test_pre_effect_provider_rejection_keeps_failover_open
+        ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
+        ; test_case "access refusal preserves structured status and rotation" `Quick
+            test_access_refusal_uses_status_and_keeps_pre_effect_rotation
+        ; test_case "access refusal after native tool remains fenced" `Quick
+            test_access_refusal_after_native_tool_remains_fenced
+        ; test_case "quota after tool effect remains fenced" `Quick
+            test_quota_after_tool_effect_remains_fenced
+        ; test_case "quota after native tool remains fenced" `Quick
+            test_quota_after_native_tool_remains_fenced
+        ; test_case
+            "spawn failure fences the claim for recovery"
+            `Quick
+            test_spawn_failure_fences_claim
+        ; test_case
+            "subscription spawn failure is pre-dispatch"
+            `Quick
+            test_subscription_spawn_failure_is_pre_dispatch
+        ; test_case
+            "truncated auth probe keeps cli stderr"
+            `Quick
+            test_truncated_auth_probe_keeps_cli_stderr
+        ; test_case
+            "cut auth probe is retried once"
+            `Quick
+            test_cut_auth_probe_is_retried_once
+        ; test_case
+            "cut auth probe reports stdout bytes"
+            `Quick
+            test_cut_auth_probe_reports_stdout_bytes
+        ; test_case
+            "truncated auth probe without stderr keeps detail"
+            `Quick
+            test_truncated_auth_probe_without_stderr_keeps_detail
+        ; test_case
+            "truncated auth probe truncates long stderr"
+            `Quick
+            test_truncated_auth_probe_truncates_long_stderr
+        ; test_case
+            "blank auth stderr keeps detail bare"
+            `Quick
+            test_blank_auth_stderr_keeps_detail_bare
+        ; test_case
+            "turn spawn failure is pre-dispatch with tools"
+            `Quick
+            test_turn_spawn_failure_is_pre_dispatch_with_tools
+        ; test_case
+            "unbounded turn keeps subscription probe bounded"
+            `Quick
+            test_unbounded_turn_keeps_subscription_probe_bounded
+        ; test_case "memory reprojection reaches the real CLI fixture input" `Quick
+            test_memory_capacity_reprojection_reaches_cli_input
+        ; test_case
+            "unshrinkable blocking_limit reports no effect"
+            `Quick
+            (test_unshrinkable_context_limit_reports_no_effect
+               ~overflow_frames:[ blocking_limit_diagnostic; blocking_limit_result ])
+        ; test_case
+            "unshrinkable rapid_refill_breaker without activity reports no effect"
+            `Quick
+            (test_unshrinkable_context_limit_reports_no_effect
+               ~overflow_frames:[ rapid_refill_breaker_diagnostic; rapid_refill_breaker_result ])
+        ; test_case
+            "blank system prompt is refused not defaulted"
+            `Quick
+            test_blank_system_prompt_is_refused_not_defaulted
+        ; test_case
+            "explicit provider terminal follows repeated reads"
+            `Quick
+            test_provider_terminal_after_repeated_reads_keeps_root_context
+        ; test_case
+            "typed terminal stop records pre-result turn identity"
+            `Quick
+            test_typed_terminal_stop_records_pre_result_turn_identity
+        ; test_case
+            "post-tool hook failure survives provider terminal"
+            `Quick
+            test_post_tool_hook_failure_survives_provider_terminal
+        ; test_case
+            "every posture names the schema lookup"
+            `Quick
+            test_every_posture_names_the_schema_lookup
+        ; test_case "task input and routed dispatch retain exact native envelope" `Quick
+            test_task_binding_freezes_exact_envelope_and_dispatch
+        ; test_case "Child read closed codec and exact requested suffix" `Quick
+            test_child_read_closed_codec_and_exact_suffix
+        ; test_case "Child hints never certify same-tail historical integrity" `Quick
+            test_child_read_hints_do_not_audit_tampered_history
+        ; test_case "Child discovery retains bound empty-directory authority" `Quick
+            test_child_read_discovery_bound_directory_authority
+        ; test_case "child durable driver receipts redaction replay and ticket scope" `Quick
+            test_child_journal_driver_replay_redaction_and_scope
+        ; test_case "child concurrent exact replay has one disk sequence" `Quick
+            test_child_journal_concurrent_exact_replay
+        ; test_case "child durable uncertain commit and independent cleanup" `Quick
+            test_child_journal_commit_uncertainty_and_cleanup
+        ; test_case "child durable suffix still audits corrupt prefix" `Quick
+            test_child_journal_full_audit_cannot_hide_prefix
+        ; test_case "received child persists through real closed autonomous sink" `Quick
+            test_child_journal_received_after_closed_root
+        ; test_case "child persistence failure cannot mutate root answer" `Quick
+            test_child_journal_failure_preserves_root
+        ; test_case "native task journal retains authority and exact replay" `Quick
+            test_native_task_journal_commit_replay_and_scope
+        ; test_case "native task journal serializes writers and distinguishes corruption" `Quick
+            test_native_task_journal_atomicity_recovery_and_failure
+        ; test_case "native task production read consumes actual bound observations" `Quick
+            test_native_task_http_reads_actual_bound_observations
+        ; test_case "Child HTTP reads actual Driver snapshots with current redaction and ticket3" `Quick
+            test_child_http_reads_actual_driver_observations
+        ; test_case "task persistence callback failure preserves root answer" `Quick
+            test_native_task_journal_callback_failure_preserves_root_answer
+        ; test_case "autonomous task journal outlives its closed root stream" `Quick
+            test_native_task_journal_autonomous_closed_root
+        ; test_case "task journal wait does not hold root stream" `Quick
+            test_native_task_journal_wait_does_not_hold_root_stream
+        ; test_case "SQLite validation scope and incarnation cursor" `Quick
+            test_native_task_sqlite_validation_scope_and_cursor
+        ; test_case "unchecked change hints retain full audit corruption boundary" `Quick
+            test_native_task_change_hints_keep_full_audit_separate
+        ; test_case "unchecked hints preserve directory authority" `Quick
+            test_native_task_change_hint_directory_authority
+        ; test_case "SQLite commit cleanup and known process issues" `Quick
+            test_native_task_sqlite_commit_cleanup_and_known_issues
+        ; test_case "non-SQLite read and observe remain typed failures" `Quick
+            test_native_task_invalid_database_remains_typed
+        ; test_case "SQLite discovery checks empty directory authority" `Quick
+            test_native_task_sqlite_empty_directory_authority
+        ; test_case "SQLite discovery preserves bound directory failure" `Quick
+            test_native_task_sqlite_bound_directory_failure
+        ; test_case "later command witness cannot adopt an unattributed task owner" `Quick
+            test_task_binding_does_not_adopt_an_earlier_unattributed_call
+        ; test_case "task metadata retains closed native owner without flushing model content" `Quick
+            test_task_callback_keeps_closed_native_owner_and_model_content
+        ; test_case "complete child callback keeps original input and separate root projection" `Quick
+            test_child_callback_binds_original_input_without_root_events
+        ; test_case "child/task callbacks share failed-first original evidence" `Quick
+            test_child_and_task_callbacks_share_failed_original_evidence
+        ; test_case
+            "a closed client connection is typed"
+            `Quick
+            test_a_closed_client_connection_is_typed
+        ; test_case "incomplete user write timeout fences retry" `Quick
+            test_incomplete_user_write_timeout_fences_retry
+        ; test_case
+            "a process exit before turn admission rotates to the next lane candidate"
+            `Quick
+            test_exit_before_turn_admission_rotates_to_next_candidate
+        ; test_case
+            "an unhandled runtime exception is a masc internal error"
+            `Quick
+            test_an_unhandled_runtime_exception_is_internal
+        ; test_case
+            "an unhandled runtime exception recovers as protocol failed"
+            `Quick
+            test_an_unhandled_runtime_exception_recovers_as_protocol_failed
+        ] )
+    ; ( "start seed"
+      , [ test_case
+            "a start seed begins at the carried front"
+            `Quick
+            test_a_start_seed_begins_at_the_carried_front
+        ; test_case
+            "the declared ceiling wins when it cuts deeper"
+            `Quick
+            test_the_declared_ceiling_wins_when_it_cuts_deeper
+        ; test_case
+            "a cold start with no completed turn carries everything"
+            `Quick
+            test_a_cold_start_with_no_completed_turn_carries_everything
+        ; test_case
+            "a cold start begins at the turn start"
+            `Quick
+            test_a_cold_start_begins_at_the_turn_start
+        ; test_case
+            "the Librarian front reaches the list and its error refuses"
+            `Quick
+            test_the_librarian_front_reaches_the_list_and_its_error_refuses
+        ; test_case
+            "a working state that would displace atoms stays out"
+            `Quick
+            test_a_working_state_that_would_displace_atoms_stays_out
+        ; test_case
+            "a working state that displaces nothing goes"
+            `Quick
+            test_a_working_state_that_displaces_nothing_goes
+        ; test_case
+            "a working state beside the turn carrier passes the composition check"
+            `Quick
+            test_a_working_state_beside_the_turn_carrier_passes_the_composition_check
+        ; test_case
+            "a range the ceiling fits goes as cut"
+            `Quick
+            test_a_range_the_ceiling_fits_goes_as_cut
+        ] )
+    ]
+;;

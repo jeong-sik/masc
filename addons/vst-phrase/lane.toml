@@ -1,0 +1,49 @@
+id = "vst-phrase"
+revision = "0.1.0"
+title = "Native MIDI phrase playback"
+ui_category = "voice_media"
+contributions = ["observe"]
+image = "masc-lane-vst-phrase:0.1.0"
+command = ["python3", "server.py"]
+
+[world.outputs.phrase]
+lanes = ["phrase"]
+
+[resources]
+cpus = 0.5
+memory_bytes = 134217728
+pids = 16
+max_reply_bytes = 4194304
+
+[interface]
+presentation = '''{
+  "description": "Latest native phrase render and local player process state",
+  "readings": [
+    {"lane_id":"phrase","path":["state"],"label":"State","format":"text"},
+    {"lane_id":"phrase","path":["selection","name"],"label":"Instrument","format":"text"},
+    {"lane_id":"phrase","path":["selection","preset_path"],"label":"Preset","format":"text"},
+    {"lane_id":"phrase","path":["render","midi_sha256"],"label":"MIDI SHA-256","format":"text"},
+    {"lane_id":"phrase","path":["render","duration_ms"],"label":"Rendered audio","unit":"ms","format":"number"},
+    {"lane_id":"phrase","path":["error"],"label":"Failure","format":"text"}
+  ]
+}'''
+binding_schema = '''{
+  "type": "object",
+  "properties": {
+    "sources": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_id": {"type": "string", "const": "vst-phrase"},
+          "kind": {"type": "string", "const": "snapshot_file"},
+          "path": {"type": "string", "minLength": 1,
+            "description": "Native score companion snapshot.json on this host"}
+        },
+        "required": ["source_id", "kind", "path"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["sources"], "additionalProperties": false
+}'''

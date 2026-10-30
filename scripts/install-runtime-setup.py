@@ -1,0 +1,3515 @@
+#!/usr/bin/env python3
+"""Select runtime connections and validate them before publishing together.
+
+Python 3.8 stdlib only. --spec names a JSON file, never a credential value.
+The wizard requires real response/tool verification; --spec stays offline unless
+--verify is supplied. Offline configuration validation is not inference proof.
+"""
+import argparse
+from dataclasses import dataclass
+import getpass
+import json
+import math
+import os
+from pathlib import Path
+import re
+import select
+import shlex
+import shutil
+import stat
+import sys
+import subprocess
+import tempfile
+import termios
+import time
+import tty
+from typing import Optional
+from urllib.parse import urlsplit
+from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.error import HTTPError, URLError
+
+CHOICES = {
+    'ollama': ('ollama-http', None),
+    'llama_cpp': ('openai-compatible-http', None),
+    'vllm': ('openai-compatible-http', None),
+    'openai_compatible': ('openai-compatible-http', None),
+    'messages': ('messages-http', None),
+    'claude_code': ('claude-code', 'claude'),
+    'codex': ('codex-app-server', 'codex'),
+    'antigravity': ('antigravity-cli', 'agy'),
+    'muse': ('muse-serve', 'muse'),
+}
+
+
+class SetupError(Exception):
+    pass
+
+
+class VerificationError(SetupError):
+    def __init__(self, runtime_id, failure=None):
+        self.runtime_id = runtime_id
+        self.failure = failure if isinstance(failure, dict) else {}
+        super().__init__('The selected model did not pass response and tool verification. Configuration was preserved.')
+
+
+def color_enabled():
+    # https://no-color.org: any non-empty NO_COLOR turns color off. Color is
+    # only for a person at a terminal; logs and pipes get the same plain text.
+    return sys.stderr.isatty() and os.environ.get('TERM') != 'dumb' and not os.environ.get('NO_COLOR')
+
+
+# A small, fixed palette: state is told apart by more than one hue (bold,
+# dim, a leading mark) so it still reads on a monochrome or low-contrast theme.
+STYLES = {'title': '1', 'hint': '2', 'current': '1;36', 'ok': '32', 'fail': '1;31',
+          'warn': '1;33', 'info': '36'}
+
+
+def paint(value, style):
+    if not style or not color_enabled():
+        return value
+    return '\x1b[{}m{}\x1b[0m'.format(STYLES[style], value)
+
+
+# The binary's verification codes are a closed set (runtime_verification.ml);
+# this table only chooses how each is shown. Temporary causes are yellow and
+# say so, so a busy provider is never mistaken for a broken configuration.
+# A spent quota or a rate limit never fails a save: MASC publishes that
+# runtime unmeasured and the receipt names it (unmeasured_runtimes).
+FAILURE_CAUSES = {
+    'provider_overloaded': ('Provider busy (temporary)', 'warn',
+                            'The provider side failed. Retry shortly, or exclude this connection for now.'),
+    'timed_out': ('No answer in time (often temporary)', 'warn',
+                  'Retry once; if it keeps timing out, check the endpoint or pick a smaller model.'),
+    'provider_unreachable': ('Network: provider unreachable', 'warn',
+                             'Check the endpoint URL, proxy and network, then retry.'),
+    'model_not_found': ('Model not found', 'fail',
+                        'Check the model name against the endpoint\'s model list, then choose connections again.'),
+    'provider_auth_refused': ('Credential refused', 'fail',
+                              'Check the API key variable or sign in again, then retry.'),
+    'missing_credential': ('Credential missing', 'fail',
+                           'Export the named variable in the shell that runs MASC, then retry.'),
+    'invalid_credential': ('Credential unusable', 'fail',
+                           'Fix or replace the declared credential, then retry.'),
+    'client_not_authenticated': ('Not signed in', 'fail',
+                                 'Sign in with the official CLI (offered below), then retry.'),
+    'client_not_started': ('Client not installed or not starting', 'fail',
+                           'Install the official CLI or fix its path, then retry.'),
+}
+
+
+def failure_cause(failure):
+    return FAILURE_CAUSES.get(failure.get('code'),
+                              # An unlisted code (provider_rejected among them)
+                              # may still come from a limit this side cannot see.
+                              ('Model check failed', 'fail', None))
+
+
+def print_verification_reason(failure):
+    # Native verification owns safe fixed diagnostics; never display provider
+    # stderr or HTTP bodies here. The detail line is the official client's own
+    # account of what it looked for (a missing sign-in, a binary that would not
+    # launch), written by the adapter, not by the provider.
+    code = failure.get('code')
+    message = failure.get('message')
+    if model_text(code) and model_text(message):
+        label, style, _ = failure_cause(failure)
+        print(paint('[' + label + '] ', style) + terminal_text(code) + ': ' + terminal_text(message),
+              file=sys.stderr)
+    detail = failure.get('detail')
+    if model_text(detail):
+        print(paint('  ' + terminal_text(detail), 'hint'), file=sys.stderr)
+
+
+def print_verification_next_step(failure):
+    _, style, step = failure_cause(failure)
+    if step:
+        print(paint('Next: ', style) + step, file=sys.stderr)
+
+
+def run_with_elapsed(argv, label, env=None):
+    """Run a child whose work can take a while, showing that it is alive.
+
+    Provider checks wait on remote models; without a visible clock a slow or
+    throttled provider looks exactly like a hung installer. Off a terminal the
+    child runs exactly as before."""
+    # NO_COLOR removes color, not the clock: the line is shown on any terminal
+    # that can redraw it, and paint() alone decides on color.
+    if not label or not sys.stderr.isatty() or os.environ.get('TERM') == 'dumb':
+        return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    started = time.monotonic()
+    with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env) as process:
+        try:
+            while True:
+                try:
+                    stdout, stderr = process.communicate(timeout=1)
+                    break
+                except subprocess.TimeoutExpired:
+                    elapsed = int(time.monotonic() - started)
+                    print('\r\x1b[2K' + paint('… ' + label, 'info') +
+                          paint(' {}s · Ctrl-C stops and keeps the previous configuration'.format(elapsed), 'hint'),
+                          end='', file=sys.stderr, flush=True)
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            print('\r\x1b[2K', end='', file=sys.stderr, flush=True)
+    return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+
+# `masc setup` gives the server it starts the workspace's own values for these
+# two in place of the terminal's (Config_dir_resolver.environment_for_workspace).
+# Every wizard child given a workspace (--base-path on its argv) runs without
+# them, so it opens the same runtime.toml the server will and not one the
+# terminal's MASC_CONFIG_DIR names (#43144). Stripping (rather than setting
+# workspace values) is enough because the child always receives --base-path,
+# and it avoids porting the resolver's path normalization into this script.
+# A child without --base-path keeps the inherited environment: its ambient
+# overrides are the operator's, not the wizard's to remove.
+WORKSPACE_OWNED_ENVIRONMENT = ('MASC_BASE_PATH', 'MASC_CONFIG_DIR')
+
+
+def workspace_child_env():
+    return {key: value for key, value in os.environ.items() if key not in WORKSPACE_OWNED_ENVIRONMENT}
+
+
+def native_setup_command(binary, command, payload=None, arguments=(), progress=None):
+    # The compiled renderer is the only identity authority. This helper handles
+    # terminal interaction and private IPC; it never renders or edits TOML.
+    if not binary:
+        raise SetupError('Runtime setup requires the installed MASC executable')
+    with tempfile.TemporaryDirectory(prefix='masc-setup-request-') as directory:
+        argv = [str(binary), command] + list(arguments)
+        if payload is not None:
+            path = Path(directory) / 'request.json'
+            atomic_write(path, json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(), 0o600)
+            argv += ['--spec' if command == 'runtime-setup-render' else '--request', str(path)]
+        child_env = workspace_child_env() if '--base-path' in list(arguments) else None
+        result = run_with_elapsed(argv, progress, env=child_env)
+    try:
+        receipt = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        raise SetupError('MASC did not return a setup result. Inspect the workspace before retrying.')
+    if not isinstance(receipt, dict):
+        raise SetupError('MASC returned an invalid setup result')
+    if result.returncode:
+        if receipt.get('schema') == 'masc.runtime_setup_error.v1':
+            if receipt.get('kind') == 'verification_failed' and model_text(receipt.get('runtime_id')):
+                raise VerificationError(receipt['runtime_id'], receipt.get('failure'))
+            if model_text(receipt.get('error')):
+                raise SetupError(receipt['error'])
+            # The kind is one of the binary's fixed names, so it is safe to show
+            # even when the sentence beside it is not; without it the operator
+            # could not tell a killed verification from a locked workspace.
+            if model_text(receipt.get('kind')):
+                raise SetupError('Runtime setup did not finish ({}). Inspect the workspace before retrying.'
+                                 .format(terminal_text(receipt['kind'])))
+        raise SetupError('Runtime setup did not finish (exit {}). Inspect the workspace before retrying.'
+                         .format(result.returncode))
+    return receipt
+
+
+def text(spec, key):
+    value = spec.get(key)
+    if not isinstance(value, str) or not value or value != value.strip() or any(ord(c) < 32 for c in value):
+        raise SetupError(key + ' must be a nonempty single-line string without surrounding whitespace')
+    return value
+
+
+def toml(value):
+    return json.dumps(value, ensure_ascii=False)
+
+
+def table(path, fields, array=False):
+    header = '.'.join(toml(part) for part in path)
+    return '\n' + ('[[' + header + ']]' if array else '[' + header + ']') + '\n' + ''.join(
+        toml(key) + ' = ' + toml(value) + '\n' for key, value in fields.items())
+
+
+def render(spec, binary=None, base_path=None):
+    if not isinstance(spec, dict):
+        raise SetupError('spec must be a JSON object')
+    named = 'provider_id' in spec
+    if named:
+        choice = text(spec, 'choice')
+        if choice not in CHOICES:
+            raise SetupError('unsupported runtime choice')
+        protocol, default_command = CHOICES[choice]
+        if default_command is not None:
+            raise SetupError('a named catalog provider is an HTTP connection')
+        allowed = {'choice', 'model', 'max_context', 'tools', 'streaming',
+                   'endpoint', 'api_key_env', 'credential_file', 'provider_kind',
+                   'provider_id', 'provider_display_name', 'model_key', 'provider_declared',
+                   'reasoning_effort', 'wizard_default'}
+        if set(spec) - allowed:
+            raise SetupError('unexpected setup fields: ' + ', '.join(sorted(set(spec) - allowed)))
+        model = text(spec, 'model')
+        context = spec.get('max_context')
+        if type(context) is not int or context <= 0:
+            raise SetupError('max_context must be a positive integer supplied by the operator')
+        for key in ('tools', 'streaming'):
+            if type(spec.get(key)) is not bool:
+                raise SetupError(key + ' must be an explicitly declared boolean')
+        endpoint = text(spec, 'endpoint')
+        try:
+            url = urlsplit(endpoint)
+            valid = url.scheme in ('http', 'https') and url.hostname and not (url.username or url.password or url.query or url.fragment)
+            _ = url.port
+        except ValueError:
+            valid = False
+        if not valid:
+            raise SetupError('endpoint must be an HTTP(S) URL without embedded credentials, query or fragment')
+        key = spec.get('api_key_env', '')
+        credential_file = spec.get('credential_file', '')
+        if key:
+            if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
+                raise SetupError('api_key_env must name an environment variable, not a credential value')
+        elif (not isinstance(credential_file, str) or not credential_file
+                or credential_file != credential_file.strip()
+                or any(ord(c) < 32 for c in credential_file) or not os.path.isabs(credential_file)):
+            raise SetupError('a named catalog provider needs api_key_env or an absolute credential_file')
+        provider = text(spec, 'provider_id')
+        model_key = provider + '-' + text(spec, 'model_key')
+        runtime = ''
+        if spec.get('provider_declared') is not True:
+            runtime += table(('providers', provider), {'display-name': text(spec, 'provider_display_name'),
+                                                       'protocol': protocol, 'endpoint': endpoint})
+            runtime += table(('providers', provider, 'healthcheck'),
+                             {'path': '/api/tags' if choice == 'ollama' else '/models'})
+            credential = {'type': 'env', 'key': key} if key else {'type': 'file', 'path': credential_file}
+            runtime += table(('providers', provider, 'credentials'), credential)
+        model_fields = {'api-name': model, 'tools-support': spec['tools'], 'streaming': spec['streaming']}
+        if spec.get('reasoning_effort'):
+            model_fields.update(**{'thinking-support': True, 'reasoning-effort': text(spec, 'reasoning_effort')})
+        runtime += table(('models', model_key), model_fields)
+        binding = {'wizard-default': True} if spec.get('wizard_default') is True else {}
+        runtime += table((provider, model_key), binding)
+        return provider + '.' + model_key, runtime.encode()
+
+    if not binary:
+        raise SetupError('Runtime setup requires the installed MASC executable')
+    rendered = native_setup_command(binary, 'runtime-setup-render', spec,
+        arguments=['--base-path', str(base_path)] if base_path is not None else ())
+    if (not model_text(rendered.get('runtime_id'))
+            or not isinstance(rendered.get('runtime_toml'), str)):
+        raise SetupError('MASC returned an invalid runtime specification')
+    return rendered['runtime_id'], rendered['runtime_toml'].encode()
+
+
+def atomic_write(path, content, mode):
+    fd, temporary = tempfile.mkstemp(prefix='.' + path.name + '-', dir=str(path.parent))
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            os.fchmod(stream.fileno(), mode)
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, str(path))
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def configured_inventory(binary, base_path):
+    inventory = native_setup_command(binary, 'runtime-setup-inventory',
+                                     arguments=['--base-path', str(base_path)])
+    if not isinstance(inventory.get('runtimes'), list) or not setup_revision(inventory.get('setup_revision')):
+        raise SetupError('invalid workspace runtime inventory')
+    ids = [row.get('id') for row in inventory['runtimes'] if isinstance(row, dict)]
+    if len(ids) != len(inventory['runtimes']) or not all(model_text(value) for value in ids) or len(set(ids)) != len(ids):
+        raise SetupError('invalid or duplicate workspace runtime identities')
+    return inventory
+
+
+def setup_revision(value):
+    return isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value) is not None
+
+
+def configure(binary, base_path, spec):
+    return configure_many(binary, base_path, [spec])
+
+
+def configure_many(binary, base_path, specs, selected_ids=None, verify=False, default_id=None,
+                   expected_revision=None):
+    if not isinstance(specs, list):
+        raise SetupError('connections must be a list')
+    if selected_ids is not None and (not isinstance(selected_ids, list) or not all(model_text(value) for value in selected_ids)):
+        raise SetupError('runtime_ids must be a list of runtime identifiers')
+    if default_id is not None and not model_text(default_id):
+        raise SetupError('default_runtime_id must be a runtime identifier')
+    if expected_revision is None:
+        expected_revision = configured_inventory(binary, base_path)['setup_revision']
+    if not setup_revision(expected_revision):
+        raise SetupError('Refresh the connection list before saving')
+    rendered = [render(spec, binary, base_path=base_path) for spec in specs]
+    selected = list(dict.fromkeys(selected_ids if selected_ids is not None else [row[0] for row in rendered]))
+    if not selected:
+        raise SetupError('select at least one runtime')
+    default_id = selected[0] if default_id is None else default_id
+    if default_id not in selected:
+        raise SetupError('the default must be one of the selected runtimes')
+    selected = [default_id] + [value for value in selected if value != default_id]
+    result = native_setup_command(binary, 'runtime-setup-batch', dict(
+        connections=specs, runtime_ids=selected, default_runtime_id=default_id,
+        expected_revision=expected_revision, verify=verify), arguments=['--base-path', str(base_path)],
+        progress='Checking each model with a real reply and a harmless tool call' if verify else None)
+    unmeasured = unmeasured_runtimes(result, selected) if verify else None
+    kept = kept_runtimes(result, selected) if verify else None
+    if (result.get('runtime_id') != default_id or result.get('runtime_ids') != selected
+            or result.get('configured') is not True or result.get('validation') != 'passed'
+            or (result.get('readiness') != ('verified' if verify else 'not_probed')
+                and unmeasured is None and kept is None)
+            or (('unverified' in result or 'not_rechecked' in result) and unmeasured is None and kept is None)):
+        raise SetupError('MASC did not confirm the selected configuration. Inspect the workspace before retrying.')
+    commit = result.get('commit')
+    if not isinstance(commit, dict) or commit.get('durability') not in ('durable', 'unconfirmed'):
+        raise SetupError('MASC did not report configuration durability. Inspect the workspace before retrying.')
+    if commit['durability'] == 'unconfirmed':
+        print(paint('! Configuration is visible, but disk durability is unconfirmed. ', 'warn')
+              + 'Do not repeat setup; inspect the workspace storage before restarting.', file=sys.stderr)
+    warnings = commit.get('warnings')
+    if not isinstance(warnings, list) or any(not isinstance(row, dict) or row.get('code') != 'runtime_config_lock_release_unconfirmed' for row in warnings):
+        raise SetupError('MASC did not report readable configuration lock warnings. Inspect the workspace before retrying.')
+    if warnings:
+        print(paint('! Configuration is saved, but configuration lock release is unconfirmed. ', 'warn')
+              + 'Do not repeat setup; inspect the server lock state.', file=sys.stderr)
+    if kept is not None:
+        print(paint('! Saved without checking these again: ', 'warn') + ', '.join(terminal_text(name) for name in kept[0])
+              + '. They stay as they were.', file=sys.stderr)
+    for row in unmeasured or (kept[1] if kept is not None else []):
+        print(paint('! Saved without the response and tool check: ', 'warn') + terminal_text(row['runtime_id'])
+              + ' (' + terminal_text(row['code']) + '). The provider declined the check for the account\'s usage.',
+              file=sys.stderr)
+    return result
+
+
+def kept_runtimes(result, selected):
+    # The selected runtimes the save left uncalled (already bound, not first in
+    # the chain) with any that were called and declined for the account's
+    # usage. None unless the receipt says so in a form this script can read.
+    # Nothing here says the kept runtimes ever passed a check.
+    kept, rows = result.get('not_rechecked'), result.get('unverified')
+    if (result.get('readiness') != 'partly_checked' or not isinstance(kept, list) or not kept
+            or not all(isinstance(name, str) and name in selected for name in kept)
+            or not isinstance(rows, list)
+            or not all(isinstance(row, dict) and row.get('runtime_id') in selected and model_text(row.get('code'))
+                       for row in rows)):
+        return None
+    return kept, rows
+
+
+def unmeasured_runtimes(result, selected):
+    # The runtimes MASC published even though their provider declined the check
+    # for the account's usage (a spent quota or a rate limit). None when the
+    # receipt does not say so in a form this script can read.
+    rows = result.get('unverified')
+    if (result.get('readiness') != 'usage_limited' or not isinstance(rows, list) or not rows
+            or not all(isinstance(row, dict) and row.get('runtime_id') in selected and model_text(row.get('code'))
+                       for row in rows)):
+        return None
+    return rows
+
+
+def catalog_models(binary, choice):
+    client = {'claude_code': 'claude-code', 'codex': 'codex'}.get(choice)
+    if client is None:
+        return []
+    result = subprocess.run([binary, 'runtime-model-list', client], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        return []
+    try:
+        rows = json.loads(result.stdout)['models']
+        if not isinstance(rows, list):
+            return []
+        # The binary's client catalog owns the window: its rows are verified
+        # client metadata, so the wizard trusts the stated context as-is.
+        return [dict(id=row['id'], label=row.get('label', row['id']), context=row['max_context'],
+                     supports_image_input=row.get('supports_image_input'),
+                     release=row.get('release'))
+                for row in rows if isinstance(row, dict) and model_text(row.get('id'))
+                and positive_integer(row.get('max_context'))]
+    except (ValueError, KeyError, TypeError):
+        return []
+
+
+def model_slug(model_id):
+    return re.sub(r'[^A-Za-z0-9-]+', '-', model_id).strip('-').lower()
+
+
+def provider_catalog_models(binary, provider_id):
+    """Curated rows for a named catalog provider, from the installed binary."""
+    result = subprocess.run([binary, 'runtime-model-list', '--provider', provider_id],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        # A failed catalog read must not masquerade as "no curated models":
+        # every later pick would be refused with a message about the catalog
+        # instead of the actual failure.
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' failed: '
+                         + (result.stderr.strip() or 'no diagnostics'))
+    try:
+        rows = json.loads(result.stdout)['models']
+    except (ValueError, KeyError, TypeError):
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' returned an unreadable catalog')
+    if not isinstance(rows, list):
+        raise SetupError('runtime-model-list --provider ' + provider_id + ' returned an unreadable catalog')
+    return [row for row in rows if isinstance(row, dict) and model_text(row.get('id'))]
+
+
+def positive_integer(value):
+    return type(value) is int and value > 0
+
+
+def model_text(value):
+    return isinstance(value, str) and bool(value) and value == value.strip() and all(ord(c) >= 32 and ord(c) != 127 for c in value)
+
+
+def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
+    def ask(label):
+        print('? ' + label + ': ', end='', file=sys.stderr, flush=True)
+        answer = sys.stdin.readline()
+        if not answer or answer.strip().lower() == 'q':
+            raise SetupError('model setup cancelled; run the installer again when you have the model settings')
+        return answer.strip()
+    # CLI clients answer only through the binary's client catalog; an empty
+    # catalog offers nothing to guess from. HTTP connections use the native
+    # discovery command, which owns the wire formats.
+    if choice == 'muse':
+        source = select_native_account(dict(choice='muse', label='Muse Code', command='muse'))
+        # Resolve the client for standalone selection too: discovery and sign-in spawn
+        # the installed client instead of a PATH-dependent literal.
+        resolved = official_client_path(binary, 'muse', source.get('command') or 'muse')
+        if resolved is None:
+            raise SetupError('Install Muse, then retry model selection')
+        source['command'] = resolved
+        models, origin = muse_models(binary, source, timeout)
+    elif choice in ('codex', 'claude_code'):
+        models = catalog_models(binary, choice)
+        origin = ('Installed MASC model catalog (suggestions; model response is not yet verified)' if models
+                  else 'Model list unavailable. Check account access, API credit or the running server, then refresh.')
+    else:
+        source = dict(choice=choice)
+        if endpoint:
+            source['endpoint'] = endpoint
+        if api_key_env:
+            source['api_key_env'] = api_key_env
+        models, origin = native_discover_models(binary, source, timeout)
+    print('\n' + origin, file=sys.stderr)
+    for index, item in enumerate(models, 1):
+        print('  {}) {} — ID: {}'.format(index, item['label'] if model_text(item['label']) else item['id'], item['id']), file=sys.stderr)
+    if choice == 'muse' and not models:
+        raise SetupError('Muse reported no models; check the selected account and refresh discovery')
+    print(('Choose a listed number or a reported model ID.' if choice == 'muse' else
+           'Choose a listed number or paste an exact model ID.') +
+          ' Enter q to cancel; do not guess a model name.', file=sys.stderr)
+    selected = None
+    while True:
+        answer = ask('Model number or exact ID' if models else 'Exact model ID from your runtime')
+        if answer.isascii() and answer.isdigit() and models:
+            index = int(answer)
+            if 1 <= index <= len(models):
+                selected = models[index - 1]
+                model = selected['id']
+                break
+            print('Choose one of the displayed numbers, or paste a model ID.', file=sys.stderr)
+        elif model_text(answer):
+            model = answer
+            selected = next((item for item in models if item['id'] == model), None)
+            if choice == 'muse' and selected is None:
+                print('Choose a model reported by the selected Muse account.', file=sys.stderr)
+                continue
+            break
+        else:
+            print('Enter a model ID or a listed number; blank input cannot choose a model.', file=sys.stderr)
+    context = selected['context'] if selected else None
+    if choice == 'muse' and not positive_integer(context):
+        raise SetupError('Muse must report a positive context window for the selected model; refresh discovery')
+    context_source = origin if context else None
+    if context is None and choice == 'claude_code':
+        result = subprocess.run([binary, 'runtime-model-info', model, '--client', {'codex':'codex','claude_code':'claude-code'}[choice]], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
+            try:
+                info = json.loads(result.stdout)
+                if info.get('model') == model and positive_integer(info.get('max_context')):
+                    context, context_source = info['max_context'], 'installed MASC model catalog'
+            except (ValueError, AttributeError):
+                pass
+    if context is not None:
+        print('Context window: {:,} tokens — from {}. No number to enter.'.format(context, context_source), file=sys.stderr)
+    else:
+        print('Context window means the amount of text the model can keep in one request, measured in tokens.', file=sys.stderr)
+        print('Use the configured server limit (llama.cpp --ctx-size, vLLM --max-model-len), or the model limit documented by your CLI/provider.', file=sys.stderr)
+        print('Do not guess. For input format only: a documented 8,192-token limit is entered as 8192. Enter q if you do not know the limit.', file=sys.stderr)
+        while context is None:
+            answer = ask('Documented/configured context limit in tokens (digits only; q to cancel)')
+            if answer.isascii() and answer.isdigit() and int(answer) > 0:
+                context = int(answer)
+            else:
+                print('Enter the documented token count using digits greater than zero, without commas or units; or q to cancel.', file=sys.stderr)
+    result = dict(model=model, max_context=context)
+    if choice == 'muse':
+        # Automation keeps the account that reported the model: the Muse
+        # specification requires its account_home, and the default account
+        # must not silently substitute for an explicitly selected one.
+        result['account_home'] = source['account_home']
+        result['command'] = source['command']
+    return result
+
+
+def terminal_text(value):
+    # API/catalog labels are untrusted terminal input, not ANSI instructions.
+    return ''.join(c if c.isprintable() else ' ' for c in str(value))
+
+
+def ask_text(label):
+    print('? ' + label + ': ', end='', file=sys.stderr, flush=True)
+    answer = sys.stdin.readline()
+    if not answer or answer.strip() == 'q':
+        raise SetupError('setup cancelled; existing connections were preserved')
+    return answer.strip()
+
+
+def pick(title, labels, multiple=False, defaults=(), allow_empty=False):
+    """TTY arrows/Space picker with type-to-filter; numbered input for accessible/scripted terminals.
+
+    A multiple pick returns the row under the cursor when nothing is marked,
+    because a caller that cannot act on "nothing" would otherwise get no
+    answer. A caller that can asks for allow_empty: Enter then returns the
+    marks as they are on the screen, none included, and the numbered input
+    shows the marks and takes 0 for "none".
+    """
+    if not labels:
+        raise SetupError('there are no options to select')
+    selected = set(defaults)
+    current = min(selected) if selected else 0
+    interactive = sys.stdin.isatty() and sys.stderr.isatty() and os.environ.get('TERM') != 'dumb'
+    if not interactive:
+        print('\n' + paint(terminal_text(title), 'title'), file=sys.stderr)
+        for index, label in enumerate(labels, 1):
+            mark = ('[x] ' if index - 1 in selected else '[ ] ') if allow_empty else ''
+            print('  {}) {}{}'.format(index, mark, terminal_text(label)), file=sys.stderr)
+        while True:
+            if allow_empty:
+                prompt = 'Numbers separated by commas choose exactly those rows; Enter keeps the marked rows; 0 skips all; q cancels'
+            else:
+                prompt = 'Numbers separated by commas; Enter selects marked choices or option 1; q cancels' if multiple else 'Number; Enter selects {}'.format(current + 1)
+            answer = ask_text(prompt)
+            if not answer:
+                if not multiple:
+                    return [current]
+                if selected or allow_empty:
+                    return sorted(selected)
+                return [current]
+            elif allow_empty and answer == '0':
+                return []
+            else:
+                parts = answer.split(',')
+                if all(part.strip().isascii() and part.strip().isdigit() for part in parts):
+                    indexes = list(dict.fromkeys(int(part.strip()) - 1 for part in parts))
+                    if all(0 <= index < len(labels) for index in indexes) and (multiple or len(indexes) == 1):
+                        return indexes
+            print('Choose displayed numbers' + (' separated by commas.' if multiple else '.'), file=sys.stderr)
+    fd = sys.stdin.fileno()
+    original = termios.tcgetattr(fd)
+    drawn = 0
+    # The filter changes what is displayed, never the index space: selected
+    # and current keep real indexes into labels, so a choice made under a
+    # filter still names the same row after the filter is cleared.
+    query = bytearray()
+    try:
+        tty.setcbreak(fd)
+        while True:
+            width, height = shutil.get_terminal_size()
+            text_query = bytes(query).decode('utf-8', 'ignore')
+            needle = text_query.strip().casefold()
+            visible = [index for index, label in enumerate(labels)
+                       if not needle or needle in terminal_text(label).casefold()]
+            if visible and current not in visible:
+                current = visible[0]
+            position = visible.index(current) if current in visible else 0
+            count = max(1, height - 6)
+            start = min(max(0, position - count + 1), max(0, len(visible) - count))
+            if drawn:
+                print('\x1b[{}A'.format(drawn), end='', file=sys.stderr)
+            hint = ('↑/↓ move · Space mark several · Enter choose · type to filter · Esc clears · Ctrl-C cancels' if multiple
+                    else '↑/↓ move · Enter select · type to filter · Esc clears · Ctrl-C cancels')
+            # Styles wrap whole rows, after truncation, so an escape sequence
+            # is never cut and the row text stays one searchable run.
+            lines = [(terminal_text(title), 'title'), (hint, 'hint'),
+                     ('Filter: ' + text_query, None if text_query else 'hint')]
+            for slot in range(start, min(len(visible), start + count)):
+                index = visible[slot]
+                marker = '[x]' if index in selected else '[ ]'
+                style = 'current' if index == current else 'ok' if index in selected else None
+                lines.append((('› ' if index == current else '  ') + (marker + ' ' if multiple else '') +
+                              terminal_text(labels[index]), style))
+            if not visible:
+                footer = ('no matches', 'warn')
+            elif multiple:
+                footer = ('{} selected · {}/{} shown'.format(len(selected), len(visible), len(labels)), 'hint')
+            else:
+                footer = ('{}/{} shown'.format(len(visible), len(labels)), 'hint')
+            lines.append(footer)
+            # A narrower frame has fewer lines than the one before it. Pad
+            # with cleared empties so exactly the previous frame's line count
+            # is rewritten, or the rows that vanished stay on screen as ghost
+            # rows (old markers, old footer and all).
+            emitted = lines + [('', None)] * max(0, drawn - len(lines))
+            for line, style in emitted:
+                print('\r\x1b[2K' + paint(line[:max(1, width - 1)], style), file=sys.stderr)
+            sys.stderr.flush()
+            drawn = len(emitted)
+            key = os.read(fd, 1)
+            if not key:
+                raise SetupError('terminal closed; existing connections were preserved')
+            move = 0
+            cancel = False
+            if key == b'\x1b':
+                # Escape sequences arrive separately on some terminals. Bound
+                # only key decoding, never model execution or Keeper behavior.
+                if select.select([fd], [], [], 0.1)[0]:
+                    prefix = os.read(fd, 1)
+                    if prefix == b'[' and select.select([fd], [], [], 0.1)[0]:
+                        direction = os.read(fd, 1)
+                        move = -1 if direction == b'A' else 1 if direction == b'B' else 0
+                        key = b''
+                    elif prefix:
+                        # A byte arriving right after Esc is a keystroke of
+                        # its own, not half of a sequence: clear the filter
+                        # and process it instead of eating it.
+                        del query[:]
+                        key = prefix
+                    else:
+                        key = b''
+                elif query:
+                    del query[:]
+                    key = b''
+                else:
+                    cancel = True
+            # Every printable byte types into the query, q/j/k included: a
+            # filter is ordinary text, and a model id can start with any
+            # letter (qwen, kimi, janus). Movement is arrows only and cancel
+            # is Ctrl-C/Ctrl-D, or Esc when nothing is typed.
+            if cancel or key in (b'\x03', b'\x04'):
+                raise SetupError('setup cancelled; existing connections were preserved')
+            elif move:
+                if len(visible) > 1:
+                    current = visible[(position + move) % len(visible)]
+            elif multiple and key == b' ':
+                if current in visible:
+                    selected.symmetric_difference_update([current])
+            elif key in (b'\r', b'\n'):
+                # An empty filter must not hand back a row the operator cannot
+                # see; Enter waits for a match instead.
+                if not visible:
+                    continue
+                if not multiple:
+                    return [current]
+                if selected or allow_empty:
+                    return sorted(selected)
+                return [current]
+            elif key == b'\x7f':
+                if query:
+                    query.pop()
+            elif len(key) == 1 and key >= b' ':
+                # Space toggles in multiple mode, so a filter cannot contain a
+                # space there; single mode types it. Bytes at 0x80 and above
+                # are UTF-8 continuation bytes on their way into the query.
+                query.extend(key)
+    except KeyboardInterrupt:
+        # cbreak keeps ISIG on, so a real terminal delivers Ctrl-C as SIGINT
+        # and it lands here, never as the \x03 byte the key loop handles.
+        # Cancel through the same path that byte would have taken.
+        raise SetupError('setup cancelled; existing connections were preserved')
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, original)
+
+
+PROTOCOL_CHOICES = {'ollama-http': 'ollama', 'openai-compatible-http': 'openai_compatible',
+                    'claude-code': 'claude_code', 'codex-app-server': 'codex',
+                    'antigravity-cli': 'antigravity', 'muse-serve': 'muse'}
+
+# The four official clients, by the name `masc prerequisite-actions` and
+# `masc runtime-client-path` take.
+OFFICIAL_CLIENTS = {'claude_code': 'claude-code', 'codex': 'codex', 'antigravity': 'antigravity', 'muse': 'muse-code'}
+
+
+def official_client_path(binary, choice, command):
+    """Where the client for `choice` runs from, or None when it is nowhere.
+
+    Asked of `masc runtime-client-path`, which answers with the path the
+    runtime will spawn: on PATH as the shell finds it, else in the vendor
+    installer's directory for the client's own name. The wizard does not look
+    for a client itself, so what it lists, what it lets the operator select
+    and what the runtime then starts cannot disagree (#37747).
+    """
+    client = OFFICIAL_CLIENTS.get(choice)
+    if client is None or not command:
+        return None
+    result = subprocess.run([str(binary), 'runtime-client-path', '--client', client, '--command', command],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        receipt = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        receipt = None
+    if result.returncode or not isinstance(receipt, dict) or receipt.get('schema') != 'masc.runtime_client_path.v1':
+        raise SetupError('MASC could not look for the ' + client + ' client. Inspect the installed executable before retrying.')
+    path = receipt.get('path')
+    return path if isinstance(path, str) and path else None
+
+
+def connection_sources(binary, inventory):
+    sources = []
+    for row in inventory['runtimes']:
+        source = next((item for item in sources if item['provider_id'] == row['provider_id']), None)
+        if source is None:
+            source = dict(provider_id=row['provider_id'], label=row['display_name'],
+                          choice=PROTOCOL_CHOICES.get(row['protocol']), endpoint=row.get('endpoint') or '',
+                          command=row.get('command') or '', api_key_env=row.get('api_key_env') or '',
+                          credential_kind=row.get('credential_kind', 'unknown'),
+                          credential_file=row.get('credential_file'), provider_timeout_s=row.get('provider_timeout_s'),
+                          account_home=row.get('account_home'), provider_kind=row.get('provider_kind'),
+                          request_path=row.get('request_path'),
+                          rows=[])
+            sources.append(source)
+        source['rows'].append(row)
+    for integration in inventory.get('integrations', []):
+        existing = next((source for source in sources if source['provider_id'] == integration['id']), None)
+        if existing:
+            existing['origin'] = integration['origin']
+            continue
+        source = dict(provider_id=integration['id'], label=integration['display_name'],
+                      choice=PROTOCOL_CHOICES.get(integration.get('protocol')),
+                      endpoint=integration.get('endpoint') or '', command=integration.get('command') or '',
+                      api_key_env=integration.get('api_key_env') or '',
+                      requires_api_key=bool(integration.get('requires_api_key')),
+                      credential_kind=integration.get('credential_kind', 'env' if integration.get('api_key_env') else 'none'),
+                      credential_file=integration.get('credential_file'), provider_timeout_s=integration.get('provider_timeout_s'),
+                      account_home=integration.get('account_home'),
+                      provider_kind=integration.get('provider_kind'), request_path=integration.get('request_path'),
+                      origin=integration['origin'], setup_support=integration['setup_support'], rows=[])
+        # A catalog-advertised new connection carries the provider's own name,
+        # so the wizard renders a named provider instead of an anonymous one.
+        # verification_support absent means an older binary that predates the
+        # field; those rows were always response-tool verified. Catalog rows
+        # state whether a key is needed (requires_api_key) rather than naming
+        # an environment variable, and classify the same either way.
+        if (integration.get('setup_support') == 'new_connection'
+                and integration.get('protocol') in PROTOCOL_CHOICES
+                and (integration.get('api_key_env') or integration.get('requires_api_key'))
+                and integration.get('endpoint')
+                and integration.get('verification_support', 'response_tool') == 'response_tool'):
+            source['catalog_provider'] = dict(declared=integration.get('origin') == 'runtime_config')
+        sources.append(source)
+    # These are local server connection suggestions, never guessed model IDs.
+    for choice, label, endpoint in [('ollama', 'Ollama on this computer', 'http://localhost:11434'),
+                                     ('llama_cpp', 'llama.cpp on this computer', 'http://localhost:8080/v1')]:
+        if not any(item['endpoint'].rstrip('/') == endpoint for item in sources):
+            sources.append(dict(provider_id=None, label=label, choice=choice, endpoint=endpoint,
+                                command='', api_key_env='', rows=[]))
+    for choice, command, label in [('codex', 'codex', 'Codex'), ('claude_code', 'claude', 'Claude Code'), ('muse', 'muse', 'Muse Code')]:
+        if not any(item['choice'] == choice for item in sources) and official_client_path(binary, choice, command):
+            sources.append(dict(provider_id=None, label=label, choice=choice, endpoint='',
+                                command=command, api_key_env='', rows=[]))
+    for source in sources:
+        source['model_release_catalog'] = inventory.get('model_release_catalog')
+        # Where the client runs from, for the list and the fast-setup filter.
+        # A source with no command (an HTTP connection) has no path to find.
+        source['command_path'] = (official_client_path(binary, source['choice'], source['command'])
+                                  if source.get('command') else None)
+    return sources
+
+
+def source_label(source):
+    command, endpoint, key = source['command'], source['endpoint'], source['api_key_env']
+    if source.get('setup_support') == 'unsupported':
+        status = 'connection support not available yet'
+    elif source.get('credential_file'):
+        status = 'saved private API key; access will be checked'
+    elif command:
+        status = 'CLI found; sign-in checked after selection' if source.get('command_path') else 'CLI needs installation'
+    elif key:
+        status = 'API key found; account access will be checked' if os.environ.get(key) else 'API key needed; enter it privately after selection'
+    elif source.get('requires_api_key'):
+        status = 'API key needed; enter it privately after selection'
+    else:
+        status = endpoint or 'configured connection'
+    return source['label'] + ' — ' + status
+
+
+class PendingCredentials:
+    """Own new private references until their selected configuration may be committed."""
+    def __init__(self, binary, base_path=None):
+        self.binary = binary
+        self.base_path = base_path
+        self.pending = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exception):
+        for path, identity in self.pending.items():
+            try:
+                info = os.lstat(path)
+                if (info.st_dev, info.st_ino) == identity and stat.S_ISREG(info.st_mode):
+                    os.unlink(path)
+            except FileNotFoundError:
+                pass
+
+    def retain(self, specs):
+        for spec in specs:
+            self.pending.pop(spec.get('credential_file'), None)
+
+    def save(self):
+        if not sys.stdin.isatty():
+            raise SetupError('API keys require the hidden input in an interactive terminal')
+        secret = getpass.getpass('API key (hidden; saved privately): ', stream=sys.stderr)
+        result = subprocess.run([str(self.binary), 'runtime-store-credential'], input=secret,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        del secret
+        if result.returncode != 0:
+            raise SetupError('The API key could not be stored. Enter one raw key and check your user configuration permissions.')
+        try:
+            receipt = json.loads(result.stdout)
+            path = receipt['credential_file']
+            if receipt.get('schema') != 'masc.private_credential_reference.v1' or not os.path.isabs(path):
+                raise ValueError('invalid reference')
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+                raise ValueError('invalid private file')
+        except (KeyError, TypeError, ValueError, OSError):
+            raise SetupError('MASC did not return a valid private credential reference')
+        self.pending[path] = (info.st_dev, info.st_ino)
+        return path
+
+    def register_account_reference(self, path):
+        info = os.lstat(path)
+        if not os.path.isabs(path) or not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise SetupError('Antigravity did not return a private account reference')
+        self.pending[path] = (info.st_dev, info.st_ino)
+
+
+def antigravity_catalog_rows(catalog):
+    if (catalog.get('source') != 'antigravity_cli_models'
+            or catalog.get('account_availability_verified') is not False
+            or not isinstance(catalog.get('models'), list)):
+        raise SetupError('Antigravity returned an unsupported model list')
+    result = []
+    for row in catalog['models']:
+        if not isinstance(row, dict) or not model_text(row.get('id')) or not model_text(row.get('label')):
+            raise SetupError('Antigravity returned an invalid model entry')
+        result.append(dict(id=row['id'], label=row['label'], context=None))
+    return result
+
+
+def prepare_antigravity_account(source, credentials):
+    if credentials is None or credentials.base_path is None:
+        raise SetupError('Open masc setup to select an Antigravity account')
+    actions = [('current', 'Use the account signed in to Antigravity on this computer'),
+               ('signin', 'Sign in with the official Antigravity client'), ('back', 'Back to connections')]
+    if source.get('credential_file'):
+        actions.insert(0, ('saved', 'Use this workspace’s saved Antigravity account'))
+    selected = actions[pick('Antigravity account', [label for _, label in actions])[0]][0]
+    if selected == 'back':
+        raise SetupError('returned to connection selection')
+    arguments = [str(credentials.binary), 'runtime-antigravity-account', '--base-path', str(credentials.base_path),
+                 '--cli-path', source['command']]
+    if selected == 'signin':
+        arguments.append('--sign-in')
+    elif selected == 'saved':
+        arguments += ['--credential-file', source['credential_file']]
+    response = subprocess.run(arguments, stdout=subprocess.PIPE, text=True, env=workspace_child_env())
+    try:
+        receipt = json.loads(response.stdout)
+        if response.returncode:
+            if receipt.get('schema') == 'masc.antigravity_setup_error.v1':
+                raise SetupError(terminal_text(receipt['error']))
+            raise ValueError('invalid failure')
+        if (receipt.get('schema') != 'masc.antigravity_account.v1' or receipt.get('invocation_verified') is not False
+                or not isinstance(receipt.get('provider_timeout_s'), (int, float))
+                or not math.isfinite(receipt['provider_timeout_s']) or receipt['provider_timeout_s'] <= 0):
+            raise ValueError('invalid account receipt')
+        credential = receipt['credential_file']
+        models = antigravity_catalog_rows(receipt['catalog'])
+        credentials.register_account_reference(credential)
+        if selected == 'saved':
+            # Native discovery returns an isolated copy even for saved accounts.
+            # Keep that copy pending for cleanup; the configured connection
+            # still owns its original reference and timeout.
+            credential = source['credential_file']
+            credentials.register_account_reference(credential)
+            if not source.get('credential_replaced'):
+                credentials.retain([dict(credential_file=credential)])
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Antigravity account selection did not return a readable result')
+    if selected != 'saved':
+        source['credential_replaced'] = True
+    timeout = (source.get('provider_timeout_s') if selected == 'saved' else None)
+    source.update(credential_file=credential, credential_kind='file', account_catalog=models,
+                  provider_timeout_s=receipt['provider_timeout_s'] if timeout is None else timeout)
+    if receipt.get('catalog_error'):
+        print(terminal_text(receipt['catalog_error']) + ' Choose Refresh model list to try again.', file=sys.stderr)
+    return source
+
+
+def antigravity_models(binary, source):
+    if 'account_catalog' in source:
+        return source.pop('account_catalog')
+    response = subprocess.run([str(binary), 'runtime-antigravity-models', '--cli-path', source['command'],
+                               '--credential-file', source['credential_file']],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if response.returncode:
+        raise SetupError('Antigravity could not refresh models. Check sign-in and retry account selection.')
+    try:
+        return antigravity_catalog_rows(json.loads(response.stdout))
+    except (TypeError, ValueError):
+        raise SetupError('Antigravity did not return a readable model list')
+
+
+def antigravity_context(binary, source, model_id):
+    print('Reading the selected Antigravity model’s context window…', file=sys.stderr)
+    response = subprocess.run([str(binary), 'runtime-antigravity-context', '--cli-path', source['command'],
+                               '--credential-file', source['credential_file'], '--model', model_id],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        observed = json.loads(response.stdout)
+        if response.returncode:
+            if observed.get('schema') == 'masc.antigravity_setup_error.v1' and isinstance(observed.get('error'), str):
+                raise SetupError(terminal_text(observed['error']))
+            raise ValueError('invalid error')
+        context = observed['context']
+        if (observed.get('source') != 'antigravity_statusline' or observed.get('model') != model_id
+                or observed.get('invocation_verified') is not False
+                or context is not None and not positive_integer(context)):
+            raise ValueError('invalid context')
+        return context
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Antigravity did not return a valid context for the selected model')
+
+
+class SetupSessionFinished(Exception):
+    """The selected group session finished; the old-group parent must exit."""
+
+
+def docker_account_actions(binary):
+    result = subprocess.run([str(binary), 'docker-account-access'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        catalog = json.loads(result.stdout)
+        if (result.returncode or catalog.get('schema') != 'masc.docker_account_actions.v1'
+                or not isinstance(catalog.get('actions'), list)):
+            raise ValueError('invalid actions')
+        return [dict(row, account_action=True) for row in catalog['actions']]
+    except (TypeError, ValueError):
+        raise SetupError('MASC could not inspect this account’s Docker access')
+
+
+def docker_account_action(binary, base_path, port, action):
+    # Native handoff redirects the child journey to the terminal; stdout remains
+    # its own typed outcome, never mixed with the child's interactive output.
+    result = subprocess.run([str(binary), 'docker-account-access', '--execute', action,
+                             '--base-path', str(base_path), '--port', str(port)],
+                            stdout=subprocess.PIPE, text=True, env=workspace_child_env())
+    try:
+        receipt = json.loads(result.stdout)
+        if (receipt.get('schema') != 'masc.docker_account_action_result.v1'
+                or receipt.get('readiness') != 'not_checked'):
+            raise ValueError('invalid result')
+        state = receipt['status']
+        if state not in ('failed', 'recheck_required', 'session_finished', 'reauthentication_required'):
+            raise ValueError('unknown result')
+        if state == 'session_finished' and result.returncode == 0:
+            raise SetupSessionFinished()
+        if state == 'failed' or state == 'reauthentication_required' or result.returncode:
+            reason = receipt.get('reason')
+            print(terminal_text(reason) if isinstance(reason, str) and reason.strip()
+                  else 'Docker account setup did not complete. Saved model choices are kept; retry when ready.', file=sys.stderr)
+        else:
+            print('Account access updated. Choose Continue saved setup to enter the new group session.', file=sys.stderr)
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Docker account setup did not return a valid result; recheck account access')
+    return True
+
+
+# The wire spells tool readiness with exactly these two words, for PDF tools,
+# presentation tools and the browser programs (geckodriver, Firefox) alike.
+# Naming them once is what keeps the call sites from each carrying their own
+# copy of the literal, where a renamed or added word would change what the
+# installer does without anything here failing.
+TOOLS_AVAILABLE = 'tools_available'
+TOOLS_UNAVAILABLE = 'unavailable'
+
+
+# slots=True is absent on purpose: this script targets Python 3.8 (see the
+# module docstring) and slots arrived in 3.10.
+@dataclass(frozen=True)
+class PdfToolCheck:
+    """One command MASC probed, and what it found."""
+    command: str
+    status: str
+
+
+@dataclass(frozen=True)
+class PdfToolsReadiness:
+    """MASC's answer about PDF inspection, already read. Callers ask
+    [available] instead of re-reading the wire word themselves."""
+    available: bool
+    checks: tuple
+
+
+def decode_pdf_tools_readiness(value):
+    if (not isinstance(value, dict) or value.get('schema') != 'masc.pdf_tools_readiness.v1'
+            or value.get('status') not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)
+            or value.get('pdf_inspection') != 'not_run'
+            or value.get('scope') != 'current_process_environment'):
+        raise SetupError('MASC returned unreadable PDF tool readiness')
+    checks = value.get('checks')
+    if (not isinstance(checks, list) or len(checks) != 2
+            or any(not isinstance(row, dict) or row.get('status') not in ('missing', 'started', 'failed')
+                   or row.get('command') not in ('pdftotext', 'pdftoppm') for row in checks)
+            or {row.get('command') for row in checks} != {'pdftotext', 'pdftoppm'}):
+        raise SetupError('MASC did not check both PDF inspection tools')
+    started = all(row['status'] == 'started' for row in checks)
+    if started != (value['status'] == TOOLS_AVAILABLE):
+        raise SetupError('MASC returned inconsistent PDF tool readiness')
+    return PdfToolsReadiness(
+        available=started,
+        checks=tuple(PdfToolCheck(command=row['command'], status=row['status']) for row in checks))
+
+
+# The sandbox menu asks this before every draw, so an answer that never comes
+# holds the whole setup screen. A readiness probe either answers at once or is
+# no use, and a probe that ran out of time is the same to the operator as tools
+# that are not there.
+PDF_TOOLS_PROBE_TIMEOUT_SECONDS = 20
+
+
+def pdf_tools_status(binary):
+    try:
+        result = subprocess.run([str(binary), 'prerequisite-actions', 'pdf-tools'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                timeout=PDF_TOOLS_PROBE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise SetupError('MASC did not answer about PDF tool availability in time')
+    try:
+        catalog = json.loads(result.stdout)
+        if result.returncode or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.prerequisite_actions.v1':
+            raise ValueError('invalid catalog')
+        return decode_pdf_tools_readiness(catalog.get('dependency_readiness'))
+    except (ValueError, TypeError):
+        raise SetupError('MASC could not inspect PDF tool availability')
+
+
+@dataclass(frozen=True)
+class PresentationToolsReadiness:
+    available: bool
+    checks: tuple
+    pdf: PdfToolsReadiness
+
+
+def decode_presentation_tools_readiness(value, base_path=None):
+    if (not isinstance(value, dict) or value.get('schema') != 'masc.presentation_tools_readiness.v1'
+            or value.get('status') not in ('tools_available', 'unavailable')
+            or value.get('presentation_inspection') != 'not_run'
+            or value.get('scope') != 'workspace_host_runtime'
+            or not isinstance(value.get('base_path'), str) or not value['base_path']):
+        raise SetupError('MASC returned unreadable presentation tool readiness')
+    if base_path is not None and Path(value['base_path']).resolve() != Path(base_path).resolve():
+        raise SetupError('MASC checked presentation tools for another workspace')
+    checks = value.get('checks')
+    if (not isinstance(checks, list) or len(checks) != 2
+            or any(not isinstance(row, dict) or row.get('status') not in ('missing', 'started', 'failed')
+                   or not isinstance(row.get('command'), str) for row in checks)
+            or {row.get('component') for row in checks} != {'python_pptx', 'libreoffice'}):
+        raise SetupError('MASC did not check both presentation dependencies')
+    pdf = decode_pdf_tools_readiness(value.get('pdf_tools'))
+    available = all(row['status'] == 'started' for row in checks) and pdf.available
+    if available != (value['status'] == 'tools_available'):
+        raise SetupError('MASC returned inconsistent presentation readiness')
+    return PresentationToolsReadiness(available=available, checks=tuple(checks), pdf=pdf)
+
+
+def presentation_tools_status(binary, base_path):
+    try:
+        result = subprocess.run([str(binary), 'prerequisite-actions', 'presentation-tools',
+                                 '--base-path', str(base_path)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                timeout=PDF_TOOLS_PROBE_TIMEOUT_SECONDS,
+                                env=workspace_child_env())
+    except subprocess.TimeoutExpired:
+        raise SetupError('MASC did not answer about presentation tool availability in time')
+    try:
+        catalog = json.loads(result.stdout)
+        if result.returncode or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.prerequisite_actions.v1':
+            raise ValueError('invalid catalog')
+        return decode_presentation_tools_readiness(catalog.get('dependency_readiness'), base_path)
+    except (ValueError, TypeError):
+        raise SetupError('MASC could not inspect presentation tool availability')
+
+
+def show_presentation_readiness(readiness):
+    print('Presentation tools are available on this workspace host; document inspection has not run.'
+          if readiness.available else
+          'Presentation tools are not ready on this workspace host. Install the missing dependencies and refresh detection.',
+          file=sys.stderr)
+    for row in readiness.pdf.checks:
+        print(terminal_text(row.command) + ': ' + terminal_text(row.status), file=sys.stderr)
+    for row in readiness.checks:
+        print(terminal_text(row['component']) + ': ' + terminal_text(row['status'])
+              + ' (' + terminal_text(row['command']) + ')', file=sys.stderr)
+        detail = row.get('detail') or row.get('output')
+        if detail:
+            print(terminal_text(detail), file=sys.stderr)
+
+
+# The programs the automation lane starts, in the order they are checked. The
+# names are the ones `masc prerequisite-actions` takes.
+BROWSER_TOOLS = ('geckodriver', 'firefox')
+# ego lite's command: looked for on its own, by its own row (ego_row).
+EGO_PROGRAM = 'ego-browser'
+BROWSER_TOOL_NAMES = {'geckodriver': 'geckodriver', 'firefox': 'Firefox', EGO_PROGRAM: 'ego-browser'}
+
+
+@dataclass(frozen=True)
+class BrowserToolReadiness:
+    """MASC's answer about one program a browser lane starts, already read.
+    [path] is where the program that answered lives, and only then."""
+    program: str
+    available: bool
+    path: Optional[str]
+
+
+def decode_browser_tools_readiness(value, program):
+    if (not isinstance(value, dict) or value.get('schema') != 'masc.browser_tools_readiness.v1'
+            or value.get('program') != program
+            or value.get('status') not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)
+            or value.get('scope') != 'current_process_environment'
+            or value.get('lane') != 'not_checked'):
+        raise SetupError('MASC returned unreadable ' + BROWSER_TOOL_NAMES.get(program, program) + ' readiness')
+    checks = value.get('checks')
+    if (not isinstance(checks, list) or len(checks) != 1 or not isinstance(checks[0], dict)
+            or checks[0].get('status') not in ('missing', 'started', 'failed')):
+        raise SetupError('MASC did not check ' + BROWSER_TOOL_NAMES[program])
+    row = checks[0]
+    started = row['status'] == 'started'
+    if started != (value['status'] == TOOLS_AVAILABLE):
+        raise SetupError('MASC returned inconsistent ' + BROWSER_TOOL_NAMES[program] + ' readiness')
+    path = row.get('path')
+    if started and not (isinstance(path, str) and os.path.isabs(path)):
+        raise SetupError('MASC did not say where ' + BROWSER_TOOL_NAMES[program] + ' runs')
+    return BrowserToolReadiness(program=program, available=started, path=path if started else None)
+
+
+# The container `masc prerequisite-actions searxng` runs, and its readiness
+# answer. `endpoint` is "answers" when a JSON search answered, which is what the
+# search tool asks for.
+SEARXNG_DEPENDENCY = 'searxng'
+SEARXNG_CONTAINER_STATES = ('absent', 'stopped', 'running', 'paused', 'restarting', 'unusable')
+# `Sandbox_prerequisites.searxng_container_name`; what `docker logs` is asked for.
+SEARXNG_CONTAINER_NAME = 'masc-searxng'
+SEARXNG_ENDPOINT_STATES = ('answers', 'refuses_json', 'unreachable')
+# A link a person could type: no whitespace and no control characters, so
+# nothing the binary sent can move the cursor or end the printed command.
+SEARXNG_URL_SHAPE = re.compile(r'https?://[^\s\x00-\x1f\x7f]+')
+# Ids the catalog uses: lowercase words joined by underscores.
+CATALOG_ACTION_ID = re.compile(r'[a-z0-9_]+')
+
+
+@dataclass(frozen=True)
+class SearxngReadiness:
+    """MASC's answer about the local SearXNG, already read. [url] is where the
+    container publishes it."""
+    docker: bool
+    container: str
+    endpoint: str
+    url: str
+    # Docker's own word, kept only for a container in a state with no name here.
+    docker_status: str = ''
+
+    @property
+    def available(self):
+        return self.endpoint == 'answers'
+
+
+def decode_searxng_readiness(value):
+    if (not isinstance(value, dict) or value.get('schema') != 'masc.searxng_readiness.v1'
+            or value.get('status') not in ('ready', 'unavailable')
+            or value.get('docker') not in ('ready', 'unavailable')
+            or value.get('container') not in SEARXNG_CONTAINER_STATES
+            or value.get('endpoint') not in SEARXNG_ENDPOINT_STATES
+            or not isinstance(value.get('url'), str) or not SEARXNG_URL_SHAPE.fullmatch(value['url'])):
+        raise SetupError('MASC returned unreadable SearXNG readiness')
+    if (value['status'] == 'ready') != (value['endpoint'] == 'answers'):
+        raise SetupError('MASC returned inconsistent SearXNG readiness')
+    # The binary only asks Docker about a container when Docker answers, and
+    # only an unusable container carries Docker's own word for it.
+    docker_status = value.get('docker_status')
+    if (value['docker'] == 'unavailable' and value['container'] != 'absent') or (
+            (value['container'] == 'unusable') != (isinstance(docker_status, str) and docker_status != '')
+            or (docker_status is not None and not isinstance(docker_status, str))):
+        raise SetupError('MASC returned inconsistent SearXNG readiness')
+    return SearxngReadiness(docker=value['docker'] == 'ready', container=value['container'],
+                            endpoint=value['endpoint'], url=value['url'], docker_status=docker_status or '')
+
+
+def prerequisite_catalog(binary, dependency, workspace_args=()):
+    result = subprocess.run([str(binary), 'prerequisite-actions', dependency] + list(workspace_args),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=workspace_child_env() if workspace_args else None)
+    try:
+        catalog = json.loads(result.stdout)
+        if (result.returncode or not isinstance(catalog, dict)
+                or catalog.get('schema') != 'masc.prerequisite_actions.v1'
+                or not isinstance(catalog.get('actions'), list)):
+            raise ValueError('invalid actions')
+    except (TypeError, ValueError):
+        raise SetupError('MASC could not inspect installation actions for this computer')
+    return catalog
+
+
+def prerequisite_menu(binary, dependency, base_path=None, port=8945):
+    if dependency == 'presentation-tools' and base_path is None:
+        raise SetupError('Presentation setup requires the selected workspace')
+    workspace_args = ['--base-path', str(base_path)] if dependency == 'presentation-tools' else []
+    catalog = prerequisite_catalog(binary, dependency, workspace_args)
+    actions = catalog['actions']
+    if dependency == 'pdf-tools':
+        pdf = decode_pdf_tools_readiness(catalog.get('dependency_readiness'))
+        if pdf.available:
+            print('PDF inspection tools are available. Original PDF inspection runs when a document is read.', file=sys.stderr)
+        else:
+            print('PDF inspection is unavailable. Install the tools below, then refresh detection.', file=sys.stderr)
+        for row in pdf.checks:
+            print(terminal_text(row.command) + ': ' + terminal_text(row.status), file=sys.stderr)
+        if pdf.available:
+            return True
+        if not actions:
+            print('No automatic installation action is available on this host. Install Poppler through your operating system, then refresh detection.', file=sys.stderr)
+    if dependency == 'presentation-tools':
+        presentation = decode_presentation_tools_readiness(catalog.get('dependency_readiness'), base_path)
+        show_presentation_readiness(presentation)
+        if presentation.available:
+            return True
+        if not actions:
+            print('No automatic presentation installation action is available on this host.', file=sys.stderr)
+    if dependency == 'docker' and base_path is not None:
+        account_actions = docker_account_actions(binary)
+        for row in account_actions:
+            print(terminal_text(row['detail']), file=sys.stderr)
+        actions = account_actions + actions
+    labels = [row['label'] + (' · administrator permission' if row['requires_admin'] else '') for row in actions]
+    choice = pick('Install or start the selected prerequisite', labels + ['Refresh detection', 'Back to setup choices'])[0]
+    if choice == len(actions) + 1:
+        return False
+    if choice == len(actions):
+        return True
+    selected = actions[choice]
+    print(terminal_text(selected['detail']), file=sys.stderr)
+    print('Source: ' + terminal_text(selected['source_url']), file=sys.stderr)
+    if selected.get('account_action'):
+        return docker_account_action(binary, base_path, port, selected['id'])
+    execute_prerequisite(binary, dependency, selected['id'], workspace_args, base_path)
+    return True
+
+
+def execute_prerequisite(binary, dependency, action_id, workspace_args=(), base_path=None):
+    """Run one native prerequisite action and report its receipt on screen.
+
+    Returns the receipt status, with a non-zero exit read as `failed` whatever
+    the receipt said, because that is how the screen already reports it.
+    """
+    # The selected native action owns commands and privilege boundaries. Child
+    # password prompts and vendor output keep the terminal, not a hidden pipe.
+    result = subprocess.run([str(binary), 'prerequisite-actions', dependency, '--execute', action_id] + list(workspace_args),
+                            stdout=subprocess.PIPE, text=True,
+                            env=workspace_child_env() if workspace_args else None)
+    try:
+        receipt = json.loads(result.stdout)
+        if not isinstance(receipt, dict) or receipt.get('schema') != 'masc.prerequisite_action_result.v1':
+            raise ValueError('invalid result')
+        state = receipt['status']
+        readiness = receipt.get('readiness')
+        if dependency == 'pdf-tools' and readiness in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE):
+            pdf = decode_pdf_tools_readiness(receipt.get('dependency_readiness'))
+            if (readiness == TOOLS_AVAILABLE) != pdf.available:
+                raise ValueError('inconsistent PDF recheck')
+            if state == 'commands_completed' and not pdf.available:
+                raise ValueError('PDF tools were not available after installation')
+        elif dependency in BROWSER_TOOLS and readiness in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE):
+            browser = decode_browser_tools_readiness(receipt.get('dependency_readiness'), dependency)
+            if (readiness == TOOLS_AVAILABLE) != browser.available:
+                raise ValueError('inconsistent browser tool recheck')
+            if state == 'commands_completed' and not browser.available:
+                raise ValueError('browser tool was not available after installation')
+        elif dependency == SEARXNG_DEPENDENCY and readiness in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE):
+            searxng = decode_searxng_readiness(receipt.get('dependency_readiness'))
+            if (readiness == TOOLS_AVAILABLE) != searxng.available:
+                raise ValueError('inconsistent SearXNG recheck')
+            if state == 'commands_completed' and not searxng.available:
+                raise ValueError('SearXNG was not answering after the start')
+        elif dependency == 'presentation-tools':
+            presentation = decode_presentation_tools_readiness(receipt.get('dependency_readiness'), base_path)
+            if readiness not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE) or (readiness == TOOLS_AVAILABLE) != presentation.available:
+                raise ValueError('inconsistent presentation recheck')
+            if state == 'commands_completed' and not presentation.available:
+                raise ValueError('presentation installation was not ready')
+        elif readiness != 'not_checked':
+            raise ValueError('invalid readiness')
+        if dependency == 'pdf-tools' and state == 'commands_completed' and readiness != TOOLS_AVAILABLE:
+            raise ValueError('PDF installation was not rechecked')
+        if (dependency in BROWSER_TOOLS and state == 'commands_completed'
+                and readiness not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)):
+            raise ValueError('browser installation was not rechecked')
+        if (dependency == SEARXNG_DEPENDENCY and state == 'commands_completed'
+                and readiness not in (TOOLS_AVAILABLE, TOOLS_UNAVAILABLE)):
+            raise ValueError('SearXNG start was not rechecked')
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('Installation action did not return a readable result; recheck the prerequisite')
+    if dependency == 'presentation-tools':
+        show_presentation_readiness(presentation)
+    if state == 'failed' or result.returncode:
+        reason = receipt.get('reason')
+        if isinstance(reason, str) and reason.strip():
+            print(terminal_text(reason), file=sys.stderr)
+        else:
+            print('The selected step did not finish. Check its terminal output and retry when ready.', file=sys.stderr)
+        return 'failed'
+    elif dependency == 'presentation-tools' and state == 'commands_completed':
+        print('Both presentation dependencies started successfully. This does not assert a document inspection.', file=sys.stderr)
+    elif dependency == 'presentation-tools' and state == 'commands_completed_recheck_required':
+        print('The selected presentation component is ready. Install the remaining component shown above, then refresh detection.', file=sys.stderr)
+    elif dependency == 'pdf-tools' and state == 'commands_completed':
+        print('PDF tools installed and both commands started successfully. Original PDF inspection runs when a document is read.', file=sys.stderr)
+    elif dependency in BROWSER_TOOLS and state == 'commands_completed':
+        print(BROWSER_TOOL_NAMES[dependency] + ' is installed and starts.', file=sys.stderr)
+    elif dependency == SEARXNG_DEPENDENCY and state == 'commands_completed':
+        print('SearXNG answers JSON searches at ' + terminal_text(searxng.url) + '.', file=sys.stderr)
+    elif state == 'external_step_pending':
+        print('Complete the vendor installation window, then choose Refresh detection.', file=sys.stderr)
+    elif state == 'commands_completed_recheck_required':
+        print('The installation step finished. Checking the service and account access next.', file=sys.stderr)
+    else:
+        raise SetupError('MASC returned an unknown installation state')
+    return state
+
+
+def select_native_account(source):
+    source = dict(source)
+    configured_home = source.get('account_home')
+    choice = source['choice']
+    home = os.environ.get('HOME', '')
+    # Without HOME there is no server CLI account to offer: Path('') joins to
+    # a relative leaf that would otherwise resolve under the process working
+    # directory and persist as the selected identity.
+    default = configured_home or ({'claude_code': os.environ.get('CLAUDE_CONFIG_DIR') or (str(Path(home) / '.claude') if home else None),
+                'codex': os.environ.get('CODEX_HOME') or (str(Path(home) / '.codex') if home else None),
+                'muse': home or None}).get(choice)
+    if default and not Path(default).is_absolute():
+        default = str(Path.cwd() / default)
+    if default is None:
+        account_home = ask_text('Absolute account directory (Claude CLAUDE_CONFIG_DIR, Codex CODEX_HOME, Muse HOME)')
+    else:
+        selected = pick(source['label'] + ': select the CLI account',
+                        [('Use the configured CLI account: ' if configured_home else 'Use this server CLI account: ') +
+                         (default or '(unavailable)'),
+                         'Select another account directory'])[0]
+        account_home = default if selected == 0 else ask_text('Absolute account directory (Claude CLAUDE_CONFIG_DIR, Codex CODEX_HOME, Muse HOME)')
+    if (not isinstance(account_home, str) or not account_home or '\0' in account_home
+            or account_home.strip() != account_home or not Path(account_home).is_absolute()):
+        raise SetupError('Select an absolute account directory for the official CLI')
+    path = Path(account_home)
+    try:
+        # First login creates native state in this selected directory. Create
+        # every missing component privately before handing it to the vendor.
+        for directory in [*reversed(path.parents), path]:
+            try:
+                directory.mkdir(mode=0o700)
+            except FileExistsError:
+                pass
+        if not path.is_dir() or path.stat().st_uid != os.geteuid():
+            raise SetupError('The selected account directory must belong to the current user')
+    except OSError as error:
+        raise SetupError('Could not prepare the selected account directory for first login') from error
+    source['account_home'] = account_home
+    # An omitted account-home already uses this effective native default.
+    # Re-selecting it must retain the existing model bindings and settings.
+    if account_home != default:
+        source['credential_replaced'] = True
+    return source
+
+
+def prepare_connection(binary, source, credentials):
+    source = dict(source)
+    if source.get('setup_support') == 'unsupported' or source['choice'] is None:
+        raise SetupError(source['label'] + ' is listed for visibility but its setup integration is not available yet')
+    if CHOICES[source['choice']][1] is not None:
+        command = source.get('command') or CHOICES[source['choice']][1]
+        # Looked for again after each installer run, and stored as found: the
+        # runtime spawns this path, and a link stays a link so a client update
+        # that replaces the link's target does not orphan the configuration.
+        path = official_client_path(binary, source['choice'], command)
+        while path is None:
+            client = OFFICIAL_CLIENTS.get(source['choice'])
+            if credentials is None or client is None or not prerequisite_menu(credentials.binary, client):
+                raise SetupError('Install the selected client, then return to connection setup')
+            path = official_client_path(binary, source['choice'], command)
+        # Keep a configured command's spelling; runtime owns executable resolution.
+        source['command'] = command if source.get('origin') == 'runtime_config' else path
+        if source['choice'] == 'antigravity':
+            return prepare_antigravity_account(source, credentials)
+        return select_native_account(source)
+    if not source['endpoint']:
+        urls = ['http://127.0.0.1:8000/v1', 'http://127.0.0.1:8080/v1']
+        selected = pick('Choose the running local server address', urls + ['Another API URL'])[0]
+        source['endpoint'] = urls[selected] if selected < len(urls) else ask_text('API base URL')
+    has_credential = bool(source.get('credential_file') or (source['api_key_env'] and os.environ.get(source['api_key_env'])))
+    if (source['api_key_env'] or source.get('requires_api_key')) and not has_credential and credentials is not None:
+        action = pick(source['label'] + ': account access', [
+            'Enter an API key now (hidden, saved for future terminals)',
+            'Return to connection selection'])[0]
+        if action:
+            raise SetupError('returned to connection selection')
+        source.update(credential_file=credentials.save(), credential_kind='file', api_key_env='', credential_replaced=True)
+    return source
+
+
+def native_connection_command(binary, command, source, timeout, arguments=()):
+    spec = {key: source[key] for key in ('choice', 'provider_kind', 'endpoint', 'provider_id', 'api_key_env', 'credential_file')
+            if source.get(key)}
+    with tempfile.TemporaryDirectory(prefix='masc-model-discovery-') as directory:
+        path = Path(directory) / 'connection.json'
+        atomic_write(path, json.dumps(spec).encode(), 0o600)
+        return subprocess.run([str(binary), command, '--spec', str(path)] + list(arguments),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+
+
+def native_discover_models(binary, source, timeout):
+    try:
+        result = native_connection_command(binary, 'runtime-discover-models', source, timeout)
+    except subprocess.TimeoutExpired:
+        return [], 'Model list did not answer in time; check the connection and refresh.'
+    if result.returncode:
+        # Native errors are fixed diagnostics; never forward provider bodies.
+        return [], 'Model list unavailable. Check account access, API credit or the running server, then refresh.'
+    try:
+        result = json.loads(result.stdout)
+        if result.get('source') != 'account_or_server_model_list' or result.get('account_availability_verified') is not False:
+            raise ValueError('unsupported observation')
+        models = result['models']
+        if not isinstance(models, list) or not all(isinstance(row, dict) and model_text(row.get('id')) for row in models):
+            raise ValueError('invalid models')
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('MASC returned an invalid model-list observation')
+    return models, 'Current account/server model list; invocation is checked after selection'
+
+
+def native_serving_context(binary, source, model, timeout, load=False):
+    arguments = ['--model', model] + (['--load'] if load else [])
+    if load:
+        print('Loading the selected model and reading its running context… Ctrl-C cancels setup.', file=sys.stderr)
+    try:
+        # A cold model load may legitimately outlast an inventory request.
+        # The operator can cancel it; the discovery timeout must not keep
+        # aborting and restarting a large model before it becomes available.
+        result = native_connection_command(binary, 'runtime-serving-context', source, None if load else timeout, arguments)
+    except subprocess.TimeoutExpired:
+        raise SetupError('The selected model is not ready yet. Wait for its server to load it, then refresh.')
+    if result.returncode:
+        raise SetupError('The selected server did not return its serving context. Check its account or server configuration.')
+    try:
+        observation = json.loads(result.stdout)
+        if (observation.get('model') != model
+                or observation.get('context_source') not in ('running_model', 'configured_model', 'serving_endpoint', 'not_reported')
+                or (observation.get('context') is not None and not positive_integer(observation['context']))
+                or (observation.get('tools') is not None and type(observation['tools']) is not bool)):
+            raise ValueError('invalid observation')
+    except (TypeError, ValueError):
+        raise SetupError('The native serving-context observation was invalid')
+    return observation
+
+
+def refresh_codex_models(binary, source):
+    arguments = [str(binary), 'runtime-codex-models', '--cli-path', source.get('command') or 'codex']
+    if source.get('account_home'):
+        arguments += ['--account-home', source['account_home']]
+    result = subprocess.run(arguments,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        raise SetupError('Codex online model refresh unavailable; using cached or bundled metadata.')
+    try:
+        receipt = json.loads(result.stdout)
+        if (not isinstance(receipt, dict) or receipt.get('schema') != 'masc.codex_model_refresh.v1'
+                or receipt.get('source') not in ('isolated_cli_cache', 'cli_list_without_context_cache')
+                or not isinstance(receipt.get('models'), list)):
+            raise ValueError('invalid refresh')
+        rows = receipt['models']
+        for row in rows:
+            # The context member must be present: the wizard projection reads
+            # row['context'] directly, so a missing member would escape this
+            # recovery block as a KeyError instead of a retryable SetupError.
+            if (not isinstance(row, dict) or not model_text(row.get('id')) or not model_text(row.get('label'))
+                    or 'context' not in row
+                    or (row['context'] is not None and not positive_integer(row['context']))):
+                raise ValueError('invalid model')
+        source_text = ('Codex refreshed model list and isolated CLI context cache' if receipt['source'] == 'isolated_cli_cache'
+                       else 'Codex model list without refreshed context; offline or bundled metadata may be in use')
+        return rows, source_text
+    except (ValueError, TypeError, KeyError):
+        raise SetupError('Codex refresh returned invalid metadata; using cached or bundled metadata.')
+
+
+def muse_models(binary, source, timeout):
+    if not source.get('account_home'):
+        raise SetupError('Select a Muse account before discovering models')
+    while True:
+        result = subprocess.run([str(binary), 'runtime-muse-models', '--cli-path', source.get('command') or 'muse',
+                                 '--account-home', source['account_home'], '--timeout-s', str(timeout)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # The native command reports typed credential failures as exit 3. A
+        # fresh HOME needs sign-in before its model catalog can be discovered.
+        if result.returncode != 3:
+            break
+        action = pick('The selected Muse account needs sign-in before listing models',
+                      ['Sign in with Muse, then retry this account', 'Back to connection selection'])[0]
+        if action == 1:
+            raise SetupError('returned to connection selection')
+        print('Muse will handle sign-in for the selected account.', file=sys.stderr)
+        login = account_login_command(binary, 'muse', source.get('command') or 'muse', source['account_home'])
+        if subprocess.run(login, stdout=sys.stderr).returncode != 0:
+            raise SetupError('Muse sign-in did not finish; the selected account and configuration were preserved')
+    try:
+        receipt = json.loads(result.stdout)
+        if (result.returncode or not isinstance(receipt, dict) or receipt.get('schema') != 'masc.muse_models.v1'
+                or receipt.get('source') not in ('providerCatalog', 'bundledCatalog', 'configCatalog')
+                or receipt.get('account_availability_verified') is not False
+                or receipt.get('invocation_verified') is not False
+                or not isinstance(receipt.get('models'), list)):
+            raise ValueError('unsupported model catalog')
+        rows = receipt['models']
+        seen = set()
+        for row in rows:
+            # The context member must be present: standalone selection and the
+            # wizard projection read row['context'] directly, so a missing
+            # member would escape this recovery block as a KeyError instead
+            # of the intended retryable SetupError.
+            if (not isinstance(row, dict) or not model_text(row.get('id')) or row['id'] in seen
+                    or not model_text(row.get('label')) or 'context' not in row
+                    or (row['context'] is not None and not positive_integer(row['context']))):
+                raise ValueError('invalid model metadata')
+            seen.add(row['id'])
+        return rows, 'Muse ' + receipt['source'] + ' metadata; account and model invocation are not yet verified'
+    except (ValueError, TypeError, KeyError):
+        raise SetupError('Muse did not report a usable provider, bundled or configured model catalog')
+
+
+def release_metadata(source, model_id):
+    # Transport compatibility does not establish model publisher identity.
+    publisher = None
+    if source.get('provider_kind') == 'glm':
+        publisher = 'zai'
+    elif not source.get('endpoint') and not source.get('provider_kind'):
+        publisher = {'codex': 'openai', 'claude_code': 'anthropic'}.get(source.get('choice'))
+    catalog = source.get('model_release_catalog')
+    if not publisher or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.model_release_catalog.v1':
+        return None
+    matches = [row.get('release') for row in catalog.get('models', [])
+               if isinstance(row, dict) and row.get('publisher') == publisher and row.get('model_id') == model_id]
+    return matches[0] if len(matches) == 1 else None
+
+
+def recently_released(model):
+    evidence = model.get('release')
+    return (isinstance(evidence, dict) and evidence.get('status') == 'official_release'
+            and evidence.get('recency') == 'within_three_calendar_months'
+            and evidence.get('kind') == 'general_availability')
+
+
+def model_choice_label(model):
+    evidence = model.get('release')
+    label = model['label'] + (' — existing connection' if model.get('existing') else '')
+    if not isinstance(evidence, dict) or evidence.get('status') != 'official_release':
+        return label + ' — release date unknown'
+    released = evidence.get('released_on')
+    kind = {'general_availability': 'released', 'limited_release': 'limited release', 'preview': 'preview'}.get(evidence.get('kind'))
+    if not model_text(released) or not kind:
+        return label + ' — release date unknown'
+    suffix = ' · recent release' if recently_released(model) else ''
+    return label + ' — ' + kind + ' ' + released + suffix
+
+
+def source_models(binary, source, timeout, refresh=False):
+    """One source's model list: discovery belongs to the native runtime;
+    curated catalog rows lead, workspace bindings are matched onto the rest."""
+    choice = source.get('choice')
+    if choice == 'muse':
+        observed, origin = muse_models(binary, source, timeout)
+    elif refresh and choice == 'codex':
+        try:
+            observed, origin = refresh_codex_models(binary, source)
+        except SetupError as error:
+            observed = catalog_models(binary, choice)
+            fallback = ('Installed MASC model catalog (suggestions; model response is not yet verified)' if observed
+                        else 'Model list unavailable. Check account access, API credit or the running server, then refresh.')
+            origin = str(error) + ' ' + fallback
+    elif choice == 'antigravity' and source.get('credential_file'):
+        observed, origin = antigravity_models(binary, source), 'Models from the selected Antigravity account'
+    elif choice in ('codex', 'claude_code'):
+        # CLI clients answer through the binary's client catalog; the wizard
+        # never drives the vendor CLI directly.
+        observed = catalog_models(binary, choice)
+        origin = ('Installed MASC model catalog (suggestions; model response is not yet verified)' if observed
+                  else 'Model list unavailable. Check account access, API credit or the running server, then refresh.')
+    else:
+        can_discover = choice and (source.get('credential_kind', 'none') in ('none', 'env') or source.get('credential_file'))
+        observed, origin = native_discover_models(binary, source, timeout) if can_discover else ([], 'Configured models')
+
+    rows = []
+    curated = provider_catalog_models(binary, source['provider_id']) if source.get('catalog_provider') and source.get('provider_id') else []
+    curated_ids = set()
+    if curated:
+        # A named catalog source leads with its curated rows: they carry the
+        # context, efforts and capabilities the runtime entry needs. Served
+        # ids the catalog does not curate still list below, uncurated.
+        curated_ids = {row['id'] for row in curated}
+        for row in curated:
+            discovered = next((item for item in observed if item['id'] == row['id']), None)
+            context = (discovered['context'] if discovered and positive_integer(discovered.get('context'))
+                       else row.get('max_context'))
+            curated_model = dict(id=row['id'], label=row.get('label') or row['id'],
+                                 context=context, existing=None, catalog=row)
+            if discovered is not None:
+                for key in ('supported_reasoning_efforts', 'default_reasoning_effort'):
+                    if key in discovered:
+                        curated_model[key] = discovered[key]
+            rows.append(curated_model)
+    # An account switch invalidates both membership and effective CLI context.
+    declared_rows = [] if choice in OFFICIAL_CLIENTS and source.get('credential_replaced') else source['rows']
+    for model in observed:
+        if model['id'] in curated_ids:
+            continue
+        existing_rows = [row for row in declared_rows if row['model'] == model['id']]
+        # A workspace declaration is relevant only in this exact connection.
+        if existing_rows:
+            for existing in existing_rows:
+                context = (model['context'] if choice == 'muse' else
+                           model['context'] or existing['max_context'])
+                label = model['label'] + (' — ' + existing['id'] if len(existing_rows) > 1 else '')
+                rows.append(dict(model, label=label, context=context,
+                                 existing=None if source.get('credential_replaced') else existing))
+        else:
+            rows.append(dict(model, existing=None))
+    for row in declared_rows:
+        if source.get('credential_replaced') and any(item['id'] == row['model'] for item in rows):
+            continue
+        if not any(item.get('existing', {}).get('id') == row['id'] for item in rows if item.get('existing')):
+            duplicates = sum(other['model'] == row['model'] for other in declared_rows) > 1
+            label = row['model'] + (' — ' + row['id'] if duplicates else '')
+            rows.append(dict(id=row['model'], label=label,
+                             context=None if choice == 'muse' else row['max_context'],
+                             existing=None if source.get('credential_replaced') else row))
+    for row in rows:
+        # Rejoin even catalog suggestions through this connection's publisher;
+        # never retain evidence from an unrelated transport-compatible source.
+        row['release'] = release_metadata(source, row['id'])
+    rows.sort(key=lambda row: (not bool(row.get('existing')), not recently_released(row)))
+    return rows, origin
+
+
+def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
+    existing = model.get('existing')
+    choice = source['choice']
+    # Preserve every setting on an operator's existing connection. Its actual
+    # model/tool capability is verified before it can become imp's default.
+    if existing and existing.get('tools') is True and choice != 'ollama':
+        return existing['id'], None
+    if source.get('credential_kind', 'none') not in ('none', 'env') and not source.get('credential_file'):
+        raise SetupError('this connection uses a protected credential reference; select an existing tool-enabled model or add an environment-authenticated connection')
+    if choice is None:
+        raise SetupError('this connection needs runtime-specific configuration; choose an existing tool-enabled runtime')
+    if source.get('catalog_provider'):
+        # A named catalog source writes named provider sections that resolve
+        # against the installed catalog. A served id the catalog does not
+        # curate cannot resolve an exact-output target, so it is refused here
+        # rather than written as a binding that quietly cannot dispatch.
+        catalog = model.get('catalog')
+        if not catalog:
+            raise SetupError(model['id'] + ' is not in the installed catalog for this provider; '
+                             'choose a curated model or use "Add another server URL" for arbitrary endpoints')
+        if not positive_integer(catalog.get('max_context')):
+            raise SetupError(model['id'] + ' declares no context in the installed catalog')
+        if catalog.get('supports_tools') is not True:
+            # Refuse early with the real reason: a toolless row would pass
+            # configuration and only fail live verification later.
+            raise SetupError(model['id'] + ' declares no tool support in the installed catalog; '
+                             'select a tool-capable model')
+        spec = dict(choice=choice, model=model['id'], max_context=catalog['max_context'],
+                    tools=catalog.get('supports_tools') is True,
+                    streaming=catalog.get('supports_streaming') is True,
+                    endpoint=source['endpoint'], api_key_env=source['api_key_env'],
+                    provider_id=source['provider_id'], provider_display_name=source['label'],
+                    model_key=model_slug(model['id']),
+                    provider_declared=source['catalog_provider'].get('declared') is True)
+        if source.get('credential_file'):
+            spec['credential_file'] = source['credential_file']
+        if catalog.get('default_reasoning_effort'):
+            spec['reasoning_effort'] = catalog['default_reasoning_effort']
+        return render(spec, binary, base_path=base_path)[0], spec
+    context = model.get('context')
+    if choice == 'antigravity' and binary:
+        context = antigravity_context(binary, source, model['id'])
+    if not positive_integer(context) and binary and source.get('provider_id') and choice not in ('ollama', 'muse'):
+        result = subprocess.run([str(binary), 'runtime-model-info', model['id'], '--provider', source['provider_id']],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
+            try:
+                catalog_model = json.loads(result.stdout)
+                if catalog_model.get('model') == model['id'] and positive_integer(catalog_model.get('max_context')):
+                    context = catalog_model['max_context']
+            except ValueError:
+                pass
+    if choice == 'ollama':
+        details = native_serving_context(binary, source, model['id'], timeout, load=True)
+        if details['tools'] is False:
+            raise SetupError('this Ollama model reports no tool support; select a tool-capable model for imp')
+        context = details['context']
+    elif choice in ('llama_cpp', 'openai_compatible') and context is None:
+        try:
+            context = native_serving_context(binary, source, model['id'], timeout)['context']
+        except SetupError:
+            context = None
+    if not positive_integer(context) and choice == 'muse':
+        raise SetupError('Muse did not report a positive context for this model; select another reported model')
+    if not positive_integer(context):
+        action = pick('The server did not report its configured context window.',
+                      ['Return to model selection', 'Advanced: enter the documented server limit'])[0]
+        if action == 0:
+            raise SetupError('select another model or refresh after configuring its server context window')
+        while not positive_integer(context):
+            answer = ask_text('Configured context tokens (for example, 8192 only if your server declares that limit)')
+            context = int(answer) if answer.isascii() and answer.isdigit() else None
+    spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
+                streaming=choice in ('claude_code', 'codex', 'antigravity', 'muse'))
+    if choice in ('claude_code', 'codex') and binary:
+        # Refresh may provide context without media metadata. Join only the
+        # selected native client's exact model, leaving unknowns undeclared.
+        catalog = next((row for row in catalog_models(binary, choice)
+                        if row['id'] == model['id']), None)
+        if catalog and type(catalog.get('supports_image_input')) is bool:
+            spec['supports_image_input'] = catalog['supports_image_input']
+    if CHOICES[choice][1] is None:
+        spec.update(endpoint=source['endpoint'])
+        spec.update({key: source[key] for key in ('api_key_env', 'credential_file', 'provider_kind', 'request_path') if source.get(key)})
+    elif source['command']:
+        spec['command'] = source['command']
+    if source.get('account_home'):
+        spec['account_home'] = source['account_home']
+    if choice == 'antigravity':
+        spec.update(credential_file=source['credential_file'], timeout_s=source['provider_timeout_s'])
+    if source.get('origin') == 'runtime_config' and not source.get('credential_replaced'):
+        spec['existing_provider_id'] = source['provider_id']
+    return render(spec, binary, base_path=base_path)[0], spec
+
+
+def pick_connection_sources(sources):
+    def detected(source):
+        return (source.get('setup_support') != 'unsupported' and source.get('choice') is not None
+                and (bool(source.get('command_path'))
+                     or bool(source.get('credential_file'))
+                     or bool(source.get('api_key_env') and os.environ.get(source['api_key_env']))))
+    found = [source for source in sources if detected(source)]
+    show_all = not found
+    while True:
+        shown = sources if show_all else found
+        labels = [source_label(source) for source in shown] + ['Add another server URL', 'Configure later']
+        if not show_all:
+            labels.append('Browse all providers and advanced connections')
+        title = 'Choose connections' if show_all else 'Fast setup · clients and account keys found on this computer'
+        chosen = pick(title + ' (Space marks several; Enter chooses)', labels, multiple=True)
+        if not show_all and len(shown) + 2 in chosen:
+            if len(chosen) != 1:
+                print('Choose Browse all on its own, or select the connections to use.', file=sys.stderr)
+                continue
+            show_all = True
+            continue
+        return shown, chosen
+
+
+def select_connections(binary, inventory, timeout, credentials=None, base_path=None):
+    sources, chosen = pick_connection_sources(connection_sources(binary, inventory))
+    if len(sources) + 1 in chosen:
+        if len(chosen) != 1:
+            raise SetupError('choose Configure later alone, or select connections')
+        return [], [], {}
+    selected, specs, names = [], [], {}
+    for index in chosen:
+        if index == len(sources):
+            kind = pick('Server type', ['OpenAI-compatible / vLLM', 'llama.cpp', 'Ollama'])[0]
+            choice = ['openai_compatible', 'llama_cpp', 'ollama'][kind]
+            endpoint = ask_text('API base URL' + (' (including /v1)' if choice != 'ollama' else ''))
+            # Validate before issuing any request; values never go into menus.
+            parsed = urlsplit(endpoint)
+            if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise SetupError('use an HTTP(S) API URL without embedded credentials')
+            keys = sorted({source['api_key_env'] for source in sources if source['api_key_env']}
+                          | {key for key in os.environ if key.endswith('_API_KEY')})
+            key_index = pick('Server authentication', ['No API key', 'Enter an API key now (hidden)'] + keys + ['Advanced: environment variable name'])[0]
+            key = keys[key_index - 2] if 2 <= key_index < len(keys) + 2 else ask_text('API key environment variable name (not its value)') if key_index == len(keys) + 2 else ''
+            source = dict(choice=choice, endpoint=endpoint, api_key_env=key, command='', rows=[], label=endpoint)
+            if key_index == 1:
+                if credentials is None:
+                    raise SetupError('Open masc setup to save an API key privately')
+                source.update(credential_file=credentials.save(), credential_kind='file')
+        else:
+            source = sources[index]
+        source = prepare_connection(binary, source, credentials)
+        refresh_models = False
+        while True:
+            models, origin = source_models(binary, source, timeout, refresh=refresh_models)
+            refresh_models = False
+            print(terminal_text(origin) + '\nListed models are checked with a real response and tool call before saving.', file=sys.stderr)
+            options = [model_choice_label(item) for item in models]
+            actions = ['Refresh model list', 'Back to connection selection']
+            if source['choice'] != 'muse':
+                actions.append('Advanced: enter an exact model ID')
+            can_replace_key = credentials is not None and CHOICES[source['choice']][1] is None
+            if can_replace_key:
+                actions.append('Save or replace API key (hidden)')
+            indexes = pick(source['label'] + ': select models', options + actions, multiple=True)
+            commands = [value for value in indexes if value >= len(models)]
+            if commands:
+                if len(indexes) != 1:
+                    print('Select a menu action on its own, or select several models.', file=sys.stderr)
+                    continue
+                action = commands[0] - len(models)
+                if action == 0:
+                    refresh_models = True
+                    continue
+                if action == 1:
+                    raise SetupError('returned to connection selection')
+                if action == 3 and can_replace_key:
+                    source.update(credential_file=credentials.save(), credential_kind='file', api_key_env='', credential_replaced=True)
+                    continue
+                model_id = ask_text('Exact model ID from your runtime')
+                if not model_text(model_id):
+                    raise SetupError('model ID must be a nonempty single line')
+                models.append(dict(id=model_id, label=model_id, context=None, existing=None))
+                indexes = [len(models) - 1]
+            for model_index in indexes:
+                model = models[model_index]
+                runtime_id, spec = resolve_model_spec(source, model, timeout, binary=binary, base_path=base_path)
+                if runtime_id not in selected:
+                    selected.append(runtime_id)
+                    names[runtime_id] = source['label'] + ' / ' + model['id']
+                    if spec:
+                        specs.append(spec)
+            break
+    return selected, specs, names
+
+
+ACCOUNT_LOGIN_CLIENTS = {'codex': 'codex', 'claude_code': 'claude', 'muse': 'muse'}
+
+
+def account_login_command(binary, client, command, account_home):
+    # masc starts the official sign-in for a declared account home itself: the
+    # child gets the environment /login gives that client
+    # (Runtime_setup_login_client).
+    return [str(binary), 'runtime-account-login', '--client', client, '--cli-path', command,
+            '--account-home', account_home]
+
+
+def login_command(binary, runtime_id, specs, inventory, base_path=None):
+    spec = next((spec for spec in specs if render(spec, binary, base_path=base_path)[0] == runtime_id), None)
+    if spec:
+        row = spec
+        choice, command = spec['choice'], spec.get('command') or CHOICES[spec['choice']][1]
+    else:
+        row = next((row for row in inventory['runtimes'] if row['id'] == runtime_id), None)
+        if row is None:
+            return None
+        choice, command = PROTOCOL_CHOICES.get(row['protocol']), row.get('command')
+    client = ACCOUNT_LOGIN_CLIENTS.get(choice)
+    if not command or client is None:
+        return None
+    if row.get('account_home'):
+        return account_login_command(binary, client, command, row['account_home'])
+    # Without account-home the client signs in on the caller's own home, which
+    # setup never selects; Muse always needs a selected home.
+    arguments = {'claude_code': ['auth', 'login'], 'codex': ['login', '--device-auth']}.get(choice)
+    return [command] + arguments if arguments else None
+
+
+def wizard(binary, base_path, timeout, quick_model=None):
+    with PendingCredentials(binary, base_path) as credentials:
+        return wizard_with_credentials(binary, base_path, timeout, credentials, quick_model=quick_model)
+
+
+def quick_connection(binary, inventory, timeout, credentials, model_id, base_path=None):
+    """Claude Code with `model_id`, built the way the model screen builds it.
+
+    None hands the step back to the screens: this computer has no Claude Code,
+    or the installed catalog does not list the model. The reason is printed so
+    the screen that follows does not look like quick setup forgot itself.
+    """
+    source = next((item for item in connection_sources(binary, inventory) if item.get('choice') == 'claude_code'), None)
+    if source is None:
+        print('Claude Code was not found. Choose a model connection.', file=sys.stderr)
+        return None
+    source = prepare_connection(binary, source, credentials)
+    models, _ = source_models(binary, source, timeout)
+    model = next((item for item in models if item['id'] == model_id), None)
+    if model is None:
+        print('The installed model catalog does not list ' + model_id + '. Choose a model.', file=sys.stderr)
+        return None
+    runtime_id, spec = resolve_model_spec(source, model, timeout, binary=binary, base_path=base_path)
+    return [runtime_id], ([spec] if spec else []), {runtime_id: source['label'] + ' / ' + model['id']}
+
+
+def wizard_with_credentials(binary, base_path, timeout, credentials, quick_model=None):
+    while True:
+        try:
+            inventory = configured_inventory(binary, base_path)
+            quick = quick_connection(binary, inventory, timeout, credentials, quick_model, base_path=base_path) if quick_model else None
+            # Asked once. Choosing connections again after a failed check is the
+            # ordinary screen, not another silent pick of the same model.
+            quick_model = None
+            if quick is not None:
+                selected, specs, names = quick
+                ordered = list(selected)
+            else:
+                selected, specs, names = select_connections(binary, inventory, timeout, credentials, base_path=base_path)
+                if not selected:
+                    return dict(configured=False, readiness='deferred', base_path=str(base_path))
+                primary = pick('Which connection should imp use first?', [names[value] for value in selected])[0]
+                ordered = [selected.pop(primary)]
+                if len(selected) > 1:
+                    print('Fallback order:\n' + '\n'.join('  {}. {}'.format(index, terminal_text(names[value]))
+                                                           for index, value in enumerate(selected, 1)), file=sys.stderr)
+                    customize = pick('Fallback order', ['Keep this order', 'Choose a different order'])[0]
+                    if customize:
+                        while len(selected) > 1:
+                            index = pick('Choose the next fallback connection', [names[value] for value in selected])[0]
+                            ordered.append(selected.pop(index))
+                ordered += selected
+            print(paint('Checking a real response and a harmless tool call for each selected connection…', 'info'),
+                  file=sys.stderr)
+            while ordered:
+                try:
+                    # Excluding a failed connection must also exclude its new
+                    # declaration from the transaction, not just from the lane.
+                    active_specs = [spec for spec in specs if render(spec, binary, base_path=base_path)[0] in ordered]
+                    # Once the effectful native child starts, loss of its receipt
+                    # cannot prove that it did not commit. Keep selected private
+                    # credentials before crossing that process boundary.
+                    credentials.retain(active_specs)
+                    result = configure_many(binary, base_path, active_specs, ordered, verify=True,
+                                            expected_revision=inventory['setup_revision'])
+                    result['base_path'] = str(base_path)
+                    return result
+                except VerificationError as error:
+                    print(paint('✗ Verification failed: ' + terminal_text(names[error.runtime_id]), 'fail'),
+                          file=sys.stderr)
+                    print_verification_reason(error.failure)
+                    print_verification_next_step(error.failure)
+                    login = login_command(binary, error.runtime_id, specs, inventory, base_path=base_path)
+                    actions = ['Retry the selected connections', 'Exclude this connection', 'Choose connections again', 'Configure later']
+                    if login:
+                        actions.append('Sign in with the official CLI, then retry these choices')
+                    action = pick('Keep your choices and decide how to continue', actions)[0]
+                    if action == 1:
+                        ordered.remove(error.runtime_id)
+                    elif action == 2:
+                        break
+                    elif action == 3:
+                        return dict(configured=False, readiness='deferred', base_path=str(base_path))
+                    elif action == 4 and login:
+                        print('The official client will handle sign-in. MASC does not ask for your password.', file=sys.stderr)
+                        if subprocess.run(login, stdout=sys.stderr).returncode != 0:
+                            print('Sign-in did not finish. Your model choices are still selected.', file=sys.stderr)
+        except (SetupError, OSError, ValueError, URLError) as error:
+            if not isinstance(error, SetupError):
+                error = SetupError('the selected server did not return usable model details; check its connection and try again')
+            print(paint('✗ ' + terminal_text(error), 'fail'), file=sys.stderr)
+            action = pick('Connection setup', ['Choose connections again', 'Configure later'])[0]
+            if action == 1:
+                # Leaving after a failed save is not the operator deferring the
+                # step: nothing was written, so the caller must not report a
+                # saved workspace or a successful exit.
+                return dict(configured=False, readiness='failed', base_path=str(base_path))
+
+
+def workspace_upgrade_catalog(binary, base_path):
+    result = subprocess.run([str(binary), 'workspace-upgrade', '--base-path', str(base_path)],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=workspace_child_env())
+    try:
+        catalog = json.loads(result.stdout)
+        if (result.returncode or catalog.get('schema') != 'masc.workspace_upgrades.v1'
+                or catalog.get('read_only') is not True
+                or not isinstance(catalog.get('keepers'), list) or not isinstance(catalog.get('backups'), list)):
+            raise ValueError('invalid catalog')
+    except (TypeError, ValueError):
+        raise SetupError('Workspace upgrades could not be inspected. Existing files were preserved.')
+    return catalog
+
+
+def workspace_upgrade_action(binary, base_path, arguments, schema):
+    result = subprocess.run([str(binary), 'workspace-upgrade', '--base-path', str(base_path)] + arguments,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=workspace_child_env())
+    try:
+        receipt = json.loads(result.stdout)
+        if result.returncode:
+            if receipt.get('schema') == 'masc.workspace_upgrade_error.v1' and isinstance(receipt.get('error'), str):
+                print(terminal_text(receipt['error']), file=sys.stderr)
+                return False
+            raise ValueError('invalid error')
+        if receipt.get('schema') != schema:
+            raise ValueError('invalid receipt')
+    except (TypeError, ValueError):
+        raise SetupError('The upgrade result could not be read. Inspect the workspace backups before retrying.')
+    if receipt.get('backup_path'):
+        print('Original configuration saved at ' + terminal_text(receipt['backup_path']), file=sys.stderr)
+    if not receipt.get('durability_confirmed') or not receipt.get('lock_release_confirmed'):
+        print('The file was changed, but final disk or lock confirmation was incomplete. The original backup remains available.', file=sys.stderr)
+    return True
+
+
+def select_workspace_upgrades(binary, base_path, plans):
+    labels = [row['keeper_name'] + ' — preserve activation mode: ' + row['plan']['activation_mode'] for row in plans]
+    selected = pick('Back up and upgrade the selected Keeper configurations', labels, multiple=True)
+    print('Each selected file gets a separate private backup. Other workspace data stays in place.', file=sys.stderr)
+    for index in selected:
+        row = plans[index]
+        if not workspace_upgrade_action(binary, base_path,
+                ['--apply', row['keeper_name'], '--source-sha256', row['plan']['source_sha256']],
+                'masc.keeper_upgrade_receipt.v1'):
+            break  # preserve successful receipts and re-inspect before another attempt
+
+
+def select_workspace_restore(binary, base_path, backups):
+    labels = [Path(row['receipt']['plan']['path']).stem + ' — backup ' + row['backup_id'] for row in backups]
+    selected = pick('Restore an original configuration (later edits are protected)', labels + ['Back'])[0]
+    if selected < len(backups):
+        print('Restoring the original may require using the previous MASC version for this workspace.', file=sys.stderr)
+        workspace_upgrade_action(binary, base_path, ['--restore', backups[selected]['backup_id']],
+                                 'masc.workspace_restore.v1')
+
+
+def workspace_check(binary, base_path):
+    base = Path(base_path).expanduser().resolve()
+    while True:
+        result = subprocess.run([str(binary), 'setup-preflight', '--base-path', str(base)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                env=workspace_child_env())
+        try:
+            receipt = json.loads(result.stdout)
+        except ValueError:
+            raise SetupError('workspace preflight did not return a readable result; existing data was preserved')
+        if (result.returncode == 0 and receipt.get('status') == 'ready'
+                and receipt.get('read_only') is True and receipt.get('scope') == 'keeper_goal_state_schema'):
+            return dict(base_path=str(base), status='ready')
+        if receipt.get('status') != 'needs_attention' or not isinstance(receipt.get('issues'), list):
+            raise SetupError('workspace preflight failed; existing data was preserved')
+        print('This workspace contains state that this version cannot open. This preflight check made no changes; earlier upgrade backups remain available.', file=sys.stderr)
+        for issue in receipt['issues']:
+            print('  ' + terminal_text(issue['path']) + ': ' + terminal_text(issue['detail']), file=sys.stderr)
+        if not sys.stdin.isatty():
+            raise SetupError('choose a new unused workspace with --base-path, or keep the previous version for this workspace')
+        upgrades = workspace_upgrade_catalog(binary, base)
+        plans = [row for row in upgrades['keepers'] if row['status'] == 'upgrade_available']
+        suggestion = base.parent / (base.name + '-new')
+        suffix = 2
+        while suggestion.exists():
+            suggestion = base.parent / (base.name + '-new-' + str(suffix))
+            suffix += 1
+        actions = ['Use new workspace: ' + str(suggestion),
+                   'Choose another directory', 'Return without changing existing data']
+        optional = []
+        if plans:
+            optional.append(('upgrade', 'Keep this workspace: back up and upgrade known Keeper settings'))
+        if upgrades['backups']:
+            optional.append(('restore', 'Restore a previous configuration backup'))
+        action = pick('Choose a workspace', actions + [label for _, label in optional])[0]
+        if action >= len(actions):
+            if optional[action - len(actions)][0] == 'upgrade':
+                select_workspace_upgrades(binary, base, plans)
+            else:
+                select_workspace_restore(binary, base, upgrades['backups'])
+            continue
+        if action == 2:
+            raise SetupError('installation cancelled; existing workspace data was preserved')
+        candidate = suggestion if action == 0 else Path(ask_text('New unused workspace directory')).expanduser().resolve()
+        if candidate.exists():
+            print('Choose an unused directory. Existing directories will not be cleared.', file=sys.stderr)
+            continue
+        base = candidate
+
+
+# The document decides whether imp's persisted conversation opens directly;
+# the journey never re-derives that from check condition strings.
+ONBOARDING_OPENINGS = ('open_existing_history', 'needs_journey')
+
+
+def onboarding_status(binary, base_path=None):
+    argv = [str(binary), 'doctor', '--json']
+    if base_path is not None:
+        argv += ['--base-path', str(base_path)]
+    response = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              env=workspace_child_env() if base_path is not None else None)
+    try:
+        state = json.loads(response.stdout)
+    except ValueError:
+        raise SetupError('MASC could not inspect this workspace. Run masc doctor for recovery details.')
+    if (response.returncode != 0 or not isinstance(state, dict)
+            or state.get('schema') != 'masc.onboarding_status.v1'
+            or state.get('scope') != 'configuration_observation'
+            or state.get('opening') not in ONBOARDING_OPENINGS
+            or not isinstance(state.get('checks'), list)):
+        raise SetupError('MASC returned an unsupported setup observation; reinstall the complete release.')
+    return state
+
+
+def open_workspace(binary, base_path, port):
+    sibling = Path(binary).resolve().parent / 'masc-tui'
+    tui = str(sibling) if os.access(str(sibling), os.X_OK) else shutil.which('masc-tui')
+    if not tui:
+        raise SetupError('The terminal UI is missing. Reinstall the complete MASC release, then run masc again.')
+    return subprocess.run([tui, '--base-path', str(base_path), '--port', str(port)],
+                         env=workspace_child_env()).returncode
+
+
+def workspace_port(binary, base_path, requested=None, save=False):
+    argv = [str(binary), 'workspace-connection', '--base-path', str(base_path)]
+    if requested is not None:
+        argv += ['--port', str(requested)]
+    if save:
+        argv += ['--save']
+    response = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              env=workspace_child_env())
+    try:
+        observed = json.loads(response.stdout)
+        if (response.returncode or observed.get('schema') != 'masc.workspace_connection.v1'
+                or observed.get('readiness') != 'not_checked'
+                or not positive_integer(observed.get('port')) or observed['port'] > 65535):
+            raise ValueError('invalid connection')
+        return observed['port']
+    except (KeyError, TypeError, ValueError):
+        raise SetupError('The workspace HTTP port could not be resolved or saved. Check connection.toml or supply --port.')
+
+
+def select_setup_server(binary, base_path, port, require_new_owner=False, resume_existing=False):
+    termination_requested = False
+    while True:
+        response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base_path), '--port', str(port)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                  env=workspace_child_env())
+        try:
+            observed = json.loads(response.stdout)
+            if response.returncode or observed.get('schema') != 'masc.setup_server.v1' or observed.get('read_only') is not True:
+                raise ValueError('invalid server observation')
+        except (TypeError, ValueError):
+            if termination_requested:
+                raise SetupError('Graceful shutdown was requested; the follow-up workspace inspection failed. Inspect it before restarting.')
+            raise SetupError('The setup port could not be inspected. Existing servers were preserved.')
+        state = observed.get('status')
+        if state == 'free':
+            return port
+        if state == 'same_workspace':
+            server_version = observed['server_version']
+            if termination_requested:
+                print('Graceful shutdown was requested, but this workspace is still answering. No second shutdown request will be sent.', file=sys.stderr)
+                if pick('Workspace shutdown', ['Check shutdown again', 'Finish later'])[0]:
+                    raise SetupError('Shutdown was requested; its completion remains unconfirmed. Inspect this workspace before restarting it.')
+                continue
+            if resume_existing and not require_new_owner and server_version == observed['installed_version']:
+                return port
+            choices = [('use', 'Continue with this running workspace'),
+                       ('stop', 'Stop this server gracefully and continue setup with the installed MASC'),
+                       ('later', 'Finish later')]
+            if require_new_owner:
+                print('This terminal has refreshed Docker access. The existing server keeps its earlier account groups; restart it to prepare the sandbox in this session.', file=sys.stderr)
+                choices = [('stop', 'Restart this workspace server with the refreshed Docker access'),
+                           ('later', 'Finish later and keep the existing server')]
+            elif server_version != observed['installed_version']:
+                choices[0], choices[1] = choices[1], choices[0]
+            selected = choices[pick('Workspace server ' + server_version + ' · installed MASC ' + observed['installed_version'],
+                                    [label for _, label in choices])[0]][0]
+            if selected == 'use':
+                return port
+            if selected == 'later':
+                raise SetupError('setup paused; the existing workspace server was preserved')
+            result = subprocess.run([str(binary), 'setup-stop-previous-owner', '--base-path', str(base_path),
+                                     '--port', str(port), '--expected-version', server_version],
+                                    stdout=subprocess.PIPE, text=True,
+                                    env=workspace_child_env())
+            try:
+                receipt = json.loads(result.stdout)
+                if result.returncode:
+                    if (receipt.get('schema') == 'masc.setup_server_error.v1'
+                            and receipt.get('termination_requested') is False):
+                        print(terminal_text(receipt['error']), file=sys.stderr)
+                        return None
+                    raise ValueError('invalid error')
+                if (receipt.get('schema') != 'masc.setup_server_shutdown.v1'
+                        or receipt.get('termination_requested') is not True
+                        or receipt.get('readiness') not in ('owner_draining', 'port_busy', 'replacement_can_start', 'observation_failed')):
+                    raise ValueError('invalid shutdown receipt')
+                if (receipt['readiness'] == 'observation_failed'
+                        and not isinstance(receipt.get('observation_error'), str)):
+                    raise ValueError('missing shutdown observation error')
+            except (TypeError, KeyError, ValueError):
+                raise SetupError('The server shutdown result was not confirmed. Inspect the workspace before retrying.')
+            termination_requested = True
+            if receipt['readiness'] == 'replacement_can_start':
+                return port
+            if receipt['readiness'] == 'observation_failed':
+                print('Graceful shutdown was requested. Its follow-up observation failed: '
+                      + terminal_text(receipt['observation_error']) + ' Rechecking the workspace without sending another shutdown request.', file=sys.stderr)
+            continue  # server or port might have changed during graceful drain
+        if state not in ('other_workspace', 'unknown_server'):
+            raise SetupError('MASC returned an unknown server observation')
+        if state == 'other_workspace':
+            print('Port ' + str(port) + ' belongs to ' + terminal_text(observed['server_workspace']), file=sys.stderr)
+        else:
+            print('Another service is using port ' + str(port), file=sys.stderr)
+        suggested = observed.get('suggested_port')
+        if not positive_integer(suggested) or suggested > 65535:
+            raise SetupError('MASC could not find an unused local port')
+        if pick('Choose this workspace’s port', ['Use available port ' + str(suggested), 'Finish later'])[0]:
+            if termination_requested:
+                raise SetupError('Setup paused after graceful shutdown was requested. Its completion remains unconfirmed.')
+            raise SetupError('setup paused; existing services were preserved')
+        port = suggested
+        termination_requested = False
+SANDBOX_NAMES = {'docker': 'Docker', 'apple_container': 'Apple Container', 'nerdctl_kata': 'Kata (nerdctl)',
+                 'microsandbox': 'microsandbox', 'remote_ssh': 'Remote SSH'}
+
+
+def sandbox_catalog(binary, base_path):
+    response = subprocess.run([str(binary), 'sandbox-catalog', '--base-path', str(base_path)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              env=workspace_child_env())
+    try:
+        catalog = json.loads(response.stdout)
+    except (TypeError, ValueError):
+        raise SetupError('Sandbox inspection failed. Run masc sandbox-catalog for details.')
+    if response.returncode != 0 or not isinstance(catalog, dict) or catalog.get('schema') != 'masc.sandbox_readiness.v1':
+        raise SetupError('MASC could not inspect sandbox prerequisites.')
+    return catalog
+
+
+def select_sandbox(binary, base_path, port=8945):
+    advanced = False
+    names = SANDBOX_NAMES
+    while True:
+        catalog = sandbox_catalog(binary, base_path)
+        error = catalog.get('configuration_error')
+        if error is not None:
+            # {kind, detail}: kind is the closed reason class, detail the OS or parse message.
+            print(terminal_text(error['kind'] + ': ' + error['detail']), file=sys.stderr)
+        rows = [row for row in catalog['candidates'] if advanced or not row['advanced']]
+        rows.sort(key=lambda row: not row['recommended'])
+        labels = [names.get(row['id'], row['id']) + (' · recommended' if row['recommended'] else '')
+                  + ' — ' + ('service found; guest still needs preparation' if row['state'] == 'service_ready' else row['reason'])
+                  for row in rows]
+        try:
+            pdf = pdf_tools_status(binary)
+            pdf_label = ('PDF document inspection · tools available' if pdf.available
+                         else 'PDF document inspection · install missing tools')
+        except SetupError:
+            pdf_label = 'PDF document inspection · could not check tools'
+        try:
+            presentation = presentation_tools_status(binary, base_path)
+            presentation_label = ('Presentation tools · available on workspace host' if presentation.available
+                                  else 'Presentation tools · install missing dependencies')
+        except SetupError:
+            presentation_label = 'Presentation tools · could not check dependencies'
+        action = pick('4 · Prepare imp’s workspace', labels + [
+            'Refresh after installing or starting a service',
+            'Show common choices' if advanced else 'Advanced sandbox choices', pdf_label, presentation_label, 'Finish later'])[0]
+        if action == len(rows):
+            continue
+        if action == len(rows) + 1:
+            advanced = not advanced
+            continue
+        if action == len(rows) + 2:
+            prerequisite_menu(binary, 'pdf-tools', base_path=base_path, port=port)
+            continue
+        if action == len(rows) + 3:
+            prerequisite_menu(binary, 'presentation-tools', base_path=base_path, port=port)
+            continue
+        if action == len(rows) + 4:
+            return None
+        row = rows[action]
+        if row['state'] != 'service_ready':
+            print(terminal_text(row['reason']), file=sys.stderr)
+            prerequisite_menu(binary, row['id'], base_path=base_path, port=port)
+            continue
+        arguments = list(row['setup_args'])
+        configured = catalog.get('configured_selection')
+        same_backend = isinstance(configured, dict) and configured.get('backend') == row['id']
+        modes = row['capabilities']['network_modes']
+        if same_backend and not advanced:
+            print('Keeping the configured guest network policy. MASC model connections and WebFetch have separate server-side controls.', file=sys.stderr)
+            return arguments
+        if advanced:
+            # A declared policy can be kept; creating a new one also needs its
+            # destination configuration, so it is not synthesized here.
+            modes = [mode for mode in modes if mode in ('inherit', 'none')]
+            modes.sort(key=lambda mode: mode != 'inherit')
+            labels = [('Allow internet access for guest commands' if mode == 'inherit'
+                       else 'Disable networking for guest commands') for mode in modes]
+            if same_backend:
+                labels.insert(0, 'Keep configured guest network policy (' + terminal_text(configured['network_mode']) + ')')
+            print('Guest networking controls sandbox commands. MASC model connections and WebFetch run through separate server-side controls.', file=sys.stderr)
+            choice = pick('Sandbox guest network access', labels)[0]
+            if same_backend:
+                if choice == 0:
+                    return arguments
+                choice -= 1
+            mode = modes[choice]
+        else:
+            if 'inherit' not in modes:
+                raise SetupError('This sandbox needs advanced network configuration for the first conversation.')
+            mode = 'inherit'
+            print('The new sandbox allows internet access for guest commands. MASC model connections and WebFetch have separate server-side controls; Advanced choices can disable guest networking.', file=sys.stderr)
+        return arguments + ['--network-mode', mode]
+
+
+def local_voices(binary, base):
+    """The voices this machine has, as `say` prints them.
+
+    The list is not a convenience. `say` does not fail on a voice it does not
+    have -- it exits 0 and speaks in the system voice -- so a name typed from
+    memory is silently a different voice, and a name that exists in several
+    languages picks one of them. Measured on macOS 26: "Eddy" read Korean in
+    English at 4.7KB where "Eddy (한국어(한국))" gave 72KB.
+    """
+    # --base-path because every masc command resolves a workspace before it
+    # runs, the listing included, even though it reads `say` and nothing under
+    # the workspace. Measured 2026-09-13 with no MASC_BASE_PATH and no recorded
+    # default: exit 1 and an empty stdout. This step runs before the one that
+    # records a default, so without the flag the list depended on whatever the
+    # launcher happened to export.
+    result = subprocess.run([str(binary), 'voice-local-setup', '--base-path', base, '--list-voices'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            env=workspace_child_env())
+    if result.returncode != 0:
+        # Said rather than swallowed: an empty list here skips the voice
+        # question without a word, and the reader cannot tell that from a
+        # computer that has no voices. The reason is the last line, after the
+        # binary's own start-up log.
+        lines = [line for line in (result.stderr or '').splitlines() if line.strip()]
+        print('Could not list the voices on this computer, so voice is skipped: {}'.format(
+                  terminal_text(lines[-1]) if lines else 'exit {}'.format(result.returncode)),
+              file=sys.stderr)
+        return []
+    try:
+        listing = json.loads(result.stdout)
+    except ValueError:
+        print('The voice listing was not JSON, so voice is skipped.', file=sys.stderr)
+        return []
+    voices = listing.get('voices')
+    return voices if isinstance(voices, list) else []
+
+
+def whisper_model_path(binary):
+    """Where the prerequisite catalog puts the model, read from the catalog.
+
+    The voice section has to name the file the download actually wrote, so the
+    path is taken from the action that writes it rather than spelled twice.
+    A computer whose catalog only links the downloads page has no such action,
+    and the reader is asked for the path instead.
+    """
+    result = subprocess.run([str(binary), 'prerequisite-actions', 'whisper'],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    if result.returncode != 0 or not result.stdout:
+        return None
+    try:
+        catalog = json.loads(result.stdout)
+    except ValueError:
+        return None
+    # The download says where it leaves the model, as `writes`. This used to
+    # take curl's -o argument, and when the fetch moved to a .part beside the
+    # final path that argument named a file that never exists once the download
+    # succeeds -- so hearing was never configured through this step. Measured
+    # 2026-09-13: this function returned ".../ggml-large-v3-turbo.bin.part".
+    for action in catalog.get('actions') or []:
+        if action.get('id') == 'whisper_model_download':
+            writes = action.get('writes')
+            return writes if isinstance(writes, str) and writes else None
+    return None
+
+
+def preferred_language():
+    for name in ('LC_ALL', 'LC_MESSAGES', 'LANG'):
+        value = os.environ.get(name)
+        if value and value not in ('C', 'POSIX'):
+            return value.split('.')[0].split('_')[0].lower()
+    return 'en'
+
+
+def select_local_voice(binary, base):
+    """Ask for a voice, and never take the journey down with it.
+
+    An optional step cannot fail the thing it is optional to. By the time this
+    runs the workspace is initialized and the model connection is saved, and
+    the sandbox step is still ahead, so a cancel here means "not this" rather
+    than "abandon setup" -- which is what it meant before, complete with a
+    `runtime setup failed` line about a step nobody had to take.
+    """
+    try:
+        ask_local_voice(binary, base)
+    except SetupError as error:
+        print(terminal_text(str(error)) + '\nContinuing without voice. '
+              'Run masc voice-local-setup to turn it on later.', file=sys.stderr)
+
+
+def ask_local_voice(binary, base):
+    """Turn on voice, which on a fresh mac needs nothing downloaded to speak.
+
+    `say` is in the base system and runs once per utterance, so speaking is a
+    setting rather than a service: there is no port, no process to keep alive
+    and nothing to install. Hearing needs whisper-cli and a model, which is
+    why it is asked separately and only after the answer to the first is yes.
+    """
+    voices = local_voices(binary, base)
+    if not voices:
+        # Not an error to report: a computer whose `say` publishes no
+        # catalogue has no voice to offer, and the journey continues.
+        return
+    language = preferred_language()
+    mine = [voice for voice in voices if str(voice.get('language', '')).lower().startswith(language)]
+    shortlist = mine or voices[:12]
+    while True:
+        labels = [terminal_text(voice.get('name') or voice.get('id')) + ' — ' + terminal_text(voice.get('language', ''))
+                  for voice in shortlist]
+        extra = ['Show every voice on this computer ({})'.format(len(voices))] if len(shortlist) < len(voices) else []
+        choice = pick('3 · Give imp a voice (optional)', labels + extra + ['Stay text only'])[0]
+        if choice == len(labels) + len(extra):
+            return
+        if extra and choice == len(labels):
+            shortlist = voices
+            continue
+        voice = shortlist[choice]
+        break
+    arguments = ['--voice', voice.get('id')]
+    # Hearing is the half that needs a download, so it is a separate question
+    # rather than a consequence of answering the first one.
+    if pick('Let imp hear you too? whisper-cli transcribes locally; the model it reads is 1.6GB.',
+            ['Speak to imp as well', 'Speaking only for now'])[0] == 0:
+        while prerequisite_menu(binary, 'whisper'):
+            pass
+        model = whisper_model_path(binary)
+        if model is None:
+            model = ask_text('Path to the whisper model file')
+        if model and Path(model).is_file() and shutil.which('whisper-cli'):
+            arguments += ['--model', model]
+            # Transcribing is configured either way: a device that posts audio
+            # needs nothing else. But masc's own capture records with sox's
+            # rec, and without it the first capture in the TUI is where the
+            # reader finds out. The menu above offers sox; this is for a reader
+            # who left it without taking that step.
+            if not shutil.which('rec'):
+                print('imp can transcribe audio sent to it, but masc records from the microphone with '
+                      "sox's rec, which is not installed. Install sox (masc prerequisite-actions whisper "
+                      'names the command) before speaking into the TUI.', file=sys.stderr)
+        else:
+            print('Listening needs both whisper-cli and a model file, so imp will speak but not listen. '
+                  'Run masc voice-local-setup --model <file> once both are ready.', file=sys.stderr)
+    result = subprocess.run([str(binary), 'voice-local-setup', '--base-path', base] + arguments,
+                            stdout=sys.stderr, env=workspace_child_env())
+    if result.returncode != 0:
+        # The writer already said why on stderr, and every reason for it is a
+        # configuration one. Voice is optional, so this does not end setup.
+        print('Voice was not saved. Everything else is. Run masc voice-local-setup to try again.',
+              file=sys.stderr)
+
+
+# Quick setup's model when Claude Code is on this computer. Chosen 2026-09-16:
+# a first conversation and its tool check answer quickly on it, and a
+# subscription spends less of its allowance than on the larger models.
+QUICK_MODEL = 'claude-sonnet-5-5'
+
+# The order quick setup takes Apple Container's own actions in. Each runs at
+# most once, so a service that never becomes ready ends in the step 4 screen
+# instead of a loop. An installed client is started before it is reinstalled.
+# The default kernel is set once the service is up: the kernel download goes
+# through the running service, and every image build after it boots one.
+QUICK_APPLE_INSTALLED_ORDER = ('apple_container_build_without_rosetta', 'apple_container_start',
+                               'apple_container_kernel_set', 'apple_container_verified_install')
+QUICK_APPLE_MISSING_ORDER = ('apple_container_build_without_rosetta', 'apple_container_verified_install',
+                             'apple_container_start', 'apple_container_kernel_set')
+
+
+def quick_plan(binary, base_path):
+    """What quick setup would do here, or None when there is no plan to offer.
+
+    A plan needs a model to go straight to (Claude Code where the runtime
+    will find it) and a sandbox observation to choose from. Without either,
+    the journey opens at step 1 as it always did. This only reads:
+    `runtime-client-path` and `sandbox-catalog` change nothing, even for a
+    workspace that does not exist yet.
+    """
+    try:
+        if not official_client_path(binary, 'claude_code', 'claude'):
+            return None
+        catalog = sandbox_catalog(binary, base_path)
+    except (SetupError, OSError):
+        return None
+    rows = {row.get('id'): row for row in catalog.get('candidates', []) if isinstance(row, dict)}
+    apple, docker = rows.get('apple_container'), rows.get('docker')
+    if apple is not None and apple.get('state') != 'unsupported_host':
+        sandbox = 'apple_container'
+    elif docker is not None and docker.get('state') == 'service_ready':
+        sandbox = 'docker'
+    else:
+        sandbox = None
+    apple_ready = apple is not None and apple.get('state') == 'service_ready'
+    return dict(model=QUICK_MODEL, sandbox=sandbox, sandbox_ready=sandbox == 'docker' or apple_ready)
+
+
+def quick_plan_text(plan, base_path):
+    if plan['sandbox'] is None:
+        sandbox = 'chosen in step 4 (no ready sandbox was found)'
+    elif plan['sandbox_ready']:
+        sandbox = SANDBOX_NAMES[plan['sandbox']]
+    else:
+        sandbox = ('Apple Container: installs Apple’s signed package and starts it as needed, and builds\n'
+                   '              without Rosetta if this Mac has none. The installer may ask for your password.')
+    return ('\nQuick setup\n'
+            '  Workspace   ' + terminal_text(base_path) + '\n'
+            '  Model       Claude Code / ' + plan['model'] + ' (checked with a real reply before saving)\n'
+            '  Voice       text only\n'
+            '  Sandbox     ' + sandbox)
+
+
+def quick_sandbox(binary, base_path, backend):
+    """Arguments for `masc setup`, preparing Apple Container on the way.
+
+    None hands the choice back to the step 4 screen: the backend is not in the
+    catalog, a step failed, or the actions ran out before the service was ready.
+    """
+    ran = set()
+    while True:
+        catalog = sandbox_catalog(binary, base_path)
+        row = next((row for row in catalog['candidates'] if row['id'] == backend), None)
+        if row is None:
+            return None
+        if row['state'] == 'service_ready':
+            print('Sandbox: ' + SANDBOX_NAMES.get(backend, backend), file=sys.stderr)
+            configured = catalog.get('configured_selection')
+            if isinstance(configured, dict) and configured.get('backend') == backend:
+                return list(row['setup_args'])
+            if 'inherit' not in row['capabilities']['network_modes']:
+                return None
+            return list(row['setup_args']) + ['--network-mode', 'inherit']
+        if backend != 'apple_container':
+            return None
+        print(terminal_text(row['reason']), file=sys.stderr)
+        offered = [action['id'] for action in prerequisite_catalog(binary, backend)['actions']]
+        order = QUICK_APPLE_INSTALLED_ORDER if shutil.which('container') else QUICK_APPLE_MISSING_ORDER
+        step = next((action for action in order if action in offered and action not in ran), None)
+        if step is None:
+            return None
+        ran.add(step)
+        if execute_prerequisite(binary, backend, step) not in ('commands_completed', 'commands_completed_recheck_required'):
+            return None
+
+
+# What imp can use once setup ends, offered as one checklist
+# (RFC setup-web-search-and-browser-lane section 4.3). The browser, web search
+# and GitHub rows start marked; the ones that open a port or need a human at
+# every browser start do not. Nothing is installed or written until the
+# reader confirms the list, and a quick setup only prints it.
+#
+# The three browser keys are also the `--mode` names of `masc browser-lane-setup`,
+# so a confirmed row is the argument the command takes.
+AUTOMATION_TOOL = 'automation'
+BIDI_TOOL = 'bidi'
+EXTENSION_TOOL = 'extension'
+EGO_TOOL = 'ego'
+BROWSER_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EXTENSION_TOOL, EGO_TOOL)
+# The routes that start or attach a Firefox. The ego route runs ego lite.
+FIREFOX_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EXTENSION_TOOL)
+WEB_SEARCH_TOOL = 'web-search'
+ZAI_TOOL = 'zai'
+# The value `web_search.provider` takes for z.ai, and what `--provider` is given.
+ZAI_PROVIDER = 'zai'
+SEARXNG_TOOL = 'searxng'
+# The variable the glm-coding model provider reads, and the one the zai search
+# provider reads. Only whether it is set is looked at here, never its value.
+ZAI_KEY_VARIABLE = 'ZAI_API_KEY'
+GITHUB_TOOL = 'github'
+IMP_KEEPER = 'imp'
+GITHUB_HOST = 'github.com'
+# `gh auth status` asks GitHub whether the token works, so it answers as slowly
+# as the network does. A login that cannot be confirmed in this time is not
+# offered, and imp signs in with a code instead.
+GH_PROBE_TIMEOUT_SECONDS = 20
+
+
+@dataclass(frozen=True)
+class HostGithubLogin:
+    """The login `gh` holds on this computer, as `gh auth status` describes it.
+    The token is not part of it: it is read only at the moment it is handed over."""
+    login: str
+    scopes: str
+    source: str
+
+
+@dataclass(frozen=True)
+class ToolRow:
+    """One line of the checklist: what it gives imp, and the command a quick
+    setup prints instead of running it. [checked] says whether it starts
+    marked and has no default: a row that forgot to say would start marked, and
+    the rows that open a port or copy a token must be the ones that never do.
+    [notice] is what the reader is told before marking it. [host_login] is set
+    on the GitHub row when the login on this computer is the one offered."""
+    key: str
+    label: str
+    command: str
+    checked: bool
+    notice: str = ''
+    host_login: Optional[HostGithubLogin] = None
+
+
+def token_comes_from_environment(source):
+    """`gh` names an environment variable (GH_TOKEN, GITHUB_TOKEN, ...) as the token's source.
+
+    `gh auth token --user` finds only a stored login, so an environment token
+    has to be read without it. That token cannot change while the wizard runs:
+    it is the wizard's own environment, so there is no account to switch.
+    """
+    return re.fullmatch(r'[A-Z][A-Z0-9_]*_TOKEN', source) is not None
+
+
+def token_argv(login):
+    argv = ['gh', 'auth', 'token', '--hostname', GITHUB_HOST]
+    if not token_comes_from_environment(login.source):
+        argv += ['--user', login.login]
+    return argv
+
+
+def browser_lane_command(base, modes):
+    """The `masc browser-lane-setup` line for [modes].
+
+    The command orders the routes itself, whatever order it is given. [modes]
+    is passed in a fixed order (BROWSER_MODES) so the line the reader sees is
+    the same each time.
+    """
+    flags = ' '.join('--mode ' + mode for mode in modes)
+    return 'masc browser-lane-setup ' + flags + ' --base-path ' + shlex.quote(str(base))
+
+
+def automation_command(base):
+    return browser_lane_command(base, (AUTOMATION_TOOL,))
+
+
+def web_search_command(base):
+    """With no option `masc web-search-setup` writes nothing: it prints each
+    provider's state and the variable to export for one that has no key."""
+    return 'masc web-search-setup --base-path ' + shlex.quote(str(base))
+
+
+def zai_command(base):
+    """Names z.ai as the provider tried first; `masc web-search-setup` then
+    prints the state and says whether a running server must restart."""
+    return 'masc web-search-setup --provider ' + ZAI_PROVIDER + ' --base-path ' + shlex.quote(str(base))
+
+
+def searxng_url_command(base, url):
+    """Writes `web_search.searxng_url`, which is what puts SearXNG in the chain."""
+    return ('masc web-search-setup --searxng-url ' + shlex.quote(url)
+            + ' --base-path ' + shlex.quote(str(base)))
+
+
+def searxng_start_command(base, action_id):
+    return ('masc prerequisite-actions ' + SEARXNG_DEPENDENCY + ' --execute ' + shlex.quote(action_id)
+            + ' --base-path ' + shlex.quote(str(base)))
+
+
+def github_command(base, login):
+    """The command that gives imp its login: the host's token for [login], or a one-time code."""
+    options = ' '.join(['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', shlex.quote(str(base))])
+    if login is None:
+        return 'masc keeper-github login ' + options
+    return '{} | masc keeper-github set-token {}'.format(' '.join(shlex.quote(word) for word in token_argv(login)), options)
+
+
+def browser_tool(binary, program):
+    """What MASC found for one program, and the actions it offers on this host."""
+    catalog = prerequisite_catalog(binary, program)
+    return decode_browser_tools_readiness(catalog.get('dependency_readiness'), program), catalog['actions']
+
+
+def install_action(actions):
+    """The first action MASC offers for a missing program, or None when it offers none."""
+    if not actions:
+        return None
+    action = actions[0]
+    # The fields `prerequisite_menu` reads when the reader chooses it: a catalog
+    # that drops one is refused here, with the row, instead of after the mark.
+    if not (isinstance(action, dict) and all(isinstance(action.get(key), str) for key in ('id', 'label', 'detail', 'source_url'))
+            and isinstance(action.get('requires_admin'), bool)):
+        raise SetupError('MASC returned an unreadable install action')
+    return action
+
+
+def action_command(action):
+    """The command line an action runs, for a person to read and copy, or None
+    when the action opens a page instead. It is printed, never handed to a shell."""
+    effect = action.get('effect')
+    if isinstance(effect, dict) and effect.get('kind') == 'run_commands':
+        steps = effect.get('argv_steps')
+        if isinstance(steps, list) and steps and all(isinstance(step, list) and step for step in steps):
+            return ' && '.join(' '.join(shlex.quote(str(part)) for part in step) for step in steps)
+    return None
+
+
+def browser_rows(binary, base):
+    """The browser rows from one look at geckodriver and Firefox.
+
+    The automation row is there whenever both programs could be read: it offers
+    the install when one is missing. The two Firefox routes are shown only when
+    Firefox was found (RFC section 4.3): recommending a browser is not this
+    step's job, so with none there is nothing to attach to and nothing to ask.
+    The routes need Firefox and not geckodriver, so each program is read on its
+    own and a catalog that cannot be read for one does not hide the rest.
+    """
+    found, unreadable = {}, []
+    for program in BROWSER_TOOLS:
+        try:
+            found[program] = browser_tool(binary, program)
+        except (SetupError, OSError) as error:
+            unreadable.append((program, error))
+    rows = []
+    if len(found) == len(BROWSER_TOOLS):
+        rows.append(automation_row(found, base))
+    if 'firefox' in found and found['firefox'][0].available:
+        rows += firefox_route_rows(base)
+    for program, error in unreadable:
+        print(BROWSER_TOOL_NAMES[program] + ': ' + terminal_text(str(error))
+              + '\nWhat that program offers is left out of this list.', file=sys.stderr)
+    if unreadable:
+        print('Run ' + automation_command(base) + ' to give imp a browser later.', file=sys.stderr)
+    return rows
+
+
+def firefox_route_rows(base):
+    """The two ways to connect a Firefox the reader already uses or MASC starts.
+
+    Both start unmarked. BiDi opens a debugging port with no authentication;
+    the extension has to be loaded by the reader again after every browser
+    start. Each is a thing to choose, not a thing to find ready.
+    """
+    bidi_notice = ('\nThe BiDi route has MASC start a Firefox of its own with remote debugging on a local port. '
+                   'That port has no authentication: any program on this computer can drive that browser and read '
+                   'its cookies. Log in once, after the server starts, to the sites imp works on; its profile keeps '
+                   'the login.')
+    extension_notice = ('\nThe extension route attaches the Firefox you use every day. Firefox removes the add-on '
+                        'when it restarts, so you load it again from about:debugging each time. A request that names '
+                        'no browser connection goes to this Firefox only while no BiDi or ego lite connection is up '
+                        'and imp has no browser of its own open.')
+    return [
+        ToolRow(BIDI_TOOL, "Firefox of its own that MASC starts for imp (BiDi) · log in once · open debugging port",
+                browser_lane_command(base, (BIDI_TOOL,)), checked=False, notice=bidi_notice),
+        ToolRow(EXTENSION_TOOL, 'Your everyday Firefox through the MASC add-on · load the add-on after each restart',
+                browser_lane_command(base, (EXTENSION_TOOL,)), checked=False, notice=extension_notice),
+    ]
+
+
+def ego_row(binary, base):
+    """The ego lite route, shown only when ego-browser answers (RFC-browser-live-ego section 7).
+
+    It starts unmarked: imp acts there with the cookies of the reader's ego lite
+    profile. Recommending a browser is not this step's job, so with no
+    ego-browser there is nothing to ask, as with Firefox.
+    """
+    readiness, _ = browser_tool(binary, EGO_PROGRAM)
+    if not readiness.available:
+        return None
+    notice = ('\nThe ego lite route has MASC open a task space of its own in your ego lite. imp sees '
+              'only the tabs in that space, and clicks and types only on the pages it opened there. Those pages '
+              'share the cookies of your ego lite profile, so imp reads and acts as you on the sites you are '
+              'logged in to. With the BiDi route chosen as well, a request that names no browser connection is '
+              'refused as ambiguous.')
+    return ToolRow(EGO_TOOL, 'Your ego lite, in a task space of its own for imp · uses your ego lite logins',
+                   browser_lane_command(base, (EGO_TOOL,)), checked=False, notice=notice)
+
+
+def automation_row(found, base):
+    missing = [program for program in BROWSER_TOOLS if not found[program][0].available]
+    head = "Web pages in imp's own Firefox"
+    if not missing:
+        return ToolRow(AUTOMATION_TOOL, head + ' · geckodriver and Firefox found', automation_command(base), checked=True)
+    names = ', '.join(BROWSER_TOOL_NAMES[program] for program in missing)
+    offered = [action for action in (install_action(found[program][1]) for program in missing) if action is not None]
+    runnable, described = [], []
+    for action in offered:
+        command = action_command(action)
+        if command:
+            runnable.append(command)
+            described.append(command)
+        else:
+            described.append('official page ' + terminal_text(action.get('source_url', '')))
+    label = head + ' · ' + names + ' not found' + (' · ' + '; '.join(described) if described else '')
+    if any(action['requires_admin'] for action in offered):
+        label += ' · administrator permission'
+    return ToolRow(AUTOMATION_TOOL, label, ' && '.join(runnable + [automation_command(base)]), checked=True)
+
+
+def host_github_login():
+    """The github.com login `gh` holds on this computer, or None when there is none to offer.
+
+    `gh auth status --json` names the account, its scopes and where the token
+    lives, and never prints the token. Only an active account that GitHub
+    accepts is offered: a token GitHub refuses reads as `state: error` with no
+    account name, and handing imp a token that does not work helps nobody.
+    """
+    if shutil.which('gh') is None:
+        return None
+    try:
+        result = subprocess.run(['gh', 'auth', 'status', '--hostname', GITHUB_HOST, '--json', 'hosts'],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                timeout=GH_PROBE_TIMEOUT_SECONDS)
+        hosts = json.loads(result.stdout)['hosts']
+        accounts = hosts.get(GITHUB_HOST, [])
+    except subprocess.TimeoutExpired:
+        print('gh did not answer in time, so imp signs in with a one-time code instead.', file=sys.stderr)
+        return None
+    except OSError:
+        print('gh could not be started, so imp signs in with a one-time code instead.', file=sys.stderr)
+        return None
+    except (ValueError, KeyError, TypeError, AttributeError):
+        print("Could not read gh's login (gh auth status --json), so imp signs in with a one-time code instead.",
+              file=sys.stderr)
+        return None
+    for account in accounts if isinstance(accounts, list) else []:
+        if (isinstance(account, dict) and account.get('active') is True and account.get('state') == 'success'
+                and isinstance(account.get('login'), str) and account['login']):
+            return HostGithubLogin(login=account['login'], scopes=str(account.get('scopes', '')),
+                                   source=str(account.get('tokenSource', '')))
+    return None
+
+
+def github_row(base):
+    login = host_github_login()
+    if login is None:
+        return ToolRow(GITHUB_TOOL, 'Sign imp into GitHub with a one-time code you approve in the browser',
+                       github_command(base, None), checked=True)
+    notice = ("\nimp can use the GitHub login on this computer: account {} on {}, token from {}, scopes {}.\n"
+              'imp then pushes and opens pull requests as {}. With the workflow scope it can change workflow files too.\n'
+              'imp gets a copy of the token, so revoking or refreshing it on this computer disconnects imp.\n'
+              'Only imp gets it: other keepers are not given this token.').format(
+                  terminal_text(login.login), GITHUB_HOST, terminal_text(login.source), terminal_text(login.scopes),
+                  terminal_text(login.login))
+    return ToolRow(GITHUB_TOOL, 'Let imp use the GitHub login on this computer · account ' + terminal_text(login.login),
+                   github_command(base, login), checked=True, notice=notice, host_login=login)
+
+
+def web_search_row(base):
+    # "writes nothing" comes first: the picker cuts a line at the terminal width,
+    # and a row that starts marked must not read as one that writes.
+    return ToolRow(WEB_SEARCH_TOOL, 'Web search check (writes nothing) · shows which providers have a key',
+                   web_search_command(base), checked=True)
+
+
+# Both choices write a key under [web_search] that may already hold something
+# the operator wrote, and an explicit order outranks both. The wizard cannot
+# read runtime.toml (no TOML parser in the Python it targets), so the screen
+# says it instead of leaving the reader to find out from the table after.
+PROVIDER_ORDER_SENTENCE = ('If web_search.provider_order is set it decides the order and this choice changes '
+                           'nothing.')
+# Where SearXNG stands once its address is saved: first among the providers
+# MASC tries without being told, and behind one named in web_search.provider.
+SEARXNG_ORDER_SENTENCE = ('Choosing it sets web_search.searxng_url, replacing an address set there. SearXNG is '
+                          'then tried before the providers that need a key, and behind a provider named in '
+                          'web_search.provider (z.ai, if you choose it too). ' + PROVIDER_ORDER_SENTENCE)
+# What SearXNG's answer to a JSON search can and cannot promise: it asks other
+# search engines, and they may refuse a server's requests. Measured on one
+# computer on 2026-10-14: every answer came through one engine while two
+# others refused. The image size is `docker images` on an arm64 Mac.
+SEARXNG_NOTICE = ('\nSearXNG runs in Docker on this computer and needs no key. It asks other search engines for '
+                  'results, and they can refuse a server\'s requests, so it can answer with few or no results. '
+                  'The first start downloads an image of about 380 MB on disk, and Docker then restarts the '
+                  'container whenever it starts, until you stop it. ' + SEARXNG_ORDER_SENTENCE)
+
+
+def zai_row(base):
+    """Offered only when ZAI_API_KEY is set where the wizard runs: the key the
+    GLM models use, so the reader's own plan is what a search would spend."""
+    if not os.environ.get(ZAI_KEY_VARIABLE, '').strip():
+        return None
+    notice = ('\nz.ai web search uses the GLM Coding Plan key in ' + ZAI_KEY_VARIABLE
+              + ', the same key the GLM models use. A search spends that plan\'s search allowance. '
+              'The key is not stored; use this only when the server runs in an environment that sees '
+              + ZAI_KEY_VARIABLE + '. '
+              'Choosing it sets web_search.provider to z.ai, replacing a provider set there: z.ai is tried '
+              'first and the others follow it in their usual order. ' + PROVIDER_ORDER_SENTENCE)
+    return ToolRow(ZAI_TOOL, 'z.ai web search through your GLM Coding Plan key · tried first',
+                   zai_command(base), checked=False, notice=notice)
+
+
+def searxng_plan(binary, base):
+    """What MASC says about the local SearXNG: its readiness and the id of the
+    one action that would start it, or None when there is nothing to start."""
+    catalog = prerequisite_catalog(binary, SEARXNG_DEPENDENCY, ['--base-path', str(base)])
+    readiness = decode_searxng_readiness(catalog.get('dependency_readiness'))
+    actions = [row for row in catalog['actions'] if isinstance(row, dict) and isinstance(row.get('id'), str)]
+    action_id = actions[0]['id'] if actions else None
+    if action_id is not None and not CATALOG_ACTION_ID.fullmatch(action_id):
+        raise SetupError('MASC returned an unreadable SearXNG action id')
+    return readiness, action_id
+
+
+def say_container_state(readiness):
+    """Why a container that exists is not offered: what is wrong with it and the
+    Docker command to run. The wizard starts, stops and removes nothing of it."""
+    name = SEARXNG_CONTAINER_NAME
+    where = terminal_text(readiness.url)
+    if readiness.container == 'running':
+        print('A SearXNG container is running but does not answer JSON searches at ' + where
+              + '. Look at its logs (docker logs ' + name + ').', file=sys.stderr)
+    elif readiness.container == 'paused':
+        print('The SearXNG container is paused. Run docker unpause ' + name + ', then set this up again.',
+              file=sys.stderr)
+    elif readiness.container == 'restarting':
+        print('The SearXNG container keeps restarting. Look at its logs (docker logs ' + name + ').',
+              file=sys.stderr)
+    elif readiness.container == 'unusable':
+        print('The SearXNG container is in a state Docker will not start from'
+              + (' (' + terminal_text(readiness.docker_status) + ')' if readiness.docker_status else '')
+              + '. Look at it with docker inspect ' + name + '. If you do not need it, docker rm -f '
+              + name + ' removes it, and this row then offers a fresh one.', file=sys.stderr)
+
+
+def searxng_row(binary, base):
+    """The SearXNG row, or None. Docker is the reader's to have: a computer
+    where it is not running gets no row and no advice to install it here."""
+    readiness, action_id = searxng_plan(binary, base)
+    if readiness.available:
+        return ToolRow(SEARXNG_TOOL, 'Use the SearXNG that already answers at ' + terminal_text(readiness.url)
+                       + ' for web search', searxng_url_command(base, readiness.url), checked=False,
+                       notice='\nAn instance is already answering JSON searches there. ' + SEARXNG_ORDER_SENTENCE)
+    if not readiness.docker or action_id is None:
+        if readiness.docker:
+            say_container_state(readiness)
+        return None
+    # Only a container that is not there needs the image pulled.
+    effort = ('pulls an image' if readiness.container == 'absent'
+              else 'starts the stopped ' + SEARXNG_CONTAINER_NAME + ' container')
+    return ToolRow(SEARXNG_TOOL, 'SearXNG in Docker · ' + effort + ' · key-free search on '
+                   + terminal_text(readiness.url),
+                   searxng_start_command(base, action_id) + ' && ' + searxng_url_command(base, readiness.url),
+                   checked=False, notice=SEARXNG_NOTICE)
+
+
+def imp_tool_rows(binary, base):
+    """The checklist's rows. Each is looked up on its own: a binary that cannot
+    inspect the browser tools still offers the web search check and the GitHub login."""
+    rows = []
+    try:
+        rows += browser_rows(binary, base)
+    except (SetupError, OSError) as error:
+        print(terminal_text(str(error)) + '\nRun ' + automation_command(base) + ' to give imp a browser later.',
+              file=sys.stderr)
+    try:
+        ego = ego_row(binary, base)
+    except (SetupError, OSError) as error:
+        print(terminal_text(str(error)) + '\nRun ' + browser_lane_command(base, (EGO_TOOL,))
+              + ' to connect ego lite later.', file=sys.stderr)
+        ego = None
+    if ego is not None:
+        rows.append(ego)
+    rows.append(github_row(base))
+    rows.append(web_search_row(base))
+    zai = zai_row(base)
+    if zai is not None:
+        rows.append(zai)
+    try:
+        searxng = searxng_row(binary, base)
+    except (SetupError, OSError) as error:
+        print(terminal_text(str(error)) + '\nRun masc prerequisite-actions ' + SEARXNG_DEPENDENCY
+              + ' to see what it would take to run SearXNG.', file=sys.stderr)
+        searxng = None
+    if searxng is not None:
+        rows.append(searxng)
+    return rows
+
+
+SETUP_SERVER_PROBE_TIMEOUT_SECONDS = 20
+# The routes that write a table of runtime.toml, which the server reads when it
+# starts. The extension route writes none: it installs the host, the manifest
+# and the add-on files, and the lane token is read for each request.
+RUNTIME_TABLE_MODES = (AUTOMATION_TOOL, BIDI_TOOL, EGO_TOOL)
+
+
+def note_running_server(binary, base, port):
+    """Say that a server which is already running keeps the old browser setting.
+
+    The server reads the browser table when it starts, and `masc setup` starts
+    one only when none answers. A reader who chose "Continue with this running
+    workspace" would otherwise be told nothing and find the lane off. An
+    observation this cannot read gets the conditional sentence: it does not
+    know there is no server.
+    """
+    try:
+        response = subprocess.run([str(binary), 'setup-server', '--base-path', str(base), '--port', str(port)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                  timeout=SETUP_SERVER_PROBE_TIMEOUT_SECONDS,
+                                  env=workspace_child_env())
+        status = json.loads(response.stdout).get('status')
+    except (OSError, ValueError, AttributeError, subprocess.TimeoutExpired):
+        status = None
+    if status in ('free', 'other_workspace', 'unknown_server'):
+        return
+    print(('A workspace server is already running. It' if status == 'same_workspace'
+           else 'If a workspace server is already running, it')
+          + " reads the browser setting only when it starts, so restart it for imp's browser to turn on.",
+          file=sys.stderr)
+
+
+def ensure_program(binary, base, program, command):
+    """True once [program] answers, offering the install menu while it does not.
+
+    False when the reader leaves the menu: nothing is installed and the
+    sentence says which command to run once it is.
+    """
+    name = BROWSER_TOOL_NAMES[program]
+    readiness, _ = browser_tool(binary, program)
+    while not readiness.available:
+        print(name + ' was not found on this computer.', file=sys.stderr)
+        if not prerequisite_menu(binary, program, base_path=base):
+            print(name + ' is missing, so this is left out. Run ' + command + ' once it is installed.',
+                  file=sys.stderr)
+            return False
+        readiness, _ = browser_tool(binary, program)
+    return True
+
+
+def prepare_browser_lane(binary, base, modes, port=None):
+    """Bring the programs the chosen routes need up, then write them all with one command.
+
+    One `masc browser-lane-setup` call takes every chosen route, so the command
+    plans them together and a route refused while planning writes none. Its
+    tables are then committed one after another; one refused at that point
+    leaves the tables before it, and the command lists them. It is not told which
+    geckodriver or Firefox to use: it finds them the way the catalog did (the
+    first one on PATH that answers), and it keeps a value the operator already
+    wrote in runtime.toml, which a named path would replace.
+
+    The automation lane is the one that starts geckodriver. A reader who leaves
+    the install menu without it loses that lane and keeps the routes they also
+    chose, which never needed it. The same holds for Firefox and the ego route,
+    which needs ego-browser and no Firefox.
+    """
+    remaining = list(modes)
+    if AUTOMATION_TOOL in remaining and not ensure_program(
+            binary, base, 'geckodriver', browser_lane_command(base, (AUTOMATION_TOOL,))):
+        remaining.remove(AUTOMATION_TOOL)
+    firefox_routes = tuple(mode for mode in remaining if mode in FIREFOX_MODES)
+    if firefox_routes and not ensure_program(binary, base, 'firefox', browser_lane_command(base, firefox_routes)):
+        remaining = [mode for mode in remaining if mode not in FIREFOX_MODES]
+    if EGO_TOOL in remaining and not ensure_program(
+            binary, base, EGO_PROGRAM, browser_lane_command(base, (EGO_TOOL,))):
+        remaining.remove(EGO_TOOL)
+    if not remaining:
+        return
+    modes = tuple(remaining)
+    command = browser_lane_command(base, modes)
+    argv = [str(binary), 'browser-lane-setup']
+    for mode in modes:
+        argv += ['--mode', mode]
+    result = subprocess.run(argv + ['--base-path', str(base)], stdout=sys.stderr, env=workspace_child_env())
+    if result.returncode != 0:
+        # The writer already said why, and listed each table it wrote before the
+        # refusal: the tables are committed one after another. A second run
+        # keeps a table that is already there. The browser is optional, so
+        # this does not end setup.
+        print("imp's browser was not saved completely. The lines above list each route written before "
+              'the refusal, and a second run keeps those as they are. '
+              'Run ' + command + ' to try again' + (
+                  ', or one route at a time: ' + '; '.join(browser_lane_command(base, (mode,)) for mode in modes)
+                  if len(modes) > 1 else '') + '.', file=sys.stderr)
+        return
+    if port is not None and any(mode in RUNTIME_TABLE_MODES for mode in modes):
+        note_running_server(binary, base, port)
+
+
+def check_web_search(binary, base):
+    """Show which web search providers have a key.
+
+    The command is given only the workspace, so it writes nothing, and it never
+    creates a key: keys are read from the environment of the process that starts
+    the server, which `masc setup` starts from this one. A failure only means
+    the reader did not get to look, so it does not end the journey.
+    """
+    try:
+        failed = subprocess.run([str(binary), 'web-search-setup', '--base-path', str(base)],
+                                stdout=sys.stderr, env=workspace_child_env()).returncode != 0
+    except OSError as error:
+        print(terminal_text(str(error)), file=sys.stderr)
+        failed = True
+    if failed:
+        print('Web search was not checked. Run ' + web_search_command(base) + ' to look again.', file=sys.stderr)
+
+
+def run_web_search_setup(binary, base, options):
+    """`masc web-search-setup` with [options], which write `[web_search]` keys.
+    True when it exited 0. The command says what it wrote and whether a running
+    server must restart, so only a failure is added to."""
+    try:
+        return subprocess.run([str(binary), 'web-search-setup'] + list(options) + ['--base-path', str(base)],
+                              stdout=sys.stderr, env=workspace_child_env()).returncode == 0
+    except OSError as error:
+        print(terminal_text(str(error)), file=sys.stderr)
+        return False
+
+
+def choose_zai(binary, base):
+    if not run_web_search_setup(binary, base, ['--provider', ZAI_PROVIDER]):
+        print('z.ai was not chosen. Run ' + terminal_text(zai_command(base)) + ' to try again.', file=sys.stderr)
+
+
+def searxng_look_command(base):
+    """What the binary offers now. Its action id changes with the container, so
+    a retry names this and not the id the row was built with."""
+    return 'masc prerequisite-actions ' + SEARXNG_DEPENDENCY + ' --base-path ' + shlex.quote(str(base))
+
+
+def start_searxng(binary, base):
+    """Start the container if it is not answering, then write its address.
+
+    A fresh look first: the answer that built the row may be minutes old. The
+    address is written only when something answers there, so the search order
+    never names an instance that is not running.
+    """
+    try:
+        readiness, action_id = searxng_plan(binary, base)
+        if not readiness.available:
+            # The catalog lists its action while Docker is down, so the action
+            # alone does not say a start can work.
+            if not readiness.docker or action_id is None:
+                print('There is nothing to start for SearXNG on this computer now' +
+                      ('' if readiness.docker else ' because Docker is not running') +
+                      '. Run ' + terminal_text(searxng_look_command(base)) + ' to see why.', file=sys.stderr)
+                print('SearXNG was not started.', file=sys.stderr)
+                return
+            state = execute_prerequisite(binary, SEARXNG_DEPENDENCY, action_id, ['--base-path', str(base)], base)
+            if state != 'commands_completed':
+                # The container may exist now, and then the action that built
+                # the row is no longer offered: say where to look, not an id.
+                print('SearXNG did not come up. Run ' + terminal_text(searxng_look_command(base))
+                      + ' to see what is offered now, and docker logs ' + SEARXNG_CONTAINER_NAME
+                      + ' to see why.', file=sys.stderr)
+                return
+    except (SetupError, OSError, subprocess.SubprocessError) as error:
+        print(terminal_text(str(error)) + '\nCould not tell whether SearXNG started. Run '
+              + terminal_text(searxng_look_command(base)) + ' to see where it stands.', file=sys.stderr)
+        return
+    url = readiness.url
+    if not run_web_search_setup(binary, base, ['--searxng-url', url]):
+        print('SearXNG answers, but its address was not saved for web search. Run '
+              + terminal_text(searxng_url_command(base, url)) + ' to save it.', file=sys.stderr)
+
+
+def choose_imp_tools(binary, base):
+    """The rows the reader leaves marked. Nothing runs here."""
+    rows = imp_tool_rows(binary, base)
+    for row in rows:
+        if row.notice:
+            print(row.notice, file=sys.stderr)
+    print('\nThe marked rows are the ones recommended. To skip this step, unmark all of them '
+          '(type 0 on a numbered list).', file=sys.stderr)
+    # allow_empty: with every mark removed, Enter must confirm nothing. The
+    # default would confirm the row under the cursor, which for the GitHub row
+    # is a copy of the reader's token after they had said no.
+    chosen = pick('5 · Give imp tools (optional)', [row.label for row in rows], multiple=True,
+                  defaults=[index for index, row in enumerate(rows) if row.checked], allow_empty=True)
+    return tuple(rows[index] for index in chosen)
+
+
+def read_host_github_token(login):
+    """The token `gh` holds for [login] on github.com, read at the moment it is handed over.
+
+    The account is named because the hand-over happens after `masc setup`,
+    which can take minutes, and `gh auth switch` in another terminal in the
+    meantime would otherwise give imp another account's token than the one
+    the reader agreed to.
+    """
+    result = subprocess.run(token_argv(login),
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            timeout=GH_PROBE_TIMEOUT_SECONDS)
+    token = result.stdout.strip()
+    if result.returncode != 0 or not token:
+        raise SetupError('gh did not give the GitHub token of ' + terminal_text(login.login))
+    return token
+
+
+def connect_imp_github(binary, base, row):
+    """Give imp its GitHub login, once imp exists.
+
+    imp is created by `masc setup`, and `keeper-github` refuses a keeper that
+    does not exist yet, so this runs after it. The token goes to the command on
+    its standard input, never in an argument another process could read, and is
+    not printed.
+    """
+    options = ['--keeper', IMP_KEEPER, '--hostname', GITHUB_HOST, '--base-path', str(base)]
+    if row.host_login is None:
+        result = subprocess.run([str(binary), 'keeper-github', 'login'] + options, stdout=sys.stderr,
+                                env=workspace_child_env())
+    else:
+        result = subprocess.run([str(binary), 'keeper-github', 'set-token'] + options,
+                                input=read_host_github_token(row.host_login), text=True, stdout=sys.stderr,
+                                env=workspace_child_env())
+    if result.returncode != 0:
+        # The command already said why. GitHub is optional, so this does not end setup.
+        print("imp's GitHub login was not saved. Everything else is. Run " + github_command(base, None)
+              + ' to sign in with a one-time code.', file=sys.stderr)
+
+
+def finish_imp_tools(binary, base, confirmed):
+    """What the reader confirmed that needs imp to exist. Never ends the journey."""
+    for row in confirmed:
+        if row.key == GITHUB_TOOL:
+            try:
+                connect_imp_github(binary, base, row)
+            except (SetupError, OSError, subprocess.SubprocessError) as error:
+                print(terminal_text(str(error)) + "\nimp's GitHub login was not saved. Run "
+                      + github_command(base, None) + ' to sign in with a one-time code.', file=sys.stderr)
+
+
+def remind_imp_tools(confirmed):
+    """For a reader who leaves before imp exists: the GitHub login they confirmed is still to do."""
+    for row in confirmed:
+        if row.key == GITHUB_TOOL:
+            print("imp's GitHub login is not set up yet. Once imp is running, run: " + terminal_text(row.command),
+                  file=sys.stderr)
+
+
+def select_imp_tools(binary, base, port=None):
+    """Ask what imp may use, and never take the journey down with it.
+
+    The same rule as the voice question: the workspace and the model are saved
+    and the first conversation is still ahead, so a cancel or a failure here
+    means "not this", not "abandon setup". The browser is prepared on its own
+    footing, so a failure there cannot take the confirmed GitHub login with it.
+    """
+    try:
+        confirmed = choose_imp_tools(binary, base)
+    except SetupError as error:
+        print(terminal_text(str(error)) + '\nContinuing without them. Later: ' + automation_command(base)
+              + ' gives imp a browser, ' + web_search_command(base) + ' shows which web search providers have a key, and '
+              + github_command(base, None) + ' signs it into GitHub.', file=sys.stderr)
+        return ()
+    # The choices that write `[web_search]` keys come first, so the check that
+    # follows shows the order they made.
+    if any(row.key == ZAI_TOOL for row in confirmed):
+        choose_zai(binary, base)
+    if any(row.key == SEARXNG_TOOL for row in confirmed):
+        start_searxng(binary, base)
+    if any(row.key == WEB_SEARCH_TOOL for row in confirmed):
+        check_web_search(binary, base)
+    modes = tuple(mode for mode in BROWSER_MODES if any(row.key == mode for row in confirmed))
+    if modes:
+        try:
+            prepare_browser_lane(binary, base, modes, port)
+        except (SetupError, OSError, subprocess.SubprocessError) as error:
+            print(terminal_text(str(error)) + "\nimp's browser was not set up. Run "
+                  + browser_lane_command(base, modes) + ' once the problem is resolved.', file=sys.stderr)
+    return confirmed
+
+
+def show_imp_tools(binary, base):
+    """What a quick setup leaves for later: each line with the command that does it.
+
+    Quick setup has no screen where the reader marks anything, so nothing here
+    is installed or written. It only looks: MASC runs `--version` of the
+    browser programs, `gh auth status` asks GitHub about the token, and the
+    SearXNG look asks Docker for the container and the local address for an answer.
+    """
+    rows = imp_tool_rows(binary, base)
+    print("\n5 · imp's tools (quick setup leaves them for later; each line is followed by its command)\n"
+          "[x] would start marked in the full setup, [ ] would start unmarked. Nothing here has been run.",
+          file=sys.stderr)
+    for row in rows:
+        print('  ' + ('[x] ' if row.checked else '[ ] ') + terminal_text(row.label)
+              + '\n      ' + terminal_text(row.command), file=sys.stderr)
+
+
+def journey(binary, base_path, port, timeout, resume=False):
+    state = onboarding_status(binary, base_path)
+    # `invalid` is not one condition. Saving a selection repairs some of them —
+    # configure_locked stages the edit, lets runtime-default-set rewrite it,
+    # and publishes that rewrite — while a declaration the parser cannot
+    # resolve is refused ahead of it. Both serialize to the same string here,
+    # so this cannot decide which one it is holding. Name what is broken and
+    # leave every exit the journey already has, including another workspace.
+    for check in state['checks']:
+        if check['condition'] == 'invalid':
+            print('\n' + check['id'] + ': ' + terminal_text(check['message']), file=sys.stderr)
+    # Persistence permits opening existing history, never a readiness badge.
+    # The TUI observes/reconnects the server and reports current execution.
+    # Which invalid checks hold that history closed is decided by the binary
+    # (Onboarding_status.opening); an advisory one such as a drifted browser
+    # lane is printed above and does not send the operator back into setup.
+    if resume and state.get('base_path') and state['opening'] == 'open_existing_history':
+        base = state['base_path']
+        try:
+            saved_port = workspace_port(binary, base, port)
+        except SetupError as error:
+            print(terminal_text(str(error)) + '\nChoose a workspace to continue.', file=sys.stderr)
+        else:
+            selected_port = select_setup_server(binary, base, saved_port, resume_existing=True)
+            return 1 if selected_port is None else open_workspace(binary, base, selected_port)
+    print('\nWelcome. Let’s make a home for you and imp.\n'
+          'Choose with arrows and Enter; Space selects several connections.', file=sys.stderr)
+    proposed = state.get('base_path') or str(Path.home() / 'MASC')
+    plan = quick_plan(binary, proposed)
+    quick = False
+    if plan is not None:
+        print(quick_plan_text(plan, proposed), file=sys.stderr)
+        choice = pick('Quick setup', ['Start quick setup', 'Choose each step', 'Finish later'])[0]
+        if choice == 2:
+            return 0
+        quick = choice == 0
+    if quick:
+        base = proposed
+    else:
+        selection = pick('1 · Your workspace', ['Use ' + proposed, 'Choose another directory', 'Finish later'])[0]
+        if selection == 2:
+            return 0
+        base = proposed if selection == 0 else ask_text('Workspace directory')
+    base = workspace_check(binary, base)['base_path']
+    port = workspace_port(binary, base, port)
+    port = select_setup_server(binary, base, port)
+    if port is None:
+        return 1
+    # The workspace was chosen on this screen, so it becomes the default the next
+    # bare `masc` finds, including when the operator finishes later.
+    if subprocess.run([str(binary), 'init', '--base-path', base, '--record-default'],
+                      stdout=sys.stderr, env=workspace_child_env()).returncode != 0:
+        raise SetupError('Workspace initialization stopped. Existing files were preserved; run masc setup to resume.')
+    workspace_port(binary, base, port, save=True)
+    print('\n2 · Connect a model\nA subscription or API credit may be required by your provider.', file=sys.stderr)
+    configured = wizard(binary, base, timeout, quick_model=plan['model'] if quick else None)
+    if configured.get('readiness') == 'failed':
+        # The reason is already on screen, printed where it was raised. Naming
+        # a cause here would be a guess: this path is reached by an unreadable
+        # workspace, an unreachable server and a refused credential alike.
+        print('The model connection was not saved. Run masc again once the '
+              'problem above is resolved.', file=sys.stderr)
+        return 1
+    if configured.get('readiness') not in ('verified', 'usage_limited', 'partly_checked'):
+        print('Your workspace is saved. Run masc to continue from here.', file=sys.stderr)
+        return 0
+    # Before the sandbox rather than after it: voice needs no guest and no
+    # service, so a reader who leaves at the sandbox step still leaves with a
+    # keeper that can speak.
+    if quick:
+        print('imp stays text only. Run masc voice-local-setup to give it a voice later.', file=sys.stderr)
+    else:
+        select_local_voice(binary, base)
+    return sandbox_journey(binary, base, port, quick_backend=plan['sandbox'] if quick else None, quick=quick)
+
+
+def sandbox_journey(binary, base, port, refresh_owner=False, quick_backend=None, quick=False):
+    if port is None:
+        port = workspace_port(binary, base)
+    if refresh_owner:
+        port = select_setup_server(binary, base, port, require_new_owner=True)
+        if port is None:
+            return 1
+    sandbox_args = None
+    if quick_backend is not None:
+        print('\n4 · Prepare imp’s workspace', file=sys.stderr)
+        sandbox_args = quick_sandbox(binary, base, quick_backend)
+        if sandbox_args is None:
+            print('Quick setup could not prepare ' + SANDBOX_NAMES.get(quick_backend, quick_backend)
+                  + ' on its own. Choose how to continue.', file=sys.stderr)
+    if sandbox_args is None:
+        sandbox_args = select_sandbox(binary, base, port=port)
+    if sandbox_args is None:
+        print('Your model connection is saved. Run masc setup to prepare the sandbox later.', file=sys.stderr)
+        return 0
+    # After the sandbox and before the first conversation: the server reads the
+    # browser table when it starts, and `masc setup` below starts one when none
+    # is running (select_imp_tools says so when one already is).
+    confirmed = ()
+    if quick:
+        show_imp_tools(binary, base)
+    else:
+        confirmed = select_imp_tools(binary, base, port)
+    print('\n6 · Open your first conversation', file=sys.stderr)
+    while True:
+        # Native setup owns staging, image preparation, server/operator login,
+        # and imp boot. --no-tui avoids re-entering this interactive journey.
+        code = subprocess.run([str(binary), 'setup', '--base-path', base, '--port', str(port),
+                               '--no-tui'] + sandbox_args, stdout=sys.stderr,
+                               env=workspace_child_env()).returncode
+        if code == 0:
+            # imp exists now, which the GitHub login needs.
+            finish_imp_tools(binary, base, confirmed)
+            return open_workspace(binary, base, port)
+        action = pick('imp is not running yet. Keep your workspace and continue when ready.',
+                      ['Retry preparation', 'Finish later'])[0]
+        if action == 1:
+            remind_imp_tools(confirmed)
+            return code
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--binary', required=True)
+    parser.add_argument('--base-path')
+    parser.add_argument('--journey', action='store_true')
+    parser.add_argument('--sandbox-step', action='store_true', help='continue saved model setup at the sandbox step')
+    parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--port', type=int)
+    parser.add_argument('--spec')
+    parser.add_argument('--wizard', action='store_true')
+    parser.add_argument('--workspace-check', action='store_true')
+    parser.add_argument('--batch-spec', help='JSON with connections, runtime_ids and optional default_runtime_id')
+    parser.add_argument('--verify', action='store_true', help='require real response and tool verification before saving')
+    parser.add_argument('--select-model', choices=CHOICES)
+    parser.add_argument('--endpoint', default='')
+    parser.add_argument('--credential-env', dest='api_key_env', default='')
+    parser.add_argument('--discovery-timeout', type=float, default=10)
+    args = parser.parse_args()
+    try:
+        if sum(map(bool, (args.spec, args.select_model, args.wizard, args.batch_spec, args.workspace_check, args.journey, args.sandbox_step))) != 1:
+            raise SetupError('choose exactly one setup operation')
+        if not args.journey and not args.base_path:
+            raise SetupError('--base-path is required for this setup operation')
+        if not math.isfinite(args.discovery_timeout) or args.discovery_timeout <= 0:
+            raise SetupError('discovery timeout must be positive')
+        if args.sandbox_step:
+            raise SystemExit(sandbox_journey(args.binary, args.base_path, args.port, refresh_owner=True))
+        if args.journey:
+            raise SystemExit(journey(args.binary, args.base_path, args.port, args.discovery_timeout, args.resume))
+        if args.workspace_check:
+            result = workspace_check(args.binary, args.base_path)
+        elif args.wizard:
+            result = wizard(args.binary, args.base_path, args.discovery_timeout)
+        elif args.batch_spec:
+            spec = json.loads(Path(args.batch_spec).read_text())
+            result = configure_many(args.binary, args.base_path, spec['connections'], spec.get('runtime_ids'),
+                                    args.verify, spec.get('default_runtime_id'))
+        elif args.select_model:
+            result = select_model(args.binary, args.select_model, args.endpoint, args.api_key_env, args.discovery_timeout)
+        else:
+            result = configure_many(args.binary, args.base_path, [json.loads(Path(args.spec).read_text())], verify=args.verify)
+        print(json.dumps(result, ensure_ascii=False))
+    except SetupSessionFinished:
+        raise SystemExit(0)
+    except KeyboardInterrupt:
+        # A Ctrl-C outside pick()'s cbreak loop (a subprocess, a pause) still
+        # exits as a cancelled setup, not as a traceback. pick() converts its
+        # own interruption; this is the net for every other interruption point.
+        raise SystemExit('runtime setup cancelled; existing connections were preserved')
+    except (SetupError, OSError, ValueError, subprocess.SubprocessError) as error:
+        raise SystemExit('runtime setup failed: ' + str(error))
+
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,2042 @@
+open Alcotest
+
+let with_durable_append_fd ~original f =
+  let path = Filename.temp_file "masc_durable_append_" ".log" in
+  let output = open_out_bin path in
+  output_string output original;
+  close_out output;
+  let fd =
+    Unix.openfile path [ Unix.O_RDWR; Unix.O_APPEND; Unix.O_CLOEXEC ] 0o600
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.close fd;
+      Sys.remove path)
+    (fun () -> f path fd)
+;;
+
+let check_unix_failure ~label ~operation ~error = function
+  | Fs_compat.Unix_error failure ->
+    check bool (label ^ " operation") true (failure.operation = operation);
+    check bool (label ^ " Unix.error") true (failure.error = error)
+  | Fs_compat.No_write_progress -> fail (label ^ " lost the typed Unix.error")
+;;
+
+let partial_write_then_error ~path error =
+  let write_calls = ref 0 in
+  fun fd bytes offset remaining ->
+    incr write_calls;
+    if !write_calls = 1
+    then Unix.single_write fd bytes offset (min 3 remaining)
+    else raise (Unix.Unix_error (error, "injected_write", path))
+;;
+
+let test_success_fsyncs () =
+  with_durable_append_fd ~original:"before"
+  @@ fun path fd ->
+  let fsync_calls = ref 0 in
+  let io : Fs_compat.durable_append_io_for_testing =
+    { write = Unix.write
+    ; ftruncate = Unix.ftruncate
+    ; fsync =
+        (fun fd ->
+          incr fsync_calls;
+          Unix.fsync fd)
+    }
+  in
+  let original_length = (Unix.fstat fd).Unix.st_size in
+  (match
+     Fs_compat.append_fd_durable_for_testing
+       ~io
+       ~fd
+       ~original_length
+       "-after"
+   with
+   | Ok () -> ()
+   | Error error -> fail (Fs_compat.durable_append_error_to_string error));
+  check int "successful append fsync count" 1 !fsync_calls;
+  check string "successful durable append" "before-after" (Fs_compat.load_file path)
+;;
+
+let test_partial_write_rolls_back error =
+  with_durable_append_fd ~original:"stable"
+  @@ fun path fd ->
+  let truncate_calls = ref 0 in
+  let fsync_calls = ref 0 in
+  let io : Fs_compat.durable_append_io_for_testing =
+    { write = partial_write_then_error ~path error
+    ; ftruncate =
+        (fun fd length ->
+          incr truncate_calls;
+          Unix.ftruncate fd length)
+    ; fsync =
+        (fun fd ->
+          incr fsync_calls;
+          Unix.fsync fd)
+    }
+  in
+  let original_length = (Unix.fstat fd).Unix.st_size in
+  (match
+     Fs_compat.append_fd_durable_for_testing
+       ~io
+       ~fd
+       ~original_length
+       "-partial-suffix"
+   with
+   | Ok () -> fail "partial write unexpectedly succeeded"
+   | Error { append_failure; rollback_failures } ->
+     check_unix_failure
+       ~label:"append failure"
+       ~operation:Fs_compat.Write
+       ~error
+       append_failure;
+     check int "rollback failures" 0 (List.length rollback_failures));
+  check int "rollback truncate count" 1 !truncate_calls;
+  check int "rollback fsync count" 1 !fsync_calls;
+  check int "original file length restored" original_length (Unix.fstat fd).Unix.st_size;
+  check string "partial suffix removed" "stable" (Fs_compat.load_file path)
+;;
+
+let test_partial_enospc_rolls_back () = test_partial_write_rolls_back Unix.ENOSPC
+let test_partial_eio_rolls_back () = test_partial_write_rolls_back Unix.EIO
+
+let test_append_fsync_failure_rolls_back () =
+  with_durable_append_fd ~original:"stable"
+  @@ fun path fd ->
+  let fsync_calls = ref 0 in
+  let io : Fs_compat.durable_append_io_for_testing =
+    { write = Unix.write
+    ; ftruncate = Unix.ftruncate
+    ; fsync =
+        (fun fd ->
+          incr fsync_calls;
+          if !fsync_calls = 1
+          then raise (Unix.Unix_error (Unix.EIO, "injected_append_fsync", path))
+          else Unix.fsync fd)
+    }
+  in
+  let original_length = (Unix.fstat fd).Unix.st_size in
+  (match
+     Fs_compat.append_fd_durable_for_testing
+       ~io
+       ~fd
+       ~original_length
+       "-complete-but-not-durable"
+   with
+   | Ok () -> fail "failed append fsync unexpectedly succeeded"
+   | Error { append_failure; rollback_failures } ->
+     check_unix_failure
+       ~label:"append fsync failure"
+       ~operation:Fs_compat.Append_fsync
+       ~error:Unix.EIO
+       append_failure;
+     check int "rollback failures" 0 (List.length rollback_failures));
+  check int "append and rollback fsync calls" 2 !fsync_calls;
+  check int "original file length restored" original_length (Unix.fstat fd).Unix.st_size;
+  check string "complete suffix rolled back" "stable" (Fs_compat.load_file path)
+;;
+
+let test_rollback_truncate_failure_is_explicit_and_still_fsyncs () =
+  with_durable_append_fd ~original:"stable"
+  @@ fun path fd ->
+  let rollback_fsync_calls = ref 0 in
+  let io : Fs_compat.durable_append_io_for_testing =
+    { write = partial_write_then_error ~path Unix.ENOSPC
+    ; ftruncate =
+        (fun _fd _length ->
+          raise (Unix.Unix_error (Unix.EIO, "injected_ftruncate", path)))
+    ; fsync =
+        (fun fd ->
+          incr rollback_fsync_calls;
+          Unix.fsync fd)
+    }
+  in
+  let original_length = (Unix.fstat fd).Unix.st_size in
+  (match
+     Fs_compat.append_fd_durable_for_testing
+       ~io
+       ~fd
+       ~original_length
+       "-partial-suffix"
+   with
+   | Ok () -> fail "append with failed rollback unexpectedly succeeded"
+   | Error { append_failure; rollback_failures } ->
+     check_unix_failure
+       ~label:"original append failure"
+       ~operation:Fs_compat.Write
+       ~error:Unix.ENOSPC
+       append_failure;
+     (match rollback_failures with
+      | [ rollback_failure ] ->
+        check_unix_failure
+          ~label:"rollback truncate failure"
+          ~operation:Fs_compat.Rollback_truncate
+          ~error:Unix.EIO
+          rollback_failure
+      | failures ->
+        failf "expected one rollback failure, got %d" (List.length failures)));
+  check int "rollback fsync still attempted" 1 !rollback_fsync_calls
+;;
+
+let test_rollback_fsync_failure_is_explicit () =
+  with_durable_append_fd ~original:"stable"
+  @@ fun path fd ->
+  let io : Fs_compat.durable_append_io_for_testing =
+    { write = partial_write_then_error ~path Unix.ENOSPC
+    ; ftruncate = Unix.ftruncate
+    ; fsync =
+        (fun _fd -> raise (Unix.Unix_error (Unix.EIO, "injected_fsync", path)))
+    }
+  in
+  let original_length = (Unix.fstat fd).Unix.st_size in
+  (match
+     Fs_compat.append_fd_durable_for_testing
+       ~io
+       ~fd
+       ~original_length
+       "-partial-suffix"
+   with
+   | Ok () -> fail "append with failed rollback fsync unexpectedly succeeded"
+   | Error { append_failure; rollback_failures } ->
+     check_unix_failure
+       ~label:"original append failure"
+       ~operation:Fs_compat.Write
+       ~error:Unix.ENOSPC
+       append_failure;
+     (match rollback_failures with
+      | [ rollback_failure ] ->
+        check_unix_failure
+          ~label:"rollback fsync failure"
+          ~operation:Fs_compat.Rollback_fsync
+          ~error:Unix.EIO
+          rollback_failure
+      | failures ->
+        failf "expected one rollback failure, got %d" (List.length failures)));
+  check int "truncate restored original length" original_length (Unix.fstat fd).Unix.st_size;
+  check string "partial suffix removed before failed fsync" "stable" (Fs_compat.load_file path)
+;;
+
+let with_temp_jsonl original f =
+  let path = Filename.temp_file "masc_private_jsonl_" ".jsonl" in
+  let output = open_out_bin path in
+  output_string output original;
+  close_out output;
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
+;;
+
+let test_private_jsonl_append_preserves_complete_history () =
+  with_temp_jsonl "{\"row\":1}\n" @@ fun path ->
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_result
+       path
+       "{\"row\":2}\n{\"row\":3}\n"
+   with
+   | Fs_compat.Private_file_succeeded () -> ()
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.private_jsonl_append_error_to_string error)
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "unexpected descriptor settlement failure");
+  check string
+    "complete rows appended"
+    "{\"row\":1}\n{\"row\":2}\n{\"row\":3}\n"
+    (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_append_returns_committed_end_offset () =
+  let original = "{\"row\":1}\n" in
+  let suffix = "{\"row\":2}\n{\"row\":3}\n" in
+  with_temp_jsonl original @@ fun path ->
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_with_end_offset_result
+       path
+       suffix
+   with
+   | Fs_compat.Private_file_succeeded end_offset ->
+     check int
+       "committed newline-end byte offset"
+       (String.length original + String.length suffix)
+       end_offset
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.private_jsonl_append_error_to_string error)
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "unexpected descriptor settlement failure")
+;;
+
+let test_private_jsonl_append_at_exact_end_offset () =
+  let original = "{\"row\":1}\n" in
+  let suffix = "{\"row\":2}\n" in
+  with_temp_jsonl original @@ fun path ->
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+       path
+       ~expected_end_offset:(String.length original)
+       suffix
+   with
+   | Fs_compat.Private_file_succeeded end_offset ->
+     check int
+       "committed newline-end byte offset"
+       (String.length original + String.length suffix)
+       end_offset
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.private_jsonl_append_error_to_string error)
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "unexpected descriptor settlement failure");
+  check string "exact append bytes" (original ^ suffix) (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_append_rejects_stale_end_offset () =
+  let original = "{\"row\":1}\n" in
+  with_temp_jsonl original @@ fun path ->
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+       path
+       ~expected_end_offset:0
+       "{\"row\":2}\n"
+   with
+   | Fs_compat.Private_file_failed
+       (Fs_compat.End_offset_mismatch
+          { expected = 0; actual }) ->
+     check int "locked actual byte offset" (String.length original) actual
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.private_jsonl_append_error_to_string error)
+   | Fs_compat.Private_file_succeeded _
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "stale cursor unexpectedly appended");
+  check string "stale append writes no bytes" original (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_slice_reads_exact_cursor_suffix () =
+  let row1 = "{\"row\":1}\n" in
+  let row2 = "{\"row\":2}\n" in
+  let row3 = "{\"row\":3}\n" in
+  with_temp_jsonl (row1 ^ row2 ^ row3) @@ fun path ->
+  match
+    Fs_compat.read_private_jsonl_slice_locked_result
+      path
+      ~from:(String.length row1)
+  with
+  | Fs_compat.Private_file_succeeded slice ->
+    check string "exact suffix" (row2 ^ row3) slice.bytes;
+    check int
+      "locked end offset"
+      (String.length row1 + String.length row2 + String.length row3)
+      slice.end_offset
+  | Fs_compat.Private_file_failed _ -> fail "complete cursor slice was rejected"
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+  | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+    fail "unexpected descriptor settlement failure"
+;;
+
+let test_private_jsonl_slice_rejects_invalid_cursors () =
+  with_temp_jsonl "{\"row\":1}\n" @@ fun path ->
+  (match Fs_compat.read_private_jsonl_slice_locked_result path ~from:(-1) with
+   | Fs_compat.Private_file_failed
+       (Fs_compat.Private_jsonl_slice.Negative_offset (-1)) ->
+     ()
+   | _ -> fail "negative cursor was not rejected");
+  (match Fs_compat.read_private_jsonl_slice_locked_result path ~from:1 with
+   | Fs_compat.Private_file_failed
+       (Fs_compat.Private_jsonl_slice.Offset_not_at_row_boundary 1) ->
+     ()
+   | _ -> fail "mid-row cursor was not rejected");
+  match Fs_compat.read_private_jsonl_slice_locked_result path ~from:1024 with
+  | Fs_compat.Private_file_failed
+      (Fs_compat.Private_jsonl_slice.Offset_beyond_end
+        { offset = 1024; end_offset = 10 }) ->
+    ()
+  | _ -> fail "cursor beyond EOF was not rejected"
+;;
+
+let test_private_jsonl_slice_missing_store_contract () =
+  let path = Filename.temp_file "masc_private_jsonl_missing_" ".jsonl" in
+  Sys.remove path;
+  (match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
+   | Fs_compat.Private_file_succeeded { bytes = ""; end_offset = 0 } -> ()
+   | _ -> fail "missing origin was not treated as an empty stream");
+  match Fs_compat.read_private_jsonl_slice_locked_result path ~from:1 with
+  | Fs_compat.Private_file_failed
+      (Fs_compat.Private_jsonl_slice.Missing_file_after_offset 1) ->
+    ()
+  | _ -> fail "missing non-origin cursor was not rejected"
+;;
+
+(* The rows reader applies the writer's framing: complete rows come back as
+   bytes, a fragment after the last newline is reported by offset only, and a
+   missing store is its own value rather than the empty stream. *)
+let test_private_jsonl_rows_reads_complete_rows_and_reports_torn_tail () =
+  let row1 = "{\"row\":1}\n" in
+  let row2 = "{\"row\":2}\n" in
+  let fragment = "{\"row\":3" in
+  (with_temp_jsonl (row1 ^ row2) @@ fun path ->
+   match Fs_compat.read_private_jsonl_rows_locked_result path with
+   | Fs_compat.Private_file_succeeded
+       (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset }) ->
+     check string "complete store: every row" (row1 ^ row2) rows;
+     check int "complete store: rows end at the end" end_offset rows_end;
+     check int "complete store: end offset is the length" (String.length (row1 ^ row2)) end_offset
+   | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing ->
+     fail "a present store read as missing"
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.Private_jsonl_rows.error_to_string error)
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "unexpected descriptor settlement failure");
+  (with_temp_jsonl (row1 ^ row2 ^ fragment) @@ fun path ->
+   match Fs_compat.read_private_jsonl_rows_locked_result path with
+   | Fs_compat.Private_file_succeeded
+       (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset }) ->
+     check string "torn store: the complete rows only" (row1 ^ row2) rows;
+     check int "torn store: rows end before the fragment" (String.length (row1 ^ row2)) rows_end;
+     check int
+       "torn store: end offset counts the fragment"
+       (String.length (row1 ^ row2 ^ fragment))
+       end_offset
+   | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing ->
+     fail "a torn store read as missing"
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.Private_jsonl_rows.error_to_string error)
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "unexpected descriptor settlement failure");
+  (with_temp_jsonl fragment @@ fun path ->
+   match Fs_compat.read_private_jsonl_rows_locked_result path with
+   | Fs_compat.Private_file_succeeded
+       (Fs_compat.Private_jsonl_rows.Rows_present { rows = ""; rows_end = 0; end_offset }) ->
+     check int "fragment-only store: no rows, the fragment counted" (String.length fragment) end_offset
+   | _ -> fail "a fragment-only store must read as zero rows");
+  (with_temp_jsonl "" @@ fun path ->
+   match Fs_compat.read_private_jsonl_rows_locked_result path with
+   | Fs_compat.Private_file_succeeded
+       (Fs_compat.Private_jsonl_rows.Rows_present { rows = ""; rows_end = 0; end_offset = 0 }) ->
+     ()
+   | _ -> fail "an empty store must read as zero rows at offset zero");
+  let missing = Filename.temp_file "masc_private_jsonl_rows_missing_" ".jsonl" in
+  Sys.remove missing;
+  match Fs_compat.read_private_jsonl_rows_locked_result missing with
+  | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing -> ()
+  | _ -> fail "a missing store must read as Rows_missing"
+;;
+
+(* A rows read copies the store into its buffer and out of it once. It used to
+   grow a 64 KB buffer by doubling and allocate a fresh chunk for every read:
+   about four times the store on the major heap per read. The chat event
+   journals it serves are tens of MB, read once a page. *)
+let row_store_bytes = 4 * 1024 * 1024
+
+let test_private_jsonl_rows_read_allocates_about_twice_the_store () =
+  let row = String.make 199 'x' ^ "\n" in
+  let store =
+    String.concat "" (List.init (row_store_bytes / String.length row) (fun _ -> row))
+  in
+  with_temp_jsonl store @@ fun path ->
+  Gc.full_major ();
+  let before = (Gc.quick_stat ()).Gc.major_words in
+  let read = Fs_compat.read_private_jsonl_rows_locked_result path in
+  let allocated_bytes =
+    ((Gc.quick_stat ()).Gc.major_words -. before) *. float_of_int (Sys.word_size / 8)
+  in
+  (match read with
+   | Fs_compat.Private_file_succeeded
+       (Fs_compat.Private_jsonl_rows.Rows_present { rows; _ }) ->
+     check bool "the store reads back" true (String.equal store rows)
+   | _ -> fail "the store did not read as rows");
+  let times = allocated_bytes /. float_of_int (String.length store) in
+  if times > 2.5 then failf "one read put %.1f times the store on the major heap" times
+;;
+
+(* The window reader against the whole-store reader. Every answer it gives is
+   derived from the complete rows here, the same bytes the rows reader
+   returns, so a window is the part of the store a whole read would have
+   seen. Stores carry blank rows, rows longer than the reader's chunk, and
+   torn tails. *)
+let window_previous_row_wanted line = not (String.equal (String.trim line) "")
+
+let expected_window ~rows ~rows_end ~end_offset ~from ~max_rows =
+  let from_starts_row =
+    from = 0 || (from <= rows_end && Char.equal rows.[from - 1] '\n')
+  in
+  if from > rows_end || not from_starts_row
+  then None, from_starts_row, "", from, rows_end, end_offset
+  else (
+    let rec previous row_end =
+      if row_end <= 0
+      then None
+      else (
+        let row_start =
+          match String.rindex_from_opt rows (row_end - 2) '\n' with
+          | Some newline when row_end >= 2 -> newline + 1
+          | Some _ | None -> 0
+        in
+        let line = String.sub rows row_start (row_end - 1 - row_start) in
+        if window_previous_row_wanted line then Some (row_start, line) else previous row_start)
+    in
+    let rec forward offset count =
+      if count >= max_rows || offset >= rows_end
+      then offset
+      else forward (String.index_from rows offset '\n' + 1) (count + 1)
+    in
+    let window_end = forward from 0 in
+    ( previous from
+    , from_starts_row
+    , String.sub rows from (window_end - from)
+    , window_end
+    , rows_end
+    , end_offset ))
+;;
+
+let window_row_choices = [| ""; " "; "{\"r\":1}"; String.make 300 'a'; String.make 70_000 'b' |]
+
+let random_window_store state =
+  let rows =
+    List.init (Random.State.int state 9) (fun _ ->
+      window_row_choices.(Random.State.int state (Array.length window_row_choices)) ^ "\n")
+  in
+  let tail = if Random.State.bool state then "" else "{\"torn\":" in
+  String.concat "" rows ^ tail
+;;
+
+let compare_window_with_rows store =
+  with_temp_jsonl store @@ fun path ->
+  let rows, rows_end, end_offset =
+    match Fs_compat.read_private_jsonl_rows_locked_result path with
+    | Fs_compat.Private_file_succeeded
+        (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset }) ->
+      rows, rows_end, end_offset
+    | _ -> fail "the store did not read as rows"
+  in
+  let starts =
+    List.concat_map (fun at -> [ at - 1; at; at + 1 ])
+      (0 :: end_offset :: List.filter_map (fun at -> at)
+         (List.init (String.length rows) (fun index ->
+            if Char.equal rows.[index] '\n' then Some (index + 1) else None)))
+    |> List.filter (fun at -> at >= 0)
+    |> List.sort_uniq compare
+  in
+  List.iter (fun from ->
+    List.iter (fun max_rows ->
+      let expected = expected_window ~rows ~rows_end ~end_offset ~from ~max_rows in
+      match
+        Fs_compat.read_private_jsonl_window_locked_result path ~from ~max_rows
+          ~previous_row_wanted:window_previous_row_wanted
+      with
+      | Fs_compat.Private_file_succeeded
+          (Fs_compat.Private_jsonl_window.Window_present
+             { previous_row; from_starts_row; rows; window_end; rows_end; end_offset }) ->
+        if (previous_row, from_starts_row, rows, window_end, rows_end, end_offset) <> expected
+        then failf "window from %d with %d rows differs from the whole read of %d bytes"
+            from max_rows (String.length store)
+      | _ -> failf "window from %d did not read as a window" from)
+      [ 1; 2; 5; 50 ])
+    starts
+;;
+
+let test_private_jsonl_window_matches_the_whole_read () =
+  List.iter compare_window_with_rows
+    [ ""; "\n"; "{\"torn\":"; "a\n\n \nb\n"; String.make 70_000 'c' ^ "\n" ^ "d\n" ];
+  let state = Random.State.make [| 43_413 |] in
+  for _ = 1 to 40 do
+    compare_window_with_rows (random_window_store state)
+  done;
+  let missing = Filename.temp_file "masc_private_jsonl_window_missing_" ".jsonl" in
+  Sys.remove missing;
+  match
+    Fs_compat.read_private_jsonl_window_locked_result missing ~from:0 ~max_rows:1
+      ~previous_row_wanted:window_previous_row_wanted
+  with
+  | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_window.Window_missing -> ()
+  | _ -> fail "a missing store must read as Window_missing"
+;;
+
+let test_private_jsonl_slice_rejects_incomplete_tail () =
+  with_temp_jsonl "{\"row\":1}" @@ fun path ->
+  match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
+  | Fs_compat.Private_file_failed
+      (Fs_compat.Private_jsonl_slice.Incomplete_tail 9) ->
+    ()
+  | _ -> fail "incomplete JSONL tail was not rejected"
+;;
+
+let read_private_tail path ~max_bytes =
+  match Fs_compat.read_private_jsonl_tail_locked_result path ~max_bytes with
+  | Fs_compat.Private_file_succeeded value -> value
+  | Fs_compat.Private_file_failed error ->
+    fail (Fs_compat.Private_jsonl_tail.error_to_string error)
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+  | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+    fail "unexpected tail descriptor settlement failure"
+;;
+
+let test_private_jsonl_tail_keeps_only_complete_bounded_rows () =
+  let row1 = "{\"row\":1}\n" in
+  let row2 = "{\"row\":2}\n" in
+  let row3 = "{\"row\":3}\n" in
+  let check_tail ~contents ~max_bytes ~expected ~omitted ~incomplete =
+    with_temp_jsonl contents @@ fun path ->
+    match read_private_tail path ~max_bytes with
+    | Fs_compat.Private_jsonl_tail.Tail_missing -> fail "present tail read as missing"
+    | Fs_compat.Private_jsonl_tail.Tail_present
+        { rows; prefix_omitted; incomplete_tail; end_offset } ->
+      check string "complete rows within window" expected rows;
+      check bool "older prefix omitted" omitted prefix_omitted;
+      check bool "incomplete suffix exposed" incomplete incomplete_tail;
+      check int "locked file length" (String.length contents) end_offset
+  in
+  check_tail ~contents:(row1 ^ row2 ^ row3) ~max_bytes:(String.length row3)
+    ~expected:row3 ~omitted:true ~incomplete:false;
+  check_tail ~contents:(row1 ^ row2 ^ row3) ~max_bytes:(String.length row3 + 3)
+    ~expected:row3 ~omitted:true ~incomplete:false;
+  check_tail ~contents:(row1 ^ row2 ^ "fragment") ~max_bytes:100
+    ~expected:(row1 ^ row2) ~omitted:false ~incomplete:true;
+  check_tail ~contents:(String.make 100000 'x' ^ "\n") ~max_bytes:32
+    ~expected:"" ~omitted:true ~incomplete:false;
+  check_tail ~contents:(row1 ^ String.make 100000 'x') ~max_bytes:32
+    ~expected:"" ~omitted:true ~incomplete:true;
+  check_tail ~contents:"" ~max_bytes:1
+    ~expected:"" ~omitted:false ~incomplete:false
+;;
+
+let test_private_jsonl_tail_missing_invalid_and_nonregular () =
+  let path = Filename.temp_file "masc_private_jsonl_tail_missing_" ".jsonl" in
+  Sys.remove path;
+  check bool "missing tail is distinct" true
+    (read_private_tail path ~max_bytes:32 = Fs_compat.Private_jsonl_tail.Tail_missing);
+  List.iter (fun max_bytes ->
+    match Fs_compat.read_private_jsonl_tail_locked_result path ~max_bytes with
+    | Fs_compat.Private_file_failed (Fs_compat.Private_jsonl_tail.Invalid_max_bytes value) ->
+      check int "invalid limit retained" max_bytes value
+    | _ -> fail "nonpositive limit must be a typed failure") [0; -1];
+  Unix.mkfifo path 0o600;
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    match Fs_compat.read_private_jsonl_tail_locked_result path ~max_bytes:32 with
+    | Fs_compat.Private_file_failed
+        (Fs_compat.Private_jsonl_tail.Read_error (Fs_compat.Private_jsonl_rows.Non_regular_file Unix.S_FIFO)) -> ()
+    | _ -> fail "FIFO must be rejected before locking or reading")
+;;
+
+let test_private_jsonl_tail_waits_for_writer_rollback () =
+  let committed = "{\"committed\":true}\n" in
+  with_temp_jsonl committed @@ fun path ->
+  let ready_read, ready_write = Unix.pipe ~cloexec:true () in
+  let release_read, release_write = Unix.pipe ~cloexec:true () in
+  let signal fd = ignore (Unix.write_substring fd "x" 0 1 : int) in
+  let receive fd =
+    let byte = Bytes.create 1 in
+    if Unix.read fd byte 0 1 <> 1 then fail "child closed before its signal"
+  in
+  let writer = match Unix.fork () with
+    | 0 ->
+      Unix.close ready_read;
+      Unix.close release_write;
+      (try
+         let fd = Unix.openfile path [Unix.O_RDWR; Unix.O_CLOEXEC] 0 in
+         Unix.lockf fd Unix.F_LOCK 0;
+         ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+         let pending = "{\"committed\":false}\n" in
+         ignore (Unix.write_substring fd pending 0 (String.length pending) : int);
+         signal ready_write;
+         receive release_read;
+         Unix.ftruncate fd (String.length committed);
+         Unix.fsync fd;
+         Unix.close fd;
+         Unix._exit 0
+       with _ -> Unix._exit 2)
+    | pid -> pid
+  in
+  Unix.close ready_write;
+  Unix.close release_read;
+  receive ready_read;
+  Unix.close ready_read;
+  let started_read, started_write = Unix.pipe ~cloexec:true () in
+  let result_read, result_write = Unix.pipe ~cloexec:true () in
+  let reader = match Unix.fork () with
+    | 0 ->
+      Unix.close release_write;
+      Unix.close started_read;
+      Unix.close result_read;
+      (try
+         signal started_write;
+         let observed = read_private_tail path ~max_bytes:1024 in
+         (match observed with
+          | Fs_compat.Private_jsonl_tail.Tail_present { rows; incomplete_tail = false; _ }
+            when String.equal rows committed -> signal result_write
+          | _ -> Unix._exit 3);
+         Unix._exit 0
+       with _ -> Unix._exit 2)
+    | pid -> pid
+  in
+  Unix.close started_write;
+  Unix.close result_write;
+  let released = ref false in
+  let release () = if not !released then (released := true; signal release_write) in
+  Fun.protect ~finally:(fun () ->
+    release ();
+    Unix.close release_write;
+    Unix.close started_read;
+    Unix.close result_read;
+    List.iter (fun pid -> match Unix.waitpid [] pid with
+      | _, Unix.WEXITED 0 -> ()
+      | _ -> fail "JSONL lock fixture child failed") [writer; reader]) (fun () ->
+    receive started_read;
+    (* A short observation interval checks exclusion while the writer holds
+       its lock; it is not a runtime deadline or a completion criterion. *)
+    let ready, _, _ = Unix.select [result_read] [] [] 0.05 in
+    check int "reader cannot expose a newline before writer settlement" 0 (List.length ready);
+    release ();
+    receive result_read)
+;;
+
+(* A crash between an append's write and its rollback leaves a last row with
+   no newline. The next plain append cuts it back to the last complete row and
+   writes from there; the rows before it stay as they were. *)
+let test_private_jsonl_append_cuts_incomplete_tail () =
+  let suffix = "{\"row\":3}\n" in
+  let cut_then_append ~complete ~fragment =
+    with_temp_jsonl (complete ^ fragment) @@ fun path ->
+    (match
+       Fs_compat.append_private_jsonl_durable_locked_with_end_offset_result
+         path
+         suffix
+     with
+     | Fs_compat.Private_file_succeeded end_offset ->
+       check int
+         (Printf.sprintf "after %S the append starts where the complete rows end"
+            fragment)
+         (String.length complete + String.length suffix)
+         end_offset
+     | Fs_compat.Private_file_failed error ->
+       fail (Fs_compat.private_jsonl_append_error_to_string error)
+     | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+     | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+       fail "unexpected descriptor settlement failure");
+    check string
+      (Printf.sprintf "%S is cut and the complete rows kept" fragment)
+      (complete ^ suffix)
+      (Fs_compat.load_file path)
+  in
+  cut_then_append ~complete:"{\"row\":1}\n" ~fragment:"{\"row\":2";
+  cut_then_append ~complete:"" ~fragment:"{\"row\":1}"
+;;
+
+(* A journal observation row carries no receipt and is written through the
+   stable append. After a crash left a torn last row, that append cuts the
+   fragment and writes, the same as the plain append above. *)
+let test_private_jsonl_stable_append_cuts_incomplete_tail () =
+  let suffix = "{\"row\":3}\n" in
+  let cut_then_append ~complete ~fragment =
+    with_temp_jsonl (complete ^ fragment) @@ fun path ->
+    (match Fs_compat.append_private_jsonl_durable_stable_result path suffix with
+     | Ok _ -> ()
+     | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+    check string
+      (Printf.sprintf "%S is cut and the complete rows kept" fragment)
+      (complete ^ suffix)
+      (Fs_compat.load_file path)
+  in
+  cut_then_append ~complete:"{\"row\":1}\n" ~fragment:"{\"row\":2";
+  cut_then_append ~complete:"" ~fragment:"{\"row\":1}"
+;;
+
+(* An offset-checked caller conditioned its write on the length it saw,
+   fragment included, so the fragment is refused and left in place. *)
+let test_private_jsonl_append_at_end_offset_refuses_incomplete_tail () =
+  let original = "{\"row\":1}\n{\"row\":2" in
+  with_temp_jsonl original @@ fun path ->
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_end_offset_result
+       path
+       ~expected_end_offset:(String.length original)
+       "{\"row\":3}\n"
+   with
+   | Fs_compat.Private_file_failed Fs_compat.Incomplete_jsonl_tail -> ()
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.private_jsonl_append_error_to_string error)
+   | Fs_compat.Private_file_succeeded _
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "an offset-checked append wrote after an incomplete row");
+  check string "incomplete bytes unchanged" original (Fs_compat.load_file path)
+;;
+
+let test_validated_jsonl_append_preserves_rejected_bytes () =
+  let original = "{\"v\":1}\n{\"torn\":" in
+  with_temp_jsonl original @@ fun path ->
+  let observed = ref None in
+  let validate_first_row row = observed := Some row; Error "unsupported epoch" in
+  (match Fs_compat.append_private_jsonl_durable_locked_validated_result
+      ~validate_first_row path "{\"v\":2}\n" with
+   | Fs_compat.Private_file_failed (Fs_compat.Existing_jsonl_refused detail) ->
+       check string "validator refusal stays explicit" "unsupported epoch" detail
+   | _ -> fail "rejected existing row was appended or reclassified");
+  check (option string) "validator sees the first row, not the entire file"
+    (Some "{\"v\":1}") !observed;
+  check string "refusal precedes torn-tail truncation" original (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_append_rejects_incomplete_suffix () =
+  with_temp_jsonl "" @@ fun path ->
+  match Fs_compat.append_private_jsonl_durable_locked_result path "{\"row\":1}" with
+  | Fs_compat.Private_file_failed Fs_compat.Invalid_jsonl_suffix -> ()
+  | Fs_compat.Private_file_failed error ->
+    fail (Fs_compat.private_jsonl_append_error_to_string error)
+  | Fs_compat.Private_file_succeeded _
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+  | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+    fail "append accepted a non-terminated JSONL suffix"
+;;
+
+let test_private_jsonl_append_respects_execution_context () =
+  with_temp_jsonl "" @@ fun path ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect
+    ~finally:Fs_compat.clear_fs
+    (fun () ->
+       (match
+          Fs_compat.append_private_jsonl_durable_locked_result path "{\"fiber\":1}\n"
+        with
+        | Fs_compat.Private_file_succeeded () -> ()
+        | Fs_compat.Private_file_failed error ->
+          fail (Fs_compat.private_jsonl_append_error_to_string error)
+        | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+        | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+          fail "unexpected descriptor settlement failure");
+       let raw_domain_result =
+         Domain.spawn (fun () ->
+           Fs_compat.append_private_jsonl_durable_locked_result path "{\"domain\":2}\n")
+         |> Domain.join
+       in
+       (match raw_domain_result with
+        | Fs_compat.Private_file_succeeded () -> ()
+        | Fs_compat.Private_file_failed error ->
+          fail (Fs_compat.private_jsonl_append_error_to_string error)
+        | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+        | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+          fail "unexpected descriptor settlement failure");
+       check string
+         "Eio fiber and raw Domain append once"
+         "{\"fiber\":1}\n{\"domain\":2}\n"
+         (Fs_compat.load_file path))
+;;
+
+let remove_if_present path =
+  match Unix.unlink path with
+  | () -> ()
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+;;
+
+let with_transaction_jsonl initial f =
+  let path = Filename.temp_file "masc_private_jsonl_transaction_" ".jsonl" in
+  (match initial with
+   | Some content ->
+     let output = open_out_bin path in
+     output_string output content;
+     close_out output
+   | None -> remove_if_present path);
+  Fun.protect
+    ~finally:(fun () ->
+      remove_if_present path;
+      remove_if_present (Fs_compat.private_jsonl_lock_path path))
+    (fun () -> f path)
+;;
+
+let transaction_snapshot path ~after =
+  match Fs_compat.read_private_jsonl_durable_locked_result path ~after with
+  | Ok snapshot -> snapshot
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+;;
+
+(* A child bounds each call even if a regression blocks in [open] before its
+   descriptor can be inspected. Only the child created by this fixture is
+   killed on timeout. *)
+let check_fifo_call_returns label f =
+  let result_read, result_write = Unix.pipe ~cloexec:true () in
+  let read_open = ref true and write_open = ref true in
+  let close_owned fd is_open =
+    if !is_open then (is_open := false; Unix.close fd)
+  in
+  let close_owned_quietly fd is_open =
+    try close_owned fd is_open with Unix.Unix_error _ -> ()
+  in
+  let remaining counter =
+    5. -. (Mtime.Span.to_float_ns (Mtime_clock.count counter) /. 1e9)
+  in
+  let rec reap_until pid counter =
+    if remaining counter <= 0. then None else
+    match Unix.waitpid [ Unix.WNOHANG ] pid with
+    | 0, _ ->
+      let left = remaining counter in
+      if left <= 0. then None
+      else (
+        (try ignore (Unix.select [] [] [] (min left 0.01) : _ * _ * _)
+         with Unix.Unix_error (Unix.EINTR, _, _) -> ());
+        reap_until pid counter)
+    | _, status -> Some status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap_until pid counter
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      close_owned_quietly result_read read_open;
+      close_owned_quietly result_write write_open)
+    (fun () ->
+      match Unix.fork () with
+      | 0 ->
+        let exit_code =
+          try
+            close_owned result_read read_open;
+            let passed = try f () with _ -> false in
+            let byte = if passed then "1" else "0" in
+            let rec write_result () =
+              match Unix.write_substring result_write byte 0 1 with
+              | 1 -> ()
+              | _ -> failwith "FIFO fixture could not write its result"
+              | exception Unix.Unix_error (Unix.EINTR, _, _) -> write_result ()
+            in
+            write_result ();
+            close_owned result_write write_open;
+            if passed then 0 else 1
+          with _ -> 1
+        in
+        Unix._exit exit_code
+      | pid ->
+        let reaped = ref false in
+        Fun.protect
+          ~finally:(fun () ->
+            if not !reaped then (
+              (try Unix.kill pid Sys.sigkill
+               with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+              match reap_until pid (Mtime_clock.counter ()) with
+              | Some _ -> reaped := true
+              | None -> fail (label ^ " fixture child did not exit after SIGKILL")))
+          (fun () ->
+            close_owned result_write write_open;
+            let counter = Mtime_clock.counter () in
+            let rec read_result () =
+              let left = remaining counter in
+              if left <= 0. then fail (label ^ " blocked while opening the FIFO");
+              match Unix.select [ result_read ] [] [] left with
+              | [], _, _ -> fail (label ^ " blocked while opening the FIFO")
+              | _ ->
+                let byte = Bytes.create 1 in
+                (match Unix.read result_read byte 0 1 with
+                 | length -> length = 1 && Bytes.get byte 0 = '1'
+                 | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_result ())
+              | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_result ()
+            in
+            let passed = read_result () in
+            let status =
+              match reap_until pid counter with
+              | Some status -> reaped := true; status
+              | None -> fail (label ^ " fixture child did not exit")
+            in
+            check bool (label ^ " refused the FIFO") true
+              (passed && status = Unix.WEXITED 0)))
+;;
+
+let test_private_jsonl_transactions_reject_fifo_without_writer () =
+  with_transaction_jsonl None @@ fun path ->
+  let snapshot = transaction_snapshot path ~after:None in
+  Unix.mkfifo path 0o600;
+  let is_fifo_error = function
+    | Error (Fs_compat.Unexpected_transaction_file_kind Unix.S_FIFO) -> true
+    | Ok _ | Error _ -> false in
+  let calls =
+    [ "read", (fun () -> is_fifo_error (Fs_compat.read_private_jsonl_durable_locked_result path ~after:None))
+    ; "recover", (fun () -> is_fifo_error (Fs_compat.recover_private_jsonl_durable_locked_result path))
+    ; "append", (fun () -> is_fifo_error
+         (Fs_compat.append_private_jsonl_durable_locked_at_cursor_result path ~expected:snapshot.cursor "{}\n"))
+    ; "rewrite", (fun () -> is_fifo_error
+         (Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result path ~expected:snapshot.cursor "{}\n"))
+    ] in
+  List.iter (fun (label, call) ->
+    check_fifo_call_returns label call;
+    check bool (label ^ " preserved the FIFO") true ((Unix.lstat path).Unix.st_kind = Unix.S_FIFO)) calls
+;;
+
+let test_private_jsonl_stable_lock_rejects_fifo_without_writer () =
+  with_transaction_jsonl None @@ fun path ->
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  Unix.mkfifo lock_path 0o600;
+  check_fifo_call_returns "stable lock" (fun () ->
+    match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+    | Error (Fs_compat.Unexpected_transaction_file_kind Unix.S_FIFO) -> true
+    | Ok _ | Error _ -> false);
+  check bool "stable lock FIFO preserved" true
+    ((Unix.lstat lock_path).Unix.st_kind = Unix.S_FIFO);
+  check bool "data path not created" false (Sys.file_exists path)
+;;
+
+let test_private_jsonl_slice_rejects_fifo_without_writer () =
+  with_transaction_jsonl None @@ fun path ->
+  Unix.mkfifo path 0o600;
+  check_fifo_call_returns "slice read" (fun () ->
+    match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
+    | Fs_compat.Private_file_failed
+        (Fs_compat.Private_jsonl_slice.Non_regular_file Unix.S_FIFO) -> true
+    | Private_file_succeeded _ | Private_file_succeeded_with_cleanup_failure _
+    | Private_file_failed _ | Private_file_failed_with_cleanup_failure _ -> false);
+  check bool "slice data FIFO preserved" true
+    ((Unix.lstat path).Unix.st_kind = Unix.S_FIFO)
+;;
+
+let transaction_snapshot_with_io ~io path ~after =
+  match
+    Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+      ~io
+      path
+      ~after
+  with
+  | Ok snapshot -> snapshot
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+;;
+
+let write_stable_lock_fixture path contents permissions =
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  let output = open_out_bin lock_path in
+  output_string output contents;
+  close_out output;
+  Unix.chmod lock_path permissions
+;;
+
+let transaction_append path ~expected suffix =
+  match
+    Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+      path
+      ~expected
+      suffix
+  with
+  | Ok cursor -> cursor
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+;;
+
+let injected_close_io ~fail_calls =
+  let calls = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _dir -> ())
+    ; close_fd =
+        (fun fd ->
+          incr calls;
+          Unix.close fd;
+          if List.mem !calls fail_calls
+          then
+            raise
+              (Unix.Unix_error
+                 (Unix.EIO, "injected_private_jsonl_close", string_of_int !calls)))
+    }
+  in
+  io, calls
+;;
+
+let check_transaction_close_failure
+      ~label
+      ~operation
+      (failure : Fs_compat.private_jsonl_operation_failure)
+  =
+  check bool (label ^ " operation") true (failure.operation = operation);
+  match failure.exception_ with
+  | Unix.Unix_error (Unix.EIO, "injected_private_jsonl_close", _) -> ()
+  | exception_ ->
+    fail
+      (Printf.sprintf
+         "%s lost injected close failure: %s"
+         label
+         (Printexc.to_string exception_))
+;;
+
+let test_private_jsonl_slice_returns_value_with_close_failure () =
+  with_temp_jsonl "{\"row\":1}\n" @@ fun path ->
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  (match
+     Fs_compat.read_private_jsonl_slice_locked_with_io_for_testing
+       ~io
+       path
+       ~from:0
+   with
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure
+       { value = slice; cleanup_failure } ->
+     check string "read value preserved" "{\"row\":1}\n" slice.bytes;
+     check_transaction_close_failure
+       ~label:"offset read descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       cleanup_failure
+   | _ -> fail "offset read did not preserve its value and close failure");
+  check int "offset read descriptor closed once" 1 !calls
+;;
+
+let test_private_jsonl_append_returns_commit_with_close_failure () =
+  let original = "{\"row\":1}\n" in
+  let suffix = "{\"row\":2}\n" in
+  with_temp_jsonl original @@ fun path ->
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_end_offset_with_io_for_testing
+       ~io
+       path
+       ~expected_end_offset:(String.length original)
+       suffix
+   with
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure
+       { value = end_offset; cleanup_failure } ->
+     check int
+       "committed offset preserved"
+       (String.length original + String.length suffix)
+       end_offset;
+     check_transaction_close_failure
+       ~label:"offset append descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       cleanup_failure
+   | _ -> fail "offset append did not preserve its commit and close failure");
+  check int "offset append descriptor closed once" 1 !calls;
+  check string "offset append commits once" (original ^ suffix) (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_append_preserves_rejection_with_close_failure () =
+  let original = "{\"row\":1}\n" in
+  with_temp_jsonl original @@ fun path ->
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_end_offset_with_io_for_testing
+       ~io
+       path
+       ~expected_end_offset:0
+       "{\"row\":2}\n"
+   with
+   | Fs_compat.Private_file_failed_with_cleanup_failure
+       { error = Fs_compat.End_offset_mismatch { expected = 0; actual }
+       ; cleanup_failure
+       } ->
+     check int "rejection actual offset" (String.length original) actual;
+     check_transaction_close_failure
+       ~label:"rejected offset append descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       cleanup_failure
+   | _ -> fail "offset append did not preserve its rejection and close failure");
+  check int "rejected append descriptor closed once" 1 !calls;
+  check string "rejected append writes nothing" original (Fs_compat.load_file path)
+;;
+
+let test_private_file_update_returns_value_with_close_failure () =
+  let original = "{\"row\":1}\n" in
+  let suffix = "{\"row\":2}\n" in
+  with_temp_jsonl original @@ fun path ->
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  (match
+     Fs_compat.update_private_file_durable_locked_with_io_for_testing
+       ~io
+       path
+       (fun _existing -> Some suffix, `Committed)
+   with
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure
+       { value = `Committed; cleanup_failure } ->
+     check_transaction_close_failure
+       ~label:"private update descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       cleanup_failure
+   | _ -> fail "private update did not preserve its value and close failure");
+  check int "private update descriptor closed once" 1 !calls;
+  check string "private update commits once" (original ^ suffix) (Fs_compat.load_file path)
+;;
+
+let test_private_file_replacement_before_decide initial () =
+  with_transaction_jsonl initial @@ fun path ->
+  let detached = path ^ ".opened" in
+  let foreign = "{\"foreign_binding\":true}\n" in
+  let decisions = ref 0 and closes = ref 0 in
+  Fun.protect ~finally:(fun () -> remove_if_present detached) (fun () ->
+    let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+      { before_sync_parent = (fun _ ->
+          Unix.rename path detached;
+          Out_channel.with_open_bin path (fun channel -> output_string channel foreign);
+          Unix.chmod path 0o600)
+      ; close_fd = (fun fd -> incr closes; Unix.close fd) } in
+    (match Fs_compat.update_private_file_durable_locked_with_io_for_testing ~io path
+        (fun _ -> incr decisions; Some "unauthorized\n", `Authorized) with
+     | _ -> fail "replaced canonical binding authorized a transaction"
+     | exception Sys_error _ -> ());
+    check int "stale opened bytes never reach decision" 0 !decisions;
+    check int "stale descriptor closes exactly once" 1 !closes;
+    check string "original detached payload is untouched"
+      (match initial with Some bytes -> bytes | None -> "") (Fs_compat.load_file detached);
+    check string "replacement canonical payload is untouched" foreign (Fs_compat.load_file path))
+;;
+
+let test_private_file_replacement_during_decide () =
+  let original = "{\"original_binding\":true}\n" in
+  with_transaction_jsonl (Some original) @@ fun path ->
+  let detached = path ^ ".opened" in
+  let foreign = "{\"foreign_binding\":true}\n" in
+  let decisions = ref 0 and closes = ref 0 in
+  Fun.protect ~finally:(fun () -> remove_if_present detached) (fun () ->
+    let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+      { before_sync_parent = (fun _ -> ())
+      ; close_fd = (fun fd -> incr closes; Unix.close fd) } in
+    (match Fs_compat.update_private_file_durable_locked_with_io_for_testing ~io path
+        (fun bytes ->
+          incr decisions;
+          check string "decision read the original authoritative payload" original bytes;
+          Unix.rename path detached;
+          Out_channel.with_open_bin path (fun channel -> output_string channel foreign);
+          Unix.chmod path 0o600;
+          Some "unauthorized\n", `Authorized) with
+     | _ -> fail "decision returned authorization after canonical replacement"
+     | exception Sys_error _ -> ());
+    check int "one real decision preceded physical replacement" 1 !decisions;
+    check int "replaced descriptor closes exactly once" 1 !closes;
+    check string "detached payload never receives suffix" original (Fs_compat.load_file detached);
+    check string "replacement payload never receives suffix" foreign (Fs_compat.load_file path))
+;;
+
+let test_private_jsonl_transaction_preserves_primary_when_data_close_fails () =
+  with_transaction_jsonl (Some "incomplete") @@ fun path ->
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  (match
+     Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+       ~io
+       path
+       ~after:None
+   with
+   | Error
+       (Fs_compat.Transaction_settlement_failed
+         { primary =
+             Fs_compat.Transaction_failed
+               (Fs_compat.Incomplete_transaction_tail _)
+         ; cleanup_failures = [ cleanup_failure ]
+         }) ->
+     check_transaction_close_failure
+       ~label:"data descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       cleanup_failure
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "data close failure was silently accepted");
+  check int "data and stable lock descriptors closed" 2 !calls
+;;
+
+let test_private_jsonl_transaction_accumulates_nested_close_failures () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let io, calls = injected_close_io ~fail_calls:[ 1; 2 ] in
+  let result =
+    Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+      ~io
+      path
+      ~after:None
+  in
+  (match result with
+   | Error
+       (Fs_compat.Transaction_settlement_failed
+         { primary =
+             Fs_compat.Transaction_succeeded
+               (Fs_compat.Snapshot_succeeded snapshot)
+         ; cleanup_failures = [ data_failure; lock_failure ]
+         }) ->
+     check string "successful snapshot receipt" "{\"row\":1}\n" snapshot.bytes;
+     check_transaction_close_failure
+       ~label:"data descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       data_failure;
+     check_transaction_close_failure
+       ~label:"stable lock descriptor cleanup"
+       ~operation:Fs_compat.Close_stable_lock
+       lock_failure;
+     (match Fs_compat.private_jsonl_snapshot_success_receipt result with
+      | Ok { value; settlement_error = Some _ } ->
+        check string "classified snapshot receipt" snapshot.bytes value.bytes
+      | Ok { settlement_error = None; _ } ->
+        fail "snapshot classifier discarded settlement evidence"
+      | Error error ->
+        fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+     let cursor_settlement_error =
+       Fs_compat.Transaction_settlement_failed
+         { primary =
+             Fs_compat.Transaction_succeeded
+               (Fs_compat.Cursor_succeeded snapshot.cursor)
+         ; cleanup_failures = [ data_failure; lock_failure ]
+         }
+     in
+     (match
+        Fs_compat.private_jsonl_cursor_success_receipt
+          (Error cursor_settlement_error)
+      with
+      | Ok { value; settlement_error = Some _ } ->
+        check bool
+          "classified cursor receipt"
+          true
+          (Fs_compat.Private_jsonl_cursor.equal snapshot.cursor value)
+      | Ok { settlement_error = None; _ } ->
+        fail "cursor classifier discarded settlement evidence"
+      | Error error ->
+        fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+     (match
+        Fs_compat.private_jsonl_snapshot_success_receipt
+          (Error cursor_settlement_error)
+      with
+      | Error _ -> ()
+      | Ok _ -> fail "snapshot classifier accepted a cursor success receipt")
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "nested close failures were silently accepted");
+  check int "both nested descriptors closed" 2 !calls
+;;
+
+let test_private_jsonl_rewrite_rejects_precondition_close_as_commit () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let origin = transaction_snapshot path ~after:None in
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  let result =
+    Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+      ~io
+      path
+      ~expected:origin.cursor
+      "{\"row\":2}\n"
+  in
+  (match result with
+   | Error
+       (Fs_compat.Transaction_settlement_failed
+         { primary =
+             Fs_compat.Transaction_succeeded
+               (Fs_compat.Cursor_precondition_succeeded observed)
+         ; cleanup_failures = [ cleanup_failure ]
+         }) ->
+     check bool
+       "precondition cursor preserved"
+       true
+       (Fs_compat.Private_jsonl_cursor.equal origin.cursor observed);
+     check_transaction_close_failure
+       ~label:"rewrite precondition descriptor cleanup"
+       ~operation:Fs_compat.Close_transaction_data
+       cleanup_failure;
+     (match Fs_compat.private_jsonl_cursor_success_receipt result with
+      | Error _ -> ()
+      | Ok _ -> fail "precondition cursor was classified as a committed rewrite")
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "rewrite continued after precondition descriptor settlement failed");
+  check int "precondition and stable lock descriptors closed" 2 !calls;
+  check string
+    "failed precondition leaves target unchanged"
+    "{\"row\":1}\n"
+    (Fs_compat.load_file path)
+;;
+
+exception Requested_private_jsonl_cancellation
+
+type private_jsonl_append_cancellation_outcome =
+  | Append_returned of
+      ( Fs_compat.Private_jsonl_cursor.t
+        , Fs_compat.private_jsonl_transaction_error )
+        result
+  | Append_cancelled
+
+type private_jsonl_close_barrier =
+  { entered : unit Eio.Promise.t
+  ; resolve_entered : unit Eio.Promise.u
+  ; first_close : bool Atomic.t
+  ; close_calls : int Atomic.t
+  ; mutex : Stdlib.Mutex.t
+  ; condition : Stdlib.Condition.t
+  ; mutable released : bool
+  }
+
+let private_jsonl_close_barrier () =
+  let entered, resolve_entered = Eio.Promise.create () in
+  { entered
+  ; resolve_entered
+  ; first_close = Atomic.make true
+  ; close_calls = Atomic.make 0
+  ; mutex = Stdlib.Mutex.create ()
+  ; condition = Stdlib.Condition.create ()
+  ; released = false
+  }
+;;
+
+let release_private_jsonl_close barrier =
+  Stdlib.Mutex.protect barrier.mutex (fun () ->
+    if not barrier.released
+    then (
+      barrier.released <- true;
+      Stdlib.Condition.broadcast barrier.condition))
+;;
+
+let private_jsonl_blocking_close_io barrier =
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _dir -> ())
+    ; close_fd =
+        (fun fd ->
+          ignore (Atomic.fetch_and_add barrier.close_calls 1 : int);
+          if Atomic.compare_and_set barrier.first_close true false
+          then (
+            Eio.Promise.resolve barrier.resolve_entered ();
+            Stdlib.Mutex.protect barrier.mutex (fun () ->
+              while not barrier.released do
+                Stdlib.Condition.wait barrier.condition barrier.mutex
+              done));
+          Unix.close fd)
+    }
+  in
+  io
+;;
+
+let test_private_jsonl_append_cancellation_settles_once_with_receipt () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  Eio_main.run @@ fun _env ->
+  let origin = transaction_snapshot path ~after:None in
+  let barrier = private_jsonl_close_barrier () in
+  let context, resolve_context = Eio.Promise.create () in
+  let outcome, resolve_outcome = Eio.Promise.create () in
+  Fun.protect
+    ~finally:(fun () -> release_private_jsonl_close barrier)
+    (fun () ->
+       Eio.Switch.run @@ fun sw ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           try
+             Eio.Cancel.sub @@ fun context ->
+             Eio.Promise.resolve resolve_context context;
+             Append_returned
+               (Fs_compat.append_private_jsonl_durable_locked_at_cursor_with_io_for_testing
+                  ~io:(private_jsonl_blocking_close_io barrier)
+                  path
+                  ~expected:origin.cursor
+                  "{\"row\":2}\n")
+           with
+           | Eio.Cancel.Cancelled _ -> Append_cancelled
+         in
+         Eio.Promise.resolve resolve_outcome outcome);
+       let context = Eio.Promise.await context in
+       Eio.Promise.await barrier.entered;
+       Eio.Cancel.cancel context Requested_private_jsonl_cancellation;
+       release_private_jsonl_close barrier;
+       match Eio.Promise.await outcome with
+       | Append_cancelled ->
+         fail "committed append lost its terminal receipt to cancellation"
+       | Append_returned (Error error) ->
+         fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+       | Append_returned (Ok committed) ->
+         check bool
+           "cancellation path returns committed cursor"
+           false
+           (Fs_compat.Private_jsonl_cursor.equal origin.cursor committed));
+  check int "cancellation path closes both descriptors" 2 (Atomic.get barrier.close_calls);
+  check string
+    "cancellation path commits suffix exactly once"
+    "{\"row\":1}\n{\"row\":2}\n"
+    (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_transaction_missing_and_delta_contract () =
+  with_transaction_jsonl None @@ fun path ->
+  let origin = transaction_snapshot path ~after:None in
+  let committed = transaction_append path ~expected:origin.cursor "{\"row\":1}\n" in
+  let delta = transaction_snapshot path ~after:(Some committed) in
+  check string "no bytes after committed cursor" "" delta.bytes;
+  let next = transaction_append path ~expected:committed "{\"row\":2}\n" in
+  let delta = transaction_snapshot path ~after:(Some committed) in
+  check string "exact appended delta" "{\"row\":2}\n" delta.bytes;
+  check bool
+    "delta advances durable cursor"
+    true
+    (Fs_compat.Private_jsonl_cursor.equal next delta.cursor)
+;;
+
+(* [Private_jsonl_cursor.t] is abstract, so the missing-store cursor has no
+   name outside [Fs_compat]. With the data file gone, a locked read reports
+   that cursor, and [equal] compares a purge result with it. *)
+let check_missing_store_cursor label path cursor =
+  check bool (label ^ ": the data file is absent") false (Sys.file_exists path);
+  let absent = transaction_snapshot path ~after:None in
+  check bool label true (Fs_compat.Private_jsonl_cursor.equal cursor absent.cursor)
+;;
+
+let test_private_jsonl_purge_removes_store_and_retains_lock () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  ignore (transaction_snapshot path ~after:None);
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  let purged =
+    match Fs_compat.purge_private_jsonl_durable_locked_result path with
+    | Ok cursor -> cursor
+    | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  in
+  check bool "purge removes the data file" false (Sys.file_exists path);
+  check bool "purge retains the stable lock" true (Sys.file_exists lock_path);
+  (* After the lock check: this read takes the stable lock itself. *)
+  check_missing_store_cursor "purge returns the missing-store cursor" path purged;
+  let successor = "{\"row\":2}\n" in
+  (match Fs_compat.append_private_jsonl_durable_locked_result path successor with
+   | Fs_compat.Private_file_succeeded () -> ()
+   | Fs_compat.Private_file_failed error ->
+     fail (Fs_compat.private_jsonl_append_error_to_string error)
+   | Fs_compat.Private_file_succeeded_with_cleanup_failure _
+   | Fs_compat.Private_file_failed_with_cleanup_failure _ ->
+     fail "successor append had a descriptor settlement failure");
+  check string "successor uses the retained lock" successor (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_purge_reports_parent_sync_after_unlink () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let parent_syncs = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent =
+        (fun dir ->
+          incr parent_syncs;
+          if !parent_syncs > 1
+          then raise (Unix.Unix_error (Unix.EIO, "injected_parent_fsync", dir)))
+    ; close_fd = Unix.close
+    }
+  in
+  ignore
+    (transaction_snapshot_with_io ~io path ~after:None);
+  (match
+     Fs_compat.purge_private_jsonl_durable_locked_with_io_for_testing ~io path
+   with
+   | Error
+       (Fs_compat.Private_jsonl_operation_failed
+         { operation = Fs_compat.Sync_removal_parent; _ }) -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "parent-sync failure after unlink was reported as success");
+  check bool "failed removal has already unlinked the data" false (Sys.file_exists path);
+  match Fs_compat.purge_private_jsonl_durable_locked_result path with
+  | Ok retried ->
+    check_missing_store_cursor "retry returns the missing-store cursor" path retried
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+;;
+
+let test_private_jsonl_transaction_rejects_second_writer_cursor () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let snapshot = transaction_snapshot path ~after:None in
+  ignore (transaction_append path ~expected:snapshot.cursor "{\"winner\":1}\n");
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+       path
+       ~expected:snapshot.cursor
+       "{\"loser\":1}\n"
+   with
+   | Error (Fs_compat.Cursor_mismatch _) -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "second writer committed from a stale cursor");
+  check string
+    "stale writer writes zero bytes"
+    "{\"row\":1}\n{\"winner\":1}\n"
+    (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_transaction_rejects_same_length_rewrite_aba () =
+  let before = "{\"row\":1}\n" in
+  let after = "{\"row\":2}\n" in
+  check int "fixture lengths match" (String.length before) (String.length after);
+  with_transaction_jsonl (Some before) @@ fun path ->
+  let snapshot = transaction_snapshot path ~after:None in
+  let rewritten =
+    match
+      Fs_compat.rewrite_private_jsonl_durable_locked_at_cursor_result
+        path
+        ~expected:snapshot.cursor
+        after
+    with
+    | Ok cursor -> cursor
+    | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  in
+  check bool
+    "same-length rewrite changes durable identity"
+    false
+    (Fs_compat.Private_jsonl_cursor.equal snapshot.cursor rewritten);
+  (match
+     Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+       path
+       ~expected:snapshot.cursor
+       "{\"stale\":1}\n"
+   with
+   | Error (Fs_compat.Cursor_mismatch _) -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "stale pre-rewrite cursor passed a same-length ABA");
+  check string "rewrite remains authoritative" after (Fs_compat.load_file path)
+;;
+
+(* Change bytes in place to deterministically model a recycled cursor. This
+   exercises the snapshot comparison without relying on filesystem inode reuse. *)
+let test_private_jsonl_snapshot_rewrite_rejects_same_cursor_changed_bytes () =
+  let before = "{\"row\":1}\n" and after = "{\"row\":2}\n" in
+  with_transaction_jsonl (Some before) @@ fun path ->
+  let expected = transaction_snapshot path ~after:None in
+  let fd = Unix.openfile path [Unix.O_WRONLY] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
+    let rec write offset =
+      if offset < String.length after then
+        let count = Unix.write_substring fd after offset (String.length after - offset) in
+        if count = 0 then fail "could not write changed fixture" else write (offset + count) in
+    write 0; Unix.fsync fd);
+  let current = transaction_snapshot path ~after:None in
+  check bool "fixture preserves cursor" true
+    (Fs_compat.Private_jsonl_cursor.equal expected.cursor current.cursor);
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result path ~expected "{\"row\":3}\n" with
+   | Error (Fs_compat.Transaction_content_changed _) -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "changed bytes were overwritten through a stale snapshot");
+  check string "changed bytes remain authoritative" after (Fs_compat.load_file path);
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result path ~expected:current "{\"row\":3}\n" with
+   | Ok _ -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+  check string "matching snapshot can commit" "{\"row\":3}\n" (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_snapshot_rewrite_preserves_settlement_evidence () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let expected = transaction_snapshot path ~after:None in
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+           ~io path ~expected "{\"row\":2}\n" with
+   | Error (Fs_compat.Transaction_settlement_failed
+       { primary = Fs_compat.Transaction_succeeded (Fs_compat.Cursor_succeeded _)
+       ; cleanup_failures = [ failure ] }) ->
+     check_transaction_close_failure ~label:"snapshot rewrite data cleanup"
+       ~operation:Fs_compat.Close_transaction_data failure
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "committed rewrite omitted the descriptor close failure");
+  check int "data and lock descriptors closed" 2 !calls;
+  check string "rewrite remained committed" "{\"row\":2}\n" (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_snapshot_rewrite_preserves_mismatch_cleanup () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let expected = transaction_snapshot path ~after:None in
+  let output = open_out_bin path in
+  output_string output "{\"row\":2}\n";
+  close_out output;
+  let io, calls = injected_close_io ~fail_calls:[ 1 ] in
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+           ~io path ~expected "{\"row\":3}\n" with
+   | Error (Fs_compat.Transaction_settlement_failed
+       { primary = Fs_compat.Transaction_failed (Fs_compat.Transaction_content_changed _)
+       ; cleanup_failures = [ failure ] }) ->
+     check_transaction_close_failure ~label:"snapshot mismatch data cleanup"
+       ~operation:Fs_compat.Close_transaction_data failure
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "mismatched snapshot committed");
+  check int "data and lock descriptors closed" 2 !calls;
+  check string "mismatch left newer bytes intact" "{\"row\":2}\n" (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_snapshot_rewrite_create_is_conditional () =
+  with_transaction_jsonl None @@ fun path ->
+  let missing = transaction_snapshot path ~after:None in
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
+           path ~expected:missing "{\"row\":1}\n" with
+   | Ok _ -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error));
+  (match Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
+           path ~expected:missing "{\"row\":2}\n" with
+   | Error (Fs_compat.Cursor_mismatch _) -> ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "missing snapshot replaced an existing store");
+  check string "created bytes retained" "{\"row\":1}\n" (Fs_compat.load_file path)
+;;
+
+let test_private_jsonl_transaction_lock_is_private () =
+  with_transaction_jsonl None @@ fun path ->
+  ignore (transaction_snapshot path ~after:None);
+  let permissions =
+    (Unix.stat (Fs_compat.private_jsonl_lock_path path)).Unix.st_perm land 0o777
+  in
+  check int "stable lock permissions" 0o600 permissions
+;;
+
+let test_private_jsonl_stable_lock_parent_sync_is_one_shot () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let parent_syncs = ref 0 in
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent = (fun _dir -> incr parent_syncs)
+    ; close_fd = Unix.close
+    }
+  in
+  let snapshot = transaction_snapshot_with_io ~io path ~after:None in
+  ignore (transaction_snapshot_with_io ~io path ~after:(Some snapshot.cursor));
+  ignore (transaction_snapshot_with_io ~io path ~after:(Some snapshot.cursor));
+  check int "stable lock parent sync count" 1 !parent_syncs
+;;
+
+let test_private_jsonl_stable_lock_parent_sync_failure_retries () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+    { before_sync_parent =
+        (fun dir ->
+          raise (Unix.Unix_error (Unix.EIO, "injected_parent_fsync", dir)))
+    ; close_fd = Unix.close
+    }
+  in
+  (match
+     Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing
+       ~io
+       path
+       ~after:None
+   with
+   | Error
+       (Fs_compat.Private_jsonl_operation_failed
+         { operation = Fs_compat.Sync_stable_lock_parent; _ }) ->
+     ()
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "stable lock parent-sync failure was silently accepted");
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  check string "failed initialization remains preparing" "" (Fs_compat.load_file lock_path);
+  ignore (transaction_snapshot path ~after:None);
+  check bool
+    "successful retry publishes ready state"
+    true
+    (String.length (Fs_compat.load_file lock_path) > 0)
+;;
+
+let test_private_jsonl_stable_lock_invalid_state_fails_closed () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let invalid = "invalid-ready-state" in
+  write_stable_lock_fixture path invalid 0o600;
+  match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+  | Error (Fs_compat.Invalid_stable_lock_state { observed_length; _ }) ->
+    check int "invalid stable lock length" (String.length invalid) observed_length
+  | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+  | Ok _ -> fail "invalid stable lock state was accepted"
+;;
+
+let test_private_jsonl_stable_lock_permission_drift_fails_closed () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  write_stable_lock_fixture path "" 0o640;
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  (match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+   | Error (Fs_compat.Unexpected_stable_lock_permissions { actual; _ }) ->
+     check int "observed stable lock permissions" 0o640 actual
+   | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+   | Ok _ -> fail "stable lock permission drift was silently repaired");
+  check int
+    "permission drift remains untouched"
+    0o640
+    ((Unix.stat lock_path).Unix.st_perm land 0o7777)
+;;
+
+let test_private_jsonl_transaction_rejects_data_aliases () =
+  with_transaction_jsonl (Some "{\"row\":1}\n") @@ fun path ->
+  let hardlink = path ^ ".hardlink" in
+  Fun.protect
+    ~finally:(fun () -> remove_if_present hardlink)
+    (fun () ->
+       Unix.link path hardlink;
+       match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+       | Error (Fs_compat.Ambiguous_transaction_file_identity { link_count; _ }) ->
+         check int "hard-link count" 2 link_count
+       | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+       | Ok _ -> fail "hard-linked transaction data was accepted")
+;;
+
+let test_private_jsonl_transaction_rejects_symlink_lock_without_chmod () =
+  with_transaction_jsonl None @@ fun path ->
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  let external_path =
+    Filename.temp_file "masc_private_jsonl_external_lock_" ".lock"
+  in
+  Fun.protect
+    ~finally:(fun () -> remove_if_present external_path)
+    (fun () ->
+       Unix.chmod external_path 0o644;
+       Unix.symlink external_path lock_path;
+       (match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+        | Error (Fs_compat.Unexpected_transaction_file_kind Unix.S_LNK) -> ()
+        | Error error ->
+          fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+        | Ok _ -> fail "symbolic-link stable lock was accepted");
+       let permissions = (Unix.stat external_path).Unix.st_perm land 0o777 in
+       check int "external target permissions unchanged" 0o644 permissions)
+;;
+
+let test_private_jsonl_transaction_lock_contention_is_typed () =
+  with_transaction_jsonl None @@ fun path ->
+  ignore (transaction_snapshot path ~after:None);
+  let ready_read, ready_write = Unix.pipe ~cloexec:true () in
+  let release_read, release_write = Unix.pipe ~cloexec:true () in
+  match Unix.fork () with
+  | 0 ->
+    Unix.close ready_read;
+    Unix.close release_write;
+    (try
+       let lock_fd =
+         Unix.openfile
+           (Fs_compat.private_jsonl_lock_path path)
+           [ Unix.O_RDWR; Unix.O_CLOEXEC ]
+           0
+       in
+       Unix.lockf lock_fd Unix.F_LOCK 0;
+       ignore (Unix.write_substring ready_write "x" 0 1 : int);
+       let release = Bytes.create 1 in
+       ignore (Unix.read release_read release 0 1 : int);
+       Unix.close lock_fd;
+       Unix._exit 0
+     with _ -> Unix._exit 2)
+  | child ->
+    Unix.close ready_write;
+    Unix.close release_read;
+    let ready = Bytes.create 1 in
+    ignore (Unix.read ready_read ready 0 1 : int);
+    Fun.protect
+      ~finally:(fun () ->
+        ignore (Unix.write_substring release_write "x" 0 1 : int);
+        Unix.close ready_read;
+        Unix.close release_write;
+        match Unix.waitpid [] child with
+        | _, Unix.WEXITED 0 -> ()
+        | _, status ->
+          fail
+            (Printf.sprintf
+               "stable-lock child failed: %s"
+               (match status with
+                | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+                | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+                | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal)))
+      (fun () ->
+         match Fs_compat.read_private_jsonl_durable_locked_result path ~after:None with
+         | Error (Fs_compat.Stable_lock_contended _) -> ()
+         | Error error ->
+           fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+         | Ok _ -> fail "cross-process stable-lock contention was accepted")
+;;
+
+let test_private_jsonl_observed_append_matches_locked_bytes () =
+  List.iter (fun original ->
+    with_temp_jsonl original @@ fun path ->
+    let before = Unix.stat path in
+    let suffix = "{\"row\":3}\n" in
+    match Fs_compat.append_private_jsonl_durable_observed_result path suffix with
+    | Error error -> fail (Fs_compat.private_jsonl_transaction_error_to_string error)
+    | Ok (_, None) -> fail "existing file lost its append observation"
+    | Ok (_, Some observation) ->
+      check int "before length includes any torn bytes" before.Unix.st_size observation.before.Unix.st_size;
+      check int "before inode is exact" before.Unix.st_ino observation.before.Unix.st_ino;
+      check string "observation identifies exact appended bytes" suffix observation.suffix;
+      check int "after length names persisted result" (String.length (Fs_compat.load_file path)) observation.after.Unix.st_size;
+      check bool "tail recovery cannot claim a pure append" (String.ends_with ~suffix:"\n" original)
+        (observation.after.Unix.st_size-observation.before.Unix.st_size=String.length suffix))
+    ["{\"row\":1}\n";"{\"row\":1}\n{\"row\":2"]
+;;
+
+let () =
+  run
+    "fs_compat durable append"
+    [ ( "durable_append"
+      , [ test_case "observed append preserves exact locked before/after identity" `Quick
+            test_private_jsonl_observed_append_matches_locked_bytes;
+          test_case "success fsyncs" `Quick test_success_fsyncs
+        ; test_case
+            "partial ENOSPC rolls back and fsyncs"
+            `Quick
+            test_partial_enospc_rolls_back
+        ; test_case
+            "partial EIO rolls back and fsyncs"
+            `Quick
+            test_partial_eio_rolls_back
+        ; test_case
+            "append fsync failure rolls back and fsyncs"
+            `Quick
+            test_append_fsync_failure_rolls_back
+        ; test_case
+            "rollback truncate failure stays explicit"
+            `Quick
+            test_rollback_truncate_failure_is_explicit_and_still_fsyncs
+        ; test_case
+            "rollback fsync failure stays explicit"
+            `Quick
+            test_rollback_fsync_failure_is_explicit
+        ; test_case
+            "private JSONL append preserves complete history"
+            `Quick
+            test_private_jsonl_append_preserves_complete_history
+        ; test_case
+            "private JSONL append returns committed end offset"
+            `Quick
+            test_private_jsonl_append_returns_committed_end_offset
+        ; test_case
+            "private JSONL append accepts exact end offset"
+            `Quick
+            test_private_jsonl_append_at_exact_end_offset
+        ; test_case
+            "private JSONL append rejects stale end offset"
+            `Quick
+            test_private_jsonl_append_rejects_stale_end_offset
+        ; test_case
+            "private JSONL cursor read returns exact suffix"
+            `Quick
+            test_private_jsonl_slice_reads_exact_cursor_suffix
+        ; test_case
+            "private JSONL cursor read rejects invalid cursors"
+            `Quick
+            test_private_jsonl_slice_rejects_invalid_cursors
+        ; test_case
+            "private JSONL cursor read handles missing stores"
+            `Quick
+            test_private_jsonl_slice_missing_store_contract
+        ; test_case
+            "private JSONL cursor read rejects incomplete tail"
+            `Quick
+            test_private_jsonl_slice_rejects_incomplete_tail
+        ; test_case
+            "private JSONL rows read keeps complete rows and reports a torn tail"
+            `Quick
+            test_private_jsonl_rows_reads_complete_rows_and_reports_torn_tail
+        ; test_case
+            "private JSONL rows read allocates about twice the store"
+            `Quick
+            test_private_jsonl_rows_read_allocates_about_twice_the_store
+        ; test_case
+            "private JSONL window matches the whole read"
+            `Quick
+            test_private_jsonl_window_matches_the_whole_read
+        ; test_case
+            "private JSONL tail returns bounded complete rows with omission"
+            `Quick
+            test_private_jsonl_tail_keeps_only_complete_bounded_rows
+        ; test_case
+            "private JSONL tail distinguishes invalid, missing, and nonregular stores"
+            `Quick
+            test_private_jsonl_tail_missing_invalid_and_nonregular
+        ; test_case
+            "private JSONL tail waits for an in-flight writer to roll back"
+            `Quick
+            test_private_jsonl_tail_waits_for_writer_rollback
+        ; test_case
+            "private JSONL append cuts incomplete tail"
+            `Quick
+            test_private_jsonl_append_cuts_incomplete_tail
+        ; test_case
+            "private JSONL offset append refuses incomplete tail"
+            `Quick
+            test_private_jsonl_append_at_end_offset_refuses_incomplete_tail
+        ; test_case
+            "private JSONL stable append cuts incomplete tail"
+            `Quick
+            test_private_jsonl_stable_append_cuts_incomplete_tail
+        ; test_case
+            "validated JSONL append preserves rejected bytes"
+            `Quick
+            test_validated_jsonl_append_preserves_rejected_bytes
+        ; test_case
+            "private JSONL append rejects incomplete suffix"
+            `Quick
+            test_private_jsonl_append_rejects_incomplete_suffix
+        ; test_case
+            "private JSONL stable lock contention is typed"
+            `Quick
+            test_private_jsonl_transaction_lock_contention_is_typed
+        ; test_case
+            "private JSONL append respects execution context"
+            `Quick
+            test_private_jsonl_append_respects_execution_context
+        ; test_case
+            "private JSONL transaction handles missing stores and deltas"
+            `Quick
+            test_private_jsonl_transaction_missing_and_delta_contract
+        ; test_case
+            "private JSONL transactions reject a FIFO without a writer"
+            `Quick
+            test_private_jsonl_transactions_reject_fifo_without_writer
+        ; test_case
+            "private JSONL stable lock rejects a FIFO without a writer"
+            `Quick
+            test_private_jsonl_stable_lock_rejects_fifo_without_writer
+        ; test_case
+            "private JSONL slice rejects a FIFO without a writer"
+            `Quick
+            test_private_jsonl_slice_rejects_fifo_without_writer
+        ; test_case
+            "private JSONL purge removes data and retains its stable lock"
+            `Quick
+            test_private_jsonl_purge_removes_store_and_retains_lock
+        ; test_case
+            "private JSONL purge reports parent-sync failure after unlink"
+            `Quick
+            test_private_jsonl_purge_reports_parent_sync_after_unlink
+        ; test_case
+            "private JSONL transaction rejects a second writer cursor"
+            `Quick
+            test_private_jsonl_transaction_rejects_second_writer_cursor
+        ; test_case
+            "private JSONL transaction rejects same-length rewrite ABA"
+            `Quick
+            test_private_jsonl_transaction_rejects_same_length_rewrite_aba
+        ; test_case
+            "private JSONL snapshot rewrite rejects changed bytes at the same cursor"
+            `Quick
+            test_private_jsonl_snapshot_rewrite_rejects_same_cursor_changed_bytes
+        ; test_case
+            "private JSONL snapshot rewrite preserves committed settlement evidence"
+            `Quick
+            test_private_jsonl_snapshot_rewrite_preserves_settlement_evidence
+        ; test_case
+            "private JSONL snapshot mismatch preserves cleanup failure"
+            `Quick
+            test_private_jsonl_snapshot_rewrite_preserves_mismatch_cleanup
+        ; test_case
+            "private JSONL snapshot creation is conditional"
+            `Quick
+            test_private_jsonl_snapshot_rewrite_create_is_conditional
+        ; test_case
+            "private JSONL stable lock is private"
+            `Quick
+            test_private_jsonl_transaction_lock_is_private
+        ; test_case
+            "private JSONL stable lock parent sync is one-shot"
+            `Quick
+            test_private_jsonl_stable_lock_parent_sync_is_one_shot
+        ; test_case
+            "private JSONL stable lock retries failed parent sync"
+            `Quick
+            test_private_jsonl_stable_lock_parent_sync_failure_retries
+        ; test_case
+            "private JSONL stable lock invalid state fails closed"
+            `Quick
+            test_private_jsonl_stable_lock_invalid_state_fails_closed
+        ; test_case
+            "private JSONL stable lock permission drift fails closed"
+            `Quick
+            test_private_jsonl_stable_lock_permission_drift_fails_closed
+        ; test_case
+            "private JSONL transaction rejects data aliases"
+            `Quick
+            test_private_jsonl_transaction_rejects_data_aliases
+        ; test_case
+            "private JSONL stable lock rejects symlink aliases"
+            `Quick
+            test_private_jsonl_transaction_rejects_symlink_lock_without_chmod
+        ; test_case
+            "private JSONL data close preserves primary error"
+            `Quick
+            test_private_jsonl_transaction_preserves_primary_when_data_close_fails
+        ; test_case
+            "private JSONL offset read preserves close failure"
+            `Quick
+            test_private_jsonl_slice_returns_value_with_close_failure
+        ; test_case
+            "private JSONL offset append preserves committed close failure"
+            `Quick
+            test_private_jsonl_append_returns_commit_with_close_failure
+        ; test_case
+            "private JSONL offset append preserves rejected close failure"
+            `Quick
+            test_private_jsonl_append_preserves_rejection_with_close_failure
+        ; test_case
+            "private file update preserves committed close failure"
+            `Quick
+            test_private_file_update_returns_value_with_close_failure
+        ; test_case "fresh private file replacement cannot reach decision" `Quick
+            (test_private_file_replacement_before_decide None)
+        ; test_case "existing private file replacement cannot reach decision" `Quick
+            (test_private_file_replacement_before_decide (Some "{\"original_binding\":true}\n"))
+        ; test_case "private file decision cannot authorize detached inode" `Quick
+            test_private_file_replacement_during_decide
+        ; test_case
+            "private JSONL nested close failures accumulate"
+            `Quick
+            test_private_jsonl_transaction_accumulates_nested_close_failures
+        ; test_case
+            "private JSONL rewrite precondition close is not a commit"
+            `Quick
+            test_private_jsonl_rewrite_rejects_precondition_close_as_commit
+        ; test_case
+            "private JSONL append cancellation settles once with receipt"
+            `Quick
+            test_private_jsonl_append_cancellation_settles_once_with_receipt
+        ] )
+    ]
+;;

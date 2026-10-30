@@ -1,0 +1,49 @@
+=== Scan: new deterministic-boundary ratchet ===
+PASS: no new deterministic-boundary debt added in f81284ca4de88abc1614be712e094178c8de23ea...HEAD, staged diff, or worktree diff
+=== Scan: deterministic branch on non-deterministic source ===
+=== Scan: permissive default on unknown input ===
+WARN: Option.value with default on potentially unknown input (sound partial?):
+lib/mcp_server_eio_call_tool.ml-317-    ~(execution_id : Ids.Execution_id.t) : unit =
+lib/mcp_server_eio_call_tool.ml:318:  let trace_id = Option.value ~default:"runtime-mcp" ctx.trace_id in
+--
+lib/mcp_server_eio_call_tool.ml-323-  in
+lib/mcp_server_eio_call_tool.ml:324:  let turn = Option.value ~default:0 ctx.turn in
+--
+lib/mcp_server_eio_protocol.ml-463-       let arguments =
+lib/mcp_server_eio_protocol.ml:464:         match Option.value ~default:`Null (Json_util.assoc_member_opt "arguments" payload) with
+--
+lib/mcp_server_eio_protocol.ml-1216-        else None)
+lib/mcp_server_eio_protocol.ml:1217:      |> Option.value ~default:0
+--
+lib/keeper/keeper_tool_execute_runtime.ml-542-               at the external-effect authorization boundary. *)
+lib/keeper/keeper_tool_execute_runtime.ml:543:            ~keeper_always_allow:(Option.value ~default:false meta.always_allow)
+--
+lib/keeper/keeper_gate.ml-613-    Auto_judge_owners.find_opt owner active
+lib/keeper/keeper_gate.ml:614:    |> Option.value ~default:Auto_judge_ids.empty
+--
+lib/keeper/keeper_gate.ml-665-    (Atomic.get active_auto_judges)
+lib/keeper/keeper_gate.ml:666:  |> Option.value ~default:Auto_judge_ids.empty
+=== Scan: catch-all permissive default ===
+WARN: catch-all branch returning Some (possible unsound default):
+lib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate
+lib/telemetry_unified/telemetry_unified.ml-114-
+--
+lib/fs_compat/fs_compat.ml:3025:     | _ -> Some failure)
+lib/fs_compat/fs_compat.ml-3026-;;
+--
+lib/server/server_dashboard_http_keeper_api.ml:1122:                  | _ -> Some entry.ts)
+lib/server/server_dashboard_http_keeper_api.ml-1123-                None entries
+--
+lib/server/server_dashboard_http_keeper_api.ml:1809:            | _ -> Some r.ts)
+lib/server/server_dashboard_http_keeper_api.ml-1810-          None records
+--
+lib/server/server_routes_http_routes_workspace.ml:585:     | _ -> Some (String.concat " " parts))
+lib/server/server_routes_http_routes_workspace.ml-586-  | _ when String.equal added "-" && String.equal deleted "-" -> Some "bin"
+--
+lib/server/server_dashboard_http_composite_claims.ml:451:          | _ -> Some "runtime_blocked"))
+lib/server/server_dashboard_http_composite_claims.ml-452-  in
+--
+lib/fusion_core/fusion_harness_core.ml:55:          | _ -> Some (rep, n))
+lib/fusion_core/fusion_harness_core.ml-56-        None ordered_keys
+=== Scan: unordered iteration in deterministic context ===
+=== DET/NDT gate: PASS ===

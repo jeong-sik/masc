@@ -1,0 +1,77 @@
+{
+  "schema": "masc.goal.restored3067.publication-manifest.v1",
+  "published_at_utc": "2026-10-25T21:25:12.813422+00:00",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 5255,
+      "sha256": "3cffe91a43a661548240dd5fd61606509581a30bd2b8af5984e141ca2772b22b"
+    },
+    {
+      "path": "actual-tool-sequence.json",
+      "bytes": 59792,
+      "sha256": "4373b281cc90c87927814c9b0f4be73a1524c741ff11f874e42c1b71af150439"
+    },
+    {
+      "path": "fixture-provenance.json",
+      "bytes": 5961,
+      "sha256": "435e2ac8224e2fc2e9232a1b8e6d001e596719cf6868eb259b8740f49100cb88"
+    },
+    {
+      "path": "observed-required-pages.json",
+      "bytes": 58450,
+      "sha256": "799b072fc8d9032e8f64dee15e04c194a8a849607b46523d2a2df53761c3eb21"
+    },
+    {
+      "path": "owned-stop.json",
+      "bytes": 1231,
+      "sha256": "6433f5557a6cd68819808d5bde402340bf067bd04a123889c3e703b998f41a04"
+    },
+    {
+      "path": "persisted-outcome.json",
+      "bytes": 8200,
+      "sha256": "f468dffddc1305025d7f98d9a8883a295fcc4a4d5f53b3b1aee37a92fd0ea6e1"
+    },
+    {
+      "path": "preparation-response.json",
+      "bytes": 4427,
+      "sha256": "d40c56bb45ae6a12977088d68f227a99466067f9b22b9bdc65e91a3a5b5b35a8"
+    },
+    {
+      "path": "preparation-review.json",
+      "bytes": 10501,
+      "sha256": "1a5457cff8b91d72f9a02578d5bbe1e05184bbd1c217e2b837e15420b032a069"
+    },
+    {
+      "path": "private-originals-manifest.json",
+      "bytes": 40587,
+      "sha256": "8f2bb92dce336dc13c29c9873fffd34b06c07596f5caf12de227ddebace7f5fb"
+    },
+    {
+      "path": "protocol-response.json",
+      "bytes": 10628,
+      "sha256": "73986f0daf2b06c0e393eb4273ea3ec1e1539163752638361d9b6e8787d4c2f6"
+    },
+    {
+      "path": "protocol-review.json",
+      "bytes": 11524,
+      "sha256": "1250719ed7f3ee9e36ec3b884c92a6ca76447676ded41f2b70d26ee6fb734fe8"
+    },
+    {
+      "path": "result.json",
+      "bytes": 14985,
+      "sha256": "27c5755aec474d5d9dabcd0419e136aa08ab45522260aa7c753c83b14d158bf9"
+    },
+    {
+      "path": "sufficiency-response.json",
+      "bytes": 7940,
+      "sha256": "23eb3a0136df4adac4d01b8e39f098932099170e274d6a824e500636e306bd60"
+    },
+    {
+      "path": "sufficiency-review.json",
+      "bytes": 16456,
+      "sha256": "d9348dc29be9a6be76e9e28ad6553d688d517582d59751df23308566e0da1ba1"
+    }
+  ],
+  "scope": "Selected safe exact files and explicitly labelled derived metadata/pages. Raw203 originals stay private; no provider bodies, hidden reasoning or unrelated primary Goal records are published. Actual Tool page content includes only owned historical fixture locators; unredacted content/hash bindings are retained. Prior cohorts and the measured prompt remain unchanged."
+}

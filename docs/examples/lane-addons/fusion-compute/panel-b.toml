@@ -1,0 +1,16 @@
+id = "fusion-panel-b"
+run_id = "assembled-fusion"
+manifest_path = "../../../../addons/fusion-compute/lane.toml"
+
+[binding]
+analysis_id = "proposal-comparison-1"
+role = "panel"
+prompt = "Compare the supplied proposals using retained evidence."
+instructions = "Challenge unsupported assumptions and identify missing evidence and risks."
+model_route = "REPLACE_WITH_DECLARED_PANEL_B_ROUTE"
+max_tokens = 2048
+
+[[binding.sources]]
+source_id = "proposal-input"
+kind = "snapshot_file"
+path = "/REPLACE_WITH_ABSOLUTE_RETAINED_INPUT.json"

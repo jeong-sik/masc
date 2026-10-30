@@ -1,0 +1,401 @@
+{
+  "schema": "masc.task-source.independent-source-rereview.v1",
+  "status": "FINAL_FROZEN",
+  "reviewed_at_utc": "2026-10-25T12:55:16.430228+00:00",
+  "reviewer": "repair_eval_metrics",
+  "first_line": "verdict: PASS head: e84eb71c4e31ba8440e5506015b603681dc23136 by: repair_eval_metrics",
+  "verdict": "PASS_SOURCE_ONLY",
+  "head": "e84eb71c4e31ba8440e5506015b603681dc23136",
+  "base": "975c4751ca41e4e458c9e22103d7c50ba625f716",
+  "canonical_complete_diff_sha256": "68383e4b9f2ccc424d6040dac4a8099f291f69f631ac79268e40ef35e31ba781",
+  "full_binary_patch_sha256": "b720a4dbb50bb93ebc599e0f47e420abd94d97645d1b4ef589cf1345bb897295",
+  "raw_diff_sha256": "f25e21543513d513b537509f5e75763821a1031d0b3ddb12390cfbebfa9e1c08",
+  "repair_delta_from_a2bf_sha256": "347c3957c10b84f9eab7d177cdd3a5143e86239a52f82d1270a29381690e9bfb",
+  "scope": {
+    "complete_current_committed_diff_read": true,
+    "changed_files": 19,
+    "insertions": 312,
+    "deletions": 41,
+    "method": "Original full a2bf/base diff plus entire e84e/a2bf repair delta and direct unchanged consumers reread; immutable current full diff identity captured.",
+    "clean_checkout_at_final_check": true,
+    "whole_stack_approval": false
+  },
+  "findings_P0_P1_P2": [],
+  "prior_review": {
+    "head": "a2bfd30359b0e06d31c6e88cdc6f4501dc950e03",
+    "path": "review.json",
+    "sha256": "13d8c8f789c410f2af0c36903b3d49856fcf792dda00e527d856021ced0c6337",
+    "verdict": "FAIL_SOURCE_P2",
+    "preserved_unmodified": true
+  },
+  "closed_findings": [
+    {
+      "id": "P2-1",
+      "result": "CLOSED_SOURCE",
+      "location": "lib/verification_collaboration_evidence.ml:154",
+      "evidence": "Task references cause one Workspace.read_backlog_r before the fold. capture_task now takes the immutable Masc_domain.backlog value and does no read. Every Task payload in the batch uses that same version, timestamp and task list; strict primary failure and exact row duplicate/missing checks remain. No backlog read is introduced for Task-free captures.",
+      "fixture": "Two explicit Task references are captured into one Goal source batch and checked against one primary revision/timestamp. This is a quiescent fixture, not a concurrent mutation/read-count experiment."
+    },
+    {
+      "id": "P2-2",
+      "result": "CLOSED_SOURCE",
+      "location": "lib/verification_authority_tools.ml:24",
+      "evidence": "source_tools adds Task_source only for a captured Evidence_collaboration whose explicit reference parses as Task_source. A Task-free Keeper keeps [Read_file;Search_files;Web_fetch;Board_source;Fusion_source]; Workspace/Goal keep [Read_file;Web_fetch;Board_source;Fusion_source]. Existing descriptor branches and registry inputs for those tools remain unchanged, so previous schema bytes/order and binding projection inputs remain unchanged for the same Task-free subject/evidence/root/route. Original/Worker equality guards are not relaxed.",
+      "direct_consumers": [
+        "create_task_review projects full schemas into binding; Verifier_review_worker still checks binding/schema exact equality",
+        "create_goal_review projects full schemas into binding; Goal_verifier_original.matches_authority still checks subject/criterion/binding/schemas/evidence exactly; Goal Worker guard unchanged"
+      ],
+      "fixture": "Existing Task-free5/4 surface assertions are restored byte-identically to base. New Goal Original test prepares and serializes/restores both Task-free and Task-bearing Originals, edits live Task state, verifies matches_authority and reads the original Task through actual dispatch. It does not instantiate an Original produced by an old executable or run a full SDK/provider resume."
+    },
+    {
+      "id": "P3-1",
+      "result": "CLOSED_SOURCE",
+      "location": "config/tools/masc_goal_transition.toml:39",
+      "evidence": "Goal evidence_refs description now includes task:<task_id> and limits lifecycle-state meaning; Workspace_goals parser refusal and .mli also describe Task sources."
+    },
+    {
+      "id": "NATIVE-COMPILE-1",
+      "result": "CLOSED_AT_SOURCE_SIGNATURE_BOUNDARY",
+      "location": "test/test_verification_collaboration_evidence.ml:220",
+      "evidence": "Fs_compat.save_file_atomic returns (unit,string) Result.t per actual mli395. Fixture now pipes that result into require and obtains unit; Error fails the fixture. This removes the reported ignored-result non-unit sequence from source. Current compilation remains unverified in this report."
+    }
+  ],
+  "source_assessment": [
+    {
+      "topic": "Primary and source integrity",
+      "detail": "Exact ID row selection, duplicate/missing row refusal, strict primary recovery refusal, canonical full Task payload/version/display timestamp and immutable SHA256 submitted-source validation remain as reviewed. The new batch observation does not take a second lock or mutate Task state."
+    },
+    {
+      "topic": "Least authority and schemas",
+      "detail": "No general Task-list handler is invoked by the verifier. The narrowed descriptor still requires a single task_ids item, excludes live status/projection/assignee filters and permits the SHA-bound cursor. Uncaptured IDs remain access denied; malformed/corrupt identity/hash remain workflow/storage failures. A corrupt Task item can expose the name of the read capability but cannot produce data because immutable read validation still rejects it."
+    },
+    {
+      "topic": "Original authority reverse scope",
+      "detail": "Task-free submitted bytes cannot gain the new descriptor merely because the live backlog changed. New captured Task data affects only its own submission lookup surface and immutable binding; unrelated current Task updates cannot replace its frozen data. Task and Goal Original consumers still refuse real authority changes, avoiding session resets, compatibility flags or guard weakening."
+    },
+    {
+      "topic": "Task/Goal submission and goalless Task",
+      "detail": "The same production Task protocol and public Goal dispatcher capture paths remain in use. No Goal-link requirement, Task-success-as-outcome counter, additional approval gate, automatic completion or budget was introduced. Contractless Task fixture and Done/untyped notes/history/external acceptance disclaimers are retained."
+    },
+    {
+      "topic": "Paging and bridge",
+      "detail": "Existing exact JSON byte paging is reused. The extended Task large-source fixture follows actual typed Tool_bridge conversion, recomputes digest, verifies contiguous UTF-8-safe pages and full canonical source equality for Task and Goal surfaces. These are authored native assertions, not execution evidence from this review."
+    },
+    {
+      "topic": "Cleanliness",
+      "detail": "One frozen primary value is passed to the exact row helper, and one submitted-evidence predicate determines least authority. No parallel mutable source store or old/new schema switch was added. Interface comments and canonical Goal help/error guidance agree with implemented source forms."
+    }
+  ],
+  "native_counterevidence": {
+    "source": "a2bfd30359b0e06d31c6e88cdc6f4501dc950e03",
+    "run": 40194054307,
+    "result": "COMPILE_FAILURE",
+    "tests_executed": 0,
+    "raw_bytes": 151072,
+    "raw_sha256": "46b1e5e384461aaedb0eeae8a357eb8798b4f841e971bc4cb639e388cbdcdca0",
+    "cause": "Warning10/non-unit-statement at Fs_compat.save_file_atomic result ignored in sequence.",
+    "method": "Read retained local raw log only; no CI/API query."
+  },
+  "validation": {
+    "git_diff_check_exit": 0,
+    "output_bytes": 0,
+    "requested_canonical_hash_matched": true,
+    "unchanged_direct_consumer_files_compared_to_base": [
+      "lib/keeper/goal_verifier_original.ml",
+      "lib/keeper/goal_verifier_worker.ml",
+      "lib/keeper/verifier_review_worker.ml",
+      "lib/keeper/verifier_review_original.ml",
+      "lib/keeper/keeper_tool_descriptor.ml",
+      "lib/keeper/keeper_tool_descriptor_resolution.ml",
+      "test/test_verification_authority_tools.ml"
+    ],
+    "native_tests_executed_by_reviewer": 0,
+    "local_Dune_OCaml_compile_or_parse": false,
+    "API_CI_Docker_provider_calls": 0,
+    "product_or_fixture_edits": 0,
+    "followup_native40194890796": "Parent-dispatched; result not queried or observed in this review."
+  },
+  "limitations": [
+    "PASS_SOURCE_ONLY is not current compilation/native/model/installed-runtime/Goal completion evidence. Old a2bf compile failure and two prior P2 findings remain preserved under their original identity.",
+    "Quiescent two-Task revision assertions do not reproduce a concurrent writer or count primary calls; the single-read property is established by the direct source dataflow here.",
+    "New Goal Original fixture exercises current-code immutable serialization/restore and actual lookup dispatch. It is not a replay of an old executable-generated Original; no new Task Worker runtime resume fixture is claimed. Old Task-free authority preservation is established structurally from equal schema construction/unchanged consumers and retained existing assertions.",
+    "The change snapshots canonical typed Task rows, not original backlog-file bytes or a full approval history. Done has no typed verifier/verification-ID certificate, and neither Task state nor notes establish edit ordering or external acceptance.",
+    "No native, provider, API/CI/Docker, deployment, approval/merge, browser or Task/Goal mutation occurred in this review. Only external review artifacts were written.",
+    "No full-stack verdict, installed-runtime success, microVM/SSH grading, original Goal completion or human confirmation is asserted."
+  ],
+  "source_and_context_files": [
+    {
+      "path": "config/prompts/keeper.md",
+      "role": "changed_full_diff_read",
+      "git_blob": "1c7d6226aa8ba905b33f5afd735c1c332d437d51",
+      "sha256": "ba3fd5964f8e448cc01dfcfa2e9949a7c67d8c578d38a07f413f4ee20844ebab",
+      "bytes": 60472
+    },
+    {
+      "path": "config/prompts/verification.md",
+      "role": "changed_full_diff_read",
+      "git_blob": "7513c087ff308b04c39815f0166ab742aef5e862",
+      "sha256": "e63ec4341cd59f3a4ca2e692969bf19e2a7764ed6c63f3471438ebb83fbc7fa8",
+      "bytes": 13478
+    },
+    {
+      "path": "config/tools/keeper_task_done.toml",
+      "role": "changed_full_diff_read",
+      "git_blob": "73f03343c414c172cd1e4ad272d4d9c1aa55b470",
+      "sha256": "78a361be5810ecd6dd8aa5a83a4c26fdc0f35ec7357f71c958fbc6f090ed7ce3",
+      "bytes": 3342
+    },
+    {
+      "path": "config/tools/keeper_task_release.toml",
+      "role": "changed_full_diff_read",
+      "git_blob": "ad24e7113eec90eb2e5dedfefbd269c019eea4ff",
+      "sha256": "38c874a5fb2c000a7df5bb5e135bac0f7ca04231552cdfd876d2123a59519552",
+      "bytes": 3368
+    },
+    {
+      "path": "config/tools/masc_goal_measure.toml",
+      "role": "changed_full_diff_read",
+      "git_blob": "339f5e1826123d9058d94cde7e67f308aff5129c",
+      "sha256": "e745b8986b3822005bff3d8f681b5d34483531c79dc43f917156d7a6f16ed160",
+      "bytes": 1215
+    },
+    {
+      "path": "config/tools/masc_goal_transition.toml",
+      "role": "changed_full_diff_read",
+      "git_blob": "498eb4e5018bba4f2dd8ba37284f026856c687cc",
+      "sha256": "9b8e7e9b2106c37cb1fcec522db815ce388a9a87b9e77349a92b237c177552c2",
+      "bytes": 1976
+    },
+    {
+      "path": "config/tools/masc_transition.toml",
+      "role": "changed_full_diff_read",
+      "git_blob": "b65e77d7c3dabf5ad60ea170ef4425919a9633fa",
+      "sha256": "4151eee86a665f44d6573a2565a73b24a559b6bbc05dcd5163f0425a770470cb",
+      "bytes": 4539
+    },
+    {
+      "path": "lib/verification_authority_tools.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "872f4163ad33fa3fa6a037eb4b88922b1d266b63",
+      "sha256": "ed48872fca7eb34471bb667e52c7c315e45cb91a6277196a2014388f82b5b154",
+      "bytes": 45204
+    },
+    {
+      "path": "lib/verification_authority_tools.mli",
+      "role": "changed_full_diff_read",
+      "git_blob": "80d71c83cb925c3e84bac6eb722d318eb35bbf12",
+      "sha256": "1ba9d633ee8d3d6cbd9029936ee1d827cf633e1751a6efd5ce7e34464f52b406",
+      "bytes": 8173
+    },
+    {
+      "path": "lib/verification_collaboration_evidence.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "d7da5c34d1630d88ef5a92ae890e0a3202891a7e",
+      "sha256": "6056bc8f0ac4f543f1018f5e947d151843cde66fc6d36e2834fb42a843cdddcc",
+      "bytes": 14482
+    },
+    {
+      "path": "lib/verification_collaboration_evidence.mli",
+      "role": "changed_full_diff_read",
+      "git_blob": "46009861fc76bd6512d7eb1423a633f23123c36c",
+      "sha256": "69bf4c1dce3d7429fce7d749613f9494ee15afeaa8f6bfa77099c86cba98851e",
+      "bytes": 2453
+    },
+    {
+      "path": "lib/workspace/workspace_verification_snapshot.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "8d03be09f6cdd566637c2f739ddb3814f1d2cd46",
+      "sha256": "3ad0792480c776327958867f367899df8c7597b1f84f6d6447f74fb4c666d1fa",
+      "bytes": 30879
+    },
+    {
+      "path": "lib/workspace/workspace_verification_snapshot.mli",
+      "role": "changed_full_diff_read",
+      "git_blob": "76eefe70f9a4cbbba6b7c691e4daab678153004f",
+      "sha256": "bf4e40d90602092713b21e4daa9dc0b135a97b09fb593570eb1d5b2757828528",
+      "bytes": 3316
+    },
+    {
+      "path": "lib/workspace/workspace_verification_store.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "436af10cccee606abd4776046b1d9c951ff1f925",
+      "sha256": "b29a2a041f8014d32d3e421c7b97511bec1f5d6555833139b88c747396856255",
+      "bytes": 20369
+    },
+    {
+      "path": "lib/workspace/workspace_verification_store.mli",
+      "role": "changed_full_diff_read",
+      "git_blob": "cd726df97843f0d8efa2b01a0737d129681b0455",
+      "sha256": "104eaec35c51d7610f027f68517f95d9d30fad65e53c37a0523f500fb247dda5",
+      "bytes": 11935
+    },
+    {
+      "path": "lib/workspace_goals.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "eeb3414a94845f8b76dd1c8199d39d260570a4f5",
+      "sha256": "f3f2ecc236af665099949e96aadede0b39401ee5b320de11f9d5f9f97940d2c5",
+      "bytes": 57026
+    },
+    {
+      "path": "lib/workspace_goals.mli",
+      "role": "changed_full_diff_read",
+      "git_blob": "3e02ab85cfc0a65265b4159cca19b935ca71582e",
+      "sha256": "64e9a018a3309692de9a8f174026b5145a44db915d7a64216a68b498bb9aca38",
+      "bytes": 8655
+    },
+    {
+      "path": "test/test_goal_verifier_original.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "664650d20c4c5913c1ce671dec77a00cbc21e7da",
+      "sha256": "80d377268cae8edaf8e2b931a86e4e0d0dd7e98c7e2d7df6577125f1726c6181",
+      "bytes": 21036
+    },
+    {
+      "path": "test/test_verification_collaboration_evidence.ml",
+      "role": "changed_full_diff_read",
+      "git_blob": "61987e1a24dae199e1c73d44bba050be229e7eb9",
+      "sha256": "e99789ea3b5bc9470a5ee3f45e04fee59d625adfb20d0e1d3649acc3b5bf0497",
+      "bytes": 35544
+    },
+    {
+      "path": "docs/constitution.xml",
+      "role": "targeted_context_read",
+      "git_blob": "7d2ff0b1e8121da7156f6c34df9445740475a3c7",
+      "sha256": "afd95dbc22a2e74fa6b96510c685487ad915260984bd1e1b393fe8eadb544682",
+      "bytes": 40861
+    },
+    {
+      "path": "docs/guides/CONTRIBUTOR-WORKFLOW.md",
+      "role": "targeted_context_read",
+      "git_blob": "aaf68625654f83f0bfd9130c7028813d8711b10c",
+      "sha256": "03ae9fad1c4e361062b2b405bf1bca8ed77dd01d5613397459aa6ba4541d4ddc",
+      "bytes": 20085
+    },
+    {
+      "path": "docs/guides/NATIVE-GITHUB-STACKS.md",
+      "role": "targeted_context_read",
+      "git_blob": "fc856a5f8050fe4f2c4d7d558301b62fbe51bec8",
+      "sha256": "6b01a6724e9666a73658355cffb3a98877e014743865ee744fce5330acea559d",
+      "bytes": 7988
+    },
+    {
+      "path": "lib/workspace/workspace_backlog.ml",
+      "role": "targeted_context_read",
+      "git_blob": "063482e3391a31c7e1016638f41f43df00275e8e",
+      "sha256": "4203b94aa9a2b03bfb96b7e70eb83d8298f525eaed997ffdd8ce73206cdf10d7",
+      "bytes": 18957
+    },
+    {
+      "path": "lib/types/types_core.ml",
+      "role": "targeted_context_read",
+      "git_blob": "1d07ceac280a5d59802e67689487bd9cfaba737a",
+      "sha256": "7d8b9f7794ef97b25053c42308ef16a85fba601347cf4757be82a019aeb7a11c",
+      "bytes": 59217
+    },
+    {
+      "path": "lib/verification_protocol.ml",
+      "role": "targeted_context_read",
+      "git_blob": "a150ef8a8d0cc9b7b28a1643b59ea6fef3ef2d4e",
+      "sha256": "ac5e8ac491e1b8985aa9dbb9e14b03ed88615bba4bd183716842246af59c316c",
+      "bytes": 28805
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "role": "targeted_context_read",
+      "git_blob": "dc2acf81b6c4101db5b072c159938d440419fcfb",
+      "sha256": "4f66ec9447b4d5aacebe01281d5e6cf01a6d7962bd0b7988cedaacead210ddaa",
+      "bytes": 58281
+    },
+    {
+      "path": "lib/task/tool_task.ml",
+      "role": "targeted_context_read",
+      "git_blob": "d661a8f587b0003c93ccdde98ffa7d7cad00e99e",
+      "sha256": "5a0a781102924e909934d28720a981d7203c2a6586d67be247f59232bf1cece5",
+      "bytes": 25322
+    },
+    {
+      "path": "lib/workspace_metric_hooks.ml",
+      "role": "targeted_context_read",
+      "git_blob": "8ec6fff0d5b5f16c942f87af22abfb83f9342ebf",
+      "sha256": "b100f19285d9f3c43e9384b23c6ff1de483a162865fdb07174e1d49ddf86b07e",
+      "bytes": 22160
+    },
+    {
+      "path": "lib/keeper/keeper_tool_descriptor.ml",
+      "role": "targeted_context_read",
+      "git_blob": "448c49e3502d44faf6ec424f904f9d39ca2e784a",
+      "sha256": "ad2d11134025862a1599bede690f338cc6dbcaba1be3d9562db940a7355237cd",
+      "bytes": 143445
+    },
+    {
+      "path": "lib/keeper/keeper_tool_descriptor_resolution.ml",
+      "role": "targeted_context_read",
+      "git_blob": "a61212efc3a6f53f6fba07f9fffe7be4cf29ef7e",
+      "sha256": "174768c4c885447da6eec61e313dfbbd0f8f20f8e84c745af5fa4e89bfdb75a9",
+      "bytes": 6260
+    },
+    {
+      "path": "lib/keeper/goal_verifier_original.ml",
+      "role": "targeted_context_read",
+      "git_blob": "c132a2e7bc869487253307aa4006424bafac5772",
+      "sha256": "3a7628a68dc50c87e9efc192b4f0c1c6756d95caff8feb71462e15b79bdc7147",
+      "bytes": 8252
+    },
+    {
+      "path": "lib/keeper/goal_verifier_worker.ml",
+      "role": "targeted_context_read",
+      "git_blob": "d28b0a2154376844bc751dcabfa097d33d7d4326",
+      "sha256": "7875e0d0b57a5ab9be7f182166f04b3e156be2280150c8faabe2db788cb55873",
+      "bytes": 35673
+    },
+    {
+      "path": "lib/keeper/verifier_review_worker.ml",
+      "role": "targeted_context_read",
+      "git_blob": "9935e286add0e9e97e98ad2b2584675bfd1dfb94",
+      "sha256": "d22865afdbe70c79d705b962d765f75cf355788302091a4e2fc43c7f2c344ed2",
+      "bytes": 13602
+    },
+    {
+      "path": "lib/keeper/verifier_review_original.ml",
+      "role": "targeted_context_read",
+      "git_blob": "41c08e8d6f021a36dce858456eb3252e5027d9f0",
+      "sha256": "4d4769457e38ecb36d6593274b13a161097f243ff3779e748b2491cdd2caee65",
+      "bytes": 19493
+    },
+    {
+      "path": "lib/goal_verification_agent.ml",
+      "role": "targeted_context_read",
+      "git_blob": "6baab2dd0600a23598d3013236e9186d8c907e62",
+      "sha256": "bab2de3604da240846d7823d6b3e586eb3fe585889621b38a61fe8082b7dc388",
+      "bytes": 40378
+    },
+    {
+      "path": "config/tools/keeper_tasks_list.toml",
+      "role": "targeted_context_read",
+      "git_blob": "4467ac64784bf0ca6544f3efec39497707d55b94",
+      "sha256": "118a671d25c7b5efed760397ae2985c8b491f37a1d9485bf29715a5c4f3d8261",
+      "bytes": 4909
+    },
+    {
+      "path": "lib/fs_compat/fs_compat.mli",
+      "role": "targeted_context_read",
+      "git_blob": "9ab5cf648db5a1de0571ab92a8f0a6f170ee6160",
+      "sha256": "3366056552f75fa5cda5eaeb89b6253a4cba138116f8832d2fd77f9b54d17da2",
+      "bytes": 81323
+    },
+    {
+      "path": "lib/goal/goal_store.ml",
+      "role": "targeted_context_read",
+      "git_blob": "014c3449831d9ceea4a66403842b270d00cccf67",
+      "sha256": "b5caacccf3003b337f48f555f4284b0a49a368e86db1a7246273816ca483e5f9",
+      "bytes": 40065
+    },
+    {
+      "path": "test/test_verification_authority_tools.ml",
+      "role": "targeted_context_read",
+      "git_blob": "30f39ddeaa30dc375e59290f201757dcb1738b20",
+      "sha256": "5c771571d5488b02bf9d8dad75dcc0488177ff599c067942b7eda093661316d7",
+      "bytes": 74660
+    }
+  ]
+}

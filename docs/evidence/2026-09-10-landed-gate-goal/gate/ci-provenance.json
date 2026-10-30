@@ -1,0 +1,35 @@
+{
+  "run_id": 34420751922,
+  "head_sha": "8ccf4d693892b78235458f81b0183dab464b6aa4",
+  "artifact": {
+    "id": 10130913709,
+    "node_id": "MDg6QXJ0aWZhY3QxMDEzMDkxMzcwOQ==",
+    "name": "runtime-probe-macos-arm64-8ccf4d693892b78235458f81b0183dab464b6aa4-attempt-1",
+    "size_in_bytes": 49656386,
+    "url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10130913709",
+    "archive_download_url": "https://api.github.com/repos/jeong-sik/masc/actions/artifacts/10130913709/zip",
+    "expired": false,
+    "digest": "sha256:70e61efaa224895a7e2b61c6427d8288a9de3e1fe92099a09d631c33b4e7d7e7",
+    "created_at": "2026-09-10T00:23:56Z",
+    "updated_at": "2026-09-10T00:23:56Z",
+    "expires_at": "2026-09-17T00:23:50Z",
+    "workflow_run": {
+      "id": 34420751922,
+      "repository_id": 1136640865,
+      "head_repository_id": 1136640865,
+      "head_branch": "test/landed-gate-goal-proof",
+      "head_sha": "8ccf4d693892b78235458f81b0183dab464b6aa4"
+    }
+  },
+  "manifest": {
+    "commit": "8ccf4d693892b78235458f81b0183dab464b6aa4",
+    "arch": "macos-arm64",
+    "run_attempt": 1,
+    "release_validated": false,
+    "sha256": {
+      "main_eio.exe": "934ac8306bda592d7bb8fbf7a1c40b67f03581600f21a1a586377559f4750891",
+      "masc_tui.exe": "8cdf23b72e4cf894e24a0d5816e678eec7dec67bb2d81f0f6b6ee6f6cee1a620",
+      "masc_browser_host.exe": "c5e7dafa7899a1197c843696778b8e8e0491c72547e714fda647d25ebf68de8a"
+    }
+  }
+}

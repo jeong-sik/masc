@@ -1,0 +1,19 @@
+name = "masc_keeper_msg"
+description = """
+Send a direct message to a keeper. Submits the message as an async chat \
+operation and returns operation_id immediately; poll \
+masc_keeper_delegate_status with target {kind: \"keeper\", name} and this \
+operation_id to observe the turn settle."""
+additional_properties = false
+
+[[params]]
+name = "name"
+type = "string"
+required = true
+description = "Keeper handle to message"
+
+[[params]]
+name = "message"
+type = "string"
+required = true
+description = "Message text to send to the keeper, also shown to the operator in chat. Use readable prose with normal word spacing, punctuation, and paragraph breaks, including Korean spacing. Shorten wording when needed; do not remove spaces between words. Preserve quoted source text, code, paths, and identifiers exactly."

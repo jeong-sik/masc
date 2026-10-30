@@ -1,0 +1,206 @@
+{
+  "feature": "prune",
+  "scope": "full pinned current-main source composition only; no local typecheck, Dune, native, runtime, network or CI",
+  "checked_at": "2026-09-30T05:09:41.744214+00:00",
+  "main_baseline": "c112b2030652a5a25360f5d5322f8dc6da99c598",
+  "immediate_local_parent": "4e10b82bc574276465f3d65bf5cb19ded168c58b",
+  "checked_source_commit": "29c1143cea2ce7d1f0a9d8506f37c612b34f9f95",
+  "original_own_delta_parent": "219ff24a8a",
+  "original_feature_source": "6eb66f6d3a",
+  "previous_published_api_head": "b69576e1f750df5d48735f18986d01e8b26981ca",
+  "extraction": "own allowed-path net feature delta; parent fixture/main overlays excluded; test/dune only actual additive native registration",
+  "parent_delta_manifest": [
+    "bin/main_eio.ml",
+    "changelog.d/40174.md",
+    "docs/audits/2026-09-30-token-prune-authority.md",
+    "docs/evidence/2026-09-30-token-prune-transaction/README.md",
+    "docs/evidence/2026-09-30-token-prune-transaction/SHA256SUMS",
+    "docs/evidence/2026-09-30-token-prune-transaction/current-main-composition.json",
+    "docs/evidence/2026-09-30-token-prune-transaction/diff-check.log",
+    "docs/evidence/2026-09-30-token-prune-transaction/ignore-lint.log",
+    "docs/evidence/2026-09-30-token-prune-transaction/parse-only.log",
+    "docs/evidence/2026-09-30-token-prune-transaction/private-retirement-label-followup.json",
+    "docs/evidence/2026-09-30-token-prune-transaction/provenance.json",
+    "lib/auth/auth.mli",
+    "lib/auth/auth_credential_base.ml",
+    "lib/auth/auth_token_prune.ml",
+    "lib/auth/auth_token_prune.mli",
+    "test/dune",
+    "test/stanzas/test_auth_token_prune_transaction.inc",
+    "test/test_auth_token_prune_transaction.ml"
+  ],
+  "compiler_version": "5.5.1",
+  "commands": [
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "bin/main_eio.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_credential_base.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "lib/auth/auth_token_prune.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-intf",
+        "lib/auth/auth_token_prune.mli"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_auth_token_prune_transaction.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check",
+        "4e10b82bc574276465f3d65bf5cb19ded168c58b",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--strict",
+        "--target",
+        "bin/main_eio.ml",
+        "lib/auth/auth.mli",
+        "lib/auth/auth_credential_base.ml",
+        "lib/auth/auth_token_prune.ml",
+        "lib/auth/auth_token_prune.mli"
+      ],
+      "exit_code": 1,
+      "stdout": "bin/main_eio.ml:223:    ignore (safe_reqd_respond reqd response body);\nbin/main_eio.ml:234:    ignore (safe_reqd_respond reqd response body);\n",
+      "stderr": "STRICT FAIL: 2 ignore sites lack a justification comment\n"
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-ignore-without-comment-diff.sh",
+        "--base",
+        "4e10b82bc574276465f3d65bf5cb19ded168c58b",
+        "--head",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "New ignore sites are justified.\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "bash",
+        "scripts/ci/check-determinism-contract.sh",
+        "--base",
+        "4e10b82bc574276465f3d65bf5cb19ded168c58b",
+        "--head",
+        "HEAD"
+      ],
+      "exit_code": 0,
+      "stdout": "=== Scan: new deterministic-boundary ratchet ===\nPASS: no new deterministic-boundary debt added in 4e10b82bc574276465f3d65bf5cb19ded168c58b...HEAD, staged diff, or worktree diff\n=== Scan: deterministic branch on non-deterministic source ===\n=== Scan: permissive default on unknown input ===\nWARN: Option.value with default on potentially unknown input (sound partial?):\nlib/mcp_server_eio_protocol.ml-486-       let arguments =\nlib/mcp_server_eio_protocol.ml:487:         match Option.value ~default:`Null (Json_util.assoc_member_opt \"arguments\" payload) with\n--\nlib/mcp_server_eio_protocol.ml-1284-        else None)\nlib/mcp_server_eio_protocol.ml:1285:      |> Option.value ~default:0\n--\nlib/mcp_server_eio_call_tool.ml-314-    ~(execution_id : Ids.Execution_id.t) : unit =\nlib/mcp_server_eio_call_tool.ml:315:  let trace_id = Option.value ~default:\"runtime-mcp\" ctx.trace_id in\n--\nlib/mcp_server_eio_call_tool.ml-320-  in\nlib/mcp_server_eio_call_tool.ml:321:  let turn = Option.value ~default:0 ctx.turn in\n--\nlib/keeper/keeper_runtime_contract.ml-179-    first_string_field [ \"action\"; \"action_key\"; \"op\"; \"cmd\"; \"command\" ] input\nlib/keeper/keeper_runtime_contract.ml:180:    |> Option.value ~default:tool_name\n--\nlib/keeper/keeper_turn_terminal.ml-35-  let summary =\nlib/keeper/keeper_turn_terminal.ml:36:    Option.value ~default:(Keeper_turn_disposition.summary disposition) summary\n--\nlib/keeper/keeper_turn_terminal.ml-56-let of_disposition ?source ?summary ?next_action disposition =\nlib/keeper/keeper_turn_terminal.ml:57:  let source = Option.value ~default:\"typed\" source in\n=== Scan: catch-all permissive default ===\nWARN: catch-all branch returning Some (possible unsound default):\nlib/telemetry_unified/telemetry_unified.ml:113:  | _ -> Some candidate\nlib/telemetry_unified/telemetry_unified.ml-114-\n--\nlib/fs_compat/fs_compat.ml:3167:     | _ -> Some failure)\nlib/fs_compat/fs_compat.ml-3168-;;\n--\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:161:        , (match tool_values with [] -> None | _ -> Some (avg_float tool_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:162:        , (match prompt_values with [] -> None | _ -> Some (avg_float prompt_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml:163:        , (match pass_values with [] -> None | _ -> Some (avg_float pass_values))\nlib/tool_call_quality_benchmark/tool_call_quality_benchmark_summary.ml-164-        , List.length values ) )\n--\nlib/fusion_core/fusion_harness_core.ml:55:          | _ -> Some (rep, n))\nlib/fusion_core/fusion_harness_core.ml-56-        None ordered_keys\n--\nlib/server/server_dashboard_http_keeper_api.ml:1161:                  | _ -> Some entry.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1162-                None entries\n--\nlib/server/server_dashboard_http_keeper_api.ml:1893:            | _ -> Some r.ts)\nlib/server/server_dashboard_http_keeper_api.ml-1894-          None records\n--\n=== Scan: unordered iteration in deterministic context ===\n=== DET/NDT gate: PASS ===\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--include-tests",
+        "--strict",
+        "--target",
+        "bin/main_eio.ml",
+        "lib/auth/auth.mli",
+        "lib/auth/auth_credential_base.ml",
+        "lib/auth/auth_token_prune.ml",
+        "lib/auth/auth_token_prune.mli",
+        "test/test_auth_token_prune_transaction.ml"
+      ],
+      "exit_code": 1,
+      "stdout": "bin/main_eio.ml:223:    ignore (safe_reqd_respond reqd response body);\nbin/main_eio.ml:234:    ignore (safe_reqd_respond reqd response body);\n",
+      "stderr": "STRICT FAIL: 2 ignore sites lack a justification comment\n"
+    }
+  ],
+  "source_sha256": {
+    "bin/main_eio.ml": "439f3e0b122c2a4c93fe6bf955f0a8df925fad195747535066d6e9ade7dd7ad3",
+    "changelog.d/40174.md": "831df8667601c01e30ed54c15d8a2c5382dcd73256538a55d42e70385be61c77",
+    "docs/audits/2026-09-30-token-prune-authority.md": "597a72b5a6a9305075c02a7ddda1bcdfef62e2f79f5744c9713f826d0b19b2ff",
+    "lib/auth/auth.mli": "649115c9e7aeaaa9a792b4c00bc468ac58fd8723f67ee28b46a68692c8a9ca72",
+    "lib/auth/auth_credential_base.ml": "9d1c698593ee3ac3e1d41bff22c1039c654d0c343d5f3aa55cbf778614fd3fad",
+    "lib/auth/auth_token_prune.ml": "7765afc4b1ef878ce9adece14f4e5cf5211c2de969d53223c50e69040367fa5a",
+    "lib/auth/auth_token_prune.mli": "b9d7625be9f23b652b1ca1bdadf5a7568eb8d780a3588d1b41df5993d477901f",
+    "test/dune": "368b3d2ad7a4bd578f5aee8ce8268b14047e1e88a6ea2b2e4be15ada82b36407",
+    "test/stanzas/test_auth_token_prune_transaction.inc": "cbe63938b5da55132817256c20bbdd9ef9a8beaf82d7332d24989799353f4820",
+    "test/test_auth_token_prune_transaction.ml": "4cad0bcd4ff86af07b78b4e4a5f1b0a85169186c1d03fcd3c976d9aaeaf1c3a6"
+  },
+  "critical_preserved_parent_source_sha256": {
+    "test/test_dos_tools.ml": "410c151a926a6374063b3ad80de135aff65a5960b882f0b09ee2459a5f3a32a3",
+    "test/test_dos_input_routes.ml": "d9370ac207f6e84211238d63f6fcbf60a4a6bf9b326a0e2f0aa205015aa8c865",
+    "lib/keeper/keeper_dos_controller.mli": "810ad58ba0beac49cdf26a47619c24bc6354d317002c740f1bc9088fb27743c7"
+  },
+  "retired_keeper_exact_block_sha256": {
+    "lib/keeper/keeper_dos_controller.ml": "03e60f32e42deabee0e6d234cd11cb8c49e1b661dfb4849d042512c741f8fb7b",
+    "lib/keeper/keeper_dos_controller.mli": "0fe533a36f9a4bd70101932211b193743412b418b8aab3cdcd3bb017a0f9d536"
+  },
+  "test_dune_registration_only_verified": true,
+  "native_registrations": [
+    "test_credential_expiry",
+    "test_auth_token_prune_transaction"
+  ],
+  "native_execution": "not_run_locally"
+}

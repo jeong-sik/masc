@@ -1,0 +1,59 @@
+{
+  "scope": "syntax, whitespace and fragment checks only; no build, typecheck or test execution",
+  "node_version": "v26.3.0",
+  "results": [
+    {
+      "argv": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/api/schemas/candle-observation.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/api/schemas/keeper-items.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "node",
+        "--experimental-strip-types",
+        "--check",
+        "dashboard/src/api/keeper-items.test.ts"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "python3",
+        "scripts/changelog-fragments.py",
+        "check"
+      ],
+      "exit_code": 0,
+      "stdout": "43 changelog fragment(s) OK\n",
+      "stderr": ""
+    }
+  ]
+}

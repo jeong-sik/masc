@@ -1,0 +1,1304 @@
+(** Keeper_internal_error — the [masc_internal_error] ADT, its JSON codec, and the reverse-direction
+    agent-core envelope parser.
+
+    This is the structured *typed envelope* carried across the
+    [Agent_core.Error.Internal _] boundary for keeper turn failures.
+
+    The originating-runtime field is a plain [string]. The operator
+    dashboard ([dashboard/src]) parses [kind] / [runtime_id] off the wire. *)
+
+(* The originating runtime id is a plain string. Each variant serialises it
+   under the ["runtime_id"] key the dashboard parses. *)
+let runtime_id_to_string (s : string) = s
+
+let incomplete_tool_transcript_kind = "incomplete_tool_transcript"
+let provider_attempt_effect_fenced_kind = "provider_attempt_effect_fenced"
+let tool_correction_lost_kind = "tool_correction_lost"
+let accept_rejected_kind = "accept_rejected"
+let terminal_effect_failed_kind = "terminal_effect_failed"
+
+(* The official-client recovery kind also feeds the receipt's typed terminal
+   reason and operator reason, so those consumers share this producer-owned
+   spelling. The remaining two kinds have no such consumer policy yet. *)
+let official_client_recovery_required_kind = "official_client_recovery_required"
+let host_stopped_turn_kind = "host_stopped_turn"
+let runtime_connection_closed_kind = "runtime_connection_closed"
+
+(** Why the durable official-client session refuses a new local claim.
+    This is distinct from the effect disposition of a provider attempt. *)
+type official_client_input_rejection =
+  | Bootstrap_floor_exceeded
+  | Effect_fenced
+
+type official_client_recovery = {
+  runtime_id : string;
+  recovery_id : string;
+  reason : official_client_input_rejection;
+}
+
+let official_client_input_rejection_to_string = function
+  | Bootstrap_floor_exceeded -> "bootstrap_floor_exceeded"
+  | Effect_fenced -> "effect_fenced"
+
+let official_client_input_rejection_of_string = function
+  | "bootstrap_floor_exceeded" -> Some Bootstrap_floor_exceeded
+  | "effect_fenced" -> Some Effect_fenced
+  | _ -> None
+
+type vendor_session_activity =
+  | No_activity_observed
+  | Activity_observed
+
+let vendor_session_activity_to_string = function
+  | No_activity_observed -> "no_activity_observed"
+  | Activity_observed -> "activity_observed"
+
+let vendor_session_activity_of_string = function
+  | "no_activity_observed" -> Some No_activity_observed
+  | "activity_observed" -> Some Activity_observed
+  | _ -> None
+
+let official_client_recovery_summary { runtime_id; recovery_id; reason } =
+  Printf.sprintf
+    "Official-client session for runtime %s requires recovery %s (%s); local claim refused before provider dispatch."
+    runtime_id recovery_id (official_client_input_rejection_to_string reason)
+
+type provider_rejection = {
+  provider_label : string;
+  reason : string;
+}
+
+type runtime_exhaustion_reason =
+  | Connection_refused
+  | Dns_failure
+  | No_providers_available
+  | All_providers_failed
+  | Candidates_filtered_after_cycles
+  | Session_conflict
+  | Other_detail of string
+
+let runtime_exhaustion_reason_retryable = function
+  | Candidates_filtered_after_cycles -> true
+  | Connection_refused | Dns_failure | No_providers_available | All_providers_failed ->
+    true
+  | Session_conflict | Other_detail _ -> false
+
+let runtime_exhaustion_label_payload_max_bytes = 200
+
+let runtime_exhaustion_label_payload detail =
+  let collapsed =
+    detail |> String_util.query_tokens |> String.concat " " |> String.trim
+  in
+  String_util.utf8_safe
+    ~max_bytes:(runtime_exhaustion_label_payload_max_bytes + 3)
+    ~suffix:"..."
+    collapsed
+  |> String_util.to_string
+
+(** Human-readable label for {!summary_of_masc_internal_error} and log
+    lines. Distinct from {!runtime_exhaustion_reason_to_json}'s wire tags:
+    this carries the [detail]/[message] payload inline so an operator does
+    not need to cross-reference the JSON-encoded event. *)
+let runtime_exhaustion_reason_to_label = function
+  | Connection_refused -> "connection_refused"
+  | Dns_failure -> "dns_failure"
+  | No_providers_available -> "no_providers_available"
+  | All_providers_failed -> "all_providers_failed"
+  | Candidates_filtered_after_cycles -> "candidates_filtered_after_cycles"
+  | Session_conflict -> "session_conflict"
+  | Other_detail detail ->
+    Printf.sprintf "other(%s)" (runtime_exhaustion_label_payload detail)
+
+let runtime_exhaustion_reason_to_json = function
+  | Connection_refused -> `String "connection_refused"
+  | Dns_failure -> `String "dns_failure"
+  | No_providers_available -> `String "no_providers_available"
+  | All_providers_failed -> `String "all_providers_failed"
+  | Candidates_filtered_after_cycles -> `String "candidates_filtered_after_cycles"
+  | Session_conflict -> `String "session_conflict"
+  | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
+
+let runtime_exhaustion_reason_of_json = function
+  | `String "connection_refused" -> Some Connection_refused
+  | `String "dns_failure" -> Some Dns_failure
+  | `String "no_providers_available" -> Some No_providers_available
+  | `String "all_providers_failed" -> Some All_providers_failed
+  | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
+  | `String "session_conflict" -> Some Session_conflict
+  | `Assoc fields ->
+    (match List.assoc_opt "tag" fields with
+     | Some (`String "other_detail") ->
+       (match List.assoc_opt "message" fields with
+         | Some (`String msg) -> Some (Other_detail msg)
+         | _ -> None)
+     | _ -> None)
+  | _ -> None
+
+type accept_rejection_kind =
+  | Accept_no_usable_progress
+  | Accept_predicate_rejected
+
+let accept_rejection_kind_to_string = function
+  | Accept_no_usable_progress -> "no_usable_progress"
+  | Accept_predicate_rejected -> "predicate_rejected"
+;;
+
+let accept_rejection_kind_of_string = function
+  | "no_usable_progress" -> Some Accept_no_usable_progress
+  | "predicate_rejected" -> Some Accept_predicate_rejected
+  | _ -> None
+;;
+
+type accept_response_shape =
+  | Accept_response_empty
+  | Accept_response_thinking_only
+  | Accept_response_blank_text_only
+  | Accept_response_tool_result_only
+  | Accept_response_media_only
+  | Accept_response_mixed_without_deliverable_content
+  | Accept_response_has_deliverable_content
+
+let accept_response_shape_to_string = function
+  | Accept_response_empty -> "empty"
+  | Accept_response_thinking_only -> "thinking_only"
+  | Accept_response_blank_text_only -> "blank_text_only"
+  | Accept_response_tool_result_only -> "tool_result_only"
+  | Accept_response_media_only -> "media_only"
+  | Accept_response_mixed_without_deliverable_content ->
+    "mixed_without_deliverable_content"
+  | Accept_response_has_deliverable_content -> "has_deliverable_content"
+;;
+
+let accept_response_shape_of_string = function
+  | "empty" -> Some Accept_response_empty
+  | "thinking_only" -> Some Accept_response_thinking_only
+  | "blank_text_only" -> Some Accept_response_blank_text_only
+  | "tool_result_only" -> Some Accept_response_tool_result_only
+  | "media_only" -> Some Accept_response_media_only
+  | "mixed_without_deliverable_content" ->
+    Some Accept_response_mixed_without_deliverable_content
+  | "has_deliverable_content" -> Some Accept_response_has_deliverable_content
+  | _ -> None
+;;
+
+let accept_response_shape_of_agent_core = function
+  | Agent_core.Response_shape.Empty -> Accept_response_empty
+  | Agent_core.Response_shape.Thinking_only -> Accept_response_thinking_only
+  | Agent_core.Response_shape.Blank_text_only -> Accept_response_blank_text_only
+  | Agent_core.Response_shape.Tool_result_only -> Accept_response_tool_result_only
+  | Agent_core.Response_shape.Media_only -> Accept_response_media_only
+  | Agent_core.Response_shape.Mixed_without_deliverable_content ->
+    Accept_response_mixed_without_deliverable_content
+  | Agent_core.Response_shape.Has_deliverable_content ->
+    Accept_response_has_deliverable_content
+;;
+
+type transcript_quarantine_reason =
+  | Structurally_invalid
+  | Unresolved_tool_results
+
+let transcript_quarantine_reason_to_string = function
+  | Structurally_invalid -> "structurally_invalid"
+  | Unresolved_tool_results -> "unresolved_tool_results"
+;;
+
+let transcript_quarantine_reason_of_string = function
+  | "structurally_invalid" -> Some Structurally_invalid
+  | "unresolved_tool_results" -> Some Unresolved_tool_results
+  | _ -> None
+;;
+
+(* RFC-0454 P2. Which host decision stopped a running turn. See the .mli. *)
+type host_turn_stop =
+  | Host_graceful_shutdown
+  | Runtime_reported_interrupt
+  | Repeated_tool_call
+  | Repeated_assistant_text
+
+let host_turn_stop_to_string = function
+  | Host_graceful_shutdown -> "host_graceful_shutdown"
+  | Runtime_reported_interrupt -> "runtime_reported_interrupt"
+  | Repeated_tool_call -> "repeated_tool_call"
+  | Repeated_assistant_text -> "repeated_assistant_text"
+;;
+
+let host_turn_stop_of_string = function
+  | "host_graceful_shutdown" -> Some Host_graceful_shutdown
+  | "runtime_reported_interrupt" -> Some Runtime_reported_interrupt
+  | "repeated_tool_call" -> Some Repeated_tool_call
+  | "repeated_assistant_text" -> Some Repeated_assistant_text
+  | _ -> None
+;;
+
+type gate_replay_repair_stage =
+  | Replay_resolution_lookup
+  | Replay_request_decode
+  | Replay_evidence_storage
+  | Replay_evidence_retrieval
+  | Replay_journal
+  | Replay_stale_grant_retirement
+  | Replay_invalid_resolution_state
+
+let gate_replay_repair_stage_to_string = function
+  | Replay_resolution_lookup -> "resolution_lookup"
+  | Replay_request_decode -> "request_decode"
+  | Replay_evidence_storage -> "evidence_storage"
+  | Replay_evidence_retrieval -> "evidence_retrieval"
+  | Replay_journal -> "replay_journal"
+  | Replay_stale_grant_retirement -> "stale_grant_retirement"
+  | Replay_invalid_resolution_state -> "invalid_resolution_state"
+;;
+
+let gate_replay_repair_stage_of_string = function
+  | "resolution_lookup" -> Some Replay_resolution_lookup
+  | "request_decode" -> Some Replay_request_decode
+  | "evidence_storage" -> Some Replay_evidence_storage
+  | "evidence_retrieval" -> Some Replay_evidence_retrieval
+  | "replay_journal" -> Some Replay_journal
+  | "stale_grant_retirement" -> Some Replay_stale_grant_retirement
+  | "invalid_resolution_state" -> Some Replay_invalid_resolution_state
+  | _ -> None
+;;
+
+(* RFC-0454 D1. The fence wraps whatever failed the provider attempt, and that
+   can be another MASC error. Written as a string, the inner error's own
+   prefixed JSON landed inside a JSON string and every wrap added a layer of
+   escaping. [fenced_cause] and [masc_internal_error] are declared together
+   because the recursion is real -- a fence may carry a terminal effect
+   failure, which may carry nothing else -- and OCaml has no module-level
+   recursion short of recursive modules. [Keeper_request_failure_core] stays a
+   separate module for the opposite reason: it carries no MASC error, so
+   [Keeper_terminal_effect_detail] can name it without a cycle. *)
+type fenced_cause =
+  | Fenced_masc of masc_internal_error
+  | Fenced_core of Keeper_request_failure_core.t
+
+and masc_internal_error =
+  | Official_client_recovery_required of official_client_recovery
+  | Runtime_exhausted of {
+      runtime_id : string;
+      reason : runtime_exhaustion_reason;
+    }
+  | Resumable_cli_session of {
+      runtime_id : string;
+      detail : string;
+      exit_code : int option;
+    }
+  | Accept_rejected of {
+      scope : string;
+      model : string option;
+      reason_kind : accept_rejection_kind option;
+      response_shape : accept_response_shape option;
+      (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
+         [MaxTokens] marks an exhausted output budget and must be
+         distinguished from a clean [EndTurn] no-progress terminal — AGENT_CORE
+         gates its own [ended_without_deliverable_content] on [EndTurn] for
+         exactly this reason. Consumed by [accept_no_progress_retry_kind]: it
+         offers the thinking-off continuation to every [MaxTokens] no-progress
+         rejection, while the retry kind follows the shape first (empty and
+         thinking-only keep their rotation kinds) and is [`Truncated_no_progress]
+         only for the remaining [MaxTokens] shapes. [summary_of_masc_internal_error]
+         reports the budget boundary for every [MaxTokens] rejection; that is a
+         statement about what happened, not about the retry kind. *)
+      stop_reason : Agent_core.Types.stop_reason option;
+      reason : string;
+    }
+  | Internal_unhandled_exception of {
+      site : string;
+      exn_repr : string;
+      transport_error_kind : Llm_provider.Http_client.network_error_kind option;
+    }
+  | Internal_bridge_exception of {
+      caller : string;
+      exn_repr : string;
+    }
+  | Internal_contract_rejected of {
+      reason : string;
+    }
+  | Incomplete_tool_transcript of {
+      reason : transcript_quarantine_reason;
+      detail : string;
+      tool_use_ids : string list;
+    }
+  | Terminal_effect_failed of {
+      failure_class : Tool_result.tool_failure_class;
+      effect_disposition : Tool_result.failure_effect_disposition;
+      detail : Keeper_terminal_effect_detail.t;
+    }
+  | Provider_attempt_effect_fenced of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      cause : fenced_cause;
+    }
+  | Tool_correction_lost of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      reject_count : int;
+      cause : fenced_cause;
+    }
+  | Host_stopped_turn of {
+      runtime_id : string;
+      stop : host_turn_stop;
+    }
+  | Runtime_connection_closed of {
+      runtime_id : string;
+      detail : string;
+      turn_accepted : bool;
+    }
+  | Receipt_persistence_failed of {
+      detail : string;
+    }
+  | Gate_replay_repair_required of {
+      approval_id : string;
+      operation : string;
+      stage : gate_replay_repair_stage;
+      detail : string;
+    }
+
+let masc_internal_error_prefix = "[masc_agent_core_error] "
+let runtime_runner_execute_site = "runtime_runner.execute"
+
+let string_opt_of_assoc key json =
+  Json_field.string json key |> Json_field.to_option
+;;
+
+let string_list_of_assoc key json =
+  match Json_field.list json key |> Json_field.to_option with
+  | None -> []
+  | Some values ->
+    values
+    |> List.filter_map (function
+         | `String value -> Some value
+         | _ -> None)
+;;
+
+let transport_error_kind_json_fields = function
+  | None -> []
+  | Some kind ->
+    [ ( "transport_error_kind"
+      , `String (Llm_provider.Http_client.network_error_kind_to_string kind) )
+    ]
+;;
+
+let rec fenced_cause_to_json = function
+  | Fenced_masc error ->
+    `Assoc [ "kind", `String "fenced_masc"; "error", masc_internal_error_to_json error ]
+  | Fenced_core core ->
+    `Assoc
+      [ "kind", `String "fenced_core"
+      ; "core", Keeper_request_failure_core.to_yojson core
+      ]
+
+and masc_internal_error_to_json = function
+  | Official_client_recovery_required { runtime_id; recovery_id; reason } ->
+    `Assoc
+      [ "kind", `String official_client_recovery_required_kind
+      ; "runtime_id", `String runtime_id
+      ; "recovery_id", `String recovery_id
+      ; "reason", `String (official_client_input_rejection_to_string reason)
+      ]
+  | Runtime_exhausted { runtime_id; reason } ->
+    let runtime_id = runtime_id_to_string runtime_id in
+    `Assoc
+      [
+        ("kind", `String "runtime_exhausted");
+        ("runtime_id", `String runtime_id);
+        ("reason", runtime_exhaustion_reason_to_json reason);
+      ]
+  | Resumable_cli_session { runtime_id; detail; exit_code } ->
+    let runtime_id = runtime_id_to_string runtime_id in
+    `Assoc
+      [
+        ("kind", `String "resumable_cli_session");
+        ("runtime_id", `String runtime_id);
+        ("detail", `String detail);
+        ("exit_code", Json_util.int_opt_to_json exit_code);
+      ]
+  | Accept_rejected
+      {
+        scope;
+        model;
+        reason_kind;
+        response_shape;
+        stop_reason;
+        reason;
+      } ->
+    `Assoc
+      [
+        ("kind", `String "accept_rejected");
+        ("scope", `String scope);
+        ("model", Json_util.string_opt_to_json model);
+        ( "reason_kind",
+          Json_util.string_opt_to_json
+            (Option.map accept_rejection_kind_to_string reason_kind) );
+        ( "response_shape",
+          Json_util.string_opt_to_json
+            (Option.map accept_response_shape_to_string response_shape) );
+        ( "stop_reason",
+          Json_util.string_opt_to_json
+            (Option.map Agent_core.Types.stop_reason_to_string stop_reason) );
+        ("reason", `String reason);
+      ]
+  | Internal_unhandled_exception { site; exn_repr; transport_error_kind } ->
+    `Assoc
+      ([ ("kind", `String "internal_unhandled_exception")
+       ; ("site", `String site)
+       ; ("exn_repr", `String exn_repr)
+       ]
+       @ transport_error_kind_json_fields transport_error_kind)
+  | Internal_bridge_exception { caller; exn_repr } ->
+    `Assoc
+      [
+        ("kind", `String "internal_bridge_exception");
+        ("caller", `String caller);
+        ("exn_repr", `String exn_repr);
+      ]
+  | Internal_contract_rejected { reason } ->
+    `Assoc
+      [
+        ("kind", `String "internal_contract_rejected");
+        ("reason", `String reason);
+      ]
+  | Incomplete_tool_transcript { reason; detail; tool_use_ids } ->
+    `Assoc
+      [
+        ("kind", `String incomplete_tool_transcript_kind);
+        ("reason", `String (transcript_quarantine_reason_to_string reason));
+        ("detail", `String detail);
+        ("tool_use_ids", `List (List.map (fun id -> `String id) tool_use_ids));
+      ]
+  | Terminal_effect_failed { failure_class; effect_disposition; detail } ->
+    `Assoc
+      [
+        ("kind", `String "terminal_effect_failed");
+        ("failure_class", `String (Tool_result.tool_failure_class_to_string failure_class));
+        ( "effect_disposition"
+        , `String
+            (Tool_result.failure_effect_disposition_to_string effect_disposition)
+        );
+        ("detail", Keeper_terminal_effect_detail.to_yojson detail);
+      ]
+  | Provider_attempt_effect_fenced { runtime_id; effect_disposition; cause } ->
+    `Assoc
+      [ "kind", `String provider_attempt_effect_fenced_kind
+      ; "runtime_id", `String runtime_id
+      ; ( "effect_disposition"
+        , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
+      ; "cause", fenced_cause_to_json cause
+      ]
+  | Tool_correction_lost { runtime_id; effect_disposition; reject_count; cause } ->
+    `Assoc
+      [ "kind", `String tool_correction_lost_kind
+      ; "runtime_id", `String runtime_id
+      ; ( "effect_disposition"
+        , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
+      ; "reject_count", `Int reject_count
+      ; "cause", fenced_cause_to_json cause
+      ]
+  | Host_stopped_turn { runtime_id; stop } ->
+    `Assoc
+      [ "kind", `String host_stopped_turn_kind
+      ; "runtime_id", `String (runtime_id_to_string runtime_id)
+      ; "stop", `String (host_turn_stop_to_string stop)
+      ]
+  | Runtime_connection_closed { runtime_id; detail; turn_accepted } ->
+    `Assoc
+      [ "kind", `String runtime_connection_closed_kind
+      ; "runtime_id", `String (runtime_id_to_string runtime_id)
+      ; "detail", `String detail
+      ; "turn_accepted", `Bool turn_accepted
+      ]
+  | Receipt_persistence_failed { detail } ->
+    `Assoc
+      [
+        ("kind", `String "receipt_persistence_failed");
+        ("detail", `String detail);
+      ]
+  | Gate_replay_repair_required { approval_id; operation; stage; detail } ->
+    `Assoc
+      [ "kind", `String "gate_replay_repair_required"
+      ; "approval_id", `String approval_id
+      ; "operation", `String operation
+      ; "stage", `String (gate_replay_repair_stage_to_string stage)
+      ; "detail", `String detail
+      ]
+
+let accept_rejection_summary_max_bytes = 180
+
+let short_accept_rejection_reason reason =
+  (* Keep accept-rejection summaries below the 200-byte narrative blocker cap
+     so the full summary fits when it is embedded in blocker detail. *)
+  String_util.utf8_safe
+    ~max_bytes:accept_rejection_summary_max_bytes
+    ~suffix:"..."
+    (String.trim reason)
+  |> String_util.to_string
+
+let nonempty_or_unknown value =
+  let value = String.trim value in
+  if String.equal value "" then "unknown" else value
+
+let accept_rejection_kind_display = function
+  | Some kind -> accept_rejection_kind_to_string kind
+  | None -> "unknown"
+
+let accept_response_shape_display = function
+  | Some shape -> accept_response_shape_to_string shape
+  | None -> "unknown"
+
+let accept_rejection_is_empty_no_progress ~reason_kind ~response_shape =
+  reason_kind = Some Accept_no_usable_progress
+  && response_shape = Some Accept_response_empty
+
+let accept_rejection_is_thinking_only_no_progress ~reason_kind ~response_shape =
+  reason_kind = Some Accept_no_usable_progress
+  && response_shape = Some Accept_response_thinking_only
+
+let summary_of_masc_internal_error = function
+  | Official_client_recovery_required recovery ->
+    Some (official_client_recovery_summary recovery)
+  | Accept_rejected
+      { scope
+      ; reason_kind = Some Accept_no_usable_progress
+      ; stop_reason = Some Agent_core.Types.MaxTokens
+      ; _
+      } ->
+    Some
+      (Printf.sprintf
+         "Provider output for runtime %s reached its maximum token boundary before completion."
+         (nonempty_or_unknown scope))
+  | Accept_rejected
+      {
+        scope;
+        reason_kind;
+        response_shape;
+        _;
+      }
+    when accept_rejection_is_empty_no_progress
+           ~reason_kind
+           ~response_shape ->
+    Some
+      (Printf.sprintf
+         "Provider returned an empty assistant turn for runtime %s; no text or tool progress was produced."
+         (nonempty_or_unknown scope))
+  | Accept_rejected
+      {
+        scope;
+        reason_kind;
+        response_shape;
+        _;
+      }
+    when accept_rejection_is_thinking_only_no_progress
+           ~reason_kind
+           ~response_shape ->
+    Some
+      (Printf.sprintf
+         "Provider returned a thinking-only assistant turn for runtime %s; no text or tool progress was produced."
+         (nonempty_or_unknown scope))
+  | Accept_rejected
+      {
+        scope;
+        reason_kind = Some Accept_predicate_rejected;
+        response_shape;
+        reason;
+        _;
+      } ->
+    let shape = accept_response_shape_display response_shape in
+    Some
+      (Printf.sprintf
+         "Provider response for runtime %s was rejected by the accept predicate; response_shape=%s; reason=%s"
+         (nonempty_or_unknown scope)
+         shape
+         (short_accept_rejection_reason reason))
+  | Accept_rejected
+      { scope
+      ; reason_kind = (None | Some Accept_no_usable_progress) as reason_kind
+      ; response_shape
+      ; stop_reason =
+          ( None
+          | Some
+              ( Agent_core.Types.EndTurn | Agent_core.Types.StopToolUse
+              | Agent_core.Types.MaxTokens | Agent_core.Types.StopSequence
+              | Agent_core.Types.Refusal | Agent_core.Types.ContentFilter
+              | Agent_core.Types.RepetitionTruncation | Agent_core.Types.PauseTurn
+              | Agent_core.Types.Compaction | Agent_core.Types.ContextWindowExceeded
+              | Agent_core.Types.UnmatchedToolCalls | Agent_core.Types.Unknown _ ) )
+      ; reason
+      ; _
+      } ->
+    let reason_kind = accept_rejection_kind_display reason_kind in
+    let response_shape = accept_response_shape_display response_shape in
+    Some
+      (Printf.sprintf
+         "Provider response for runtime %s was rejected by the keeper accept contract; reason_kind=%s; response_shape=%s; reason=%s"
+         (nonempty_or_unknown scope)
+         reason_kind
+         response_shape
+         (short_accept_rejection_reason reason))
+  | Runtime_exhausted { runtime_id; reason } ->
+    Some
+      (Printf.sprintf
+         "Runtime %s exhausted all candidates; reason=%s"
+         (nonempty_or_unknown runtime_id)
+         (runtime_exhaustion_reason_to_label reason))
+  | Terminal_effect_failed { effect_disposition; detail; _ } ->
+    Some
+      (Printf.sprintf
+         "Terminal tool effect failed (effect_disposition=%s): %s"
+         (Tool_result.failure_effect_disposition_to_string effect_disposition)
+         (Keeper_terminal_effect_detail.summary detail))
+  (* [None] for the same reason the two fences below are [None], and it is the
+     same reason for all four: a chat row's only carrier for the cause is its
+     text, and [Keeper_agent_error.user_message_of_core_error] puts a summary
+     there in place of the envelope the pane reads. Answering here would hand
+     the pane a sentence and take the value away, which is the exchange
+     RFC-0454 exists to undo. The row gets a typed [failure] field in P3
+     (RFC-0454 D3); these arms answer then. *)
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
+  | Resumable_cli_session _
+  | Internal_unhandled_exception _
+  | Internal_bridge_exception _
+  | Internal_contract_rejected _
+  | Incomplete_tool_transcript _
+  | Provider_attempt_effect_fenced _
+  | Tool_correction_lost _
+  | Receipt_persistence_failed _
+  | Gate_replay_repair_required _ -> None
+
+type wire_kind =
+  | Wire_official_client_recovery_required
+  | Wire_runtime_exhausted
+  | Wire_resumable_cli_session
+  | Wire_accept_rejected
+  | Wire_internal_unhandled_exception
+  | Wire_internal_bridge_exception
+  | Wire_internal_contract_rejected
+  | Wire_incomplete_tool_transcript
+  | Wire_terminal_effect_failed
+  | Wire_provider_attempt_effect_fenced
+  | Wire_tool_correction_lost
+  | Wire_host_stopped_turn
+  | Wire_runtime_connection_closed
+  | Wire_receipt_persistence_failed
+  | Wire_gate_replay_repair_required
+
+let wire_kind_of_masc_internal_error = function
+  | Official_client_recovery_required _ -> Wire_official_client_recovery_required
+  | Runtime_exhausted _ -> Wire_runtime_exhausted
+  | Resumable_cli_session _ -> Wire_resumable_cli_session
+  | Accept_rejected _ -> Wire_accept_rejected
+  | Internal_unhandled_exception _ -> Wire_internal_unhandled_exception
+  | Internal_bridge_exception _ -> Wire_internal_bridge_exception
+  | Internal_contract_rejected _ -> Wire_internal_contract_rejected
+  | Incomplete_tool_transcript _ -> Wire_incomplete_tool_transcript
+  | Terminal_effect_failed _ -> Wire_terminal_effect_failed
+  | Provider_attempt_effect_fenced _ -> Wire_provider_attempt_effect_fenced
+  | Tool_correction_lost _ -> Wire_tool_correction_lost
+  | Host_stopped_turn _ -> Wire_host_stopped_turn
+  | Runtime_connection_closed _ -> Wire_runtime_connection_closed
+  | Receipt_persistence_failed _ -> Wire_receipt_persistence_failed
+  | Gate_replay_repair_required _ -> Wire_gate_replay_repair_required
+
+let wire_kind_to_string = function
+  | Wire_official_client_recovery_required -> official_client_recovery_required_kind
+  | Wire_runtime_exhausted -> "runtime_exhausted"
+  | Wire_resumable_cli_session -> "resumable_cli_session"
+  | Wire_accept_rejected -> accept_rejected_kind
+  | Wire_internal_unhandled_exception -> "internal_unhandled_exception"
+  | Wire_internal_bridge_exception -> "internal_bridge_exception"
+  | Wire_internal_contract_rejected -> "internal_contract_rejected"
+  | Wire_incomplete_tool_transcript -> incomplete_tool_transcript_kind
+  | Wire_terminal_effect_failed -> terminal_effect_failed_kind
+  | Wire_provider_attempt_effect_fenced -> provider_attempt_effect_fenced_kind
+  | Wire_tool_correction_lost -> tool_correction_lost_kind
+  | Wire_host_stopped_turn -> host_stopped_turn_kind
+  | Wire_runtime_connection_closed -> runtime_connection_closed_kind
+  | Wire_receipt_persistence_failed -> "receipt_persistence_failed"
+  | Wire_gate_replay_repair_required -> "gate_replay_repair_required"
+
+(* Decoding scans this list through [wire_kind_to_string] rather than
+   repeating the strings, so encoder and decoder cannot spell a kind
+   differently. *)
+let all_wire_kinds =
+  [ Wire_official_client_recovery_required
+  ; Wire_runtime_exhausted
+  ; Wire_resumable_cli_session
+  ; Wire_accept_rejected
+  ; Wire_internal_unhandled_exception
+  ; Wire_internal_bridge_exception
+  ; Wire_internal_contract_rejected
+  ; Wire_incomplete_tool_transcript
+  ; Wire_terminal_effect_failed
+  ; Wire_provider_attempt_effect_fenced
+  ; Wire_tool_correction_lost
+  ; Wire_host_stopped_turn
+  ; Wire_runtime_connection_closed
+  ; Wire_receipt_persistence_failed
+  ; Wire_gate_replay_repair_required
+  ]
+
+(* A wire reason is either the bare kind or [kind:params] -- a producer
+   appends the call's parameters after a colon. Read the kind and leave the
+   parameters to the payload, so a reason that carries them decodes to its
+   typed kind instead of falling through as [Unknown]. *)
+let wire_kind_of_string wire =
+  let kind =
+    match String.index_opt wire ':' with
+    | None -> wire
+    | Some colon -> String.sub wire 0 colon
+  in
+  List.find_opt
+    (fun candidate -> String.equal (wire_kind_to_string candidate) kind)
+    all_wire_kinds
+;;
+
+let kind_of_masc_internal_error error =
+  wire_kind_to_string (wire_kind_of_masc_internal_error error)
+;;
+
+(* What failed, without the envelope. A masc cause with no summary of its own
+   falls back to its wire kind: short and typed, never a JSON document. *)
+let fenced_cause_label = function
+  | Fenced_core core -> Keeper_request_failure_core.summary core
+  | Fenced_masc masc ->
+    (match summary_of_masc_internal_error masc with
+     | Some summary -> summary
+     | None -> kind_of_masc_internal_error masc)
+;;
+
+(* The empty assistant turn behind a fence, when the fence's cause is one.
+   The decision this supports (Board p-d8153cc02a535b82b6b1e3b5bca9add4,
+   c-ff6ec9f3168e1c677318c91bc0795c3b) keeps the fence — a host or subagent
+   may have run a tool MASC never saw, so "no tool call in this turn" is not
+   proof of "no effect anywhere" — but carries the already-typed
+   Accept_rejected empty/no-progress fact as a reason, so display layers and
+   receipts can say "empty turn" without parsing the wire kind out of text.
+   [None] for every other cause, including the fenced masc errors that are
+   not an empty turn and the projected agent-core causes, whose emptiness
+   this projection cannot vouch for. *)
+let fenced_cause_empty_no_progress = function
+  | Fenced_core _ -> None
+  | Fenced_masc
+      (Accept_rejected
+         { reason_kind; response_shape; _ }) ->
+    Some (accept_rejection_is_empty_no_progress ~reason_kind ~response_shape)
+  | Fenced_masc
+      (Official_client_recovery_required _
+      | Runtime_exhausted _
+      | Resumable_cli_session _
+      | Internal_unhandled_exception _
+      | Internal_bridge_exception _
+      | Internal_contract_rejected _
+      | Incomplete_tool_transcript _
+      | Terminal_effect_failed _
+      | Host_stopped_turn _
+      | Runtime_connection_closed _
+      | Provider_attempt_effect_fenced _
+      | Tool_correction_lost _
+      | Receipt_persistence_failed _
+      | Gate_replay_repair_required _) -> None
+;;
+
+let fenced_cause_of_masc_internal_error = function
+  | Provider_attempt_effect_fenced { cause; _ }
+  | Tool_correction_lost { cause; _ } -> Some cause
+  | Official_client_recovery_required _
+  | Runtime_exhausted _
+  | Resumable_cli_session _
+  | Accept_rejected _
+  | Internal_unhandled_exception _
+  | Internal_bridge_exception _
+  | Internal_contract_rejected _
+  | Incomplete_tool_transcript _
+  | Terminal_effect_failed _
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
+  | Receipt_persistence_failed _
+  | Gate_replay_repair_required _ -> None
+;;
+
+let fenced_attempt_summary = function
+  | Provider_attempt_effect_fenced { effect_disposition; cause; _ }
+  | Tool_correction_lost { effect_disposition; cause; _ } ->
+    (* The short, fixed-size disposition leads and the variable-length cause
+       follows, so a surface that clips the line loses the tail of the cause
+       rather than the disposition. *)
+    Some
+      (Printf.sprintf
+         "effect_disposition=%s; %s"
+         (Keeper_provider_attempt_effect_core.to_string effect_disposition)
+         (fenced_cause_label cause))
+  | Official_client_recovery_required _
+  | Runtime_exhausted _
+  | Resumable_cli_session _
+  | Accept_rejected _
+  | Internal_unhandled_exception _
+  | Internal_bridge_exception _
+  | Internal_contract_rejected _
+  | Incomplete_tool_transcript _
+  | Terminal_effect_failed _
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
+  | Receipt_persistence_failed _
+  | Gate_replay_repair_required _ -> None
+;;
+
+let runtime_id_of_masc_internal_error = function
+  | Official_client_recovery_required { runtime_id; _ }
+  | Runtime_exhausted { runtime_id; _ }
+  | Resumable_cli_session { runtime_id; _ }
+  | Provider_attempt_effect_fenced { runtime_id; _ }
+  | Tool_correction_lost { runtime_id; _ }
+  | Host_stopped_turn { runtime_id; _ }
+  | Runtime_connection_closed { runtime_id; _ } ->
+      let runtime_id = runtime_id_to_string runtime_id in
+      if String.equal (String.trim runtime_id) "" then "unknown"
+      else runtime_id
+  | Accept_rejected { scope; _ } ->
+      nonempty_or_unknown scope
+  | Internal_unhandled_exception _
+  | Internal_bridge_exception _
+  | Internal_contract_rejected _
+  | Incomplete_tool_transcript _
+  | Terminal_effect_failed _
+  | Receipt_persistence_failed _
+  | Gate_replay_repair_required _ -> "unknown"
+
+(* The two shapes that already have rotation kinds decide before the stop
+   reason: an empty or thinking-only response keeps [`Empty_no_progress] /
+   [`Thinking_only_no_progress] whether the provider stopped at [EndTurn] or at
+   [MaxTokens]. The truncation-continuation attempt is unaffected: it runs
+   first on every [MaxTokens] no-progress rejection, because
+   [Keeper_turn_driver_try_provider.max_tokens_truncation_error] reads the
+   record, not this kind. [`Truncated_no_progress] is every other [MaxTokens]
+   shape. It rotates like the other two: the continuation already ran on
+   this runtime, so when it fails as well the lane defers to the next
+   candidate instead of ending on the same model.
+
+   Before this order, every [MaxTokens] rejection was [`Truncated_no_progress].
+   On a lane whose dialect drops [enable_thinking = false] from the wire
+   (Chat_completions with the reasoning_effort dialect), the continuation is
+   the same request again: 2026-09-02 17:39-18:06 KST analyst ran nine
+   thinking-only max_tokens turns (first generation 68-116 s, continuation
+   52-88 s more, same result), each classified [`Truncated_no_progress], each
+   ending with [deferred_next_runtime=none] while glm-coding.glm-5.3 stood
+   second in its lane. With the shape kinds restored the failed continuation
+   defers the next cycle to that sibling. The identical second generation
+   itself is the dialect's silent drop, tracked separately.
+
+   The remaining shape got the same hint on 2026-09-05 (#33260): one measured Keeper on
+   ollama_cloud deepseek-v4-flash-0731 repeated one sentence up to the output
+   cap right after a Read tool call, the accept gate rejected the response at
+   [MaxTokens] with deliverable content, the same-run retry was deferred
+   behind the tool checkpoint, and every cycle ended with
+   [deferred_next_runtime=none] because this kind carried no hint. *)
+let accept_no_progress_retry_kind = function
+  | Accept_rejected
+      {
+        reason_kind;
+        response_shape;
+        _;
+      }
+    when accept_rejection_is_empty_no_progress
+           ~reason_kind
+           ~response_shape ->
+    Some `Empty_no_progress
+  | Accept_rejected
+      {
+        reason_kind;
+        response_shape;
+        _;
+      }
+    when accept_rejection_is_thinking_only_no_progress
+           ~reason_kind
+           ~response_shape ->
+    Some `Thinking_only_no_progress
+  | Accept_rejected
+      { reason_kind = Some Accept_no_usable_progress
+      ; stop_reason = Some Agent_core.Types.MaxTokens
+      ; _
+      } ->
+    Some `Truncated_no_progress
+  | Accept_rejected
+      { reason_kind = None | Some (Accept_no_usable_progress | Accept_predicate_rejected)
+      ; stop_reason =
+          ( None
+          | Some
+              ( Agent_core.Types.EndTurn | Agent_core.Types.StopToolUse
+              | Agent_core.Types.MaxTokens | Agent_core.Types.StopSequence
+              | Agent_core.Types.Refusal | Agent_core.Types.ContentFilter
+              | Agent_core.Types.RepetitionTruncation | Agent_core.Types.PauseTurn
+              | Agent_core.Types.Compaction | Agent_core.Types.ContextWindowExceeded
+              | Agent_core.Types.UnmatchedToolCalls | Agent_core.Types.Unknown _ ) )
+      ; _
+      }
+  | Official_client_recovery_required _
+  | Runtime_exhausted _
+  | Resumable_cli_session _
+  | Internal_unhandled_exception _
+  | Internal_bridge_exception _
+  | Internal_contract_rejected _
+  | Incomplete_tool_transcript _
+  | Terminal_effect_failed _
+  | Provider_attempt_effect_fenced _
+  | Tool_correction_lost _
+  | Host_stopped_turn _
+  | Runtime_connection_closed _
+  | Receipt_persistence_failed _
+  | Gate_replay_repair_required _ ->
+    None
+
+let accept_rejection_has_no_progress_retry_hint err =
+  match accept_no_progress_retry_kind err with
+  | Some
+      ( `Empty_no_progress | `Thinking_only_no_progress
+      | `Truncated_no_progress ) ->
+    true
+  | None -> false
+
+(* The typed value rides the carrier (RFC-0371 B12 §6.1(1)); the message
+   keeps the exact prefixed-JSON spelling so anything that only stringifies
+   — logs, receipts, persisted turn state — sees the same wire text as
+   before the carrier existed. *)
+type Agent_core.Error.carrier += Masc_internal of masc_internal_error
+
+let carried_masc_internal_error = function
+  | Agent_core.Error.Internal_carried { carrier = Masc_internal err; _ } -> Some err
+  | Agent_core.Error.Internal_carried _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Api _
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> None
+;;
+
+let core_error_of_masc_internal_error err =
+  Agent_core.Error.Internal_carried
+    { message =
+        masc_internal_error_prefix
+        ^ Yojson.Safe.to_string (masc_internal_error_to_json err)
+    ; carrier = Masc_internal err
+    }
+
+
+(* ------------------------------------------------------------------ *)
+(* Reverse direction: agent-core envelope -> typed variant.                  *)
+(* ------------------------------------------------------------------ *)
+
+let exact_fields expected fields =
+  let sort = List.sort String.compare in
+  sort expected = sort (List.map fst fields)
+;;
+
+let rec parse_fenced_cause_json (json : Yojson.Safe.t) : fenced_cause option =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "kind" fields with
+      | Some (`String "fenced_masc") when exact_fields [ "kind"; "error" ] fields ->
+        Option.bind
+          (List.assoc_opt "error" fields)
+          (fun error ->
+             Option.map
+               (fun error -> Fenced_masc error)
+               (parse_masc_internal_error_json error))
+      | Some (`String "fenced_core") when exact_fields [ "kind"; "core" ] fields ->
+        Option.bind
+          (List.assoc_opt "core" fields)
+          (fun core ->
+             match Keeper_request_failure_core.of_yojson core with
+             | Ok core -> Some (Fenced_core core)
+             | Error _ -> None)
+      | _ -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+and parse_masc_internal_error_json (json : Yojson.Safe.t) :
+    masc_internal_error option =
+  let int_opt_of_assoc key = function
+    | `Assoc fields -> (
+        match List.assoc_opt key fields with
+        | Some (`Int value) -> Some value
+        | Some (`Intlit value) -> int_of_string_opt value
+        | _ -> None)
+    | _ -> None
+  in
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "kind" fields with
+      | Some (`String "runtime_exhausted") -> (
+          match string_opt_of_assoc "runtime_id" json with
+          | Some runtime_id ->
+            let reason_opt =
+              match List.assoc_opt "reason"
+                      (match json with `Assoc fields -> fields | _ -> []) with
+              | Some json_val ->
+                  runtime_exhaustion_reason_of_json json_val
+              | None -> None
+            in
+            (match reason_opt with
+             | Some reason ->
+               Some (Runtime_exhausted { runtime_id; reason })
+             | None -> None)
+          | None -> None)
+      | Some (`String "resumable_cli_session") -> (
+          match string_opt_of_assoc "runtime_id" json, string_opt_of_assoc "detail" json with
+          | Some runtime_id, Some detail ->
+            Some
+              (Resumable_cli_session
+                 {
+                   runtime_id;
+                   detail;
+                   exit_code = int_opt_of_assoc "exit_code" json;
+                 })
+          | _ -> None)
+      | Some (`String "accept_rejected") -> (
+          match string_opt_of_assoc "scope" json, string_opt_of_assoc "reason" json with
+          | Some scope, Some reason ->
+            Some
+              (Accept_rejected
+                 {
+                   scope;
+                   model = string_opt_of_assoc "model" json;
+                   reason_kind =
+                     Option.bind
+                       (string_opt_of_assoc "reason_kind" json)
+                       accept_rejection_kind_of_string;
+                   response_shape =
+                     Option.bind
+                       (string_opt_of_assoc "response_shape" json)
+                       accept_response_shape_of_string;
+                   stop_reason =
+                     Option.map
+                       Agent_core.Types.stop_reason_of_string
+                       (string_opt_of_assoc "stop_reason" json);
+                   reason;
+                 })
+          | _ -> None)
+      | Some (`String "internal_unhandled_exception") -> (
+          match string_opt_of_assoc "site" json, string_opt_of_assoc "exn_repr" json with
+          | Some site, Some exn_repr ->
+            (match string_opt_of_assoc "transport_error_kind" json with
+             | None ->
+               Some
+                 (Internal_unhandled_exception
+                    { site; exn_repr; transport_error_kind = None })
+             | Some raw_kind ->
+               (match Llm_provider.Http_client.network_error_kind_of_string raw_kind with
+                | Some transport_error_kind ->
+                  Some
+                    (Internal_unhandled_exception
+                       { site; exn_repr; transport_error_kind = Some transport_error_kind })
+                | None -> None))
+          | _ -> None)
+      | Some (`String "internal_bridge_exception") -> (
+          match string_opt_of_assoc "caller" json,
+                string_opt_of_assoc "exn_repr" json
+          with
+          | Some caller, Some exn_repr ->
+            Some (Internal_bridge_exception { caller; exn_repr })
+          | _ -> None)
+      | Some (`String "internal_contract_rejected") -> (
+          match string_opt_of_assoc "reason" json with
+          | Some reason -> Some (Internal_contract_rejected { reason })
+          | _ -> None)
+      | Some (`String "incomplete_tool_transcript") -> (
+          match
+            string_opt_of_assoc "reason" json,
+            string_opt_of_assoc "detail" json
+          with
+          | Some reason, Some detail ->
+            (match transcript_quarantine_reason_of_string reason with
+             | Some reason ->
+               Some
+                 (Incomplete_tool_transcript
+                    { reason
+                    ; detail
+                    ; tool_use_ids = string_list_of_assoc "tool_use_ids" json
+                    })
+             | None -> None)
+          | _ -> None)
+      | Some (`String "terminal_effect_failed")
+        when exact_fields
+               [ "kind"; "failure_class"; "effect_disposition"; "detail" ]
+               fields -> (
+          match
+            string_opt_of_assoc "failure_class" json,
+            string_opt_of_assoc "effect_disposition" json,
+            List.assoc_opt "detail" fields
+          with
+          | Some failure_class, Some effect_disposition, Some detail ->
+            (match
+               Tool_result.tool_failure_class_of_string failure_class,
+               Tool_result.failure_effect_disposition_of_string effect_disposition,
+               Keeper_terminal_effect_detail.of_yojson detail
+             with
+             | Some failure_class, Some effect_disposition, Ok detail ->
+               Some
+                 (Terminal_effect_failed
+                    { failure_class; effect_disposition; detail })
+             | (None, _, (Ok _ | Error _))
+             | (Some _, None, (Ok _ | Error _))
+             | (Some _, Some _, Error _) -> None)
+          | _ -> None)
+      | Some (`String kind)
+        when String.equal kind provider_attempt_effect_fenced_kind
+             && exact_fields
+                  [ "kind"; "runtime_id"; "effect_disposition"; "cause" ]
+                  fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json,
+           string_opt_of_assoc "effect_disposition" json,
+           Option.bind (List.assoc_opt "cause" fields) parse_fenced_cause_json
+         with
+         | Some runtime_id, Some effect_disposition, Some cause ->
+           Option.map
+             (fun effect_disposition ->
+                Provider_attempt_effect_fenced
+                  { runtime_id; effect_disposition; cause })
+             (Keeper_provider_attempt_effect_core.of_string effect_disposition)
+         | _ -> None)
+      | Some (`String kind)
+        when String.equal kind tool_correction_lost_kind
+             && exact_fields
+                  [ "kind"
+                  ; "runtime_id"
+                  ; "effect_disposition"
+                  ; "reject_count"
+                  ; "cause"
+                  ]
+                  fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json,
+           string_opt_of_assoc "effect_disposition" json,
+           List.assoc_opt "reject_count" fields,
+           Option.bind (List.assoc_opt "cause" fields) parse_fenced_cause_json
+         with
+         | Some runtime_id, Some effect_disposition, Some (`Int reject_count),
+           Some cause ->
+           Option.map
+             (fun effect_disposition ->
+                Tool_correction_lost
+                  { runtime_id; effect_disposition; reject_count; cause })
+             (Keeper_provider_attempt_effect_core.of_string effect_disposition)
+         | _ -> None)
+      | Some (`String kind)
+        when String.equal kind official_client_recovery_required_kind
+             && exact_fields [ "kind"; "runtime_id"; "recovery_id"; "reason" ] fields ->
+        (match string_opt_of_assoc "runtime_id" json,
+               string_opt_of_assoc "recovery_id" json,
+               string_opt_of_assoc "reason" json with
+         | Some runtime_id, Some recovery_id, Some reason
+           when String.trim runtime_id <> "" && String.trim recovery_id <> "" ->
+           Option.map
+             (fun reason -> Official_client_recovery_required { runtime_id; recovery_id; reason })
+             (official_client_input_rejection_of_string reason)
+         | _ -> None)
+      | Some (`String kind)
+        when String.equal kind host_stopped_turn_kind
+             && exact_fields [ "kind"; "runtime_id"; "stop" ] fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json, string_opt_of_assoc "stop" json
+         with
+         | Some runtime_id, Some stop ->
+           Option.map
+             (fun stop -> Host_stopped_turn { runtime_id; stop })
+             (host_turn_stop_of_string stop)
+         | _ -> None)
+      | Some (`String kind)
+        when String.equal kind runtime_connection_closed_kind
+             && exact_fields
+                  [ "kind"; "runtime_id"; "detail"; "turn_accepted" ]
+                  fields ->
+        (match
+           string_opt_of_assoc "runtime_id" json,
+           string_opt_of_assoc "detail" json,
+           List.assoc_opt "turn_accepted" fields
+         with
+         | Some runtime_id, Some detail, Some (`Bool turn_accepted) ->
+           Some (Runtime_connection_closed { runtime_id; detail; turn_accepted })
+         | _ -> None)
+      | Some (`String "receipt_persistence_failed") -> (
+          match string_opt_of_assoc "detail" json with
+          | Some detail -> Some (Receipt_persistence_failed { detail })
+          | _ -> None)
+      | Some (`String "gate_replay_repair_required")
+        when exact_fields
+               [ "kind"; "approval_id"; "operation"; "stage"; "detail" ]
+               fields -> (
+          match
+            string_opt_of_assoc "approval_id" json,
+            string_opt_of_assoc "operation" json,
+            string_opt_of_assoc "stage" json,
+            string_opt_of_assoc "detail" json
+          with
+          | Some approval_id, Some operation, Some stage, Some detail ->
+            Option.map
+              (fun stage ->
+                 Gate_replay_repair_required
+                   { approval_id; operation; stage; detail })
+              (gate_replay_repair_stage_of_string stage)
+          | _ -> None)
+      | _ -> None)
+  | _ -> None
+
+let classify_masc_internal_error_of_string (raw : string) :
+    masc_internal_error option =
+  let prefix = masc_internal_error_prefix in
+  let prefix_len = String.length prefix in
+  let raw_len = String.length raw in
+  let rec find_prefix start =
+    if start + prefix_len > raw_len then None
+    else if String.sub raw start prefix_len = prefix then Some start
+    else find_prefix (start + 1)
+  in
+  match find_prefix 0 with
+  | None -> None
+  | Some prefix_start ->
+    let payload_start = prefix_start + prefix_len in
+    let payload = String.sub raw payload_start (raw_len - payload_start) in
+    (try parse_masc_internal_error_json (Yojson.Safe.from_string payload)
+     with Yojson.Json_error _ -> None)
+
+let classify_masc_internal_error (err : Agent_core.Error.t) :
+    masc_internal_error option =
+  let terminal_effect_failed ~effect_disposition ~detail =
+    let effect_disposition =
+      match Agent_core.Error.terminal_effect_disposition effect_disposition with
+      | Agent_core.Tool_contract.Proven_pre_effect ->
+        Tool_result.Proven_pre_effect
+      | Agent_core.Tool_contract.Proven_post_effect ->
+        Tool_result.Proven_post_effect
+      | Agent_core.Tool_contract.Effect_outcome_unknown ->
+        Tool_result.Effect_outcome_unknown
+    in
+    Some
+      (Terminal_effect_failed
+         { failure_class = Tool_result.Runtime_failure
+         ; effect_disposition
+         ; detail = Keeper_terminal_effect_detail.Agent_core_terminal_effect { detail }
+         })
+  in
+  match err with
+  (* Live values carry the typed payload (RFC-0371 B12); the string parse
+     below stays as the boundary for persisted strings and for [Internal]
+     values from producers that predate the carrier. *)
+  | Agent_core.Error.Internal_carried { carrier = Masc_internal err; _ } -> Some err
+  | Agent_core.Error.Internal_carried { message; _ } ->
+    classify_masc_internal_error_of_string message
+  | Agent_core.Error.Internal msg -> classify_masc_internal_error_of_string msg
+  | Agent_core.Error.Agent
+      (Agent_core.Error.TerminalToolEffectFailed
+        { effect_disposition; detail; _ }) ->
+    terminal_effect_failed ~effect_disposition ~detail
+  | Agent_core.Error.Agent
+      (Agent_core.Error.TerminalToolDurabilityFailed
+        { effect_disposition; detail; _ }) ->
+    terminal_effect_failed ~effect_disposition ~detail
+  | Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason _ | (Agent_core.Error.ToolRoundLimitExceeded _ | (Agent_core.Error.HookExecutionFailed _ | (Agent_core.Error.GuardrailViolation _ | (Agent_core.Error.TripwireViolation _ | Agent_core.Error.InputRequired _)))))
+  | Agent_core.Error.Api _ | Agent_core.Error.Provider _ | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _ | Agent_core.Error.Serialization _ | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> None

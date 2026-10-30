@@ -1,0 +1,99 @@
+{
+  "sources": [
+    {
+      "source_id": "s1",
+      "keeper_id": "writer",
+      "store": "ordinary",
+      "revision": 1,
+      "snapshot_sha256": "0f0c487e03a16e2ebaeb0fb0ede36c747039a2ab02457fa44fad457846169eec",
+      "fact_index": 0,
+      "fact": {
+        "claim": "Report R was generated as PDF.",
+        "category": "fact",
+        "first_seen": 1,
+        "last_seen": 1,
+        "origin": {
+          "kind": "authored",
+          "trace_id": "synthetic-scenario"
+        }
+      }
+    },
+    {
+      "source_id": "s2",
+      "keeper_id": "reviewer",
+      "store": "ordinary",
+      "revision": 1,
+      "snapshot_sha256": "c45597f12084bc080be57e54319992c4a90082eddb55a45f4d2b22d87eb41a46",
+      "fact_index": 0,
+      "fact": {
+        "claim": "Report R contains plain Markdown bytes; PDF generation failed.",
+        "category": "fact",
+        "first_seen": 1,
+        "last_seen": 1,
+        "origin": {
+          "kind": "authored",
+          "trace_id": "synthetic-scenario"
+        }
+      }
+    },
+    {
+      "source_id": "s3",
+      "keeper_id": "analyst",
+      "store": "ordinary",
+      "revision": 1,
+      "snapshot_sha256": "ddb6bea677a53bf443f967bea04d07ce562732a218b5b32ce8d79dea2e3086ed",
+      "fact_index": 0,
+      "fact": {
+        "claim": "Measurement M was 12 seconds.",
+        "category": "fact",
+        "first_seen": 1,
+        "last_seen": 1,
+        "origin": {
+          "kind": "authored",
+          "trace_id": "synthetic-scenario"
+        }
+      }
+    },
+    {
+      "source_id": "s4",
+      "keeper_id": "analyst",
+      "store": "ordinary",
+      "revision": 1,
+      "snapshot_sha256": "ddb6bea677a53bf443f967bea04d07ce562732a218b5b32ce8d79dea2e3086ed",
+      "fact_index": 1,
+      "fact": {
+        "claim": "Correction from the original log: measurement M was 21 seconds, not 12.",
+        "category": "fact",
+        "first_seen": 1,
+        "last_seen": 1,
+        "origin": {
+          "kind": "authored",
+          "trace_id": "synthetic-scenario"
+        }
+      }
+    }
+  ],
+  "gaps": [
+    {
+      "keeper_id": "writer",
+      "store": "source_bound",
+      "observation": {
+        "status": "missing"
+      }
+    },
+    {
+      "keeper_id": "reviewer",
+      "store": "source_bound",
+      "observation": {
+        "status": "missing"
+      }
+    },
+    {
+      "keeper_id": "analyst",
+      "store": "source_bound",
+      "observation": {
+        "status": "missing"
+      }
+    }
+  ]
+}

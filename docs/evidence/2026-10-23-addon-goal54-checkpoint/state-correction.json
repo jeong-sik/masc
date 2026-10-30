@@ -1,0 +1,57 @@
+{
+  "original_54_count": 54,
+  "criteria_unchanged": true,
+  "criteria_sha256": "19dc4f8ffb9fb5c64093be6019a2fb3b59df29dd1d43777e8759ae0c9414b809",
+  "changed_state_ids": [
+    "D03",
+    "D04",
+    "D06",
+    "E03",
+    "E09"
+  ],
+  "reviewed_prior_head": "a4a069206bfa48bf62bd4db9f3f57e05f064af17",
+  "confirmed_merges": [
+    {
+      "number": 45448,
+      "merged": true,
+      "merged_at": "2026-10-23T07:33:23Z",
+      "merge_commit_sha": "299542e6ce70ba41ef18be887b820b6feb038ca6",
+      "html_url": "https://github.com/jeong-sik/masc/pull/45448",
+      "head": "8ad31bb1acb814664c067ca56187abaa7c3164c5"
+    },
+    {
+      "number": 45451,
+      "merged": true,
+      "merged_at": "2026-10-23T07:39:40Z",
+      "merge_commit_sha": "0050a38d4cfa0692fc35294f3d558e195c1c9493",
+      "html_url": "https://github.com/jeong-sik/masc/pull/45451",
+      "head": "131d72c160febdabb19493664b36fc52b6c2f114"
+    },
+    {
+      "number": 45452,
+      "merged": true,
+      "merged_at": "2026-10-23T07:56:31Z",
+      "merge_commit_sha": "0d132a69d8ef7b3917f3b26273cc8e463ba854c7",
+      "html_url": "https://github.com/jeong-sik/masc/pull/45452",
+      "head": "25180b5e678317b371bf2c4e248eccc03727add9"
+    },
+    {
+      "number": 45462,
+      "merged": true,
+      "merged_at": "2026-10-23T07:51:10Z",
+      "merge_commit_sha": "00ddf36fbafc4ea66c52c8c57b213ac8c392a298",
+      "html_url": "https://github.com/jeong-sik/masc/pull/45462",
+      "head": "c7521290e27b424f2bbfd9466c8b5f19c45d0f4c"
+    },
+    {
+      "number": 45463,
+      "merged": true,
+      "merged_at": "2026-10-23T07:51:11Z",
+      "merge_commit_sha": "3305b64832d069f7afe5dc19deff6e23d6bcbb16",
+      "html_url": "https://github.com/jeong-sik/masc/pull/45463",
+      "head": "bdccda5a872bcc3e5b6ac0c44d78c8b3bd4f5ec6"
+    }
+  ],
+  "no_execution_success_claimed": true,
+  "observed_at": "2026-10-23T08:05:28.621533+00:00"
+}

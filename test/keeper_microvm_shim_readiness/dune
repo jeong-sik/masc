@@ -1,0 +1,4 @@
+(test
+ (name test_keeper_microvm_shim_readiness)
+ (modules test_keeper_microvm_shim_readiness)
+ (libraries masc_test_deps fs_compat_test_support))

@@ -1,0 +1,520 @@
+open Alcotest
+open Masc
+module VAT = Verification_authority_tools
+let () = Mirage_crypto_rng_unix.use_default ()
+(* These tests pin what the verification evidence reads from a post, not who is
+   declared: every name with the shape of a Board identity stands for itself. *)
+let every_name_declared =
+  Recipient_lookup.make (fun candidate ->
+    Ok
+      (Result.to_option
+         (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate))))
+let require label = function Ok value -> value | Error _ -> fail label
+let require_durable_deletion label = function
+  | Ok Board.Durable_deletion -> ()
+  | Ok (Board.Deletion_persistence_pending detail) -> failf "%s: %s" label detail
+  | Error error -> failf "%s: %s" label (Board.show_board_error error)
+let rec remove path =
+  if Sys.is_directory path then (Array.iter (fun n -> remove (Filename.concat path n)) (Sys.readdir path); Unix.rmdir path)
+  else Unix.unlink path
+let with_fixture f = Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Masc_test_deps.init_unified_tool_registry ();
+  let base = Filename.temp_dir "verification-collaboration-" "" in
+  let old = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "MASC_BASE_PATH" base;
+  Board.reset_global_for_test (); Board_dispatch.reset_for_test ();
+  Fun.protect ~finally:(fun () ->
+    Board.reset_global_for_test (); Board_dispatch.reset_for_test ();
+    Unix.putenv "MASC_BASE_PATH" (Option.value old ~default:""); remove base)
+    (fun () ->
+      let config = Workspace.default_config base in
+      ignore (Workspace.init config ~agent_name:(Some "producer"));
+      Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+      f config)
+let call surface name args = VAT.dispatch surface ~name ~args
+let read surface name args =
+  match call surface name args with
+  | Tool_result.Completed _ as result -> Yojson.Safe.from_string (Tool_result.message result)
+  | result -> failf "source read failed: %s" (Tool_result.message result)
+let denied surface name args code =
+  match call surface name args with
+  | Tool_result.Failed _ as result ->
+    let expected_class = match code with
+      | "verification_source_access_denied" -> Tool_result.Policy_rejection
+      | "verification_source_storage_failed" -> Tool_result.Runtime_failure
+      | _ -> Tool_result.Workflow_rejection in
+    check bool "failure preserves its authority or storage classification" true
+      (Tool_result.failure_class result = Some expected_class);
+    check string "explicit source failure" code
+      Yojson.Safe.Util.(Tool_result.message result |> Yojson.Safe.from_string |> member "code" |> to_string)
+  | _ -> fail "source lookup unexpectedly succeeded"
+let invalid_input surface name args =
+  match call surface name args with
+  | Tool_result.Failed _ as result ->
+    check bool "invalid descriptor input is a workflow rejection" true
+      (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+    check bool "input rejection explains the error" true
+      (String.trim (Tool_result.message result) <> "")
+  | _ -> fail "malformed source input unexpectedly succeeded"
+let post ~author ~visibility ?origin ?meta_json ?(post_kind=Board.System_post) content =
+  match Board_dispatch.create_post ~author ~content ~post_kind
+    ~visibility ~ttl_hours:0 ?origin ?meta_json () with
+  | Ok post -> post
+  | Error error -> failf "post: %s" (Board_tool.board_error_to_string error)
+let post_args (post : Board.post) = `Assoc ["post_id", `String (Board.Post_id.to_string post.id)]
+let run_args id = `Assoc ["run_id", `String id]
+let metadata = `Assoc
+  [ "source_context", `Assoc ["question", `String "compare the designs"; "task", `Null; "goals", `List []]
+  ; "panel", `List [ `Assoc ["model", `String "first"; "answer", `String "Keep A"];
+                       `Assoc ["model", `String "second"; "answer", `String "B preserves the constraint"] ]
+  ; "judge", `Assoc ["status", `String "synthesized"; "decision", `String "Choose A"] ]
+(* The context the sink captures for a request made for [task]. A decision is
+   recorded only for the Task its run was requested for, so a fixture that
+   records one has to capture that Task. *)
+let metadata_for_task task_id = `Assoc
+  [ "source_context", `Assoc
+      [ "keeper", `String "producer"; "turn_ref", `Null
+      ; "task", `Assoc ["id", `String task_id; "title", `String "Make a decision";
+          "description", `String "Compare the evidence"; "status", `String "claimed"; "contract", `Null]
+      ; "goals", `List []; "question", `String "compare the designs"; "decision_context", `Null ]
+  ; "panel", `List [ `Assoc ["model", `String "first"; "answer", `String "Keep A"];
+                       `Assoc ["model", `String "second"; "answer", `String "B preserves the constraint"] ]
+  ; "judge", `Assoc ["status", `String "synthesized"; "decision", `String "Choose A"] ]
+let fusion ~author ~visibility ~source ?(content="Original independent advice") ?(meta_json=metadata) run_id =
+  post ~author ~visibility ~meta_json
+    ~origin:Board.{turn_ref=Some (Ids.Turn_ref.make ~trace_id:"origin-trace" ~absolute_turn:7);
+                  source=Some source; fusion_run_id=Some run_id; fusion_producer=Some author}
+    content
+
+module Store = Workspace_verification_store
+module Evidence = Verification_collaboration_evidence
+let board_ref (post : Board.post) = "board:" ^ Board.Post_id.to_string post.Board.id
+let capture config authority references =
+  Evidence.capture ~config ~authority ~references |> require "capture submission"
+let surfaces config references =
+  let task = VAT.create ~config ~producer:"producer"
+    ~submitted_evidence:(capture config (Evidence.Task_producer "producer") references)
+    |> require "Task snapshot surface" in
+  let goal = VAT.create_goal_proof ~config
+    ~submitted_evidence:(capture config Evidence.Goal_workspace references)
+    |> require "Goal snapshot surface" in
+  task, goal
+let restored items =
+  let bytes = Yojson.Safe.to_string (`List (List.map Store.submitted_evidence_item_to_yojson items)) in
+  match Yojson.Safe.from_string bytes with
+  | `List rows -> List.map (fun row -> Store.submitted_evidence_item_of_yojson row |> require "persisted item") rows
+  | _ -> fail "snapshot array"
+
+let new_task config ~title ~description =
+  ignore (Workspace.add_task config ~title ~priority:1 ~description);
+  let backlog = Workspace.read_backlog_r config |> require "primary backlog" in
+  List.find (fun (task : Masc_domain.task) -> task.title = title) backlog.tasks
+
+let task_args id = `Assoc ["task_ids", `List [`String id]]
+
+let test_task_sources_preserve_committed_state () = with_fixture (fun config ->
+  let open Yojson.Safe.Util in
+  let prior = new_task config ~title:"Prior approval" ~description:"Produce the first increment" in
+  List.iter (fun action -> match Workspace.transition_task_r config ~agent_name:"producer"
+    ~task_id:prior.id ~action ~notes:"First increment evidence"
+    ~prepare_verification_request:(Verification_protocol.create_submit_request ~config) () with
+    | Ok _ -> ()
+    | Error error -> failf "prior %s: %s" (Masc_domain.task_action_to_string action)
+        (Masc_error.to_string error))
+    [Masc_domain.Claim; Masc_domain.Start; Masc_domain.Submit_for_verification];
+  let pending = Workspace.read_backlog_r config |> require "pending primary" in
+  let row = List.find (fun (task : Masc_domain.task) -> task.id = prior.id) pending.tasks in
+  let verification_id = match row.task_status with
+    | Masc_domain.AwaitingVerification {verification_id; _} -> verification_id
+    | _ -> fail "prior Task did not await verification" in
+  let reference = "task:" ^ prior.id in
+  let pending_task, pending_goal = surfaces config [reference] in
+  ignore (Workspace.commit_verdict_r config
+    ~authority:(Masc_domain.Human_operator {operator_id="fixture-operator"})
+    ~verdict:Masc_domain.Verdict_approved ~task_id:prior.id ~verification_id
+    ~notes:"Independent first-increment approval" () |> require "prior verdict commit");
+  List.iter (fun surface ->
+    let source = read surface "keeper_tasks_list" (task_args prior.id) in
+    check string "later approval cannot change the pending snapshot" "awaiting_verification"
+      (source |> member "task" |> member "status" |> to_string);
+    check string "pending request identity remains exact" verification_id
+      (source |> member "task" |> member "verification_id" |> to_string)) [pending_task;pending_goal];
+  let next = new_task config ~title:"Next increment" ~description:"Use prior approval evidence" in
+  check bool "goalless Task remains valid" true (Option.is_none next.contract);
+  let primary = Workspace.read_backlog_r config |> require "multi-Task primary" in
+  let batched = capture config Evidence.Goal_workspace [reference; "task:" ^ next.id] in
+  let batched_surface = VAT.create_goal_proof ~config ~submitted_evidence:batched
+    |> require "multi-Task source surface" in
+  List.iter (fun id ->
+    let source = read batched_surface "keeper_tasks_list" (task_args id) in
+    check int "one batch retains one primary revision" primary.version
+      (source |> member "backlog_version" |> to_int);
+    check string "one batch retains one primary timestamp" primary.last_updated
+      (source |> member "backlog_last_updated" |> to_string)) [prior.id;next.id];
+  Verification_protocol.create_submit_request ~config ~task:next ~assignee:"producer"
+    ~verification_id:"next-with-prior-source"
+    ~claim:(Masc_domain.Completion_evidence {evidence_refs=[reference]}) |> require "next submission";
+  let request = Verification.load_request config.base_path "next-with-prior-source" |> require "next request" in
+  let items = match member "submitted_evidence" request.output with
+    | `List rows -> List.map (fun row -> Store.submitted_evidence_item_of_yojson row |> require "Task evidence decode") rows
+    | _ -> fail "Task source was not captured" in
+  let task_surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:(restored items)
+    |> require "Task source surface" in
+  let schema = List.find (fun (schema : Types_core.tool_schema) -> schema.name="keeper_tasks_list")
+    (VAT.schemas task_surface) in
+  check (list string) "Task source requires exact ids" ["task_ids"]
+    (schema.input_schema |> member "required" |> to_list |> List.map to_string);
+  check (list string) "Task source has no live listing filters" ["cursor";"task_ids"]
+    (schema.input_schema |> member "properties" |> keys);
+  let goal, _ = Goal_store.upsert_goal config ~title:"Ordered increments" ~metric:"source" ~target_value:"1" ()
+    |> require "Goal" in
+  let ctx : Tool_workspace.context = {config;agent_name="producer"} in
+  let result = Tool_workspace.dispatch ctx ~name:"masc_goal_transition"
+    ~args:(`Assoc ["goal_id",`String goal.id;"action",`String "request_complete";
+      "evidence_refs",`List [`String reference]]) |> Option.get in
+  (match result with Tool_result.Completed _ -> () | _ -> fail (Tool_result.message result));
+  let record = Goal_verification.get_record_authoritative config ~goal_id:goal.id
+    |> require "Goal source record" |> Option.get in
+  let goal_surface = VAT.create_goal_proof ~config ~submitted_evidence:(restored record.submitted_evidence)
+    |> require "Goal source surface" in
+  let committed = Workspace.read_backlog_r config |> require "committed primary" in
+  let original = List.find (fun (task : Masc_domain.task) -> task.id = prior.id) committed.tasks in
+  let original_json = Masc_domain.task_to_yojson original in
+  List.iter (fun surface ->
+    let source = read surface "keeper_tasks_list" (task_args prior.id) in
+    check bool "full committed state, time and notes preserved" true (member "task" source = original_json);
+    check int "primary revision retained" committed.version (source |> member "backlog_version" |> to_int);
+    check string "primary display timestamp retained" committed.last_updated
+      (source |> member "backlog_last_updated" |> to_string);
+    denied surface "keeper_tasks_list" (task_args next.id) "verification_source_access_denied";
+    invalid_input surface "keeper_tasks_list" (`Assoc []);
+    invalid_input surface "keeper_tasks_list" (`Assoc ["task_ids",`List [`String prior.id;`String next.id]]);
+    invalid_input surface "keeper_tasks_list" (`Assoc ["task_ids",`List [`String prior.id];"status",`String "done"]))
+    [task_surface;goal_surface];
+  let changed = {committed with tasks=List.map (fun (task : Masc_domain.task) ->
+    if task.id=prior.id then {task with title="Changed after submission"} else task) committed.tasks} in
+  Workspace.write_backlog config changed;
+  ignore (Workspace.delete_task_r config ~task_id:prior.id |> require "delete live prior Task");
+  List.iter (fun surface ->
+    let source = read surface "keeper_tasks_list" (task_args prior.id) in
+    check bool "edit and deletion cannot replace submitted state" true (member "task" source=original_json))
+    [task_surface;goal_surface])
+
+let test_task_source_failure_boundaries () = with_fixture (fun config ->
+  let task = new_task config ~title:"Task source integrity" ~description:"Original body" in
+  let reference = "task:" ^ task.id in
+  let items = capture config (Evidence.Task_producer "producer") [reference] in
+  let corrupt = List.map (function
+    | Store.Evidence_collaboration {reference;content;sha256} ->
+      Store.Evidence_collaboration {reference;content=content ^ " ";sha256}
+    | item -> item) items in
+  let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:corrupt |> require "corrupt surface" in
+  denied surface "keeper_tasks_list" (task_args task.id) "verification_source_storage_failed";
+  let wrong_id = "another-task" in
+  let wrong = List.map (function
+    | Store.Evidence_collaboration {content;sha256;_} ->
+      Store.Evidence_collaboration {reference="task:" ^ wrong_id;content;sha256}
+    | item -> item) items in
+  let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:wrong |> require "wrong identity surface" in
+  denied surface "keeper_tasks_list" (task_args wrong_id) "verification_source_storage_failed";
+  (match Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:["task:absent"] with
+   | Error (Evidence.Source_unavailable _) -> () | _ -> fail "unknown Task became evidence");
+  let primary_rows = Workspace.read_backlog_r config |> require "original primary" in
+  Workspace.write_backlog config {primary_rows with tasks=task :: primary_rows.tasks};
+  (match Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[reference] with
+   | Error (Evidence.Storage_failed _) -> () | _ -> fail "ambiguous duplicate Task identity became evidence");
+  let duplicated = Workspace.read_backlog_r config |> require "duplicated primary" in
+  Workspace.write_backlog config {duplicated with tasks=primary_rows.tasks};
+  let primary = Workspace_backlog.backlog_path config in
+  let recovery = Workspace_backlog.backlog_recovery_path config in
+  check bool "valid recovery exists before damage" true (Sys.file_exists recovery);
+  Fs_compat.save_file_atomic primary "{broken" |> require "damage primary for recovery control";
+  (match Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[reference] with
+   | Error (Evidence.Storage_failed _) -> () | _ -> fail "recovery was presented as primary Task evidence");
+  (match Workspace.read_backlog_observation_r config with
+   | Ok _ -> () | Error _ -> fail "negative control lost the valid recovery copy"))
+
+let test_submission_freezes_sources () = with_fixture (fun config ->
+  let p = post ~author:"producer" ~visibility:Board.Internal "Original objection" in
+  let id = Board.Post_id.to_string p.id in
+  let comment = Board_dispatch.add_comment ~post_id:id ~author:"peer" ~content:"Original criticism"
+    ~ttl_hours:0 () |> require "original comment" in
+  let run_id = "immutable-fusion" in
+  let f = fusion ~author:"producer" ~visibility:Board.Unlisted ~source:"fusion" run_id in
+  let refs = [board_ref p; "fusion:" ^ run_id] in
+  let task, goal = surfaces config refs in
+  let original = read task "masc_board_post_get" (post_args p) in
+  let original_fusion = read task "masc_fusion_status" (run_args run_id) in
+  ignore (Board_dispatch.update_post ~post_id:id ~editor:"producer" ~content:"Rewritten claim"
+    ~new_author:"peer" () |> require "rewrite and transfer");
+  ignore (Board_dispatch.add_comment ~post_id:id ~author:"peer" ~content:"Later friendly comment"
+    ~ttl_hours:0 () |> require "later comment");
+  ignore (Board_dispatch.update_post ~post_id:(Board.Post_id.to_string f.id) ~editor:"producer"
+    ~content:"New advice" ~new_author:"peer" () |> require "transfer Fusion");
+  Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string f.id) |> require_durable_deletion "remove expiring projection";
+  List.iter (fun surface ->
+    check bool "post and comments are submission bytes" true
+      (read surface "masc_board_post_get" (post_args p) = original);
+    check bool "Fusion survives author transfer and projection removal" true
+      (read surface "masc_fusion_status" (run_args run_id) = original_fusion)) [task;goal];
+  check bool "only original criticism is visible" true
+    (Yojson.Safe.Util.member "comments" original = `List [Board.comment_to_yojson comment]);
+  (* The cursor inputs page the submitted thread, not the live one: the later
+     comment is not after the snapshot's newest, and it is not among the
+     newest either. *)
+  let comment_id = Board.Comment_id.to_string comment.Board.id in
+  List.iter (fun surface ->
+    let open Yojson.Safe.Util in
+    let after = read surface "masc_board_post_get"
+      (`Assoc ["post_id", `String id; "after_comment_id", `String comment_id]) in
+    check bool "nothing follows the snapshot's newest comment" true
+      (member "comments" after = `List []);
+    check bool "the empty page starts right after that comment" true
+      (after |> member "pagination" |> member "offset" = `Int 1);
+    let newest = read surface "masc_board_post_get"
+      (`Assoc ["post_id", `String id; "comment_tail", `Int 5]) in
+    check bool "the newest comments are the snapshot's" true
+      (member "comments" newest = `List [Board.comment_to_yojson comment])) [task; goal];
+  let empty = VAT.create_goal_proof ~config ~submitted_evidence:[] |> require "other request" in
+  denied empty "masc_board_post_get" (post_args p) "verification_source_access_denied")
+
+let test_capture_failures_and_corruption () = with_fixture (fun config ->
+  let p = post ~author:"producer" ~visibility:Board.Direct ~post_kind:Board.Human_post "@recipient Private original" in
+  let require_error label = function Error _ -> () | Ok _ -> fail label in
+  Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:[board_ref p]
+    |> require_error "Goal captured private source";
+  Evidence.capture ~config ~authority:(Evidence.Task_producer "peer") ~references:[board_ref p]
+    |> require_error "other producer captured private source";
+  Evidence.capture ~config ~authority:Evidence.Goal_workspace ~references:["fusion:absent"]
+    |> require_error "missing source captured";
+  let items = capture config (Evidence.Task_producer "producer") [board_ref p] |> restored in
+  let item_json = List.hd items |> Store.submitted_evidence_item_to_yojson in
+  let operator = `Assoc ["result", `Assoc ["evidence", `Assoc ["access", `String "available"; "items", `List [item_json]]]] in
+  (match Tui_decode.decode_verification_evidence operator with
+   | Ok (Tui_decode.Evidence_items [Tui_decode.Ev_collaboration _]) -> ()
+   | _ -> fail "operator cannot decode submitted collaboration");
+  let metadata = List.hd items |> Store.submitted_evidence_item_metadata_to_yojson in
+  check bool "metadata does not carry full source body" true
+    (Yojson.Safe.Util.member "content" metadata = `Null);
+  let task = VAT.create ~config ~producer:"producer" ~submitted_evidence:items |> require "restored surface" in
+  ignore (read task "masc_board_post_get" (post_args p));
+  let item = List.hd items |> Store.submitted_evidence_item_to_yojson in
+  let corrupt = match item with `Assoc fields ->
+    `Assoc (("content", `String "{}") :: List.remove_assoc "content" fields) | _ -> fail "item" in
+  Store.submitted_evidence_item_of_yojson corrupt |> require_error "changed snapshot digest accepted";
+  List.iter (fun input -> invalid_input task "masc_board_post_get" input)
+    [`Assoc ["post_id", `String (Board.Post_id.to_string p.id); "comment_limit", `Null];
+     `Assoc ["post_id", `String (Board.Post_id.to_string p.id); "comment_offset", `Int (-1)];
+     (* The snapshot has no comments, so offset 1 names nothing; it is refused
+        rather than answered with an empty page that reads like lost comments. *)
+     `Assoc ["post_id", `String (Board.Post_id.to_string p.id); "comment_offset", `Int 1];
+     (* No comment of the empty snapshot has this id. *)
+     `Assoc ["post_id", `String (Board.Post_id.to_string p.id);
+             "after_comment_id", `String ("c-" ^ String.make 32 '0')];
+     `Assoc ["post_id", `String (Board.Post_id.to_string p.id);
+             "comment_tail", `Int 1; "comment_offset", `Int 0]];
+  let Board_dispatch.Jsonl store = Board_dispatch.backend () in
+  store.Board.posts_load_result <- Error "unreadable persisted source";
+  Evidence.capture ~config ~authority:(Evidence.Task_producer "producer") ~references:[board_ref p]
+    |> require_error "corrupt source captured";
+  ignore (read task "masc_board_post_get" (post_args p)))
+
+let test_fusion_original_and_separate_decision () = with_fixture (fun config ->
+  let id = "opaque-source-id" in
+  let goal_record, _ = Goal_store.upsert_goal config ~title:"Compare designs" ~metric:"verified designs" ~target_value:"1" () |> require "goal" in
+  let work = Task.Goal_assignment.add_task_with_result config ~goal_id:goal_record.id
+      ~title:"Make a decision" ~priority:2 ~description:"Compare the evidence" |> require "task" in
+  Workspace.claim_task_r config ~agent_name:"producer" ~task_id:work.task_id () |> require "claim" |> ignore;
+  let p = fusion ~author:"producer" ~visibility:Board.Unlisted ~source:"fusion"
+      ~meta_json:(metadata_for_task work.task_id) id in
+  let proposal = Fusion_decision.parse (`Assoc ["run_id", `String id; "task_id", `String work.task_id;
+    "decision", `String "modified"; "choice", `String "Choose B"; "reason", `String "B preserves measured behavior"]) |> require "proposal" in
+  let recorded = Fusion_decision.record ~config ~keeper:"producer"
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:"decision" ~absolute_turn:8) proposal |> require "decision" in
+  let task, goal = surfaces config ["fusion:" ^ id] in
+  List.iter (fun surface ->
+    let wire = read surface "masc_fusion_status" (run_args id) in
+    let open Yojson.Safe.Util in
+    check bool "full original source metadata" true
+      (wire |> member "post" |> member "meta" = metadata_for_task work.task_id);
+    check string "original source ID" (Board.Post_id.to_string p.id)
+      (wire |> member "post" |> member "id" |> to_string);
+    check string "same evidence hash as decision" (Fusion_decision.evidence_sha256 p)
+      (wire |> member "evidence_sha256" |> to_string);
+    check bool "actual Keeper choice is separately attributed" true
+      (wire |> member "keeper_decisions" = `List [recorded.event]);
+    let padded = read surface "masc_fusion_status" (run_args (" " ^ id ^ "\n")) in
+    check string "a padded run id reads the run the canonical handler reads" (Board.Post_id.to_string p.id)
+      (padded |> member "post" |> member "id" |> to_string);
+    check string "the echoed run id is the exact one" id (padded |> member "run_id" |> to_string)) [task; goal];
+  check int "reads do not adopt or duplicate choices" 1
+    (List.length (Fusion_decision.read ~config ~run_id:id |> require "read decisions")))
+
+let test_original_fusion_producer_before_submit () = with_fixture (fun config ->
+  let run_id = "transferred-before-submit" in
+  let post = fusion ~author:"producer" ~visibility:Board.Unlisted ~source:"fusion" run_id in
+  let moved = Board_dispatch.update_post ~post_id:(Board.Post_id.to_string post.id)
+    ~editor:"producer" ~content:post.body ~new_author:"peer" () |> require "transfer" in
+  let durable = Board.post_to_yojson moved in
+  let restored_post = Board.post_of_yojson durable |> Option.get in
+  check bool "original producer persists independently from mutable author" true
+    (Option.bind restored_post.origin (fun origin -> origin.Board.fusion_producer) = Some "producer");
+  let items = capture config (Evidence.Task_producer "producer") ["fusion:" ^ run_id] in
+  let task = VAT.create ~config ~producer:"producer" ~submitted_evidence:items |> require "original producer surface" in
+  ignore (read task "masc_fusion_status" (run_args run_id));
+  (match Evidence.capture ~config ~authority:(Evidence.Task_producer "peer") ~references:["fusion:" ^ run_id] with
+   | Error (Evidence.Access_denied _) -> () | _ -> fail "new Board author became Fusion producer");
+  let missing_identity = match durable with
+    | `Assoc fields -> (match List.assoc "origin" fields with
+      | `Assoc origin -> `Assoc (("origin", `Assoc (List.remove_assoc "fusion_producer" origin)) :: List.remove_assoc "origin" fields)
+      | _ -> fail "origin")
+    | _ -> fail "post" in
+  check bool "old Fusion origin never guesses producer from current author" true
+    (Board.post_of_yojson missing_identity = None))
+
+let test_goal_request_freezes_sources () = with_fixture (fun config ->
+  let post = post ~author:"peer" ~visibility:Board.Internal "Goal proof source" in
+  let goal, _ = Goal_store.upsert_goal config ~title:"Frozen Goal proof" ~metric:"proof" ~target_value:"1" () |> require "Goal" in
+  let ctx : Tool_workspace.context = {config; agent_name="producer"} in
+  let result = Tool_workspace.dispatch ctx ~name:"masc_goal_transition"
+    ~args:(`Assoc ["goal_id", `String goal.id; "action", `String "request_complete";
+      "evidence_refs", `List [`String (board_ref post)]]) |> Option.get in
+  (match result with Tool_result.Completed _ -> () | _ -> fail (Tool_result.message result));
+  let record = Goal_verification.get_record_authoritative config ~goal_id:goal.id |> require "Goal request" |> Option.get in
+  let items = match record.completion with
+    | Goal_verification.Proof_pending _ -> restored record.submitted_evidence
+    | _ -> fail "Goal proof request not pending" in
+  Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string post.id) |> require_durable_deletion "remove live Goal source";
+  let surface = VAT.create_goal_proof ~config ~submitted_evidence:items |> require "Goal snapshot surface" in
+  let result = read surface "masc_board_post_get" (post_args post) in
+  check string "Goal reads original body after deletion" post.body
+    Yojson.Safe.Util.(result |> member "post" |> member "body" |> to_string))
+
+let test_task_request_persists_snapshot () = with_fixture (fun config ->
+  let p = post ~author:"producer" ~visibility:Board.Internal "Submitted body" in
+  ignore (Workspace.add_task config ~title:"Submission source" ~priority:1 ~description:"");
+  let task = List.hd (Workspace.read_backlog config).tasks in
+  check bool "fixture has no contract" true (Option.is_none task.contract);
+  let since_seq = (Log.Ring.bounds ()).total - 1 in
+  Verification_protocol.create_submit_request ~config ~task ~assignee:"producer"
+    ~verification_id:"snapshot-request" ~claim:(Masc_domain.Completion_evidence {evidence_refs=[board_ref p]})
+    |> require "submit request";
+  let request = Verification.load_request config.base_path "snapshot-request" |> require "load request" in
+  let items = match Yojson.Safe.Util.member "submitted_evidence" request.output with
+    | `List rows -> List.map (fun row -> Store.submitted_evidence_item_of_yojson row |> require "decode request item") rows
+    | _ -> fail "missing submission snapshot" in
+  check bool "evidence persists without a completion contract" true (items <> []);
+  let diagnostic = Log.Ring.recent ~since_seq ~module_filter:"Task" ()
+    |> List.find_opt (fun (row : Log.Ring.entry) ->
+      Yojson.Safe.Util.member "event" row.details = `String "verification_contract_gap") in
+  (match diagnostic with
+   | None -> fail "no structured contract-gap diagnostic"
+   | Some row ->
+     check bool "task id is not misreported as a Keeper" true (Option.is_none row.keeper_name);
+     check bool "contract absence is separate from evidence" true
+       (Yojson.Safe.Util.member "contract_present" row.details = `Bool false);
+     check int "diagnostic counts submitted evidence independently"
+       (List.length items)
+       Yojson.Safe.Util.(member "submitted_reference_count" row.details |> to_int));
+  let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:items |> require "request-bound surface" in
+  Board_dispatch.delete_post ~post_id:(Board.Post_id.to_string p.id) |> require_durable_deletion "remove source";
+  ignore (read surface "masc_board_post_get" (post_args p));
+  (match Verification_protocol.create_submit_request ~config ~task ~assignee:"producer"
+    ~verification_id:"missing-request" ~claim:(Masc_domain.Completion_evidence {evidence_refs=[board_ref p]}) with
+   | Error _ -> () | Ok _ -> fail "submission with missing source committed");
+  check bool "failed capture writes no verification request" true
+    (Result.is_error (Verification.load_request config.base_path "missing-request")))
+
+let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
+  let open Yojson.Safe.Util in
+  let payload = String.concat "" (List.init 5000 (fun _ -> "한글\"\\\n")) in
+  let metadata = `Assoc ["panel", `String payload] in
+  let board = post ~author:"producer" ~visibility:Board.Internal ~meta_json:metadata "Large Board source" in
+  let run_id = "large-fusion-source" in
+  let fusion_post = post ~author:"producer" ~visibility:Board.Unlisted ~meta_json:metadata
+    ~origin:Board.{turn_ref=None; source=Some "fusion"; fusion_run_id=Some run_id; fusion_producer=Some "producer"}
+    "Large Fusion source" in
+  let task_row = new_task config ~title:"Large Task source" ~description:payload in
+  let primary = Workspace.read_backlog_r config |> require "large Task primary" in
+  let task, goal = surfaces config [board_ref board; "fusion:" ^ run_id; "task:" ^ task_row.id] in
+  let cursor_args args cursor = match args with
+    | `Assoc fields -> `Assoc (("cursor", cursor) :: fields) | _ -> assert false in
+  let bridge surface name args =
+    let result = call surface name args in
+    let content = match Tool_bridge.to_agent_core_typed_result ~base_path:config.Workspace.base_path result with
+      | Ok result -> result.Agent_core.Types.content
+      | Error error -> failf "bridge refused source page: %s" error.Agent_core.Types.message in
+    check bool "actual model content stays within bridge budget" true
+      (String.length content <= Tool_bridge.default_externalize_threshold_bytes);
+    (* A spilled blob marker cannot parse as the source-page JSON contract. *)
+    Yojson.Safe.from_string content in
+  let reconstruct surface name args =
+    let first = bridge surface name args in
+    check string "large source advertises lossless continuation" "source_json_page"
+      (first |> member "representation" |> to_string);
+    let expected_digest = first |> member "source_sha256" |> to_string in
+    let rec collect offset page parts =
+      check int "pages are contiguous bytes" offset (page |> member "byte_offset" |> to_int);
+      check string "all pages bind one source observation" expected_digest
+        (page |> member "source_sha256" |> to_string);
+      let content = page |> member "content" |> to_string in
+      check bool "every page makes progress" true (String.length content > 0);
+      let offset = offset + String.length content in
+      match member "next_cursor" page with
+      | `Null ->
+        check int "complete byte count" offset (page |> member "total_bytes" |> to_int);
+        let bytes = String.concat "" (List.rev (content :: parts)) in
+        check string "reconstructed digest matches exact original" expected_digest
+          Agent_core_sha256.(digest_string bytes |> to_hex);
+        Yojson.Safe.from_string bytes, member "next_cursor" first
+      | cursor -> collect offset (bridge surface name (cursor_args args cursor)) (content :: parts) in
+    collect 0 first [] in
+  List.iter (fun surface ->
+    List.iter (fun (name, args, expected) ->
+      let reconstructed, cursor = reconstruct surface name args in
+      check bool "entire original source including escapes and Unicode survives" true
+        (reconstructed = expected);
+      let invalid_hash = match cursor with `Assoc fields ->
+        `Assoc (("source_sha256", `String (String.make 64 '0')) :: List.remove_assoc "source_sha256" fields)
+        | _ -> fail "large source lacks continuation" in
+      denied surface name (cursor_args args invalid_hash) "verification_source_unavailable";
+      invalid_input surface name (cursor_args args (`Assoc ["source_sha256", `String "bad"; "byte_offset", `Int 0])))
+      ["masc_board_post_get", post_args board,
+        `Assoc ["source", `String "board"; "post", Board.post_to_yojson board;
+          "comments", `List []; "pagination", `Assoc ["offset", `Int 0; "returned", `Int 0;
+            "total", `Int 0; "has_more", `Bool false; "next_offset", `Null]];
+       "masc_fusion_status", run_args run_id,
+        `Assoc ["source", `String "fusion"; "run_id", `String run_id;
+          "evidence_sha256", `String (Fusion_decision.evidence_sha256 fusion_post);
+          "post", Board.post_to_yojson fusion_post; "keeper_decisions", `List []];
+       "keeper_tasks_list", task_args task_row.id,
+        `Assoc ["source", `String "task"; "backlog_version", `Int primary.version;
+          "backlog_last_updated", `String primary.last_updated; "task", Masc_domain.task_to_yojson task_row]])
+    [task; goal];
+  let private_post = post ~author:"producer" ~visibility:Board.Direct ~post_kind:Board.Human_post ~meta_json:metadata "@peer Private source" in
+  let task_private = VAT.create ~config ~producer:"producer"
+    ~submitted_evidence:(capture config (Evidence.Task_producer "producer") [board_ref private_post])
+    |> require "private snapshot" in
+  let private_page = bridge task_private "masc_board_post_get" (post_args private_post) in
+  denied goal "masc_board_post_get"
+    (cursor_args (post_args private_post) (member "next_cursor" private_page))
+    "verification_source_access_denied";
+  let first = bridge task "masc_board_post_get" (post_args board) in
+  let cursor = member "next_cursor" first in
+  ignore (Board_dispatch.add_comment ~post_id:(Board.Post_id.to_string board.id)
+    ~author:"producer" ~content:"New source revision" ~ttl_hours:0 () |> require "changed source");
+  let continued = bridge task "masc_board_post_get" (cursor_args (post_args board) cursor) in
+  check string "live edits cannot invalidate submission paging" "source_json_page"
+    (continued |> member "representation" |> to_string))
+
+let () = run "Verifier submitted collaboration sources" ["submission", [
+  test_case "Task and Goal submission preserve exact prior committed state" `Quick test_task_sources_preserve_committed_state;
+  test_case "Task source rejects corruption, wrong identity and recovered primary" `Quick test_task_source_failure_boundaries;
+  test_case "submission freezes author, comments and expiring Fusion source" `Quick test_submission_freezes_sources;
+  test_case "capture authority, corruption and persistence roundtrip" `Quick test_capture_failures_and_corruption;
+  test_case "original Fusion advice and separately attributed decisions" `Quick test_fusion_original_and_separate_decision;
+  test_case "original Fusion producer survives pre-submission author transfer" `Quick test_original_fusion_producer_before_submit;
+  test_case "Goal request owns source before completion proof" `Quick test_goal_request_freezes_sources;
+  test_case "Task request owns snapshot before commit" `Quick test_task_request_persists_snapshot;
+  test_case "full Board and Fusion bytes survive actual bridge paging" `Quick test_large_sources_survive_actual_bridge]]

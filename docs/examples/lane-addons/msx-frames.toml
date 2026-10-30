@@ -1,0 +1,13 @@
+# Installation declaration. The referenced lane.toml describes the package.
+# This path resolves from this example's directory in the repository.
+# When installing elsewhere, adjust it to the actual package manifest path.
+id = "msx-frames"
+run_id = "existing-msx-observations"
+manifest_path = "../../../addons/msx-observer/lane.toml"
+
+[binding]
+machine_id = "workspace-msx"
+
+[[binding.sources]]
+source_id = "existing-machine"
+kind = "msx_capture"

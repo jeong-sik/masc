@@ -1,0 +1,227 @@
+name: Runtime artifact comparisons
+# Compare runtime artifacts only by explicit dispatch.
+on:
+  workflow_dispatch:
+    inputs:
+      compare_checkpoint_history:
+        description: Compare checkpoint inventories with scheduler and runtime-events evidence
+        type: boolean
+        default: false
+      compare_server:
+        description: Compare two existing Linux x64 manual probe artifacts
+        type: boolean
+        default: false
+      compare_vision:
+        description: Measure vision artifact storage and load on the fixed source pair
+        type: boolean
+        default: false
+      checkpoint_histories:
+        type: string
+        description: Matching checkpoint history files for the checkpoint comparison
+        default: '128'
+      checkpoint_noise:
+        type: string
+        description: Nonmatching directory entries for the checkpoint comparison
+        default: '8192'
+      baseline_run:
+        type: string
+        description: Baseline Linux probe workflow run ID
+      baseline_artifact:
+        type: string
+        description: Baseline runtime-probe artifact ID
+      baseline_commit:
+        type: string
+        description: Expected full baseline source commit
+      candidate_run:
+        type: string
+        description: Candidate Linux probe workflow run ID
+      candidate_artifact:
+        type: string
+        description: Candidate runtime-probe artifact ID
+      candidate_commit:
+        type: string
+        description: Expected full candidate source commit
+      repetitions:
+        type: string
+        description: Repetitions per binary, alternating order
+        default: '3'
+      server_tasks:
+        type: string
+        description: Synthetic initial task count for server comparison
+        default: '250'
+      server_workers:
+        type: string
+        description: Synthetic active agent records for server comparison (no Keeper processes)
+        default: '0'
+permissions:
+  contents: read
+concurrency:
+  group: bench-tests-${{ inputs.compare_checkpoint_history && 'compare-checkpoint-history' || inputs.compare_vision && 'compare-vision' || inputs.compare_server && 'compare-server' || 'comparison' }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate-inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Select the requested comparison
+        env:
+          SERVER: ${{ inputs.compare_server }}
+          VISION: ${{ inputs.compare_vision }}
+          CHECKPOINT: ${{ inputs.compare_checkpoint_history }}
+        run: |
+          python3 - <<'PYVALIDATE'
+          import os
+          selected = [name for name in ('SERVER', 'VISION', 'CHECKPOINT') if os.environ[name] == 'true']
+          if len(selected) != 1:
+              raise SystemExit('Choose one comparison mode: ' + ', '.join(selected))
+          PYVALIDATE
+  compare-server:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_server && !inputs.compare_vision && !inputs.compare_checkpoint_history }}
+    needs: validate-inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Install the Linux release runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y -qq libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+      - name: Verify artifacts and compare isolated servers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVER_TASKS: ${{ inputs.server_tasks }}
+          SERVER_WORKERS: ${{ inputs.server_workers }}
+          BASELINE_RUN: ${{ inputs.baseline_run }}
+          BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
+          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          exec python3 scripts/harness/perf/compare_server_artifacts.py \
+            --repository "$GITHUB_REPOSITORY" --repository-id "$GITHUB_REPOSITORY_ID" \
+            --baseline-run "$BASELINE_RUN" --baseline-artifact "$BASELINE_ARTIFACT" \
+            --baseline-commit "$BASELINE_COMMIT" \
+            --candidate-run "$CANDIDATE_RUN" --candidate-artifact "$CANDIDATE_ARTIFACT" \
+            --candidate-commit "$CANDIDATE_COMMIT" \
+            --repetitions "$REPETITIONS" --tasks "$SERVER_TASKS" --workers "$SERVER_WORKERS" \
+            --output comparison-results
+      - name: Retain complete or partial HTTP receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: server-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: comparison-results/
+          if-no-files-found: warn
+
+  compare-vision:
+    needs: validate-inputs
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_vision && !inputs.compare_server && !inputs.compare_checkpoint_history }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+          os-packages: jq ripgrep
+      - name: Measure the same vision artifacts on both source commits
+        env:
+          DUNE_JOBS: "2"
+        run: |
+          python3 scripts/harness/perf/vision_artifact_compare.py \
+            --output "${RUNNER_TEMP}/vision-results" --count 40 --seconds 90 --pairs 3
+      - name: Retain identity, latency, scheduler and runtime-event receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vision-artifact-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/vision-results/summary.json
+            ${{ runner.temp }}/vision-results/fixture-sha256.txt
+            ${{ runner.temp }}/vision-results/window-*/receipt.json
+            ${{ runner.temp }}/vision-results/window-*/cleanup.json
+            ${{ runner.temp }}/vision-results/window-*/failure.json
+            ${{ runner.temp }}/vision-results/window-*/stdout.jsonl
+            ${{ runner.temp }}/vision-results/window-*/stderr.txt
+            ${{ runner.temp }}/vision-results/window-*/rtev_*.txt
+            ${{ runner.temp }}/vision-results/window-*/rtev_*-control/ready
+            ${{ runner.temp }}/vision-results/window-*/rtev_*-control/ended
+            ${{ runner.temp }}/vision-results/window-*/state/window-start
+            ${{ runner.temp }}/vision-results/window-*/state/window-complete
+  compare-checkpoint-history:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.compare_checkpoint_history && !inputs.compare_server }}
+    needs: validate-inputs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Require one comparison mode
+        env:
+          SERVER: ${{ inputs.compare_server }}
+          VISION: ${{ inputs.compare_vision }}
+        run: test "$SERVER" != true && test "$VISION" != true
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - name: Build only the runtime-events readers
+        run: |
+          # Resolve the reader dependency from the repository's dependency lock.
+          reader_eio_version="$(python3 - <<'PYVERSION'
+          import pathlib, re
+          locked = pathlib.Path('masc.opam.locked').read_text()
+          versions = re.findall(r'^\s*"eio"\s*\{=\s*"([0-9.]+)"\}\s*$', locked, re.M)
+          if len(versions) != 1:
+              raise SystemExit('expected one exact numeric eio version in masc.opam.locked')
+          print(versions[0])
+          PYVERSION
+          )"
+          opam install -y dune "eio.$reader_eio_version"
+          mkdir -p "$RUNNER_TEMP/checkpoint-readers"
+          cp tools/rtev_trace/*.ml tools/rtev_trace/dune "$RUNNER_TEMP/checkpoint-readers/"
+          printf '(lang dune 3.17)\n' > "$RUNNER_TEMP/checkpoint-readers/dune-project"
+          opam exec -- dune build --root "$RUNNER_TEMP/checkpoint-readers" ./rtev_fibers.exe ./rtev_watch.exe
+      - name: Install Linux binary libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y -qq libffi8 libgmp10 libpq5 libssl3t64 libzstd1 zlib1g libncurses6 libtinfo6
+      - name: Compare checkpoint workload on this runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECKPOINT_HISTORIES: ${{ inputs.checkpoint_histories }}
+          CHECKPOINT_NOISE: ${{ inputs.checkpoint_noise }}
+          BASELINE_RUN: ${{ inputs.baseline_run }}
+          BASELINE_ARTIFACT: ${{ inputs.baseline_artifact }}
+          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          REPETITIONS: ${{ inputs.repetitions }}
+        run: |
+          python3 scripts/harness/perf/compare_checkpoint_history.py \
+            --repository "$GITHUB_REPOSITORY" --repository-id "$GITHUB_REPOSITORY_ID" \
+            --baseline-run "$BASELINE_RUN" --baseline-artifact "$BASELINE_ARTIFACT" \
+            --baseline-commit "$BASELINE_COMMIT" \
+            --candidate-run "$CANDIDATE_RUN" --candidate-artifact "$CANDIDATE_ARTIFACT" \
+            --candidate-commit "$CANDIDATE_COMMIT" --repetitions "$REPETITIONS" \
+            --histories "$CHECKPOINT_HISTORIES" --noise "$CHECKPOINT_NOISE" \
+            --tracers "$RUNNER_TEMP/checkpoint-readers/_build/default" --output checkpoint-results
+      - name: Retain raw measurements, including failed sessions
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: checkpoint-history-comparison-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: checkpoint-results/
+          if-no-files-found: warn

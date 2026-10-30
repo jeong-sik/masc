@@ -1,0 +1,172 @@
+(** Typed operator command for one Board-attention quarantine.
+
+    The command never invokes AGENT_CORE and never retries automatically. Candidate
+    [Requeue_requested], candidate [Requeued], and exact partition [Ready] are
+    committed in that order. If the partition row is absent, the candidate's
+    durable quarantine first restores its [Blocked] generation without
+    inventing missing failure detail. The opaque quarantine id fences a later
+    failure generation on the same singleton partition. *)
+
+val request_schema : string
+val result_schema : string
+
+type decision = Acknowledge_and_requeue
+
+type request =
+  { candidate_id : string
+  ; expected_quarantine_id : string
+  ; decision : decision
+  }
+
+type t =
+  { keeper_name : string
+  ; partition_id : string
+  ; request : request
+  ; requested_by : string
+    (** The authenticated principal issuing the command. It is written onto
+        the candidate's [Requeue_requested] and [Requeued] phases and is the
+        actor of the command's audit row. *)
+  }
+
+type input_error =
+  | Object_required
+  | Duplicate_fields of string list
+  | Unsupported_fields of string list
+  | Missing_fields of string list
+  | Invalid_field of string
+  | Unsupported_schema of string
+  | Unsupported_decision of string
+  | Invalid_keeper_name of string
+  | Invalid_requester
+
+type execution_error =
+  | Candidate_state_conflict of string
+  | Partition_state_conflict of string
+  | Durability_unconfirmed of string
+  | Wake_request_failed of string
+
+type report =
+  { candidate : Keeper_board_attention_candidate.candidate
+  ; partition : Keeper_board_attention_partition.t
+  ; failure_category :
+      Keeper_board_attention_candidate.quarantine_failure_category
+      (** Typed category captured when the command resolves the quarantine;
+          renderers never reopen the candidate status or synthesize an
+          ["unknown"] success value. *)
+  ; wake : Keeper_board_attention_worker_wake.wake_result
+  }
+
+val input_error_to_string : input_error -> string
+val input_error_to_json : input_error -> Yojson.Safe.t
+val execution_error_label : execution_error -> string
+val parse_request : Yojson.Safe.t -> (request, input_error) result
+val parse_tool_command :
+  requested_by:string -> Yojson.Safe.t -> (t, input_error) result
+
+val make :
+  keeper_name:string ->
+  raw_partition_id:string ->
+  requested_by:string ->
+  request ->
+  (t, input_error) result
+
+val execute :
+  now:float ->
+  base_path:string ->
+  t ->
+  (report, execution_error) result
+
+module For_testing : sig
+  val execute_with_before_root_restore :
+    before_root_restore:(unit -> unit) -> now:float -> base_path:string -> t ->
+    (report, execution_error) result
+
+  val execute_with_before_partition_commit :
+    before_partition_commit:(Keeper_board_attention_partition.t -> unit) ->
+    now:float ->
+    base_path:string ->
+    t ->
+    (report, execution_error) result
+end
+
+val audit :
+  Workspace.config ->
+  t ->
+  outcome:Audit_log.outcome ->
+  (unit, string) result
+
+val audit_json : (unit, string) result -> Yojson.Safe.t
+val success_json : audit:Yojson.Safe.t -> t -> report -> Yojson.Safe.t
+val failure_json : audit:Yojson.Safe.t -> execution_error -> Yojson.Safe.t
+
+
+(** The candidate ledger says how far the operator's requeue got; once a
+    requeue is recorded the partition ledger says whether it finished.
+    - [Inventory_requeue_unfinished]: the candidate records the requeue and the
+      partition is still [Blocked] at the quarantined generation, or its row is
+      absent. [execute] restores an absent row from the candidate and finishes
+      the requeue.
+    - [Inventory_requeued]: the partition left [Blocked] after the recorded
+      requeue.
+    - [Inventory_requeue_unreconciled]: the candidate records a requeue that
+      the partition ledger does not explain (the partition names another
+      candidate or generation, or the ledger is unreadable) and [execute]
+      refuses it. It is not shown as finished. *)
+type inventory_phase =
+  | Inventory_quarantined
+  | Inventory_requeue_requested
+  | Inventory_requeue_unfinished
+  | Inventory_requeued
+  | Inventory_requeue_unreconciled
+
+type inventory_item =
+  { keeper_name : string
+  ; partition_id : string
+  ; candidate_id : string
+  ; quarantine_id : string
+  ; phase : inventory_phase
+  ; failure_category : Keeper_board_attention_candidate.quarantine_failure_category
+  ; attempt_provenance : Keeper_board_attention_candidate.attempt_provenance option
+  ; quarantined_at : float
+  ; requested_at : float option
+  ; requeued_at : float option
+  ; requested_by : string option
+  }
+
+type inventory_error_kind =
+  | Inventory_candidate_ledger_unavailable
+  | Inventory_partition_ledger_unavailable
+      (** Read only for a keeper with a recorded requeue; that keeper's
+          requeued rows are [Inventory_requeue_unreconciled]. *)
+
+type inventory_error =
+  { keeper_name : string
+  ; kind : inventory_error_kind
+  }
+
+type inventory =
+  { items : inventory_item list
+  ; errors : inventory_error list
+  }
+
+val inventory :
+  base_path:string ->
+  keeper_names:string list ->
+  inventory
+
+val inventory_to_json : inventory -> Yojson.Safe.t
+
+val inventory_json :
+  base_path:string ->
+  keeper_names:string list ->
+  Yojson.Safe.t
+
+val request_to_json : request -> Yojson.Safe.t
+(** The request body {!parse_request} accepts, schema included. *)
+
+val inventory_item_of_json : Yojson.Safe.t -> (inventory_item, string) result
+(** Inverse of the item rows {!inventory_to_json} writes. An unknown [phase]
+    or [failure_category] spelling is an [Error], never a default. *)
+
+val inventory_error_of_json : Yojson.Safe.t -> (inventory_error, string) result
+(** Inverse of the [errors] rows {!inventory_to_json} writes. *)

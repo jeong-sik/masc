@@ -1,0 +1,14 @@
+File "test/test_process_eio_coverage.ml", line 709, characters 33-41:
+709 |   Process_eio.init ~cwd_default ~proc_mgr ~clock;
+                                       ^^^^^^^^
+Error: The value proc_mgr has type
+         Failing.tag Eio.Process.mgr_ty Eio.Resource.t
+       but an expression was expected of type
+         Eio_unix.Process.mgr_ty Eio.Resource.t
+       Type
+         Failing.tag Eio.Process.mgr_ty =
+           [ `Platform of Failing.tag | `Process_mgr ]
+       is not compatible with type
+         Eio_unix.Process.mgr_ty =
+           [ `Platform of [ `Generic | `Unix ] | `Process_mgr ]
+       Types for tag `Platform are incompatible

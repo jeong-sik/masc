@@ -1,0 +1,665 @@
+{
+  "status": "ok",
+  "server": "masc",
+  "version": "0.35.2",
+  "release_version": "0.35.2",
+  "build": {
+    "release_version": "0.35.2",
+    "binary_version": "0.35.2",
+    "commit": "4a6723c3f54a597a52db26276635b4a2b8b6e871",
+    "commit_source": "embedded",
+    "binary_commit": "4a6723c3f54a597a52db26276635b4a2b8b6e871",
+    "binary_commit_source": "embedded",
+    "provenance_source": "self_observed",
+    "executable_sha256": "a44c69c2cb9788817381bc417ec4a789f493038f076d60b6356d4c7205102261",
+    "binary_commit_unix_ts": 1788997776.0,
+    "binary_commit_age_seconds": 1219,
+    "executable_path": "/private/tmp/masc-verifier-large-candidate-4a/main_eio.exe",
+    "executable_dir": "/private/tmp/masc-verifier-large-candidate-4a",
+    "runtime_instance_id": "01a088a6-471b-7000-b732-b56ec794c2d7",
+    "started_at": "2026-09-10T00:09:53Z",
+    "uptime_seconds": 1
+  },
+  "health_detail": "full",
+  "protocol": {
+    "default": "2025-11-25",
+    "listener": "http/1.1",
+    "supported": [
+      "2026-07-28",
+      "DRAFT-2026-v1",
+      "2024-11-05",
+      "2025-03-26",
+      "2025-06-18",
+      "2025-11-25"
+    ]
+  },
+  "transport": {
+    "streamable_http_default": true,
+    "http": {
+      "configured": true,
+      "enabled": true,
+      "protocol_capable": true,
+      "auth_policy_present": false,
+      "base_url": "http://127.0.0.1:18945",
+      "mcp_url": "http://127.0.0.1:18945/mcp",
+      "sse_url": "http://127.0.0.1:18945/mcp?sse_kind=observer"
+    },
+    "grpc": {
+      "enabled": false,
+      "configured": false,
+      "listening": false,
+      "reachable": false,
+      "listen_status": "disabled",
+      "port": 8936,
+      "service": "masc.workspace.v1.MascWorkspace",
+      "health_service": "grpc.health.v1.Health"
+    },
+    "websocket": {
+      "enabled": false,
+      "configured": false,
+      "listening": false,
+      "reachable": false,
+      "mode": "same_origin",
+      "discovery_path": "/ws",
+      "upgrade_path": "/ws",
+      "request_host": "127.0.0.1",
+      "session_count": 0
+    },
+    "total_sessions": 0,
+    "enabled_protocols": [
+      "json-rpc",
+      "sse"
+    ]
+  },
+  "http_listener": {
+    "mode": "auto",
+    "status": "listening",
+    "active_connections": 1,
+    "accepted_total": 3,
+    "accept_errors_total": 0,
+    "rate_limit_responses_total": 0,
+    "rate_limit_responses": [
+      {
+        "protocol": "h1",
+        "scope": "client_ip",
+        "total": 0
+      },
+      {
+        "protocol": "h1",
+        "scope": "agent",
+        "total": 0
+      },
+      {
+        "protocol": "h1",
+        "scope": "sse_connection",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "client_ip",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "agent",
+        "total": 0
+      },
+      {
+        "protocol": "h2",
+        "scope": "sse_connection",
+        "total": 0
+      }
+    ],
+    "last_accept_unix": 1788998995.180343,
+    "last_accept_age_seconds": 0.0006990432739257812,
+    "last_error": null
+  },
+  "paths": {
+    "cwd": "/private/tmp/masc-verifier-image-runtime-large-4a/base",
+    "effective_base_path": "/private/tmp/masc-verifier-image-runtime-large-4a/base",
+    "effective_masc_root": "/private/tmp/masc-verifier-image-runtime-large-4a/base/.masc",
+    "current_task_path": "/private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/current_task",
+    "current_task_shape": "absent",
+    "effective_has_masc_dir": true,
+    "roots_diverge": false,
+    "strict_mode_requested": false,
+    "startup_rejected": false,
+    "startup_abort_eligible": false,
+    "input_base_path": "/private/tmp/masc-verifier-image-runtime-large-4a/base",
+    "env_masc_base_path": "/private/tmp/masc-verifier-image-runtime-large-4a/base",
+    "resolution_source": "explicit_cli"
+  },
+  "internal_mcp_auth": {
+    "schema": "masc.internal_mcp_auth.v1",
+    "status": "ok",
+    "source": "running_process_env_and_auth_hash",
+    "env_key": "MASC_INTERNAL_MCP_TOKEN",
+    "env_token_present": true,
+    "token_hash_file_present": true,
+    "env_token_verifies": true,
+    "keeper_internal_runtime_mcp_ready": true,
+    "missing": [],
+    "operator_action_required": false,
+    "operator_next_action": "none"
+  },
+  "otel": {
+    "enabled": false,
+    "status": "disabled",
+    "endpoint": "http://127.0.0.1:4318",
+    "service_name": "masc",
+    "exporter_active": false,
+    "exporter_degraded": false,
+    "consecutive_failures": 0,
+    "last_successful_export_unix": null,
+    "last_degradation_error": null
+  },
+  "uptime": "1s",
+  "sse_clients": 0,
+  "startup": {
+    "phase": "ready",
+    "state_ready": true,
+    "pending_lazy_tasks": [],
+    "last_error": null,
+    "path_diagnostics": {
+      "cwd": "/private/tmp/masc-verifier-image-runtime-large-4a/base",
+      "effective_base_path": "/private/tmp/masc-verifier-image-runtime-large-4a/base",
+      "effective_masc_root": "/private/tmp/masc-verifier-image-runtime-large-4a/base/.masc",
+      "current_task_path": "/private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/current_task",
+      "current_task_shape": "absent",
+      "effective_has_masc_dir": true,
+      "roots_diverge": false,
+      "strict_mode_requested": false,
+      "startup_rejected": false,
+      "startup_abort_eligible": false,
+      "input_base_path": "/private/tmp/masc-verifier-image-runtime-large-4a/base",
+      "env_masc_base_path": "/private/tmp/masc-verifier-image-runtime-large-4a/base",
+      "resolution_source": "explicit_cli"
+    },
+    "config_resolution": {
+      "status": "ready",
+      "warnings": [],
+      "config_root": {
+        "path": "/private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/config",
+        "exists": true,
+        "source": "local_masc"
+      },
+      "prompts": {
+        "path": "/private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/config/prompts",
+        "exists": true,
+        "source": "local_masc"
+      },
+      "keepers": {
+        "path": "/private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/config/keepers",
+        "exists": true,
+        "source": "local_masc"
+      }
+    },
+    "elapsed_sec": 0.5879828929901123,
+    "watchdog_timeout_sec": 240.0,
+    "product": {
+      "lifecycle": "serving",
+      "lazy_tasks": "complete",
+      "readiness": "ready",
+      "last_error": null,
+      "flat_phase": "ready"
+    }
+  },
+  "schedule_runner": {
+    "schema": "masc.schedule.runner_status.v1",
+    "status": "ok",
+    "tick_in_flight": false,
+    "tick_count": 1,
+    "success_count": 1,
+    "failure_count": 0,
+    "crash_count": 0,
+    "last_tick_started_at": 1788998995.15454,
+    "last_tick_finished_at": 1788998995.158605,
+    "last_success_at": 1788998995.158605,
+    "last_error_at": null,
+    "last_error": null,
+    "last_duration_sec": 0.004065036773681641,
+    "last_counts": {
+      "due_changed": 0,
+      "emitted": 0,
+      "rescheduled": 0,
+      "dispatch_succeeded": 0,
+      "dispatch_failed": 0,
+      "dispatch_unsupported": 0,
+      "dispatch_start_rejected": 0,
+      "wake_enqueued": 0,
+      "wake_skipped_no_keeper": 0,
+      "wake_skipped_missing_schedule": 0,
+      "wake_skipped_non_keeper_actor": 0,
+      "wake_skipped_unregistered_keeper": 0,
+      "wake_failed": 0
+    },
+    "totals": {
+      "due_changed": 0,
+      "emitted": 0,
+      "rescheduled": 0,
+      "dispatch_succeeded": 0,
+      "dispatch_failed": 0,
+      "dispatch_unsupported": 0,
+      "dispatch_start_rejected": 0,
+      "wake_enqueued": 0,
+      "wake_skipped_no_keeper": 0,
+      "wake_skipped_missing_schedule": 0,
+      "wake_skipped_non_keeper_actor": 0,
+      "wake_skipped_unregistered_keeper": 0,
+      "wake_failed": 0
+    },
+    "stale_after_sec": 60.0,
+    "last_tick_age_sec": 0.02235889434814453,
+    "last_success_age_sec": 0.02235889434814453,
+    "last_error_age_sec": null
+  },
+  "runtime_startup_degradation": {
+    "schema": "masc.runtime_startup_degradation.v1",
+    "status": "ok",
+    "degraded": false,
+    "operator_action_required": false,
+    "terminal_reason": "none",
+    "missing_catalog_model_count": 0,
+    "disabled_runtime_ids": []
+  },
+  "dashboard_surface": {
+    "schema": "masc.dashboard_surface.v1",
+    "installed_release": null,
+    "status": "missing",
+    "source_provenance": "unknown",
+    "index_present": false,
+    "assets_root": "/assets",
+    "dashboard_asset_root": "/assets/dashboard",
+    "dashboard_manifest_root": null,
+    "build_stamp_path": "/assets/dashboard/.build-stamp",
+    "index_sha256": null,
+    "asset_tree_sha256": null,
+    "asset_file_count": null,
+    "build_input_sha256": null,
+    "build_source_commit": null,
+    "build_head_tree": null,
+    "build_index_tree": null,
+    "build_input_file_count": null,
+    "build_input_matches_head": null,
+    "build_lock_sha256": null,
+    "build_environment_profile_sha256": null,
+    "build_environment_path_identity_sha256": null,
+    "build_environment_path_executable_sha256": null,
+    "build_environment_path_executable_count": null,
+    "build_producer": null,
+    "build_runtime": null,
+    "recovery": {
+      "kind": "install_matching_ci_artifacts",
+      "reason": "unbound_assets_missing",
+      "restart_required": false
+    }
+  },
+  "subsystems": {
+    "discord_presence": {
+      "status": "alive"
+    },
+    "keeper_autoboot": {
+      "status": "alive"
+    },
+    "keeper_shutdown_recovery": {
+      "status": "alive"
+    },
+    "session_cleanup": {
+      "status": "alive"
+    }
+  },
+  "logs": {
+    "status": "active",
+    "capacity": 50000,
+    "total_entries": 80,
+    "retained_entries": 80,
+    "recent_window": 80,
+    "recent_errors": 0,
+    "recent_warnings": 7,
+    "latest": {
+      "seq": 79,
+      "ts": "2026-09-10T00:09:55Z",
+      "level": "INFO",
+      "source": "structured",
+      "module": "Dashboard",
+      "keeper_name": "system",
+      "turn_id": null
+    },
+    "file_sink": {
+      "enabled": true,
+      "dir": "/private/tmp/masc-verifier-image-runtime-large-4a/base/.masc/logs",
+      "current_date": "2026-09-10"
+    }
+  },
+  "gc": {
+    "compactions": 0,
+    "heap_words": 1718595,
+    "live_words": 1025302,
+    "minor_heap_size": 4194304,
+    "space_overhead": 100,
+    "minor_collections": 52,
+    "major_collections": 6,
+    "forced_major_collections": 0,
+    "minor_words": 36053179.0,
+    "promoted_words": 738143.0,
+    "major_words": 1197121.0
+  },
+  "scheduler": {
+    "pool_domains": 14,
+    "probe": "running",
+    "interval_ms": 100.0,
+    "window_s": 60.0,
+    "stall_threshold_ms": 1000.0,
+    "samples": 0
+  },
+  "feature_flags": {
+    "component": "feature_flags",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "overall_status": "warming",
+  "operator_action_required": false,
+  "operator_action_reasons": [],
+  "keeper_fibers": 0,
+  "fd_observation": {
+    "component": "fd_observation",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "fd_accountant": {
+    "component": "fd_accountant",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "disk_observation": {
+    "component": "disk_observation",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_fleet_safety": {
+    "component": "keeper_fleet_safety",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_identity_drift": {
+    "schema": "masc.keeper_identity_drift.v1",
+    "status": "warming",
+    "blocking": false,
+    "terminal_reason": "snapshot_not_ready",
+    "operator_action_required": false,
+    "configured_keeper_count": 0,
+    "configured_keeper_names": [],
+    "materializable_configured_keeper_count": 0,
+    "materializable_configured_keeper_names": [],
+    "persisted_meta_names": [],
+    "configured_without_meta_count": 0,
+    "configured_without_meta_names": [],
+    "meta_without_config_count": 0,
+    "meta_without_config_names": [],
+    "next_action": "none",
+    "component_timed_out": false
+  },
+  "publication_recovery_activation": {
+    "component": "publication_recovery_activation",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_reaction_ledger": {
+    "component": "keeper_reaction_ledger",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_owner": {
+    "component": "keeper_owner",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_board_event_collection": {
+    "component": "keeper_board_event_collection",
+    "status": "warming",
+    "component_timed_out": false
+  },
+  "keeper_event_queue": {
+    "schema": "masc.keeper_event_queue.fleet_summary.v5",
+    "queue_residence": {
+      "status": "unknown",
+      "oldest_age_seconds": null,
+      "reason": "queue_observation_incomplete"
+    },
+    "status": "warming",
+    "operator_action_required": false,
+    "status_reasons": [],
+    "backlog_clean": false,
+    "storage_integrity": {
+      "schema": "masc.keeper_event_queue.storage_integrity.v1",
+      "status": "warming",
+      "counts_complete": false,
+      "read_error_count": 0,
+      "transition_outbox_count": 0,
+      "operator_action_required": false
+    },
+    "work_liveness": {
+      "schema": "masc.keeper_event_queue.work_liveness.v2",
+      "status": "warming",
+      "state": "unknown",
+      "runnable_backlog_count": 0,
+      "runnable_oldest_source_age_seconds": null,
+      "queue_residence": {
+        "status": "unknown",
+        "oldest_age_seconds": null,
+        "reason": "queue_observation_incomplete"
+      },
+      "operator_action_required": false
+    },
+    "keeper_count": 0,
+    "keeper_names": [],
+    "pending_count": 0,
+    "total_count": 0,
+    "oldest_source_arrived_at_unix": null,
+    "oldest_source_age_seconds": null,
+    "runnable_backlog_count": 0,
+    "runnable_oldest_source_arrived_at_unix": null,
+    "runnable_oldest_source_age_seconds": null,
+    "runnable_by_keeper": [],
+    "recoverable_backlog_count": 0,
+    "recoverable_oldest_source_arrived_at_unix": null,
+    "recoverable_oldest_source_age_seconds": null,
+    "recoverable_by_keeper": [],
+    "retained_disabled_backlog_count": 0,
+    "retained_disabled_oldest_source_arrived_at_unix": null,
+    "retained_disabled_oldest_source_age_seconds": null,
+    "retained_disabled_by_keeper": [],
+    "paused_dead_backlog_count": 0,
+    "paused_dead_oldest_source_arrived_at_unix": null,
+    "paused_dead_oldest_source_age_seconds": null,
+    "paused_dead_by_keeper": [],
+    "shutdown_fenced_backlog_count": 0,
+    "shutdown_fenced_oldest_source_arrived_at_unix": null,
+    "shutdown_fenced_oldest_source_age_seconds": null,
+    "shutdown_fenced_by_keeper": [],
+    "unclassified_count": 0,
+    "unclassified_oldest_source_arrived_at_unix": null,
+    "unclassified_oldest_source_age_seconds": null,
+    "unclassified_by_keeper": [],
+    "pending_by_keeper": [],
+    "read_error_count": 0,
+    "read_errors": [],
+    "keepers": [],
+    "component_timed_out": false
+  },
+  "keeper_terminal_effect_policy": [
+    {
+      "effect": "checkpoint_store",
+      "criticality": "durability_critical",
+      "failure_blocks_product_success": true
+    },
+    {
+      "effect": "execution_receipt",
+      "criticality": "durability_critical",
+      "failure_blocks_product_success": true
+    },
+    {
+      "effect": "owner_meta",
+      "criticality": "durability_critical",
+      "failure_blocks_product_success": true
+    },
+    {
+      "effect": "lifecycle_projection",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "metrics_snapshot",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "activity_graph",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "decision_record",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "usage_metrics",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    },
+    {
+      "effect": "terminal_fsm_projection",
+      "criticality": "best_effort",
+      "failure_blocks_product_success": false
+    }
+  ],
+  "keeper_observability_artifacts": {
+    "schema": "masc.keeper_observability_artifacts.v1",
+    "status": "ok",
+    "command_authority": false,
+    "validation_errors": [],
+    "artifacts": [
+      {
+        "artifact": "execution_receipt",
+        "producer": "Keeper_agent_run_receipt",
+        "authority_source": "exact provider/tool terminal result",
+        "truth_role": "execution_evidence",
+        "command_authority": false,
+        "consumers": [
+          "Telemetry_unified",
+          "Dashboard_http_keeper_execution_receipt",
+          "Workspace_task_receipts"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "turn_record",
+        "producer": "Keeper_turn_record_writer",
+        "authority_source": "execution receipt cadence + admitted turn identity",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Server_dashboard_http_keeper_api",
+          "Keeper_context_observation_projection",
+          "Keeper_raw_trace_retention"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "runtime_manifest",
+        "producer": "Keeper_runtime_manifest",
+        "authority_source": "turn/provider/checkpoint event writers",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Server_dashboard_http_keeper_runtime_manifest_scan",
+          "Server_dashboard_http_keeper_runtime_lens_swimlane"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS flat-file mtime pruning"
+      },
+      {
+        "artifact": "activity_event",
+        "producer": "Activity_graph.emit",
+        "authority_source": "typed terminal/tool/board observations",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Server_activity_http",
+          "Dashboard_snapshot"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "metrics_snapshot",
+        "producer": "Keeper_unified_metrics_snapshot",
+        "authority_source": "normalized execution outcome + lifecycle projection",
+        "truth_role": "derived_projection",
+        "command_authority": false,
+        "consumers": [
+          "Dashboard_http_keeper_metrics",
+          "Keeper_status_metrics",
+          "Telemetry_unified"
+        ],
+        "retention_owner": "Server_runtime_startup_maintenance",
+        "retention_policy": "MASC_JSONL_RETENTION_DAYS dated JSONL pruning"
+      },
+      {
+        "artifact": "raw_trace",
+        "producer": "Agent_core.Raw_trace",
+        "authority_source": "exact provider request/event stream",
+        "truth_role": "execution_evidence",
+        "command_authority": false,
+        "consumers": [
+          "Turn_record.raw_trace_run_ref",
+          "Keeper_raw_trace_reader"
+        ],
+        "retention_owner": "Keeper_raw_trace_retention",
+        "retention_policy": "TurnRecord reachability window, plus MASC_JSONL_RETENTION_DAYS mtime fallback"
+      }
+    ]
+  },
+  "paused_keepers": {
+    "status": "warming",
+    "count": 0,
+    "names": [],
+    "component_timed_out": false
+  },
+  "keeper_config_error_count": 0,
+  "keeper_config_errors": [],
+  "keeper_config_probe_error": null,
+  "keeper_config_unknown_key_count": 0,
+  "keeper_config_unknown_keys": [],
+  "keeper_config_schema_status": "warming",
+  "keeper_config_schema_blocking": false,
+  "keeper_config_schema_terminal_reason": "snapshot_not_ready",
+  "keeper_config_operator_action_required": false,
+  "lazy_task_boot_guard_fires_total": 0,
+  "full_health_snapshot": {
+    "status": "warming",
+    "snapshot_age_ms": null,
+    "stale_reason": null,
+    "stale_age_ms": null,
+    "computed_at_unix": null,
+    "duration_ms": null,
+    "ttl_ms": 60000,
+    "refresh_in_flight": false,
+    "refresh_requested": true,
+    "refresh_worker_active": false,
+    "refresh_worker_submissions_total": 0,
+    "refresh_worker_joins_total": 0,
+    "invalidation_generation": 0,
+    "refresh_wakeup_coalesce_ms": 100,
+    "refresh_started_at_unix": null,
+    "refresh_timeout_ms": 20000,
+    "component_timed_out": false,
+    "error": null,
+    "last_good_available": false,
+    "section_timings": [],
+    "stale_since_ts": null
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "observed_at_utc": "2026-09-30T05:10:53Z",
+  "evidence_kind": "read-only installed binary provenance; no terminal session or runtime journey",
+  "binary_location": "~/.local/bin/masc-tui",
+  "platform": "macos-arm64",
+  "version": "0.49.0",
+  "source_commit": "c112b2030652a5a25360f5d5322f8dc6da99c598",
+  "sha256": "11544a7cfceb2f7052b60ee5bdde678d4ea357f19efecfa091e44b5e0c6a8db3",
+  "commands": [
+    "masc-tui --version",
+    "masc-tui --build-commit",
+    "shasum -a 256 <binary>",
+    "file <binary>"
+  ],
+  "limits": [
+    "Does not include integration PR40176",
+    "No human timing measurement",
+    "No production behavior observed",
+    "Linux probe cannot execute natively on this Mac"
+  ],
+  "fixture_harness_source_commit": "dda41e69674fa68381b088682633a77f350a9390",
+  "fixture_harness_sha256": "c4bbb322913a06785166a60044ea6ef19ca0e25436b362742db6ce71c790d533"
+}

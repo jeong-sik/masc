@@ -1,0 +1,10 @@
+{
+  "at": "2026-10-24T18:12:35.643879+00:00",
+  "request": {
+    "id": "appr_01a16f14-f0fb-7000-8760-679a7fc70346",
+    "decision": "approve",
+    "remember_rule": false
+  },
+  "input_hash": "3d57ebdef6c7dcbbc8890bb05d70a4572c81128b44a540c1f7de8f717a384a22",
+  "scope": "Controlled operator-proxy permission for this isolated sandbox sleep20 only; no persistent rule, Task verdict or human Goal confirmation."
+}

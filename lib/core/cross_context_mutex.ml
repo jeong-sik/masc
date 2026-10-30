@@ -1,0 +1,65 @@
+type t =
+  { eio_gate : Eio.Mutex.t
+  ; cross_context_mutex : Stdlib.Mutex.t
+  }
+
+let create () =
+  { eio_gate = Eio.Mutex.create ()
+  ; cross_context_mutex = Stdlib.Mutex.create ()
+  }
+;;
+
+let rec lock_cooperatively mutex =
+  if Stdlib.Mutex.try_lock mutex
+  then ()
+  else (
+    Eio.Fiber.yield ();
+    (lock_cooperatively [@tailcall]) mutex)
+;;
+
+type cancellation_mode =
+  | Cancellable
+  | Durable
+
+(* [use_ro] is still exclusive; unlike [use_rw] it releases rather than poisons
+   the gate when the callback raises. The gate carries no mutable resource state
+   of its own, and the Stdlib mutex is released by the [Fun.protect] finalizer
+   before any callback exception is propagated. *)
+let with_eio_lock cancellation_mode t f =
+  Eio.Mutex.use_ro t.eio_gate (fun () ->
+    lock_cooperatively t.cross_context_mutex;
+    let run_locked () =
+      Fun.protect
+        ~finally:(fun () -> Stdlib.Mutex.unlock t.cross_context_mutex)
+        f
+    in
+    match cancellation_mode with
+    | Cancellable -> run_locked ()
+    | Durable -> Eio.Cancel.protect run_locked)
+;;
+
+let with_lock t f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> Stdlib.Mutex.protect t.cross_context_mutex f
+  | Eio_guard.Eio_fiber -> with_eio_lock Cancellable t f
+;;
+
+let with_durable_lock t f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> Stdlib.Mutex.protect t.cross_context_mutex f
+  | Eio_guard.Eio_fiber -> with_eio_lock Durable t f
+;;
+
+let try_with_lock t f =
+  let with_stdlib_mutex () =
+    if Stdlib.Mutex.try_lock t.cross_context_mutex
+    then Some (Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock t.cross_context_mutex) f)
+    else None
+  in
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> with_stdlib_mutex ()
+  | Eio_guard.Eio_fiber ->
+    if Eio.Mutex.try_lock t.eio_gate
+    then Fun.protect ~finally:(fun () -> Eio.Mutex.unlock t.eio_gate) with_stdlib_mutex
+    else None
+;;

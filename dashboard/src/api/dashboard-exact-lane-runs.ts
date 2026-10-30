@@ -1,0 +1,432 @@
+import { isRecord } from '../components/common/normalize'
+import { get, type AbortableRequestOptions } from './core'
+
+export const EXACT_LANE_IDS = [
+  'librarian_exact',
+  'workspace_curator_exact',
+  'candle_appraiser',
+  'hitl_auto_judge',
+  'board_attention_exact',
+] as const
+export type ExactLane = typeof EXACT_LANE_IDS[number]
+
+// Retained logical work is independent of the current builtin model routes.
+// Verifier uses Task/Goal registries; Stagehand has no retained source yet.
+export const LANE_RUN_IDENTITIES = [...EXACT_LANE_IDS, 'verifier_exact', 'browser_stagehand_exact'] as const
+export type LaneRunIdentity = typeof LANE_RUN_IDENTITIES[number]
+export function isLaneRunIdentity(value: unknown): value is LaneRunIdentity {
+  return LANE_RUN_IDENTITIES.some(lane => lane === value)
+}
+
+export type ExactLaneRunStatus =
+  | 'running'
+  | 'succeeded'
+  | 'cancelled'
+  | 'failed'
+  | 'completion_persistence_failed'
+  | 'completion_durability_unknown'
+
+export type ExactLaneIntendedStatus = 'succeeded' | 'cancelled' | 'failed'
+export type ExactLanePersistenceState = 'not_persisted' | 'durability_unknown'
+
+export type ExactLaneRunInput = { kind: 'exact'; payload: unknown }
+export type ExactLanePayloadError = {
+  code: 'source_unavailable' | 'missing_registration' | 'missing_completion' | 'invalid_payload' | 'snapshot_changed'
+  message: string
+}
+export type ExactLanePayloadAvailability =
+  | { state: 'available' }
+  | { state: 'not_loaded' }
+  | { state: 'unavailable'; error: ExactLanePayloadError }
+
+export type ExactLaneAnswerSource =
+  | { kind: 'exact_attempt'; slotId: string }
+  | { kind: 'cli_lane_slot'; slotId: string }
+  | { kind: 'vendor_system_one'; model: string; endpoint: string }
+
+// A listing row. The exact input and output payloads are deliberately absent:
+// a lane run embeds the whole rendered prompt, so carrying them here made one
+// listing 246 MB. They arrive from fetchExactLaneRun when a row is opened.
+export type ExactLaneCompletionOrigin = 'producer' | 'restart_replay'
+export interface ExactLaneUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens: number
+  cacheReadInputTokens: number
+  costUsd?: number
+}
+
+export interface ExactLaneRunSummary {
+  runId: string
+  runKind: 'exact_output'
+  lane: ExactLane
+  subjectId: string | null
+  actor: string
+  startedAt: number
+  status: ExactLaneRunStatus
+  elapsedSeconds?: number
+  completionOrigin?: ExactLaneCompletionOrigin
+  usage?: ExactLaneUsage | null
+  code?: string
+  detail?: string
+  intendedStatus?: ExactLaneIntendedStatus
+  intendedCode?: string
+  intendedDetail?: string
+  persistenceError?: string
+  persistenceState?: ExactLanePersistenceState
+  // Opaque configured exact-lane slot. This is not separately authoritative
+  // provider/model attribution. Running rows have no terminal value yet.
+  selectedSlot?: string | null
+}
+
+// One opened run, payloads included.
+export interface ExactLaneRunRecord extends ExactLaneRunSummary {
+  input: ExactLaneRunInput
+  output?: unknown
+  // Board attention may be answered before an exact-lane slot runs. Keep the
+  // answer source separate from selectedSlot, which only names an accepted
+  // exact-flow or CLI slot.
+  answerSource?: ExactLaneAnswerSource
+  payloadAvailability: {
+    input: ExactLanePayloadAvailability
+    output: ExactLanePayloadAvailability | null
+  }
+  skillEvidence: { state: 'no_keeper_skills' }
+}
+
+export interface DashboardExactLaneRunsResponse {
+  runs: ExactLaneRunSummary[]
+  count: number
+  total: number
+  hasMore: boolean
+  generatedAt: string
+}
+
+const STATUSES: readonly string[] = [
+  'running',
+  'succeeded',
+  'cancelled',
+  'failed',
+  'completion_persistence_failed',
+  'completion_durability_unknown',
+]
+const INTENDED_STATUSES: readonly string[] = ['succeeded', 'cancelled', 'failed']
+
+function fail(message: string): never {
+  throw new Error(`Invalid exact lane runs response: ${message}`)
+}
+
+function string(value: unknown, context: string): string {
+  if (typeof value !== 'string' || value.trim() === '') fail(`${context} must be a non-empty string`)
+  return value
+}
+
+function number(value: unknown, context: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    fail(`${context} must be a non-negative finite number`)
+  }
+  return value
+}
+
+function exactFields(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+  context: string,
+): void {
+  const expected = new Set([...required, ...optional])
+  const missing = required.filter(key => !(key in value))
+  const unknown = Object.keys(value).filter(key => !expected.has(key))
+  if (missing.length > 0 || unknown.length > 0) {
+    fail(`${context} fields mismatch (missing=[${missing.join(',')}], unknown=[${unknown.join(',')}])`)
+  }
+}
+
+function parseUsage(raw: unknown, context: string): ExactLaneUsage | null {
+  if (raw === null) return null
+  if (!isRecord(raw)) fail(`${context} must be an object or null`)
+  exactFields(raw, ['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'], ['cost_usd'], context)
+  const count = (key: string): number => {
+    const value = number(raw[key], `${context}.${key}`)
+    if (!Number.isSafeInteger(value)) fail(`${context}.${key} must be a safe integer`)
+    return value
+  }
+  return {
+    inputTokens: count('input_tokens'), outputTokens: count('output_tokens'),
+    cacheCreationInputTokens: count('cache_creation_input_tokens'), cacheReadInputTokens: count('cache_read_input_tokens'),
+    ...(raw.cost_usd === undefined ? {} : { costUsd: number(raw.cost_usd, `${context}.cost_usd`) }),
+  }
+}
+
+function parseInput(raw: unknown, context: string): ExactLaneRunInput {
+  if (!isRecord(raw)) fail(`${context} must be an object`)
+  const kind = string(raw.kind, `${context}.kind`)
+  if (kind === 'exact') {
+    exactFields(raw, ['kind', 'payload'], [], context)
+    return { kind, payload: raw.payload }
+  }
+  return fail(`${context}.kind has unknown value ${JSON.stringify(kind)}`)
+}
+
+function parsePayloadAvailability(raw: unknown, context: string): ExactLanePayloadAvailability {
+  if (!isRecord(raw)) fail(`${context} must be an object`)
+  if (raw.state === 'available' || raw.state === 'not_loaded') {
+    exactFields(raw, ['state'], [], context)
+    return { state: raw.state }
+  }
+  if (raw.state !== 'unavailable') fail(`${context}.state has an unknown value`)
+  exactFields(raw, ['state', 'error'], [], context)
+  const error = raw.error
+  if (!isRecord(error)) fail(`${context}.error must be an object`)
+  const message = string(error.message, `${context}.error.message`)
+  switch (error.code) {
+    case 'source_unavailable':
+    case 'missing_registration':
+    case 'missing_completion':
+    case 'invalid_payload':
+    case 'snapshot_changed':
+      exactFields(error, ['code', 'message'], [], `${context}.error`)
+      return { state: 'unavailable', error: { code: error.code, message } }
+    default:
+      return fail(`${context}.error.code has an unknown value`)
+  }
+}
+
+function parsePayloads(raw: Record<string, unknown>, status: string, context: string) {
+  const availability = raw.payload_availability
+  if (!isRecord(availability)) fail(`${context}.payload_availability must be an object`)
+  exactFields(availability, ['input', 'output'], [], `${context}.payload_availability`)
+  const input = parsePayloadAvailability(availability.input, `${context}.payload_availability.input`)
+  const output = availability.output === null
+    ? null
+    : parsePayloadAvailability(availability.output, `${context}.payload_availability.output`)
+  if ((status === 'running') !== (output === null)) {
+    fail(`${context}.payload_availability.output must be null exactly while running`)
+  }
+  const skills = raw.skill_evidence
+  if (!isRecord(skills)) fail(`${context}.skill_evidence must be an object`)
+  exactFields(skills, ['state'], [], `${context}.skill_evidence`)
+  if (skills.state !== 'no_keeper_skills') fail(`${context}.skill_evidence.state has an unknown value`)
+  return {
+    input: parseInput(raw.input, `${context}.input`),
+    output: output?.state === 'available' ? raw.output : undefined,
+    payloadAvailability: { input, output },
+    skillEvidence: { state: 'no_keeper_skills' as const },
+  }
+}
+
+function parseBoardAnswerSource(
+  output: unknown,
+  selectedSlot: string | null | undefined,
+  context: string,
+): ExactLaneAnswerSource {
+  if (!isRecord(output)) fail(`${context} must be an object`)
+  exactFields(output, ['verdict', 'slot_id', 'source', 'judged_at'], [], context)
+  if (!isRecord(output.verdict)) fail(`${context}.verdict must be an object`)
+  exactFields(output.verdict, ['decision', 'rationale'], [], `${context}.verdict`)
+  const decision = string(output.verdict.decision, `${context}.verdict.decision`)
+  if (decision !== 'relevant' && decision !== 'not_relevant') {
+    fail(`${context}.verdict.decision has unknown value ${JSON.stringify(decision)}`)
+  }
+  string(output.verdict.rationale, `${context}.verdict.rationale`)
+  const slotId = string(output.slot_id, `${context}.slot_id`)
+  number(output.judged_at, `${context}.judged_at`)
+  const source = output.source
+  if (!isRecord(source)) fail(`${context}.source must be an object`)
+  const sourceContext = `${context}.source`
+  const kind = string(source.kind, `${sourceContext}.kind`)
+  if (kind === 'exact_attempt') {
+    exactFields(source, ['kind', 'call_id', 'plan_fingerprint', 'request_body_sha256'], [], sourceContext)
+    string(source.call_id, `${sourceContext}.call_id`)
+    string(source.plan_fingerprint, `${sourceContext}.plan_fingerprint`)
+    string(source.request_body_sha256, `${sourceContext}.request_body_sha256`)
+    if (selectedSlot !== slotId) fail(`${context}.slot_id must match selected_slot`)
+    return { kind, slotId }
+  }
+  if (kind === 'cli_lane_slot') {
+    exactFields(source, ['kind'], [], sourceContext)
+    if (selectedSlot !== slotId) fail(`${context}.slot_id must match selected_slot`)
+    return { kind, slotId }
+  }
+  if (kind === 'vendor_system_one') {
+    exactFields(source, ['kind', 'endpoint', 'model', 'request_body_sha256'], [], sourceContext)
+    const endpoint = string(source.endpoint, `${sourceContext}.endpoint`)
+    const model = string(source.model, `${sourceContext}.model`)
+    string(source.request_body_sha256, `${sourceContext}.request_body_sha256`)
+    if (selectedSlot !== null) fail(`${context} vendor source must not have selected_slot`)
+    if (slotId !== model) fail(`${context}.slot_id must match source.model`)
+    return { kind, model, endpoint }
+  }
+  return fail(`${sourceContext}.kind has unknown value ${JSON.stringify(kind)}`)
+}
+
+function parseRun(raw: unknown, index: number, withPayloads: false): ExactLaneRunSummary
+function parseRun(raw: unknown, index: number, withPayloads: true): ExactLaneRunRecord
+function parseRun(
+  raw: unknown,
+  index: number,
+  withPayloads: boolean,
+): ExactLaneRunSummary | ExactLaneRunRecord {
+  const context = withPayloads ? 'root.run' : `runs[${index}]`
+  if (!isRecord(raw)) fail(`${context} must be an object`)
+  const status = string(raw.status, `${context}.status`)
+  if (!STATUSES.includes(status)) fail(`${context}.status has unknown value ${JSON.stringify(status)}`)
+  const lane = string(raw.lane, `${context}.lane`)
+  if (!EXACT_LANE_IDS.some(candidate => candidate === lane)) fail(`${context}.lane has unknown value ${JSON.stringify(lane)}`)
+  if (raw.run_kind !== 'exact_output') fail(`${context}.run_kind must be exact_output`)
+  const base = ['run_id', 'run_kind', 'lane', 'subject_id', 'actor', 'started_at', 'status']
+    .concat(withPayloads ? ['input', 'payload_availability', 'skill_evidence'] : [])
+  // `output` rides with the payloads; a summary never carries it.
+  const completion = withPayloads
+    ? ['elapsed_s', 'completion_origin', 'usage', 'output', 'selected_slot']
+    : ['elapsed_s', 'completion_origin', 'usage', 'selected_slot']
+  const persistenceFailure = status === 'completion_persistence_failed'
+    || status === 'completion_durability_unknown'
+  const intendedStatus = persistenceFailure
+    ? string(raw.intended_status, `${context}.intended_status`)
+    : undefined
+  if (intendedStatus !== undefined && !INTENDED_STATUSES.includes(intendedStatus)) {
+    fail(`${context}.intended_status has unknown value ${JSON.stringify(intendedStatus)}`)
+  }
+  const intendedFailure = intendedStatus === 'failed'
+  const required = status === 'running'
+    ? base
+    : persistenceFailure
+      ? [
+          ...base,
+          'intended_status',
+          ...completion,
+          'persistence_error',
+          'persistence_state',
+          ...(intendedFailure ? ['intended_code', 'intended_detail'] : []),
+        ]
+      : status === 'failed'
+        ? [...base, ...completion, 'code', 'detail']
+        : [...base, ...completion]
+  exactFields(raw, required, [], context)
+  const persistenceState = persistenceFailure
+    ? string(raw.persistence_state, `${context}.persistence_state`)
+    : undefined
+  const expectedPersistenceState = status === 'completion_persistence_failed'
+    ? 'not_persisted'
+    : status === 'completion_durability_unknown'
+      ? 'durability_unknown'
+      : undefined
+  if (persistenceState !== expectedPersistenceState) {
+    fail(`${context}.persistence_state must be ${JSON.stringify(expectedPersistenceState)}`)
+  }
+  const selectedSlot = status === 'running'
+    ? undefined
+    : raw.selected_slot === null
+      ? null
+      : string(raw.selected_slot, `${context}.selected_slot`)
+  const completionOrigin = status === 'running' ? undefined : raw.completion_origin
+  if (completionOrigin !== undefined && completionOrigin !== 'producer' && completionOrigin !== 'restart_replay') {
+    fail(`${context}.completion_origin has an unknown value`)
+  }
+  if (completionOrigin === 'restart_replay' && (status !== 'failed' || raw.elapsed_s !== null || raw.selected_slot !== null || raw.usage !== null)) {
+    fail(`${context} restart observation must be a failed row without measured duration, slot or usage`)
+  }
+  if (persistenceFailure && completionOrigin !== 'producer') fail(`${context} pending completion must have producer origin`)
+  const payloads = withPayloads ? parsePayloads(raw, status, context) : undefined
+  const answerSource = withPayloads
+    && lane === 'board_attention_exact'
+    && (status === 'succeeded' || intendedStatus === 'succeeded')
+    && payloads?.payloadAvailability.output?.state === 'available'
+    ? parseBoardAnswerSource(payloads.output, selectedSlot, `${context}.output`)
+    : undefined
+  return {
+    runId: string(raw.run_id, `${context}.run_id`),
+    runKind: 'exact_output',
+    lane: lane as ExactLane,
+    subjectId: raw.subject_id === null
+      ? null
+      : string(raw.subject_id, `${context}.subject_id`),
+    actor: string(raw.actor, `${context}.actor`),
+    startedAt: number(raw.started_at, `${context}.started_at`),
+    ...(payloads ?? {}),
+    status: status as ExactLaneRunStatus,
+    elapsedSeconds: status === 'running' || raw.elapsed_s === null ? undefined : number(raw.elapsed_s, `${context}.elapsed_s`),
+    completionOrigin,
+    usage: status === 'running' ? undefined : parseUsage(raw.usage, `${context}.usage`),
+    code: status === 'failed' ? string(raw.code, `${context}.code`) : undefined,
+    detail: status === 'failed' ? string(raw.detail, `${context}.detail`) : undefined,
+    intendedStatus: intendedStatus as ExactLaneIntendedStatus | undefined,
+    intendedCode: intendedFailure ? string(raw.intended_code, `${context}.intended_code`) : undefined,
+    intendedDetail: intendedFailure ? string(raw.intended_detail, `${context}.intended_detail`) : undefined,
+    persistenceError: persistenceFailure
+      ? string(raw.persistence_error, `${context}.persistence_error`)
+      : undefined,
+    persistenceState: persistenceState as ExactLanePersistenceState | undefined,
+    selectedSlot,
+    answerSource,
+  }
+}
+
+export function parseExactLaneRunsResponse(raw: unknown): DashboardExactLaneRunsResponse {
+  if (!isRecord(raw)) fail('root must be an object')
+  exactFields(raw, ['runs', 'count', 'total', 'has_more', 'generated_at'], [], 'root')
+  if (!Array.isArray(raw.runs)) fail('root.runs must be an array')
+  if (!Number.isSafeInteger(raw.count) || (raw.count as number) < 0) {
+    fail('root.count must be a non-negative safe integer')
+  }
+  if (!Number.isSafeInteger(raw.total) || (raw.total as number) < 0) {
+    fail('root.total must be a non-negative safe integer')
+  }
+  if (typeof raw.has_more !== 'boolean') fail('root.has_more must be a boolean')
+  const runs = raw.runs.map((run, index) => parseRun(run, index, false))
+  if (raw.count !== runs.length) fail('root.count must match runs.length')
+  return {
+    runs,
+    count: raw.count as number,
+    total: raw.total as number,
+    hasMore: raw.has_more,
+    generatedAt: string(raw.generated_at, 'root.generated_at'),
+  }
+}
+
+export function parseExactLaneRunResponse(raw: unknown): ExactLaneRunRecord {
+  if (!isRecord(raw)) fail('root must be an object')
+  exactFields(raw, ['run', 'generated_at'], [], 'root')
+  return parseRun(raw.run, 0, true)
+}
+
+// The cursor is the caller's own last row, not server state: the server keeps
+// nothing between calls, and carrying the run_id alongside the timestamp is
+// what stops two runs recorded in the same float second from straddling a page
+// boundary.
+export type ExactLaneRunCursor = { startedAt: number; runId: string }
+
+export async function fetchExactLaneRuns(
+  opts?: AbortableRequestOptions & { limit?: number; before?: ExactLaneRunCursor; lane?: ExactLane },
+): Promise<DashboardExactLaneRunsResponse> {
+  const params = new URLSearchParams()
+  // This consumer decodes native exact-output rows; Task verification has
+  // its own monitor source. Keep the filter on every cursor request.
+  params.set('run_kind', 'exact_output')
+  // The server applies the lane filter before it pages, so another busy lane
+  // cannot fill this page and hide the requested lane's runs.
+  if (opts?.lane != null) params.set('lane', opts.lane)
+  if (opts?.limit != null) params.set('limit', String(opts.limit))
+  if (opts?.before != null) {
+    params.set('before_started_at', String(opts.before.startedAt))
+    params.set('before_run_id', opts.before.runId)
+  }
+  const query = params.toString()
+  const raw = await get<unknown>(
+    `/api/v1/dashboard/exact-lane-runs${query === '' ? '' : `?${query}`}`,
+    { signal: opts?.signal },
+  )
+  return parseExactLaneRunsResponse(raw)
+}
+
+export async function fetchExactLaneRun(
+  runId: string,
+  opts?: AbortableRequestOptions,
+): Promise<ExactLaneRunRecord> {
+  const raw = await get<unknown>(
+    `/api/v1/dashboard/exact-lane-runs/${encodeURIComponent(runId)}`,
+    { signal: opts?.signal },
+  )
+  return parseExactLaneRunResponse(raw)
+}

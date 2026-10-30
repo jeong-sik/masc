@@ -1,0 +1,1109 @@
+(* See .mli for high-level shape. *)
+
+module Gw = Discord_gateway_client
+module State = Channel_gate_discord_state
+
+(* Intents requested at IDENTIFY time. Same set as RFC-0203 §Modules
+   and the previous sidecar configuration. *)
+let default_intents : Gw.intent list =
+  [ Gw.Guilds
+  ; Gw.Guild_messages
+  ; Gw.Message_content
+  ; Gw.Guild_message_reactions
+  ; Gw.Direct_messages
+  ; Gw.Direct_message_reactions
+  ]
+
+(* ---------------------------------------------------------------- *)
+(* Env-driven config                                                *)
+(* ---------------------------------------------------------------- *)
+
+let bot_token_opt () = Env_config_discord.bot_token_opt ()
+
+(* Default trigger policy when none is configured (empty/unset). The
+   "quiet, mention-triggered bot" baseline per RFC-0203. *)
+let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
+
+(* The TOML walk lives in [Connector_trigger_policy]: this module and the
+   Slack sibling each carried a byte-for-byte copy of it. A missing file or
+   missing key is "unset" (default applies); an unreadable file, malformed
+   TOML, wrong field type, or a value the strict grammar rejects is an explicit
+   load error and the gateway does not start — never a silent fallback onto a
+   policy the operator did not write (masc#25123 / PR #25126 recut).
+
+   Both types are re-exported by type equation rather than aliased, so this
+   module still publishes the constructor names its suite reads. *)
+
+module Policy_load = Connector_trigger_policy.Make (struct
+  type policy = Gw.trigger_policy
+
+  let table = Runtime_toml_namespace.(key Discord)
+  (* [Gw] is the client here, not the state machine: the grammar lives with
+     the state module the client re-exports its policy type from. *)
+  let parse = Discord_gateway_state.parse_trigger_policy
+  let default = default_trigger_policy
+end)
+
+type trigger_policy_toml_load = Policy_load.load =
+  | Runtime_toml_missing
+  | Trigger_policy_missing
+  | Trigger_policy_loaded of Gw.trigger_policy
+
+type trigger_policy_load_error = Connector_trigger_policy.load_error =
+  | Runtime_toml_unreadable of { path : string; detail : string }
+  | Runtime_toml_invalid of { path : string; detail : string }
+  | Trigger_policy_invalid of { path : string; detail : string }
+
+let trigger_policy_load_error_to_string = function
+  | Runtime_toml_unreadable { path; detail } ->
+    Printf.sprintf "cannot read %s: %s" path detail
+  | Runtime_toml_invalid { path; detail } ->
+    Printf.sprintf "invalid TOML in %s: %s" path detail
+  | Trigger_policy_invalid { path; detail } ->
+    Printf.sprintf "invalid discord.trigger_policy in %s: %s" path detail
+;;
+
+let load_trigger_policy_from_toml ~path = Policy_load.load_from_toml ~path
+
+(* runtime.toml > default — the precedence config/runtime.toml documents for
+   this key. A missing file, a missing key and a blank value all mean unset. *)
+let resolved_trigger_policy () = Policy_load.resolve ()
+
+(* What the gateway judges by right now: the operator's override when the
+   params surface holds one, otherwise what runtime.toml said at boot. Read
+   per step by the client, so a change lands on the next message. *)
+let current_trigger_policy () =
+  Runtime_params.get Connector_trigger_params.discord
+;;
+
+(* ---------------------------------------------------------------- *)
+(* Inbound delivery                                                 *)
+(* ---------------------------------------------------------------- *)
+
+let metadata_opt key = function
+  | None -> []
+  | Some value ->
+      let value = String.trim value in
+      if value = "" then [] else [ (key, value) ]
+
+let metadata_bool key value = [ (key, string_of_bool value) ]
+
+let discord_conversation_id ~guild_id ~channel_id =
+  let guild_label =
+    match guild_id with
+    | Some guild_id when not (String.equal (String.trim guild_id) "") ->
+        guild_id
+    | Some _ | None -> "dm"
+  in
+  Printf.sprintf "discord:%s:channel:%s" guild_label channel_id
+
+let discord_attention_surface ~guild_id ~channel_id ~channel_name =
+  Keeper_external_attention.Discord
+    { guild_id
+    ; channel_id
+    ; channel_name
+    ; parent_channel_id = None
+    ; thread_id = None
+    }
+
+let discord_chat_metadata ~guild_id ~channel_id ~message_id =
+  [
+    ("conversation_id", discord_conversation_id ~guild_id ~channel_id);
+    ("external_message_id", message_id);
+  ]
+
+let discord_delivery ~guild_id ~channel_id ~channel_name ~message_id ~author_id :
+    (Gate_keeper_backend.connector_delivery, string) result =
+  let parent_channel_id = State.parent_channel_of_thread ~channel_id in
+  let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
+  Result.map
+    (fun continuation_channel ->
+       { Gate_keeper_backend.continuation_channel
+       ; surface =
+           Surface_ref.Discord
+             { guild_id; channel_id; channel_name; parent_channel_id; thread_id }
+       ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
+       ; external_message_id = Some message_id
+       ; workspace_id = guild_id
+       })
+    (Keeper_continuation_channel.discord
+       ~guild_id
+       ~channel_id
+       ~parent_channel_id
+       ~thread_id
+       ~reply_to_message_id:message_id
+       ~user_id:author_id
+       ())
+
+(* What a channel is called. [get_channel] answers it once and the name is
+   written down; a bot without access to that channel never gets an answer,
+   and then the id keeps standing in for the room the way it always did.
+
+   One keeper here is bound to five channels, and before the id was drawn they
+   all read as the same [discord] badge. A name reads as a place. *)
+let resolve_channel_name ~base_dir ~channel_id =
+  match
+    Keeper_connector_names.recall ~base_dir ~connector:State.channel
+      ~scope:Keeper_connector_names.Channel ~id:channel_id
+  with
+  | Some _ as known -> known
+  | None -> (
+    match bot_token_opt () with
+    | None -> None
+    | Some token -> (
+      match Discord_rest_client.snowflake_of_string channel_id with
+      | Error _ -> None
+      | Ok snowflake -> (
+        match
+          Discord_rest_client.get_channel ~token ~channel_id:snowflake ()
+        with
+        (* No access, a rate limit, a deleted channel. None of those stops the
+           message: the id stands in and the next inbound retries. *)
+        | Error _ -> None
+        | Ok json -> (
+          match Json_util.get_string json "name" with
+          | Some name when String.trim name <> "" ->
+            let name = String.trim name in
+            Keeper_connector_names.remember ~base_dir ~connector:State.channel
+              ~scope:Keeper_connector_names.Channel ~id:channel_id ~name ();
+            Some name
+          (* A direct message has no name. Absent, not blank. *)
+          | Some _ | None -> None))))
+
+let nonblank_string_field json field =
+  match Json_util.get_string json field with
+  | Some value when String.trim value <> "" -> Some (String.trim value)
+  | Some _ | None -> None
+
+let discord_channel_directory_entry json =
+  match
+    nonblank_string_field json "id",
+    nonblank_string_field json "name"
+  with
+  | Some id, Some name -> Ok (id, name)
+  | Some _, None | None, Some _ | None, None ->
+    Error "Discord channel response has no id/name pair"
+
+let discord_message_people_entries = function
+  | `List messages ->
+    let people = Hashtbl.create 32 in
+    List.iter
+      (fun message ->
+         match message with
+         | `Assoc fields ->
+           (match List.assoc_opt "author" fields with
+            | None -> ()
+            | Some author ->
+              (match nonblank_string_field author "id" with
+               | None -> ()
+               | Some id when Hashtbl.mem people id -> ()
+               | Some id ->
+                 let name =
+                   match nonblank_string_field author "global_name" with
+                   | Some _ as global_name -> global_name
+                   | None -> nonblank_string_field author "username"
+                 in
+                 Option.iter (fun name -> Hashtbl.add people id name) name))
+         | _ -> ())
+      messages;
+    Ok
+      (Hashtbl.to_seq people |> List.of_seq
+       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
+  | _ -> Error "Discord channel messages response is not a list"
+
+let discord_channel_directory_entries = function
+  | `List channels ->
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | channel :: rest ->
+        (match discord_channel_directory_entry channel with
+         | Ok entry -> decode (entry :: acc) rest
+         | Error _ as error -> error)
+    in
+    decode [] channels
+  | _ -> Error "Discord guild channels response is not a list"
+
+let discord_member_directory_page = function
+  | `List members ->
+    let entry member =
+      match member with
+      | `Assoc fields ->
+        (match List.assoc_opt "user" fields with
+         | None -> Error "Discord guild member has no user"
+         | Some user ->
+           (match nonblank_string_field user "id" with
+            | None -> Error "Discord guild member user has no id"
+            | Some id ->
+            let name =
+             match nonblank_string_field user "global_name" with
+             | Some _ as global_name -> global_name
+             | None -> nonblank_string_field user "username"
+           in
+            (match name with
+             | Some name -> Ok (id, name)
+             | None -> Error "Discord guild member user has no name")))
+      | _ -> Error "Discord guild member is not an object"
+    in
+    let rec decode acc = function
+      | [] -> Ok (List.rev acc)
+      | member :: rest ->
+        (match entry member with
+         | Ok value -> decode (value :: acc) rest
+         | Error _ as error -> error)
+    in
+    (match decode [] members with
+     | Error _ as error -> error
+     | Ok entries ->
+       let after = List.rev entries |> List.find_map (fun (id, _) -> Some id) in
+       Ok (entries, after, List.length members))
+  | _ -> Error "Discord guild members response is not a list"
+
+let remember_directory_entries ~base_dir ~scope entries =
+  List.iter
+    (fun (id, name) ->
+       Keeper_connector_names.remember ~base_dir ~connector:State.channel ~scope ~id
+         ~name ())
+    entries
+
+let discord_recent_message_limit = 100
+let discord_member_page_limit = 1000
+
+type directory_rest_failure =
+  | Directory_authentication_failed
+  | Directory_permission_denied
+  | Directory_channel_gone
+  | Directory_operation_failed
+
+(* A deleted channel answers 10003 (Unknown Channel) for as long as it is
+   gone — no retry ever brings it back. The refresh loop used to re-ask
+   every bound dead channel on every pass; these are remembered per process
+   and skipped, and a restart re-checks the verdict. *)
+let gone_bound_channels : (string, unit) Hashtbl.t = Hashtbl.create 4
+
+let classify_directory_rest_failure = function
+  | Discord_rest_client.Http_status { code = 401; _ } ->
+    Directory_authentication_failed
+  | Discord_rest_client.Discord_api { http_status = 401; _ } ->
+    Directory_authentication_failed
+  | Discord_rest_client.Discord_api { code = 10003; _ } ->
+    Directory_channel_gone
+  | Discord_rest_client.Http_status { code = 403; _ }
+  | Discord_rest_client.Discord_api { http_status = 403; _ }
+  | Discord_rest_client.Discord_api { code = 50001 | 50013; _ } ->
+    Directory_permission_denied
+  | Discord_rest_client.Network _
+  | Discord_rest_client.Http_status _
+  | Discord_rest_client.Discord_api _
+  | Discord_rest_client.Other _ -> Directory_operation_failed
+
+let refresh_discord_directory_once ~clock ~base_dir ~token =
+  State.record_directory_refresh_started ();
+  let servers = Hashtbl.create 8 in
+  let channels = Hashtbl.create 64 in
+  let people = Hashtbl.create 256 in
+  let authentication_failed = ref [] in
+  let permission_denied = ref [] in
+  let errors = ref [] in
+  let remember ~scope table entries =
+    List.iter (fun (id, name) -> Hashtbl.replace table id name) entries;
+    remember_directory_entries ~base_dir ~scope entries
+  in
+  let record_rest_error ~scope ~target error =
+    let detail = Format.asprintf "%a" Discord_rest_client.pp_error error in
+    let classification = classify_directory_rest_failure error in
+    (match classification with
+     | Directory_authentication_failed ->
+       authentication_failed := scope :: !authentication_failed
+     | Directory_permission_denied ->
+       permission_denied := scope :: !permission_denied
+     | Directory_channel_gone -> ()
+     | Directory_operation_failed -> errors := scope :: !errors);
+    let reason = match classification with
+      | Directory_authentication_failed ->
+        "the bot token was rejected — check the token"
+      | Directory_permission_denied ->
+        "the bot lacks access (channel/server permissions) — grant access or \
+         unbind it"
+      | Directory_channel_gone ->
+        "the channel is deleted"
+      | Directory_operation_failed -> ""
+    in
+    Log.Server.warn "Discord directory %s target=%s: %s%s%s" scope target detail
+      (if reason = "" then "" else " — ") reason
+  in
+  let refresh_channel channel_id =
+    if Hashtbl.mem gone_bound_channels channel_id then ()
+    else
+    match Discord_rest_client.snowflake_of_string channel_id with
+    | Error detail ->
+      Log.Server.warn "Discord directory skipped channel %s: %s" channel_id detail
+    | Ok channel_snowflake ->
+      (match
+         Discord_rest_client.get_channel ~clock ~token
+           ~channel_id:channel_snowflake ()
+       with
+       | Error error ->
+         (match classify_directory_rest_failure error with
+          | Directory_channel_gone ->
+            Hashtbl.replace gone_bound_channels channel_id ();
+            Log.Server.warn
+              "Discord directory bound channel %s is deleted (10003); skipping                it until restart — unbind it to stop this warning"
+              channel_id
+          | Directory_authentication_failed | Directory_permission_denied
+          | Directory_operation_failed -> record_rest_error ~scope:"bound_channel" ~target:channel_id error)
+       | Ok json ->
+         (match discord_channel_directory_entry json with
+          | Error detail ->
+            Log.Server.warn "Discord channel directory rejected channel=%s: %s"
+              channel_id detail
+          | Ok (returned_id, name) when String.equal returned_id channel_id ->
+            remember ~scope:Keeper_connector_names.Channel channels
+              [ returned_id, name ]
+          | Ok (returned_id, _) ->
+            Log.Server.warn
+              "Discord channel directory identity mismatch requested=%s returned=%s"
+              channel_id returned_id));
+      (match
+         Discord_rest_client.get_channel_messages ~clock ~token
+           ~channel_id:channel_snowflake ~limit:discord_recent_message_limit ()
+       with
+       | Error error ->
+         record_rest_error ~scope:"recent_people" ~target:channel_id error
+       | Ok json ->
+         (match discord_message_people_entries json with
+          | Error detail ->
+            Log.Server.warn "Discord people directory rejected channel=%s: %s"
+              channel_id detail
+          | Ok entries ->
+            remember ~scope:Keeper_connector_names.Person people entries))
+  in
+  let refresh_guild guild_id =
+    match Discord_rest_client.snowflake_of_string guild_id with
+    | Error detail ->
+      errors := "server_identity" :: !errors;
+      Log.Server.warn "Discord directory invalid guild id %s: %s" guild_id detail
+    | Ok guild_snowflake ->
+      (match Discord_rest_client.get_guild ~clock ~token ~guild_id:guild_snowflake () with
+       | Error error -> record_rest_error ~scope:"server" ~target:guild_id error
+       | Ok json ->
+         (match discord_channel_directory_entry json with
+          | Ok (returned_id, name) when String.equal returned_id guild_id ->
+            remember ~scope:Keeper_connector_names.Server servers [ returned_id, name ]
+          | Ok (returned_id, _) ->
+            errors := "server: identity mismatch" :: !errors;
+            Log.Server.warn
+              "Discord directory server identity mismatch requested=%s returned=%s"
+              guild_id returned_id
+          | Error detail ->
+            errors := "server" :: !errors;
+            Log.Server.warn "Discord directory server rejected guild=%s: %s"
+              guild_id detail));
+      (match
+         Discord_rest_client.get_guild_channels ~clock ~token
+           ~guild_id:guild_snowflake ()
+       with
+       | Error error -> record_rest_error ~scope:"channels" ~target:guild_id error
+       | Ok json ->
+         (match discord_channel_directory_entries json with
+          | Ok entries -> remember ~scope:Keeper_connector_names.Channel channels entries
+          | Error detail ->
+            errors := "channels" :: !errors;
+            Log.Server.warn "Discord directory channels rejected guild=%s: %s"
+              guild_id detail));
+      let seen_member_cursors = Hashtbl.create 16 in
+      let rec refresh_members after =
+        match
+          Discord_rest_client.get_guild_members ~clock ~token
+            ~guild_id:guild_snowflake ~limit:discord_member_page_limit ?after ()
+        with
+        | Error error -> record_rest_error ~scope:"members" ~target:guild_id error
+        | Ok json ->
+          (match discord_member_directory_page json with
+           | Error detail ->
+             errors := "members" :: !errors;
+             Log.Server.warn "Discord directory members rejected guild=%s: %s"
+               guild_id detail
+           | Ok (entries, next_after, count) ->
+             remember ~scope:Keeper_connector_names.Person people entries;
+             if count = discord_member_page_limit then
+               match next_after with
+               | None ->
+                 errors :=
+                   "members: full page has no cursor"
+                   :: !errors
+               | Some cursor ->
+                 if Hashtbl.mem seen_member_cursors cursor then begin
+                   errors := "members: cursor did not advance" :: !errors;
+                   Log.Server.warn
+                     "Discord directory member cursor repeated guild=%s cursor=%s"
+                     guild_id cursor
+                 end else begin
+                   Hashtbl.replace seen_member_cursors cursor ();
+                   match Discord_rest_client.snowflake_of_string cursor with
+                   | Ok cursor -> refresh_members (Some cursor)
+                   | Error detail ->
+                     errors := "members_cursor" :: !errors;
+                     Log.Server.warn
+                       "Discord directory member cursor rejected guild=%s: %s"
+                       guild_id detail
+                 end)
+      in
+      refresh_members None
+  in
+  List.iter refresh_guild (State.current_guild_ids ());
+  (match State.configured_channel_ids_result () with
+   | Error error ->
+     errors := "bindings" :: !errors;
+     Log.Server.warn "Discord directory binding read failed: %s"
+       (State.binding_lookup_error_to_string error)
+   | Ok channel_ids -> List.iter refresh_channel channel_ids);
+  State.record_directory_refresh_finished
+    ~server_count:(Hashtbl.length servers)
+    ~channel_count:(Hashtbl.length channels)
+    ~person_count:(Hashtbl.length people)
+    ~authentication_failed:!authentication_failed
+    ~permission_denied:!permission_denied ~errors:!errors
+
+(* READY and successful binds share one coalescing queue. A request arriving
+   during network I/O sets [pending]; the worker rereads the authoritative
+   binding store before the follow-up pass, so a just-created binding is not
+   stranded until the next reconnect. The global mutex protects only booleans
+   and is never held across I/O or a fiber yield. *)
+let discord_directory_refresh_mu = Stdlib.Mutex.create ()
+let discord_directory_refresh_running = ref false
+let discord_directory_refresh_pending = ref false
+
+let with_directory_refresh_lock f =
+  Stdlib.Mutex.lock discord_directory_refresh_mu;
+  match f () with
+  | result ->
+    Stdlib.Mutex.unlock discord_directory_refresh_mu;
+    result
+  | exception exn ->
+    Stdlib.Mutex.unlock discord_directory_refresh_mu;
+    raise exn
+
+let request_directory_refresh ~sw ~clock ~base_dir =
+  match bot_token_opt () with
+  | None -> ()
+  | Some token ->
+    let start_worker =
+      with_directory_refresh_lock (fun () ->
+        discord_directory_refresh_pending := true;
+        if !discord_directory_refresh_running then false
+        else begin
+          discord_directory_refresh_running := true;
+          true
+        end)
+    in
+    if start_worker then
+      Eio.Fiber.fork ~sw (fun () ->
+        let stop_worker () =
+          with_directory_refresh_lock (fun () ->
+            discord_directory_refresh_running := false;
+            discord_directory_refresh_pending := false)
+        in
+        let take_pending_or_stop () =
+          with_directory_refresh_lock (fun () ->
+            if !discord_directory_refresh_pending then begin
+              discord_directory_refresh_pending := false;
+              true
+            end else begin
+              discord_directory_refresh_running := false;
+              false
+            end)
+        in
+        let rec loop () =
+          if take_pending_or_stop () then begin
+            refresh_discord_directory_once ~clock ~base_dir ~token;
+            loop ()
+          end
+        in
+        try loop () with
+        | Eio.Cancel.Cancelled _ as exn ->
+          stop_worker ();
+          raise exn
+        | exn ->
+          stop_worker ();
+          State.record_directory_refresh_finished ~server_count:0
+            ~channel_count:0 ~person_count:0 ~authentication_failed:[]
+            ~permission_denied:[]
+            ~errors:[ "worker" ];
+          Log.Server.error "Discord directory refresh crashed: %s"
+            (Printexc.to_string exn))
+
+let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
+      ~channel_name ~message_id ~author_id ~author_name ~content ~mentions_bot
+      ~route ~urgency
+  =
+  Option.iter
+    (fun name ->
+      Keeper_connector_names.remember ~base_dir ~connector:State.channel
+        ~scope:Keeper_connector_names.Person ~id:author_id ~name ())
+    author_name;
+  let surface =
+    discord_attention_surface ~guild_id ~channel_id ~channel_name
+  in
+  let conversation_id = discord_conversation_id ~guild_id ~channel_id in
+  let dedupe_key =
+    Printf.sprintf "discord:%s:%s" conversation_id message_id
+  in
+  let event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key in
+  let item : Keeper_external_attention.item =
+    { event_id
+    ; dedupe_key
+    ; keeper_name
+    ; conversation = { conversation_id; surface }
+    ; external_message =
+        Some { surface; message_id; reply_to_message_id = None }
+    ; source_label = State.channel
+    ; actor =
+        { actor_id = Some author_id
+        ; display_name = author_name
+        ; authority = Keeper_chat_store.External
+        }
+    ; urgency
+    ; content_preview = content
+    ; content_ref = None
+    ; received_at =
+        Unix.gettimeofday ()
+        (* NDT-OK: Discord ingress wall-clock timestamp. The value is
+           persisted as event evidence and for pending-order projection;
+           it does not branch deterministic policy. *)
+    ; metadata =
+        [ "route", route
+        ; "mentions_bot", string_of_bool mentions_bot
+        ; "discord_channel_id", channel_id
+        ]
+        @ metadata_opt "discord_guild_id" guild_id
+    }
+  in
+  match Keeper_external_attention.record ~base_path:base_dir item with
+  | `Recorded -> Some event_id
+  | `Duplicate item -> Some item.event_id
+  | `Error error ->
+      Log.Server.warn
+        "discord external attention record failed (channel=%s keeper=%s): %s"
+        channel_id keeper_name error;
+      None
+
+let log_binding_lookup_failure ~channel_id error =
+  let detail =
+    Format.asprintf "%a" State.pp_binding_lookup_error error
+  in
+  Log.Server.error
+    "Discord binding lookup failed (channel=%s): %s"
+    channel_id
+    detail
+
+let resolve_binding_for_message ~channel_id =
+  State.resolve_keeper_for_channel_result ~channel_id
+  |> Result.map (Option.map (fun resolution -> resolution, []))
+
+(* Files, said as references rather than carried as bytes.
+
+   Discord gives a url, a name and a size; the bytes live behind that url and
+   fetching them is a separate decision with its own size cap, trust question
+   and failure mode. Writing them into the store's [data] field empty would
+   make "not fetched" and "empty file" the same row, so the reference is what
+   travels and it says so.
+
+   Appended to the message the Keeper reads because Discord's own clients show
+   a file as part of the message: a caption with a photo under it is one thing
+   said, and splitting them here would hide half of it. *)
+let accept_message_create ~resolved_binding ~dispatch_for_delivery
+      ~(channel_id : string) ~(message_id : string)
+      ~(guild_id : string option)
+      ~base_dir
+      ~(author_id : string) ~(author_name : string option)
+      ~(content : string)
+      ~(attachments : Discord_gateway_state.inbound_attachment list)
+      ~(mentions_bot : bool)
+      ~(explicit_mentions_bot : bool)
+      ~(message_reference_channel_id : string option)
+      ~(message_reference_message_id : string option)
+      ~(referenced_message_author_id : string option) () =
+  let binding =
+    match resolved_binding with
+    | Some binding -> Ok (Some binding)
+    | None -> resolve_binding_for_message ~channel_id
+  in
+  match binding with
+  | Error error ->
+    log_binding_lookup_failure ~channel_id error;
+    Discord_observability.record_inbound_dispatch
+      Discord_observability.Gate_error;
+    None
+  | Ok None ->
+    (* No binding for this channel — drop quietly. The bot may be in
+       channels it isn't bound to (e.g. server-wide guild messages). *)
+    Discord_observability.record_inbound_dispatch
+      Discord_observability.Dropped_unbound;
+    None
+  | Ok (Some (resolution, resolution_metadata)) ->
+    let keeper_name = resolution.State.keeper_name in
+    (* Same body on both paths. A mention that came with a photo is the same
+       message as an ambient one that did; only the trigger differs. *)
+    let content = Discord_gateway_state.content_with_attachments ~content ~attachments in
+    let metadata =
+      discord_chat_metadata ~guild_id ~channel_id ~message_id
+      @ [ ("discord.channel_id", channel_id)
+      ; ("discord.message_id", message_id)
+      ; ("discord.bound_channel_id", resolution.bound_channel_id)
+      ; ("discord.binding_via_parent", string_of_bool resolution.via_parent)
+      ]
+      @ resolution_metadata
+      @ metadata_opt "discord.guild_id" guild_id
+      @ metadata_bool "discord.mentions_bot" mentions_bot
+      @ metadata_bool "discord.explicit_mentions_bot" explicit_mentions_bot
+      (* Connector-neutral key consumed by the gate recorder: the
+         structured mentions array named this channel's bound keeper
+         (its bot user), so the persisted user line carries an explicit
+         mention even when the text has no "@name" token (Discord
+         renders mentions as <@snowflake>, invisible to the token
+         parser).  RFC-0232 §3.3. *)
+      @ metadata_bool "mentions_bound_keeper" mentions_bot
+      @ metadata_opt "discord.message_reference_channel_id"
+          message_reference_channel_id
+      @ metadata_opt "discord.message_reference_message_id"
+          message_reference_message_id
+      @ metadata_opt "discord.referenced_message_author_id"
+          referenced_message_author_id
+    in
+    let urgency =
+      if mentions_bot then Keeper_external_attention.Mention
+      else
+        match guild_id with
+        | None -> Keeper_external_attention.Direct_message
+        | Some _ -> Keeper_external_attention.Ambient
+    in
+    (* Resolved once for this message, so the attention record and the
+       durable chat row name the same room. *)
+    let channel_name = resolve_channel_name ~base_dir ~channel_id in
+    (* Recorded as evidence; this route answers inline rather than queueing, so
+       nothing downstream needs the id. *)
+    let (_ : string option) =
+      record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~channel_name
+        ~message_id ~author_id ~author_name ~content ~mentions_bot
+        ~route:"triggered" ~urgency
+    in
+    let msg : Channel_gate.inbound_message =
+      { channel = State.channel
+      ; channel_user_id = author_id
+      ; channel_user_name = Option.value author_name ~default:author_id
+        (* NDT-OK: display name ([global_name] else [username], RFC-0223
+           P1); the snowflake stands in only for malformed payloads
+           missing both — the gate contract requires a non-empty name,
+           and the id fallback preserves the pre-P1 behavior. *)
+      ; channel_workspace_id = Option.value guild_id ~default:""
+        (* sound-partial: allow — [guild_id]=None is a DM (a known state,
+           not a parse failure), so the "" default at the stringly gate
+           layer is total, not permissive; the typed
+           [delivery.workspace_id] carries the explicit absence ([None]). *)
+      ; keeper_name
+      ; content
+      ; idempotency_key = Printf.sprintf "discord-msg-%s" message_id
+      ; metadata
+      }
+    in
+    let outcome =
+      match
+        discord_delivery ~guild_id ~channel_id ~channel_name ~message_id ~author_id
+      with
+      | Error detail -> Error (Channel_gate.Internal detail)
+      | Ok delivery ->
+        Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg
+    in
+    Some (fun () ->
+     match outcome with
+     | Error gate_err ->
+       (match gate_err with
+        | Channel_gate.Dispatch_unavailable ->
+          let notice =
+            Printf.sprintf "⚠️ `%s` 오프라인" keeper_name
+          in
+          (match State.send_message ~channel_id ~content:notice
+                  ~reply_to_message_id:message_id () with
+           | Ok _ ->
+             Discord_observability.record_inbound_dispatch
+               Discord_observability.Dispatch_unavailable;
+             Discord_observability.record_reply
+               Discord_observability.Reply_send_ok
+           | Error e ->
+             Discord_observability.record_inbound_dispatch
+               Discord_observability.Dispatch_unavailable;
+             Discord_observability.record_reply
+               Discord_observability.Reply_send_failed;
+             Log.Server.error
+               "discord send unavailable notice failed (channel=%s): %s"
+               channel_id
+               (Format.asprintf "%a" State.pp_send_error e));
+         Log.Server.info
+           "discord inbound -> keeper unavailable, notice sent (channel=%s keeper=%s)"
+           channel_id keeper_name
+        | Channel_gate.Validation _
+        | Channel_gate.Keeper_error _
+        | Channel_gate.Internal _ ->
+          Discord_observability.record_inbound_dispatch
+            Discord_observability.Gate_error;
+          Log.Server.warn
+            "discord inbound -> keeper failed (channel=%s keeper=%s): %s"
+            channel_id keeper_name
+            (Channel_gate.gate_error_to_string gate_err))
+     | Ok out ->
+       if String.equal out.content "" then begin
+                  Discord_observability.record_inbound_dispatch
+           Discord_observability.Empty_reply;
+         Discord_observability.record_reply Discord_observability.Reply_empty
+       end
+       else
+         (match
+            State.send_message ~channel_id ~content:out.content
+              ~reply_to_message_id:message_id ()
+          with
+          | Ok _ ->
+                        Discord_observability.record_inbound_dispatch
+              Discord_observability.Reply_sent;
+            Discord_observability.record_reply
+              Discord_observability.Reply_send_ok
+          | Error e ->
+            Discord_observability.record_inbound_dispatch
+              Discord_observability.Reply_send_error;
+            Discord_observability.record_reply
+              Discord_observability.Reply_send_failed;
+            Log.Server.error "discord send_message failed (channel=%s): %s"
+              channel_id
+              (Format.asprintf "%a" State.pp_send_error e)))
+
+let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
+    (ev : Gw.gateway_event) =
+  match ev with
+  | Gw.Ready { bot_user_id; bot_user_name; guild_ids; _ } ->
+    State.record_ready ~bot_user_id ~bot_user_name ~guild_ids;
+    Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id;
+    None
+  | Gw.Message_create
+      { channel_id
+      ; message_id
+      ; guild_id
+      ; author_id
+      ; author_name
+      ; content
+      ; mentions_bot
+      ; explicit_mentions_bot
+      ; author_is_bot = _
+      ; message_reference_channel_id
+      ; message_reference_message_id
+      ; referenced_message_author_id
+      ; attachments
+      } ->
+    (* mentions_bot is already enforced by the trigger policy at the
+       gateway-state layer; nothing extra to check here. *)
+    accept_message_create ~resolved_binding ~dispatch_for_delivery ~channel_id
+      ~message_id ~author_id
+      ~guild_id ~base_dir ~author_name ~content ~attachments ~mentions_bot
+      ~explicit_mentions_bot
+      ~message_reference_channel_id ~message_reference_message_id
+      ~referenced_message_author_id ()
+  | Gw.Reaction_add _ ->
+    (* The previous Python sidecar used a configurable emoji
+       trigger to drain pending messages. That feature is dropped in
+       the in-process gateway; re-add as a follow-up if needed. *)
+    None
+  | Gw.Thread_tracked { thread_id; parent_channel_id } ->
+    State.register_thread ~thread_id ~parent_channel_id;
+    Log.Server.info
+      "Discord thread registered: %s -> parent %s (total=%d)"
+      thread_id parent_channel_id
+      (State.registered_thread_count ());
+    None
+  | Gw.Threads_bulk_tracked { threads } ->
+    List.iter (fun (tid, pid) -> State.register_thread ~thread_id:tid ~parent_channel_id:pid) threads;
+    Log.Server.info
+      "Discord guild threads bulk registered: %d threads (total=%d)"
+      (List.length threads)
+      (State.registered_thread_count ());
+    None
+  | Gw.Thread_removed { thread_id } ->
+    State.unregister_thread ~thread_id;
+    Log.Server.info
+      "Discord thread removed: %s (total=%d)"
+      thread_id
+      (State.registered_thread_count ());
+    None
+  | Gw.Ignored _ ->
+    None
+
+(* RFC-0226 ambient lane recording: a bound-channel message that failed
+   the trigger policy is still conversation the keeper sits in. Persist
+   a single user line — no dispatch, no turn. Unbound channels drop, as
+   on the dispatch path. *)
+let handle_ambient ?resolved_keeper_name ~base_dir
+      ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
+      ~(author_id : string) ~(author_name : string option) ~(content : string)
+      ~(attachments : Discord_gateway_state.inbound_attachment list) () =
+  let keeper_name =
+    match resolved_keeper_name with
+    | Some keeper_name -> Ok (Some keeper_name)
+    | None -> State.keeper_for_channel_result ~channel_id
+  in
+  match keeper_name with
+  | Error error ->
+    log_binding_lookup_failure ~channel_id error;
+    Discord_observability.record_ambient
+      Discord_observability.Ambient_binding_store_error
+  | Ok None ->
+    Discord_observability.record_ambient
+      Discord_observability.Ambient_dropped_unbound
+  | Ok (Some keeper_name) ->
+    (* A photo with no caption is a message. Trimming the text alone read it
+       as empty and dropped it, so a file posted without words never reached
+       the Keeper at all. *)
+    let content =
+      Discord_gateway_state.content_with_attachments ~content ~attachments
+    in
+    if String.equal (String.trim content) "" then
+      Discord_observability.record_ambient
+        Discord_observability.Ambient_dropped_empty
+    else if String.length content > Channel_gate.max_content_length () then
+      (* Same inbound bound the turn path enforces
+         ([Channel_gate.handle_inbound] validation): a message this
+         size cannot become a turn either; it is rejected, not
+         truncated. *)
+      Discord_observability.record_ambient
+        Discord_observability.Ambient_dropped_too_long
+    else begin
+      let parent_channel_id = State.parent_channel_of_thread ~channel_id in
+      let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
+      (* Resolved once for this message, so the attention record and the
+         durable chat row name the same room. *)
+      let channel_name = resolve_channel_name ~base_dir ~channel_id in
+      let attention_event_id =
+        record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~channel_name
+          ~message_id ~author_id ~author_name ~content
+          ~mentions_bot:false ~route:"ambient"
+          ~urgency:Keeper_external_attention.Ambient
+      in
+      Keeper_chat_store.append_user_message
+        ~base_dir ~keeper_name ~content
+        ~surface:
+          (Surface_ref.Discord
+             {
+               guild_id;
+               channel_id;
+               channel_name;
+               parent_channel_id;
+               thread_id;
+             })
+        ~conversation_id:(discord_conversation_id ~guild_id ~channel_id)
+        ~external_message_id:message_id
+        ~speaker:
+          { Keeper_chat_store.speaker_id = Some author_id
+          ; speaker_name = author_name
+          ; speaker_authority = Keeper_chat_store.External
+          }
+        ();
+      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
+      (* Every accepted Connector event is a durable per-Keeper stimulus. The
+         event identity comes from the producer-owned external-attention row;
+         no content, channel activity, elapsed-time window, or rollout flag may
+         suppress it. The wake is only a hint after the durable commit, so a
+         busy or lifecycle-deferred Keeper retains the exact event for its next
+         lane cycle. *)
+      (match attention_event_id with
+       | Some event_id ->
+         let channel =
+           (* RFC-0320: carry the originating Discord channel+author so a woken
+              keeper replies into the same thread, not its own state. *)
+           match
+             Keeper_continuation_channel.discord
+               ~guild_id
+               ~channel_id
+               ~parent_channel_id
+               ~thread_id
+               ~reply_to_message_id:message_id
+               ~user_id:author_id
+               ()
+           with
+           | Ok channel -> channel
+           | Error message -> invalid_arg message
+         in
+         ignore (Server_connector_attention_delivery.deliver
+           ~base_path:base_dir
+           ~keeper_name
+           ~event_id
+           ~channel : (unit, string) result)
+       | None -> ());
+      Discord_observability.record_ambient
+        Discord_observability.Ambient_recorded
+    end
+
+let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
+  match ev with
+  | Gw.Message_create
+      { channel_id
+      ; guild_id
+      ; message_id
+      ; author_id
+      ; author_name
+      ; content
+      ; attachments
+      ; _
+      } ->
+    handle_ambient ?resolved_keeper_name ~base_dir ~channel_id ~guild_id
+      ~message_id ~author_id ~author_name ~content ~attachments ()
+  | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
+
+let submit_ingress ingress ~lane ~event_id run =
+  match Connector_ingress_lane.submit ingress ~lane ~event_id run with
+  | Ok () -> ()
+  | Error error ->
+    Log.Server.error
+      "Discord ingress submission rejected lane=%s event=%s: %s"
+      (Connector_ingress_lane.lane_to_string lane)
+      (Connector_ingress_lane.event_id_to_string event_id)
+      (Connector_ingress_lane.submit_error_to_string error)
+;;
+
+  let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
+    (ev : Gw.gateway_event) =
+  match ev with
+  | Gw.Message_create { channel_id; message_id; _ } ->
+    (match resolve_binding_for_message ~channel_id with
+     | Error error ->
+       log_binding_lookup_failure ~channel_id error;
+       Discord_observability.record_inbound_dispatch
+         Discord_observability.Gate_error
+     | Ok None ->
+       Discord_observability.record_inbound_dispatch
+         Discord_observability.Dropped_unbound
+     | Ok (Some ((resolution, _) as resolved_binding)) ->
+       (match
+          accept_event
+            ~resolved_binding:(Some resolved_binding)
+            ~dispatch_for_delivery ~base_dir ev
+        with
+        | None -> ()
+        | Some accepted_delivery ->
+          submit_ingress
+            ingress
+            ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
+            ~event_id:{ source = "discord_triggered"; opaque_id = message_id }
+            (* DET-OK: override-vs-admitted delivery, both from one typed
+               admission — deterministic, not an unknown-input default. *)
+            (Option.value deliver ~default:accepted_delivery)))
+  | Gw.Ready _
+  | Gw.Reaction_add _
+  | Gw.Thread_tracked _
+  | Gw.Threads_bulk_tracked _
+  | Gw.Thread_removed _
+  | Gw.Ignored _ ->
+    ignore
+      (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
+;;
+
+module For_testing = struct
+  let submit_triggered_event = submit_triggered_event
+  let discord_channel_directory_entry = discord_channel_directory_entry
+  let discord_channel_directory_entries = discord_channel_directory_entries
+  let discord_member_directory_page = discord_member_directory_page
+  let discord_message_people_entries = discord_message_people_entries
+end
+
+let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
+  match ev with
+  | Gw.Message_create { channel_id; message_id; _ } ->
+    (match State.keeper_for_channel_result ~channel_id with
+     | Error error ->
+       log_binding_lookup_failure ~channel_id error;
+       Discord_observability.record_ambient
+         Discord_observability.Ambient_binding_store_error
+     | Ok None -> on_ambient ~base_dir ev
+     | Ok (Some keeper_name) ->
+       submit_ingress
+         ingress
+         ~lane:(Connector_ingress_lane.Keeper_lane keeper_name)
+         ~event_id:{ source = "discord_ambient"; opaque_id = message_id }
+         (fun () -> on_ambient ~resolved_keeper_name:keeper_name ~base_dir ev))
+  | Gw.Ready _
+  | Gw.Reaction_add _
+  | Gw.Thread_tracked _
+  | Gw.Threads_bulk_tracked _
+  | Gw.Thread_removed _
+  | Gw.Ignored _ -> on_ambient ~base_dir ev
+;;
+
+(* ---------------------------------------------------------------- *)
+(* Start                                                            *)
+(* ---------------------------------------------------------------- *)
+
+let start ~sw ~env ~clock ~state =
+  match resolved_trigger_policy () with
+  | Error error ->
+    (* Reject malformed policy even when transport credentials are absent. *)
+    Log.Server.error
+      "RFC-0203: Discord trigger-policy configuration rejected; gateway \
+       not started (%s)"
+      (trigger_policy_load_error_to_string error)
+  | Ok configured ->
+    (* Publish configuration before token admission so disconnected status
+       reads the same default the ingress policy uses. *)
+    Connector_trigger_params.set_discord_configured configured;
+    match bot_token_opt () with
+    | None ->
+      Log.Server.warn
+        "RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started"
+    | Some token ->
+    (* An override left on the params surface outlives a restart, so what this
+       gateway judges by is the param, not [configured] alone. *)
+    let policy = current_trigger_policy () in
+    let ingress =
+      Connector_ingress_lane.create
+        ~sw
+        ~on_failure:(fun failure ->
+          Log.Server.error
+            "Discord ingress callback failed lane=%s event=%s: %s"
+            (Connector_ingress_lane.lane_to_string failure.lane)
+            (Connector_ingress_lane.event_id_to_string failure.event_id)
+            (Connector_ingress_lane.failure_reason_to_string failure.reason))
+        ()
+    in
+    let dispatch_for_config config delivery =
+      Gate_keeper_backend.accept_connector ~delivery ~clock ~config
+    in
+    let policy_label = Discord_gateway_state.trigger_policy_to_string policy in
+    Log.Server.info
+      "RFC-0203: starting in-process Discord gateway (policy=%s, intents=%d)"
+      policy_label
+      (Gw.intents_bitmask default_intents);
+    Eio.Fiber.fork ~sw (fun () ->
+      try
+        Gw.run
+          ~sw ~env ~token
+          ~intents:default_intents
+          ~trigger_policy:current_trigger_policy
+          ~on_event:(fun ev ->
+            let config = Mcp_server.workspace_config state in
+            submit_triggered_event
+              ingress
+              ~dispatch_for_delivery:(dispatch_for_config config)
+              ~base_dir:config.base_path
+              ev;
+            (* READY must be admitted first: [accept_event] publishes the
+               authoritative guild ids that the refresh worker consumes. *)
+            (match ev with
+             | Gw.Ready _ ->
+               request_directory_refresh ~sw ~clock ~base_dir:config.base_path
+             | Gw.Message_create _ | Gw.Reaction_add _ | Gw.Thread_tracked _
+             | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ ->
+               ()))
+          ~on_ambient:(fun ev ->
+            let config = Mcp_server.workspace_config state in
+            submit_ambient_event ingress ~base_dir:config.base_path ev)
+          ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Server.error
+          "RFC-0203: in-process Discord gateway crashed: %s"
+          (Printexc.to_string exn))

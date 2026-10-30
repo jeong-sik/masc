@@ -1,0 +1,196 @@
+(** Drawing an image on a terminal that can hold one.
+
+    The Kitty graphics protocol carries image bytes to the terminal inside APC
+    escapes and asks it to place them at the cursor. Terminals that implement
+    it (Ghostty, Kitty, WezTerm) draw the picture; terminals that do not
+    ignore the escapes entirely, which is why the capability is asked about
+    rather than assumed -- an unanswered query means no image is sent, instead
+    of a screenful of base64.
+
+    Pure: every function returns bytes for the caller to write, or reads bytes
+    the caller collected. Nothing here touches a terminal or a file. *)
+
+type placement = {
+  columns : int;
+  rows : int;
+      (** The cell box an iTerm2 placement is asked to fit inside. iTerm2 takes
+          both dimensions together with [preserveAspectRatio=1], so a box wider
+          than the image's shape leaves margin rather than stretching it.
+
+          The Kitty placements do not take a box. Kitty has no such flag: the
+          protocol says "if only one of either r or c is specified, the other
+          one is computed based on the source image aspect ratio, so that the
+          image is displayed without distortion" -- and, by the same sentence,
+          giving both scales the image into that exact rectangle. So those
+          functions take the row count alone and let the terminal derive the
+          width. *)
+}
+
+val fit_rows : cell_pixels:(int * int) option -> image_pixels:(int * int) option
+  -> columns:int -> rows:int -> int
+(** Aspect-preserving rows that fit both terminal dimensions. Without measured
+    pixel geometry, retain the requested rows rather than inventing cell shape. *)
+
+(** Every picture this process puts on a Kitty terminal. *)
+type image =
+  | Graphics_query  (** {!query}'s one-pixel probe, received but never drawn *)
+  | Msx_screen  (** the MSX spectator screen *)
+  | Mascot  (** MASC's candle on [/about] *)
+  | Keeper_portrait  (** a Keeper's own portrait at the head of its detail *)
+  | About_keeper_1 | About_keeper_2 | About_keeper_3 | About_keeper_4
+      (** The four bounded Keeper placements on [/about]. *)
+  | Evidence_image_1 | Evidence_image_2 | Evidence_image_3 | Evidence_image_4
+      (** The pictures of one task's operator evidence, in the order the
+          evidence lists them. *)
+  | Image_inspection
+[@@deriving enumerate]
+
+val image_id : image -> int
+(** Each picture's own image id, so placing one never replaces another and
+    deleting one never takes another down. {!Graphics_query}'s is in the
+    terminal's reply, so a reply cannot be taken for an answer about a
+    picture actually being drawn. *)
+
+val resource_image_id : int -> int
+(** Zero-based document occurrence in the resource image ID namespace,
+    separate from portraits, evidence and capability probes. *)
+
+val evidence_images : image list
+(** The {!image} slots the operator evidence has, in order. A fifth picture in
+    one task's evidence has no slot and is listed by its caption only. *)
+
+val query : string
+(** Ask the terminal whether it speaks the protocol. Sends a one-pixel image
+    it is asked to receive but not draw, under {!Graphics_query}'s id. A terminal
+    that implements the protocol answers; one that does not says nothing, so
+    the caller needs its own deadline. *)
+
+type query_reply =
+  | Supported
+  | Refused of string
+      (** The terminal answered and said no, carrying its reason. This is a
+          terminal that speaks the protocol and declined this request -- not
+          the same as one that never answered, which produces no reply at
+          all. *)
+
+val parse_query_reply : string -> query_reply option
+(** Read one APC reply body -- the bytes between [ESC _ G] and [ESC \\].
+    [None] when the body is not an answer to {!query}: another image's
+    response, or something that is not a graphics reply. *)
+
+val payload_media_type : string
+(** What {!place} encodes its payload as: it says [f=100], a PNG file's bytes,
+    and [q=2], which tells the terminal not to answer. Bytes of any other
+    format are sent, dropped by the decoder, and nothing says so. Ask whatever
+    identifies bytes whether they are this, before placing -- after placing
+    there is nobody to ask. *)
+
+val place_rgb
+  :  data:string
+  -> pixel_width:int
+  -> pixel_height:int
+  -> rows:int
+  -> string
+(** Bytes that put a raw RGB frame -- three bytes per pixel, row-major, no
+    container -- on the terminal at the cursor, scaled into the cell box.
+
+    For a caller holding a frame rather than a file: no encoder stands between
+    the pixels and the wire. [pixel_width] and [pixel_height] are what the
+    format cannot carry itself and the terminal needs to read the payload.
+
+    [""] when [data] is empty or its length is not
+    [pixel_width * pixel_height * 3] -- a frame that disagrees with its own
+    dimensions is refused here rather than drawn as whatever the terminal
+    makes of it.
+
+    Chunked and silent for the same reasons as {!place}. *)
+
+val replace_rgb : image_id:int -> placement_id:int -> data:string
+  -> pixel_width:int -> pixel_height:int -> rows:int -> string
+(** Transmit and display a replacement under a stable image and placement ID.
+    The caller owns both IDs and must retire the image when leaving its surface. *)
+
+val replace_rgba : image_id:int -> placement_id:int -> data:string
+  -> pixel_width:int -> pixel_height:int -> rows:int -> string
+(** {!replace_rgb} for four bytes per pixel with straight alpha: the
+    terminal blends the picture over the cells behind it, so a picture with a
+    transparent surround needs no guess at the page colour. The pixels travel
+    as an RGBA PNG ([f=100]), without Kitty transport compression. [""] when [data] is empty or not
+    [pixel_width * pixel_height * 4] bytes long. *)
+
+val put : image_id:int -> placement_id:int -> rows:int -> string
+(** Place, at the cursor and [rows] cells tall, the pixels the terminal
+    already holds under [image_id], without sending them again: [a=p], a few
+    dozen bytes. The protocol says a second placement under the same image
+    and placement ids replaces the first, so this also moves or restores a
+    placement {!replace_rgba} made. It needs the pixels to still be there:
+    a clear screen ([ESC [2J]) frees an image whose placements it took, in
+    Kitty and in Ghostty, and [q=2] means a missing image is not reported. *)
+
+(** The part of a picture that shows, as whole-width rows of source pixels. *)
+type crop = { top_px : int; height_px : int }
+
+val replace_png :
+  image_id:int -> placement_id:int -> data:string -> rows:int -> cols:int
+  -> crop:crop option -> string
+(** {!replace_rgba} for a picture that already is a PNG file: its bytes travel
+    as they are ([f=100]), chunked and silent like every other placement. The
+    terminal draws [crop] (all of the picture for [None]) over [cols] by
+    [rows] cells; both are sent because a cropped picture is not the shape of
+    the whole one. [""] when [data] is empty. [data] must be a PNG -- ask
+    {!payload_media_type}'s question of the bytes first. *)
+
+val put_png :
+  image_id:int -> placement_id:int -> rows:int -> cols:int -> crop:crop option -> string
+(** {!put} with the cells and crop of {!replace_png}: place, or move and
+    re-crop, the pixels the terminal already holds, without sending them. *)
+
+val delete_placement : image_id:int -> placement_id:int -> string
+(** Delete one placement and leave the image's pixels with the terminal
+    ([d=i], lowercase), so {!put_png} can bring the picture back without a
+    transfer. The terminal may still free the pixels on its own, as it does
+    after a clear screen; {!delete_image} is what frees them. *)
+
+val delete_image : image_id:int -> string
+(** Delete this image's placements and free its stored pixels. *)
+
+val place : data:string -> rows:int -> string
+(** Bytes that put [data] -- the contents of a PNG file -- on the terminal at
+    the cursor.
+
+    Chunked: the protocol asks that a payload be split, and terminals do drop
+    escapes past a certain length. The caller writes the whole string;
+    splitting is this function's business, not the caller's.
+
+    Asks the terminal not to answer. A reply would arrive on stdin, which is
+    the key stream, and an unread reply is typed into whatever the operator
+    was writing. {!query} is the one request that wants an answer. *)
+
+val place_viewport : data:string -> Masc_tui_image_viewport.window -> string
+(** PNG transfer with explicit x/y/w/h source-pixel cropping and c/r cell
+    geometry. Caller validates the PNG and derives the bounded window. *)
+val put_viewport : Masc_tui_image_viewport.window -> string
+(** Re-crop the already transmitted inspection image without sending its bytes. *)
+
+val delete_all : string
+(** Bytes that remove every image this process placed. Written before leaving
+    a picture behind: the terminal holds images in its own layer, and text
+    drawn over them does not necessarily erase them. *)
+
+type graphics_protocol =
+  | Kitty_protocol
+  | ITerm2_protocol
+  | Unsupported_protocol
+
+val iterm2_place : data:string -> placement -> string
+(** Bytes that put [data] on an iTerm2-compatible terminal at the cursor using OSC 1337. *)
+
+val tmux_wrapped : string -> string
+(** Wrap escapes so tmux forwards them to the terminal underneath instead of
+    eating them. Only correct inside tmux, and only with
+    [allow-passthrough on]; the caller decides whether it is in tmux. *)
+
+type image_region = { top : int; left : int; width_cells : float; height_cells : float }
+val image_point : image_region -> row:int -> column:int -> (float * float) option
+(** Maps the center of a reported terminal cell to a normalized image position.
+    Padding and captions return None. The caller supplies measured placement. *)

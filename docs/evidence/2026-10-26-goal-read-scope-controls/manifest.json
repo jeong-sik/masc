@@ -1,0 +1,73 @@
+{
+  "schema": "masc.goal.read-scope.publication-manifest.v1",
+  "created_at_utc": "2026-10-25T20:13:41.910939+00:00",
+  "cohort": "2026-10-26-goal-read-scope-controls",
+  "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "prompt_sha_prefix": "0dc483a9",
+  "private_original_leaf_count": 109,
+  "file_count_excluding_manifest": 12,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3262,
+      "sha256": "daf09706ea98f27529b8a62a3fbbc40d01d68abe62d3d13c20815db3e430ff34"
+    },
+    {
+      "path": "actual-tool-sequence.json",
+      "bytes": 17134,
+      "sha256": "eb77e08ab6abe206bfc850a68863afcecd81fb748c88c6f494d0f440499d2c52"
+    },
+    {
+      "path": "cohort-response.json",
+      "bytes": 12768,
+      "sha256": "2ad2f25d3879620ce81e0805849a5652bf64f986f419aa9c17161b0f6a8576e3"
+    },
+    {
+      "path": "cohort-review.json",
+      "bytes": 26621,
+      "sha256": "1a50f935795ad1c06d2bebf0df0e5881d59b58b1e687df3ddee099c2e4cc6501"
+    },
+    {
+      "path": "owned-stop.json",
+      "bytes": 1230,
+      "sha256": "d4fc2982ce15a7e24763af47a663a2839f30fbe69943deac9d30c715ce234e06"
+    },
+    {
+      "path": "persisted-outcome.json",
+      "bytes": 14044,
+      "sha256": "8b11ab46455243a76ad3e5c45441b0bad996c8ebc7597c6c758d4eb47c634f70"
+    },
+    {
+      "path": "preparation-response.json",
+      "bytes": 13270,
+      "sha256": "2d17a083944030cf8e86f6bb6dd9ff453dcc6374873aba82f1e0f96d5bc47621"
+    },
+    {
+      "path": "preparation-review.json",
+      "bytes": 14401,
+      "sha256": "47768658d8ed8f6b1e27ec1ea4a8b7120562ea7e3e49d096607369864605658d"
+    },
+    {
+      "path": "private-originals-manifest.json",
+      "bytes": 19475,
+      "sha256": "f33af8d5b9a51157439775e6c1505122c1e0d038549a72562620f88a074eb085"
+    },
+    {
+      "path": "result.json",
+      "bytes": 8249,
+      "sha256": "3f089604ac1134775867b8ee6a5843dbf415956830aad27de1788c4eff7ff15b"
+    },
+    {
+      "path": "source-response.json",
+      "bytes": 7797,
+      "sha256": "203b626b7406a522cca665c5e645cd8d36011b1cd303d09f12166197b764e9a0"
+    },
+    {
+      "path": "source-review.json",
+      "bytes": 9152,
+      "sha256": "eb4a5b8d94863b66d280718adb228674ea83185b1b0cea13816ccfbbe4a5ef84"
+    }
+  ],
+  "raw_provider_bodies_or_reasoning_exported": false,
+  "scope": "Allowlisted immutable result/protocol/state projections, attributed reviews and metadata-only private-original manifest. No originalGoal completion, native current-head build, installation, causal effect or reliability claim."
+}

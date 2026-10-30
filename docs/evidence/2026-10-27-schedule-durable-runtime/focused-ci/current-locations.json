@@ -1,0 +1,32 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Locate exact selected retained copies. Recorded capture paths belong to the original checkout roots listed in submanifest.json; generated retention index, not a rewrite of any captured manifest. Derived selections are bound separately in submanifest.json.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "capture-path-digests.json",
+    "sha256": "9ffb4a411d2ba3f2e48e340c3d9c1407ec0f06da8c26d418fa020bb51e42ba11"
+  },
+  "files": {
+    "docs/evidence/2026-10-27-schedule-durable-runtime/focused-ci/download-manifest.json": {
+      "recorded_path": "artifacts/schedule-actual-repair-20261027/test40394461863/download-manifest.json",
+      "recorded_sha256": "e8cc816e399d95b14e8a288a86cb541fecf8430a4d5f1030172b802610b835de",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/focused-ci/selected-results.json": {
+      "recorded_path": "artifacts/schedule-actual-repair-20261027/test40394461863/selected-results.json",
+      "recorded_sha256": "5d13d789328e56a3748fd57c5562115b86d90e8fa1d4636b40a360f02842d1d4",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/focused-ci/raw-suite-runner.txt": {
+      "recorded_path": "artifacts/schedule-actual-repair-20261027/test40394461863/member-0.txt",
+      "recorded_sha256": "03eb55364bcf04a870a097e1ecc32def7c9b0de09d2c24d56382817f5f0c138b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-10-27-schedule-durable-runtime/focused-ci/suite-runner-log.zip": {
+      "recorded_path": "artifacts/schedule-actual-repair-20261027/test40394461863/suite-runner-log.zip",
+      "recorded_sha256": "4d104784ef8830b373f695fc5e702df5afe98eaa97f1cf274a64ec63c8c688bc",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

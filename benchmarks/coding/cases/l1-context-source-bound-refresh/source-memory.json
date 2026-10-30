@@ -1,0 +1,6 @@
+{
+  "age_sec": 86400,
+  "source_path": "workspace/service.toml",
+  "stale_source": "region = \"us-west-1\"\n",
+  "claim": "현재 배포 리전은 us-west-1이다."
+}

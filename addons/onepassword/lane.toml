@@ -1,0 +1,36 @@
+id = "onepassword"
+revision = "0.1.0"
+title = "1Password"
+ui_category = "browser"
+runtime = "host_process"
+command = [".venv/bin/python", "server.py"]
+contributions = ["observe"]
+
+[world.tools]
+export = ["onepassword_status", "onepassword_login", "onepassword_login_status", "onepassword_logins", "onepassword_fill_next", "onepassword_finish", "onepassword_cancel"]
+invocation = "host_context"
+hooks = ["validate_input", "validate_output"]
+
+[world.skills]
+directory = "skills"
+
+[world.outputs.connection]
+lanes = ["connection"]
+
+[resources]
+max_reply_bytes = 1048576
+
+[interface]
+binding_schema = '''{
+  "type": "object", "properties": {
+    "sources": {"type": "array", "items": {"type": "object", "properties": {}, "additionalProperties": false}, "maxItems": 0}
+  }, "required": ["sources"], "additionalProperties": false
+}'''
+presentation = '''{
+  "description": "Private 1Password approvals for sign-in in the agent's original Browser session.",
+  "readings": [
+    {"lane_id": "connection", "path": ["phase"], "label": "Connection", "unit": null, "format": "text"},
+    {"lane_id": "connection", "path": ["connected"], "label": "Account connected", "unit": null, "format": "boolean"},
+    {"lane_id": "connection", "path": ["browser_login_available"], "label": "Browser login available", "unit": null, "format": "boolean"}
+  ]
+}'''

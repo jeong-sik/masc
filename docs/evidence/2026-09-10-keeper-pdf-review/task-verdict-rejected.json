@@ -1,0 +1,14 @@
+{
+  "type": "task_completion_verdict",
+  "from_status": "awaiting_verification",
+  "to_status": "in_progress",
+  "ts": "2026-09-09T23:20:54Z",
+  "task_id": "task-001",
+  "authority_kind": "system_llm_agent",
+  "authority_actor": "verifier_exact",
+  "producer": "memory-guide-proof",
+  "verification_id": "vrf-d14835a4b1f16ae763aef3f80d91e4ff",
+  "evaluator_runtime": "glm-coding.glm-5-3",
+  "verdict": "rejected",
+  "reason": "직접 조회로 확인된 것은 (1) memory_proposal_guide.pdf 실물 존재(ReportLab 생성)와 PDF 원시 바이트의 /Count 3 — 즉 \"정확히 3페이지\"만 통과다. 나머지는 미확인: ① pdftotext/pdfinfo 실제 출력이 없다 — 제출 어태치먼트 artifact:verify_summary.txt는 missing이고 직접 열기 시도에서 path_not_found(현재 트리에 파일 부재), 노트의 \"chars=4839 korean=True, embedded_nanum=4\"는 실행 영수증 없는 서술이다. ② 페이지 PNG 렌더와 시각 검토 결과가 없다 — 전체 트리에서 PNG 시그니처(IHDR) 0건; make_guide_v2.py의 verify()가 렌더를 tempfile.mkdtemp(pdfrender_) 임시 디렉터리에만 남겨 workspace에 보존하지 않으므로 \"한글 누락 glyph 없음\"(계약 2)과 \"텍스트 겹침·잘림 없음\"(계약 3)을 뒷받침할 시각 증거가 존재하지 않는다. ③ SHA-256(163518c8…)은 노트 주장뿐으로 계산·영수증이 없어 미확인. ④ 계약 4(synthetic 구분)는 생성 스크립트에 문구가 있는 것으로만 확인됐고 PDF 콘텐츠 스트림이 Flate 압축이라 실제 인쇄 여부를 직접 확인하지 못했다(소스 구현은 결과 검증 증거가 아님). 조회 도구는 동작했으므로 이는 조회 실패가 아니라 요구 증거(실행 출력·렌더 이미지·해시 영수증)의 실제 부재다."
+}

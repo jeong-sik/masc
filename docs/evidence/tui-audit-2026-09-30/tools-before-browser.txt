@@ -1,0 +1,18 @@
+ Dashboard  Work  Keepers  Usage  Board  Workspace  ▸System
+
+   MASC System / Tools  18:14:23  HTTP [connected]                              
+   호출 범위  비동기 작업  Skill 기록  ▸Skill 사용 집계  전체 도구              
+ ────────────────────────────────────────────────────────────────────────────── 
+                                                                                
+   Unavailable: UNAVAILABLEHEAD 한글 ledger 한글 ledger 한글 ledger 한글 ledg…  
+   Skill Sources — 1 of 1 root carrying skills                                  
+     ✓ workspace        base-path  .masc/skills/한글-root-한글-root-한글-root…  
+     config revision-rrr… · resource read ≤ 65536 bytes                         
+                                                                                
+   Rejected Skill Sources — 1                                                   
+     workspace/broken · rejected-jjj…                                           
+       name_mismatch: REJECTHEAD preserve `literal` **/*.ml [draft](target)  …  
+  [rows 22-30/30]                                                               
+
+  j/k:scroll  Home/End:top/bottom  p:section  J/K:Skill  Esc:system  q:quit  …?
+ › to alpha   (i to write)                                                      

@@ -1,0 +1,148 @@
+{
+  "instance_id": "01a16e98-2804-7000-bd4a-c59dde02eb92",
+  "incarnation": "01a16e98-2804-7000-bd4a-c59dde02eb92",
+  "action_schema": null,
+  "run_id": "browser",
+  "addon_id": "browser",
+  "title": "Browser connections",
+  "revision": "0.1.0",
+  "phase": {
+    "kind": "detached"
+  },
+  "lifecycle": {
+    "kind": "detached",
+    "release": {
+      "kind": "native_released",
+      "installation_id": "browser",
+      "instance_id": "01a16e98-2804-7000-bd4a-c59dde02eb92"
+    }
+  },
+  "execution_authority": {
+    "kind": "host_process",
+    "installation_id": "browser"
+  },
+  "resolved_image": null,
+  "observation_seq": 5,
+  "rows_count": 1,
+  "observation_pending": false,
+  "coalesced_wakes": 0,
+  "unchanged_source_refreshes": 0,
+  "binding": {
+    "sources": []
+  },
+  "source_access": {
+    "kind": "operator_configuration"
+  },
+  "package": {
+    "runtime": "host_process",
+    "ui_category": "browser",
+    "service": "browser",
+    "tool_hooks": [
+      "validate_input",
+      "validate_output"
+    ],
+    "exact_outputs": {
+      "locate": {
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "matches": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "nodeId": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "nodeId",
+                  "description"
+                ]
+              }
+            }
+          },
+          "required": [
+            "matches"
+          ]
+        },
+        "request_schema": false
+      },
+      "stagehand": {
+        "schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": true
+        },
+        "request_schema": true
+      }
+    },
+    "id": "browser",
+    "revision": "0.1.0",
+    "title": "Browser connections",
+    "contributions": [
+      "observe"
+    ],
+    "command": [
+      "masc-browser-addon-worker"
+    ],
+    "directory": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-navigation-proof-20261025/.masc/packages/browser",
+    "action_tool": null,
+    "state_storage": "ephemeral",
+    "tool_invocation": "host_context",
+    "exported_tools": [
+      "browser_command"
+    ],
+    "outputs": {
+      "connections": {
+        "all_lanes": true
+      }
+    },
+    "refresh_policy": "every_hint",
+    "model_access": "disabled",
+    "binding_schema": {
+      "type": "object",
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          },
+          "maxItems": 0
+        }
+      },
+      "required": [
+        "sources"
+      ],
+      "additionalProperties": false
+    },
+    "presentation": {
+      "description": null,
+      "readings": []
+    },
+    "skills_directory": "skills",
+    "resources": {
+      "max_reply_bytes": 4194304
+    }
+  },
+  "visibility": {
+    "kind": "shared"
+  },
+  "configuration": {
+    "id": "browser",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-ego-navigation-proof-20261025/.masc/config/lane-addons/browser.toml",
+    "revision": "bd21cd512565a33d0c29e7bcfacecec4f9db0de7cf0b0eab74e3c8bd81f06379"
+  },
+  "resource": {
+    "kind": "host_process",
+    "pid": 5266,
+    "started": "darwin:1792856827.961471"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "pid": 51306,
+  "stop_requested_at_unix": 1793021026.383308,
+  "pid_missing_at_unix": 1793021028.8511941,
+  "pre_stop_turns": {
+    "schema": "masc.keeper_turns.v1",
+    "keepers": [
+      {
+        "status": "ok",
+        "keeper_name": "audit-live-deepseek",
+        "turn": null
+      }
+    ]
+  },
+  "returncode": null,
+  "returncode_limit": "Original observer had exited after SIGINT. This observer was not the server parent; no exit code was collected.",
+  "reason": "Both exact scheduled sources were terminal and no model turn remained live before stopping the owned server."
+}

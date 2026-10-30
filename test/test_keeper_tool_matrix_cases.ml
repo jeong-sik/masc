@@ -1,0 +1,922 @@
+module Types = Masc_domain
+
+module Generic = Test_mcp_tool_matrix_cases
+module KET = Masc.Keeper_tool_dispatch_runtime
+module KTO = Masc.Keeper_tools_agent_core_bundle
+module Tool = Agent_core.Tool
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+type init_mode = Generic.init_mode =
+  | Fresh
+  | Init_only
+  | Init_joined
+
+type expectation =
+  | Expect_success
+  | Expect_success_or_refusal
+  | Expect_refusal
+  | Expect_refusal_saying of string
+  | Expect_missing_file_credentials
+  | Expect_no_audio
+
+let of_generic_expectation = function
+  | Generic.Expect_success -> Expect_success
+  | Generic.Expect_success_or_refusal -> Expect_success_or_refusal
+  | Generic.Expect_refusal -> Expect_refusal
+  | Generic.Expect_refusal_saying message -> Expect_refusal_saying message
+
+type keeper_case = {
+  init_mode : init_mode;
+  prepare : fixture -> unit;
+  arguments : fixture -> Masc_domain.tool_schema -> Yojson.Safe.t;
+  expectation : expectation;
+}
+
+and fixture = {
+  generic : Generic.fixture;
+  config : Masc.Workspace.config;
+  meta : Masc.Keeper_meta_contract.keeper_meta;
+  ctx_snapshot : Keeper_types.working_context;
+  tools : Agent_core.Tool.t list;
+  cleanup : unit -> unit;
+}
+
+let string_starts_with = Generic.string_starts_with
+let contains_any = Generic.contains_any
+let cleanup_dir = Generic.cleanup_dir
+
+let restore_env name = function
+  | Some raw -> Unix.putenv name raw
+  | None -> unsetenv name
+;;
+
+let keeper_matrix_guard_fragments =
+  [
+    "tool_not_allowed";
+    "tool_not_supported_in_keeper";
+    "unknown_tool";
+    "unregistered_masc_tool";
+  ]
+
+let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
+  let seen = Hashtbl.create (max 16 (List.length schemas)) in
+  List.filter
+    (fun (schema : Masc_domain.tool_schema) ->
+      if Hashtbl.mem seen schema.name then
+        false
+      else (
+        Hashtbl.replace seen schema.name ();
+        true))
+    schemas
+
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let init_keeper_bridge =
+  let initialized = ref false in
+  fun () ->
+    if not !initialized then (
+      initialized := true;
+      Masc_test_deps.init_unified_tool_registry ();
+      ignore (Masc.Mcp_server_eio.get_clock_opt ());
+      (* Use find_project_root — the test cwd is _build/default/test/ which
+         does not contain dune-project, so Sys.getcwd fails the
+         direct shortcut and falls into the exe-relative walk that picks up
+         the partial _build/default/config/runtime.json. *)
+      let base_path = Masc_test_deps.find_project_root () in
+      let runtime_config_path = Filename.concat base_path "config/runtime.toml" in
+      let config_path =
+        if Sys.file_exists runtime_config_path then
+          runtime_config_path
+        else (
+          let temp_path = Filename.temp_file "keeper_matrix_runtime_" ".toml" in
+          let oc = open_out temp_path in
+          output_string oc test_runtime_toml;
+          close_out oc;
+          temp_path)
+      in
+      (match Runtime.init_default ~config_path with
+       | Ok () -> ()
+       | Error err -> Printf.eprintf "[WARN] Runtime.init_default failed: %s\n" err);
+      Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch)
+
+let keeper_matrix_owner = "keeper-tool-matrix"
+(* The tag this suite builds, and the catalog name its Keepers use for it. *)
+let sandbox_image = "masc-test-tool-matrix:fixture"
+let sandbox_image_name = "base"
+
+let make_meta ?(name = keeper_matrix_owner) () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [
+          ("name", `String name);
+          ("trace_id", `String "keeper-tool-matrix-trace");
+        ])
+  with
+  | Ok meta ->
+    (* The decoder fills [sandbox_profile] with a placeholder its own comment
+       calls a bug to read as authority, and nothing here overwrote it, so
+       every case ran under whatever that placeholder happened to be --
+       Docker. What this suite measures is the tools, not a backend, so it
+       says which backend it wants instead of inheriting one it never chose. *)
+    { meta with
+      sandbox_profile = Masc_test_deps.fixture_sandbox_profile ();
+      sandbox_image = Some sandbox_image_name;
+    }
+  | Error err -> failwith ("make_meta failed: " ^ err)
+
+let all_keeper_tool_schemas_raw () =
+  init_keeper_bridge ();
+  KET.keeper_model_tool_schemas ()
+  |> List.sort (fun (left : Masc_domain.tool_schema) right ->
+         String.compare left.name right.name)
+
+let all_keeper_tool_schemas () =
+  all_keeper_tool_schemas_raw ()
+  |> dedupe_tool_schemas
+
+let all_keeper_tool_names =
+  all_keeper_tool_schemas_raw ()
+  |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+
+let make_fixture
+      sw
+      ~proc_mgr
+      ~fs
+      ~net
+      ~mono_clock
+      clock
+      ~base_path
+      ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+      ~publication_recovery
+      init_mode
+  =
+  init_keeper_bridge ();
+  let generic =
+    Generic.make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode
+  in
+  Masc_test_deps.write_sandbox_image_catalog ~base_path
+    [ sandbox_image_name, sandbox_image ];
+  let config = Masc.Workspace.default_config base_path in
+  let playground = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Generic.mkdir_p (Filename.concat playground "lib");
+  Generic.write_text_file (Filename.concat playground "lib/sample.ml")
+    "let sample = 1\n";
+  let ctx =
+    Masc.Keeper_context_runtime.create ~eio:false
+      ~system_prompt:"keeper tool matrix"
+    |> fun ctx ->
+    Masc.Keeper_context_runtime.append ctx
+      (Agent_core.Types.user_msg "tool matrix memory needle")
+  in
+  let ctx_snapshot = ctx in
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path meta.name meta);
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path "tool-matrix" meta);
+  (* The matrix runs the full AGENT_CORE handler path, so it must also hand
+     the bundle what a real turn hands it: a turn-context cell. Without one
+     the call arrives with [turn_ref = None] and shared-draft editing --
+     the only matrix tool that requires its owning Keeper turn -- fails the
+     case as an unclassified [Runtime_failure] instead of exercising the
+     handler. The cell mirrors [test_keeper_artifact_draft_bundle]: any
+     [keeper_turn_id] works, what matters is that one exists. *)
+  let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+  Masc.Keeper_tool_call_log.set_turn_context ~cell:turn_ctx_cell
+    ~agent_name:meta.name ~turn:0 ~keeper_turn_id:1 ();
+  let bundle =
+    KTO.For_testing.make_tool_bundle
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot
+      ~clock
+      ~turn_ctx_cell
+      ()
+  in
+  (match init_mode with
+   | Init_joined ->
+       (* Bind under both the raw meta name (used by masc_* tools called
+          through the keeper) and the prefixed keeper alias. Some keeper
+          tools resolve the agent through the prefixed alias while
+          dispatched masc tools use the raw meta identity. *)
+       ignore
+         (Masc.Workspace.bind_session config ~agent_name:meta.name
+            ~capabilities:[] ());
+       ignore
+         (Masc.Workspace.bind_session config ~agent_name:("keeper-" ^ meta.name)
+            ~capabilities:[] ())
+   | Fresh | Init_only -> ());
+  { generic; config; meta; ctx_snapshot; tools = bundle.tools; cleanup = bundle.cleanup }
+
+let find_tool fixture name =
+  let by_name tool_name =
+    List.find_opt
+      (fun (tool : Agent_core.Tool.t) -> String.equal tool.schema.name tool_name)
+      fixture.tools
+  in
+  match by_name name with
+  | Some _ as found -> found
+  | None ->
+    (match Masc.Keeper_tool_descriptor_resolution.public_name_for_internal name with
+     | Some public -> by_name public
+     | None -> None)
+
+let ensure_sample_file fixture =
+  let relative = "keeper-tool-matrix.txt" in
+  let absolute =
+    Filename.concat
+      (Masc.Keeper_sandbox.host_root_abs_of_meta ~config:fixture.config fixture.meta)
+      relative
+  in
+  Generic.mkdir_p (Filename.dirname absolute);
+  Generic.write_text_file absolute "needle\nsecond line\n";
+  relative
+
+let ensure_keeper_claim fixture =
+  ignore (Generic.ensure_task fixture.generic);
+  ignore
+    (Masc.Workspace.claim_next_r fixture.config
+       ~agent_name:fixture.meta.name ())
+
+let ensure_voice_session fixture =
+  let mgr = Masc.Keeper_voice_local.get_session_manager () in
+  ignore
+    (Masc.Voice_session_manager.start_session mgr ~agent_id:fixture.meta.name
+       ~voice:"tool-matrix" ())
+
+let ensure_board_comment fixture =
+  let body =
+    Generic.execute_tool_ok fixture.generic ~name:"masc_board_comment"
+      ~arguments:
+        (`Assoc
+          [
+            ("post_id", `String (Generic.ensure_board_post fixture.generic));
+            ("author", `String fixture.meta.name);
+            ("content", `String "tool-matrix-comment");
+          ])
+  in
+  match
+    Generic.extract_id body ~fields:[ "id"; "comment_id" ]
+      ~prefixes:[ "comment-" ]
+  with
+  | Some value -> value
+  | None -> failwith ("failed to parse comment id from: " ^ body)
+
+let sub_board_slug fixture =
+  "tool-matrix-" ^ Filename.basename fixture.generic.base_path
+
+let ensure_sub_board fixture =
+  let slug = sub_board_slug fixture in
+  ignore
+    (Generic.execute_tool_ok fixture.generic ~name:"masc_board_sub_board_create"
+       ~arguments:
+         (`Assoc
+           [
+             ("slug", `String slug);
+             ("name", `String "Tool Matrix SubBoard");
+             ("description", `String "Sub-board fixture for keeper matrix");
+             ("access", `String "open");
+           ]));
+  slug
+
+let prepare_keeper_name fixture name =
+  if name = "keeper_voice_listen" then (
+    (* No microphone or STT request: exercise the recorder's no-audio outcome. *)
+    let bin_dir = Filename.concat fixture.generic.base_path "voice-fixture-bin" in
+    Generic.mkdir_p bin_dir;
+    List.iter
+      (fun command ->
+        let path = Filename.concat bin_dir command in
+        Generic.write_text_file path "#!/bin/sh\nexit 0\n";
+        Unix.chmod path 0o755)
+      [ "rec"; "play" ];
+    Unix.putenv "PATH" (bin_dir ^ ":" ^ Sys.getenv "PATH"));
+  if
+    List.mem name
+      [
+        "masc_board_post_get";
+        "masc_board_comment";
+        "masc_board_vote";
+        "masc_board_comment_vote";
+        "masc_board_search";
+      ]
+  then
+    ignore (Generic.ensure_board_post fixture.generic);
+  if
+    List.mem name
+      [ "keeper_wiki_search"; "keeper_wiki_read" ]
+  then
+    ignore (Generic.ensure_wiki_topic fixture.generic);
+  if
+    List.mem name
+      [ "keeper_task_claim"; "keeper_tasks_list"; "keeper_tasks_audit";
+        "keeper_task_done" ]
+  then
+    ignore (Generic.ensure_task fixture.generic);
+  if
+    List.mem name
+      [ "keeper_task_done" ]
+  then
+    ensure_keeper_claim fixture;
+  if name = "keeper_voice_session_end" then ensure_voice_session fixture;
+  (* keeper_memory_search: needle "tool matrix memory needle" is already
+     in ctx_snapshot from fixture creation (line ~128). No mutation needed. *)
+  ignore (name = "keeper_memory_search")
+
+let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
+  let name = schema.name in
+  match name with
+  | "keeper_lane_status"
+  | "keeper_workspace_memory_read"
+  | "keeper_context_status"
+  | "keeper_tools_list"
+  | "keeper_tasks_audit"
+  | "keeper_candle_balance"
+  | "keeper_candle_catalog"
+  | "keeper_task_claim"
+  | "keeper_voice_agent"
+  | "keeper_voice_sessions"
+  | "keeper_voice_session_end" ->
+      `Assoc []
+  | "keeper_candle_purchase" ->
+      `Assoc [ "item", `String "glasses" ]
+  | "keeper_candle_equip" ->
+      `Assoc [ "slot", `String "face"; "item", `String "default" ]
+  | "keeper_candle_gift" ->
+      `Assoc
+        [ "to", `String "keeper-b"; "amount_milli", `Int 10; "reason", `String "tool matrix gift" ]
+  | "keeper_capability_search" ->
+      `Assoc [ "query", `String "keeper_lane_status" ]
+  | "keeper_memory_search" ->
+      `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
+  | "keeper_memory_select" ->
+      `Assoc [ ("purpose", `String "tool matrix memory selection") ]
+  | "keeper_memory_retract" ->
+      `Assoc
+        [ "memory_id", `String ("sha256:" ^ String.make 64 '0')
+        ; "reason", `String "tool matrix missing-fact refusal"
+        ]
+  | "keeper_memory_write" ->
+      `Assoc [ ("content", `String "tool matrix memory write content") ]
+  | "keeper_analyze_image" ->
+      `Assoc [ ("artifact", `String "tool-matrix-missing-query") ]
+  | "keeper_ide_annotate" ->
+      (* A memo above line 1 of a file, in that file's comment syntax. *)
+      `Assoc
+        [
+          ("file_path", `String "lib/sample.ml");
+          ("line", `Int 1);
+          ("text", `String "tool matrix memo");
+        ]
+  | "masc_board_post" ->
+      (* The keeper projection in config/tools/masc_board_post.toml sets
+         additional_properties = false and does not list visibility, so a
+         keeper caller sending it is rejected before the handler runs. The
+         general projection has the field; this matrix calls as a keeper. *)
+      `Assoc
+        [
+          ("title", `String "Keeper Tool Matrix");
+          ("content", `String "tool-matrix-post");
+        ]
+  | "masc_board_post_get" ->
+      `Assoc [ ("post_id", `String (Generic.ensure_board_post fixture.generic)) ]
+  | "masc_board_list" -> `Assoc [ ("limit", `Int 5) ]
+  | "masc_board_curation_read" -> `Assoc []
+  | "masc_board_curation_submit" ->
+      `Assoc [ ("rationale", `String "tool matrix curation") ]
+  | "masc_board_comment" ->
+      `Assoc
+        [
+          ("post_id", `String (Generic.ensure_board_post fixture.generic));
+          ("content", `String "tool-matrix-comment");
+        ]
+  | "masc_board_vote" ->
+      `Assoc
+        [
+          ("post_id", `String (Generic.ensure_board_post fixture.generic));
+          ("direction", `String "up");
+        ]
+  | "masc_board_comment_vote" ->
+      `Assoc
+        [
+          ("comment_id", `String (ensure_board_comment fixture));
+          ("direction", `String "up");
+        ]
+  | "masc_board_stats" -> `Assoc []
+  | "masc_board_search" ->
+      `Assoc [ ("query", `String "tool-matrix"); ("limit", `Int 5) ]
+  | "masc_board_sub_board_create" ->
+      `Assoc
+        [
+          ("slug", `String (sub_board_slug fixture));
+          ("name", `String "Tool Matrix SubBoard");
+          ("description", `String "Sub-board fixture for keeper matrix");
+          ("access", `String "open");
+        ]
+  | "masc_board_sub_board_list" -> `Assoc []
+  | "masc_board_sub_board_get" ->
+      `Assoc [ ("sub_board_id", `String (ensure_sub_board fixture)) ]
+  | "masc_board_sub_board_update" ->
+      `Assoc
+        [
+          ("sub_board_id", `String (ensure_sub_board fixture));
+          ("name", `String "Tool Matrix SubBoard Updated");
+        ]
+  | "masc_board_sub_board_delete" ->
+      `Assoc [ ("sub_board_id", `String (ensure_sub_board fixture)) ]
+  | "tool_read_file" ->
+      `Assoc [ ("file_path", `String (ensure_sample_file fixture)) ]
+  | "tool_edit_file" ->
+      `Assoc
+        [
+          ("file_path", `String (ensure_sample_file fixture));
+          ("old_string", `String "needle");
+          ("new_string", `String "edited needle");
+        ]
+  | "tool_search_files" ->
+      `Assoc
+        [
+          ("pattern", `String "needle");
+          ("path", `String (ensure_sample_file fixture));
+        ]
+  | "tool_write_file" ->
+      `Assoc
+        [
+          ("file_path", `String "keeper-matrix-write.txt");
+          ("content", `String "matrix write\n");
+          ("mode", `String "overwrite");
+        ]
+  | "tool_execute" ->
+      `Assoc
+        [ ("argv", `List [ `String "pwd" ]); ("timeout_sec", `Float 5.0) ]
+  | "keeper_voice_speak" ->
+      `Assoc [ ("message", `String "tool matrix hello") ]
+  | "keeper_voice_listen" ->
+      `Assoc [ ("timeout_seconds", `Float 1.0) ]
+  | "keeper_voice_session_start" ->
+      `Assoc [ ("session_name", `String "tool-matrix") ]
+  | "keeper_wiki_search" ->
+      `Assoc [ ("query", `String "tool matrix") ]
+  | "keeper_wiki_read" ->
+      `Assoc [ ("topic", `String (Generic.ensure_wiki_topic fixture.generic)) ]
+  | "keeper_surface_read" -> `Assoc [ ("surface", `String "dashboard") ]
+  | "keeper_surface_post" ->
+      `Assoc
+        [ ("surface", `String "dashboard");
+          ("content", `String "tool matrix surface post") ]
+  | "keeper_person_note_set" ->
+      `Assoc
+        [ ("speaker_id", `String "98791450001");
+          ("note", `String "tool matrix person note") ]
+  | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
+  | "keeper_artifact_transfer" ->
+      `Assoc ["action", `String "export"; "path", `String "lib/sample.ml";
+        "purpose", `String "Inspect the matrix fixture source"]
+  | "keeper_constitution_write" ->
+      `Assoc ["text", `String "Record measured evidence with each result."]
+  | "keeper_constitution_read" -> `Assoc []
+  | "keeper_constitution_remove" ->
+      let written = Masc.Keeper_tool_constitution_runtime.write_with_outcome
+        ~config:fixture.config ~meta:fixture.meta
+        ~args:(`Assoc ["text", `String "Fixture norm to remove."]) in
+      (match written.Masc.Keeper_tool_execution.data with
+       | Some (`Assoc fields) ->
+         (match List.assoc_opt "article_id" fields with
+          | Some (`String article_id) -> `Assoc ["article_id", `String article_id]
+          | _ -> failwith "constitution fixture did not return its article identity")
+       | _ -> failwith "constitution fixture could not seed an article")
+  | "keeper_artifact_read" ->
+      (* No artifact carries this digest in a fresh workspace, so the call
+         refuses rather than reading one. *)
+      `Assoc [ ("sha256", `String (String.make 64 '0')) ]
+  | "keeper_portrait_read" ->
+      (* The read-only portrait tool renders the Keeper's own portrait and
+         returns its equipment. A small edge keeps the case cheap. *)
+      `Assoc [ ("size", `Int 96) ]
+  | "keeper_skill_validate" ->
+      (* The request has the public fields, but the empty artifact must be
+         refused before any Skill content is read. *)
+      `Assoc
+        [ ("artifact", `Assoc [])
+        ; ("package_id", `String "matrix-skill")
+        ]
+  | "keeper_skill_publish" ->
+      (* Empty evidence must be refused before anything reaches the
+         publisher, so the matrix never writes a Skill. *)
+      `Assoc
+        [ ("package_id", `String "matrix-skill")
+        ; ("source_text", `String "")
+        ; ("evidence", `List [])
+        ]
+  | "keeper_code_query" ->
+      `Assoc
+        [
+          ("question", `String "what does this define?");
+          ("path", `String "lib/sample.ml");
+          ("line", `Int 1);
+          ("symbol", `String "sample");
+        ]
+  | "keeper_spawn" ->
+      (* [pwd] exits immediately, so the case leaves no process behind. This
+         mirrors the [tool_execute] case above, which runs the same command. *)
+      `Assoc [ ("argv", `List [ `String "pwd" ]) ]
+  | "keeper_composition_result" ->
+      (* A well-formed binding for a request this workspace never accepted.
+         The reader has to look the request up and refuse it; a malformed
+         binding would be rejected by argument parsing and say nothing about
+         the lookup. The run id is fresh so no stored run can match it. *)
+      `Assoc
+        [
+          ( "binding",
+            `Assoc
+              [
+                ("request_id", `String "matrix-no-such-request");
+                ( "composition_run_id",
+                  `String
+                    (Masc.Keeper_tool_plan.Composition_run_id.to_string
+                       (Masc.Keeper_tool_plan.Composition_run_id.fresh ())) );
+                ("composition_tool", `String "keeper_compose_matrix-no-such-skill");
+                ("parent_tool_use_id", `String "matrix-no-such-call");
+                ("source_turn", `Int 0);
+                ( "skill_reference",
+                  `Assoc
+                    [
+                      (* Sixty-four hex digits: the shape of a content
+                         revision, naming no Skill that exists. *)
+                      ("content_revision", `String (String.make 64 'a'));
+                      ( "identity",
+                        `Assoc
+                          [
+                            ("source_id", `String "matrix-source");
+                            ("package_id", `String "matrix-package");
+                            ("name", `String "matrix-no-such-skill");
+                          ] );
+                    ] );
+              ] );
+        ]
+  | "keeper_job_start" ->
+      (* An empty argv breaks the schema's min_items, so the case refuses the
+         same way on every host. A well-formed argv would reach the Docker
+         backend: it starts a real job where Docker exists and fails as a
+         runtime failure, neither success nor refusal, where it does not. *)
+      `Assoc [ ("argv", `List []) ]
+  | "keeper_job_status" | "keeper_job_result" | "keeper_job_cancel" ->
+      (* A job id that was never issued: the reader has to look it up and
+         refuse, which says more than an argument-parse rejection would. *)
+      `Assoc [ ("job_id", `String "matrix-no-such-job") ]
+  | "keeper_spawn_read" ->
+      `Assoc [ ("handle", `String "matrix-no-such-handle") ]
+  | "keeper_spawn_stop" ->
+      `Assoc [ ("handle", `String "matrix-no-such-handle") ]
+  | "keeper_spawn_wait" ->
+      (* A handle that was never issued refuses without waiting; the short
+         timeout bounds the case even if an implementation waits first. *)
+      `Assoc
+        [
+          ("handle", `String "matrix-no-such-handle");
+          ("until", `String "exit");
+          ("timeout_sec", `Float 0.1);
+        ]
+  | "keeper_task_cancel" ->
+      (* Deliberately not [Generic.ensure_task]: cancelling or releasing the
+         shared fixture task would decide the outcome of [keeper_task_done],
+         which claims the same one. An unknown id keeps the cases independent
+         and still exercises the call. *)
+      `Assoc
+        [
+          ("task_id", `String "matrix-no-such-task");
+          ("reason", `String "tool matrix cancel");
+        ]
+  | "keeper_task_release" ->
+      `Assoc
+        [
+          ("task_id", `String "matrix-no-such-task");
+          ("summary", `String "tool matrix release");
+        ]
+  | "keeper_broadcast" ->
+      `Assoc [ ("content", `String "tool matrix broadcast") ]
+  | "keeper_task_done" ->
+      (* The completion text intentionally contains the "follow-up"
+         excuse pattern so the anti-rationalization gate fast-rejects
+         on Gate 2 (excuse pattern) without invoking the completion-authority
+         LLM runtime. The matrix runs in environments where the
+         evaluator runtime is unreachable, and the LLM path's 180s
+         timeout would always exceed the 25s per-case budget. The
+         expectation table accepts the structured rejection. *)
+      `Assoc
+        [
+          ("task_id", `String (Generic.ensure_task fixture.generic));
+          ( "result",
+            `String
+              "Validated the keeper tool matrix case as a follow-up smoke check, confirmed the task fixture was claimed, and recorded the successful completion path." );
+          ("evidence_refs", `List [ `String "trace:tool-matrix-task-done" ]);
+        ]
+  | "keeper_task_create" ->
+      `Assoc
+        [
+          ("title", `String "tool matrix task");
+          ("priority", `Int 3);
+          ("description", `String "tool matrix task body");
+        ]
+  (* cdp_port is pinned to a closed port so the case refuses deterministically
+     on every machine — a developer's live Chrome on 9222 must not turn this
+     smoke case into a real browser call. *)
+  | "keeper_webmcp_list" ->
+    `Assoc [ "page", `String "matrix-no-such-page"; "cdp_port", `Int 59999 ]
+  | "keeper_webmcp_call" ->
+    `Assoc
+      [ "page", `String "matrix-no-such-page"
+      ; "tool", `String "masc_status"
+      ; "args_json", `String "{}"
+      ; "cdp_port", `Int 59999
+      ]
+  | "keeper_artifact_publish" ->
+      (* Required params per config/tools/keeper_artifact_publish.toml.
+         A new artifact (no id) is the refusal-free default path. *)
+      `Assoc
+        [
+          ("title", `String "Tool Matrix Artifact");
+          ("summary", `String "tool matrix publish");
+          ("format", `String "markdown");
+          ("content", `String "# tool matrix publish\n");
+        ]
+  | "keeper_image_read" ->
+      (* Exactly one of path/artifact per config/tools/keeper_image_read.toml.
+         No required params; a missing path must refuse without falling over. *)
+      `Assoc [ ("path", `String "samples/tool-matrix-missing-image.png") ]
+  | "keeper_artifact_draft" ->
+      (* Only action is required per config/tools/keeper_artifact_draft.toml.
+         Opening an artifact the fresh workspace does not have must refuse
+         without falling over. *)
+      `Assoc
+        [
+          ("action", `String "open");
+          ("artifact_id", `String "tool-matrix-missing-artifact");
+        ]
+  | other -> failwith ("missing keeper arguments contract for " ^ other)
+
+(* Every keeper tool here may either do the work or refuse it when called with
+   default arguments in a fresh workspace. Which of the two happens is not the
+   contract; not falling over is. The per-tool word lists this replaced
+   ("file not found", "annotation sink is not installed", ...) only ever said
+   "that refusal was expected", which the typed class now says for all of them
+   at once. [analyze_image], [keeper_skill_validate] and [keeper_skill_publish]
+   still have to refuse: their cases exist to prove argument validation runs. *)
+let keeper_expectation_for_name name =
+  match name with
+  | "keeper_analyze_image" | "keeper_skill_validate" | "keeper_skill_publish"
+  | "keeper_job_start" ->
+    Expect_refusal
+  | "keeper_voice_listen" -> Expect_no_audio
+  | "keeper_artifact_transfer" | "keeper_constitution_write" | "keeper_constitution_remove"
+  | "keeper_constitution_read"
+  | "tool_execute" | "tool_search_files" | "tool_read_file"
+  | "tool_write_file" | "keeper_ide_annotate" | "keeper_spawn" -> Expect_success
+  | _ -> Expect_success_or_refusal
+
+let case_for_name name =
+  let runtime_name =
+    match Masc.Keeper_tool_descriptor_resolution.descriptor_for_tool_name name with
+    | Some (descriptor : Masc.Keeper_tool_descriptor.t) -> descriptor.internal_name
+    | None -> name
+  in
+  if string_starts_with ~prefix:"masc_" runtime_name then
+    let generic_case_opt =
+      try Some (Generic.case_for_name runtime_name) with Failure _ -> None
+    in
+    (match generic_case_opt with
+     | Some generic_case ->
+       {
+         init_mode = generic_case.init_mode;
+         prepare = (fun fixture -> Generic.prepare_for_name fixture.generic runtime_name);
+         arguments =
+           (fun fixture schema ->
+             Generic.tool_arguments
+               fixture.generic
+               { schema with name = runtime_name });
+         expectation =
+           (match runtime_name with
+            | "masc_file_upload" | "masc_file_delete" | "masc_file_list" ->
+              Expect_missing_file_credentials
+            | _ -> of_generic_expectation generic_case.expectation);
+       }
+     | None ->
+       {
+         init_mode = Init_only;
+         prepare = (fun _fixture -> ());
+         arguments =
+           (fun fixture schema ->
+             Generic.tool_arguments
+               fixture.generic
+               { schema with name = runtime_name });
+         expectation =
+           (match runtime_name with
+            | "masc_file_upload" | "masc_file_delete" | "masc_file_list" ->
+              Expect_missing_file_credentials
+            | _ -> Expect_success_or_refusal);
+       })
+  else if
+    string_starts_with ~prefix:"keeper_" runtime_name
+    || string_starts_with ~prefix:"tool_" runtime_name
+    || String.equal runtime_name "keeper_analyze_image"
+  then
+    {
+      init_mode = Init_joined;
+      prepare = (fun fixture -> prepare_keeper_name fixture runtime_name);
+      arguments =
+        (fun fixture schema ->
+          keeper_arguments fixture { schema with name = runtime_name });
+      expectation = keeper_expectation_for_name runtime_name;
+    }
+  else
+    failwith ("missing keeper tool contract for " ^ name)
+
+(* Host-level refusals: the keeper was never handed the tool, so no tool
+   decided anything and there is no class to read. Textual because there is no
+   typed value, not as a shortcut. *)
+let host_failure_fragments =
+  Generic.host_failure_fragments @ keeper_matrix_guard_fragments
+
+(* The keeper path lowers [Tool_result.tool_failure_class] through
+   [Tool_projection.to_agent_core_typed_result], which keeps the
+   distinction this test needs: a refusal the tool chose arrives as
+   [Deterministic] or [Transient], and only [Runtime_failure] arrives as
+   [Unknown]. So the same question the MCP matrix asks is answerable here.
+
+   [None] is a boundary that recorded no class. Treated as not-graceful: a
+   smoke test that cannot tell a crash from a guard should say so rather than
+   pass. *)
+let is_graceful_refusal = function
+  | Some Agent_core.Types.Deterministic | Some Agent_core.Types.Transient -> true
+  | Some Agent_core.Types.Unknown | None -> false
+
+let refusal_class_report = function
+  | None -> "no error_class recorded"
+  | Some Agent_core.Types.Deterministic -> "deterministic"
+  | Some Agent_core.Types.Transient -> "transient"
+  | Some Agent_core.Types.Unknown -> "unknown"
+
+let evaluate_expectation ~name expectation = function
+  | Ok (output : Agent_core.Types.tool_output) -> (
+      match expectation with
+      | Expect_success | Expect_success_or_refusal -> Ok ()
+      | Expect_no_audio ->
+        (match Yojson.Safe.from_string output.Agent_core.Types.content with
+         | json ->
+           (match Masc.Voice_bridge.capture_outcome_of_json json with
+            | Masc.Voice_bridge.Nothing_heard _ -> Ok ()
+            | _ -> Error "voice fixture expected the typed no-audio outcome")
+         | exception Yojson.Json_error error -> Error error)
+      | Expect_missing_file_credentials
+      | Expect_refusal | Expect_refusal_saying _ ->
+          Error (Printf.sprintf "%s expected a refusal but succeeded" name))
+  | Error ({ Agent_core.Types.message; error_class; _ } as observed_error) ->
+      let refused_gracefully = is_graceful_refusal error_class in
+      let report = refusal_class_report error_class in
+      if contains_any message host_failure_fragments then
+        Error (Printf.sprintf "%s hit fatal keeper-tool failure: %s" name message)
+      else (
+        match expectation with
+        | Expect_missing_file_credentials ->
+            let expected =
+              `Assoc
+                [ "ok", `Bool false
+                ; "error", `String "masc_file requires the DEEPSEEK_API_KEY environment variable"
+                ]
+            in
+            let expected_result =
+              Tool_result.error ~failure_class:Tool_result.Runtime_failure
+                ~tool_name:name ~start_time:(Tool_timing.start ())
+                (Yojson.Safe.to_string expected)
+              |> Masc.Tool_bridge.to_agent_core_typed_result
+            in
+            (match expected_result with
+             | Error expected_error
+               when error_class = Some Agent_core.Types.Unknown
+                    && not observed_error.recoverable
+                    && observed_error.message = expected_error.message -> Ok ()
+             | Ok _ | Error _ -> Error ("unexpected file dependency failure: " ^ message))
+        | Expect_no_audio -> Error ("voice fixture failed before no-audio result: " ^ message)
+        | Expect_success ->
+            Error (Printf.sprintf "%s expected success but got error: %s" name message)
+        | Expect_refusal ->
+            if refused_gracefully then Ok ()
+            else
+              Error
+                (Printf.sprintf "%s refused with %s, which is a fault rather than a guard: %s"
+                   name report message)
+        | Expect_refusal_saying expected ->
+            if not refused_gracefully then
+              Error
+                (Printf.sprintf "%s refused with %s, which is a fault rather than a guard: %s"
+                   name report message)
+            else if contains_any message [ expected ] then Ok ()
+            else
+              Error
+                (Printf.sprintf "%s refused as expected but did not say %S: %s" name expected
+                   message)
+        | Expect_success_or_refusal ->
+            if refused_gracefully then Ok ()
+            else
+              Error
+                (Printf.sprintf "%s neither succeeded nor refused -- %s: %s" name report message))
+
+let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
+    (schema : Masc_domain.tool_schema) =
+  let saved_home = Sys.getenv_opt "HOME" in
+	  let saved_env =
+	    [
+	      ("MASC_BASE_PATH", Sys.getenv_opt "MASC_BASE_PATH");
+	      ("PATH", Sys.getenv_opt "PATH");
+	      ("DEEPSEEK_API_KEY", Sys.getenv_opt "DEEPSEEK_API_KEY");
+	    ]
+	  in
+	  let base_path = Generic.temp_dir "keeper-tool-matrix-" in
+  Unix.putenv "MASC_BASE_PATH" base_path;
+  let result =
+    Fun.protect
+      ~finally:(fun () ->
+        List.iter
+          (fun (name, value) -> restore_env name value)
+          saved_env;
+        restore_env "HOME" saved_home)
+      (fun () ->
+        Unix.putenv "HOME" base_path;
+        unsetenv "DEEPSEEK_API_KEY";
+        Eio_context.with_turn_switch sw @@ fun () ->
+        let registry =
+          match Spawn_registry.create ~run:"matrix-turn" ~output_limit_bytes:(1 lsl 16) with
+          | Some registry -> registry
+          | None -> failwith "valid matrix spawn registry was rejected"
+        in
+        Spawn_turn_registry.with_turn_registry (Some registry) @@ fun () ->
+        try
+          let case = case_for_name schema.Masc_domain.name in
+          let meta = make_meta () in
+          Masc_test_deps.with_publication_recovery_registry
+            ~sw
+            ~fs
+            ~registry_root:base_path
+          @@ fun publication_recovery_registry ->
+          let publication_recovery =
+            Masc.Keeper_publication_recovery_availability.
+              { provider =
+                  Masc_test_deps.publication_recovery_provider
+                    publication_recovery_registry
+              ; keeper_name = meta.name
+              }
+          in
+          let fixture =
+            make_fixture
+              sw
+              ~proc_mgr
+              ~fs
+              ~net
+              ~mono_clock
+              clock
+              ~base_path
+              ~meta
+              ~publication_recovery
+              case.init_mode
+          in
+          Fun.protect ~finally:fixture.cleanup @@ fun () ->
+          case.prepare fixture;
+          let args = case.arguments fixture schema in
+          match find_tool fixture schema.Masc_domain.name with
+          | None ->
+            Error
+              (Printf.sprintf
+                 "missing keeper Tool.t for %s"
+                 schema.Masc_domain.name)
+          | Some tool ->
+            let outcome = Tool.execute tool args in
+            evaluate_expectation
+              ~name:schema.Masc_domain.name
+              case.expectation
+              outcome
+        with exn ->
+          Error
+            (Printf.sprintf "%s raised during keeper case: %s"
+               schema.Masc_domain.name (Printexc.to_string exn)))
+  in
+  (base_path, result)

@@ -1,0 +1,20 @@
+HEAD=bdbd33c0c93f364b0549aa755c5834e01b9bcaac
+UTC=2026-09-16T22:30:17Z
+## Masc_tui_fork_guard.launch call sites in bin/masc_tui.ml (expect 9):
+3861:          Masc_tui_fork_guard.launch ~sw
+4739:        Masc_tui_fork_guard.launch ~sw
+5093:        Masc_tui_fork_guard.launch ~sw
+5122:        Masc_tui_fork_guard.launch ~sw
+5714:        Masc_tui_fork_guard.launch ~sw
+5835:        Masc_tui_fork_guard.launch ~sw
+5866:        Masc_tui_fork_guard.launch ~sw
+5899:        Masc_tui_fork_guard.launch ~sw
+6011:        Masc_tui_fork_guard.launch ~sw
+## on_sync_failure sites (expect 9):
+9
+## remaining raw Eio.Fiber.fork_daemon sites (untouched, outside task scope):
+90
+## dune build bin/ (type-check + link of the 9-site edit), this session:
+bin_build_exit=0
+## dune build test/test_tui_fork_guard.exe (scoped):
+guard_build_exit=0 ; binary run: 2 tests OK, exit 0 (see 01)

@@ -1,0 +1,83 @@
+{
+  "scope": "Raw original responses2–9 before first owner terminal; excludes later recovery and initial operator fixture calls. File reads only.",
+  "first_owner_model_goal_measure_calls": 0,
+  "responses": [
+    {
+      "request": 2,
+      "response_sha256": "348c63ec9b4d6b5ea99835811872383637e89bfc565d68f5f17c3cf03937d0df",
+      "terminal": true,
+      "tool_names": [
+        "Read"
+      ]
+    },
+    {
+      "request": 3,
+      "response_sha256": "36e77387c0b91b78e2402ea8014186195ec144962ae90c3887451d089f0f7dcf",
+      "terminal": true,
+      "tool_names": [
+        "keeper_task_create"
+      ]
+    },
+    {
+      "request": 4,
+      "response_sha256": "85ad3ef20de9f96440934a86ebbbf1a46fb4d5e858cbf53f39f428306e2e6fd1",
+      "terminal": true,
+      "tool_names": [
+        "keeper_task_claim"
+      ]
+    },
+    {
+      "request": 5,
+      "response_sha256": "9d144eb4125ca92a1f5d265f87417b9ce94b264da1514580181ebfc4a29efe04",
+      "terminal": true,
+      "tool_names": [
+        "Edit"
+      ]
+    },
+    {
+      "request": 6,
+      "response_sha256": "5e87ada55ba67a4b9068cb78631d6c99c538cf6eb685e9ec4b569cc102afce0a",
+      "terminal": true,
+      "tool_names": [
+        "Read"
+      ]
+    },
+    {
+      "request": 7,
+      "response_sha256": "0bd25d4a5fcfe7cb23b5d01906fe6871ec92bc759f13928d77c19eeb0bdb2ba8",
+      "terminal": true,
+      "tool_names": [
+        "keeper_task_done"
+      ]
+    },
+    {
+      "request": 8,
+      "response_sha256": "0871b64a9ee651b0ae574e5d5c96e010a0af101dea99e88aa5c6bf9fad831363",
+      "terminal": true,
+      "tool_names": [
+        "keeper_tasks_list"
+      ]
+    },
+    {
+      "request": 9,
+      "response_sha256": "9aa1f32a94526efebe4236fb51e446b8c5d4b07c9d702a36848f1bcb0157a018",
+      "terminal": true,
+      "tool_names": []
+    }
+  ],
+  "measurement_store_at_first_owner_terminal": {
+    "version": 1,
+    "measurements": [
+      {
+        "id": "685442347e915f0c4e1b25d460bfd3dc",
+        "goal_id": "goal-canary-three-results",
+        "criterion_revision": "323f43fbb45eda9a26d334f519d40239",
+        "observed_value": "0/3: alpha=false, beta=false, gamma=false; persisted initial fixture reread",
+        "evidence": "note:Canary operator initialized and independently reread acceptance.json; no Task approval or Goal proof inferred.",
+        "actor": "goal-canary-operator",
+        "recorded_at": "2026-10-24T17:16:09Z"
+      }
+    ]
+  },
+  "interpretation": "No model Goal measurement call executed before first owner terminal. The initial operator0/3 measurement is not model receipt interpretation."
+}

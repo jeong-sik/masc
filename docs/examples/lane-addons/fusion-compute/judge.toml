@@ -1,0 +1,25 @@
+id = "fusion-judge"
+run_id = "assembled-fusion"
+manifest_path = "../../../../addons/fusion-compute/lane.toml"
+
+[binding]
+analysis_id = "proposal-comparison-1"
+role = "judge"
+prompt = "Compare the supplied proposals using retained evidence."
+instructions = "Synthesize both panel answers, preserve disagreements and failures, and state what the evidence supports."
+model_route = "REPLACE_WITH_DECLARED_JUDGE_ROUTE"
+max_tokens = 2048
+
+[[binding.sources]]
+source_id = "panel-a"
+kind = "lane_output"
+installation_id = "fusion-panel-a"
+output_id = "result"
+selection = "latest_completed"
+
+[[binding.sources]]
+source_id = "panel-b"
+kind = "lane_output"
+installation_id = "fusion-panel-b"
+output_id = "result"
+selection = "latest_completed"

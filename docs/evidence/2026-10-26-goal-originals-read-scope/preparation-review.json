@@ -1,0 +1,180 @@
+{
+  "schema": "masc.goal.originals.428e.preparation-review.v1",
+  "freeze": "FINAL FROZEN",
+  "reviewed_at_utc": "2026-10-25T19:26:56.584967+00:00",
+  "verdict": "PASS_SCOPED_PRE_SUBMISSION_SOURCE_AND_INPUT_REVIEW",
+  "summary": "No actionable P0-P2 found in the named driver, transitive source helpers and current 76-file prepared packet. The driver can request one fresh isolated Goal proof of the unchanged historical finite criterion. This is neither an observed model result nor proof that the original eleven behaviors were rerun or the primary Goal completed.",
+  "findings": [],
+  "authority": {
+    "constitution": "Previously read in full; repository execution protocol observed. No local Dune, CI watching, additional agent, API call, target-driver/helper execution or process lifecycle action was performed by this reviewer."
+  },
+  "identity": {
+    "binary_source_head": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "read_only_checkout_head_observed": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "binary": {
+      "bytes": 105922464,
+      "sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+      "method": "Read and hashed the existing binary; did not execute it or independently interrogate embedded identity."
+    },
+    "baseline_prompt": {
+      "bytes": 6005,
+      "sha256": "75c4c1fd44110376a8523046e1b903107f855abc8e223b2e5ba60210806cdb51"
+    },
+    "candidate_source_head": "577e6e10a5eb10869796fc4f7f862f3ea3d7e17d",
+    "candidate_prompt": {
+      "bytes": 8143,
+      "sha256": "428e2d7fd1db9ea920ff67ac1a959fa9e91867776b0ee40bef8b7f022307a47d",
+      "git_path": "config/prompts/goal_verification.md",
+      "comparison": "Prepared candidate, current owned source file and exact 577 Git blob are byte equal."
+    },
+    "configured_slot": "glm-coding.glm-5.3-flash",
+    "api_model": "glm-5.3-flash",
+    "model_identity_limit": "These are prepared configuration identities. This review observed no provider response, selected-model report, weights or verdict.",
+    "original_goal_id": "goal-outcome-driven-work-20261024",
+    "original_primary_criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+    "canonical_acceptance": {
+      "bytes": 26469,
+      "sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e"
+    },
+    "delivery_pack_manifest_sha256": "2003ed2a127f1dfdbf9d174685d982632c6af99c42c78deed607ad5e749018a8"
+  },
+  "reviewed_artifacts": [
+    {
+      "path": "masc-goal-originals-428e-20261026.py",
+      "bytes": 9018,
+      "sha256": "b6ed2c4c2c79c00e97a5d0e8fe5731cab395b9679d87bd8990cb1d696538f476"
+    },
+    {
+      "path": "masc-goal-originals-428e-3e0d-20261026/plan-private.json",
+      "bytes": 4187,
+      "sha256": "f18506c7818bc06e7c52e544aaa42eae97ade4905dd89869b650a7595d2bc8e6"
+    },
+    {
+      "path": "masc-goal-originals-428e-3e0d-20261026/staged-inputs-manifest.json",
+      "bytes": 18299,
+      "sha256": "584df4b041fbdee5a97a298bb55dc2e34c7220a1f42c3001a5c336ff1a9d987f"
+    },
+    {
+      "path": "masc-goal-originals-428e-3e0d-20261026/launch-inputs-private.json",
+      "bytes": 465,
+      "sha256": "66010667af8bb977e7ad8c883f96469f0205e6a83c0ae07d9ddd5050947a3497"
+    },
+    {
+      "path": "masc-goal-originals-428e-preflight-20261026-v1/goal-selected.json",
+      "bytes": 3594,
+      "sha256": "0b625ef27c4c1adca1e9078f63bd9182502a096caca68d1e10ab104411494437"
+    },
+    {
+      "path": "masc-goal-declared-aggregate-control-20261026.py",
+      "bytes": 8191,
+      "sha256": "f169f09d39825acca30f7179d8dab8d1fb17cc87fc1dae35e6e1d66ef2d44b21"
+    },
+    {
+      "path": "masc-goal-proof-provenance-controls-20261026.py",
+      "bytes": 13498,
+      "sha256": "27eddedaa65bede3cd6b9e6bc13404f420db6a00ccf81e1c6d8ef3b5e1c09b98"
+    },
+    {
+      "path": "masc-goal-required-originals-negative-20261026.py",
+      "bytes": 8813,
+      "sha256": "0f541215675151c4efa45b2c271417aaee30e854289d38b41a5fee49a87c33d9"
+    },
+    {
+      "path": "masc-goal-measurement-canary-20261025/canary.py",
+      "bytes": 23079,
+      "sha256": "a60067e9d5d3ba8c6ce194056db0754f49171a68b4715d821f9c7193fab89830"
+    },
+    {
+      "path": "masc-goal-originals-428e-3e0d-20261026/wire_proxy.py",
+      "bytes": 5021,
+      "sha256": "9ec19df518e28d16cb0bfb42a843115b4b820db4384a7787cd8ab517eca3bf60"
+    }
+  ],
+  "prepared_input_checks": {
+    "method": "Offline reads, JSON decoding, relative-path/regular-file checks, byte comparisons and SHA256 only. No target module was imported or invoked.",
+    "unique_files": 76,
+    "total_bytes": 1736509,
+    "all_rows_size_and_sha_match": true,
+    "all_staged_bytes_equal_existing_shared_sources": true,
+    "exact_composition": {
+      "delivery_manifest_leaves": 73,
+      "additional_files": [
+        "codex-mcp-client/goal-outcomes-delivery-20261026-v1/manifest.json",
+        "codex-mcp-client/goal-outcomes-20261024/acceptance.json",
+        "goal-outcome-driven-work-20261024-evidence-index.json"
+      ]
+    },
+    "all_leaf_paths_relative_without_parent_traversal": true,
+    "root_carrier_equals_pack_index": true,
+    "preflight_projection": "Plan title, metric and target_value equal the retained primary preflight; plan original_reported_measurement equals preflight measurement.record exactly. The wrapper state is reported. Main criterion revision remains a provenance key; the new fixture uses a new revision.",
+    "criterion_unchanged": "The finite original G1-G4/A1-A7 criterion and acceptance bytes are reused. Existing independent Task permission is preserved. No new microVM, current-head binary, all-stack approval or model-independence condition is added."
+  },
+  "static_effect_trace": [
+    {
+      "boundary": "import chain",
+      "finding": "Driver loads aggregate -> provenance -> negative -> shared helper modules. Their import-time effects are definitions and root/operator/source-binding assignments. Guarded main branches do not run. New driver rebinds aggregate, provenance and shared ROOT to its resolved fresh root. Negative runtime_text is used as a rendering helper; its legacy preparation and submission entrypoints are not invoked."
+    },
+    {
+      "boundary": "prepare",
+      "finding": "New driver owns prepare(). It reads the pinned candidate, baseline binding, binary, frozen primary preflight and existing packet, and writes exclusively beneath the new root. It does not call the old helpers preparation functions that execute fixture commands or change old checkouts. Candidate Git object and baseline checks are read-only. Current prepared inputs were independently checked rather than assuming source count alone proves completeness."
+    },
+    {
+      "boundary": "launch",
+      "finding": "Selected shared launch validates binary hash, source binding and build commit; initializes a fresh explicit private base with config-only, renders runtime configuration, logs in an isolated operator and starts the owned proxy/server with explicit base and port. It does not target primary stores. The proxy is loopback-bound and forwards credentials in memory; it retains private raw payloads and responses, not request headers."
+    },
+    {
+      "boundary": "normal prompt overlay",
+      "finding": "Selected aggregate apply_prompts calls the authenticated isolated /api/v1/prompts set endpoint for the two candidate sections and checks effective values. It uses fresh private client/server records; it does not edit baseline source or replace a binary. Its full checked_health call is after the sets, so this function alone is not a pre-write proof of every endpoint identity. Parent separately reports checking owned binary/base/instance health before applying them; that report is not independently re-observed here."
+    },
+    {
+      "boundary": "pre-submit health",
+      "finding": "Selected provenance checked_health validates private effective base/masc root, expected source/binary identity, admitted singleton Flash verifier lane, no CLI/cascade/degradation, and both effective prompt sections. submit() calls it before its Goal operations."
+    },
+    {
+      "boundary": "one new proof request",
+      "finding": "submit() creates submission-private with exist_ok=False, verifies and copies only staged rows under private runtime playground, then uses its private Client. There is exactly one create/upsert call, one measurement call and one request_complete call. Client requests have no retry loop. A second whole-submit invocation cannot pass the exclusive output-directory creation. This is not a guarantee against asynchronous provider or outbox retry behavior, which must be read from actual evidence."
+    },
+    {
+      "boundary": "criterion and measurement",
+      "finding": "Upsert preserves frozen title/metric/target and asserts a new revision distinct from main3067. Measurement carries the original observed_value and evidence with the new fixture revision; normal actor/time/id are new. Historical revision in the evidence text remains provenance. No verdict is forced, and no explicit evidence references or instruction to approve are injected by submit(). The expected_outcome diagnostic is saved locally, not passed as a model verdict or API gate."
+    },
+    {
+      "boundary": "primary and old evidence",
+      "finding": "Only original shared evidence and a frozen primary preflight are read. Selected mutations address the new private runtime. Source does not call a primary Goal/Task/Board endpoint, install, checkout mutation or human confirmation. New output paths are distinct from old529f run paths."
+    }
+  ],
+  "preserved_baselines": [
+    {
+      "path": "masc-goal-originals-final-prompt-20261026.py",
+      "bytes": 8528,
+      "sha256": "12effeaad0bca2a6bac84edc5cef7ea891b825ace4bcf3c95c4e59844a983daa",
+      "observation": "Existing old529f driver still matches its frozen identity."
+    },
+    {
+      "path": "masc-goal-originals-final-prompt-3e0d-20261026/terminal-originals-private/manifest.json",
+      "bytes": 31353,
+      "sha256": "526d578d8500b71168dbcf9b685ed96cc0cdf6ea36e1a341b8bcaf2cf19d2e6b",
+      "observation": "Existing old149-original manifest still matches its frozen identity. This review did not re-audit those149 payloads."
+    }
+  ],
+  "nonblocking_limits": [
+    "launch-inputs-private.json lists five direct artifacts but omits the transitive negative helper implementing runtime_text. This review independently read and records that helper hash. The five-entry file alone must not be described as a complete transitive import-chain freeze.",
+    "The driver revalidates staged row hashes at submit, but the current prepared count/path completeness was established by this offline comparison; no generic completeness or hostile-concurrent-filesystem guarantee is inferred.",
+    "No measured assistant/provider model, request bodies, tool results, verdict ACK, review registry, terminal stored Goal state, cleanup or live primary state was inspected in this preparation review.",
+    "Private wire payloads may include reasoning and source content. Their existence is not permission to publish raw payloads; later public evidence requires an explicit allowlist and must omit credentials and private paths.",
+    "Owned launch errors do not imply rollback or process cleanup. Actual lifecycle and cleanup need separate runtime receipts.",
+    "Observed source behavior may establish readiness for a fresh replay, not adequacy of the eventual proof. In particular a later approval must be checked against actual required source reads; the prior149 A1 sufficiency FAIL is preserved."
+  ],
+  "parent_handoff": {
+    "original_request_stage": "Prepared driver and inputs; no launch requested of this reviewer.",
+    "later_parent_report": "Parent reports checking owned binary/base/instance health, starting its server10278 and proxy10276, and applying two normal overrides on isolated port63807. At that message provider/Goal submissions were zero. Those are parent-reported execution-stage facts, not this reviewers independent observations or a claim about subsequent current state.",
+    "execution_decision": "No source/input blocker identified. Parent owns any later submission, wire/result audit and owned process cleanup. This response does not authorize primary mutation, Board publication, deployment, human confirmation, formal review or merge."
+  },
+  "not_claimed": [
+    "New execution of the original eleven product behaviors or all linked original commands.",
+    "Primary criterion3067 proof, Goal completion or human confirmation.",
+    "Candidate577 binary execution, new native suite, source-only causal effect or controlled A/B.",
+    "General model reliability, independent-model validation, whole-stack approval, installation or production change.",
+    "Docker/microVM/SSH coverage beyond the existing separately scoped evidence."
+  ]
+}

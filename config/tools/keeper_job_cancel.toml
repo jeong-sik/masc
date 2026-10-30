@@ -1,0 +1,20 @@
+name = "keeper_job_cancel"
+description = """
+Durably request cancellation of the exact isolated job_id and reconcile its current phase. \
+Cancellation is a request, not a claim that the program has already stopped. The handle \
+survives Keeper turns and server restarts. Jobs run only in a private Docker workspace \
+without network access or Keeper/host identity. An unconfirmed create or launch is preserved \
+under the same handle and never authorizes retrying the original command. The reply carries \
+result_ready and reconciliation state/reason. A held non-ready cancellation reports \
+status=unconfirmed; inspect detail and check this same handle after the reported backend or \
+authority issue is resolved. result_ready means a settled result, including cancellation or explicitly \
+unavailable outputs; inspect the outcome and artifacts separately."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "job_id"
+type = "string"
+min_length = 1
+required = true
+description = "Exact durable job_id returned by keeper_job_start."

@@ -1,0 +1,137 @@
+import { html } from 'htm/preact'
+
+import type { KeeperCompositeSnapshot, KeeperCompositeInvariants } from '../api/keeper'
+
+import { invariantRows } from './fsm-hub-invariant-analysis'
+import type { InvariantViolationCounts } from './fsm-hub-types'
+
+/** Human-readable descriptions for MeasurementCard context actions.
+    Indexed by rule name -> { on: "this fires next turn", off: "nothing
+    pending" } so the tooltip reflects the active half of the flag. */
+const MEASUREMENT_FLAG_DESCRIPTIONS: Record<string, { on: string; off: string }> = {
+  handoff: {
+    on: '키퍼가 동일 정체성을 유지하며 새 trace/generation 으로 이관됩니다.',
+    off: '예약된 handoff 없음 — 현재 generation 이 같은 trace 에서 계속 실행됩니다.',
+  },
+}
+
+export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
+  const m = snapshot.measurement
+  return html`
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">
+        측정
+      </div>
+      ${m.captured && m.context_actions ? html`
+        <div class="flex flex-col gap-1.5 text-2xs text-[var(--color-fg-primary)]">
+          <div class="flex flex-wrap gap-1.5 font-mono">
+            <${Flag} label="handoff" on=${m.context_actions.handoff} />
+          </div>
+        </div>
+      ` : html`
+        <div class="text-3xs text-[var(--color-fg-disabled)]">키퍼가 첫 턴을 완료하면 context actions가 여기 표시됩니다</div>
+      `}
+    </div>
+  `
+}
+
+export function flagTooltip(label: string, on: boolean): string {
+  const desc = MEASUREMENT_FLAG_DESCRIPTIONS[label]
+  if (!desc) return `${label}: ${on ? 'active' : 'inactive'}`
+  return `${label} (${on ? 'active' : 'inactive'})\n${on ? desc.on : desc.off}`
+}
+
+function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: 'ok' | 'warn' }) {
+  const offCls = 'text-[var(--color-fg-disabled)] border-[var(--color-border-default)]'
+  const onCls =
+    tone === 'warn'
+      ? 'text-[var(--warn-fg)] border-[var(--warn-border)] bg-[var(--warn-soft)]'
+      : 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
+  return html`
+    <span
+      class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs cursor-help ${on ? onCls : offCls}`}
+      title=${flagTooltip(label, on)}
+    >
+      ${label}
+    </span>
+  `
+}
+
+/** Plain-english safety-property descriptions per invariant key. */
+const INVARIANT_DESCRIPTIONS: Record<string, string> = {
+  event_priority_monotone:
+    'measurement bind_count <= 1 이고 current 와 pending measurement 가 동시에 존재하지 않아야 함. 위반은 measurement 가 여러 번 bind 되었거나 두 위치에서 동시에 소유되고 있음을 뜻함.',
+  phase_derivation_agreement:
+    '저장된 KSM phase 가 derive_phase(conditions) 결과와 일치해야 함. drift 는 registry 가 phase 를 갱신하지 않았거나 condition source 가 신호를 흘렸음을 의미.',
+}
+
+export function invariantDescription(key: string): string {
+  return INVARIANT_DESCRIPTIONS[key] ?? 'keeper composite contract 가 정의한 invariant.'
+}
+
+export function InvariantsPanel({
+  snapshot,
+  violationCounts,
+  sampleCount,
+}: {
+  snapshot: KeeperCompositeSnapshot
+  violationCounts: InvariantViolationCounts
+  sampleCount: number
+}) {
+  const entries = invariantRows(snapshot)
+  const okCount = entries.filter(entry => entry.ok).length
+  const total = entries.length
+  const allOk = okCount === total
+  const badgeText = allOk ? `${total}/${total}` : `${okCount}/${total}`
+  return html`
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <div class="flex items-center justify-between mb-2">
+        <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+          Safety
+        </div>
+        <span
+          class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-mono tabular-nums ${
+            allOk
+              ? 'text-[var(--emerald)] border-[var(--emerald-30)] bg-[var(--emerald-8)]'
+              : 'text-[var(--color-status-err)] border-[var(--err-border)] bg-[var(--bad-soft)]'
+          }`}
+          title=${allOk
+            ? `All ${total} keeper composite invariants hold.`
+            : `${total - okCount} of ${total} invariants are currently violated.`}
+        >
+          ${badgeText}
+        </span>
+      </div>
+      <ul class="flex flex-col gap-1">
+        ${entries.map(entry => {
+          const desc = invariantDescription(entry.key)
+          const vCount = violationCounts[entry.key as keyof KeeperCompositeInvariants] ?? 0
+          const rate = sampleCount > 0
+            ? `${vCount}/${sampleCount} 위반`
+            : ''
+          const tooltip = `${entry.label} — ${entry.ok ? 'holds' : 'BROKEN'}\n${desc}${rate ? `\n누적: ${rate}` : ''}`
+          return html`
+            <li class="v2-monitoring-row flex gap-2 text-3xs cursor-help" title=${tooltip}>
+              <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[var(--emerald)]' : 'bg-[var(--color-status-err)]'}`}></span>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5">
+                  <span class=${entry.ok ? 'text-[var(--color-fg-primary)]' : 'text-[var(--bad-light)] font-semibold'}>
+                    ${entry.label}
+                  </span>
+                  ${vCount > 0 ? html`
+                    <span class="ml-auto text-3xs font-mono tabular-nums text-[var(--bad-light)]">
+                      ${vCount}/${sampleCount}
+                    </span>
+                  ` : null}
+                </div>
+                <div class="text-3xs leading-relaxed text-[var(--color-fg-disabled)]">
+                  ${entry.detail}
+                </div>
+              </div>
+            </li>
+          `
+        })}
+      </ul>
+    </div>
+  `
+}

@@ -1,0 +1,433 @@
+// MASC Dashboard — Keeper cost metrics / decisions / cost-latency fetchers.
+// Extracted from dashboard.ts (domain split). Public symbols re-exported
+// from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
+
+import { get, type AbortableRequestOptions } from './core'
+import { isRecord, asInt, asNumber, asNullableString, asString, asStringArray, asRecordArray } from '../components/common/normalize'
+import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
+import { decodeDashboardFeedMetadata, type DashboardFeedMetadata } from './dashboard-shared'
+
+const REDACTED_RUNTIME_LABEL = 'runtime'
+const UNKNOWN_MODEL_LABEL = 'unknown_model'
+
+// The producer spells lane labels `runtime_lane_<12 hex of a digest>`
+// (lib/model_inference_metrics/model_inference_metrics_json.ml:22-24). The
+// suffix is a digest, so there is nothing to enumerate -- the prefix is the
+// whole shape. What there was nothing of is a check: the literal is written
+// once in OCaml and once here, and if the producer renamed it this side would
+// silently redact every lane to `runtime` with no test going red. The OCaml
+// side is pinned (test/test_model_inference_metrics.ml:98 re-derives the same
+// formula and compares against the emitted JSON); this side is not, and a
+// cross-language pin needs a shared fixture rather than a unit test.
+const RUNTIME_LANE_LABEL_PREFIX = 'runtime_lane_'
+
+function isPublicRuntimeLaneLabel(value: string): boolean {
+  return value.startsWith(RUNTIME_LANE_LABEL_PREFIX)
+}
+const UNKNOWN_PROVIDER_LABEL = 'unknown_provider'
+const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a', 'null', 'undefined', 'default', 'auto'])
+
+function normalizedModelEvidence(value: string | null | undefined): string | null {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text || MODEL_PLACEHOLDERS.has(text.toLowerCase())) return null
+  return text
+}
+
+function publicRuntimeModelLabel(value: string | null | undefined): string {
+  const model = normalizedModelEvidence(value)
+  if (model == null) return UNKNOWN_MODEL_LABEL
+  if (model === REDACTED_RUNTIME_LABEL || isPublicRuntimeLaneLabel(model)) return model
+  return REDACTED_RUNTIME_LABEL
+}
+
+function costMatrixModelLabel(value: string | undefined, index: number): string {
+  const label = publicRuntimeModelLabel(value)
+  return label === UNKNOWN_MODEL_LABEL ? `${UNKNOWN_MODEL_LABEL}_${index + 1}` : label
+}
+
+/** What the server could read of one keeper's metrics store. `failed` means the
+ *  store could not be read at all, so the sums are empty because nothing was
+ *  read, not because nothing happened. `read` with malformed rows or turn rows
+ *  it could not read means the sums count only what was readable. */
+export type KeeperMetricsRead =
+  | { state: 'read'; malformed_rows: number; unread_turn_rows: number }
+  | { state: 'failed'; reason: string }
+
+export interface KeeperCostMetric {
+  keeper_name: string
+  metrics_read: KeeperMetricsRead
+  // Sum over the samples whose runtime reported a cost. `null` when no sample
+  // in the window reported one (subscription runtimes write `cost_usd: null`),
+  // so an unknown cost never reads as $0.
+  total_cost_usd: number | null
+  cost_reported_samples: number
+  cost_unreported_samples: number
+  // Samples whose cost field was missing or had a shape the producer never
+  // writes. Kept apart from `cost_unreported_samples` (the runtime's `null`).
+  cost_unread_samples: number
+  // Sums over the samples whose runtime reported token usage. `null` when no
+  // sample in the window reported it, so unknown usage never reads as 0.
+  total_input_tokens: number | null
+  total_output_tokens: number | null
+  total_tokens: number | null
+  tokens_reported_samples: number
+  tokens_unreported_samples: number
+  tokens_unread_samples: number
+  p50_latency_ms: number | null
+  p95_latency_ms: number | null
+  sample_count: number
+}
+
+export type KeeperCostMetricsResponse =
+  | { state: 'pending'; window_minutes: number }
+  | { state: 'failed'; message: string }
+  | { state: 'ready'; window_minutes?: number; keepers: KeeperCostMetric[]; generated_at?: number | null }
+
+// A sum is a number exactly when some sample reported the value, and `null`
+// when none did. `undefined` marks a pair the producer cannot write.
+function reportedSum(raw: unknown, reportedSamples: number): number | null | undefined {
+  const sum = raw === null ? null : asNumber(raw)
+  if (sum === undefined) return undefined
+  if ((sum === null) !== (reportedSamples === 0)) return undefined
+  return sum
+}
+
+// A state the producer does not write is a row this decoder cannot trust.
+function decodeMetricsRead(raw: unknown): KeeperMetricsRead | null {
+  if (!isRecord(raw)) return null
+  if (raw.state === 'read') {
+    const malformed = asInt(raw.malformed_rows)
+    const unreadTurns = asInt(raw.unread_turn_rows)
+    if (malformed === undefined || unreadTurns === undefined || malformed < 0 || unreadTurns < 0) return null
+    return { state: 'read', malformed_rows: malformed, unread_turn_rows: unreadTurns }
+  }
+  if (raw.state === 'failed') {
+    const reason = asString(raw.reason)
+    return reason ? { state: 'failed', reason } : null
+  }
+  return null
+}
+
+function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
+  if (!isRecord(raw)) return null
+  const keeperName = asString(raw.keeper_name)
+  if (!keeperName) return null
+  const metricsRead = decodeMetricsRead(raw.metrics_read)
+  if (metricsRead === null) return null
+  const costReported = asInt(raw.cost_reported_samples)
+  const costUnreported = asInt(raw.cost_unreported_samples)
+  const costUnread = asInt(raw.cost_unread_samples)
+  const tokensReported = asInt(raw.tokens_reported_samples)
+  const tokensUnreported = asInt(raw.tokens_unreported_samples)
+  const tokensUnread = asInt(raw.tokens_unread_samples)
+  if (
+    costReported === undefined || costUnreported === undefined || costUnread === undefined
+    || tokensReported === undefined || tokensUnreported === undefined || tokensUnread === undefined
+  ) return null
+  const totalCost = reportedSum(raw.total_cost_usd, costReported)
+  const totalInput = reportedSum(raw.total_input_tokens, tokensReported)
+  const totalOutput = reportedSum(raw.total_output_tokens, tokensReported)
+  const totalTokens = reportedSum(raw.total_tokens, tokensReported)
+  if (
+    totalCost === undefined || totalInput === undefined
+    || totalOutput === undefined || totalTokens === undefined
+  ) return null
+  return {
+    keeper_name: keeperName,
+    metrics_read: metricsRead,
+    total_cost_usd: totalCost,
+    cost_reported_samples: costReported,
+    cost_unreported_samples: costUnreported,
+    cost_unread_samples: costUnread,
+    total_input_tokens: totalInput,
+    total_output_tokens: totalOutput,
+    total_tokens: totalTokens,
+    tokens_reported_samples: tokensReported,
+    tokens_unreported_samples: tokensUnreported,
+    tokens_unread_samples: tokensUnread,
+    p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
+    p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,
+    sample_count: asNumber(raw.sample_count) ?? 0,
+  }
+}
+
+function decodeKeeperCostMetricsResponse(raw: unknown): KeeperCostMetricsResponse | null {
+  if (!isRecord(raw)) return null
+  if (raw.state === 'loading') {
+    const cache = isRecord(raw.cache) ? raw.cache : null
+    const window = asInt(raw.window_minutes)
+    if (cache?.state !== 'warming' || window === undefined || window <= 0) return null
+    if (cache.last_error != null) {
+      return typeof cache.last_error === 'string'
+        ? { state: 'failed', message: cache.last_error }
+        : null
+    }
+    return { state: 'pending', window_minutes: window }
+  }
+  if (raw.state !== undefined || !Array.isArray(raw.keepers)) return null
+  // A row this decoder cannot read fails the whole payload. Dropping it leaves
+  // the list a keeper short with nothing saying so, and a list that lost every
+  // row reads as "no cost recorded in this window".
+  const keepers: KeeperCostMetric[] = []
+  for (const row of raw.keepers) {
+    const metric = decodeKeeperCostMetric(row)
+    if (metric === null) return null
+    keepers.push(metric)
+  }
+  return {
+    state: 'ready',
+    window_minutes: asNumber(raw.window_minutes),
+    keepers,
+    generated_at: asNumber(raw.generated_at) ?? null,
+  }
+}
+
+export async function fetchKeeperCostMetrics(
+  windowMinutes = DEFAULT_WINDOW_MINUTES_24H,
+  opts?: AbortableRequestOptions,
+): Promise<KeeperCostMetricsResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-costs?window=${windowMinutes}`, { signal: opts?.signal })
+  const decoded = decodeKeeperCostMetricsResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 keeper cost metrics payload')
+  return decoded
+}
+
+export interface KeeperDecision {
+  ts_unix: number | null
+  keeper_name: string
+  event_type: string
+  outcome: string | null
+  choice: string | null
+  reason: string | null
+  context: KeeperDecisionContext | null
+  latency_ms: number | null
+  cost_usd: number | null
+  input_tokens: number | null
+  output_tokens: number | null
+  stop_reason: string | null
+  error_category: string | null
+  tool: string | null
+  duration_ms: number | null
+  match_count: number | null
+  // Closed-sum terminal cause of the turn (completed / api_error /
+  // runtime_exhausted / tool_contract / required_tool_use_unsatisfied),
+  // computed by dashboard_http_keeper_feeds.ml; the table can only show the
+  // coarse `outcome` without it.
+  terminal_reason_code: string | null
+}
+
+export interface KeeperDecisionContext {
+  file_path?: string | null
+  line?: number | null
+  goal_id?: string
+  task_id?: string
+  board_post_id?: string
+  comment_id?: string
+  pr_id?: string
+  git_ref?: string
+  log_id?: string
+  session_id?: string
+  operation_id?: string
+  worker_run_id?: string
+}
+
+export interface KeeperDecisionsResponse extends DashboardFeedMetadata {
+  events: KeeperDecision[]
+  limit: number
+  generated_at: number | null
+}
+
+function decodeKeeperDecisionContext(raw: unknown): KeeperDecisionContext | null {
+  if (!isRecord(raw)) return null
+  const context: KeeperDecisionContext = {}
+  const filePath = asNullableString(raw.file_path)
+  if (filePath !== null) context.file_path = filePath
+  const line = asNumber(raw.line)
+  if (line !== undefined) context.line = line
+  const stringFields = [
+    ['goal_id', 'goal_id'],
+    ['task_id', 'task_id'],
+    ['board_post_id', 'board_post_id'],
+    ['comment_id', 'comment_id'],
+    ['pr_id', 'pr_id'],
+    ['git_ref', 'git_ref'],
+    ['log_id', 'log_id'],
+    ['session_id', 'session_id'],
+    ['operation_id', 'operation_id'],
+    ['worker_run_id', 'worker_run_id'],
+  ] as const
+  for (const [sourceKey, targetKey] of stringFields) {
+    const value = asString(raw[sourceKey])
+    if (value !== undefined) context[targetKey] = value
+  }
+  return Object.keys(context).length > 0 ? context : null
+}
+
+function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
+  if (!isRecord(raw)) return null
+  return {
+    ts_unix: asNumber(raw.ts_unix) ?? null,
+    keeper_name: asString(raw.keeper_name) ?? '',
+    event_type: asString(raw.event_type) ?? '(unknown event_type)',
+    outcome: asNullableString(raw.outcome),
+    choice: asNullableString(raw.choice),
+    reason: asNullableString(raw.reason),
+    context: decodeKeeperDecisionContext(raw.context),
+    latency_ms: asNumber(raw.latency_ms) ?? null,
+    cost_usd: asNumber(raw.cost_usd) ?? null,
+    input_tokens: asNumber(raw.input_tokens) ?? null,
+    output_tokens: asNumber(raw.output_tokens) ?? null,
+    stop_reason: asNullableString(raw.stop_reason),
+    error_category: asNullableString(raw.error_category),
+    tool: asNullableString(raw.tool),
+    duration_ms: asNumber(raw.duration_ms) ?? null,
+    match_count: asNumber(raw.match_count) ?? null,
+    terminal_reason_code: asNullableString(raw.terminal_reason_code),
+  }
+}
+
+function decodeKeeperDecisionsResponse(raw: unknown): KeeperDecisionsResponse | null {
+  if (!isRecord(raw) || !Array.isArray(raw.events)) return null
+  return {
+    ...decodeDashboardFeedMetadata(raw),
+    events: asRecordArray(raw.events)
+      .map(decodeKeeperDecision)
+      .filter((d): d is KeeperDecision => d !== null),
+    limit: asInt(raw.limit) ?? 0,
+    generated_at: asNumber(raw.generated_at) ?? null,
+  }
+}
+
+export async function fetchKeeperDecisions(
+  limit = 200,
+  opts?: AbortableRequestOptions,
+): Promise<KeeperDecisionsResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-decisions?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeKeeperDecisionsResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 keeper decisions payload')
+  return decoded
+}
+
+// --- Cost-per-agent / cost-matrix / cost-latency ---
+// payload required by the CostPerAgent / CostMatrix / CostLatency
+// frontend components (Phase 2 spec cb-group-f.jsx:291-429).
+
+export interface CostPerAgentRow {
+  agent: string
+  in_tok: number | null
+  out_tok: number | null
+  cost: number | null
+  p50_ms: number | null
+  p95_ms: number | null
+}
+
+export interface CostMatrix {
+  providers: string[]
+  models: string[]
+  grid: (number | null)[][]
+}
+
+export interface CostLatencyBucket {
+  lo: number
+  hi: number | null
+  n: number
+}
+
+export interface CostLatencyResponse {
+  perAgent: CostPerAgentRow[]
+  matrix: CostMatrix
+  latencyBuckets: CostLatencyBucket[]
+  p50: number | null
+  p95: number | null
+  total_cost_usd: number | null
+  window_minutes: number
+  generated_at: number
+}
+
+function decodeCostPerAgentRow(raw: unknown): CostPerAgentRow | null {
+  if (!isRecord(raw)) return null
+  const agent = asString(raw.agent)
+  if (!agent) return null
+  return {
+    agent,
+    in_tok: asNumber(raw.in_tok) ?? null,
+    out_tok: asNumber(raw.out_tok) ?? null,
+    cost: asNumber(raw.cost) ?? null,
+    p50_ms: asNumber(raw.p50_ms) ?? null,
+    p95_ms: asNumber(raw.p95_ms) ?? null,
+  }
+}
+
+function decodeCostMatrix(raw: unknown): CostMatrix | null {
+  if (!isRecord(raw)) return null
+  const rawModels = asStringArray(raw.models)
+  const rawProviders = asStringArray(raw.providers)
+  const rawGrid = Array.isArray(raw.grid)
+    ? (raw.grid as unknown[]).map(row =>
+        Array.isArray(row)
+          ? (row as unknown[]).map(v => asNumber(v) ?? null)
+          : []
+      )
+    : []
+  const colCount = Math.max(
+    rawModels.length,
+    rawGrid.reduce((max, row) => Math.max(max, row.length), 0),
+  )
+  const models = Array.from({ length: colCount }, (_, index) =>
+    costMatrixModelLabel(rawModels[index], index),
+  )
+  const hasProviderEvidence = rawProviders.some(provider => normalizedModelEvidence(provider) != null)
+  const providers = colCount > 0 || rawProviders.length > 0
+    ? [hasProviderEvidence ? REDACTED_RUNTIME_LABEL : UNKNOWN_PROVIDER_LABEL]
+    : []
+  const grid = providers.length === 0
+    ? []
+    : [
+        Array.from({ length: colCount }, (_, column) =>
+          rawGrid.reduce<number | null>((sum, row) => {
+            const value = row[column]
+            return sum === null || value == null ? null : sum + value
+          }, rawGrid.length === 0 ? null : 0),
+        ),
+      ]
+  return { providers, models, grid }
+}
+
+function decodeCostLatencyResponse(raw: unknown): CostLatencyResponse | null {
+  if (!isRecord(raw)) return null
+  const matrix = decodeCostMatrix(raw.matrix)
+  if (!matrix) return null
+  return {
+    perAgent: asRecordArray(raw.perAgent)
+      .map(row => decodeCostPerAgentRow(row))
+      .filter((r): r is CostPerAgentRow => r !== null),
+    matrix,
+    latencyBuckets: Array.isArray(raw.latencyBuckets)
+      ? (raw.latencyBuckets as unknown[])
+          .filter(isRecord)
+          .map(b => ({
+            lo: asNumber(b.lo) ?? 0,
+            hi: b.hi == null ? null : (asNumber(b.hi) ?? null),
+            n: asNumber(b.n) ?? 0,
+          }))
+      : [],
+    p50: asNumber(raw.p50) ?? null,
+    p95: asNumber(raw.p95) ?? null,
+    total_cost_usd: asNumber(raw.total_cost_usd) ?? null,
+    window_minutes: asNumber(raw.window_minutes) ?? DEFAULT_WINDOW_MINUTES_24H,
+    generated_at: asNumber(raw.generated_at) ?? 0,
+  }
+}
+
+export async function fetchCostLatency(
+  windowMinutes = DEFAULT_WINDOW_MINUTES_24H,
+  opts?: AbortableRequestOptions,
+): Promise<CostLatencyResponse> {
+  const raw = await get<Record<string, unknown>>(
+    `/api/v1/dashboard/cost-latency?window=${windowMinutes}`,
+    { signal: opts?.signal },
+  )
+  const decoded = decodeCostLatencyResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 cost-latency payload')
+  return decoded
+}

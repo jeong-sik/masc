@@ -1,0 +1,300 @@
+{
+  "area": "B1 backend raw runtime.toml CAS and TUI wire coupling",
+  "base": "dd5e691f2ce78a3dbd10c22965107344c3b39248",
+  "head": "dd5e691f2ce78a3dbd10c22965107344c3b39248",
+  "reviewed_source": "Uncommitted integration working tree, identified by per-file SHA-256. This is not a committed-head or whole-PR approval.",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc-tui-runtime-edit-draft-20261004",
+  "recorded_at": "2026-10-04T05:28:22.977623+00:00",
+  "verdict": "PASS_SCOPED_WORKING_TREE",
+  "threshold": "검토한 backend 6파일과 TUI revision 계약 결합에서 열린 P0/P1/P2/P3 없음. 최초 P2 hash 불일치 및 P3 source 중복/import 메모는 해결 소스를 직접 확인했다.",
+  "scope": {
+    "backend_files": [
+      "lib/runtime/runtime.ml",
+      "lib/runtime/runtime.mli",
+      "lib/server/server_routes_http_routes_dashboard.ml",
+      "lib/server/server_routes_http_routes_dashboard.mli",
+      "test/test_runtime_config_validity.ml",
+      "test/test_dashboard_http_core.ml"
+    ],
+    "tui_revision_coupling_only": [
+      "bin/masc_tui_http.ml",
+      "test/test_tui_runtime_account_form_pty.py",
+      "test/test_tui_remote_workspace_history_pty.py",
+      "test/test_tui_runtime_config_draft_pty.py"
+    ],
+    "additional_read": [
+      "lib/process/file_lock_eio.ml",
+      "lib/core/json_util.ml",
+      "lib/runtime/dune",
+      "lib/server/dune",
+      "test/dune",
+      "bin/masc_tui_loader.ml",
+      "bin/masc_tui_runtime_config_view.ml",
+      "bin/masc_tui.ml",
+      "test/tui_keyboard_runtime.py"
+    ],
+    "exclusions": [
+      "직접 작성한 Web 코드는 독립 리뷰 범위가 아니다. 원문 route 소비자 inventory에서만 식별했다.",
+      "TUI 전체 draft UX/상태 전이는 다른 독립 리뷰 담당 범위다. 여기서는 raw HTTP와 revision producer/consumer의 결합만 검토했다."
+    ]
+  },
+  "source_sha256": {
+    "lib/runtime/runtime.ml": "7322312a61737659b0703927b1ca81f81483922ad653c08deb9e9072a1155944",
+    "lib/runtime/runtime.mli": "67962caefaa93624c46cb11264efd37dc4e96bc4a0b0e6546466114bc25d9aa8",
+    "lib/server/server_routes_http_routes_dashboard.ml": "9dbafec836985c66fd92c19788c1d975bbf32e80b8eadae5c6c840acc142484f",
+    "lib/server/server_routes_http_routes_dashboard.mli": "87ae1631362cf6d3104a1cbed23d71fa45da350a0476b1f27e62a6f141bd9c47",
+    "test/test_runtime_config_validity.ml": "bdf24716bf993e08e5f941d2993b84b785deab1c0e784209320a08cdd7657844",
+    "test/test_dashboard_http_core.ml": "b32b394e24d5f5ffd546b6b98302cf0d0b85ea2adcbbf4380b8cb9f69f0e0e8b",
+    "bin/masc_tui_http.ml": "1e59cee4b76d5adffbc3b8ea8ac2622ec8a4d6f2899ae7841fc21aff2b0db314",
+    "test/test_tui_runtime_account_form_pty.py": "1cabef1dc9803300bb79a161bbcd0144d0b54f21d775a4b1e7e5a5c8c1716c50",
+    "test/test_tui_remote_workspace_history_pty.py": "326caa7406957b0ca26afdbf008bfe49d91ccaa0253d54de1f914e6a0901514a",
+    "test/test_tui_runtime_config_draft_pty.py": "0ab46c99cc99adac8195bf369891252c13b84ae5690a81ddc5925b4ba4b65c0d"
+  },
+  "backend_diff_sha256": "06acd27977cd475c69c9c1d1b1fd07df1a391ad2a53fe401f21b15a9b797d33f",
+  "checks": [
+    {
+      "area": "잠금 및 CAS 순서",
+      "result": "expected_source_revision 형식을 먼저 확인하고 config path에 기존 durable lock을 획득한다. 파일을 읽어 config_observation으로 revision을 계산한 뒤 비교한다. 불일치 분기는 journal/commit/set_loaded/registry publication 전에 current observation으로 반환한다. 일치한 경우 journal require_resolved와 commit_runtime_config_text가 같은 lock callback 안에서 실행된다.",
+      "refs": [
+        {
+          "path": "lib/runtime/runtime.ml",
+          "start": 3042,
+          "end": 3072
+        },
+        {
+          "path": "lib/runtime/runtime.ml",
+          "start": 2196,
+          "end": 2234
+        },
+        {
+          "path": "lib/process/file_lock_eio.ml",
+          "start": 480,
+          "end": 524
+        }
+      ]
+    },
+    {
+      "area": "원자적 파일 및 registry 의미 보존",
+      "result": "새 wrapper는 기존 commit_runtime_config_text를 재사용한다. before-rename 실패는 publish하지 않고, after-rename은 runtime publication 및 durability-unconfirmed receipt를 유지한다. registry transact_replacement의 reservation/write 경로도 바뀌지 않았다. lock-release warning은 성공 receipt에 붙고 실패 분기에서는 로그로 남는다.",
+      "refs": [
+        {
+          "path": "lib/runtime/runtime.ml",
+          "start": 2937,
+          "end": 3018
+        },
+        {
+          "path": "lib/runtime/runtime.ml",
+          "start": 3065,
+          "end": 3071
+        }
+      ]
+    },
+    {
+      "area": "HTTP admission/auth/status",
+      "result": "실제 raw POST는 기존 CanAdmin auth 안에서만 handler를 호출하며 GET raw도 동일 권한이다. expected_source_revision은 64 lowerhex string 하나만 허용하고 누락/잘못된 타입/중복을 400으로 거부한다. stale은 409 + revision_conflict + 현재 path/text/revision, 다른 write 오류는 기존과 같이 400, 성공은 원래 commit response/application 경로를 사용한다. preview는 source_text만 받는 기존 경로를 유지한다. 후속 delta에서 source_text도 정확히 하나만 허용하도록 공통 raw/preview parser를 갱신했고, 유효 revision을 가진 duplicate source body를 거부하는 authored HTTP 사례를 확인했다.",
+      "refs": [
+        {
+          "path": "lib/server/server_routes_http_routes_dashboard.ml",
+          "start": 500,
+          "end": 515
+        },
+        {
+          "path": "lib/server/server_routes_http_routes_dashboard.ml",
+          "start": 923,
+          "end": 962
+        },
+        {
+          "path": "lib/server/server_routes_http_routes_dashboard.ml",
+          "start": 2562,
+          "end": 2580
+        },
+        {
+          "path": "lib/server/server_routes_http_routes_dashboard.ml",
+          "start": 2726,
+          "end": 2733
+        }
+      ]
+    },
+    {
+      "area": "authoritative revision producer/consumer",
+      "result": "GET/commit/conflict의 source_revision 정본은 Runtime.config_observation이며 SHA256(domain-prefix + source text)다. 수정 후 TUI는 공유 Runtime helper를 호출해 conflict/receipt를 검증하고, Python account-form/draft/workspace fixtures도 동일 domain prefix로 계산한다. TUI 원문 editor와 account form 두 POST callsite는 읽은 revision을 전달한다. Web 직접 저장 API는 구현자의 변경이므로 독립 PASS 범위에서 제외했다.",
+      "refs": [
+        {
+          "path": "lib/runtime/runtime.ml",
+          "start": 198,
+          "end": 204
+        },
+        {
+          "path": "bin/masc_tui_http.ml",
+          "start": 2922,
+          "end": 2967
+        },
+        {
+          "path": "bin/masc_tui.ml",
+          "start": 17480,
+          "end": 17504
+        }
+      ]
+    },
+    {
+      "area": "의존성과 authored tests",
+      "result": "Runtime 공개 ml/mli 합타입·함수 signature가 일치한다. File_lock_eio/Runtime/String_util은 기존 직접 의존성과 소비가 있는 모듈이다. authored backend 사례는 실제 commit 후 stale editor POST가 파일/current revision/audit를 바꾸지 않는지, malformed/duplicate revision 거부 및 explicit current revision 재저장을 검사한다. runtime 사례는 runtime cache·registry identity/staleness까지 conflict 이전 값 보존을 확인한다. Test 실행은 하지 않았다.",
+      "refs": [
+        {
+          "path": "test/test_dashboard_http_core.ml",
+          "start": 6429,
+          "end": 6500
+        },
+        {
+          "path": "test/test_runtime_config_validity.ml",
+          "start": 5094,
+          "end": 5166
+        }
+      ]
+    }
+  ],
+  "findings": [],
+  "nonblocking_notes": [],
+  "resolved_findings": [
+    {
+      "id": "CAS-R1",
+      "severity": "P2",
+      "confidence": "source-confirmed",
+      "title": "TUI plain hash 검증이 실제 서버 revision을 모두 거부함",
+      "initial_verdict": "FAIL",
+      "trigger": "실제 서버에 정상 raw save 또는 stale raw save 요청을 보낸다.",
+      "before": "서버는 SHA256(\"runtime_config_source\\x00\" ^ source_text), TUI는 SHA256(source_text)를 비교했다. 정상 commit은 unconfirmed로 오인되고 409의 current document도 채택되지 않았다. Python fixture가 같은 plain hash를 반환해 이를 가렸다.",
+      "resolution": "runtime_config_text_revision이 Runtime.config_observation/config_source_revision_to_string을 직접 사용하도록 수정되었다. account-form/draft/remote-workspace fixture에 domain prefix를 추가한 소스도 직접 확인했다.",
+      "status": "resolved",
+      "refs": [
+        {
+          "path": "lib/runtime/runtime.ml",
+          "start": 198,
+          "end": 204
+        },
+        {
+          "path": "bin/masc_tui_http.ml",
+          "start": 2922,
+          "end": 2967
+        },
+        {
+          "path": "test/test_tui_runtime_config_draft_pty.py",
+          "start": 28,
+          "end": 30
+        },
+        {
+          "path": "test/test_tui_runtime_account_form_pty.py",
+          "start": 119,
+          "end": 130
+        }
+      ]
+    },
+    {
+      "id": "CAS-N1",
+      "severity": "P3",
+      "history": "pre-existing source parser behavior retained in new save parser",
+      "title": "source_text 중복 필드는 아직 첫 값을 채택함",
+      "detail": "parse_runtime_config_raw_body는 Json_util.assoc_member_opt(List.assoc_opt)를 사용하므로 동일 key가 여러 번 나온 JSON에서 첫 source_text를 사용한다. 새 expected_source_revision 중복 검사는 있어 revision CAS는 우회되지 않는다. 일반 Web/TUI JSON serializer는 이 형태를 만들지 않는다. source_text도 정확히 하나만 허용하면 요청 원문 해석이 명확해진다.",
+      "refs": [
+        {
+          "path": "lib/server/server_routes_http_routes_dashboard.ml",
+          "start": 487,
+          "end": 506
+        },
+        {
+          "path": "lib/core/json_util.ml",
+          "start": 284,
+          "end": 286
+        }
+      ],
+      "status": "resolved",
+      "resolution": "Shared raw/preview source parser now rejects duplicate source_text; HTTP test table includes duplicate source and preserves file."
+    },
+    {
+      "id": "CAS-N2",
+      "severity": "P3",
+      "title": "Python fixture import 중복",
+      "detail": "test_tui_remote_workspace_history_pty.py의 hashlib import가 11행과 13행에 중복된다. 기능 영향은 없다.",
+      "refs": [
+        {
+          "path": "test/test_tui_remote_workspace_history_pty.py",
+          "start": 10,
+          "end": 13
+        }
+      ],
+      "status": "resolved",
+      "resolution": "Duplicate hashlib import removed."
+    }
+  ],
+  "limits": [
+    "리뷰어는 코드 수정·native/Dune/CI·PTY·GitHub 조작을 하지 않았다.",
+    "타입/링크와 filesystem concurrency/HTTP live route는 실행으로 확인하지 않은 source-only 판정이다.",
+    "CAS는 같은 config lock을 따르는 writer 간의 비교/커밋을 보호한다. 잠금을 따르지 않는 직접 filesystem writer와의 전역 원자성을 새로 보장하지 않는다.",
+    "현재 대상은 변경 중인 working tree다. 최종 커밋에서 기록한 파일 hashes 또는 새 delta를 재확인해야 한다."
+  ],
+  "delta_history": [
+    {
+      "reviewed_at": "2026-10-04T05:25:21.932088+00:00",
+      "source_sha256": {
+        "lib/runtime/runtime.ml": "7322312a61737659b0703927b1ca81f81483922ad653c08deb9e9072a1155944",
+        "lib/runtime/runtime.mli": "67962caefaa93624c46cb11264efd37dc4e96bc4a0b0e6546466114bc25d9aa8",
+        "lib/server/server_routes_http_routes_dashboard.ml": "70353cacbbdf4fc9eaa868da21a9bbe8793b4f39fb580d424ad4e0d8befe56b2",
+        "lib/server/server_routes_http_routes_dashboard.mli": "87ae1631362cf6d3104a1cbed23d71fa45da350a0476b1f27e62a6f141bd9c47",
+        "test/test_runtime_config_validity.ml": "bdf24716bf993e08e5f941d2993b84b785deab1c0e784209320a08cdd7657844",
+        "test/test_dashboard_http_core.ml": "cef9b6e704dde78d1cdf83d3e8f1c7953a6df2132414cb822a766dc910133461",
+        "bin/masc_tui_http.ml": "1e59cee4b76d5adffbc3b8ea8ac2622ec8a4d6f2899ae7841fc21aff2b0db314",
+        "test/test_tui_runtime_account_form_pty.py": "1cabef1dc9803300bb79a161bbcd0144d0b54f21d775a4b1e7e5a5c8c1716c50",
+        "test/test_tui_remote_workspace_history_pty.py": "bc84e65cde7aae4f5308b8ace1c4430998852e1d64d67d13c3342a867a06ed07",
+        "test/test_tui_runtime_config_draft_pty.py": "0ab46c99cc99adac8195bf369891252c13b84ae5690a81ddc5925b4ba4b65c0d"
+      },
+      "backend_diff_sha256": "bbf31a8d41cf4ca72efdd9cac9b50adb5c2640d5723b83e309071c27e0a4408f",
+      "open_nonblocking_notes": [
+        {
+          "id": "CAS-N1",
+          "severity": "P3",
+          "history": "pre-existing source parser behavior retained in new save parser",
+          "title": "source_text 중복 필드는 아직 첫 값을 채택함",
+          "detail": "parse_runtime_config_raw_body는 Json_util.assoc_member_opt(List.assoc_opt)를 사용하므로 동일 key가 여러 번 나온 JSON에서 첫 source_text를 사용한다. 새 expected_source_revision 중복 검사는 있어 revision CAS는 우회되지 않는다. 일반 Web/TUI JSON serializer는 이 형태를 만들지 않는다. source_text도 정확히 하나만 허용하면 요청 원문 해석이 명확해진다.",
+          "refs": [
+            {
+              "path": "lib/server/server_routes_http_routes_dashboard.ml",
+              "start": 487,
+              "end": 506
+            },
+            {
+              "path": "lib/core/json_util.ml",
+              "start": 284,
+              "end": 286
+            }
+          ],
+          "status": "resolved",
+          "resolution": "Shared raw/preview source parser now rejects duplicate source_text; HTTP test table includes duplicate source and preserves file."
+        },
+        {
+          "id": "CAS-N2",
+          "severity": "P3",
+          "title": "Python fixture import 중복",
+          "detail": "test_tui_remote_workspace_history_pty.py의 hashlib import가 11행과 13행에 중복된다. 기능 영향은 없다.",
+          "refs": [
+            {
+              "path": "test/test_tui_remote_workspace_history_pty.py",
+              "start": 10,
+              "end": 13
+            }
+          ],
+          "status": "resolved",
+          "resolution": "Duplicate hashlib import removed."
+        }
+      ]
+    }
+  ],
+  "latest_delta": {
+    "changed_files": [
+      "lib/server/server_routes_http_routes_dashboard.ml",
+      "test/test_dashboard_http_core.ml",
+      "test/test_tui_remote_workspace_history_pty.py"
+    ],
+    "review": "Shared parser matches exactly one source_text: missing/wrong type/duplicates return explicit errors before raw-save CAS and preview validation. Existing valid source_text bodies remain accepted. The duplicate-source test supplies a fresh expected revision, so 400 specifically exercises source-field ambiguity rejection rather than stale CAS. Python import removal is behavior-neutral. Other reviewed file hashes unchanged.",
+    "execution": "No build or native/PTY test run."
+  }
+}

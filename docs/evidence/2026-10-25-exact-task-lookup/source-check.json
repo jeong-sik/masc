@@ -1,0 +1,60 @@
+{
+  "scope": "Actual pure Query/Cursor/Snapshot modules + baseline visibility/current production revision fragments. Minimal unrelated typed ports; no full native Task tool, Keeper, SDK or model execution claim.",
+  "baseline": "0596143ca7393557f072662e11d7e8359d23743b",
+  "sources": [
+    {
+      "compiled": "masc_domain.ml",
+      "scope": "exact Task status/tag/actor source; minimal task-record port for unrelated fields",
+      "sha256": "a473a348b13370b347109a487bf7617828409b0f0ff194655fa0ceae0942ff33"
+    },
+    {
+      "compiled": "string_util.ml",
+      "scope": "exact substring helper",
+      "sha256": "bccfa9f1308fda738c79232bd79b3bc85226092724170a79f0e04ccd56cb714f"
+    },
+    {
+      "compiled": "keeper_tasks_list_query.mli",
+      "scope": "lib/keeper/keeper_tasks_list_query.mli",
+      "sha256": "7dbde07b195b4686362c210ce6869a47280f786462ffc50a19fdc463d4e42495"
+    },
+    {
+      "compiled": "keeper_tasks_list_query.ml",
+      "scope": "lib/keeper/keeper_tasks_list_query.ml",
+      "sha256": "ca5de6749cfc1553588dc91f62a985f77e4177cf3ef86eac4afaa81c814a3713"
+    },
+    {
+      "compiled": "keeper_tasks_list_cursor.mli",
+      "scope": "lib/keeper/keeper_tasks_list_cursor.mli",
+      "sha256": "b76cfe3c57427a8487aef05c27ea4cbfc1a367a673adb308e12c78016592bd85"
+    },
+    {
+      "compiled": "keeper_tasks_list_cursor.ml",
+      "scope": "lib/keeper/keeper_tasks_list_cursor.ml",
+      "sha256": "e83d4bb60a2d6c966a90f8f3620bf90cfd43b435c7193d5b23e62685e1debae4"
+    },
+    {
+      "compiled": "snapshot_protocol.mli",
+      "scope": "lib/snapshot_protocol.mli",
+      "sha256": "328dcbc4444a729bcee05d2586221083ac6be685bed10f87f566b7385d470f93"
+    },
+    {
+      "compiled": "snapshot_protocol.ml",
+      "scope": "lib/snapshot_protocol.ml",
+      "sha256": "abfb5463a11f045c473c288abeb1b15335d041a69d68b582cb084b09861a2f3b"
+    },
+    {
+      "compiled": "baseline.ml",
+      "scope": "exact baseline runtime visibility predicate",
+      "sha256": "fb5fbcd87a3ec86d499a2cfd98781b3c849a2d48e4b5e20338bd50e54c43b416"
+    },
+    {
+      "compiled": "runtime_revision.ml",
+      "scope": "exact current runtime revision statements; minimal unrelated local ports",
+      "sha256": "c9d4af28a9304d7ea0deab50faafe739477e9a30f1de4f83a415bc185da4a976"
+    }
+  ],
+  "compile_exit": 0,
+  "compile_stderr": "findlib: [WARNING] Interface digestif.cmi occurs in several directories: /Users/dancer/.opam/5.5.1/lib/digestif/ocaml, /Users/dancer/.opam/5.5.1/lib/digestif\n",
+  "run_exit": 0,
+  "output": "PASS baseline known IDs hide Done and Cancelled\nPASS repaired known IDs read all six actual lifecycle variants\nPASS general discovery remains active-only\nPASS explicit false remains active-only\nPASS explicit true includes Done and excludes Cancelled\nPASS explicit null status retains active semantics\nPASS explicit status selects todo\nPASS explicit status selects claimed\nPASS explicit status selects in_progress\nPASS explicit status selects awaiting_verification\nPASS explicit status selects done\nPASS explicit status selects cancelled\nPASS a supplied nonboolean is not a silent default\nPASS a supplied nonboolean is not a silent default\nPASS a supplied nonboolean is not a silent default\nPASS resolved exact lookup cursor round-trips\nPASS a cursor cannot cross to an explicit lifecycle filter\nPASS a cursor cannot cross to an explicit lifecycle filter\nPASS old opaque cursor shape is refused, never reinterpreted\nPASS closed lifecycle serialization preserves identity\nPASS closed lifecycle serialization preserves identity\nPASS closed lifecycle serialization preserves identity\nPASS closed lifecycle serialization preserves identity\nPASS unknown lifecycle is unavailable\nPASS actual production revision binds lifecycle even when page bytes match\nPASS matching revision uses production unchanged response\nPASS another lifecycle cannot inherit that unchanged response\n27 exact-source lookup checks passed\n"
+}

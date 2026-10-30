@@ -1,0 +1,10 @@
+run: 36668855707
+source_head: f088db60a2a3cc5a2bb56513eeb46617032612c2
+scope: focused Schedules viewport, source-status and existing hold fixture PTY; not installed TUI proof
+test suite	Checkout	2026-09-30T04:34:55.2618564Z f088db60a2a3cc5a2bb56513eeb46617032612c2
+test suite	Test	2026-09-30T04:40:33.1760416Z Schedule detail physical-row viewport: PASS
+test suite	Test	2026-09-30T04:40:33.2657208Z [targeted] test_tui_schedule_detail_viewport_pty: OK in 50s
+test suite	Test	2026-09-30T04:40:43.4653708Z tui schedule source status regression: PASS
+test suite	Test	2026-09-30T04:40:43.5493127Z [targeted] test_tui_keyboard_input-schedule-source-status: OK in 10s
+test suite	Test	2026-09-30T04:40:56.6052758Z a held schedule says when it was checked: PASS
+test suite	Test	2026-09-30T04:40:56.6974189Z [targeted] test_tui_schedules_hold_says_when_it_was_checked: OK in 13s

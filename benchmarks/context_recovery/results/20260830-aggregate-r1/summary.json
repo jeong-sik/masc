@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-08-30T13:32:06+09:00",
+  "source_commit": "e57f5ac581249e21ea0aba98698f6b20bf1b3d95",
+  "binary_sha256": "65342273d818dff5f7abd41ed25ad49649de65a4b1d19a4141cd6caa5c6a86c0",
+  "aggregate_budget_rejection": {
+    "case_id": "l1-memory-aggregate-budget",
+    "model": "hf.co/unsloth/gemma-4-31B-it-qat-GGUF:UD-Q4_K_XL",
+    "provider": "ollama",
+    "port": 9502,
+    "status": "provider_error",
+    "expected_terminal_tool_rejection": true,
+    "verify_exit": 0,
+    "duration_ms": 149000,
+    "requested_content_characters": 200,
+    "observed_content_bytes": 208,
+    "tool_call_count": 1,
+    "tool": "keeper_memory_write",
+    "title_present": false,
+    "source_path_present": false,
+    "tool_success": false,
+    "error_kind": "persistence_failed",
+    "actual_combined_bytes": 364,
+    "max_combined_bytes": 256,
+    "ordinary_snapshot_after_rejection": "absent",
+    "source_revision_after_rejection": 2,
+    "source_fact_count_after_rejection": 0,
+    "source_invalidation_count_after_rejection": 1,
+    "source_invalidation_reason": "source_changed",
+    "last_prompt_assembled_bytes": 241,
+    "artifact_sha256": {
+      "evidence.json": "e70ea634f86ec54dfefb26e1c947bd14056e3aa89735eb53210039876091ad38",
+      "last-prompt.json": "c3cb596061d1a28da5cb1b9a9d75b2ea4723af893533f70949734120683aa03c",
+      "memory-source-seed.json": "12c471492bf4d43b07d03cbe157ec11d7fc3e58a34ef07cdfbc1107eb45814e8",
+      "operation-final.json": "5371d801b0eb811db4238f718f3174463cd8a9f926762b3b0c3633ac76186160",
+      "tool-calls.jsonl": "f7aa97b73e81ae525bf6ce3ce701d11e8532a76dec69f9dde9810c9da8c41742"
+    }
+  },
+  "restart_persistence": {
+    "port": 9503,
+    "same_target_and_config_as_rejection": true,
+    "operation_state": "Succeeded",
+    "outcome_ref": "trace-1788063649387-00000#2",
+    "absolute_turn": 2,
+    "captured_at": 1788064088.335604,
+    "last_prompt_assembled_bytes": 241,
+    "source_revision": 2,
+    "source_fact_count": 0,
+    "source_invalidation_count": 1,
+    "source_invalidation_reason": "source_changed",
+    "source_invalidated_at": 1788063649.50978,
+    "artifact_sha256": {
+      "last-prompt.json": "ffd90d93997d1c9064c68b885e060283284ed9b3f60fc468acc07a474d48fba6",
+      "msg-submit.json": "d2e4018bcf80aaf5e4f767397d7e49f38421c97d278503e575e418e031e3ed62",
+      "operation-final.json": "79a3554547da61d0002df9910edcc520f3128b8ece6f9fda70bbb69985aa8431"
+    }
+  },
+  "source_refresh_after_guard": {
+    "case_id": "l1-context-source-bound-refresh",
+    "model": "hf.co/unsloth/gemma-4-31B-it-qat-GGUF:UD-Q4_K_XL",
+    "provider": "ollama",
+    "port": 9504,
+    "status": "ok",
+    "verify_exit": 0,
+    "duration_ms": 159000,
+    "last_prompt_assembled_bytes": 243,
+    "stale_claim_matches_in_last_prompt": 0,
+    "source_changed_matches_in_last_prompt": 2,
+    "final_revision": 3,
+    "final_fact_count": 1,
+    "final_invalidation_count": 0,
+    "live_source_sha256": "0b79c1f7c5218e6a6bfa92266b0de96e7f506a9edc8eeb8b3ef91ecd4115abce",
+    "final_fact_source_sha256": "0b79c1f7c5218e6a6bfa92266b0de96e7f506a9edc8eeb8b3ef91ecd4115abce",
+    "tool_calls": [
+      "Read",
+      "Read",
+      "Write",
+      "Execute",
+      "keeper_memory_write"
+    ],
+    "artifact_sha256": {
+      "evidence.json": "4f6e3a242f846dd599c6bd4af3d82c0f3be9cb1d1db8305bce090c1391b43f79",
+      "last-prompt.json": "4e280731e933de368df50bc79b0714c4f8b5e553fd55034af84bd19ce76a9f2e",
+      "memory-source-seed.json": "b4a2466ce7b653f07dddd93051f502ea6d99be9105eacfc39bf302027f95b94d",
+      "memory-source-final.json": "286d35c50fba407e09f4fe68cb74b1521605773ba5d1d2324035717a42f12c87",
+      "operation-final.json": "b6769bc001c119622968360429db6117eaaf428c02b09522fbea7a478b04a3f1"
+    }
+  },
+  "focused_checks": {
+    "test_keeper_memory_write": "16/16",
+    "test_keeper_memory_os_current": "22/22",
+    "focused_build": [
+      "bin/main_eio.exe",
+      "test/coding_eval_report_cli.exe",
+      "test/test_keeper_memory_write.exe",
+      "test/test_keeper_memory_os_current.exe"
+    ]
+  },
+  "shutdown_check": {
+    "isolated_ports": [9501, 9502, 9503, 9504],
+    "listeners_after_runs": [],
+    "operating_8935_status": "ok",
+    "operating_effective_base_path": "/Users/dancer/me",
+    "operating_effective_masc_root": "/Users/dancer/me/.masc",
+    "operating_roots_diverge": false
+  },
+  "performance_claim": false
+}

@@ -1,0 +1,632 @@
+(** Workspace_task — Task lifecycle: add, claim, transition, complete, cancel, claim_next.
+
+    Facade module: includes Workspace_task_transitions (which includes classify,
+    create, claim sub-modules). *)
+
+open Masc_domain
+open Workspace_backlog
+
+include Workspace_task_transitions
+
+type task_delete_outcome =
+  | Task_deleted
+  | Task_already_absent
+  | Task_delete_cleanup_failed of string list
+
+type deletion_observation =
+  { receipts : task_deletion_receipt list
+  ; copies : Workspace_backlog.copy_consistency
+  }
+
+type deletion_retry_error =
+  | Unknown_deletion of string
+  | Task_identity_reused of string
+  | Deletion_storage_error of Masc_domain.masc_error
+
+let deletion_receipts_r config =
+  with_file_lock_r config (backlog_lock_path config) (fun () ->
+    read_backlog_r config |> Result.map (fun backlog ->
+      {receipts=backlog.task_deletion_receipts; copies=observe_copy_consistency config backlog}))
+  |> function
+  | Ok result -> result
+  | Error error -> Error (Masc_domain.masc_error_to_string error)
+;;
+
+let receipt_errors receipt = List.filter_map Fun.id
+  [receipt.primary_mirror_error; receipt.recovery_error; receipt.post_commit_error]
+
+let retire_rejections (backlog : Masc_domain.backlog) ~task_id =
+  let keep (item : Masc_domain.pending_completion_rejection) =
+    not (String.equal item.task_id task_id)
+  in
+  { backlog with
+    pending_completion_rejections = List.filter keep backlog.pending_completion_rejections;
+    delivered_completion_rejections = List.filter keep backlog.delivered_completion_rejections }
+
+(* The Task and durable cleanup identity are committed together. Receipts are
+   retained after domain cleanup; copy consistency is a separate observation,
+   including failures after the acknowledgement's primary commit. *)
+let settle_task_deletion_locked config backlog (receipt : task_deletion_receipt) task =
+  let open Result.Syntax in
+  let task_id = receipt.deleted_task_id in
+  let backlog = retire_rejections backlog ~task_id in
+  let pending_completion_approvals = List.filter
+    (fun (pending : pending_completion_approval) -> not (String.equal pending.task_id task_id))
+    backlog.pending_completion_approvals in
+  let tasks = List.filter (fun (task : task) -> not (String.equal task.id task_id)) backlog.tasks in
+  let receipts = if List.exists (fun old -> String.equal old.deletion_id receipt.deletion_id) backlog.task_deletion_receipts
+    then backlog.task_deletion_receipts else receipt :: backlog.task_deletion_receipts in
+  let pending = {backlog with tasks; pending_completion_approvals; task_deletion_receipts=receipts} in
+  let protect f = match Eio_guard.execution_context () with
+    | Eio_guard.Eio_fiber -> Eio.Cancel.protect f | Eio_guard.Non_eio -> f () in
+  protect (fun () ->
+    let* first_errors =
+      if pending = backlog then Ok (match repair_backlog_copies_result config backlog with Ok () -> [] | Error e -> [e])
+      else match write_backlog_result config pending with
+        | Ok receipt -> Ok (receipt_errors receipt)
+        | Error message -> Error (Masc_domain.System (Masc_domain.System_error.IoError message)) in
+    let domain_errors =
+      (match Workspace_goal_index.prune_links_for_task_result config ~task_id with Ok () -> [] | Error e -> [e])
+      @ (match Task_cache_invariant.clear_stale_agent_task_for_task_result config
+           ~cause:Task_cache_invariant.After_commit ~task_id
+           ~status:(match task with Some task -> task.task_status | None -> Masc_domain.Todo)
+           ~module_name:"workspace_task.delete_task_r" with Ok () -> [] | Error errors -> errors) in
+    let settled = {receipt with phase=(match domain_errors with
+      | [] -> Cleanup_verified | errors -> Cleanup_required errors)} in
+    let acknowledgement_errors = match read_backlog_r config with
+      | Error message -> [message]
+      | Ok current ->
+        let receipts = List.map (fun old -> if String.equal old.deletion_id receipt.deletion_id then settled else old) current.task_deletion_receipts in
+        if receipts = current.task_deletion_receipts then []
+        else match write_backlog_result config {current with task_deletion_receipts=receipts} with
+          | Error message -> [message] | Ok receipt -> receipt_errors receipt in
+    match first_errors @ domain_errors @ acknowledgement_errors with
+    | [] -> Ok (match task with Some _ -> Task_deleted | None -> Task_already_absent)
+    | errors -> Ok (Task_delete_cleanup_failed errors))
+;;
+
+let delete_task_r config ~task_id =
+  with_file_lock_r config (backlog_lock_path config) (fun () ->
+    match read_backlog_r config with
+    | Error message -> Error (Masc_domain.System (Masc_domain.System_error.IoError message))
+    | Ok backlog ->
+      let task = List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks in
+      let existing = match task with
+        | Some _ -> None
+        | None -> List.find_opt (fun receipt -> String.equal receipt.deleted_task_id task_id) backlog.task_deletion_receipts in
+      let receipt = match existing with
+        | Some receipt -> receipt
+        | None -> {deletion_id=Random_id.prefixed ~prefix:"delete-" ~bytes:16;
+          deleted_task_id=task_id; requested_at=now_iso (); phase=Cleanup_required []} in
+      settle_task_deletion_locked config backlog receipt task)
+  |> Workspace_task_verification.flatten_lock_result
+;;
+
+let retry_task_deletion_r config ~deletion_id =
+  match with_file_lock_r config (backlog_lock_path config) (fun () ->
+    match read_backlog_r config with
+    | Error message -> Error (Deletion_storage_error (Masc_domain.System (Masc_domain.System_error.IoError message)))
+    | Ok backlog ->
+      match List.find_opt (fun receipt -> String.equal receipt.deletion_id deletion_id) backlog.task_deletion_receipts with
+      | None -> Error (Unknown_deletion deletion_id)
+      | Some receipt ->
+        if List.exists (fun (task : task) -> String.equal task.id receipt.deleted_task_id) backlog.tasks
+        then Error (Task_identity_reused receipt.deleted_task_id)
+        else settle_task_deletion_locked config backlog receipt None |> Result.map_error (fun error -> Deletion_storage_error error)) with
+  | Ok result -> result
+  | Error error -> Error (Deletion_storage_error error)
+;;
+
+(** Release task back to backlog - transition wrapper *)
+let release_task_r config ~agent_name ~task_id ?expected_version ?handoff_context ()
+  : string Masc_domain.masc_result
+  =
+  transition_task_r
+    config
+    ~agent_name
+    ~task_id
+    ~action:Masc_domain.Release
+    ?expected_version
+    ?handoff_context
+    ()
+;;
+
+(* Two paths return a task its owner can no longer carry to [Todo]: the
+   operator's explicit recovery, and the rejection delivery that finds no
+   Keeper to hand the verdict back to. Both commit the same backlog mutation
+   and then project the same five facts about it. Only the actor and one
+   activity field differ, so the projection lives here rather than being
+   written twice and drifting. *)
+let project_task_release_to_todo
+      config
+      ~(persistence : Workspace_backlog.write_backlog_outcome)
+      ~(from_status : Masc_domain.task_status)
+      ~task_id
+      ~previous_assignee
+      ~(actor_kind : Workspace_task_classify.task_actor_kind)
+      ~actor
+      ~reason
+      ~(activity_fields : (string * Yojson.Safe.t) list)
+      ~module_name
+  =
+  let backlog_version = persistence.committed_revision in
+  let run_post_commit label f =
+    try
+      f ();
+      None
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      let detail = Printf.sprintf "%s: %s" label (Printexc.to_string exn) in
+      Log.TaskState.error
+        "%s post-commit projection failed task=%s version=%d detail=%s"
+        module_name
+        task_id
+        backlog_version
+        detail;
+      Some detail
+  in
+  [ Option.map
+      (fun message -> "backlog_primary_mirror: " ^ message)
+      persistence.primary_mirror_error
+  ; Option.map
+      (fun message -> "backlog_recovery_copy: " ^ message)
+      persistence.recovery_error
+  ; Option.map
+      (fun message -> "backlog_post_commit: " ^ message)
+      persistence.post_commit_error
+  ; run_post_commit "task_cache_invariant" (fun () ->
+      Task_cache_invariant.clear_stale_agent_task
+        config
+        ~cause:Task_cache_invariant.After_commit
+        ~agent_name:previous_assignee
+        ~task_id
+        ~status:Masc_domain.Todo
+        ~module_name)
+  ; run_post_commit "agent_state" (fun () ->
+      update_local_agent_state config ~agent_name:previous_assignee (fun agent ->
+        if agent.current_task = Some task_id
+        then { agent with status = Active; current_task = None }
+        else agent))
+  ; run_post_commit "transition_log" (fun () ->
+      log_event
+        config
+        (transition_log_event
+           ~actor_kind
+           ~agent_name:actor
+           ~task_id
+           ~from_status
+           ~to_status:Masc_domain.Todo
+           ~action:(Masc_domain.task_action_to_string Masc_domain.Release)
+           ~reason
+           ~assignee:previous_assignee
+           ()))
+  ; run_post_commit "task_activity" (fun () ->
+      emit_task_activity
+        ~actor_kind
+        config
+        ~agent_name:actor
+        ~task_id
+        ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
+        ~payload:
+          (`Assoc
+            ([ "task_id", `String task_id
+             ; "previous_assignee", `String previous_assignee
+             ; "reason", `String reason
+             ; "backlog_version", `Int backlog_version
+             ]
+             @ activity_fields)))
+  ; run_post_commit "transition_observer" (fun () ->
+      observe_task_transition
+        config
+        ~agent_name:actor
+        ~task_id
+        ~transition:Masc_domain.Release
+        ~details:
+          (task_transition_details ~from_status ~to_status:Masc_domain.Todo ~reason ()))
+  ]
+  |> List.filter_map Fun.id
+;;
+
+type operator_task_recovery_result =
+  { task_id : string
+  ; previous_status : Masc_domain.task_status
+  ; previous_assignee : string
+  ; backlog_version : int
+  ; post_commit_errors : string list
+  }
+
+let recover_owned_task_to_todo_r
+      config
+      ~operator_actor
+      ~task_id
+      ~expected_assignee
+      ~expected_version
+      ~reason
+      ()
+  : operator_task_recovery_result Masc_domain.masc_result
+  =
+  let open Result.Syntax in
+  let* () =
+    if not (is_initialized config)
+    then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
+    else Ok ()
+  in
+  let* _task_id = validate_task_id_r task_id in
+  let* _expected_assignee = validate_agent_name_r expected_assignee in
+  let* () =
+    if String.equal operator_actor (String.trim operator_actor)
+       && not (String.equal operator_actor "")
+    then Ok ()
+    else
+      Error
+        (Masc_domain.System
+           (Masc_domain.System_error.ValidationError
+              "operator_actor must be non-empty without surrounding whitespace"))
+  in
+  let* () =
+    if String.equal reason (String.trim reason) && not (String.equal reason "")
+    then Ok ()
+    else
+      Error
+        (Masc_domain.System
+           (Masc_domain.System_error.ValidationError
+              "reason must be non-empty without surrounding whitespace"))
+  in
+  let lock_path = backlog_lock_path config in
+  with_file_lock_r config lock_path (fun () ->
+    let open Result.Syntax in
+    let* backlog =
+      read_backlog_r config
+      |> Result.map_error (fun message ->
+        Masc_domain.System (Masc_domain.System_error.IoError message))
+    in
+    let* () =
+      if backlog.version = expected_version
+      then Ok ()
+      else
+        Error
+          (Masc_domain.Task
+             (Masc_domain.Task_error.InvalidState
+                (Printf.sprintf
+                   "Task recovery version mismatch (expected %d, got %d)"
+                   expected_version
+                   backlog.version)))
+    in
+    let* task =
+      match List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks with
+      | Some task -> Ok task
+      | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
+    in
+    let* previous_assignee =
+      match task.task_status with
+      | Masc_domain.Claimed { assignee; _ }
+      | Masc_domain.InProgress { assignee; _ } ->
+        Ok assignee
+      | Masc_domain.Todo
+      | Masc_domain.AwaitingVerification _
+      | Masc_domain.Done _
+      | Masc_domain.Cancelled _ ->
+        Error
+          (Masc_domain.Task
+             (Masc_domain.Task_error.InvalidState
+                (Printf.sprintf
+                   "Task %s status %s is not operator-recoverable"
+                   task_id
+                   (Masc_domain.task_status_to_string task.task_status))))
+    in
+    let* () =
+      if String.equal previous_assignee expected_assignee
+      then Ok ()
+      else
+        Error
+          (Masc_domain.Task
+             (Masc_domain.Task_error.InvalidState
+                (Printf.sprintf
+                   "Task %s assignee mismatch (expected %s, got %s)"
+                   task_id
+                   expected_assignee
+                   previous_assignee)))
+    in
+    let tasks =
+      List.map
+        (fun (candidate : task) ->
+           if String.equal candidate.id task_id
+           then
+             { candidate with
+               task_status = Masc_domain.Todo
+             ; reclaim_policy = None
+             ; do_not_reclaim_reason = None
+             }
+           else candidate)
+        backlog.tasks
+    in
+    let* persistence =
+      write_backlog_result
+        config
+        { (retire_rejections backlog ~task_id) with tasks }
+      |> Result.map_error (fun message ->
+        Masc_domain.System (Masc_domain.System_error.IoError message))
+    in
+    let backlog_version = persistence.committed_revision in
+    let post_commit_errors =
+      project_task_release_to_todo
+        config
+        ~persistence
+        ~from_status:task.task_status
+        ~task_id
+        ~previous_assignee
+        ~actor_kind:Workspace_task_classify.Operator
+        ~actor:operator_actor
+        ~reason
+        ~activity_fields:[ "operator_recovery", `Bool true ]
+        ~module_name:"recover_owned_task_to_todo_r"
+    in
+    Ok
+      { task_id
+      ; previous_status = task.task_status
+      ; previous_assignee
+      ; backlog_version
+      ; post_commit_errors
+      })
+  |> Workspace_task_verification.flatten_lock_result
+;;
+
+(** What a rejection delivery found when it went to put the Task back. *)
+type unroutable_rejection_release =
+  | Released of
+      { previous_status : Masc_domain.task_status
+      ; backlog_version : int
+      ; post_commit_errors : string list
+      }
+  | Producer_became_routable
+      (** A Keeper queue appeared at the producer's name between the routing
+          decision and this lock. The verdict can be delivered after all, so
+          the task stays where the delivery expects to find it. *)
+  | Producer_route_unread of { detail : string }
+      (** The producer's route could not be read inside this lock: a file at
+          its Keeper meta path that this binary does not decode, or a failed
+          read. That may still be a Keeper, so the task stays where it is. *)
+  | Rejection_superseded
+
+let release_unroutable_rejected_task_r
+      config
+      ~(authority : Masc_domain.completion_authority)
+      ~task_id
+      ~producer
+      ~verification_id
+      ~reason
+      ~still_unroutable
+      ()
+  : unroutable_rejection_release Masc_domain.masc_result
+  =
+  let open Result.Syntax in
+  let* () =
+    if not (is_initialized config)
+    then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
+    else Ok ()
+  in
+  let* _task_id = validate_task_id_r task_id in
+  let* () =
+    if Masc_domain.completion_authority_has_identity authority
+    then Ok ()
+    else
+      Error
+        (Masc_domain.System
+           (Masc_domain.System_error.ValidationError
+              "completion authority must carry an identity to release a task"))
+  in
+  let actor = Masc_domain.completion_authority_actor authority in
+  (* The same mapping the verdict commit uses to record who decided
+     (workspace_task_transitions.ml). The released-by actor is read off the
+     obligation rather than passed in, so no call site can name the assignee
+     whose session is gone. *)
+  let actor_kind =
+    match authority with
+    | Masc_domain.Human_operator _ -> Workspace_task_classify.Operator
+    | Masc_domain.System_llm_agent _ -> Workspace_task_classify.System
+  in
+  with_file_lock_r config (backlog_lock_path config) (fun () ->
+    let open Result.Syntax in
+    let* backlog =
+      read_backlog_r config
+      |> Result.map_error (fun message ->
+        Masc_domain.System (Masc_domain.System_error.IoError message))
+    in
+    let pending = List.find_opt
+      (fun (item : Masc_domain.pending_completion_rejection) ->
+        String.equal item.task_id task_id && String.equal item.verification_id verification_id)
+      backlog.pending_completion_rejections
+    in
+    match pending with
+    | None -> Ok Rejection_superseded
+    | Some item when not (String.equal item.producer producer
+        && String.equal item.reason reason && item.authority = authority) ->
+      Error (Masc_domain.System (Masc_domain.System_error.IoError
+        "unroutable release conflicts with its pending rejection"))
+    | Some _ ->
+    let* standing = Workspace_task_rejection_outbox.standing_in_backlog backlog
+      ~task_id ~verification_id ~producer ~reason ~authority
+      |> Result.map_error (fun detail ->
+        Masc_domain.System (Masc_domain.System_error.IoError detail)) in
+    match standing with
+    | Workspace_task_rejection_outbox.Obsolete -> Ok Rejection_superseded
+    | Workspace_task_rejection_outbox.Current ->
+    match
+      List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks
+    with
+    | None -> Error (Masc_domain.System (Masc_domain.System_error.IoError
+        "current rejection has no Task to release"))
+    | Some task ->
+      (match task.task_status with
+       | Masc_domain.InProgress { assignee; _ }
+         when Workspace_task_classify.same_task_actor config assignee producer ->
+         (* The route was read before this lock was taken. A Keeper meta
+            landing at the producer's name in between means a queue now exists
+            and the verdict can be delivered after all, so the task is left
+            where the delivery expects to find it. Asked again here, under the
+            lock that decides, rather than trusting the earlier answer. A
+            route that cannot be read is its own answer, not a backlog
+            failure: the producer may be a Keeper whose meta this binary does
+            not decode, so the task stays put too. *)
+         (match still_unroutable () with
+          | Error detail -> Ok (Producer_route_unread { detail })
+          | Ok false -> Ok Producer_became_routable
+          | Ok true ->
+            let handoff_context : Masc_domain.task_handoff_context =
+              { summary =
+                  "rejected work had no producer Keeper to return it to; released to \
+                   the backlog"
+              ; reason = Some reason
+              ; next_step = Some "Any agent may claim this task and answer the rejection"
+              ; failure_mode = None
+              ; reclaim_policy = Some Masc_domain.Allow_reclaim
+              ; evidence_refs = []
+              ; updated_at = Some (Masc_domain.now_iso ())
+              ; updated_by = Some actor
+              }
+            in
+            let tasks =
+              List.map
+                (fun (candidate : task) ->
+                   if String.equal candidate.id task_id
+                   then
+                     { candidate with
+                       task_status = Masc_domain.Todo
+                     ; handoff_context = Some handoff_context
+                     }
+                   else candidate)
+                backlog.tasks
+            in
+            let* persistence =
+              write_backlog_result config { (retire_rejections backlog ~task_id) with tasks }
+              |> Result.map_error (fun message ->
+                Masc_domain.System (Masc_domain.System_error.IoError message))
+            in
+            let post_commit_errors =
+              project_task_release_to_todo
+                config
+                ~persistence
+                ~from_status:task.task_status
+                ~task_id
+                ~previous_assignee:assignee
+                ~actor_kind
+                ~actor
+                ~reason
+                ~activity_fields:
+                  [ "unroutable_rejection", `Bool true
+                  ; "verification_id", `String verification_id
+                  ]
+                ~module_name:"release_unroutable_rejected_task_r"
+            in
+            Ok
+              (Released
+                 { previous_status = task.task_status
+                 ; backlog_version = persistence.committed_revision
+                 ; post_commit_errors
+                 }))
+       | Masc_domain.Claimed _
+       | Masc_domain.InProgress _
+       | Masc_domain.Todo
+       | Masc_domain.AwaitingVerification _
+       | Masc_domain.Done _
+       | Masc_domain.Cancelled _ ->
+         Error (Masc_domain.System (Masc_domain.System_error.IoError
+           "current rejection has no matching InProgress Task"))))
+  |> Workspace_task_verification.flatten_lock_result
+;;
+
+type claim_next_result = Masc_domain.claim_next_result =
+  | Claim_next_claimed of
+      { task_id : string
+      ; title : string
+      ; priority : int
+      ; message : string
+      ; scope_widened : bool
+      }
+  | Claim_next_no_unclaimed
+  | Claim_next_no_eligible of
+      { excluded_count : int
+      ; scope_excluded_count : int
+      ; explicit_excluded_count : int
+      ; claim_pool_candidate_count : int
+      }
+  | Claim_next_error of string
+
+let link_task_execution_artifacts_r
+      config
+      ~task_id
+      ?session_id
+      ?operation_id
+      ()
+  : string Masc_domain.masc_result
+  =
+  if not (is_initialized config)
+  then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
+  else (
+    let lock_path = backlog_lock_path config in
+    let result =
+      with_file_lock_r config lock_path (fun () ->
+      try
+        match read_backlog_r config with
+        | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
+        | Ok backlog ->
+          (match List.find_opt (fun (task : task) -> task.id = task_id) backlog.tasks with
+           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
+           | Some task ->
+             (* Only execution identity moves here. The contract is whatever the
+                task was created with, including absent. *)
+             let updated_links =
+               merge_execution_links
+                 task.execution_links
+                 ?session_id
+                 ?operation_id
+                 ()
+             in
+             let new_tasks =
+               List.map
+                 (fun (candidate : task) ->
+                    if candidate.id = task_id
+                    then { candidate with execution_links = updated_links }
+                    else candidate)
+                 backlog.tasks
+             in
+             (* [write_backlog] stamps version/last_updated at the commit
+                point. *)
+             let new_backlog = { backlog with tasks = new_tasks } in
+             write_backlog config new_backlog;
+             let execution_link_fields =
+               (match trim_opt session_id with
+                | Some session_id -> [ "session_id", `String session_id ]
+                | None -> [])
+               @
+               match trim_opt operation_id with
+               | Some operation_id -> [ "operation_id", `String operation_id ]
+               | None -> []
+             in
+             emit_task_activity
+               ~actor_kind:Workspace_task_classify.System
+               config
+               ~agent_name:"system"
+               ~task_id
+               ~kind:(Event_kind.Task.to_string Event_kind.Task.Linked)
+               ~payload:(`Assoc ([ "task_id", `String task_id ] @ execution_link_fields));
+             log_event
+               config
+               (`Assoc
+                   ([ "type", `String "task_linked"
+                    ; "agent", `String "system"
+                    ; "actor_kind", `String "system"
+                    ; "task", `String task_id
+                    ; "ts", `String (now_iso ())
+                    ]
+                    @ execution_link_fields));
+             Ok (Printf.sprintf "Linked execution artifacts for %s" task_id))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e ->
+        Error
+          (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
+    in
+    Workspace_task_verification.flatten_lock_result result)
+;;

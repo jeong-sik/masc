@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name keeper_cost_coverage)
+ (public_name masc.keeper_cost_coverage)
+ (wrapped false)
+ (libraries yojson))

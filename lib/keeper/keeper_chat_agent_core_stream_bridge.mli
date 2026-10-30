@@ -1,0 +1,93 @@
+(** Translate AGENT_CORE typed stream events into keeper chat events.
+
+    MASC owns the channel event surface, but the upstream stream semantics come
+    from AGENT_CORE' closed {!Agent_core.Types.sse_event} sum. This module is the
+    boundary adapter between those two domains.
+
+    Text deltas arriving here are already canonical: the Agent Core stream
+    state reduces explicitly typed [TextSnapshot] values to unseen suffixes and
+    suppresses exact snapshot replays before invoking this boundary. Ordinary
+    [TextDelta] values always append. This adapter projects each accepted delta
+    exactly once and never reinterprets it.
+
+    A published [Agent_core_stream_message_start] opens a new provider response.
+    The bridge suppresses an exact prelude replay within the current open
+    stream scope, and emits only protocol errors for conflicting starts.
+    Provider ids may be reused in a subsequent sealed scope; identity equality
+    is not a response-boundary test for downstream consumers.
+
+    Exact tool quarantine is write-once per stream occurrence. The bridge keeps
+    the first typed quarantine kind for freeze checks; later content events at
+    that scope/index are suppressed and cannot overwrite the first failure. *)
+
+type state
+(** Per-stream correlation state for AGENT_CORE content block indices. *)
+
+type translated_event = {
+  bridge_state : state;
+  chat_events : Keeper_chat_events.keeper_chat_event list;
+}
+(** Result of translating one typed AGENT_CORE stream event. *)
+
+(** [generation] is the seq of this run's Run_started, assigned by its single
+    journal publisher. The default 0 is for an isolated standalone stream. *)
+val empty_state : ?generation:int -> unit -> state
+
+val start_runtime_attempt
+  :  ?runtime_id:string
+  -> ?attempt_index:int
+  -> previous_scope:Keeper_chat_events.runtime_attempt_scope_disposition
+  -> state
+  -> translated_event
+(** Reset unfinished text/thinking state at an exact resolved-runtime attempt
+    boundary. When [previous_scope] is [Abandon_previous_scope], terminalize
+    every tool occurrence in that unsealed scope as superseded. The durable tool
+    accumulator computes this disposition before advancing, so a sealed or
+    result-ready occurrence remains intact on both live and persisted surfaces. *)
+
+val record_tool_result : state -> Keeper_chat_events.tool_stream_occurrence -> state
+(** Preserve this committed result against outer cancellation/fallback, without
+    exempting it from actual block/delta protocol conflicts. *)
+
+val progress_native_tool :
+  redact_text:(string -> string) -> stream_scope:int -> block_index:int ->
+  tool_call_id:string option -> Runtime_native_tools.progress -> state -> translated_event
+(** Attach only to the exact active native occurrence. Late/wrong-scope/MASC
+    progress is diagnosed and cannot reopen, close or commit a tool. *)
+
+val finish_native_tool :
+  redact_text:(string -> string) -> stream_scope:int -> block_index:int ->
+  tool_call_id:string option -> Runtime_native_tools.completion -> state -> translated_event
+(** Finish only the native occurrence already opened at this exact scope and
+    index. The following AGENT_CORE block stop cannot emit a second end.
+    A native report never commits or updates a MASC execution receipt. *)
+
+val fail_stream : state -> reason:string -> translated_event
+(** Quarantine every tool occurrence in the current provider scope when the
+    outer transport/cancellation boundary fails after the typed stream reader
+    can no longer emit another event. A no-op after an attempt reported its
+    own failure, whether it cut the stream (incomplete, repeating) or poisoned
+    the scope: that failure is diagnosed once. *)
+(** Reads the generated-media wire cap once, so every decision in this stream
+    is made against one number even if an operator edits the env var while it
+    runs. *)
+
+val terminal_message_had_text : state -> bool
+(** [true] when the last completed provider message (or the currently open
+    message) emitted a non-empty text delta. Earlier tool-loop messages never
+    affect this projection. *)
+
+val translate :
+  redact_text:(string -> string) ->
+  base_dir:string ->
+  stream_scope:int ->
+  state ->
+  Agent_core.Types.sse_event ->
+  translated_event
+(** [base_dir] is the workspace base path used to persist RFC-0301 model-generated
+    media (via {!Keeper_chat_media_store}) when a media block completes. *)
+
+val terminal_text_scope : state -> int option
+(** The accumulator-owned stream scope whose terminal provider message
+    actually emitted text. Missing text or a newer uncompleted scope leaves
+    this unknown; provider message IDs are not used as round identities. *)

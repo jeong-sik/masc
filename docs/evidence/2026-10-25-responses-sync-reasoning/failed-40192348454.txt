@@ -1,0 +1,15 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40192348454
+Head: 6ac88a2c23e1b047476db62b0fa10f5f42446bd1
+Full raw log SHA256: 15664ddd72796a3381acc79b46539fdd6fd1f01829516dc909ef62589f1f4315
+Trailing whitespace normalized.
+test suite	Checkout	2026-10-25T12:16:05.8549578Z   ref: 6ac88a2c23e1b047476db62b0fa10f5f42446bd1
+test suite	Test	2026-10-25T12:17:21.8522106Z [targeted] @@packages/agent_core/test/runtest-test_backend_openai_codec: start 2026-10-25T12:17:21Z (dune alias)
+test suite	Test	2026-10-25T12:17:44.4104500Z 38 | let non_blank_json_string json =
+test suite	Test	2026-10-25T12:17:44.4105652Z Error (warning 32 [unused-value-declaration]): unused value non_blank_json_string.
+test suite	Test	2026-10-25T12:18:00.2414526Z [targeted] @@packages/agent_core/test/runtest-test_backend_openai_codec: FAIL exit 1 in 39s
+test suite	Test	2026-10-25T12:18:00.2439542Z [targeted] @@packages/agent_core/test/runtest-test_capabilities: start 2026-10-25T12:18:00Z (dune alias)
+test suite	Test	2026-10-25T12:18:00.8352689Z 38 | let non_blank_json_string json =
+test suite	Test	2026-10-25T12:18:00.8353637Z Error (warning 32 [unused-value-declaration]): unused value non_blank_json_string.
+test suite	Test	2026-10-25T12:18:01.4305390Z [targeted] @@packages/agent_core/test/runtest-test_capabilities: FAIL exit 1 in 1s
+test suite	Test	2026-10-25T12:18:02.1629248Z 38 | let non_blank_json_string json =
+test suite	Test	2026-10-25T12:18:02.1630357Z Error (warning 32 [unused-value-declaration]): unused value non_blank_json_string.

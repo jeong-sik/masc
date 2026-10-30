@@ -1,0 +1,10 @@
+{
+  "id": "l3-py-mutable-default",
+  "level": "L3",
+  "lang": "python",
+  "timeout_sec": 600,
+  "verify": "verify.sh",
+  "build": "build.sh",
+  "prompt": "check.sh fails: add_item(item, bucket=[]) in registry.py uses a mutable default argument, so the default list persists across calls and add_item(\"a\") followed by add_item(\"b\") returns [\"a\", \"b\"] instead of [\"b\"]. Fix registry.py so each call without an explicit bucket starts empty, while an explicitly passed bucket still accumulates. Do not modify check.sh. Reply DONE once `bash check.sh` prints PASS.",
+  "description": "Bug fix: mutable default argument leaks state across calls."
+}

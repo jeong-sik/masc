@@ -1,0 +1,367 @@
+(** Durable, capacity-agnostic Board-attention judgment partitions.
+
+    Every currently-unassigned non-terminal candidate receives one singleton
+    root. MASC owns candidate membership and this durable state machine. AGENT_CORE
+    owns admission, dispatch, and advancement; this module persists only opaque
+    attempt provenance supplied by AGENT_CORE. Runtime transitions append one
+    cursor-fenced row. Only process-start recovery canonically compacts the
+    history. *)
+
+module Candidate = Keeper_board_attention_candidate
+module Generation = Keeper_board_attention_partition_generation
+
+module Worker_epoch : sig
+  type t
+
+  val generate : unit -> t
+  val to_string : t -> string
+  val equal : t -> t -> bool
+end
+
+type completed_item =
+  { candidate_id : string
+  ; judgment : Candidate.judgment
+  }
+
+type exact_provenance =
+  { slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  }
+(** Opaque AGENT_CORE attempt identity. MASC compares and persists these fields but
+    never derives provider, model, tier, retry, or failover policy from them. *)
+
+type candidate_visit =
+  { flow_id : string
+  ; ordinal : int
+  ; slot_id : string
+  ; catalog_generation_fingerprint : string
+  ; catalog_evidence_sha256 : string
+  ; target_identity_fingerprint : string
+  }
+(** AGENT_CORE-selected successor visit before an attempt exists. It deliberately has
+    no call id, request plan, body hash, provider, model, or credential. *)
+
+type advance_source =
+  | Executed_failure of exact_provenance
+  | Predispatch_rejection of candidate_visit
+(** Opaque source of one AGENT_CORE advancement. A predispatch rejection has no
+    execution receipt and therefore carries only its candidate visit. *)
+
+type running_progress =
+  | Unbound
+  | Bound of exact_provenance
+  | Advancing of
+      { execution_anchor : exact_provenance option
+      ; last_from : candidate_visit option
+      ; next : candidate_visit
+      }
+
+(** Each cause is its own constructor and carries the durable progress it
+    had, so the cause is never overwritten by the progress and a reader
+    tells the causes apart by constructor, not by [detail] text. *)
+type blocked_reason =
+  | Candidate_membership_conflict of string
+  | Durable_partition_invariant of string
+  | Exact_setup_unavailable of string
+  | Exact_flow_replayed of running_progress option
+      (** The exact flow for this partition had already started: a
+          concurrent duplicate reached it. *)
+  | Exact_lane_exhausted of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** The lane ended on a failure a later retry of the same input
+          cannot fix: the last HTTP refusal was about the input itself or
+          left the request's effect unknown. A lane whose every slot refused
+          for its account's standing (rate limit or quota spent, capacity
+          full, payment refused) is not blocked; the worker returns it to
+          [Ready] through [defer]. [detail] is the flow's own sentence. *)
+  | Exact_flow_bookkeeping_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** The flow could not record its own run bookkeeping. *)
+  | Exact_completion_failed of
+      { detail : string
+      ; progress : running_progress option
+      }
+      (** The judgment arrived but persisting the completion failed. *)
+  | Domain_output_invalid of
+      { detail : string
+      ; progress : running_progress option
+      }
+  | Execution_provenance_mismatch of
+      { detail : string
+      ; progress : running_progress option
+      }
+  | Unexpected_worker_failure of
+      { detail : string
+      ; progress : running_progress option
+      }
+  | Exact_execution_quarantined of running_progress
+  | Exact_execution_interrupted of running_progress
+      (** A process restart cut a bound execution. [recover_for_process_start]
+          returns a cut run to [Ready], so no new row takes this reason. Rows
+          the ledger already holds keep it until the operator requeue moves
+          them [Blocked -> Ready]. *)
+  | Restored_candidate_quarantine of
+      { failure_category : Candidate.quarantine_failure_category
+      ; attempt_provenance : Candidate.attempt_provenance option
+      }
+      (** The candidate ledger proves that a Blocked partition was durably
+          projected, but the partition row is now absent. Retain the exact
+          category and call identity without inventing the missing detail. *)
+
+type running_state =
+  { worker_epoch : Worker_epoch.t
+  ; started_at : float
+  ; progress : running_progress
+  }
+
+type state =
+  | Ready
+  | Running of running_state
+  | Completed of
+      { item : completed_item
+      ; completed_at : float
+      }
+  | Settled of { settled_at : float }
+      (** Terminal: a judgment is on record. No transition leaves [Settled]. *)
+  | Abandoned of { abandoned_at : float }
+      (** Terminal for judgment purposes and never reached by [settle]: the
+          root gave up its candidate without ever recording one (e.g.
+          [reconcile_quarantines] abandoning a [Blocked] root whose candidate
+          is permanently absent from the ledger). [ensure_roots] reopens an
+          [Abandoned] root back to [Ready] (same deterministic identity, next
+          generation) when the matching candidate is still [Resumable_pending]
+          — nothing was ever judged. A [Resumable_judged] or
+          [Requeued_resumable] match leaves [Abandoned] alone; those belong to
+          [reconcile_quarantines]'s own bookkeeping instead. *)
+  | Blocked of
+      { reason : blocked_reason
+      ; blocked_at : float
+      }
+
+type t = private
+  { partition_id : string
+  ; keeper_name : string
+  ; context_key : Candidate.Context_key.t
+  ; candidate_id : string
+  ; created_at : float
+  ; generation : Generation.t
+  ; state : state
+  }
+(** [generation] advances exactly once for each legal state transition.
+    Cursor-fenced confirmation reappends of an unchanged state retain the same
+    generation. Current-schema ledger decoding rejects non-successor transition
+    generations. *)
+
+type exact_write_outcome =
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
+
+type exact_transition =
+  { partition : t
+  ; changed : bool
+  ; write_outcome : exact_write_outcome
+  }
+
+type requeue_blocked_outcome =
+  | Requeued of exact_transition
+  | Cursor_conflict of string
+  | Generation_conflict of string
+
+val to_yojson : t -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (t, string) result
+val load : base_path:string -> keeper_name:string -> (t list, string) result
+
+val directory : base_path:string -> string
+(** The runtime-owned partition ledger directory. *)
+val path : base_path:string -> keeper_name:string -> string
+(** The runtime-owned path, including namespace sanitization. *)
+val validate_serialized :
+  base_path:string -> ledger_path:string -> string -> (unit, string) result
+(** Strict framing, production wire decode, root/keeper identity and transition
+    replay for preflight. The recorded Keeper identity must own [ledger_path]
+    through [path]; a sanitized filename is not a Keeper name.
+    Pure: no cache publication, file repair or recovery. *)
+
+val ensure_roots :
+  base_path:string ->
+  keeper_name:string ->
+  Candidate.candidate list ->
+  (int, string) result
+(** Persist one deterministic singleton root for each unassigned [Pending] or
+    [Judged] candidate. Also restore a missing [Blocked] root from a candidate's
+    durable quarantine at its recorded generation. The candidate is the proof
+    of that prior Blocked commit; its category and call identity are retained,
+    while unavailable detail is not fabricated. Existing live membership must
+    remain one-to-one. *)
+
+(** Restore only candidates still present with exactly the observed value.
+    The durable candidate read and root append share the partition mutation
+    lock, so candidate-then-partition purge cannot be undone by an earlier
+    recovery request's snapshot. *)
+val ensure_current_roots :
+  base_path:string -> keeper_name:string -> Candidate.candidate list ->
+  (int, string) result
+
+val recover_for_process_start :
+  now:float -> base_path:string -> keeper_name:string -> (int, string) result
+(** Canonically compact the append ledger. Every [Running] root returns to
+    [Ready] at the next generation, whatever its progress: the judgment lane
+    is a read-only model call and each claim starts a fresh AGENT_CORE flow,
+    so a run a restart cut is dispatched again and spends tokens and nothing
+    else. The return value is the number of Running roots released.
+    Old schema rows and non-tail malformed JSON are rejected without migration.
+    A torn final append is truncated under the ledger lock. *)
+
+val prune_settled_receipts :
+  base_path:string -> keeper_name:string -> (int, string) result
+(** Drop the [Settled] receipts whose candidate is [Consumed] or gone from
+    the candidate ledger, with the same gate as [recover_for_process_start]:
+    an unreadable candidate ledger, or one holding rows the decoder refused,
+    keeps every receipt. Other states are kept as they are; [Running] roots
+    are not released. Returns the number of receipts dropped. The rewrite is
+    fenced on the ledger cursor, so a concurrent append fails it and the next
+    drain retries. *)
+
+val claim_ready_exact :
+  now:float ->
+  worker_epoch:Worker_epoch.t ->
+  base_path:string ->
+  keeper_name:string ->
+  partition_id:string ->
+  generation:Generation.t ->
+  (t option, string) result
+(** Claim only the named [Ready] generation as [Running Unbound]. [None] means
+    the observed target lost its readiness, changed generation, or the ledger
+    cursor changed before the append; no sibling is claimed. [started_at] is
+    observation only, never lease or retry authority. *)
+
+val bind_before_dispatch :
+  worker_epoch:Worker_epoch.t ->
+  base_path:string ->
+  partition:t ->
+  provenance:exact_provenance ->
+  (exact_transition, string) result
+(** Cursor-fenced durable [before_dispatch] callback. The call moves
+    [Unbound -> Bound]. An idempotent repeat retains the same binding so only
+    [Fsync_completed] authorizes AGENT_CORE dispatch. An [Advancing] partition accepts
+    only the AGENT_CORE-selected successor slot. *)
+
+val record_before_advance :
+  worker_epoch:Worker_epoch.t ->
+  base_path:string ->
+  partition:t ->
+  source:advance_source ->
+  next:candidate_visit ->
+  (exact_transition, string) result
+(** Atomically persist every AGENT_CORE-selected advancement. Executed failure starts
+    from its exact binding; predispatch rejection carries only its immutable
+    candidate visit and may advance an existing [Advancing.next]. [next] is
+    AGENT_CORE-selected, never a MASC successor decision. Only [Fsync_completed]
+    authorizes advancement. *)
+
+val complete :
+  now:float ->
+  worker_epoch:Worker_epoch.t ->
+  base_path:string ->
+  partition:t ->
+  item:completed_item ->
+  (exact_transition, string) result
+(** Commit [Completed] from [Bound] when the candidate identity and all
+    four opaque judgment provenance fields exactly match the durable binding.
+    A judgment with no HTTP receipt completes from [Unbound] or [Bound]; a
+    CLI tail answer also completes from [Advancing], because the tail runs
+    only after AGENT_CORE ended the HTTP walk and the named next slot is never
+    dispatched. Only [Fsync_completed] confirms that the judgment can leave
+    worker memory. *)
+
+val complete_existing_judgment :
+  now:float ->
+  worker_epoch:Worker_epoch.t ->
+  base_path:string ->
+  partition:t ->
+  item:completed_item ->
+  (exact_transition, string) result
+(** Atomically project a current-schema judgment already durable in the
+    Candidate ledger from [Running Unbound] directly to [Completed]. This
+    creates no dispatch binding; [Bound] is rejected. The
+    caller must inspect the exact write outcome. *)
+
+val confirm_completed :
+  base_path:string -> partition:t -> (exact_transition, string) result
+(** Cursor-fenced reappend of an unchanged durable [Completed] row. The current
+    ledger item must exactly match the supplied partition item. This allows a
+    caller to retry local fsync confirmation without repeating exact execution
+    or domain delivery. *)
+
+val block :
+  now:float ->
+  worker_epoch:Worker_epoch.t ->
+  base_path:string ->
+  partition:t ->
+  blocked_reason ->
+  (exact_transition, string) result
+
+val defer :
+  worker_epoch:Worker_epoch.t ->
+  base_path:string ->
+  partition:t ->
+  (exact_transition, string) result
+(** Return a [Running] root this worker epoch owns to [Ready] at the next
+    generation, cursor-fenced like every exact transition. The worker calls it
+    when every slot of the lane refused for its account's standing, so the candidate
+    stays Pending and a later claim judges it once a binding frees. The
+    candidate is not quarantined. *)
+
+val confirm_blocked :
+  base_path:string -> partition:t -> (exact_transition, string) result
+
+val requeue_blocked :
+  base_path:string -> partition:t -> (requeue_blocked_outcome, string) result
+(** Atomically move exactly the supplied [Blocked] generation to [Ready].
+    A stale ledger cursor is returned as [Cursor_conflict] without being
+    confused with a changed target. A different durable target generation is
+    returned as [Generation_conflict]; persistence and validation failures
+    remain errors. *)
+
+val confirm_ready :
+  base_path:string -> partition:t -> (exact_transition, string) result
+(** Reappend an unchanged [Ready] snapshot for fsync confirmation. This never
+    converts a later [Blocked] generation back to [Ready]. The same durable
+    append records its confirmation time and runtime instance identity as an
+    observation. Process-start compaction preserves these observations without
+    treating them as state transitions; older rows have no inferred time. *)
+
+val completed : base_path:string -> keeper_name:string -> (t list, string) result
+
+val settle :
+  now:float -> base_path:string -> partition:t -> (t, string) result
+(** Idempotently mark one [Completed] or terminal [Blocked] root [Settled]
+    after its domain obligation or operator disposition has been applied. *)
+
+val abandon :
+  now:float -> base_path:string -> partition:t -> (t, string) result
+(** Idempotently mark one [Blocked] root [Abandoned]: its candidate is
+    permanently absent from the Candidate ledger, so the root gives up
+    without ever recording a judgment. Unlike [Settled], an [Abandoned] root
+    still reopens through [ensure_roots] when the matching candidate turns
+    out to be alive and [Resumable_pending]. A root that is already
+    [Abandoned] is returned unchanged. *)
+
+val ledger_path : base_path:string -> keeper_name:string -> string
+
+(** Purge the ledger and its cached view under the existing mutation and
+    stable-file locks. Lock identities remain available to queued writers. *)
+val purge : base_path:string -> keeper_name:string -> (unit, string) result
+(** The Keeper's partition ledger file. A Keeper purge removes it with the
+    Keeper, so a later Keeper of the same name starts without its roots. *)
+
+val heap_root : (Obj.t -> 'a) -> 'a
+(** Run [walk] on this module's retained state, under the lock that guards
+    it, for [Heap_roots.measure] to size with [Obj.reachable_words].
+    Diagnostics only: the walk stalls the process for its duration. *)

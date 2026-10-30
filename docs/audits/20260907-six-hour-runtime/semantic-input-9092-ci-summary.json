@@ -1,0 +1,46 @@
+{
+  "observed_at": "2026-09-07T14:07:17.918404+00:00",
+  "pr_number": 34062,
+  "head_sha": "9092da9b9c7958f04ef3ec8a8a95509fdf28f3d8",
+  "run_id": 34129305456,
+  "run_url": "https://github.com/jeong-sik/masc/actions/runs/34129305456",
+  "conclusion": "success",
+  "passed_total": 108,
+  "failed_total": 0,
+  "suites": [
+    {
+      "suite": "semantic",
+      "passed": 29,
+      "failed": 0
+    },
+    {
+      "suite": "chat",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "suite": "owner",
+      "passed": 45,
+      "failed": 0
+    },
+    {
+      "suite": "shutdown",
+      "passed": 23,
+      "failed": 0
+    }
+  ],
+  "required_checks": {
+    "run_id": 34129066017,
+    "conclusion": "success",
+    "head_sha": "9092da9b9c7958f04ef3ec8a8a95509fdf28f3d8"
+  },
+  "merge": {
+    "merged": true,
+    "merged_at": "2026-09-07T14:04:19Z",
+    "merge_commit_sha": "3c353d75b53b072fb3b03c959b2d7d35de9b3a64"
+  },
+  "limits": [
+    "No native semantic admission, child ownership or interrupted-effect recovery activation.",
+    "Root source review; no additional independent review of this input revision."
+  ]
+}

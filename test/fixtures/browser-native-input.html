@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>MASC native input proof</title>
+<style>body{font:20px system-ui;margin:40px;background:#f3f5f9;color:#162334}button,textarea{font:inherit;padding:20px;margin:15px 0;display:block}textarea{width:600px;height:120px}output{white-space:pre-wrap}</style>
+<h1>Native browser input</h1><button id="counter">Double-click this control</button><textarea id="editor" aria-label="Native typing"></textarea><output id="result">Waiting</output>
+<script>
+window.fixtureEvents=[];window.doubleClicks=0;
+for(const type of ['pointerdown','pointerup','click','dblclick','keydown','keyup','beforeinput','input'])
+ document.addEventListener(type,e=>{window.fixtureEvents.push({type,trusted:e.isTrusted,target:e.target.id,key:e.key??null,meta:e.metaKey??null,control:e.ctrlKey??null});document.querySelector('#result').textContent=JSON.stringify({doubleClicks:window.doubleClicks,value:document.querySelector('#editor').value,events:window.fixtureEvents.slice(-8)},null,2)},true);
+document.querySelector('#counter').addEventListener('dblclick',e=>{if(e.isTrusted)window.doubleClicks++});
+</script></html>

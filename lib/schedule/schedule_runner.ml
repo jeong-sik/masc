@@ -1,0 +1,784 @@
+(* TEL-OK: this library returns structured [dispatch_result] values and persists
+   generic wake records through [Schedule_store]. The server maintenance
+   loop owns runtime Log telemetry when it installs a concrete consumer. *)
+
+type signal_kind =
+  | Due_candidate
+
+type wake_signal =
+  { occurrence_id : Schedule_occurrence_id.t
+  ; kind : signal_kind
+  ; schedule_instance_id : string
+  ; schedule_id : string
+  ; emitted_at : float
+  ; due_at : float
+  ; payload_digest : string
+  ; payload : Yojson.Safe.t
+  }
+
+type hold_reason =
+  | Previous_occurrence_unconsumed
+      (** The target still holds this schedule's previous occurrence (#36213). *)
+  | Target_intake_fenced of
+      { target : string
+      ; fence_owner : string
+      }
+      (** The target refuses intake while [fence_owner] holds its intake
+          fence. The occurrence stays due and is reconsidered next tick
+          (#34642). *)
+
+type held =
+  { signal : wake_signal
+  ; reason : hold_reason
+  }
+
+type settlement_verdict = Retry_dispatch of string
+  | Reject_dispatch of Schedule_store.failure_scope * string
+
+type finish_stamp = Awaiting_finish_stamp | Finished_at of float
+
+type pending_settlement =
+  { attempt : Schedule_store.running_attempt
+  ; occurrence_id : Schedule_occurrence_id.t
+  ; schedule_id : string
+  ; schedule_instance_id : string
+  ; recurrence_now : float
+  ; verdict : settlement_verdict
+  ; finish_stamp : finish_stamp
+  }
+
+type settlement_failure =
+  | Finish_clock_raised of string
+  | Store_settlement_error of Schedule_store.store_error
+  | Store_settlement_raised of string
+
+type settlement_error =
+  { occurrence_id : Schedule_occurrence_id.t
+  ; schedule_id : string
+  ; failure : settlement_failure
+  }
+
+type tick_result =
+  { due_changed : int
+  ; emitted : wake_signal list
+  ; rescheduled : int
+  ; dispatches : dispatch_result list
+  ; held : held list
+  ; held_at : float
+  ; pending_settlements : pending_settlement list
+  ; settlement_errors : settlement_error list
+  }
+
+and dispatch_status =
+  | Dispatch_succeeded
+  | Dispatch_failed
+  | Dispatch_unsupported
+  | Dispatch_start_rejected
+
+and dispatch_result =
+  { occurrence_id : Schedule_occurrence_id.t
+  ; schedule_id : string
+  ; status : dispatch_status
+  ; detail : Yojson.Safe.t option
+  ; error : string option
+  }
+
+type consumer_dispatch_error =
+  | Retryable_dispatch_failure of string
+  | Occurrence_dispatch_rejection of string
+  | Terminal_dispatch_rejection of string
+
+type acceptance_commit = Acceptance_committed
+
+type consumer_dispatch_result =
+  | Work_accepted of
+      { detail : Yojson.Safe.t
+      ; acceptance_commit : acceptance_commit
+      }
+
+type consumer =
+  { accepts : Schedule_domain.schedule_request -> (unit, string) result
+  ; dispatch :
+      Workspace_utils.config ->
+      now:float ->
+      wake_signal ->
+      Schedule_domain.schedule_request ->
+      commit_acceptance:
+        (Yojson.Safe.t ->
+         (acceptance_commit, consumer_dispatch_error) result) ->
+      (consumer_dispatch_result, consumer_dispatch_error) result
+  ; defer_wake :
+      Workspace_utils.config ->
+      occurrence_id:Schedule_occurrence_id.t ->
+      Schedule_domain.schedule_request -> hold_reason option
+      (** [Some reason] holds this due schedule; see the interface.
+          Self-clock: [Some Previous_occurrence_unconsumed] leaves this due schedule unfired this tick — no
+          signal, no dispatch, no advance — because its target still holds the
+          previous, unconsumed occurrence. The current [occurrence_id] is a
+          retry, not a new wake, and must remain eligible for reconciliation.
+          Emission then tracks consumption
+          rather than wall-clock, bounding a slow keeper to one pending
+          occurrence per instance. The consumer decides which schedules
+          self-clock; a schedule whose every occurrence is distinct work returns
+          [None] and fires on every due. *)
+  }
+
+type runner_error =
+  | Service_error of Schedule_service.service_error
+  | Signal_store_error of string
+  | Tick_raised of string
+
+type tick_failure =
+  { error : runner_error
+  ; pending_settlements : pending_settlement list
+  ; settlement_errors : settlement_error list
+  }
+
+open Result.Syntax
+
+let runner_error_to_string = function
+  | Service_error err -> Schedule_service.service_error_to_string err
+  | Signal_store_error msg -> "signal store error: " ^ msg
+  | Tick_raised msg -> "schedule tick raised: " ^ msg
+;;
+
+let tick_failure_to_string (failure : tick_failure) = runner_error_to_string failure.error
+;;
+
+let settlement_error_to_string error =
+  let failure = match error.failure with
+    | Finish_clock_raised detail -> "settlement finish clock raised: " ^ detail
+    | Store_settlement_error error -> Schedule_store.store_error_to_string error
+    | Store_settlement_raised detail -> "settlement store raised: " ^ detail in
+  Printf.sprintf "schedule_id=%s occurrence=%s: %s" error.schedule_id
+    (Schedule_occurrence_id.to_string error.occurrence_id) failure
+;;
+
+let signal_kind_to_string = function
+  | Due_candidate -> Schedule_occurrence_id.protocol_tag
+;;
+
+let signal_kind_of_string value =
+  if String.equal value Schedule_occurrence_id.protocol_tag
+  then Ok Due_candidate
+  else Error ("unknown schedule signal kind: " ^ value)
+;;
+
+let dispatch_status_to_string = function
+  | Dispatch_succeeded -> "succeeded"
+  | Dispatch_failed -> "failed"
+  | Dispatch_unsupported -> "unsupported"
+  | Dispatch_start_rejected -> "start_rejected"
+;;
+
+let schedules_dir config =
+  Filename.concat (Workspace_utils.masc_dir config) "schedules"
+;;
+
+let signal_location config =
+  Dated_jsonl.Store.at
+    (Workspace_utils.dated_store_root config)
+    Dated_jsonl.Store.Root.Schedule_signals
+;;
+
+let signals_dir config = Dated_jsonl.Store.dir (signal_location config)
+
+let signal_seen_path config =
+  Filename.concat (schedules_dir config) "signal_keys.json"
+;;
+
+let signal_store config = Dated_jsonl.open_store (signal_location config)
+
+let string_field name fields =
+  match List.assoc_opt name fields with
+  | Some (`String value) -> Ok value
+  | Some _ -> Error ("expected string field: " ^ name)
+  | None -> Error ("missing field: " ^ name)
+;;
+
+let wake_signal_to_yojson signal =
+  `Assoc
+    [ "event_type", `String (signal_kind_to_string signal.kind)
+    ; "occurrence_id", `String (Schedule_occurrence_id.to_string signal.occurrence_id)
+    ; "schedule_instance_id", `String signal.schedule_instance_id
+    ; "schedule_id", `String signal.schedule_id
+    ; "emitted_at", `Float signal.emitted_at
+    ; "due_at", `Float signal.due_at
+    ; "payload_digest", `String signal.payload_digest
+    ; "payload", signal.payload
+    ]
+;;
+
+let wake_signal_of_yojson = function
+  | `Assoc fields ->
+    let* kind_name = string_field "event_type" fields in
+    let* kind = signal_kind_of_string kind_name in
+    let* occurrence_id = string_field "occurrence_id" fields in
+    let* schedule_instance_id = string_field "schedule_instance_id" fields in
+    let* schedule_id = string_field "schedule_id" fields in
+    let* emitted_at = Schedule_domain.float_field "emitted_at" fields in
+    let* due_at = Schedule_domain.float_field "due_at" fields in
+    let* payload_digest = string_field "payload_digest" fields in
+    let* payload = Schedule_domain.assoc_field "payload" fields in
+    let* decoded_payload = Schedule_domain.payload_of_yojson payload in
+    let actual_payload_digest = Schedule_domain.payload_digest decoded_payload in
+    let* () =
+      if String.equal payload_digest actual_payload_digest
+      then Ok ()
+      else Error "payload_digest does not match schedule occurrence payload"
+    in
+    let expected_occurrence_id =
+      Schedule_occurrence_id.make
+        ~schedule_instance_id
+        ~schedule_id
+        ~due_at
+        ~payload_digest
+    in
+    if String.equal occurrence_id (Schedule_occurrence_id.to_string expected_occurrence_id)
+    then
+      Ok
+        { occurrence_id = expected_occurrence_id
+        ; kind
+        ; schedule_instance_id
+        ; schedule_id
+        ; emitted_at
+        ; due_at
+        ; payload_digest
+        ; payload
+        }
+    else Error "occurrence_id does not match schedule occurrence facts"
+  | _ -> Error "expected schedule wake_signal object"
+;;
+
+let occurrence_id (request : Schedule_domain.schedule_request) =
+  let payload_digest = Schedule_domain.payload_digest request.payload in
+  Schedule_occurrence_id.make
+    ~schedule_instance_id:request.schedule_instance_id
+    ~schedule_id:request.schedule_id
+    ~due_at:request.due_at
+    ~payload_digest
+;;
+
+let make_signal ~now kind (request : Schedule_domain.schedule_request) =
+  let payload_digest = Schedule_domain.payload_digest request.payload in
+  { occurrence_id = occurrence_id request
+  ; kind
+  ; schedule_instance_id = request.schedule_instance_id
+  ; schedule_id = request.schedule_id
+  ; emitted_at = now
+  ; due_at = request.due_at
+  ; payload_digest
+  ; payload = Schedule_domain.payload_to_yojson request.payload
+  }
+;;
+
+let signal_seen_recovery_path config = signal_seen_path config ^ ".last-good"
+
+let parse_seen_json = function
+  | `List rows ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | `String key :: rest -> loop (key :: acc) rest
+      | _ :: _ -> Error "signal_keys.json must be a string list"
+    in
+    loop [] rows
+  | _ -> Error "signal_keys.json must be a JSON list"
+;;
+
+(* [Seen_absent]: no primary file exists — nothing has ever been observed,
+   and the empty list is correct with no data loss. [Seen_unparseable]: the
+   primary exists but its bytes (or the read itself) do not yield a key
+   list; the caller must not treat this as "nothing seen", because that
+   would re-fire every occurrence this store has ever signalled. *)
+type seen_primary_failure =
+  | Seen_absent
+  | Seen_unparseable of string
+
+let decode_seen_primary config =
+  match Workspace_utils.read_json_doc config (signal_seen_path config) with
+  | Error error -> Error (Seen_unparseable (Workspace_utils.json_doc_error_to_string error))
+  | Ok None -> Error Seen_absent
+  | Ok (Some json) ->
+    (match parse_seen_json json with
+     | Ok keys -> Ok keys
+     | Error msg -> Error (Seen_unparseable msg))
+;;
+
+(* The primary seen list, kept with the file version it was read from. Every
+   tick reads it, and a tick that neither emits nor prunes writes nothing, so
+   most ticks find the file unchanged. [write_seen] forgets it after it
+   writes. The Memory backend is not a file, so its reads decode every
+   time, as [Schedule_store] does for the ledger. *)
+let decoded_seen_primary : string list File_version_cache.t = File_version_cache.create ()
+
+let load_seen_primary config =
+  let decode () = decode_seen_primary config in
+  match config.Workspace_utils.backend with
+  | Workspace_utils.FileSystem _ ->
+    File_version_cache.load decoded_seen_primary (signal_seen_path config) ~decode
+  | Workspace_utils.Memory _ -> decode ()
+;;
+
+let load_seen_recovery config =
+  match Workspace_utils.read_json_doc config (signal_seen_recovery_path config) with
+  | Error _ | Ok None -> None
+  | Ok (Some json) ->
+    (match parse_seen_json json with
+     | Ok keys -> Some keys
+     | Error _ -> None)
+;;
+
+(* Self-recovering read (#26686 item 1). An absent primary is a fresh store:
+   the empty list loses nothing. A primary that exists but will not parse is
+   corruption; the previous version of this function returned [Error]
+   straight from here, and [append_new_signals] binds that with [let*], so
+   every future tick failed the same way with no writer able to replace the
+   broken file — the whole scheduler stopped dispatching until an operator
+   edited it by hand.
+   RFC-0234 already solved this for [schedules.json] with a [.last-good]
+   mirror (schedule_store.ml); this store gets the same recovery source. A
+   corrupt primary with no usable mirror still reports [Error] rather than
+   silently discarding whatever the bytes may hold, and this function does
+   not retry — retrying an unchanged file cannot change the outcome. The
+   primary heals itself on the next tick that emits a signal, because
+   [write_seen] below always writes both files together. *)
+let read_seen config =
+  match load_seen_primary config with
+  | Ok keys -> Ok keys
+  | Error Seen_absent -> Ok []
+  | Error (Seen_unparseable primary_err) ->
+    (match load_seen_recovery config with
+     | Some keys -> Ok keys
+     | None -> Error primary_err)
+;;
+
+(* Commits the primary, then mirrors to [.last-good] so a later corrupt-primary
+   read (above) has a recovery source. Returning a result (#26686 item 2) lets
+   the caller refuse to report a tick that lost this write as successful,
+   instead of the failure only reaching [Log.Misc.warn] the way [write_json]
+   reports it — this module's own header keeps it telemetry-free, the caller
+   installs the concrete consumer. A mirror write that fails after the
+   primary succeeds does not fail the commit: the primary write stands, and
+   only the recovery copy is stale until the next write. *)
+let write_seen config keys =
+  Workspace_utils.mkdir_p (schedules_dir config);
+  let json = `List (List.map (fun key -> `String key) keys) in
+  let written = Workspace_utils.write_json_result config (signal_seen_path config) json in
+  (* Landed or not, the file may no longer be the version that was read. *)
+  File_version_cache.forget decoded_seen_primary (signal_seen_path config);
+  let* () = written in
+  (* The primary already committed above; a failed mirror write only means
+     the next corrupt-primary read has no recovery source. *)
+  (* fire-and-forget: a mirror write failure does not fail this commit. *)
+  ignore (Workspace_utils.write_json_result config (signal_seen_recovery_path config) json);
+  Ok ()
+;;
+
+let append_signal config signal =
+  try
+    Dated_jsonl.append (signal_store config) (wake_signal_to_yojson signal);
+    Ok ()
+  with
+  | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, arg) ->
+    Error
+      (Printf.sprintf
+         "%s failed for %s: %s"
+         fn
+         arg
+         (Unix.error_message err))
+;;
+
+(* The keys of the last schedule list they were taken from. The store hands
+   every tick of an unchanged ledger the same decoded list, and a decoded list
+   is never changed in place, so such a tick reuses the keys instead of
+   hashing every stored schedule again. A list the tick has not seen, from a
+   ledger that changed, takes its keys anew. Only [append_new_signals] reads
+   the table, and nothing writes it once it is kept. *)
+let keys_of_last_schedules :
+  (Schedule_domain.schedule_request list * (string, unit) Hashtbl.t) option Atomic.t
+  =
+  Atomic.make None
+;;
+
+(* A seen key is one occurrence id: a digest of the schedule instance, its
+   schedule id, its due time and its payload. A tick can emit a key only for
+   a request the ledger currently holds, at that request's current due time
+   and payload (see [candidates]). So a key stays reachable only while it is
+   the current occurrence of a stored request. Every other key can never be
+   produced again:
+   - its schedule was forgotten or pruned from the ledger, and a schedule id
+     used again gets a fresh [schedule_instance_id] ([Schedule_domain]);
+   - its schedule was edited, which also takes a fresh instance id
+     ([Schedule_store.update_request]);
+   - its recurring schedule moved on, and [Schedule_domain.next_due_after]
+     only returns a due time after [now], while an emitted occurrence was
+     due at or before the [now] that emitted it.
+   Dropping those keys therefore cannot let a later tick emit a signal
+   twice. [state] is what this tick's [Schedule_store.refresh_due] returned,
+   read before this lock. The server maintenance loop is the one runner on
+   a base path and runs its ticks one after another, so no other tick can
+   advance a schedule and record its new key in between. *)
+let current_occurrence_keys (state : Schedule_store.state) =
+  match Atomic.get keys_of_last_schedules with
+  | Some (schedules, keys) when schedules == state.schedules -> keys
+  | Some _ | None ->
+    let keys = Hashtbl.create (List.length state.schedules) in
+    List.iter
+      (fun request ->
+         Hashtbl.replace keys (Schedule_occurrence_id.to_string (occurrence_id request)) ())
+      state.schedules;
+    Atomic.set keys_of_last_schedules (Some (state.schedules, keys));
+    keys
+;;
+
+let append_new_signals config ~(state : Schedule_store.state) candidates =
+  Workspace_utils.mkdir_p (schedules_dir config);
+  Workspace_utils.with_file_lock config (signal_seen_path config) (fun () ->
+    let* seen = read_seen config in
+    (* Dedupe against the whole list read from disk, pruned keys included, so
+       this tick's candidates are judged exactly as before the prune. *)
+    let seen_tbl = Hashtbl.create (List.length seen + List.length candidates) in
+    List.iter (fun key -> Hashtbl.replace seen_tbl key ()) seen;
+    let current = current_occurrence_keys state in
+    let kept = List.filter (fun key -> Hashtbl.mem current key) seen in
+    let pruned = List.compare_lengths kept seen < 0 in
+    let emitted_rev = ref [] in
+    let seen_rev = ref (List.rev kept) in
+    (* The file is rewritten only when this tick changed its contents: it
+       pruned a key or emitted a signal. A tick that does neither writes
+       nothing.
+       This same write also closes #26686 item 3: [loop]'s [Error] arm below
+       calls it before returning, so a signal whose JSONL row already landed
+       (its [append_signal] succeeded) is recorded seen even when a later
+       signal in the same tick fails. The previous version only reached this
+       write from the clean end of the candidate list, so a mid-list failure
+       discarded [seen_rev] entirely and the next tick re-appended every
+       signal this one had already committed to the JSONL store. *)
+    let persist_progress () =
+      match !emitted_rev, pruned with
+      | [], false -> Ok ()
+      | [], true | _ :: _, _ -> write_seen config (List.rev !seen_rev)
+    in
+    let rec loop = function
+      | [] ->
+        let* () = persist_progress () in
+        Ok (List.rev !emitted_rev)
+      | (signal : wake_signal) :: rest ->
+        let occurrence_id = Schedule_occurrence_id.to_string signal.occurrence_id in
+        if Hashtbl.mem seen_tbl occurrence_id then loop rest
+        else (
+          match append_signal config signal with
+          | Error msg ->
+            (* Best-effort persistence of the progress made before this
+               failure; this module stays telemetry-free (see the header),
+               so a secondary failure here has nowhere to go. *)
+            (* fire-and-forget: does not change which error is returned. *)
+            ignore (persist_progress ());
+            Error msg
+          | Ok () ->
+            Hashtbl.replace seen_tbl occurrence_id ();
+            seen_rev := occurrence_id :: !seen_rev;
+            emitted_rev := signal :: !emitted_rev;
+            loop rest)
+    in
+    loop candidates)
+  |> function
+  | Ok emitted -> Ok emitted
+  | Error msg -> Error (Signal_store_error msg)
+;;
+
+let candidates ~now state =
+  Schedule_store.due_wake_candidates state
+  |> List.map (fun request -> request, make_signal ~now Due_candidate request)
+;;
+
+let dispatch_result ?detail ?error occurrence_id schedule_id status =
+  { occurrence_id; schedule_id; status; detail; error }
+;;
+
+let replay_settlement config ~clock (pending : pending_settlement) =
+  let stamp = match pending.finish_stamp with
+    | Finished_at value -> Ok value
+    | Awaiting_finish_stamp ->
+      Cancel_safe.protect
+        ~on_exn:(fun exn -> Error (Finish_clock_raised (Printexc.to_string exn)))
+        (fun () -> Ok (clock ())) in
+  let result, retained = match stamp with
+    | Error failure -> Error failure, pending
+    | Ok finished_at ->
+      let retained = { pending with finish_stamp = Finished_at finished_at } in
+      let result = Cancel_safe.protect
+          ~on_exn:(fun exn -> Error (Store_settlement_raised (Printexc.to_string exn)))
+          (fun () ->
+            (match retained.verdict with
+             | Retry_dispatch detail ->
+               Schedule_store.retry_running ~finished_at config ~now:retained.recurrence_now
+                 ~attempt:retained.attempt ~reason:(Schedule_store.Retryable_dispatch_failure detail)
+             | Reject_dispatch (failure_scope, error) ->
+               Schedule_store.fail_running ~finished_at config ~now:retained.recurrence_now
+                 ~attempt:retained.attempt ~failure_scope ~error)
+            |> Result.map_error (fun error -> Store_settlement_error error)) in
+      result, retained in
+  let keep failure =
+    Some retained,
+    Some { occurrence_id = retained.occurrence_id; schedule_id = retained.schedule_id; failure }
+  in
+  match result with
+  | Ok _ -> None, None
+  | Error ((Finish_clock_raised _ | Store_settlement_raised _) as failure) -> keep failure
+  | Error (Store_settlement_error error as failure) ->
+    (match error with
+     | Schedule_store.Running_attempt_superseded _ | Schedule_store.Schedule_not_found ->
+       None, None
+     | Schedule_store.Schedule_already_exists
+     | Schedule_store.Not_schedule_owner _
+     | Schedule_store.Invalid_initial_status _
+     | Schedule_store.Transition_refused _
+     | Schedule_store.Changed_due_already_past _
+     | Schedule_store.Interval_below_runner_tick _
+     | Schedule_store.Running_wake_absent _
+     | Schedule_store.Running_wake_settled _
+     | Schedule_store.Schedule_not_due_candidate
+     | Schedule_store.Running_attempt_unavailable _
+     | Schedule_store.Persistence_failed _
+     | Schedule_store.Corrupt_ledger _ -> keep failure)
+;;
+
+let finish_dispatch config ~now ~clock ~attempt ~occurrence_id ~schedule_id ~schedule_instance_id verdict =
+  let pending = { attempt; occurrence_id; schedule_id; schedule_instance_id; recurrence_now = now;
+    verdict; finish_stamp = Awaiting_finish_stamp } in
+  let retained, error = replay_settlement config ~clock pending in
+  let detail = match verdict with
+    | Retry_dispatch reason -> Schedule_store.running_recovery_reason_to_string
+        (Schedule_store.Retryable_dispatch_failure reason)
+    | Reject_dispatch (_, detail) -> detail in
+  let message = match verdict, error with
+    | Retry_dispatch _, None -> detail ^ "; schedule returned to due for retry"
+    | Reject_dispatch _, None -> detail
+    | (Retry_dispatch _ | Reject_dispatch _), Some failure -> detail ^ "; " ^ settlement_error_to_string failure in
+  dispatch_result ~error:message occurrence_id schedule_id Dispatch_failed, retained, error
+;;
+
+let safe_consumer_dispatch config ~now ~clock ~attempt consumer signal request =
+  Cancel_safe.protect
+    ~on_exn:(fun exn ->
+      Error
+        (Retryable_dispatch_failure
+           ("consumer dispatch raised: " ^ Printexc.to_string exn)))
+    (fun () ->
+       consumer.dispatch
+         config
+         ~now
+         signal
+         request
+         ~commit_acceptance:(fun detail ->
+           match
+             Schedule_store.accept_running
+               ~finished_at:(clock ())
+               config
+               ~now
+               ~attempt
+               ~detail
+               ()
+           with
+           | Ok _ -> Ok Acceptance_committed
+           | Error error ->
+             Error
+               (Retryable_dispatch_failure
+                  ("schedule acceptance commit failed: "
+                   ^ Schedule_store.store_error_to_string error))))
+;;
+
+let dispatch_candidate
+      config
+      ~now
+      ~clock
+      consumer
+      (signal : wake_signal)
+      (request : Schedule_domain.schedule_request)
+  =
+  let schedule_id = request.Schedule_domain.schedule_id in
+  let occurrence_id = signal.occurrence_id in
+  match consumer.accepts request with
+  | Error reason ->
+    (match
+       Schedule_store.fail_due_candidate
+         ~attempted_at:(clock ())
+         config
+         ~now
+         ~candidate:request
+         ~error:reason
+     with
+     | Ok _ ->
+       dispatch_result ~error:reason occurrence_id schedule_id Dispatch_unsupported, None, None
+     | Error err ->
+       let error =
+         Printf.sprintf
+           "%s; failed to mark schedule failed: %s"
+           reason
+           (Schedule_store.store_error_to_string err)
+       in
+       dispatch_result ~error occurrence_id schedule_id Dispatch_unsupported, None, None)
+  | Ok () ->
+    (match
+       Schedule_store.start_due_candidate
+         ~started_at:(clock ())
+         config
+         ~now
+         ~candidate:request
+     with
+     | Error err ->
+       dispatch_result ~error:(Schedule_store.store_error_to_string err) occurrence_id
+         schedule_id Dispatch_start_rejected, None, None
+     | Ok started ->
+       (match
+          safe_consumer_dispatch config ~now ~clock ~attempt:started.attempt
+            consumer signal started.request
+        with
+        | Error (Retryable_dispatch_failure detail) ->
+          finish_dispatch config ~now ~clock ~attempt:started.attempt
+            ~occurrence_id ~schedule_id ~schedule_instance_id:started.request.schedule_instance_id
+            (Retry_dispatch detail)
+        | Error (Occurrence_dispatch_rejection detail) ->
+          finish_dispatch config ~now ~clock ~attempt:started.attempt ~occurrence_id ~schedule_id
+            ~schedule_instance_id:started.request.schedule_instance_id
+            (Reject_dispatch (Schedule_store.Occurrence_failure, detail))
+        | Error (Terminal_dispatch_rejection detail) ->
+          finish_dispatch config ~now ~clock ~attempt:started.attempt ~occurrence_id ~schedule_id
+            ~schedule_instance_id:started.request.schedule_instance_id
+            (Reject_dispatch (Schedule_store.Schedule_failure, detail))
+        | Ok (Work_accepted { detail; acceptance_commit = Acceptance_committed }) ->
+          dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded, None, None))
+;;
+
+let dispatch_candidates config ~now ~clock consumer candidates =
+  let rec loop dispatches = function
+    | [] -> List.rev dispatches, None, None
+    | (request, signal) :: rest ->
+      let result, pending, error = dispatch_candidate config ~now ~clock consumer signal request in
+      match pending with
+      | Some _ -> List.rev (result :: dispatches), pending, error
+      | None -> loop (result :: dispatches) rest
+  in loop [] candidates
+;;
+
+let replay_settlements config ~clock pending_settlements =
+  let pending, errors = List.fold_left
+      (fun (pending, errors) intent ->
+         let retained, failure = replay_settlement config ~clock intent in
+         (match retained with None -> pending | Some value -> value :: pending),
+         (match failure with None -> errors | Some value -> value :: errors))
+      ([], []) pending_settlements in
+  List.rev pending, List.rev errors
+;;
+
+let tick ?consumer ?clock config ~pending_settlements ~now ~retention_days =
+  (* Without a clock every wake stamp copies [now], which is the tick start:
+     the store then records a dispatch that took fourteen seconds as one
+     that took none. The production caller passes its wall clock; tests that
+     reason about a fixed [now] pass nothing and keep their determinism. *)
+  let clock =
+    match clock with
+    | Some clock -> clock
+    | None -> fun () -> now
+  in
+  let progress = ref (pending_settlements, []) in
+  let failed error =
+    let pending_settlements, settlement_errors = !progress in
+    Error { error; pending_settlements; settlement_errors } in
+  let run_fresh () =
+    match Schedule_store.refresh_due config ~now ~retention_days with
+    | Error err -> Error (Service_error (Schedule_service.Store_error err))
+    | Ok (state, due_changed) ->
+      let all_candidates = candidates ~now state
+        |> List.filter (fun (_, (signal : wake_signal)) ->
+             not (List.exists (fun (pending : pending_settlement) ->
+               String.equal signal.schedule_instance_id pending.schedule_instance_id
+               && String.equal signal.schedule_id pending.schedule_id) pending_settlements)) in
+      (* Self-clock (#36213): a consumer may hold a due schedule back when its
+         target still carries the previous unconsumed occurrence. Held candidates
+         emit no signal and are not dispatched or advanced — they stay due and are
+         reconsidered next tick, so emission tracks consumption instead of the
+         wall clock. Without a consumer the runner is keeper-agnostic and holds
+         nothing. *)
+      let held, active =
+        match consumer with
+        | Some consumer ->
+          List.partition_map
+            (fun ((request, (signal : wake_signal)) as candidate) ->
+               match
+                 consumer.defer_wake config ~occurrence_id:signal.occurrence_id request
+               with
+               | Some reason -> Either.Left { signal; reason }
+               | None -> Either.Right candidate)
+            all_candidates
+        | None -> [], all_candidates
+      in
+      (* Read before anything is emitted or dispatched: a dispatch can take
+         seconds, and the tick's finish time would then describe the dispatches
+         rather than when the holds were decided (#38411). *)
+      let held_at = clock () in
+      let candidate_signals = List.map snd active in
+      let* emitted = append_new_signals config ~state candidate_signals in
+      (match consumer with
+       | Some consumer ->
+         let dispatches, pending, error = dispatch_candidates config ~now ~clock consumer active in
+         let retained, errors = !progress in
+         let pending_settlements, settlement_errors = match pending with
+           | Some intent -> retained @ [ intent ], errors @ Option.to_list error
+           | None -> retained, errors in
+         progress := pending_settlements, settlement_errors;
+         Ok { due_changed; emitted; rescheduled = 0; dispatches; held; held_at;
+           pending_settlements; settlement_errors }
+       | None ->
+         let schedule_ids =
+           List.map (fun (signal : wake_signal) -> signal.schedule_id) candidate_signals
+         in
+         (match Schedule_store.reschedule_due_recurring config ~now ~schedule_ids with
+          | Error err -> Error (Service_error (Schedule_service.Store_error err))
+          | Ok (_, rescheduled) ->
+            let pending_settlements, settlement_errors = !progress in
+            Ok { due_changed; emitted; rescheduled; dispatches = []; held; held_at;
+              pending_settlements; settlement_errors }))
+  in
+  Cancel_safe.protect
+    ~on_exn:(fun exn -> failed (Tick_raised (Printexc.to_string exn)))
+    (fun () ->
+      progress := replay_settlements config ~clock pending_settlements;
+      match run_fresh () with Ok result -> Ok result | Error error -> failed error)
+;;
+
+let hold_reason_to_json = function
+  | Previous_occurrence_unconsumed ->
+    `Assoc [ "kind", `String "previous_occurrence_unconsumed" ]
+  | Target_intake_fenced { target; fence_owner } ->
+    `Assoc
+      [ "kind", `String "target_intake_fenced"
+      ; "target", `String target
+      ; "fence_owner", `String fence_owner
+      ]
+;;
+
+let hold_reason_equal left right =
+  match left, right with
+  | Previous_occurrence_unconsumed, Previous_occurrence_unconsumed -> true
+  | ( Target_intake_fenced { target; fence_owner }
+    , Target_intake_fenced { target = target'; fence_owner = fence_owner' } ) ->
+    String.equal target target' && String.equal fence_owner fence_owner'
+  | Previous_occurrence_unconsumed, Target_intake_fenced _
+  | Target_intake_fenced _, Previous_occurrence_unconsumed -> false
+;;
+
+let newly_held ~previous held =
+  let was_held ({ signal; reason } : held) =
+    List.exists
+      (fun ({ signal = earlier; reason = earlier_reason } : held) ->
+         String.equal
+           (Schedule_occurrence_id.to_string earlier.occurrence_id)
+           (Schedule_occurrence_id.to_string signal.occurrence_id)
+         && hold_reason_equal earlier_reason reason)
+      previous
+  in
+  List.filter (fun hold -> not (was_held hold)) held
+;;

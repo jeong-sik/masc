@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Lane Add-ons                                                                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│Last evidence receipt                                                                                                                                         │
+│Evidence preserved: 1 row · sha256 2ed0cb5ec42432edf643fd4393203c6908ade96ded953be8e45c78e683c961a4                                                           │
+│Evidence owner: 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad                                                                                                          │
+│Selected row: 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad/1/e8e8b75037064ace8cb1bde36d94521f726b782d9295136ffc7e04d0f326da1d                                         │
+│Not shared.                                                                                                                                                   │
+│                                                                                                                                                              │
+│?:help  Esc:back  Tab:section  j/k:move  D:raw                                                                                                                │
+│native-current-ui-proof · Native MIDI phrase playback · attached                                                                                              │
+│[1 Results]  2 Links  3 Installation  4 Records                                                                                                               │
+│                                                                                                                                                              │
+│Latest native phrase render and local player process state                                                                                                    │
+│phrase (1)                                           │ SoundFont: stop_requested                                                                              │
+│> SoundFont: stop_requested                          │ phrase · 2026-10-21 15:59:18.339 UTC                                                                   │
+│                                                     │                                                                                                        │
+│                                                     │ State  stop_requested                                                                                  │
+│                                                     │ Instrument  unavailable · field unavailable                                                            │
+│                                                     │ Preset  unavailable · field unavailable                                                                │
+│                                                     │ MIDI SHA-256  unavailable · field unavailable                                                          │
+│                                                     │ Rendered audio  unavailable · field unavailable                                                        │
+│                                                     │ Failure  unavailable · field unavailable                                                               │
+│                                                                                                                                                              │
+│Activity timeline                                                                                                                                             │
+│Wall time 1792598358.339 → 1792598358.339 · o event · v value · * relation                                                                                    │
+│>phrase            · 8510066d |---------------------------------------------------------------v--------------------------------------------------------------|│
+│                                                                                                                                                              │
+│Received snapshot coverage · all Add-ons                                                                                                                      │
+│01a15f30-3b0b-7000-b3b7-70768510066d · complete · cursor 1                                                                                                    │
+│vst-phrase · complete · cursor 2 · Synthetic source for corrected native lifecycle; no model/audio                                                            │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+│                                                                                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  o:observe  d:remove TOML + worker  D:raw  J/K:scroll  r:refresh
+ Choose a Keeper before writing · i:choose

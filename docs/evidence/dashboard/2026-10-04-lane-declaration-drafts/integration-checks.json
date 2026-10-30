@@ -1,0 +1,68 @@
+{
+  "implementation_head": "2c9198d38fd142fc970fe95612b7887c92b71109",
+  "base": "d819bd3221b614a0f7c1731752556ccac715de3a",
+  "commands": [
+    {
+      "name": "vitest",
+      "command": "pnpm test src/components/lane-declaration-editor.test.ts src/components/lane-addons-panel.test.ts src/components/status.test.ts src/api/lane-declarations.test.ts --reporter verbose",
+      "exit_code": 0
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm exec tsc --noEmit",
+      "exit_code": 0
+    },
+    {
+      "name": "eslint",
+      "command": "pnpm exec eslint src/lib/lane-declaration-sessions.ts src/components/lane-declaration-editor.ts src/components/lane-declaration-editor.test.ts src/components/lane-addons-panel.ts src/components/lane-addons-panel.test.ts",
+      "exit_code": 0
+    }
+  ],
+  "source_sha256": {
+    "dashboard/src/lib/lane-declaration-sessions.ts": "63134a8b38deff9240662e27a0bb2e2f653d7770db6edb9770b58fa54ab31f59",
+    "dashboard/src/components/lane-addons-panel.ts": "624e705fb50080985626a8c1bc744f5ea7fb46e30d91476d7df10d0ff965192e",
+    "dashboard/src/components/lane-addons-panel.test.ts": "8c22c090367d6856d9cc2bd743d330fab5d57236fbe86ce759468ba0816238eb",
+    "dashboard/src/components/lane-declaration-editor.ts": "76ab9e0896fbcdff9f68eb01c68e918d323fcc80a520f2bd333ff53a74703d57",
+    "dashboard/src/components/lane-declaration-editor.test.ts": "b6af9f3cf5718829d195892ca64ab3347c1a1b6491e1dda57c3597d62e523b39",
+    "docs/guides/lane-declaration-editor.md": "c1a534c89ecd90d7efd87020d5b6a7f33bb4bbab5b1195203398c321e80cb43a"
+  },
+  "scope": "frontend checks after stacking B5/U1/U2; no native/backend/CI/integration deployment proof",
+  "web_tests_passed": 57,
+  "browser": {
+    "passed": true,
+    "browser": "149.0.7827.55",
+    "scope": "actual Status/router/editor with synthetic HTTP and accepted execution authority; no backend or deployment",
+    "assertions": [
+      "actual Status unmount removes editor DOM",
+      "dirty beforeunload guard remains on Skills",
+      "return restores same file draft without refetch",
+      "late create after unmount migrates to file identity",
+      "edits typed during create remain unsaved",
+      "new-file key rotates after late creation",
+      "previous file draft survives new-file flow",
+      "identical configured directory does not join workspace A/B drafts",
+      "return to each workspace restores its own draft",
+      "only one explicit create POST"
+    ],
+    "writes": [
+      {
+        "file_name": "travel.toml",
+        "source_text": "# server A\nid = \"custom\"\nrun_id = \"fixture\"\nmanifest_path = \"./lane.toml\"\n[binding]\nsources = []\n",
+        "mode": "create"
+      }
+    ],
+    "reads": [
+      {
+        "workspace": "A",
+        "path": "/fixture/shared-config/lane-addons/custom.toml"
+      },
+      {
+        "workspace": "B",
+        "path": "/fixture/shared-config/lane-addons/custom.toml"
+      }
+    ],
+    "pageErrors": [],
+    "consoleErrors": [],
+    "unhandled": []
+  }
+}

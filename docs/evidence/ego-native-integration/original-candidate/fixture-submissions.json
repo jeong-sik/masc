@@ -1,0 +1,11 @@
+[
+  {
+    "name": "Ego Native 검증",
+    "delivery": "shipping",
+    "address": "서울시 테스트로 42",
+    "notifications": [
+      "email",
+      "sms"
+    ]
+  }
+]

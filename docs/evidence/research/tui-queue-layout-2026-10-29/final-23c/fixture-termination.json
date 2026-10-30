@@ -1,0 +1,6 @@
+{
+  "at": "2026-10-28T18:19:48.100847+00:00",
+  "pid": 41616,
+  "signal": "SIGTERM",
+  "scope": "owned synthetic fixture only, after acknowledged operator POST; intentional failure observation"
+}

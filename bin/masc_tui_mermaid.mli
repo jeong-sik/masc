@@ -1,0 +1,259 @@
+(** Mermaid diagrams drawn as text.
+
+    A keeper writes ```` ```mermaid ```` fences into chat and posts, and the
+    dashboard draws them in a browser. The TUI has no browser and starts no
+    process, so this module reads the source and lays it out itself: nodes
+    become boxes, edges become box-drawing lines with a one-cell head, and
+    the whole comes back as rows the chat and the Code surface place like
+    any other fenced block.
+
+    What is drawn is a closed set. [graph] and [flowchart] in the four
+    directions, with rectangular, rounded and diamond nodes, solid, dotted
+    and thick edges, edge labels in both spellings, chains and [&] groups.
+    [stateDiagram] and [stateDiagram-v2] in the four directions, with rounded
+    state boxes, initial and terminal [[*]] pseudo-states, [-->] transitions
+    and their labels, state descriptions, [<<choice>>] states drawn as a
+    diamond, and composite states drawn as titled boxes around their members.
+    A [[*]] inside a composite state is that state's own start or end. A
+    composite state may open on an id the source named before, and the box
+    is then that state; a state named inside several composite states is
+    drawn in the last of them, which is where Mermaid places it. A
+    composite state that this would put inside itself is refused.
+    [<<fork>>] and [<<join>>] states are drawn as a thick bar across the
+    flow, without their id, as Mermaid draws them. A state id is
+    one token of letters, digits, [_] or non-ASCII text. A [note left of] or
+    [note right of] a state, on one line or running to [end note], is read
+    and its text is not drawn.
+    [sequenceDiagram] draws participants, lifelines, messages with their
+    text, notes and the framed blocks. A diagram of any other kind, or a
+    line this grammar cannot read, comes back as a {!failure} naming the
+    kind or the line, and the caller shows the source under that name. Nothing is guessed. [subgraph] blocks are
+    drawn as titled bounding boxes around their members (RFC-0429 §3.3);
+    [classDef], [class], [style] and [click] statements, and [linkStyle] in
+    a flowchart, are accepted and change nothing on a text canvas.
+
+    Layout is layered: back edges are turned around so the rest is a DAG,
+    layers come from the longest path, an edge across several layers gets a
+    pass-through cell in each layer between, and each layer is ordered by
+    the barycenter of its neighbours in a fixed number of sweeps. Same
+    source, same width: same bytes. Every glyph is one cell wide. *)
+
+type direction =
+  | Top_down
+  | Bottom_up
+  | Left_right
+  | Right_left
+
+type shape =
+  | Rect  (** [id[label]], [id>label]] *)
+  | Round  (** [id(label)] *)
+  | Diamond  (** [id{label}], [id{{label}}]; drawn as a box whose label wears ⟨ ⟩ *)
+  | Database  (** [id[(label)]]; drawn as a cylinder box with ╓ ╖ ╙ ╜ corners and ║ sides *)
+  | Subroutine  (** [id[[label]]]; drawn as a double-line box with ╔ ╗ ╚ ╝ corners and ║ ═ borders *)
+  | Stadium  (** [id([label])]; drawn with rounded ends *)
+  | Circle  (** [id((label))]; drawn as a circle node *)
+  | Bar  (** a state diagram's [<<fork>>] or [<<join>>]; a thick line across the flow *)
+
+(** Where a state diagram's [[*]] was written: at the top of the diagram, or
+    inside the composite state of that id. Each has a start and an end of
+    its own. *)
+type scope =
+  | Top_level
+  | Inside of string
+
+(** What names a node. A state diagram's [[*]] names no state: it is where
+    its scope starts on the left of a transition, and where it ends on the
+    right. Those are nodes of their own, and none of them can meet a state
+    the source named. *)
+type node_id =
+  | Named of string  (** an id the source wrote *)
+  | Initial of scope  (** [[*] --> X] *)
+  | Final of scope  (** [X --> [*]] *)
+
+type node = {
+  id : node_id;
+  label : string;
+  shape : shape;
+}
+
+type line_style =
+  | Solid
+  | Dotted
+  | Thick
+
+type edge = {
+  from_id : node_id;
+  to_id : node_id;
+  directed : bool;  (** [-->] against [---] *)
+  style : line_style;
+  label : string option;
+}
+
+(** A [subgraph … end]. Its members are laid out on their own and the
+    drawing is placed in the enclosing scope as one item, which makes a
+    nested subgraph the same thing one level down. An edge may name a
+    subgraph, and then it joins the box; an edge with one end inside a
+    subgraph and the other outside it is refused, because the box would be
+    drawn around a member the line already left.
+
+    [group_direction] is a [direction] statement inside the subgraph.
+    Mermaid ignores one at the top level, where the header has already
+    said which way the diagram reads, and so do we. *)
+type group = {
+  group_id : string;
+  group_label : string;  (** the title on the box, [group_id] when untitled *)
+  group_direction : direction option;
+  group_nodes : node_id list;  (** ids declared directly inside, source order *)
+  group_children : group list;
+}
+
+type graph = {
+  direction : direction;
+  nodes : node list;  (** every node of the diagram, in order of first appearance *)
+  edges : edge list;  (** in source order, one per source-target pair *)
+  groups : group list;  (** the subgraphs at the top level, source order *)
+}
+
+(** A sequence diagram: participants across the top, one lifeline each,
+    messages between them in source order. [participant X as Label] names
+    the box; a participant first seen in a message is enrolled there. Notes
+    sit over the lifelines they name; [loop], [alt]/[else], [opt], [par]/
+    [and], [critical]/[option], [break] and [rect] frame the rows they
+    hold; [box] groups are read and not drawn; [autonumber], [activate],
+    [deactivate] and [title] are accepted and change nothing here. *)
+type head =
+  | Head_arrow  (** [->], [->>], [-)] and their dotted forms *)
+  | Head_cross  (** [-x], [--x] *)
+
+type sequence_event =
+  | Message of {
+      m_from : string;
+      m_to : string;
+      m_text : string;
+      m_style : line_style;  (** [Solid] or [Dotted]; a message is never [Thick] *)
+      m_head : head;
+    }
+  | Note of {
+      n_over : string list;
+      n_text : string;
+    }
+  | Block_open of {
+      b_kind : string;  (** the keyword as written: [loop], [alt], … *)
+      b_label : string;
+    }
+  | Block_else of string
+  | Block_close
+
+type participant = {
+  pid : string;
+  alias : string;  (** what the box says *)
+}
+
+type sequence = {
+  participants : participant list;  (** in order of first appearance *)
+  events : sequence_event list;
+}
+
+type diagram =
+  | Graph of graph
+  | Sequence of sequence
+
+type failure =
+  | Unsupported of string
+      (** the diagram's first word: [sequenceDiagram], [classDiagram], … *)
+  | Parse_error of {
+      line : int;  (** 1-based, in the source as given *)
+      what : string;
+    }
+  | Too_wide of {
+      cells : int;
+      cols : int;
+      turning_it_fits : direction option;
+    }
+      (** the drawing needs [cells] columns and the caller has [cols].
+
+          [turning_it_fits] is the direction the same graph does fit in, when
+          there is one. A chain drawn across the pane can need several times
+          the columns it needs rows drawn down it, and the reader can only act
+          on that if the refusal says so. [None] when the other axis is no
+          better, and always [None] for a sequence diagram, which has one
+          shape. Nothing is redrawn: which way a graph reads is the author's. *)
+
+type label_source_range = {
+  start_byte : int;
+  end_byte : int;
+}
+
+type mapped_label = {
+  label_text : string;
+  source_ranges : label_source_range array;
+}
+
+val label_with_source_ranges : string -> mapped_label
+(** The parser's own label normalization with one original-input byte range per
+    resulting UTF-8 byte. Trimming and quote delimiters are excluded; the space
+    replacing a Mermaid [<br>] label break maps to the entire break tag.
+    A parser caller adds the raw label's statement/source offset. This primitive
+    does not yet attach label identities to a complete parsed diagram. *)
+
+type label_identity =
+  | Node_label of node_id
+  | Edge_label of int
+  | Group_label of int
+  | Participant_label of string
+  | Event_label of int
+  | Event_kind of int
+
+type sourced_label = {
+  identity : label_identity;
+  text : string;
+  ranges : label_source_range array;
+}
+
+type missing_label = { identity : label_identity; text : string }
+
+type source_mapping =
+  | Complete of sourced_label list
+  | Incomplete of { mapped : sourced_label list; missing : missing_label list }
+
+type parsed_with_sources = { diagram : diagram; source_mapping : source_mapping }
+
+val parse_with_source_labels : string -> (parsed_with_sources, failure) result
+(** Parse with parser-owned semantic label identities and absolute source byte
+    ranges. Edge/group/event indices are parsed occurrence indices, not canvas rows.
+    Ranges track source positions through normalization; canonical command
+    casing and aliases such as [and] to [else] need not have identical bytes.
+    The original [parse] result is unchanged. Consumers must handle [Incomplete]
+    explicitly: a missing map is not generated decoration or an absent label.
+    Tracing covers flowchart, sequence and state semantic labels. [Incomplete]
+    remains an explicit integrity boundary if an added or changed parser path
+    has not supplied a matching source map. *)
+
+val direction_word : direction -> string
+(** The header word for a direction, so a message can name one as the source
+    writes it. [TD] for {!Top_down}, which a header may also spell [TB]. *)
+
+val parse : string -> (diagram, failure) result
+(** The source of one fence, without the fence markers. Blank lines and
+    [%%] comment lines are skipped; [;] separates statements on one line. *)
+
+val render : cols:int -> string -> (string list, failure) result
+(** {!parse}, then lay out and draw. Each row is at most [cols] cells and
+    carries no trailing spaces; rows are not padded. *)
+
+
+type semantic_position = { identity : label_identity; byte : int }
+
+type rendered_with_sources = {
+  rendered_rows : string list;
+  rendered_positions : semantic_position option array array;
+  labels : source_mapping;
+}
+
+val render_with_source_labels : cols:int -> string -> (rendered_with_sources, failure) result
+(** The same drawing and refusal as {!render}, with a semantic label identity
+    and byte offset for every surviving label byte in each row. Generated
+    borders, padding and arrow heads carry [None]. Overwrites, nested drawing
+    placement and trailing-space removal apply to both glyphs and positions.
+    Compose positions through [labels] to recover original input ranges;
+    [Incomplete] must be handled explicitly, never as generated decoration. *)

@@ -1,0 +1,45 @@
+{
+  "at": 1792747385.039005,
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/lane-addons/package-catalog?directory=packages",
+    "body": null,
+    "authorization": "private isolated admin bearer omitted"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Accept, Origin, Authorization, Idempotency-Key, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-Id, X-Gate-Agent, X-MASC-Agent, X-MASC-Agent-Name",
+      "access-control-expose-headers": "Mcp-Session-Id, Mcp-Protocol-Version, X-RateLimit-Limit, X-RateLimit-Remaining",
+      "vary": "Origin",
+      "etag": "W/\"d9d9b4130ed9\"",
+      "cache-control": "no-cache",
+      "content-type": "application/json; charset=utf-8",
+      "content-length": "634"
+    },
+    "body": {
+      "directory": "/private/tmp/masc-addon-actual-review-20261023/workspace/packages",
+      "parent": "/private/tmp/masc-addon-actual-review-20261023/workspace",
+      "entries": [
+        {
+          "kind": "package",
+          "manifest_path": "/private/tmp/masc-addon-actual-review-20261023/workspace/packages/browser-role/lane.toml",
+          "title": "Statistics worker with Browser role",
+          "revision": "0.1.0",
+          "description": null,
+          "ui_category": "browser"
+        },
+        {
+          "kind": "package",
+          "manifest_path": "/private/tmp/masc-addon-actual-review-20261023/workspace/packages/output-statistics/lane.toml",
+          "title": "Latest completed output statistics",
+          "revision": "0.1.0",
+          "description": null,
+          "ui_category": "analysis"
+        }
+      ]
+    }
+  }
+}

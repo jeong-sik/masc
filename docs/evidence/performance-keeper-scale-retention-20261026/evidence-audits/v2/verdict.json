@@ -1,0 +1,122 @@
+{
+  "schema": "masc.independent-native-evidence-verdict.v2",
+  "reviewer": "/root/concurrent_probe_review",
+  "review_date_local": "2026-10-27",
+  "verdict": "PASS_NEW_PACKET_AND_PUBLIC_DOCUMENT_EVIDENCE_CONSISTENCY",
+  "counts": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 0
+  },
+  "candidate_v1_verdict_preserved_sha256": "e056207e30ff77efb88ee4ed0b883f6c26c67abbb27ee7fa2d5702e731b0c21f",
+  "source_worktree_observed_head": "a8183cfa901dcdb9bf8bfa1e8bbdf953b058c387",
+  "scope_manifest_sha256": "df2d501ce4a731ad1dff332758bc4a866e1edfc94898dfcb329a19b5dac99f62",
+  "public_document_snapshots": [
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/docs/evidence/performance-keeper-scale-retention-20261026/README.md",
+      "snapshot": "reviewed-documents/README.md",
+      "sha256": "f0a342ea9fe5c114c50d43e9e532ebf56e1384e32c40c4afffa00394327f19cf",
+      "bytes": 6478,
+      "lines": 106
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/docs/evidence/performance-keeper-scale-retention-20261026/native-cohorts-derivative.json",
+      "snapshot": "reviewed-documents/native-cohorts-derivative.json",
+      "sha256": "9caadf6c5028e9cff2b83f1fa90a502e282b3912205f0bc90faf1d41a89507e3",
+      "bytes": 24681,
+      "lines": 753
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/docs/evidence/performance-keeper-scale-retention-20261026/native-cohort-before-after-observations.json",
+      "snapshot": "reviewed-documents/native-cohort-before-after-observations.json",
+      "sha256": "2e090a0dda2c13572ea6ea8236fc493fa077a39df0e96e4a8fe1d04b8ffe8983",
+      "bytes": 5612,
+      "lines": 217
+    },
+    {
+      "path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/perf-scale-evidence-retention-20261026/docs/evidence/performance-keeper-scale-retention-20261026/native-batch-qualification.json",
+      "snapshot": "reviewed-documents/native-batch-qualification.json",
+      "sha256": "1ec0cab805abf0f6aab4167b8fdcfb18e096153ed0dd7e2e29a1d289025addc6",
+      "bytes": 3180,
+      "lines": 69
+    }
+  ],
+  "packets": [
+    {
+      "packet": "owned-concurrent-1ce158-2-v3",
+      "input_hashes_sha256": "f171b6c689a74f9f01e41acd5fc0b541fe08de713bf4903c4d8ae4cf0b1dff8e",
+      "identity_sha256": "768644b54d40e2e63431d5d938298a69eee1a887e1241db15cd63728447c5a75",
+      "terminal_sha256": "a5fd67340491d70fcd551c74361d51fd99c6031ac219c348a6b855e068ea0391",
+      "durable_receipt_sha256": "67219a100127fc6c3d52db5f33304cca75ffed34797b50dbcf1520979e3b7263",
+      "original_post_run_audit_sha256": "8fe714b7b7243dbffd41d72f82232ed417fc028eb6983c2c6bb79cc4dfb22d3b",
+      "cleanup_sha256": "4293d3242a618831f38e62215d570037e3d3bf863b6948cfd4e43cb2d3e67b75",
+      "raw_and_verdict_unchanged_at_completion": true
+    },
+    {
+      "packet": "owned-concurrent-1ce158-30-v3",
+      "input_hashes_sha256": "fd4b37228dd45c35366951abb835c392f5b2dea020f0b3fd4e7fe0baaa87b85b",
+      "identity_sha256": "ee160e87543ff6dccaac8c75fcb0ab7c1c601553a40e5c4a7509dea815037bd5",
+      "terminal_sha256": "bc92402b9dd6d9ab4510a9a8b3d30fef17c055b11b67851156b838e8c39ad541",
+      "durable_receipt_sha256": "0ec10e2faadf43d742ff38253521529ad9461b40eca387aef86fd12fd37ea904",
+      "original_post_run_audit_sha256": "990fc708612562bb416937f7c27dd57ef46228d8df9e7a660594e394c40b655c",
+      "cleanup_sha256": "106ee29c8275629122fabc286367d0b6bb0c0f33a115508f353b3819efb3235d",
+      "raw_and_verdict_unchanged_at_completion": true
+    },
+    {
+      "packet": "owned-concurrent-1ce158-300-v3",
+      "input_hashes_sha256": "e087ef8d579f5a6b6db7f5a1ada62ece64bb08cdd6ada5e1491bca8b1500388d",
+      "identity_sha256": "c52bb3648451b2010a79fa4fd930caa74f39f3f277cf77dd09328640561de117",
+      "terminal_sha256": "8db935858d0c1da88a0adf66a099d6f4cbcbefee50b6ebaa1a1ba100b4082e17",
+      "durable_receipt_sha256": "56e90471e918518242bdd13baa07be50e8b25edc0843cc2c3469e415ea755c98",
+      "original_post_run_audit_sha256": "92712d9d36ee929f29b3597686f4cc01c18ee96ba931985b094d187a7c78e07a",
+      "cleanup_sha256": "a2d1fb2823634d1283f2ca83c8d3dc509754b61d3e0fa3141c232e2587154278",
+      "raw_and_verdict_unchanged_at_completion": true
+    },
+    {
+      "packet": "owned-concurrent-c3cb371-2x3-v3",
+      "input_hashes_sha256": "2af6c50c894329f4c6d51c93da4df5a805e01b64c5a97d83370435886e5bdc01",
+      "identity_sha256": "542d27685dd613612123df77e71e340e05bb6afd71766e518aaa005a5c5fbac5",
+      "terminal_sha256": "1566cd761a8c84b7a1fff3129a97378214741214317af971a4292cf082a0925a",
+      "durable_receipt_sha256": "ea8f5757efad56950de4907c9807016ec00f10f6dc625297a2459cc62547015a",
+      "original_post_run_audit_sha256": "5b6336b184007b36cd206f5151a4c9990feb6f211e43e163b5d2210480d03586",
+      "cleanup_sha256": "613acb071bebfdcbb0b2e75059006ea875ca261bded193fbf6caf619effe0bdc",
+      "raw_and_verdict_unchanged_at_completion": true
+    }
+  ],
+  "baseline_app_source": "1ce158d50d3eb48648e6deea7f668172f914fea3",
+  "baseline_server_sha256": "e5e30b8ffd632910eb8b8ed023fddb3a8e10742720c26d4b7f0a3561ede5820c",
+  "workflow_source": "6a2d8dd6171e1d732ca15f918fb084e462e4d371",
+  "candidate_source": "c3cb3715e3a36b56ae17c23820b6b7c83914a602",
+  "fixture_bytes_equal_in_baseline_and_candidate_git": true,
+  "new_batch": {
+    "operations": 6,
+    "scripted_model_calls": 4,
+    "provider_peak": 2,
+    "held_members": 0,
+    "terminal_members": 4,
+    "held_projection_native_proven": false
+  },
+  "comparison": {
+    "baseline300_allocation_bytes": 67548205824.0,
+    "candidate300_allocation_bytes": 67544518400.0,
+    "candidate_minus_baseline_allocation_bytes": -3687424.0,
+    "candidate_minus_baseline_allocation_percent": -0.0054589518034053874,
+    "no_established_native_performance_gain": true,
+    "causal_or_repeated_comparison": false
+  },
+  "critical_limits": {
+    "baseline300_status_wire_max_ms": 9582.334,
+    "candidate300_status_wire_max_ms": 13209.662667,
+    "baseline300_rate_wait_s": 68.454228756,
+    "all_new_full_health_held_after": "degraded: keeper_memory_execution:addon_unattached",
+    "one_per_source_population_shared_host": true,
+    "no_established_native_performance_gain": true
+  },
+  "reviewer_new_native_or_workload_executions": 0,
+  "local_dune_builds": 0,
+  "ci_live_api_network_calls": 0,
+  "original_packet_writes": 0,
+  "credential_or_executable_copies": 0,
+  "formal_github_approval": false,
+  "new_head_full_source_approval": false
+}

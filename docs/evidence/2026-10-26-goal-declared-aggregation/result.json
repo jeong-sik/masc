@@ -1,0 +1,67 @@
+{
+  "schema": "masc.goal.declared-aggregation.actual-result.v1",
+  "task_id": "task-2680",
+  "binary_source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "binary_sha256": "00f3fdc897bea8874dc21bd9f471aef80ef9e2aebd4321b4483ce83508ef84e8",
+  "candidate_prompt_file_sha256": "529f84a6a36146eca2821e02ade8a9467b166b5d1ed25eea4b37493cc5579539",
+  "goal_id": "goal-proof-provenance-declared-aggregate-20261026",
+  "criterion_revision": "e0534d15effb0e62e52cb04dd466809e",
+  "request_id": "427492fbf97c6dc4b41c6876ddaba52d",
+  "run_id": "01a17412-3eea-7000-aac4-f3265d72a09a",
+  "measurement_id": "2fc01ef43447f9cf9b78021135f604c0",
+  "reported_value": "99",
+  "actual_recorded_executions": [
+    {
+      "execution_id": "run-a",
+      "stdout": "4\n",
+      "exit_code": 0,
+      "source_bytes": 262,
+      "source_sha256": "de8631ab118c84d9d6c60178206314a6420667bfd1e9d658ea857f5835449210"
+    },
+    {
+      "execution_id": "run-b",
+      "stdout": "6\n",
+      "exit_code": 0,
+      "source_bytes": 262,
+      "source_sha256": "cad5add269b3260ec105c5c3b2f3c2c04495f53cd6b30022374c3538ee6bc0be"
+    }
+  ],
+  "actual_recorded_sum": 10,
+  "target": "정확히 10",
+  "expected_completion": "proof_proven",
+  "observed_completion": "proof_proven",
+  "observed_phase": "awaiting_confirmation",
+  "structured_verdict": {
+    "reason": "공유 Goal playground의 aggregate-data/index.json을 직접 읽어 선언된 run-a, run-b 실행 기록 경로를 확인했고, 각 기록 파일을 직접 열어 실행 ID를 보존한 채 stdout 정수를 읽었다: run-a stdout 4, run-b stdout 6. index의 reported_value 99는 합계에 쓰지 않았고 보고자 관측값 99도 채택하지 않았다. metric이 선언한 두 실행만의 합계 4+6=10은 target '정확히 10'에 도달한다.",
+    "verdict": "APPROVE"
+  },
+  "actual_Goal_runs": 1,
+  "model_POSTs": 4,
+  "unique_tools": 4,
+  "requested_models": [
+    "glm-5.3-flash"
+  ],
+  "reported_models": [
+    "glm-5.3-flash"
+  ],
+  "unknown_reported_models": 0,
+  "retained_user_and_system_equal_first_actual_provider_input": true,
+  "declared_aggregation_permission_in_actual_prompt": true,
+  "same_current_revision_and_measurement_in_actual_input": true,
+  "elapsed_s": 31.70969796180725,
+  "native_stages": [
+    "reviewed",
+    "committed"
+  ],
+  "private_originals_manifest": {
+    "entries": 55,
+    "sha256": "e567d1fb0015b6657029071236bf90f9e9f5a549370be6b18ec44ceb3ecc0138"
+  },
+  "runtime_mechanism": "Frozen3e binary plus two normal authenticated persisted isolated-runtime prompt overrides; managed baseline unchanged.",
+  "limits": [
+    "This is a new single aggregation control on prompt529f, separate from the earlier three controls on prompt35b653. Cohorts are not pooled into a reliability estimate.",
+    "The old aggregation wording was a source P2 finding, not an observed baseline model failure; no matched baseline causal A/B is claimed.",
+    "No original11-case proof, human confirmation, new-head native build, production apply, model-weight independence or whole-stack approval.",
+    "Initial read-only prompt catalog GET raced startup readiness and was connection-refused before any prompt POST or Goal submit. Health was explicitly read before the normal application continuation."
+  ]
+}

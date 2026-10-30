@@ -1,0 +1,365 @@
+module Inventory = Masc.Tui_decode_lane_inventory
+open Inventory
+
+module Category = Masc.Lane_addon_category
+let row_category (row : row) = match row.selection with
+  | Exact _ | Browser _ | Machine _ -> row.ui_category
+  | Declaration _ ->
+      (match row.state with
+       | Package_state {declaration=Some (Valid value);_} -> value.ui_category
+       | Package_state {declaration=Some (Invalid _ | Absent | Unobserved) | None;_}
+       | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None)
+  | Manual_instance {instance_id;incarnation} ->
+      (match row.state with
+       | Package_state {declaration=None;instances} ->
+           Option.bind (List.find_opt (fun (item:instance) ->
+             item.instance_id=instance_id && item.incarnation=incarnation) instances)
+             (fun item -> item.ui_category)
+       | Package_state {declaration=Some _;_}
+       | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None)
+let category_label = function
+  | Some Category.Memory_and_judgment -> "기억 · 판단"
+  | Some Category.Browser -> "브라우저"
+  | Some Category.External_communications -> "외부 소통"
+  | Some Category.Voice_and_media -> "음성 · 미디어"
+  | Some Category.Execution_environment -> "실행 환경"
+  | Some Category.Analysis -> "분석"
+  | None -> "미분류"
+type overview_entry = Category_header of Category.t option | Lane_row of row
+let overview_entries rows =
+  [Some Category.Memory_and_judgment;Some Category.Browser;
+   Some Category.External_communications;Some Category.Voice_and_media;
+   Some Category.Execution_environment;Some Category.Analysis;None]
+  |> List.concat_map (fun category ->
+       match List.filter (fun row -> row_category row=category) rows with
+       | [] -> []
+       | grouped -> Category_header category :: List.map (fun row -> Lane_row row) grouped)
+let ordered_rows rows = overview_entries rows |> List.filter_map (function
+  | Category_header _ -> None | Lane_row row -> Some row)
+let row_position ~id entries = List.find_index (function
+  | Category_header _ -> false | Lane_row row -> String.equal row.id id) entries
+type identity = {row_id:string;target:selection;installation_id:string option}
+let identity (row : row) =
+  let installation_id=match row.selection with
+    | Declaration _ -> (match row.state with
+        | Package_state {declaration=Some (Valid value);_} -> Some value.installation_id
+        | Package_state {declaration=Some (Invalid _ | Absent | Unobserved) | None;_}
+        | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None)
+    | Exact _ | Browser _ | Machine _ | Manual_instance _ -> None in
+  {row_id=row.id;target=row.selection;installation_id}
+let identity_matches selected row =
+  let current=identity row in
+  selected.row_id=current.row_id && selected.target=current.target
+    && selected.installation_id=current.installation_id
+let find_identity selected rows = List.find_opt (identity_matches selected) rows
+let identity_index selected rows = List.find_index (identity_matches selected) rows
+
+let family_label = function
+  | Exact _ -> "Exact-output"
+  | Browser _ -> "Browser"
+  | Machine _ -> "Machines"
+  | Declaration _ | Manual_instance _ -> "Packages"
+let phase = function
+  | Attached -> "attached"
+  | Observing -> "observing"
+  | Failed detail -> "failed: " ^ detail
+  | Detaching -> "cleanup pending"
+  | Detached -> "detached history"
+let instance_summary (item : instance) =
+  (match item.presence with Live -> "live " | Retained -> "retained ") ^ phase item.phase
+let application_summary : Masc.Lane_addon_application.t -> string = function
+  | Starting_worker -> "worker startup pending"
+  | Cleaning_workers -> "worker cleanup pending"
+  | Applied id -> "worker running: " ^ id
+  | Inactive -> "worker cleanup confirmed"
+  | Failed messages -> "application failed: " ^ String.concat "; " messages
+  | Unknown messages -> "application unknown: " ^ String.concat "; " messages
+let declaration_summary = function
+  | Valid value -> (if value.enabled then "configured on" else "configured off") ^ "; " ^ application_summary value.application
+  | Invalid _ -> "declaration invalid"
+  | Absent -> "declaration absent"
+  | Unobserved -> "declaration not observed"
+let browser_switch_line =
+  "A source is switched on or off from its browser-<source> package row: Enter, then Space, then s."
+let browser_reading_label observed = function
+  | Browser_observed value -> observed value
+  | Browser_addon_absent -> "no browser Add-on"
+  | Browser_addon_off -> "browser Add-on switched off"
+  | Browser_addon_not_running -> "browser Add-on declared on, not running"
+  | Browser_addon_unavailable detail -> "browser Add-on unavailable: " ^ detail
+let machine_activity_label = function
+  | Machine_enabled -> "on"
+  | Machine_disabled -> "off; machine state retained"
+  | Machine_unobserved -> "activity unavailable"
+let machine_publication_label = function
+  | No_screen -> "no screen published"
+  | Stable -> "screen stable"
+  | Running -> "machine running"
+  | Publication_unavailable -> "worker observation unavailable"
+let row_summary (row : row) = match row.state with
+  | Exact_state (Disabled _) -> "off; candidates retained"
+  | Exact_state (Unconfigured _) -> "unconfigured"
+  | Exact_state (Registry_unavailable _) -> "registry unavailable"
+  | Exact_state (Configured c) ->
+      if c.admitted_slots=[] && c.cli_slots=[] then "no admitted slots"
+      else if Option.is_some c.admission_error then "admission issue"
+      else Printf.sprintf "%d admitted slots" (List.length c.admitted_slots + List.length c.cli_slots)
+  | Browser_clients reading -> browser_reading_label (Printf.sprintf "%d connected clients") reading
+  | Browser_executor reading -> browser_reading_label (fun registered ->
+          if registered then "executor registered" else "executor not registered") reading
+  | Machine_state (activity,publication) -> machine_activity_label activity ^ "; " ^ machine_publication_label publication
+  | Package_state {declaration;instances} ->
+      let declared = match declaration with
+        | None -> "manual attachment"
+        | Some value -> declaration_summary value in
+      declared ^ " · " ^ (match instances with
+        | [] -> "no worker observed"
+        | values -> String.concat "; " (List.map instance_summary values))
+
+module Standing = Masc_tui_lane_standing
+
+let instance_failed (item : instance) = match item.phase with
+  | Failed _ -> true
+  | Attached | Observing | Detaching | Detached -> false
+(* Without a usable declaration, the workers alone say how the row stands.
+   [attached] is what a live attached worker means: ready for a manual
+   attachment, changing for one whose declaration was removed and so is
+   being detached. A cleanup in progress is changing wherever its record
+   lives; a retained worker is no longer running here. *)
+let instances_standing ~attached ~none (instances : instance list) =
+  if List.exists (fun (item : instance) ->
+      item.presence = Live && List.mem item.phase [ Attached; Observing ]) instances then attached
+  else if List.exists (fun (item : instance) -> item.phase = Detaching) instances then Standing.Changing
+  else match instances with [] -> none | _ :: _ -> Standing.Off
+let application_standing : Masc.Lane_addon_application.t -> Standing.t = function
+  | Applied _ -> Standing.Ready
+  | Starting_worker | Cleaning_workers -> Standing.Changing
+  | Inactive -> Standing.Off
+  | Failed _ -> Standing.Failing
+  | Unknown _ -> Standing.Unobserved
+(* Something switched off that still has work in flight is changing, not
+   off: the operator would otherwise read it as already stopped. *)
+let row_standing (row : row) = match row.state with
+  | Exact_state (Unconfigured _) -> Standing.Not_set_up
+  | Exact_state (Disabled _) -> Standing.Off
+  | Exact_state (Registry_unavailable _) -> Standing.Unobserved
+  | Exact_state (Configured c) ->
+      if c.admitted_slots=[] && c.cli_slots=[] then Standing.Failing
+      else if Option.is_some c.admission_error then Standing.Failing
+      else Standing.Ready
+  | Browser_clients (Browser_observed connected) ->
+      if connected > 0 then Standing.Ready else Standing.Waiting
+  | Browser_executor (Browser_observed registered) ->
+      if registered then Standing.Ready else Standing.Waiting
+  (* With no observation, a lane no browser Add-on serves needs one set up;
+     one whose Add-ons are all switched off is off; one whose Add-on is
+     declared on and not running waits for it; one whose Add-on cannot be
+     read is failing. *)
+  | Browser_clients Browser_addon_absent | Browser_executor Browser_addon_absent -> Standing.Not_set_up
+  | Browser_clients Browser_addon_off | Browser_executor Browser_addon_off -> Standing.Off
+  | Browser_clients Browser_addon_not_running | Browser_executor Browser_addon_not_running -> Standing.Waiting
+  | Browser_clients (Browser_addon_unavailable _) | Browser_executor (Browser_addon_unavailable _) -> Standing.Failing
+  | Machine_state (Machine_disabled, Running) -> Standing.Changing
+  | Machine_state (Machine_disabled, (No_screen | Stable | Publication_unavailable)) -> Standing.Off
+  | Machine_state (Machine_unobserved, _) -> Standing.Unobserved
+  | Machine_state (Machine_enabled, (Stable | Running)) -> Standing.Ready
+  | Machine_state (Machine_enabled, No_screen) -> Standing.Waiting
+  | Machine_state (Machine_enabled, Publication_unavailable) -> Standing.Failing
+  | Package_state {declaration;instances} ->
+      (* A failed worker is what the operator has to see, whatever the
+         declaration says about the others. *)
+      if List.exists instance_failed instances then Standing.Failing
+      else match declaration with
+        | Some (Valid value) -> application_standing value.application
+        | Some (Invalid _) -> Standing.Failing
+        | Some Unobserved -> Standing.Unobserved
+        | Some Absent -> instances_standing ~attached:Standing.Changing ~none:Standing.Not_set_up instances
+        | None -> instances_standing ~attached:Standing.Ready ~none:Standing.Off instances
+(* An exact row's run observation can say more than its admission: a lane
+   whose latest runs fail needs attention, and one switched off may still be
+   finishing runs. Kept beside [row_summary_in], which writes the same
+   observation, so the mark and the text read one capture. *)
+let exact_standing (admission : Standing.t) (lane : Masc.Tui_decode.standalone_lane) =
+  match lane.sl_status with
+  | Masc.Tui_decode.Standalone_degraded -> Standing.Failing
+  | Masc.Tui_decode.Standalone_off ->
+      if lane.sl_running_count > 0 then Standing.Changing else admission
+  | Masc.Tui_decode.Standalone_unavailable ->
+      (match admission with
+       | Standing.(Failing | Not_set_up | Off) -> admission
+       | Standing.(Ready | Waiting | Changing | Unobserved) -> Standing.Unobserved)
+  | Masc.Tui_decode.(Standalone_running | Standalone_idle | Standalone_no_retained_observation) -> admission
+let row_standing_in (snapshot : snapshot) (row : row) =
+  let admission = row_standing row in
+  match row.selection with
+  | Exact target ->
+      (match List.find_opt (fun (lane : Masc.Tui_decode.standalone_lane) ->
+           Standalone_lane.equal lane.sl_lane target) snapshot.exact_snapshot.sls_lanes with
+       | None -> admission
+       | Some lane -> exact_standing admission lane)
+  | Browser _ | Machine _ | Declaration _ | Manual_instance _ -> admission
+
+let instance_lines (item : instance) =
+  ["Instance: " ^ item.instance_id; "Incarnation: " ^ item.incarnation;
+   "Run: " ^ item.run_id; "Package: " ^ item.package_id ^ " · " ^ item.package_revision;
+   "Worker: " ^ instance_summary item]
+  @ (match item.applied_revision with None -> [] | Some revision -> ["Applied declaration revision: " ^ revision])
+let refused_cli_slot_lines
+    (values : Masc.Keeper_lane_cli_oneshot.refused_slot list)
+  =
+  match values with
+  | [] -> []
+  | values ->
+    [ "Refused CLI slots: "
+      ^ String.concat
+          ", "
+          (List.map
+             (fun (r : Masc.Keeper_lane_cli_oneshot.refused_slot) ->
+                r.slot ^ " (" ^ Runtime.refusal_to_string r.refusal ^ ")")
+             values)
+    ]
+
+let detail_lines (row : row) =
+  [row.label; row.purpose; "Surface: " ^ family_label row.selection;
+   "Identity: " ^ row.id; "Reading: " ^ row_summary row]
+  @ (match row.selection with
+     | Exact _ -> ["Exact-output admission and retained run evidence are separate readings."]
+     | Browser _ -> ["Opening this row reads the selected browser backend; it does not open a new session."]
+     | Machine _ -> ["Activity configuration and the last published screen are separate readings."]
+     | Declaration path -> ["TOML: " ^ path]
+     | Manual_instance _ -> ["No declaration file; this is a manual attachment."])
+  @ (match row.state with
+     | Exact_state (Disabled c) ->
+         ["New work is off; accepted runs finish with their acquired candidates.";
+          "Declared HTTP slots: " ^ String.concat ", " c.declared_slots;
+          "Declared CLI slots: " ^ String.concat ", " c.declared_cli_slots]
+     | Exact_state (Configured c) ->
+         let refused_cli =
+           List.filter
+             (fun slot -> not (List.mem slot c.cli_slots))
+             c.declared_cli_slots
+         in
+         let refused_cli_lines =
+           match row.selection, refused_cli with
+           | _, [] -> []
+           | Exact lane, refused ->
+             let partitioned =
+               Masc.Keeper_lane_cli_oneshot.partition_cli_slots
+                 ~lane:(Runtime.requirement_of_exact_lane lane)
+                 refused
+             in
+             (match partitioned.refused_cli_slots with
+              | _ :: _ as typed_refusals -> refused_cli_slot_lines typed_refusals
+              | [] -> ["Refused CLI slots: " ^ String.concat ", " refused])
+           | (Browser _ | Machine _ | Declaration _ | Manual_instance _), refused ->
+             ["Refused CLI slots: " ^ String.concat ", " refused]
+         in
+         ["Declared HTTP slots: " ^ String.concat ", " c.declared_slots;
+          "Declared CLI slots: " ^ String.concat ", " c.declared_cli_slots]
+         @ (match c.dropped_slots with [] -> [] | values -> ["Dropped HTTP slots: " ^ String.concat ", " values])
+         @ refused_cli_lines
+         @ (match c.admission_error with None -> [] | Some detail -> ["Admission: " ^ detail])
+     | Exact_state (Unconfigured detail | Registry_unavailable detail) -> [detail]
+     | Browser_clients _ -> [browser_switch_line]
+     | Browser_executor _ -> ["Registration does not prove browser process health or an open session.";
+         "Executable and profile paths apply at server startup.";browser_switch_line]
+     | Machine_state _ -> ["Off refuses new execution and input; existing machine state and checkpoints are retained.";
+         "Select this machine in All Lanes and press Space for activity settings."]
+     | Package_state {declaration;instances} ->
+         (match declaration with
+          | None -> []
+          | Some (Valid value) -> ["Installation: " ^ value.installation_id; "Run: " ^ value.run_id;
+              "Package: " ^ value.package_id ^ " · " ^ value.title; "Desired revision: " ^ value.desired_revision; "Source revision: " ^ value.source_revision]
+          | Some (Invalid messages) -> List.map (fun message -> "Declaration error: " ^ message) messages
+          | Some Absent -> ["No declaration was observed in the complete directory reading; retained worker state is separate."]
+          | Some Unobserved -> ["Directory reading is incomplete; declaration absence is not established."])
+         @ List.concat_map instance_lines instances)
+
+(* A package row's exact outputs, first and the rest, with the installation
+   id their runtime.toml tables are named by. Only a valid declaration that
+   lists one has any. *)
+let exact_outputs (row : row) = match row.state with
+  | Package_state {declaration = Some (Valid value); _} -> (match value.exact_outputs with
+      | [] -> None
+      | first :: rest -> Some (value.installation_id, first, rest))
+  | Package_state {declaration = Some (Invalid _ | Absent | Unobserved) | None; _}
+  | Exact_state _ | Browser_clients _ | Browser_executor _ | Machine_state _ -> None
+
+let selected_exact_output ~selected (row : row) =
+  Option.map (fun (installation_id, first, rest) ->
+    let chosen = Option.bind selected (fun name ->
+      List.find_opt (fun (o : exact_output) -> String.equal o.output name) (first :: rest)) in
+    installation_id, Option.value chosen ~default:first) (exact_outputs row)
+
+let step_exact_output ~selected ~direction (row : row) =
+  Option.map (fun (installation_id, first, rest) ->
+    let outputs = Array.of_list (first :: rest) in
+    let current = match selected_exact_output ~selected row with
+      | Some (_, chosen) ->
+          Option.value ~default:0
+            (Array.find_index (fun (o : exact_output) -> String.equal o.output chosen.output) outputs)
+      | None -> 0 in
+    let next = max 0 (min (Array.length outputs - 1) (current + direction)) in
+    installation_id, outputs.(next).output) (exact_outputs row)
+
+let exact_output_table_path ~installation_id (o : exact_output) =
+  Result.map (fun addon -> Runtime_schema.exact_lane_table_path (Runtime_schema.Addon addon))
+    (Runtime_schema.addon_lane ~declaration_id:installation_id ~output:o.output)
+
+let exact_output_state (o : exact_output) =
+  (match o.configuration with
+   | Configured c -> (match c.admitted_slots @ c.cli_slots with
+       | [] -> "bound, no admitted slot"
+       | slots -> "bound: " ^ String.concat ", " slots)
+   | Disabled _ -> "off"
+   | Unconfigured _ -> "unbound"
+   | Registry_unavailable detail -> "unavailable: " ^ detail)
+  ^ (match o.source with Declared -> "" | Table_only -> " · the package declares no such output")
+
+let exact_output_lines ~selected (row : row) =
+  match selected_exact_output ~selected row, exact_outputs row with
+  | Some (_, chosen), Some (_, first, rest) ->
+      "Exact outputs ([ / ] choose, e opens its runtime.toml table):"
+      :: List.map (fun (o : exact_output) ->
+           (if String.equal o.output chosen.output then "› " else "  ") ^ o.output ^ " · " ^ exact_output_state o)
+           (first :: rest)
+  | None, _ | _, None -> []
+
+let reading_notices (snapshot : snapshot) =
+  (if snapshot.package_read.complete then [] else ["Package inventory is incomplete; missing entries do not prove removal."])
+  @ (if snapshot.package_read.owner_present then [] else ["Package runtime owner has not been observed; declarations and retained bindings remain listed."])
+
+let exact_notices (snapshot : snapshot) =
+  if snapshot.exact_snapshot.sls_exact_run_projection_truncated then
+    [Printf.sprintf "Exact run observations are windowed: %d/%d retained runs. Counts and timings describe this window."
+      snapshot.exact_snapshot.sls_exact_run_projection_count snapshot.exact_snapshot.sls_exact_run_source_total]
+  else []
+
+let overview_notices (snapshot : snapshot) =
+  exact_notices snapshot @
+  reading_notices snapshot
+  @ (match snapshot.package_read.issues with
+     | [] -> []
+     | issues -> [Printf.sprintf "%d inventory issues · i: details" (List.length issues)])
+let snapshot_notices (snapshot : snapshot) =
+  exact_notices snapshot @
+  reading_notices snapshot
+  @ List.map (fun (path,message) -> path ^ ": " ^ message) snapshot.package_read.issues
+
+let row_summary_in (snapshot : snapshot) (row : row) =
+  let admission = row_summary row in
+  match row.selection with
+  | Exact target ->
+      (match List.find_opt (fun (lane : Masc.Tui_decode.standalone_lane) ->
+           Standalone_lane.equal lane.sl_lane target) snapshot.exact_snapshot.sls_lanes with
+       | None -> admission
+       | Some lane ->
+           let observation = match lane.sl_status with
+             | Masc.Tui_decode.Standalone_off -> Printf.sprintf "off · %d finishing" lane.sl_running_count
+             | Masc.Tui_decode.Standalone_running -> Printf.sprintf "%d running" lane.sl_running_count
+             | Standalone_idle -> "idle"
+             | Standalone_degraded -> "needs attention"
+             | Standalone_unavailable -> "unavailable"
+             | Standalone_no_retained_observation -> "no retained runs" in
+           observation ^ " · " ^ admission)
+  | Browser _ | Machine _ | Declaration _ | Manual_instance _ -> admission

@@ -1,0 +1,37 @@
+{
+  "is_derivative": true,
+  "phases": [
+    {
+      "phase": "first-failure",
+      "runtime_instance_id": "01a17a0e-5201-7000-8197-de7dc881f6bc",
+      "binary_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "executable_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+      "started_at": "2026-10-26T21:12:01Z",
+      "tick_count": 4
+    },
+    {
+      "phase": "queue-repaired-ledger-fault",
+      "runtime_instance_id": "01a17a0e-5201-7000-8197-de7dc881f6bc",
+      "binary_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "executable_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+      "started_at": "2026-10-26T21:12:01Z",
+      "tick_count": 5
+    },
+    {
+      "phase": "retry-settled-only",
+      "runtime_instance_id": "01a17a0e-5201-7000-8197-de7dc881f6bc",
+      "binary_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "executable_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+      "started_at": "2026-10-26T21:12:01Z",
+      "tick_count": 6
+    },
+    {
+      "phase": "fresh-admission",
+      "runtime_instance_id": "01a17a0e-5201-7000-8197-de7dc881f6bc",
+      "binary_commit": "a3950a189b9cc5a7ce82cb725699455d79923f42",
+      "executable_sha256": "1622a35d1082da4fe24d9effb05aec11918d9444288441049c8d6d30cedb415c",
+      "started_at": "2026-10-26T21:12:01Z",
+      "tick_count": 7
+    }
+  ]
+}

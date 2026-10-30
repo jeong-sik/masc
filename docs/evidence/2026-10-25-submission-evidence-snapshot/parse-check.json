@@ -1,0 +1,90 @@
+{
+  "scope": "Parsing only; no linked full MASC build or native suite",
+  "ocaml_parse": [
+    {
+      "path": "lib/task/tool_task_completion_review.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/task/tool_task_completion_review.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/types/types_core.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/verification_protocol.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/verification_protocol.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/workspace/workspace_hooks.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/workspace/workspace_task.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/workspace/workspace_task_transition_executor.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/workspace/workspace_task_transition_executor.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/workspace/workspace_task_transitions.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/workspace/workspace_task_verification.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "lib/workspace/workspace_task_verification.mli",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_completion_repair_delivery.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_verification.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_workspace_handoff_boundary.ml",
+      "exit": 0,
+      "output": ""
+    },
+    {
+      "path": "test/test_workspace_task_verification_phase_e.ml",
+      "exit": 0,
+      "output": ""
+    }
+  ],
+  "python_ast": "PASS",
+  "diff_check": {
+    "exit": 0,
+    "output": ""
+  }
+}

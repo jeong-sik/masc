@@ -1,0 +1,25 @@
+(include_subdirs no)
+
+(library
+ (name masc_board)
+ (public_name masc.masc_board)
+ (wrapped false)
+ (modules board_types)
+ ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ ; masc_types provides Ids.Turn_ref for the typed post origin (RFC-0233 §7).
+ ; masc_types has no board/keeper edge, so this is cycle-safe; the origin
+ ; source stays a string (Surface_ref.lane_label) because Surface_ref lives
+ ; in the masc umbrella, which already depends on masc_board.
+ (libraries
+  yojson
+  re
+  re.pcre
+  eio
+  masc_random_id
+  masc.config
+  masc_core
+  masc_types)
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq ppx_tla ppx_enumerate)))

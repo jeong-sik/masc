@@ -1,0 +1,606 @@
+(** A keeper is handed every Goal the workspace can still progress.
+
+    The turn's [### Active Goals] block renders the summaries
+    ({!Keeper_unified_prompt.active_goal_summaries}): title, criterion and
+    whether a task the keeper holds serves the goal. The turn observation
+    records the same open goal ids in [world_observation.active_goals].
+    [Goal_phase.admits_self_directed_progress] decides which goals are open on
+    both surfaces. *)
+
+open Alcotest
+open Masc
+
+let scheduled_admission_fixture_ref =
+  Ids.Turn_ref.make ~trace_id:"trace-admission-fixture" ~absolute_turn:1
+
+let temp_dir () =
+  let dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_goal_phase_%d_%d" (Unix.getpid ())
+         (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  dir
+;;
+
+let with_workspace f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree dir)
+    (fun () ->
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:(Some "test"));
+      f config)
+;;
+
+let goal_in phase id title =
+  let ts = Masc_domain.now_iso () in
+  { Goal_store.id
+  ; criterion_revision = "fixture-" ^ id
+  ; title
+  ; metric = None
+  ; target_value = None
+  ; due_date = None
+  ; priority = 3
+  ; phase
+  ; last_review_note = None
+  ; last_review_at = None
+  ; created_at = ts
+  ; updated_at = ts
+  }
+;;
+
+(* One goal per phase, so a future phase added to [Goal_phase.t] shows up here
+   as an unclassified id rather than silently inheriting a neighbour's verdict.
+   [Verifying] (RFC-0387 stage 2) admits self-directed progress — the gate
+   holds the phase, not the work — so it survives alongside Executing. *)
+let seed_all_phases config =
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals =
+        [ goal_in Goal_phase.Executing "goal-executing" "still work"
+        ; goal_in Goal_phase.Verifying "goal-verifying" "proof pending"
+        ; goal_in Goal_phase.Completed "goal-completed" "already achieved"
+        ; goal_in Goal_phase.Dropped "goal-dropped" "abandoned"
+        ]
+    }
+;;
+
+(* Only terminal Goals: nothing on the surface, and nothing that could be
+   mistaken for an empty list produced some other way. *)
+let seed_terminal_phases_only config =
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals =
+        [ goal_in Goal_phase.Completed "goal-completed" "already achieved"
+        ; goal_in Goal_phase.Dropped "goal-dropped" "abandoned"
+        ]
+    }
+;;
+
+let keeper_name = "goal-phase-keeper"
+
+let keeper_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ "name", `String keeper_name
+         ; "trace_id", `String "test-trace-goal-phase"
+         ])
+  with
+  | Ok m -> m
+  | Error e -> failwith ("meta_of_json failed: " ^ e)
+;;
+
+(* A held task, so a turn can carry independent work beside the Goal layer. *)
+let task_named id : Masc_domain.task =
+  { id
+  ; title = "linked work"
+  ; description = ""
+  ; task_status = Masc_domain.Todo
+  ; priority = 1
+  ; files = []
+  ; created_at = "2026-09-02T01:00:00Z"
+  ; created_by = Some "test"
+  ; predecessor_task_id = None
+  ; contract = None
+  ; execution_links = Masc_domain.no_execution_links
+  ; handoff_context = None
+  ; cycle_count = 0
+  ; reclaim_policy = None
+  ; do_not_reclaim_reason = None
+  ; skills = []
+  }
+;;
+
+let current_task_of id =
+  Keeper_world_observation_inputs.Current_task (task_named id)
+;;
+
+let get_ok = function
+  | Ok value -> value
+  | Error unavailable -> fail (Goal_store.unavailable_to_string unavailable)
+;;
+
+let goal_store_unavailable : Goal_store.unavailable testable =
+  testable
+    (fun fmt unavailable ->
+       Format.pp_print_string fmt (Goal_store.unavailable_to_string unavailable))
+    ( = )
+;;
+
+let summary_ids summaries =
+  let summaries = get_ok summaries in
+  List.map
+    (fun (s : Keeper_unified_prompt.goal_summary) -> s.summary_goal_id)
+    summaries
+;;
+
+let summary_title_opt goal_id summaries =
+  let summaries = get_ok summaries in
+  match
+    List.find_opt
+      (fun (s : Keeper_unified_prompt.goal_summary) ->
+        String.equal s.summary_goal_id goal_id)
+      summaries
+  with
+  | Some s -> Some s.summary_title
+  | None -> None
+;;
+
+let test_turn_surface_drops_terminal_goals () =
+  with_workspace @@ fun config ->
+  seed_all_phases config;
+  let summaries =
+    Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name
+  in
+  check (list string) "only progressable goals are offered"
+    [ "goal-executing"; "goal-verifying" ]
+    (summary_ids summaries);
+  check (option string) "its title still resolves" (Some "still work")
+    (summary_title_opt "goal-executing" summaries)
+;;
+
+let contains_in haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+;;
+
+let fragment key vars =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> text
+  | Error detail -> fail detail
+;;
+
+let goals_heading count =
+  fragment Prompt_names.keeper_world_active_goals_heading
+    [ "count", string_of_int count ]
+;;
+
+(* The rendered Active Goals row of [goal_id], found by its own template. *)
+let goal_row world ~goal_id ~title =
+  let row =
+    fragment Prompt_names.keeper_world_active_goals_row
+      [ "goal_id", goal_id; "title", title ]
+  in
+  match
+    List.find_opt (String.starts_with ~prefix:row) (String.split_on_char '\n' world)
+  with
+  | Some line -> line
+  | None -> fail ("no Active Goals row for " ^ goal_id)
+;;
+
+(* #45028. Every task the keeper holds marks the Goals its link names, whether
+   or not it is the turn's current task, and nothing is removed. When the link
+   registry cannot be read authoritatively the rows are marked unknown, not
+   unlinked. *)
+let test_held_tasks_mark_their_goals_without_hiding_others () =
+  with_workspace @@ fun config ->
+  seed_all_phases config;
+  let meta = keeper_meta () in
+  let held =
+    match
+      Workspace.add_task_with_result config ~title:"held work" ~priority:2
+        ~description:"linked to the verifying goal"
+    with
+    | Ok created -> created.task_id
+    | Error error -> fail (Workspace.add_task_error_to_string error)
+  in
+  (match Workspace.claim_task_r config ~agent_name:meta.name ~task_id:held () with
+   | Ok _ -> ()
+   | Error _ -> fail "the keeper could not claim its task");
+  Workspace_goal_index.write_goal_task_links config [ "goal-verifying", [ held ] ];
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  let world ~keeper_name =
+    let { Keeper_unified_prompt.world_state; _ } =
+      Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
+        ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
+        ~current_task:Keeper_world_observation_inputs.No_current_task
+        ~active_goal_summaries:
+          (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name)
+        ~observation ()
+    in
+    world_state
+  in
+  let yours = fragment Prompt_names.keeper_world_active_goals_yours_annotation [] in
+  let unknown =
+    fragment Prompt_names.keeper_world_active_goals_held_task_link_unreadable_annotation []
+  in
+  let marked = world ~keeper_name:meta.name in
+  check bool "a held task that is not the current task marks its goal" true
+    (contains_in (goal_row marked ~goal_id:"goal-verifying" ~title:"proof pending") yours);
+  check bool "the other open goal stays listed, unmarked" false
+    (contains_in (goal_row marked ~goal_id:"goal-executing" ~title:"still work") yours);
+  check bool "both open goals are counted" true (contains_in marked (goals_heading 2));
+  let other_keeper = world ~keeper_name:"keeper-holding-nothing" in
+  check bool "a keeper holding nothing marks nothing" false (contains_in other_keeper yours);
+  check bool "and sees the same goals" true (contains_in other_keeper (goals_heading 2));
+  Fs_compat.save_file (Workspace_goal_index.goal_task_links_path config) "unreadable";
+  let unreadable = world ~keeper_name:meta.name in
+  check bool "a recovery copy does not stand in for the registry" false
+    (contains_in unreadable yours);
+  check bool "every open goal is marked unknown" true
+    (contains_in (goal_row unreadable ~goal_id:"goal-executing" ~title:"still work") unknown
+     && contains_in (goal_row unreadable ~goal_id:"goal-verifying" ~title:"proof pending") unknown);
+  check bool "a keeper holding nothing needs no links" false
+    (contains_in (world ~keeper_name:"keeper-holding-nothing") unknown)
+;;
+
+let test_world_observation_drops_terminal_goals () =
+  with_workspace @@ fun config ->
+  seed_all_phases config;
+  let meta = keeper_meta () in
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config
+      ~meta
+  in
+  check (list string) "the per-turn frame agrees with the system prompt"
+    [ "goal-executing"; "goal-verifying" ]
+    (get_ok observation.Keeper_world_observation.active_goals)
+;;
+
+(* Terminal phases are the only thing that removes a Goal from the surface.
+   Seed a store whose Goals are all terminal and neither surface offers any --
+   an empty block rather than one that looks empty for a different reason. *)
+let test_no_goals_surface_when_all_are_terminal () =
+  with_workspace @@ fun config ->
+  seed_terminal_phases_only config;
+  let meta = keeper_meta () in
+  check (list string) "no goal block rather than an empty-looking one" []
+    (summary_ids
+       (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name));
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config
+      ~meta
+  in
+  check (list string) "and the frame carries none either" []
+    (get_ok observation.Keeper_world_observation.active_goals)
+;;
+
+(* A Goal is a standing question, not an assignment. Nothing in a turn frame
+   invites a Keeper to pick one up. *)
+let rendered_world_state config =
+  let meta = keeper_meta () in
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  let { Keeper_unified_prompt.world_state; _ } =
+    Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
+      ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
+      ~current_task:Keeper_world_observation_inputs.No_current_task
+      ~active_goal_summaries:(Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name)
+      ~observation
+      ()
+  in
+  world_state
+;;
+
+let test_no_goal_is_offered_as_work_to_pick_up () =
+  with_workspace @@ fun config ->
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals =
+        [ goal_in Goal_phase.Executing "goal-open" "nobody started this"
+        ; goal_in Goal_phase.Completed "goal-done" "already achieved"
+        ]
+    };
+  let world = rendered_world_state config in
+  check bool "the open goal is in the frame" true (contains_in world (goals_heading 1));
+  check bool "no heading invites the keeper to start work on a goal" false
+    (contains_in world "no Task yet");
+  check bool "no goal is named as a move to make" false
+    (contains_in world "picking one up")
+;;
+
+let test_unreadable_goals_preserve_context_and_independent_turn () =
+  with_workspace @@ fun config ->
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot) @@ fun () ->
+  let runtime_path = Filename.concat config.base_path "runtime.toml" in
+  Fs_compat.save_file runtime_path {|
+[runtime]
+default = "test_provider.test_model"
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|};
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> () | Error detail -> fail detail);
+  seed_all_phases config;
+  let goal = { (goal_in Goal_phase.Executing "goal-executing" "Publish an audio essay") with
+    metric = Some "independently reviewed playable audio essays";
+    target_value = Some "1";
+    last_review_note = Some "Audio has not yet been played back." } in
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = Masc_domain.now_iso (); goals = [goal] };
+  let meta = keeper_meta () in
+  let check_criterion expected_metric expected_target expected_review absent_text () =
+    let observation = Keeper_world_observation.observe
+      ~pending_board_events:(Some []) ~config ~meta in
+    let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name in
+    (* No task is held and no task links this Goal: the criterion reaches the
+       turn anyway, because a Goal is shared and not reached through a task. *)
+    let { Keeper_unified_prompt.world_state; _ } = Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown
+      ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
+      ~current_task:Keeper_world_observation_inputs.No_current_task
+      ~active_goal_summaries:summaries ~observation () in
+    check bool "stored criterion reaches the actual turn context" true
+      (contains_in world_state expected_metric);
+    check bool "target reaches the actual turn context" true
+      (contains_in world_state expected_target);
+    check bool "stale values do not remain in the turn context" false
+      (contains_in world_state absent_text);
+    check bool "review evidence reaches the actual turn context" true
+      (contains_in world_state expected_review);
+    check bool "criterion identity is available for evidence binding" true
+      (contains_in world_state goal.criterion_revision)
+  in
+  check_criterion "independently reviewed playable audio essays"
+    "\"target_value\":\"1\"" "Audio has not yet been played back."
+    "Provide an explicit measurable criterion." ();
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1; updated_at = Masc_domain.now_iso ();
+      goals = [{ goal with metric = None; target_value = None;
+        last_review_note = Some "Provide an explicit measurable criterion." }] };
+  check_criterion "\"metric\":null" "\"target_value\":null"
+    "Provide an explicit measurable criterion."
+    "independently reviewed playable audio essays" ();
+  let primary = Goal_store.goals_path config in
+  let mirror = primary ^ ".last-good" in
+  let original = Fs_compat.load_file primary in
+  let meta = keeper_meta () in
+  let check_unavailable () =
+    let observation = Keeper_world_observation.observe
+      ~pending_board_events:(Some []) ~config ~meta in
+    let unavailable = match observation.active_goals with
+      | Error unavailable -> unavailable
+      | Ok _ -> fail "an unreadable Goal source became an available list" in
+    check string "read failure names the file it could not read" primary
+      unavailable.Goal_store.file;
+    let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name in
+    (match summaries with
+     | Error _ -> () | Ok _ -> fail "the summaries lost the Goal read failure");
+    let observation = { observation with pending_messages =
+      [ { Keeper_world_observation_message_scope.message_id = "independent-message"
+        ; speaker = "operator"; content = "Please inspect the independent file."
+        ; kind = Keeper_world_observation_message_scope.Mention } ] } in
+    let decision = Keeper_world_observation.keeper_cycle_decision ~meta observation in
+    check bool "independent mention still admits a turn" true decision.should_run;
+    let { Keeper_unified_prompt.world_state; _ } = Keeper_unified_prompt.build_prompt ~turn_ref:scheduled_admission_fixture_ref ~admission:Masc.Keeper_unified_prompt_event_fields.Unknown ~turn_decision:decision
+      ~current_task:(current_task_of "task-linked")
+      ~active_goal_summaries:summaries ~observation () in
+    check bool "Goal failure reaches the model context" true
+      (contains_in world_state "goal_store_unavailable");
+    check bool "independent request stays visible" true
+      (contains_in world_state "Please inspect the independent file.");
+    let log_path = Keeper_types_support.keeper_decision_log_path config meta.name in
+    let directory = Filename.dirname log_path in
+    if not (Sys.file_exists directory) then Unix.mkdir directory 0o755;
+    Keeper_unified_metrics_decision.append_decision_record ~config ~meta
+      ~turn_ctx_cell:(Keeper_tool_call_log.create_turn_ctx_cell ())
+      ~observation ~latency_ms:0 ~outcome:Keeper_decision_outcome.Success
+      ~execution_path:Keeper_unified_metrics_decision.Autonomous_cycle
+      ~degraded_retry_applied:None ~degraded_retry_deferred:None ();
+    let rows = Fs_compat.load_file log_path |> String.split_on_char '\n'
+      |> List.filter (fun row -> row <> "") in
+    let row = List.rev rows |> List.hd |> Yojson.Safe.from_string in
+    let open Yojson.Safe.Util in
+    let observed = member "observation" row in
+    check bool "frame does not invent a zero count" true
+      (member "active_goals" observed = `Null);
+    check string "frame retains the unavailable source" "unavailable"
+      (observed |> member "active_goals_source" |> member "status" |> to_string)
+  in
+  Fs_compat.save_file primary "unreadable-primary";
+  check_unavailable ();
+  check string "observing does not repair primary" "unreadable-primary"
+    (Fs_compat.load_file primary);
+  check string "observing leaves the recovery copy unchanged" original
+    (Fs_compat.load_file mirror);
+  Sys.remove primary;
+  check_unavailable ();
+  check bool "missing primary is not recreated" false (Sys.file_exists primary);
+  Sys.remove mirror;
+  let fresh = Keeper_world_observation.observe
+    ~pending_board_events:(Some []) ~config ~meta in
+  check (result (list string) goal_store_unavailable) "fresh store is genuinely empty"
+    (Ok []) fresh.active_goals
+;;
+
+(* RFC-0444 §2.3 row 6. The 2026-09-08 shape: every row lacks
+   [criterion_revision], the mirror still decodes. The Active Goals layer must
+   say which member the decoder refused and which file, and must not draw a
+   Goal count or heading, because a store that cannot be read holds an
+   unknown number of Goals, not zero. *)
+let test_schema_rejected_store_renders_reason_and_file_not_zero_goals () =
+  with_workspace @@ fun config ->
+  seed_all_phases config;
+  let primary = Goal_store.goals_path config in
+  let stripped =
+    match Yojson.Safe.from_string (Fs_compat.load_file primary) with
+    | `Assoc members ->
+      `Assoc
+        (List.map
+           (function
+             | "goals", `List goals ->
+               ( "goals"
+               , `List
+                   (List.map
+                      (function
+                        | `Assoc goal ->
+                          `Assoc
+                            (List.filter
+                               (fun (key, _) -> not (String.equal key "criterion_revision"))
+                               goal)
+                        | other -> other)
+                      goals) )
+             | member -> member)
+           members)
+    | _ -> fail "goals.json is not an object"
+  in
+  Fs_compat.save_file primary (Yojson.Safe.to_string stripped);
+  let meta = keeper_meta () in
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  (match observation.active_goals with
+   | Error { Goal_store.reason = Goal_store.Schema_rejected { field; _ }; file; _ } ->
+     check string "the refused member is named" "criterion_revision" field;
+     check string "the file is named" primary file
+   | Error _ -> fail "the reason is not the refused schema member"
+   | Ok _ -> fail "rows without criterion_revision read as a Goal list");
+  let world = rendered_world_state config in
+  check bool "the layer names the refused member" true
+    (contains_in world "schema_rejected field=criterion_revision");
+  check bool "the layer names the file" true (contains_in world primary);
+  check bool "the layer says the source is unavailable" true
+    (contains_in world "Active Goals — source unavailable");
+  check bool "no Goal count is drawn" false (contains_in world "Active Goals (0)");
+  check bool "no Goal heading is drawn" false (contains_in world "### Active Goals (")
+;;
+
+let test_goal_measurement_tracks_current_revision_and_read_failure () =
+  with_workspace @@ fun config ->
+  let goal_id = "goal-executing" in
+  let declared_goal =
+    { (goal_in Goal_phase.Executing goal_id "acceptance outcome") with
+      metric = Some "observed acceptance cases"
+    ; target_value = Some "2 of 2 cases observed with evidence"
+    }
+  in
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1
+    ; updated_at = Masc_domain.now_iso (); goals = [ declared_goal ]
+    };
+  let summary () =
+    match
+      List.find_opt
+        (fun (value : Keeper_unified_prompt.goal_summary) ->
+           String.equal value.summary_goal_id goal_id)
+        (get_ok (Keeper_unified_prompt.active_goal_summaries ~config ~keeper_name))
+    with
+    | Some value -> value
+    | None -> fail "the open Goal disappeared"
+  in
+  (match (summary ()).summary_measurement with
+   | Ok None -> ()
+   | Ok (Some _) | Error _ -> fail "an unmeasured Goal needs an explicit empty observation");
+  check bool "world state exposes missing measurement" true
+    (contains_in (rendered_world_state config)
+       "Current criterion has no recorded measurement");
+  let goal =
+    match Goal_store.find_goal config ~goal_id with
+    | Goal_store.Goal_found goal -> goal
+    | Goal_store.Goal_absent | Goal_store.Store_unavailable _ -> fail "fixture Goal unavailable"
+  in
+  (match Goal_measurement.record config ~goal_id
+           ~criterion_revision:goal.criterion_revision
+           ~observed_value:"0 of 2 acceptance cases observed"
+           ~evidence:"note:baseline execution, neither required result observed"
+           ~actor:keeper_name with
+   | Ok _ -> ()
+   | Error error -> fail (Goal_measurement.error_to_string error));
+  (match (summary ()).summary_measurement with
+   | Ok (Some measured) ->
+     check string "observed zero is preserved" "0 of 2 acceptance cases observed"
+       measured.observed_value;
+     check string "evidence identity is preserved"
+       "note:baseline execution, neither required result observed" measured.evidence;
+     check string "measurement names the admitted criterion" goal.criterion_revision
+       measured.criterion_revision
+   | Ok None | Error _ -> fail "the recorded measurement did not reach turn context");
+  let measured_world = rendered_world_state config in
+  check bool "world state carries the measured zero" true
+    (contains_in measured_world "0 of 2 acceptance cases observed");
+  check bool "world state carries its submitted evidence" true
+    (contains_in measured_world
+       "note:baseline execution, neither required result observed");
+  check bool "world state labels observation separately from verified completion" true
+    (contains_in measured_world "not verified completion or an instruction");
+  Goal_store.write_state config
+    { pending_events = []; pending_notifications = []; version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals = [ { goal with criterion_revision = "changed-criterion" } ]
+    };
+  (match (summary ()).summary_measurement with
+   | Ok None -> ()
+   | Ok (Some _) | Error _ -> fail "a previous criterion's measurement leaked into the new one");
+  let changed_world = rendered_world_state config in
+  check bool "world state omits the old criterion's measured value" false
+    (contains_in changed_world "0 of 2 acceptance cases observed");
+  check bool "world state exposes the new criterion as unmeasured" true
+    (contains_in changed_world "Current criterion has no recorded measurement");
+  Fs_compat.save_file (Goal_measurement.path config) "not JSON";
+  (match (summary ()).summary_measurement with
+   | Error _ -> ()
+   | Ok None | Ok (Some _) -> fail "an unreadable measurement was converted to a value");
+  let unavailable_world = rendered_world_state config in
+  check bool "world state preserves the open Goal when measurement is unreadable" true
+    (contains_in unavailable_world goal_id);
+  check bool "world state reports the unavailable source" true
+    (contains_in unavailable_world "Measurement source unavailable");
+  check bool "world state preserves unknown measurement semantics" true
+    (contains_in unavailable_world "Its value is unknown; preserve the Goal")
+;;
+
+let () =
+  run "keeper_goal_phase_projection"
+    [ ( "prompt surfaces"
+      , [ test_case "Goal measurement preserves current revision and unavailable source" `Quick
+            test_goal_measurement_tracks_current_revision_and_read_failure
+        ; test_case "schema-rejected rows render reason and file, never zero goals" `Quick
+            test_schema_rejected_store_renders_reason_and_file_not_zero_goals
+        ; test_case "unavailable Goal source preserves independent turn and frame" `Quick
+            test_unreadable_goals_preserve_context_and_independent_turn
+        ; test_case "the turn surface drops terminal goals" `Quick
+            test_turn_surface_drops_terminal_goals
+        ; test_case "held tasks mark their goals without hiding others" `Quick
+            test_held_tasks_mark_their_goals_without_hiding_others
+        ; test_case "world observation drops terminal goals" `Quick
+            test_world_observation_drops_terminal_goals
+        ; test_case "all-terminal yields no goals at either surface" `Quick
+            test_no_goals_surface_when_all_are_terminal
+        ] )
+    ; ( "goals are not assignments"
+      , [ test_case "no goal is offered as work to pick up" `Quick
+            test_no_goal_is_offered_as_work_to_pick_up
+        ] )
+    ]
+;;

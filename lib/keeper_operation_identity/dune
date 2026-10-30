@@ -1,0 +1,6 @@
+(include_subdirs no)
+(library
+ (name masc_keeper_operation_identity)
+ (public_name masc.keeper_operation_identity)
+ (wrapped false)
+ (modules keeper_operation_id))

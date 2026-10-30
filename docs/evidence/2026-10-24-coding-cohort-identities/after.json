@@ -1,0 +1,63 @@
+{
+  "base_head": "4949d3333bfbf08d4267de1fe3c26c1dd44851de",
+  "python_command": [
+    "python3",
+    "scripts/tests/test_coding_eval_boundary.py",
+    "-v"
+  ],
+  "python_exit_code": 0,
+  "python_scope": "6 tests pass,1 actual Docker test explicitly skipped",
+  "transport_fixture_scope": "actual shell driver, controlled transport and grader ports, no server/provider/grader execution",
+  "transport_checks": [
+    {
+      "fixture": "coding_eval_admission_failure.sh",
+      "args": [
+        "fresh"
+      ],
+      "exit_code": 0,
+      "run_id": "run-53ac233e757815ccfdd71d919b933c5e6004f973ca8595c4b972d73b0a635a73",
+      "model": "model",
+      "status": "transport_error",
+      "verify_exit": null,
+      "passed": false
+    },
+    {
+      "fixture": "coding_eval_admission_failure.sh",
+      "args": [
+        "stale"
+      ],
+      "exit_code": 0,
+      "run_id": "run-53ac233e757815ccfdd71d919b933c5e6004f973ca8595c4b972d73b0a635a73",
+      "model": "model",
+      "status": "transport_error",
+      "verify_exit": null,
+      "passed": false
+    },
+    {
+      "fixture": "coding_eval_operation_response.sh",
+      "args": [
+        "{\"operation_id\":\"kmsg-accepted\",\"state\":\"Succeeded\"}",
+        "text"
+      ],
+      "exit_code": 0,
+      "run_id": "run-53ac233e757815ccfdd71d919b933c5e6004f973ca8595c4b972d73b0a635a73",
+      "model": "model",
+      "status": "ok",
+      "verify_exit": 0,
+      "passed": true
+    },
+    {
+      "fixture": "coding_eval_operation_response.sh",
+      "args": [
+        "{\"operation_id\":\"kmsg-other\",\"state\":\"Succeeded\"}",
+        "text"
+      ],
+      "exit_code": 0,
+      "run_id": "run-53ac233e757815ccfdd71d919b933c5e6004f973ca8595c4b972d73b0a635a73",
+      "model": "model",
+      "status": "transport_error",
+      "verify_exit": 0,
+      "passed": false
+    }
+  ]
+}

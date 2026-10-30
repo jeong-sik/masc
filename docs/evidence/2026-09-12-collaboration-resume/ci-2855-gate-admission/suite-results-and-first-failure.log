@@ -1,0 +1,41 @@
+3077: 2026-09-12T13:43:00.5261336Z [targeted] test_dashboard_observation_quota: OK in 7s
+3111: 2026-09-12T13:43:20.5001917Z [targeted] test/test_keeper_codex_current_context: OK in 0s
+3815: 2026-09-12T13:43:34.2755478Z [targeted] test/test_runtime_codex_app_server: OK in 14s
+3937: 2026-09-12T13:43:34.4308191Z [targeted] test/test_rate_limit_coverage: OK in 0s
+4026: 2026-09-12T13:43:35.1053060Z   [OK]          direct_gate_resume                             0   retention ...
+4066: 2026-09-12T13:43:35.2179533Z   [OK]          direct_gate_resume                             1   official-c...
+4106: 2026-09-12T13:43:35.3350784Z   [OK]          direct_gate_resume                             2   official-c...
+4142: 2026-09-12T13:43:35.4429996Z   [OK]          direct_gate_resume                             3   official-c...
+4163: 2026-09-12T13:43:35.4775406Z   [OK]          direct_gate_resume                             4   unavailabl...
+4185: 2026-09-12T13:43:35.5169711Z   [OK]          direct_gate_resume                             5   unretained...
+4206: 2026-09-12T13:43:35.5766145Z   [OK]          direct_gate_resume                             6   channel-sc...
+4229: 2026-09-12T13:43:35.6404885Z   [OK]          direct_gate_resume                             7   new Gate a...
+4249: 2026-09-12T13:43:35.6761111Z   [OK]          direct_gate_resume                             8   checkpoint...
+4270: 2026-09-12T13:43:35.7394589Z   [OK]          direct_gate_resume                             9   approved G...
+4289: 2026-09-12T13:43:35.7947072Z   [OK]          direct_gate_resume                            10   denied Gat...
+5539: 2026-09-12T13:43:43.0902093Z [targeted] test/test_keeper_tool_dispatch_runtime: OK in 9s
+5586: 2026-09-12T13:43:43.2076468Z │ [FAIL]        journal          0   exact unconfirmed source is reconcile...  │
+5587: 2026-09-12T13:43:43.2076989Z └──────────────────────────────────────────────────────────────────────────────┘
+5588: 2026-09-12T13:43:43.2077690Z FAIL wrong scope poisoned store: Keeper chat operation store integrity error: invalid semantic execution transition: action is not admitted in running
+5589: 2026-09-12T13:43:43.2078587Z Raised at Alcotest_engine__Test.check_err in file "src/alcotest-engine/test.ml", line 173, characters 20-48
+5590: 2026-09-12T13:43:43.2079630Z Called from Dune__exe__Test_keeper_direct_gate_wait.test_exact_source_reconciliation_after_restart.(fun) in file "test/keeper_chat_operations/test_keeper_direct_gate_wait.ml", line 178, characters 22-89
+5591: 2026-09-12T13:43:43.2080522Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+5592: 2026-09-12T13:43:43.2081035Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+5593: 2026-09-12T13:43:43.2082762Z Called from Dune__exe__Test_keeper_direct_gate_wait.test_exact_source_reconciliation_after_restart.(fun) in file "test/keeper_chat_operations/test_keeper_direct_gate_wait.ml", lines 167-181, characters 2-124
+5594: 2026-09-12T13:43:43.2084035Z Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+5595: 2026-09-12T13:43:43.2084532Z Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+5596: 2026-09-12T13:43:43.2085196Z Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+5597: 2026-09-12T13:43:43.2086267Z Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+5598: 2026-09-12T13:43:43.2086716Z 
+5599: 2026-09-12T13:43:43.2087047Z  ──────────────────────────────────────────────────────────────────────────────
+5600: 2026-09-12T13:43:43.2087309Z 
+5601: 2026-09-12T13:43:43.2087437Z 1 failure! in 0.064s. 8 tests run.
+5603: 2026-09-12T13:43:43.2114922Z [targeted] test/keeper_chat_operations/test_keeper_direct_gate_wait: FAIL exit 1 in 0s
+5911: 2026-09-12T13:43:43.7446984Z [targeted] test/test_keeper_owner: OK in 0s
+6005: 2026-09-12T13:43:43.8605513Z [targeted] test/test_official_client_session_store: OK in 0s
+6191: 2026-09-12T13:43:44.4876705Z [targeted] test/test_keeper_claude_code_runtime: OK in 1s
+6271: 2026-09-12T13:43:44.9385568Z [targeted] test/test_keeper_antigravity_runtime: OK in 0s
+6642: 2026-09-12T13:43:47.2627770Z [targeted] test/test_runtime_claude_code: OK in 2s
+6742: 2026-09-12T13:44:23.0629888Z [targeted] test/test_runtime_antigravity: OK in 36s
+6798: 2026-09-12T13:44:23.1785727Z [targeted] test/keeper_chat_operations/test_keeper_direct_runtime_continuation: OK in 0s
+6843: 2026-09-12T13:44:23.4625347Z [targeted] test/test_tool_output_washing_e2e: OK in 0s

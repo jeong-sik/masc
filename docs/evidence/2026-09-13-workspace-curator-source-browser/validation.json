@@ -1,0 +1,32 @@
+{
+  "scope": "source-only",
+  "mounted_vitest": {
+    "suites": [
+      "dashboard-exact-lane-runs",
+      "dashboard-standalone-lanes",
+      "internal-agents-monitor"
+    ],
+    "passed": 38,
+    "failed": 0,
+    "duration_seconds": 66.78
+  },
+  "native_tests": "not_run_locally; requires CI",
+  "browser": "source component with intercepted synthetic API responses",
+  "installed_runtime": "not exercised",
+  "semantic_verification": "not performed",
+  "superseded": [
+    "interceptor failure matched source modules instead of API endpoints",
+    "incomplete Fusion fixture lacked replay metadata",
+    "Vite served cached component footer until owned dev server restart"
+  ],
+  "typescript": "tsc --noEmit passed",
+  "eslint": "five changed TS files passed",
+  "ocaml_parse": {
+    "changed_files": 28,
+    "result": "passed"
+  },
+  "node_syntax": "passed",
+  "diff_check": "passed",
+  "source_component_sha256": "4636fe815895d2aca66d3ea8a8edf59d9624a5891c7d79e048ba2ccd7bc52bbd",
+  "browser_probe_sha256": "197e7ab884fcb13b42a3408e29b36c89d6396cc196d5fc2726268b3c2b2daf40"
+}

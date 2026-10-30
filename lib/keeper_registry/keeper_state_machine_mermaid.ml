@@ -1,0 +1,67 @@
+(* Keeper state-machine -> Mermaid stateDiagram-v2 rendering.
+
+   Used by the dashboard FSM diagnostic panel. Pure mapping over the
+   [Keeper_state_machine.phase] type - no I/O, no shared state.
+
+   Extracted from [Keeper_state_machine] (godfile decomp). Note: no
+   reverse alias in [Keeper_state_machine] - external callers reference
+   this module directly to avoid the wrapped-library import cycle
+   recorded in memory/feedback. *)
+
+open Keeper_state_machine
+
+let phase_to_mermaid_id = function
+  | Offline -> "Offline"
+  | Running -> "Running"
+  | Failing -> "Failing"
+  | Draining -> "Draining"
+  | Paused -> "Paused"
+  | Stopped -> "Stopped"
+  | Crashed -> "Crashed"
+  | Restarting -> "Restarting"
+;;
+
+let phase_to_mermaid ~(current : phase) : string =
+  let b = Buffer.create 512 in
+  let p fmt = Printf.bprintf b fmt in
+  p "stateDiagram-v2\n";
+  (* Phase nodes with display names *)
+  p "    [*] --> Offline\n";
+  p "    Offline --> Running : Fiber_started\n";
+  p "    Offline --> Draining : stop requested\n";
+  p "    Offline --> Stopped : stop while not started\n";
+  p "    Running --> Failing : hb/turn fail\n";
+  p "    Running --> Draining : stop requested\n";
+  p "    Running --> Paused : operator pause\n";
+  p "    Running --> Stopped : stop requested\n";
+  p "    Running --> Crashed : fiber death\n";
+  p "    Failing --> Running : clean turn recovery\n";
+  p "    Failing --> Crashed : fiber death\n";
+  p "    Failing --> Draining : stop requested\n";
+  p "    Failing --> Paused : operator pause\n";
+  p "    Draining --> Stopped : drain done\n";
+  p "    Draining --> Crashed : fiber death\n";
+  p "    Paused --> Running : operator resume\n";
+  p "    Paused --> Draining : stop requested\n";
+  p "    Paused --> Stopped : stop requested\n";
+  p "    Paused --> Crashed : fiber death\n";
+  p "    Crashed --> Restarting : backoff elapsed\n";
+  p "    Restarting --> Running : fiber started\n";
+  p "    Restarting --> Crashed : launch fail\n";
+  p "    Restarting --> Draining : stop requested\n";
+  p "    Restarting --> Paused : operator pause\n";
+  p "    Stopped --> [*]\n";
+  (* Highlight current phase with classDef *)
+  p "\n";
+  p "    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";
+  p "    classDef terminal fill:#6b7280,stroke:#4b5563,color:#fff\n";
+  p "    classDef buffer fill:#f59e0b,stroke:#d97706,color:#fff\n";
+  (match current with
+   | Stopped ->
+     p "    class %s terminal\n" (phase_to_mermaid_id current)
+   | Failing | Draining | Restarting | Crashed ->
+     p "    class %s buffer\n" (phase_to_mermaid_id current)
+   | Running | Offline | Paused ->
+     p "    class %s active\n" (phase_to_mermaid_id current));
+  Buffer.contents b
+;;

@@ -1,0 +1,55 @@
+{
+  "schema": "masc.standalone_verifier_skill_reassessment.v1",
+  "source_receipt_sha256": "8fde05cc70f1b2a6753868896b50ec0dc07771e5640bf4ebfb58bd7156f8ed81",
+  "source_commit": "05cf7d67be8ae46d2bde0c257a6af6be12404008",
+  "binary_sha256": "400b8034f69f92e9ca9f2498cf70b2d631fdd071f24d50345e3052a5979804c6",
+  "method": "Offline reassessment of original real-model observations with full-content checker; no model rerun.",
+  "scope": "Goal proof via shared Task/Goal reviewer. Completion order is not model-turn dependency; attempt IDs are absent.",
+  "cases": {
+    "matching": {
+      "passed": true,
+      "checks": {
+        "goal_outcome": true,
+        "goal_phase": true,
+        "same_committed_run": true,
+        "skill_read": true,
+        "evidence_read_attempt": true,
+        "single_expected_verdict": true,
+        "skill_then_read_then_verdict": true,
+        "evidence_read_success": true
+      },
+      "run_id": "01a081b1-4578-7001-a2f1-e56d35bbf7fc",
+      "evaluator_runtime": "glm-coding.glm-5.3-flash"
+    },
+    "wrong-revision": {
+      "passed": true,
+      "checks": {
+        "goal_outcome": true,
+        "goal_phase": true,
+        "same_committed_run": true,
+        "skill_read": true,
+        "evidence_read_attempt": true,
+        "single_expected_verdict": true,
+        "skill_then_read_then_verdict": true,
+        "evidence_read_success": true
+      },
+      "run_id": "01a081b1-e33f-7000-9dea-443fddda0412",
+      "evaluator_runtime": "glm-coding.glm-5.3-flash"
+    },
+    "missing": {
+      "passed": false,
+      "checks": {
+        "goal_outcome": true,
+        "goal_phase": true,
+        "same_committed_run": true,
+        "skill_read": true,
+        "evidence_read_attempt": true,
+        "single_expected_verdict": true,
+        "skill_then_read_then_verdict": false
+      },
+      "run_id": "01a081b2-8084-7000-be71-6c375bfc4e4b",
+      "evaluator_runtime": "glm-coding.glm-5.3-flash"
+    }
+  },
+  "passed": false
+}

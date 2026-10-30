@@ -1,0 +1,8 @@
+{
+  "source_commit": "337f547de110f9fdfa3c4abe4609352d862d27ae",
+  "source_tree": "8e30c132a48855f6c1120a786452c4feed09e18f",
+  "manifest": "source-sha256.json",
+  "entries": 17,
+  "verification": "Every manifest entry checked against git show <source_commit>:<path>.",
+  "runtime_execution": false
+}

@@ -1,0 +1,9 @@
+Reviewed PR: #40277
+Head: ae678a798507e0f5633f180db0d2f5a9e9c67307
+Test dispatch: HTTP422 Cannot trigger workflow_dispatch on a disabled workflow; workflow349921658.
+Manual probe dispatch: same HTTP422; workflow367783705.
+GitHub workflow inventory verified Test, Manual probe artifacts and PR check as disabled_manually.
+PR head check rollup was empty; no execution or required-check proof.
+Release Candidate Verification is active but its called Release manual-ref guard accepts only tags/release/v* branches. It was not dispatched for this ordinary fix branch.
+No workflow was re-enabled and no local Dune build was run.
+Operator verification-route question is pending; independent source/static work can continue.

@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-24T18:21:06.046753+00:00",
+  "scope": "Stop only completed2be isolated runtime/proxy after all three observer stages and actual UI evidence were frozen. Production8935 and active GLM runtime untouched.",
+  "processes": [
+    {
+      "pid": 84191,
+      "command": "/tmp/masc-goal-runtime-2be9d216/masc --port 65337 --base-path /tmp/masc-goal-canary-2be9d216-qwen",
+      "signal": "SIGTERM",
+      "post_signal_absent": true
+    },
+    {
+      "pid": 83448,
+      "command": "/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /tmp/masc_goal_wire_proxy.py --out /tmp/masc-goal-wire-2be9d216-qwen --upstream http://127.0.0.1:11434",
+      "signal": "SIGTERM",
+      "post_signal_absent": true
+    }
+  ]
+}

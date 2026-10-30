@@ -1,0 +1,121 @@
+(** Bounded observation registry for active and recently completed Fusion runs. *)
+
+type decision_preview = private string
+(** A bounded display projection of a typed Fusion judge decision. It remains
+    distinct from both the authoritative [Fusion_types.judge_decision] and an
+    arbitrary wire string inside the registry domain. *)
+
+val decision_preview_max_bytes : int
+(** Byte cap enforced by [decision_preview_of_string], suffix included. *)
+
+val decision_preview_of_string : string -> decision_preview
+(** Enforces the preview invariant: flattens ['\n'], ['\r'], ['\t'] to spaces,
+    trims, and UTF-8-safely truncates to at most [decision_preview_max_bytes]
+    bytes (appending ["..."] when truncation occurs). Applying it to a value
+    it already produced is the identity, so JSON replay of persisted rows is
+    byte-exact. *)
+
+val decision_preview_to_string : decision_preview -> string
+
+type outcome =
+  | Succeeded
+  | Succeeded_with_summary of
+      { decision : decision_preview
+      ; summary : string
+      }
+  | Failed of
+      { reason : string
+      ; code : string
+      }
+
+type run_status =
+  | Running
+  | Completed of outcome
+
+type progress =
+  | Progress_accepted
+  | Progress_panel_running of { expected : int }
+  | Progress_judge_running of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+  | Progress_computed of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+  | Progress_recording_evidence of
+      { expected : int
+      ; answered : int
+      ; failed : int
+      }
+
+type run =
+  { run_id : string
+  ; keeper : string
+  ; preset : string
+  ; roster : Fusion_types.roster
+      (** 이 run 이 preset 명단 대신 쓴 자리 경로. 바꾸지 않은 칸은 [None] 이다.
+          저장 줄에는 바꾼 칸만 [judge_route] / [panel_routes] 키로 적히고, 키가 없으면
+          preset 의 그 칸을 쓴 run 이다. *)
+  ; topology : Fusion_types.fusion_topology
+      (** 이 run 이 실행한 심의 위상. obligation payload 에도 있지만 그 레코드는
+          배달 직후 제거되므로, 완료된 run 의 위상을 되읽을 수 있는 자리는 여기뿐이다.
+          topology 를 담지 않은 예전 replay 레코드는 스킵된다(레거시 폴백 없음). *)
+  ; started_at : float
+  ; finished_at : float option
+  ; status : run_status
+  ; progress : progress option
+      (** Process-local live observation. Replay drops running workers, so an
+          intermediate stage is deliberately not persisted as resumable
+          state. Completed runs always carry [None]. *)
+  }
+
+type t
+
+val create : ?path:string -> unit -> t
+val replay : string -> t
+(** Keeps durable terminal history for delayed observers across restart. The
+    ordinary in-memory list remains bounded by [max_completed_retained]. *)
+
+val register_running
+  :  t
+  -> run_id:string
+  -> keeper:string
+  -> preset:string
+  -> roster:Fusion_types.roster
+  -> topology:Fusion_types.fusion_topology
+  -> started_at:float
+  -> unit
+
+val mark_completed : t -> run_id:string -> outcome:outcome -> unit
+(** Complete a registered run. An unknown [run_id] is logged and is not written
+    to the append-only log. Re-projecting a completed run preserves its first
+    [finished_at], including after replay, while updating its outcome. *)
+
+val mark_progress : t -> run_id:string -> progress:progress -> unit
+(** Update the live stage only while the exact run remains [Running]. Unknown
+    and terminal ids are ignored. *)
+
+val list_runs : t -> run list
+val get : t -> run_id:string -> run option
+val get_for_observer : t -> run_id:string -> (run option, string) result
+(** Current live run, or its exact durable terminal lifecycle after cache eviction.
+    A new registration for the same id supersedes the previous terminal owner. *)
+val status_label : run_status -> string
+val run_to_yojson : run -> Yojson.Safe.t
+type global_install_error = Already_installed
+
+val global : unit -> t
+val install_global : t -> (unit, global_install_error) result
+val replay_status : t -> Run_registry_core.replay_status
+val storage_filename : string
+val max_completed_retained : int
+
+val cut_replay_log : execute:bool -> string -> Run_registry_core.cut_report
+(** Explicit destructive deployment-time store cut for {!storage_filename}.
+    Unlike ordinary restart this can discard terminal source history; operators
+    must preserve any history needed by retained observers before authorizing it.
+    See
+    {!Run_registry_core.Make.cut_replay_log}. *)

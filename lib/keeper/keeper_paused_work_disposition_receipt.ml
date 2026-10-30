@@ -1,0 +1,476 @@
+type continuation_binding =
+  | Routed of Keeper_continuation_channel.t
+  | No_channel
+
+type transfer_owner =
+  { from_keeper : string
+  ; to_keeper : string
+  ; target_trace_id : Keeper_id.Trace_id.t
+  ; source : Keeper_event_queue.stimulus
+  ; source_incarnation : int64
+  ; continuation_binding : continuation_binding
+  }
+
+type source_terminal_operation =
+  { source : Keeper_event_queue.stimulus
+  ; source_incarnation : int64
+  ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
+  }
+
+type operation =
+  | Resume_owner
+  | Transfer_owner of transfer_owner
+  | Ack_source_terminal of source_terminal_operation
+
+type keeper_lock = { keeper_name : string }
+
+type t =
+  { keeper_name : string
+  ; expected_trace_id : Keeper_id.Trace_id.t
+  ; operator_operation_id : string
+  ; requested_at : float
+  ; operation : operation
+  }
+
+type save_result =
+  | Created
+  | Existing of t
+
+open Result.Syntax
+(* The receipt shape and the store that holds it move together. [of_yojson] is
+   an exhaustive match over the sorted field list, so a field removed from the
+   shape makes every stored receipt unreadable, and [save_if_absent] reads
+   before it writes — the operation id then neither replays its receipt nor
+   records a new one. #29590 removed [expected_generation] without moving
+   either name and wedged 97 of 98 live receipts that way.
+
+   One constant, so a bump cannot land in the schema string and miss the
+   directory. Nothing forces the bump itself: a fixture pin was tried here and
+   removed, because removing a field and deleting the matching fixture line
+   passes it with the version unmoved, and because CI on this repo has started
+   after the merge it was meant to gate (#27715). What catches a shape change
+   today is the behavioural suite around it, which builds real receipts. *)
+let store_version = "v7"
+let schema = "masc.keeper.paused-work-disposition." ^ store_version
+let store_dirname = "paused-work-dispositions-" ^ store_version
+
+let equal left right =
+  String.equal left.keeper_name right.keeper_name
+  && Keeper_id.Trace_id.equal left.expected_trace_id right.expected_trace_id
+  && String.equal left.operator_operation_id right.operator_operation_id
+  && Float.equal left.requested_at right.requested_at
+  && left.operation = right.operation
+;;
+
+let continuation_binding_of_source source =
+  match source.Keeper_event_queue.payload with
+  | Keeper_event_queue.Fusion_completed completion -> Routed completion.channel
+  | Keeper_event_queue.Connector_attention attention -> Routed attention.channel
+  | Keeper_event_queue.Hitl_resolved resolution -> Routed resolution.channel
+  (* The conversation the question was asked in, so a paused keeper's answer
+     goes back where the human is waiting. *)
+  | Keeper_event_queue.Ask_answered answered -> Routed answered.channel
+  | Keeper_event_queue.Owned_job_completed completion -> Routed completion.oj_channel
+  | Keeper_event_queue.Addon_operation_changed change -> Routed change.ao_channel
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Tool_result_ready _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_outcome _
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  (* The answer arriving is the reply; it names no further destination. *)
+  | Keeper_event_queue.Delegate_completed _
+  (* The submitter is the destination; there is nothing further to route. *)
+  | Keeper_event_queue.Composition_completed _ ->
+    No_channel
+;;
+
+let validate receipt =
+  if String.equal (String.trim receipt.keeper_name) ""
+  then Error "paused-work disposition keeper name must not be empty"
+  else if String.equal (String.trim receipt.operator_operation_id) ""
+  then Error "paused-work disposition operation ID must not be empty"
+  else if not (Float.is_finite receipt.requested_at)
+  then Error "paused-work disposition request time must be finite"
+  else
+    match receipt.operation with
+    | Resume_owner -> Ok ()
+    | Transfer_owner transfer ->
+      if not (String.equal transfer.from_keeper receipt.keeper_name)
+      then Error "paused-work transfer source Keeper does not match receipt owner"
+      else if String.equal (String.trim transfer.to_keeper) ""
+      then Error "paused-work transfer target Keeper must not be empty"
+      else if String.equal transfer.from_keeper transfer.to_keeper
+      then Error "paused-work transfer source and target Keepers must differ"
+      else if Int64.compare transfer.source_incarnation 0L < 0
+      then Error "paused-work transfer source incarnation must not be negative"
+      else if String.equal (String.trim transfer.source.post_id) ""
+      then Error "paused-work transfer source post id must not be empty"
+      else if
+        transfer.continuation_binding
+        <> continuation_binding_of_source transfer.source
+      then Error "paused-work transfer continuation binding does not match source"
+      else Ok ()
+    | Ack_source_terminal operation ->
+      if Int64.compare operation.source_incarnation 0L < 0
+      then Error "paused-work source-terminal incarnation must not be negative"
+      else
+        let* exact =
+          Keeper_event_queue_state.source_terminal_receipt_of_stimulus
+            operation.source
+        in
+        if exact = operation.source_receipt
+        then Ok ()
+        else Error "paused-work source-terminal receipt does not match source"
+;;
+
+let sha256 value = Agent_core_sha256.(digest_string value |> to_hex)
+
+let keeper_dir config keeper_name =
+  let root = Workspace.masc_dir config in
+  Filename.concat
+    (Filename.concat root store_dirname)
+    ("keeper-" ^ sha256 keeper_name)
+;;
+
+let receipt_path_of_masc_root ~masc_root ~keeper_name ~operator_operation_id =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat masc_root store_dirname)
+       ("keeper-" ^ sha256 keeper_name))
+    ("operation-" ^ sha256 operator_operation_id ^ ".json")
+;;
+
+let receipt_path config ~keeper_name ~operator_operation_id =
+  receipt_path_of_masc_root
+    ~masc_root:(Workspace.masc_dir config)
+    ~keeper_name
+    ~operator_operation_id
+;;
+
+(* #38527: the event-queue projection retention predicate only needs "can a
+   standing asker still re-ask this transition", and a receipt on disk is
+   that answer. Existence only -- no decode, no lock: the file's writer
+   committed it before the queue transition it asks about. [masc_root] is
+   [<base>/.masc], the root {!receipt_path} builds from the config. *)
+let durable_receipt_exists ~masc_root ~keeper_name ~operator_operation_id =
+  Sys.file_exists
+    (receipt_path_of_masc_root ~masc_root ~keeper_name ~operator_operation_id)
+;;
+
+let continuation_binding_to_yojson = function
+  | Routed channel ->
+    `Assoc
+      [ "kind", `String "routed"
+      ; "channel", Keeper_continuation_channel.to_yojson channel
+      ]
+  | No_channel -> `Assoc [ "kind", `String "no_channel" ]
+;;
+
+let transfer_owner_to_yojson transfer =
+  `Assoc
+    [ "from_keeper", `String transfer.from_keeper
+    ; "to_keeper", `String transfer.to_keeper
+    ; "target_trace_id", `String (Keeper_id.Trace_id.to_string transfer.target_trace_id)
+    ; "source", Keeper_event_queue.stimulus_to_yojson transfer.source
+    ; "source_incarnation", `Intlit (Int64.to_string transfer.source_incarnation)
+    ; "continuation_binding", continuation_binding_to_yojson transfer.continuation_binding
+    ]
+;;
+
+let source_terminal_receipt_kind = function
+  | Keeper_event_queue_state.Fusion_terminal _ -> "fusion_terminal"
+  | Keeper_event_queue_state.Hitl_terminal _ -> "hitl_terminal"
+  | Keeper_event_queue_state.Turn_completed -> "turn_completed"
+  | Keeper_event_queue_state.Turn_attempt_terminal _ ->
+    "turn_attempt_terminal"
+;;
+
+let source_terminal_operation_to_yojson operation =
+  `Assoc
+    [ "source", Keeper_event_queue.stimulus_to_yojson operation.source
+    ; "source_incarnation", `Intlit (Int64.to_string operation.source_incarnation)
+    ; "source_receipt_kind", `String (source_terminal_receipt_kind operation.source_receipt)
+    ]
+;;
+
+let to_yojson receipt =
+  let common operation extra =
+    `Assoc
+      ([ "schema", `String schema
+       ; "operation", `String operation
+       ; "keeper_name", `String receipt.keeper_name
+       ; ( "expected_trace_id"
+         , `String (Keeper_id.Trace_id.to_string receipt.expected_trace_id) )
+       ; "operator_operation_id", `String receipt.operator_operation_id
+       ; "requested_at", `Float receipt.requested_at
+       ]
+       @ extra)
+  in
+  match receipt.operation with
+  | Resume_owner -> common "resume_owner" []
+  | Transfer_owner transfer ->
+    common
+      "transfer_owner"
+      [ "transfer", transfer_owner_to_yojson transfer ]
+  | Ack_source_terminal operation ->
+    common
+      "ack_source_terminal"
+      [ "source_terminal", source_terminal_operation_to_yojson operation ]
+;;
+
+let sorted fields =
+  List.sort (fun (left, _) (right, _) -> String.compare left right) fields
+;;
+
+let requested_at_of_yojson = function
+  | `Float value -> Ok value
+  | `Int value -> Ok (Float.of_int value)
+  | `Intlit value ->
+    (match Float.of_string_opt value with
+     | Some value -> Ok value
+     | None -> Error "paused-work disposition request time is invalid")
+  | _ -> Error "paused-work disposition request time must be numeric"
+;;
+
+let source_incarnation_of_yojson = function
+  | `Int value -> Ok (Int64.of_int value)
+  | `Intlit value ->
+    (match Int64.of_string_opt value with
+     | Some value -> Ok value
+     | None -> Error "paused-work disposition source incarnation is invalid")
+  | _ -> Error "paused-work disposition source incarnation must be an integer"
+;;
+
+let continuation_binding_of_yojson = function
+  | `Assoc fields ->
+    (match sorted fields with
+     | [ "kind", `String "no_channel" ] -> Ok No_channel
+     | [ "channel", channel_json; "kind", `String "routed" ] ->
+       let* channel = Keeper_continuation_channel.of_yojson channel_json in
+       Ok (Routed channel)
+     | _ -> Error "paused-work transfer continuation binding fields are not exact")
+  | _ -> Error "paused-work transfer continuation binding must be an object"
+;;
+
+let transfer_owner_of_yojson = function
+  | `Assoc fields ->
+    (match sorted fields with
+     | [ ("continuation_binding", continuation_binding_json)
+       ; ("from_keeper", `String from_keeper)
+       ; ("source", source_json)
+       ; ("source_incarnation", source_incarnation_json)
+       ; ("target_trace_id", `String target_trace_id)
+       ; ("to_keeper", `String to_keeper)
+       ] ->
+       let* target_trace_id = Keeper_id.Trace_id.of_string target_trace_id in
+       let* source = Keeper_event_queue.stimulus_of_yojson source_json in
+       let* source_incarnation = source_incarnation_of_yojson source_incarnation_json in
+       let* continuation_binding =
+         continuation_binding_of_yojson continuation_binding_json
+       in
+       Ok
+         { from_keeper
+         ; to_keeper
+         ; target_trace_id
+         ; source
+         ; source_incarnation
+         ; continuation_binding
+         }
+     | _ -> Error "paused-work transfer fields are not exact")
+  | _ -> Error "paused-work transfer must be an object"
+;;
+
+let source_terminal_operation_of_yojson = function
+  | `Assoc fields ->
+    (match sorted fields with
+     | [ ("source", source_json)
+       ; ("source_incarnation", source_incarnation_json)
+       ; ("source_receipt_kind", `String source_receipt_kind)
+       ] ->
+       let* source = Keeper_event_queue.stimulus_of_yojson source_json in
+       let* source_incarnation = source_incarnation_of_yojson source_incarnation_json in
+       let* source_receipt =
+         Keeper_event_queue_state.source_terminal_receipt_of_stimulus source
+       in
+       let* () =
+         if String.equal source_receipt_kind (source_terminal_receipt_kind source_receipt)
+         then Ok ()
+         else Error "paused-work source-terminal receipt kind does not match source"
+       in
+       Ok { source; source_incarnation; source_receipt }
+     | _ -> Error "paused-work source-terminal fields are not exact")
+  | _ -> Error "paused-work source-terminal operation must be an object"
+;;
+
+let receipt_of_common
+      ~keeper_name
+      ~expected_trace_id
+      ~operator_operation_id
+      ~requested_at_json
+      ~operation
+  =
+  let* requested_at = requested_at_of_yojson requested_at_json in
+  let* expected_trace_id = Keeper_id.Trace_id.of_string expected_trace_id in
+  let receipt =
+    { keeper_name
+    ; expected_trace_id
+    ; operator_operation_id
+    ; requested_at
+    ; operation
+    }
+  in
+  let* () = validate receipt in
+  Ok receipt
+;;
+
+let of_yojson = function
+  | `Assoc fields ->
+    (match sorted fields with
+     | [ ("expected_trace_id", `String expected_trace_id)
+       ; ("keeper_name", `String keeper_name)
+       ; ("operation", `String "resume_owner")
+       ; ("operator_operation_id", `String operator_operation_id)
+       ; ("requested_at", requested_at_json)
+       ; ("schema", `String receipt_schema)
+       ] ->
+       if not (String.equal receipt_schema schema)
+       then Error "unsupported paused-work disposition receipt schema"
+       else
+         receipt_of_common
+           ~keeper_name
+           ~expected_trace_id
+           ~operator_operation_id
+           ~requested_at_json
+           ~operation:Resume_owner
+     | [ ("expected_trace_id", `String expected_trace_id)
+       ; ("keeper_name", `String keeper_name)
+       ; ("operation", `String "transfer_owner")
+       ; ("operator_operation_id", `String operator_operation_id)
+       ; ("requested_at", requested_at_json)
+       ; ("schema", `String receipt_schema)
+       ; ("transfer", transfer_json)
+       ] ->
+       if not (String.equal receipt_schema schema)
+       then Error "unsupported paused-work disposition receipt schema"
+       else
+         let* transfer = transfer_owner_of_yojson transfer_json in
+         receipt_of_common
+           ~keeper_name
+           ~expected_trace_id
+           ~operator_operation_id
+           ~requested_at_json
+           ~operation:(Transfer_owner transfer)
+     | [ ("expected_trace_id", `String expected_trace_id)
+       ; ("keeper_name", `String keeper_name)
+       ; ("operation", `String "ack_source_terminal")
+       ; ("operator_operation_id", `String operator_operation_id)
+       ; ("requested_at", requested_at_json)
+       ; ("schema", `String receipt_schema)
+       ; ("source_terminal", source_terminal_json)
+       ] ->
+       if not (String.equal receipt_schema schema)
+       then Error "unsupported paused-work disposition receipt schema"
+       else
+         let* operation =
+           source_terminal_operation_of_yojson source_terminal_json
+         in
+         receipt_of_common
+           ~keeper_name
+           ~expected_trace_id
+           ~operator_operation_id
+           ~requested_at_json
+           ~operation:(Ack_source_terminal operation)
+     | _ -> Error "paused-work disposition receipt fields are not exact")
+  | _ -> Error "paused-work disposition receipt must be a JSON object"
+;;
+
+let load config ~keeper_name ~operator_operation_id =
+  if String.equal (String.trim keeper_name) ""
+  then Error "paused-work disposition keeper name must not be empty"
+  else if String.equal (String.trim operator_operation_id) ""
+  then Error "paused-work disposition operation ID must not be empty"
+  else
+    let path = receipt_path config ~keeper_name ~operator_operation_id in
+    if not (Fs_compat.file_exists path)
+    then Ok None
+    else
+      let* json = Safe_ops.read_json_file_safe path in
+      let* receipt = of_yojson json in
+      if
+        String.equal receipt.keeper_name keeper_name
+        && String.equal receipt.operator_operation_id operator_operation_id
+      then Ok (Some receipt)
+      else Error "paused-work disposition receipt path identity does not match payload"
+;;
+
+let with_keeper_lock config ~keeper_name f =
+  if String.equal (String.trim keeper_name) ""
+  then Error "paused-work disposition keeper name must not be empty"
+  else
+    let dir = keeper_dir config keeper_name in
+    let prepared =
+      try
+        (* fire-and-forget: only [ensure_dir]'s side effect matters; a failure is caught below and surfaced as [Error]. *)
+        ignore (Keeper_fs.ensure_dir dir : string);
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    let* () = prepared in
+    (match
+       File_lock_eio.with_durable_lock
+         ~lock_path:(Filename.concat dir "keeper-disposition.lock")
+         (fun () -> f ({ keeper_name } : keeper_lock))
+     with
+     | Error error -> Error (File_lock_eio.durable_lock_error_to_string error)
+     | Ok result -> Ok result)
+;;
+
+let save_if_absent (lock : keeper_lock) config receipt =
+  let* () = validate receipt in
+  let* () =
+    if String.equal lock.keeper_name receipt.keeper_name
+    then Ok ()
+    else Error "paused-work disposition lock owner does not match receipt"
+  in
+  let root = Workspace.masc_dir config in
+  let path =
+    receipt_path
+      config
+      ~keeper_name:receipt.keeper_name
+      ~operator_operation_id:receipt.operator_operation_id
+  in
+  let* existing =
+    load
+      config
+      ~keeper_name:receipt.keeper_name
+      ~operator_operation_id:receipt.operator_operation_id
+  in
+  match existing with
+  | Some existing -> Ok (Existing existing)
+  | None ->
+    (match
+       Keeper_fs.save_json_durable_atomic
+         ~ownership_root:root
+         ~pretty:false
+         path
+         (to_yojson receipt)
+     with
+     | Error error -> Error (Keeper_fs.durable_write_error_to_string error)
+     | Ok () ->
+       let* persisted =
+         load
+           config
+           ~keeper_name:receipt.keeper_name
+           ~operator_operation_id:receipt.operator_operation_id
+       in
+       (match persisted with
+        | Some persisted when equal persisted receipt -> Ok Created
+        | Some _ -> Error "paused-work disposition receipt changed after durable write"
+        | None -> Error "paused-work disposition receipt missing after durable write"))
+;;

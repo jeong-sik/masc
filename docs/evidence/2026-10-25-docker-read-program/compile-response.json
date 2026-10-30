@@ -1,0 +1,61 @@
+{
+  "schema": "masc.goal-read-program.compile-response.v1",
+  "status": "FINAL_FROZEN",
+  "verdict": "OLD_NATIVE_FAILED_REPAIR_SOURCE_ONLY",
+  "reviewed_at_utc": "2026-10-25T11:53:29.820409+00:00",
+  "pr": 45922,
+  "direct_base": "45592d21f7f1c11226e75c857d1983f7b0eef9d5",
+  "failed_head": "84003fe04f9ac67a4b4b8f5fe851a3ad2c1924d8",
+  "repair_head": "cdeb9e5af15677c22fc4be8b0cc0f82d42e5b351",
+  "native_failure": {
+    "run_id": 40189920561,
+    "raw_log_bytes": 134143,
+    "raw_log_sha256": "c8a7bce51399bad91cb3f3e8b924650ff942e534bcb525b80064fb92ebf70602",
+    "failed_source_checkout_verified": true,
+    "selected_suite": "test_keeper_sandbox_read_backend",
+    "build_target": "test/test_keeper_sandbox_read_backend.exe",
+    "reported_compiler_error_count": 1,
+    "ci_exit_wrapper_count": 1,
+    "failure_location": "test/test_keeper_sandbox_read_backend.ml:2132",
+    "error": "The function requires a positional keeper_meta argument; label ~meta cannot be applied.",
+    "selected_suite_executions": 0,
+    "native_behavior_tests_passed": false,
+    "execution_boundary": "set -euo pipefail targeted runner builds before entering the suite execution loop. Build exited1; no run/OK/Alcotest completion followed.",
+    "other_log_findings": "Two nonfatal package-definition check warnings for ocaml-msx/ocaml-dos preceded compilation. No other compiler diagnostic or fatal failure was reported in the entire928-line log. Later uncompiled errors are not ruled out."
+  },
+  "source_review_response": {
+    "prior_verdict": "PASS_SOURCE_ONLY",
+    "prior_review_sha256": "08f1a40f6a8da6a023fb8531136f860169a0a620aa243796243008c41778a293",
+    "prior_review_preserved": true,
+    "source_PASS_establishes_typing_or_native_success": false,
+    "missed_fixture_signature_mismatch_acknowledged": true,
+    "failed_head_must_not_be_reported_as_native_passed": true
+  },
+  "repair_assessment": {
+    "verdict": "PASS_ONE_LINE_SOURCE_REPAIR_ONLY",
+    "direct_parent_is_failed_head": true,
+    "changed_files": [
+      "test/test_keeper_sandbox_read_backend.ml"
+    ],
+    "change": "host_root_abs_of_meta ~config ~meta → host_root_abs_of_meta ~config meta",
+    "canonical_repair_diff_sha256": "75379619d3059006c5bde77cc9caf09cb42c690f0c3da8f008f057056fa6d4eb",
+    "binary_repair_patch_sha256": "7bd91d66d53001c18ed68e4d4bd01a799868162eed39ba48a121d15e33964b0e",
+    "signature_source": "lib/keeper/keeper_sandbox.mli:108",
+    "unchanged_mli_sha256": "c3d401773e2d26da033255afba4516665c76391fc820802e5bf03b2df670e2fd",
+    "signature": "config:Workspace.config -> Keeper_meta_contract.keeper_meta -> string",
+    "existing_call_examples": [
+      "test/test_keeper_sandbox_read_backend.ml:151",
+      "lib/keeper/keeper_sandbox_read_backend.ml:17",
+      "lib/keeper/keeper_sandbox_factory.ml:64"
+    ],
+    "reason": "The unlabeled meta matches the unchanged published interface and existing callers. Exactly one fixture line changes; test semantics, assertions, production code, API and runner are unchanged.",
+    "production_files_changed": [],
+    "git_diff_check_exit": 0,
+    "repaired_typing_or_native_success": "NOT_OBSERVED; requires the new source selected-suite run."
+  },
+  "limits": [
+    "Historical source review and native result remain separate receipts. This is a response to a newly observed compile failure, not a whole-PR source/publication approval.",
+    "No extra API/provider/native/CI query or execution, no source/product/original/publication mutation and no approval was performed by this reviewer. Only this response artifact was written.",
+    "A later final source/publication head needs its own requested delta review."
+  ]
+}

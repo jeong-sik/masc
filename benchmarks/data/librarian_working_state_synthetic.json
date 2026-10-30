@@ -1,0 +1,102 @@
+{
+  "provenance": [
+    "Synthetic"
+  ],
+  "cases": [
+    {
+      "id": "pending-approval",
+      "trace_id": "synthetic-approval",
+      "absolute_turn": 1,
+      "prefix": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "The cabinet code is ORCHID-731. Prepare deployment but do not publish without my approval."
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "The synthetic build passed. Approval has not been given."
+            }
+          ]
+        }
+      ],
+      "suffix": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Report our next action."
+            }
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "memory-runbook",
+          "claim": "The synthetic deployment requires a completed build and explicit approval."
+        }
+      ],
+      "question": "What code is recorded, and may we publish now?"
+    },
+    {
+      "id": "corrected-destination",
+      "trace_id": "synthetic-destination",
+      "absolute_turn": 1,
+      "prefix": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Use staging-east initially."
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Correction: use staging-west. The previous destination is obsolete."
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "I will use staging-west; the smoke check remains pending."
+            }
+          ]
+        }
+      ],
+      "suffix": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Continue with the agreed destination."
+            }
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "memory-smoke",
+          "claim": "A smoke check is required before announcing the synthetic rollout."
+        }
+      ],
+      "question": "Which destination should be used, and what check remains?"
+    }
+  ]
+}

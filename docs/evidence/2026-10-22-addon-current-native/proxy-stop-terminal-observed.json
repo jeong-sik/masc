@@ -1,0 +1,8 @@
+{
+  "tool": "write_stdin",
+  "session_id": 31082,
+  "input": "control-C",
+  "observed_exit_code": 130,
+  "observation": "Terminal result after KeyboardInterrupt; original returned session is terminal",
+  "scope": "Tool-session termination; no separately captured proxy PID"
+}

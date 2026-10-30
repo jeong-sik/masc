@@ -1,0 +1,161 @@
+name = "masc_schedule_update"
+description = """
+Atomically replace a scheduled or due Keeper wake. Keep schedule_id; issue a new
+schedule_instance_id to separate future evidence. Running and terminal requests
+cannot change. If both due inputs and recurrence_kind are omitted, keep the
+latest stored due time, recurrence and expiry; a content edit does not
+reschedule the wake. Those three are the only fields kept from the stored
+definition; every other field is replaced by this call's arguments. An explicit
+recurrence_kind follows masc_schedule_create's first-due rules. Omitting
+recurrence_kind keeps the latest stored recurrence under the mutation lock,
+including when this call supplies a due input.
+A changed due time before the current second is refused with error_kind
+due_already_past; resending the stored
+due time is accepted. You may update a schedule you made or one that wakes you;
+its replacement must retain that ownership or fail with error_kind
+not_schedule_owner. Requester and scheduler stay unchanged.
+A Lane action schedule is replaced the same way, with installation_id and
+action instead of keeper_name and message."""
+additional_properties = false
+defer_loading = true
+
+[[params]]
+name = "schedule_id"
+type = "string"
+required = true
+description = "Stable id of the scheduled or due request to replace."
+
+[[params]]
+name = "due_in_sec"
+type = "integer"
+minimum = 1
+description = "Seconds after the server runs this call."
+
+[[params]]
+name = "due_at_unix"
+type = "number"
+description = "Unix timestamp in seconds."
+
+[[params]]
+name = "due_at_iso"
+type = "string"
+description = """
+RFC 3339 timestamp with Z or an explicit numeric offset, for example
+2026-08-02T09:00:00+09:00. It is normalized to whole-second UTC."""
+
+[[params]]
+name = "keeper_name"
+type = "string"
+description = "The Keeper to wake. A Keeper wake needs it and message."
+
+[[params]]
+name = "message"
+type = "string"
+description = """
+What the Keeper is being woken to do. Write the work itself. A recurring
+wake sends this text unchanged: ask the Keeper to read current state each time,
+rather than rely on a copied status or an unintentionally fixed current head.
+Keep immutable run IDs, commit SHAs, or other exact identifiers when they
+deliberately define the recurring target or baseline. Notes are not included
+in the wake. If execution depends on notes, include an instruction here to
+call masc_schedule_notes_list with the schedule ID before acting."""
+
+[[params]]
+name = "title"
+type = "string"
+description = "Short label for this wake in listings. Falls back to message."
+
+[[params]]
+name = "urgency"
+type = "string"
+enum = ["immediate", "normal", "low"]
+description = "Where the wake sits in the Keeper queue. Defaults to normal."
+
+[[params]]
+name = "requested_at_unix"
+type = "number"
+description = """
+Optional replacement request timestamp for replay/tests. Recorded only; no
+due time counts from it."""
+
+[[params]]
+name = "expires_at_unix"
+type = "number"
+description = "Optional expiry timestamp. A content edit that omits it keeps the stored expiry. An update that also sends a due input or recurrence_kind and omits it leaves the schedule without an expiry."
+
+[[params]]
+name = "recurrence_kind"
+type = "string"
+description = "Send one_shot to remove recurrence; omission keeps the stored recurrence."
+enum = ["one_shot", "interval", "daily", "cron"]
+
+[[params]]
+name = "recurrence_interval_sec"
+type = "integer"
+description = "Required when recurrence_kind is interval."
+
+[[params]]
+name = "recurrence_hour"
+type = "integer"
+description = "Required when recurrence_kind is daily; local hour in 0..23."
+
+[[params]]
+name = "recurrence_minute"
+type = "integer"
+description = "Required when recurrence_kind is daily; local minute in 0..59."
+
+[[params]]
+name = "recurrence_second"
+type = "integer"
+description = "Optional when recurrence_kind is daily; local second in 0..59."
+
+[[params]]
+name = "recurrence_cron"
+type = "string"
+description = """
+Required when recurrence_kind is cron. Standard 5-field cron expression."""
+
+[[params]]
+name = "recurrence_timezone"
+type = "string"
+description = """
+Required for daily or cron. Fixed-offset only: UTC, Asia/Seoul/KST, or an
+offset such as +09:00/UTC+09:00."""
+
+[[params]]
+name = "allow_unregistered_keeper"
+type = "boolean"
+description = """
+Allow a wake whose target Keeper has no durable metadata yet. Default false."""
+
+[[params]]
+name = "source"
+type = "string"
+enum = ["operator_request", "automated_request", "system_request"]
+
+[[params]]
+name = "installation_id"
+type = "string"
+description = """
+For a Lane action instead of a Keeper wake: the declared Lane Add-on \
+installation (its declaration id) whose live worker runs action at each due \
+time. Give it with action, and without keeper_name, message, title, urgency \
+or allow_unregistered_keeper."""
+
+[[params]]
+name = "action"
+type = "object"
+description = """
+For a Lane action: the action object the installation's package schema \
+accepts, such as {"kind": "compose", "questions": 5}. It is checked against the worker that \
+runs it, at each due time."""
+
+[[one_of]]
+required = ["keeper_name", "message"]
+forbidden = ["installation_id", "action"]
+description = "Wake a Keeper with this message."
+
+[[one_of]]
+required = ["installation_id", "action"]
+forbidden = ["keeper_name", "message", "title", "urgency", "allow_unregistered_keeper"]
+description = "Hand this action to a declared Lane installation's live worker."

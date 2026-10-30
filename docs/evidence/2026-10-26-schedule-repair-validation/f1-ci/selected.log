@@ -1,0 +1,118 @@
+[targeted] test/test_schedule_tool_wiring: start 2026-10-26T14:53:41Z
+Testing `Schedule_tool_wiring'.
+  [OK]          wiring          0   cancel ledger write failure retains withd...
+  [OK]          wiring          1   cancel finds old target and all instances.
+  [OK]          wiring          2   Keeper-to-Lane cancellation withdraws old...
+  [OK]          wiring          3   unfinished transfer refuses cancel then r...
+  [OK]          wiring          4   cancel refuses corrupt durable owner.
+  [OK]          wiring          5   cancel refuses discovery failure.
+  [OK]          wiring          6   partial cancel preserves durable effects ...
+  [OK]          wiring          7   note distinguishes absent schedule from u...
+  [OK]          wiring          8   note reports actual primary write failure.
+  [OK]          wiring          9   flat tool surface.
+  [OK]          wiring         10   create list get cancel.
+  [OK]          wiring         11   update keeps public id and replaces insta...
+  [OK]          wiring         12   update omitted kind keeps daily.
+  [OK]          wiring         13   update omitted kind keeps one-shot.
+  [OK]          wiring         14   update requires id and active row.
+  [OK]          wiring         15   content edit preserves time and recurrence.
+  [OK]          wiring         16   content edit keeps the stored expiry.
+  [OK]          wiring         17   content edit keeps a concurrent retime.
+  [OK]          wiring         18   due edit keeps a concurrent daily-to-inte...
+  [OK]          wiring         19   due edit keeps a concurrent interval-to-o...
+  [OK]          wiring         20   results survive the checkpoint encoder.
+  [OK]          wiring         21   creation boundary owns result delivery de...
+  [OK]          wiring         22   update keeps the creator's result delivery.
+  [OK]          wiring         23   get recurring schedule after accept advance.
+  [OK]          wiring         24   create accepts explicit ISO-8601 offset.
+  [OK]          wiring         25   removed convenience input does not synthe...
+  [OK]          wiring         26   unregistered wake target rejected.
+  [OK]          wiring         27   unknown payload kind rejected by the vali...
+  [OK]          wiring         28   unknown field rejected before persistence.
+  [OK]          wiring         29   empty call rejected by name.
+  [OK]          wiring         30   every declared field still creates.
+  [OK]          wiring         31   payload contracts are schema only.
+  [OK]          wiring         32   keeper wake schema validation.
+  [OK]          wiring         33   lane act schedule is created from its own...
+  [OK]          wiring         34   due signal and dashboard projection.
+  [OK]          wiring         35   schedule store error is explicit.
+  [OK]          wiring         36   projection reports read failure as unknown.
+  [OK]          wiring         37   tools response no longer carries the proj...
+  [OK]          wiring         38   Keeper wake target validation is fenced.
+  [OK]          wiring         39   Keeper wake creation respects shutdown fe...
+  [OK]          wiring         40   tool response carries structured recurrence.
+  [OK]          wiring         41   create refuses a due time behind the clock.
+  [OK]          wiring         42   the current second is not past.
+  [OK]          wiring         43   cancel refusal says the state and the las...
+  [OK]          wiring         44   list reads the owner it is asked for.
+  [OK]          wiring         45   list pages by schedule_id.
+  [OK]          wiring         46   an unnamed caller names the actor itself.
+  [OK]          wiring         47   the recorded actor is the caller, not an ...
+  [OK]          wiring         48   a keeper cannot cancel another keeper's s...
+  [OK]          wiring         49   an update keeps the row's actors and its ...
+  [OK]          wiring         50   recipient edit rechecks the current target.
+  [OK]          wiring         51   locked cancel refuses a former recipient ...
+  [OK]          wiring         52   locked replacement uses the current sched...
+  [OK]          wiring         53   a named caller is the actor, not the argu...
+  [OK]          wiring         54   a call gives exactly one due input.
+  [OK]          wiring         55   create refuses an interval below the runn...
+  [OK]          wiring         56   due_in_sec counts from the dispatch clock.
+  [OK]          wiring         57   a calendar first due counts from dispatch...
+  [OK]          wiring         58   update refuses a due time moved behind th...
+  [OK]          wiring         59   a limit outside its range is refused.
+  [OK]          wiring         60   a cursor belongs to the filters that issu...
+  [OK]          wiring         61   status active lists every status that is ...
+  [OK]          wiring         62   a mistyped deciding argument is refused.
+  [OK]          wiring         63   declared bounds match the handler.
+Test Successful in 1.119s. 64 tests run.
+[targeted] test/test_schedule_tool_wiring: OK in 1s
+[targeted] test/test_keeper_paused_work_transfer_transaction: start 2026-10-26T14:53:42Z
+Testing `keeper paused-work transfer transaction'.
+  [OK]          Transfer_owner          0   commit exact pending move.
+  [OK]          Transfer_owner          1   retired v2 receipt is rejected.
+  [OK]          Transfer_owner          2   retired receipt directory is not ...
+  [OK]          Transfer_owner          3   admission busy has zero mutation.
+  [OK]          Transfer_owner          4   unrelated enqueue preserves sourc...
+  [OK]          Transfer_owner          5   stale source incarnation has no e...
+  [OK]          Transfer_owner          6   source shutdown fences transfer b...
+  [OK]          Transfer_owner          7   target shutdown fences transfer b...
+  [OK]          Transfer_owner          8   same transfer replay after target...
+  [OK]          Transfer_owner          9   later identical source transfers ...
+  [OK]          Transfer_owner         10   replay after source ACK projects ...
+  [OK]          Transfer_owner         11   exact projected replay survives t...
+Test Successful in 0.238s. 12 tests run.
+[targeted] test/test_keeper_paused_work_transfer_transaction: OK in 0s
+[targeted] test/test_keeper_event_queue: start 2026-10-26T14:53:43Z
+ASSERT independent canonical queue progresses while page cannot finish
+ASSERT locked original transition remains durable
+ASSERT page retains original workspace
+ASSERT actual deterministic owner page
+ASSERT first original transfer converged
+ASSERT first source retired only after target projection
+ASSERT page retains original workspace
+ASSERT actual deterministic owner page
+ASSERT page retains exact shutdown operation
+ASSERT fenced original transition retained
+ASSERT page retains original workspace
+ASSERT actual deterministic owner page
+ASSERT cursor continues beyond fenced owner
+ASSERT page retains original workspace
+ASSERT actual deterministic owner page
+ASSERT page retains original workspace
+ASSERT actual deterministic owner page
+ASSERT page retains original workspace
+ASSERT actual deterministic owner page
+ASSERT page retains original workspace
+ASSERT actual deterministic owner page
+ASSERT fresh original owner converges after rollback
+ASSERT original source outbox retired
+ASSERT original source outbox retired
+ASSERT original source outbox retired
+ASSERT each original source appears once in target queue
+ASSERT each original source appears once in target queue
+ASSERT each original source appears once in target queue
+ASSERT page retains original workspace
+ASSERT actual deterministic owner page
+ASSERT settled original owner has no pending transition
+ASSERT fresh sweep does not duplicate transferred stimuli
+[targeted] test/test_keeper_event_queue: OK in 0s

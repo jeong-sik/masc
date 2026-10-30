@@ -1,0 +1,68 @@
+{
+  "at": "2026-10-21T17:10:26.343228+00:00",
+  "identity": "candle-host-qualifier",
+  "method": "POST",
+  "path": "/mcp",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": "5f361692ec1844069692d0a19c32ecc5",
+    "method": "tools/call",
+    "params": {
+      "name": "masc_transition",
+      "arguments": {
+        "task_id": "task-001",
+        "action": "submit_for_verification",
+        "handoff_context": {
+          "summary": "Guest shim dependency repaired; the actual Keeper wrote and read back measurement.json in its owned running guest. The host performed the source-byte comparison; the Keeper only preserved that measurement.",
+          "evidence_refs": [
+            "artifact:measurement.json"
+          ]
+        },
+        "notes": "Resubmission after the original artifact_unreadable receipt; inspect the new immutable artifact. This qualifies source bytes only, not behavior or the full54 goal."
+      }
+    }
+  },
+  "http_status": 200,
+  "response": {
+    "jsonrpc": "2.0",
+    "id": "5f361692ec1844069692d0a19c32ecc5",
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.60.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"result\":\"task-001 awaiting_verification \u2192 awaiting_verification\",\"evidence_capture\":{\"verification_id\":\"vrf-5ee2e4f6674a8ccda7adaa075d60da5b\",\"diagnostics\":[]}}",
+            "status": "ok",
+            "tool": "masc_transition"
+          },
+          "trace_id": "\"5f361692ec1844069692d0a19c32ecc5\"",
+          "agent_id": "candle-host-qualifier",
+          "tool": "masc_transition",
+          "duration_ms": 84,
+          "attempts": 1,
+          "timestamp": "2026-10-21T17:10:26Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"result\":\"task-001 awaiting_verification \u2192 awaiting_verification\",\"evidence_capture\":{\"verification_id\":\"vrf-5ee2e4f6674a8ccda7adaa075d60da5b\",\"diagnostics\":[]}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "result": "task-001 awaiting_verification \u2192 awaiting_verification",
+        "evidence_capture": {
+          "verification_id": "vrf-5ee2e4f6674a8ccda7adaa075d60da5b",
+          "diagnostics": []
+        }
+      }
+    }
+  }
+}

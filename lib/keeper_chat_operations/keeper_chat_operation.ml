@@ -1,0 +1,231 @@
+module Operation_id = Keeper_operation_id
+
+type failure_kind =
+  | Interrupted_by_restart
+  | Turn_cancelled
+  | Turn_exception
+  | Store_unavailable
+  | No_queued_operation
+  | Invalid_input
+  | Turn_invariant
+  | Delivery_failed
+
+let all_failure_kinds =
+  [ Interrupted_by_restart
+  ; Turn_cancelled
+  ; Turn_exception
+  ; Store_unavailable
+  ; No_queued_operation
+  ; Invalid_input
+  ; Turn_invariant
+  ; Delivery_failed
+  ]
+;;
+
+let failure_kind_to_string = function
+  | Interrupted_by_restart -> "Interrupted_by_restart"
+  | Turn_cancelled -> "Turn_cancelled"
+  | Turn_exception -> "Turn_exception"
+  | Store_unavailable -> "Store_unavailable"
+  | No_queued_operation -> "No_queued_operation"
+  | Invalid_input -> "Invalid_input"
+  | Turn_invariant -> "Turn_invariant"
+  | Delivery_failed -> "Delivery_failed"
+;;
+
+let failure_kind_of_string = function
+  | "Interrupted_by_restart" -> Ok Interrupted_by_restart
+  | "Turn_cancelled" -> Ok Turn_cancelled
+  | "Turn_exception" -> Ok Turn_exception
+  | "Store_unavailable" -> Ok Store_unavailable
+  | "No_queued_operation" -> Ok No_queued_operation
+  | "Invalid_input" -> Ok Invalid_input
+  | "Turn_invariant" -> Ok Turn_invariant
+  | "Delivery_failed" -> Ok Delivery_failed
+  | value -> Error (Printf.sprintf "unknown Keeper chat operation failure kind %S" value)
+;;
+
+type failure =
+  { kind : failure_kind
+  ; detail : string
+  ; outcome_ref : string option
+  }
+
+type state =
+  | Queued
+  | Running of { started_at : float }
+  | Succeeded of
+      { completed_at : float
+      ; outcome_ref : string
+      }
+  | Failed of
+      { completed_at : float
+      ; failure : failure
+      }
+  | Cancelled of { completed_at : float }
+
+type batch_membership = { execution_id : Operation_id.t; input_digest : string }
+
+type t =
+  { operation_id : Operation_id.t
+  ; batch_membership : batch_membership option
+  ; admission_digest : string
+  ; execution_digest : string
+  ; sequence : int64
+  ; source : Yojson.Safe.t
+  ; input : Yojson.Safe.t option
+  ; state : state
+  ; created_at : float
+  }
+
+let state_to_string = function
+  | Queued -> "queued"
+  | Running _ -> "running"
+  | Succeeded _ -> "succeeded"
+  | Failed _ -> "failed"
+  | Cancelled _ -> "cancelled"
+;;
+
+let is_terminal = function
+  | Succeeded _ | Failed _ | Cancelled _ -> true
+  | Queued | Running _ -> false
+;;
+
+let to_json_with_failure ~failure_fields operation =
+  let state_fields =
+    match operation.state with
+    | Queued -> [ "state", `String "Queued" ]
+    | Running { started_at } ->
+      [ "state", `String "Running"; "started_at", `Float started_at ]
+    | Succeeded { completed_at; outcome_ref } ->
+      [ "state", `String "Succeeded"
+      ; "completed_at", `Float completed_at
+      ; "outcome_ref", `String outcome_ref
+      ]
+    | Failed { completed_at; failure } ->
+      [ "state", `String "Failed"; "completed_at", `Float completed_at ]
+      @ failure_fields operation.operation_id failure
+    | Cancelled { completed_at } ->
+      [ "state", `String "Cancelled"; "completed_at", `Float completed_at ]
+  in
+  `Assoc
+    ([ "schema", `String "masc.keeper_chat_operation.v1"
+     ; "operation_id", `String (Operation_id.to_string operation.operation_id)
+     ; "sequence", `String (Int64.to_string operation.sequence)
+     ; "created_at", `Float operation.created_at
+     ; "admission_digest", `String operation.admission_digest
+     ; "execution_digest", `String operation.execution_digest
+     ; "source", operation.source
+     ; ( "input"
+       , match operation.input with
+         | None -> `Null
+         | Some input -> input )
+     ]
+     @ (match operation.batch_membership with
+        | None -> []
+        | Some member -> ["batch_execution_id", `String (Operation_id.to_string member.execution_id);
+            "batch_input_digest", `String member.input_digest])
+     @ state_fields)
+;;
+
+let to_json operation =
+  to_json_with_failure operation
+    ~failure_fields:(fun _operation_id { kind; detail; outcome_ref } ->
+      [ "failure_kind", `String (failure_kind_to_string kind)
+      ; "failure_detail", `String detail
+      ; ( "outcome_ref"
+        , match outcome_ref with None -> `Null | Some value -> `String value )
+      ])
+;;
+
+let public_failure_message = function
+  | Interrupted_by_restart -> "The operation was interrupted by a runtime restart."
+  | Turn_cancelled -> "The operation was cancelled."
+  | Turn_exception -> "The operation could not complete."
+  | Store_unavailable -> "The operation store is unavailable."
+  | No_queued_operation -> "The operation is no longer queued."
+  | Invalid_input -> "The operation input was rejected."
+  | Turn_invariant -> "The operation requires operator attention."
+  | Delivery_failed -> "The operation result could not be delivered."
+;;
+
+let to_public_json operation =
+  to_json_with_failure operation
+    ~failure_fields:(fun operation_id { kind; detail = _; outcome_ref = _ } ->
+      [ "failure_kind", `String (failure_kind_to_string kind)
+      ; "failure_detail", `String (public_failure_message kind)
+      ; "incident_id", `String (Operation_id.to_string operation_id)
+      ])
+;;
+
+let validate_timestamp ~field value =
+  if Float.is_finite value && value >= 0.0
+  then Ok ()
+  else Error (field ^ " must be a finite non-negative timestamp")
+;;
+
+let validate_nonblank ~field value =
+  if String.equal (String.trim value) ""
+  then Error (field ^ " must not be blank")
+  else Ok value
+;;
+
+type canonical_json_error =
+  | Duplicate_object_key of string
+  | Non_finite_float
+
+let canonical_json value =
+  let rec normalize = function
+    | `Assoc fields ->
+      let rec loop seen normalized = function
+        | [] ->
+          normalized
+          |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+          |> fun fields -> Ok (`Assoc fields)
+        | (name, value) :: rest ->
+          if List.mem name seen
+          then Error (Duplicate_object_key name)
+          else
+            (match normalize value with
+             | Error _ as error -> error
+             | Ok value -> loop (name :: seen) ((name, value) :: normalized) rest)
+      in
+      loop [] [] fields
+    | `List values ->
+      let rec loop normalized = function
+        | [] -> Ok (`List (List.rev normalized))
+        | value :: rest ->
+          (match normalize value with
+           | Error _ as error -> error
+           | Ok value -> loop (value :: normalized) rest)
+      in
+      loop [] values
+    | `Float value when not (Float.is_finite value) ->
+      Error Non_finite_float
+    | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
+      Ok value
+  in
+  normalize value
+;;
+
+let canonical_json_error_to_string = function
+  | Duplicate_object_key name -> Printf.sprintf "JSON has duplicate field %S" name
+  | Non_finite_float -> "JSON contains a non-finite float"
+;;
+
+let canonical_json_string value =
+  canonical_json value
+  |> Result.map Yojson.Safe.to_string
+  |> Result.map_error canonical_json_error_to_string
+;;
+
+let sha256 value = Agent_core_sha256.(digest_string value |> to_hex)
+
+let execution_digest input =
+  canonical_json_string input |> Result.map sha256
+;;
+
+let admission_digest ~source ~input =
+  canonical_json_string (`Assoc [ "source", source; "input", input ])
+  |> Result.map sha256
+;;

@@ -1,0 +1,10 @@
+name = "masc_dos_meta"
+description = """
+Report which ocaml-dos core this server was built with.
+
+Read-only. Returns the linked core's source digest, the digest at the CI pin,
+and whether they match. A mismatch means this server runs a different core
+from the one CI builds against — an older opam install or a vendored checkout
+on another branch."""
+additional_properties = false
+defer_loading = true

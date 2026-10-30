@@ -1,0 +1,12 @@
+{
+  "executed_source": "1196e280ee8b1b5d2381a59210fa51246affe76e",
+  "first_incarnation": "01a161d1-adf6-7000-a5bb-d068f198269c",
+  "second_incarnation": "01a161d4-4188-7000-b79c-17a3edec7769",
+  "second_container_id": "93e4f725eee87cd4739f0b7d98f7be45fbd172ef5671aed2d2f60a1f403718ce",
+  "state_volume_preserved": true,
+  "current_memory_bytes_preserved": true,
+  "memory_sha256": "619fa8737bed6d1b38e0d7e903a9fd1562f4ef6aedcae5b9fc60e19207151c85",
+  "off_observation": "29-off-cleanup-inventory.json plus actual docker ps returned zero matching containers",
+  "on_observation": "30-second-on-inventory.json plus actual docker inspect returned one distinct container with the original state volume",
+  "curator_domain_completion": false
+}

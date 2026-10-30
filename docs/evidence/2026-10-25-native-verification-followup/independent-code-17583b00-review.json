@@ -1,0 +1,150 @@
+{
+  "verdict": "PASS_SOURCE",
+  "verdict_line": "verdict: PASS head: 17583b006eaf0823587ba07a27ad50889ef8d498 by: repair_eval_metrics (independent source review)",
+  "reviewed_at_utc": "2026-10-25T01:15:20.062186+00:00",
+  "head": "17583b006eaf0823587ba07a27ad50889ef8d498",
+  "base": "b31260ebda2134c3c4b2527ee5f9455ddfd600f1",
+  "full_diff_sha256": "50d3e545f11511f79e33e214e3d445d2c5d4a6cc979598c34f02cf199dcd87c6",
+  "original_code_head": "32d68120b394a5dc8b1d96aba7a9765a4a1ad552",
+  "original_base": "be9a9d9da9d426c8babb691a9ebc4620ca4a517c",
+  "scope": {
+    "included": "Entire current CODE delta:3 test files only; exact current APIs and production identity/publication/rejection/event consumers, parent-added Claude helper and pre-result identity fixture as relevant context, original be9a native counterevidence binding.",
+    "excluded": "Unfinished docs head, whole parent/upstream/Native Stack approval, full new native execution/typing/linking, installed runtime, vendor/model Goal success, main Goal/Task lifecycle claims. No source edits, Dune, CI watch/query, canary mutations or GitHub approval."
+  },
+  "p0_p1_p2_findings": [],
+  "nonblocking_findings": [],
+  "findings_by_file": [
+    {
+      "path": "test/test_keeper_claude_code_runtime.ml:5208",
+      "assessment": "Adds a real fixture root assistant frame with explicit model, session and UUID immediately before the same result. Preserves3 reads, failing post_tool_use hook and expected hook failure detail. No fallback model identity or result-only relaxation is introduced.",
+      "actual_consumer": "Runtime_claude_code.parse_assistant1918 requires exact active session and message.model; Frame_assistant2432 records model only for Root_response/Model_response; result guard2578 still rejects no measured assistant model.",
+      "bounded_execution": "Exact source definitions and lifecycle49 with_fixture expression compiled and generated script executed. Before emits3 calls/0 root assistant/1 result; after3 calls/1 root assistant/1 result, with measured-model frame ordered before original terminal. Actual SDK parser/hook flow was source-reviewed, not natively executed."
+    },
+    {
+      "path": "test/test_verification.ml:16",
+      "assessment": "One unique temporary on-disk registry is replayed then installed before tests, using canonical storage_filename/API; install conflict fails explicitly. At process exit only that test directory is removed after clearing expired Eio fs context. No production state/config or policy is changed.",
+      "actual_consumer": "Server_runtime_bootstrap764 uses the same replay→install_global sequence. Completion_authority_agent.process_task_once1004 and recovery1523 resolve installed global registry on invocation. Verifier_review_publication157 calls publish_terminal_confirmed; Verification_run_registry387 confirms current durable history and rejects Volatile_store356.",
+      "requery": "New check_durable_approved_run28 reads current global and separately replays the same history, compares complete canonical row serialization, and requires typed Completed/Approved. Missing, Running, different or non-approved replay fails. Called after existing reviewer/verdict/run completion promises in both affected fixtures; Task Done, tool observation and frozen contract/source checks remain. Existing5s test deadlines are unchanged. No fake completion row or bypass of durable confirmation is added."
+    },
+    {
+      "path": "test/test_completion_repair_delivery.ml:186",
+      "assessment": "Updates stale bare-verification-ID handoff expectation to current empty evidence list, while adding stronger typed correlation/reason/authority assertions before reconciliation and durable event assertions afterward. Task returns Todo, correction text/next step/reclaim policy, queue absence, exact outbox drain and idempotence checks remain.",
+      "actual_consumer": "Workspace_task_transitions973 and Workspace_task484 produce empty evidence refs. Rejected obligation988 persists task_id/verification_id/producer/reason/authority. Completion_authority_actor/kind map System_llm_agent to repair-verifier-run/system_llm_agent. Actual verdict event fields1174–1198 and log_event1238 match all asserted names and values. Workspace_utils_ops.log_event708 writes synchronously to canonical Dated_jsonl.Store.Root.Events, exactly the new read location.",
+      "error_handling": "Missing event, malformed JSON, read error, mismatched identity or absent field all fail outside best-effort producer hook guards; no swallowed assertion path introduced."
+    }
+  ],
+  "parent_reassembly_context": {
+    "own_stable_patch_id": "bf794556a24d766a187da468545d96257556afff",
+    "same_as_original_32d_delta": true,
+    "six_relevant_product_files_byte_equal_to_original": [
+      {
+        "path": "lib/verification_run_registry.mli",
+        "same_at_32d_and_175": true,
+        "head_sha256": "0b251b5a8a525e920aa6866f96cb033684a23aa732767c10e475e445efd06cfe"
+      },
+      {
+        "path": "lib/verification_run_registry.ml",
+        "same_at_32d_and_175": true,
+        "head_sha256": "9864c29f2d5b49c3bd26abb18acad4d50bf9fc66492c2e82da2760499d8bd281"
+      },
+      {
+        "path": "lib/run_registry_core/run_registry_core.ml",
+        "same_at_32d_and_175": true,
+        "head_sha256": "d575fb58c2e73006b4f0196afbd18b1c6dc77a9d23de25bec24475c4bb17280d"
+      },
+      {
+        "path": "lib/runtime/runtime_claude_code.ml",
+        "same_at_32d_and_175": true,
+        "head_sha256": "0957f8fa9e2da445f781435a804ba852fedfcacdef6574eb44908a55556464b3"
+      },
+      {
+        "path": "lib/workspace/workspace_task_transitions.ml",
+        "same_at_32d_and_175": true,
+        "head_sha256": "4f66ec9447b4d5aacebe01281d5e6cf01a6d7962bd0b7988cedaacead210ddaa"
+      },
+      {
+        "path": "lib/server/server_runtime_bootstrap.ml",
+        "same_at_32d_and_175": true,
+        "head_sha256": "52e93c41abaf2ef2a6f5c82b3c3d3c149fc254b6edd384ce60d8e264800852ae"
+      }
+    ],
+    "claude_parent_delta": "Read all added optional terminal_effect_state helper forwarding and pre-result typed terminal identity fixture. Actual current runtime.mli101 accepts this callback; runtime default remains Terminal_effect_open. Lifecycle49 passes no override, so the parent port does not silently force its completion. Added separate fixture explicitly documents its producer-state port and tests Host settlement/context/turn identity, not a real external durable stimulus. No entire-parent approval inferred."
+  },
+  "original_native_evidence": {
+    "source": "be9a9d9da9d426c8babb691a9ebc4620ca4a517c",
+    "run_id": 40147287888,
+    "raw_job_log": {
+      "path": "/tmp/masc-native-integrity-be9a9d9d-job.log",
+      "sha256": "421e39925afa2c5498899a58edba05eed7ae9be821310059b32c36706bafcde0",
+      "bytes": 593320
+    },
+    "independently_recounted": {
+      "passed": 247,
+      "failed": 4
+    },
+    "count_definition": "Timestamped first status rows only: Z[space]+[OK|FAIL]. Excludes boxed duplicate failure-summary rows. No raw log-row count is a new failure count.",
+    "cause_binding": [
+      "22/24 logs explicitly say volatile verification registry cannot confirm durable publication before5s timeout.",
+      "repair_delivery2 fails old bareVrf evidence expectation.",
+      "lifecycle49 logs3 post_tool hook failures then no measured assistant model result protocol error."
+    ],
+    "interpretation": "Original completed be9a result remains247PASS/4FAIL, not replaced by source review or fixture-generator success."
+  },
+  "independent_checks": {
+    "changed_ml_files_parsed": 3,
+    "parse_total": 3,
+    "full_code_diff_check_exit": 0,
+    "stable_own_delta_identity": true,
+    "fixture_generator_before_after": "Both compile/script exits0; exact3 read IDs and original result maintained, after has valid root model/session/UUID before result.",
+    "native_current_head": "UNRUN_BY_REVIEWER",
+    "registry_actual_durable_execution": "UNRUN_BY_REVIEWER; canonical production/API source traced, no reimplementation passed off as registry execution."
+  },
+  "remaining_unverified": [
+    "Actual minimum5 native suites at175 or final docs head",
+    "Full installed SDK/Host post-tool-hook callback execution with the added measured frame",
+    "Real durable registry/publication transaction and event store execution in linked MASC tests",
+    "Final docs delta and remote head/base/Native Stack membership"
+  ],
+  "artifacts": [
+    {
+      "path": "/tmp/masc-independent-native19-code-review-20261025/identity.json",
+      "sha256": "baa0fcf38846d4442102d2986cfe918c004a7ebbf1f18793816fc4cabe8dc16a"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-code-review-20261025/code.diff",
+      "sha256": "50d3e545f11511f79e33e214e3d445d2c5d4a6cc979598c34f02cf199dcd87c6"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-code-review-20261025/original-32d.diff",
+      "sha256": "a9e527a2a0e197e8b4e71b75c3bcc2b90388e4d3166bd9135452f3c98b374182"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-code-review-20261025/parent-claude-context.diff",
+      "sha256": "52797d664a4af076a47d2bb5ba67ab7381486cb128489ad6f2446098f673b1e3"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-code-review-20261025/parse-diff-binding.json",
+      "sha256": "393ea30c4f45d71749085831cd1c328e4b91be5fcd39582af52ac71b0c1c57c3"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-code-review-20261025/probe_fixture.py",
+      "sha256": "1fa956c5e10ba7d696d39f28bd017f064ec4d86c996931ffa18e7dfd34ef6dfc"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-code-review-20261025/before-fixture-generator.ml",
+      "sha256": "ace5654c4b71c5c0505dcd65324c440003ca88497aa69d07059a7eb0aea47a25"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-code-review-20261025/after-fixture-generator.ml",
+      "sha256": "42081ccbd20d98c78bbd54689778dda724f61edf782ec0dcd99bb6cbc68becda"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-code-review-20261025/fixture-protocol-result.json",
+      "sha256": "7b0617041eea7870ad1e355f589d3c1a0bd92c51a135a2ac4e3ffd3f220c6168"
+    },
+    {
+      "path": "/tmp/masc-independent-native19-code-review-20261025/baseline-native-binding.json",
+      "sha256": "353040834b2b75b4be69f7bc4767e22a60f5a45d3935aa2c7087cbfe89c28a58"
+    }
+  ]
+}

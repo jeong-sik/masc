@@ -1,0 +1,88 @@
+{
+  "scope": "real CodeMirror and MASC LSP extension with synthetic WebSocket; not an actual language-server or production integration test",
+  "source_commit": "63c4b772166e3f064e09ab2d12d293005e8c368a",
+  "data": {
+    "messages": [
+      "initialize",
+      "initialized",
+      "textDocument/didOpen",
+      "textDocument/codeLens",
+      "textDocument/inlayHint",
+      "textDocument/diagnostic"
+    ],
+    "document": "let total = sum 3 7\nlet answer = total + 1",
+    "hints": [
+      {
+        "label": ": int",
+        "position": 9,
+        "tooltip": "inferred type",
+        "parts": [
+          {
+            "value": ": ",
+            "tooltip": null
+          },
+          {
+            "value": "int",
+            "tooltip": "**integer**"
+          }
+        ]
+      },
+      {
+        "label": " (inferred)",
+        "position": 9,
+        "tooltip": null,
+        "parts": [
+          {
+            "value": " (inferred)",
+            "tooltip": null
+          }
+        ]
+      },
+      {
+        "label": "left:",
+        "position": 16,
+        "tooltip": "first argument",
+        "parts": [
+          {
+            "value": "left:",
+            "tooltip": null
+          }
+        ]
+      },
+      {
+        "label": "right:",
+        "position": 18,
+        "tooltip": "second argument",
+        "parts": [
+          {
+            "value": "right:",
+            "tooltip": null
+          }
+        ]
+      },
+      {
+        "label": "A",
+        "position": 42,
+        "tooltip": null,
+        "parts": [
+          {
+            "value": "A",
+            "tooltip": null
+          }
+        ]
+      },
+      {
+        "label": "B",
+        "position": 42,
+        "tooltip": null,
+        "parts": [
+          {
+            "value": "B",
+            "tooltip": null
+          }
+        ]
+      }
+    ]
+  },
+  "page_errors": []
+}

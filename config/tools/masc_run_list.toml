@@ -1,0 +1,17 @@
+name = "masc_run_list"
+description = """
+List all task runs with their status (active/completed) and plan presence.
+
+\
+\\nUse when starting a session to find abandoned work or review completed \
+runs. \\nAfter finding a run, call masc_run_get for full details or \
+masc_run_init to start a new one."""
+additional_properties = false
+
+
+# Held back from the request until the model asks for it by name.
+# 2026-09-01..03: 10 turns needed it across 6317 provider requests, and its
+# 369 B schema rode every one of those requests. Loading it on demand costs
+# one extra request on those 10 turns and saves the 369 B on the rest.
+# What that trade does not cover is in Tool_loading_declarations.
+defer_loading = true

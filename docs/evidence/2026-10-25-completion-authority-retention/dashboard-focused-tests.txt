@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /private/tmp/masc-authority-round-integration-20261025/dashboard
+
+
+ Test Files  2 passed (2)
+      Tests  39 passed (39)
+   Start at  02:48:08
+   Duration  2.05s (transform 29%, environment 24%, import 22%, setup 20%, tests 5%, worker 1%)
+
+    Isolate  2 workers spawned · ~340ms startup each (spawn + environment, per file)
+             at least ~340ms faster with isolate: false — reuses workers across files instead of one per file
+

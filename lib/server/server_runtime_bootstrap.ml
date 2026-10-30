@@ -1,0 +1,2188 @@
+
+open Server_auth
+open Server_routes_http
+
+module Mcp_server = Mcp_server
+module Mcp_eio = Mcp_server_eio
+module Config_root_bootstrap = Server_runtime_config_root_bootstrap
+
+let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
+let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
+let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
+
+(* Seconds withheld from tool-blob maintenance so the boot stages that follow
+   it (Runtime_params restore, credential audit, Domain_pool, Keeper gate
+   replay, lazy task groups, Discord/Slack/gRPC/WebSocket listeners) still fit
+   inside the startup watchdog. Those stages took ~2s on an idle host; the
+   reserve carries them at the ~10x slowdown observed when a concurrent build
+   saturates the disk, which is the condition under which maintenance
+   overran its host's watchdog. *)
+(* Whether AGENT_CORE_MODEL_CATALOG names a full replacement is one answer,
+   [Runtime.exact_output_target_source]: installing the catalog, warning
+   about retired config-root catalogs, choosing where the exact targets come
+   from, and whether rule 3 applies to runtime.toml all read it there. *)
+let replacement_catalog_path ?env () =
+  match Runtime.exact_output_target_source ?env () with
+  | Runtime.Replacement_catalog_targets { path } -> Some path
+  | Runtime.Runtime_binding_targets -> None
+
+let existing_file path =
+  let path = String.trim path in
+  if String.equal path "" then
+    None
+  else
+    try
+      if Sys.file_exists path && not (Sys.is_directory path) then Some path else None
+    with
+    | Sys_error _ -> None
+
+let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
+  match load_catalog path with
+  | Ok catalog -> set_catalog catalog
+  | Error detail ->
+    raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail))
+
+let configure_agent_core_model_catalog_env
+      ?env
+      ?(agent_core_catalog = Llm_provider.Model_catalog.global)
+      ?(load_catalog = Llm_provider.Model_catalog.load_file)
+      ?(set_catalog = Llm_provider.Model_catalog.set_global)
+      ()
+  =
+  match replacement_catalog_path ?env () with
+  | Some path ->
+    install_runtime_model_catalog_override ~load_catalog ~set_catalog path;
+    Log.Misc.info
+      "model_catalog: AGENT_CORE_MODEL_CATALOG=%s already configured and loaded"
+      path;
+    Some path
+  | None ->
+    (match agent_core_catalog () with
+     | Some _ ->
+       Log.Misc.info
+         "model_catalog: no explicit catalog path resolved; using agent_core ambient \
+          model catalog"
+     | None ->
+       raise (Env_config_core.Config_error "model_catalog: AGENT_CORE embedded model catalog is unavailable"));
+    None
+
+let warn_ignored_config_root_full_catalogs
+      ?env
+      ~config_root
+      ()
+  =
+  if Option.is_none (replacement_catalog_path ?env ())
+  then
+    [ "models.toml"; "agent-core-models.toml" ]
+    |> List.iter (fun filename ->
+      let path = Filename.concat config_root filename in
+      if Option.is_some (existing_file path)
+      then
+        Log.Misc.warn
+          "model_catalog: ignoring retired config-root full catalog %s; the AGENT_CORE embedded catalog is the only place a provider or model fact is written (set AGENT_CORE_MODEL_CATALOG explicitly only for a deliberate full replacement)"
+          path)
+
+(* A config-load failure (runtime.toml) must not be reported
+   as a model connection problem: the model was never reached. The diagnostic
+   names the class, carries the underlying file-path-bearing detail verbatim,
+   and states the next action. *)
+let config_load_failure_diagnostic ~detail =
+  Printf.sprintf
+    "Model configuration could not be loaded (this is not a model connection problem):\n\
+     %s\n\
+     Fix the configuration above or move the file aside. Run masc runtime-verify <RUNTIME_ID> to re-check a model connection afterwards."
+    detail
+
+let load_exact_output_lane_declarations ?config_path ?config_root () =
+  let runtime_config_path =
+    match config_path, config_root with
+    | Some path, _ -> Some path
+    | None, Some config_root ->
+      let path =
+        Filename.concat config_root Config_dir_resolver.runtime_toml_filename
+      in
+      if Sys.file_exists path then Some path else None
+    | None, None -> Runtime.config_path ()
+  in
+  match runtime_config_path with
+  | None ->
+    raise
+      (Env_config_core.Config_error
+         "exact-output registry: runtime.toml path is unavailable")
+  | Some config_path ->
+    (match Runtime_toml.parse_file config_path with
+     | Error errors ->
+       raise
+         (Env_config_core.Config_error
+            (Printf.sprintf
+               "exact-output registry: runtime config parse failed (%s): %d error(s)"
+               config_path
+               (List.length errors)))
+     | Ok (config : Runtime_schema.config) ->
+       ( config_path
+       , config.exact_output_lane_decls ))
+;;
+
+type mandatory_exact_output_lane_violation =
+  | Mandatory_lane_missing of { lane_id : string }
+  | Mandatory_lane_without_slots of { lane_id : string }
+
+let mandatory_exact_output_lane_violations lanes =
+  List.filter_map
+    (fun lane_id ->
+       match
+         List.find_opt
+           (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+              String.equal (Runtime_schema.exact_lane_key lane.owner) lane_id)
+           lanes
+       with
+       | None -> Some (Mandatory_lane_missing { lane_id })
+       | Some { slot_ids = []; cli_slot_ids = []; _ } ->
+         Some (Mandatory_lane_without_slots { lane_id })
+       | Some { slot_ids = _ :: _; _ }
+       | Some { cli_slot_ids = _ :: _; _ } -> None)
+    Standalone_lane.required_ids
+;;
+
+(* Names the key to set and the type it expects, never a value: the seed
+   config/runtime.toml describes a different deployment, so a target ref
+   copied from it can be unknown here and fail publication on the next
+   boot (#25685). *)
+let mandatory_exact_output_lane_violation_to_string = function
+  | Mandatory_lane_missing { lane_id } ->
+    Printf.sprintf
+      "lane %S is missing: add [runtime.exact_output_lanes.%s] with a \
+       non-empty slots array (AGENT_CORE target refs) or cli_slots array \
+       (runtime ids)"
+      lane_id
+      lane_id
+  | Mandatory_lane_without_slots { lane_id } ->
+    Printf.sprintf
+      "lane %S has no slots: set runtime.exact_output_lanes.%s.slots \
+       (AGENT_CORE target refs) or runtime.exact_output_lanes.%s.cli_slots \
+       (runtime ids) to a non-empty array"
+      lane_id
+      lane_id
+      lane_id
+;;
+
+(* Every violation goes into one error, so the first failed boot names every
+   key the operator has to set. *)
+let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
+  match mandatory_exact_output_lane_violations lanes with
+  | [] -> ()
+  | violations ->
+    raise
+      (Env_config_core.Config_error
+         (Printf.sprintf
+            "exact-output registry: %d mandatory lane(s) unusable in %s: %s; \
+             choose target refs or runtime ids this deployment defines; \
+             existing runtime configs are never migrated automatically"
+            (List.length violations)
+            config_path
+            (violations
+             |> List.map mandatory_exact_output_lane_violation_to_string
+             |> String.concat "; ")))
+;;
+
+(* Retracted (2026-08-28, hours after #31445): the classifier reuses
+   Exact_output.admit_target_ref, whose authority is exact-output LANE
+   admission. Keeper turn assignments resolve through a different path —
+   the [runtime] provider/model bindings — and keepers flagged by the
+   catalog predicate (codex_subscription.gpt-5.6-luna, ollama_cloud
+   targets, …) were measured running on exactly their assigned runtimes
+   the same day. The boot ERROR named ten false positives before it was
+   pulled. A correct assignment-liveness check must read the binding
+   resolver, not the frozen catalog. *)
+
+let warn_catalog_absent_keeper_assignments _resolver_snapshot = ()
+;;
+
+(* The Stagehand browser lane is optional: without it only the browser target
+   that asks it for answers is degraded, which [Runtime.report_exact_output_registry]
+   reports. A slot whose model takes no system prompt is named once here, at
+   boot, and not only in each refused llm.generate. *)
+let warn_browser_stagehand_slots registry =
+  let lane_id = Standalone_lane.to_id Standalone_lane.Browser_stagehand in
+  match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+  | Error
+      ( Runtime_exact_output_registry.Exact_lane_off _
+      | Runtime_exact_output_registry.Exact_lane_unconfigured _
+      | Runtime_exact_output_registry.No_admitted_lane_slots _ ) ->
+    (* [Runtime.report_exact_output_registry] reported it. *)
+    ()
+  | Ok resolved ->
+    (match Browser_stagehand_model.admit_lane resolved with
+     | Ok { refused_slots = []; _ } -> ()
+     | Ok { refused_slots = _ :: _ as refused_slots; _ } ->
+       Log.Server.warn
+         "exact_output: lane %S skips slots it cannot use: %s"
+         lane_id
+         (String.concat "; " (List.map Browser_stagehand_model.refused_slot_to_string refused_slots))
+     | Error refusal ->
+       Log.Server.warn
+         "exact_output: lane %S refuses every request: %s"
+         lane_id
+         (Browser_stagehand_model.refusal_to_string (Browser_stagehand_model.Lane_refused refusal)))
+;;
+
+(* The lanes runtime.toml declares, refused when a mandatory one is unusable,
+   and the catalog the loaded runtimes give them. Boot publishes from these;
+   the deployment preflight only asks whether it could. *)
+let exact_output_catalog_for_lanes ~config_path lanes =
+  require_explicit_mandatory_exact_output_lanes ~config_path lanes;
+  let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
+  lanes, Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes, runtimes
+;;
+
+let exact_output_lanes_and_catalog ?config_path ?config_root () =
+  let config_path, lanes = load_exact_output_lane_declarations ?config_path ?config_root () in
+  exact_output_catalog_for_lanes ~config_path lanes
+;;
+
+let exact_output_resolver_snapshot (catalog : Runtime.exact_output_catalog) =
+  match Runtime.load_exact_output_resolver_snapshot catalog.Runtime.catalog_input with
+  | Error error ->
+    raise
+      (Env_config_core.Config_error
+         ("exact-output resolver snapshot: "
+          ^ Runtime_exact_output_registry.resolver_snapshot_error_to_string error))
+  | Ok resolver_snapshot -> resolver_snapshot
+;;
+
+(* A mandatory lane rule 3 emptied -- every slot a gap, no cli_slots -- is
+   excused at a publication, so it alone is unavailable and every other lane
+   still publishes. A config commit excuses the same lanes from the same
+   derivation ([Runtime.exact_output_resolver_catalog]). A mandatory lane empty
+   for any other reason is still required and still stops publication. *)
+let exact_output_excused_lane_ids (catalog : Runtime.exact_output_catalog) =
+  catalog.Runtime.catalog_exact_slots.Runtime_config_error.emptied_lane_ids
+;;
+
+let exact_output_registry_refused detail =
+  Env_config_core.Config_error ("exact-output resolver-and-lane registry: " ^ detail)
+;;
+
+let publish_exact_output_catalog (lanes, catalog, runtimes) =
+  (* Logged before the registry is published, so it is said even when
+     publication fails. *)
+  Runtime.warn_exact_slot_degradation catalog.Runtime.catalog_exact_slots;
+  let resolver_snapshot = exact_output_resolver_snapshot catalog in
+  match
+    Runtime.publish_exact_output_registry
+      ~runtime_observations:(Runtime.exact_output_runtime_observations
+        ~origin:catalog.Runtime.catalog_origin runtimes)
+      ~required_lane_ids:Standalone_lane.required_ids
+      ~excused_lane_ids:(exact_output_excused_lane_ids catalog)
+      ~lanes
+      resolver_snapshot
+  with
+  | Error detail -> raise (exact_output_registry_refused detail)
+  | Ok registry ->
+    Runtime.report_exact_output_registry registry;
+    warn_catalog_absent_keeper_assignments resolver_snapshot;
+    Log.Misc.info
+      "exact_output: immutable resolver-and-lane registry published%s"
+      catalog.Runtime.catalog_description;
+    warn_browser_stagehand_slots registry
+;;
+
+let configure_exact_output_registry ?config_path ?config_root () =
+  publish_exact_output_catalog (exact_output_lanes_and_catalog ?config_path ?config_root ())
+;;
+
+let publish_exact_output_registry_from_observation (observation : Runtime.config_observation) =
+  let lanes = match Runtime_toml.parse_string observation.source_text with
+    | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+    | Error errors -> raise (Env_config_core.Config_error
+        (Printf.sprintf "exact-output registry: runtime config observation parse failed (%s): %d error(s)"
+          observation.path (List.length errors))) in
+  publish_exact_output_catalog (exact_output_catalog_for_lanes ~config_path:observation.path lanes)
+;;
+
+let check_exact_output_registry ?config_root () =
+  let lanes, catalog, _runtimes = exact_output_lanes_and_catalog ?config_root () in
+  let resolver_snapshot = exact_output_resolver_snapshot catalog in
+  match
+    Runtime_exact_output_registry.check_publication
+      ~required_lane_ids:Standalone_lane.required_ids
+      ~excused_lane_ids:(exact_output_excused_lane_ids catalog)
+      ~lanes
+      resolver_snapshot
+  with
+  | Error error ->
+    raise
+      (exact_output_registry_refused
+         (Runtime_exact_output_registry.publication_error_to_string error))
+  | Ok () -> ()
+;;
+
+let install_domain_pool_references ?read domain_pool =
+  Domain_pool_ref.set domain_pool;
+  Executor_pool_ref.set (Domain_pool.executor_pool domain_pool);
+  Option.iter
+    (fun read ->
+      Domain_pool_ref.set_read read;
+      Executor_pool_ref.set_read (Domain_pool.executor_pool read))
+    read
+;;
+
+let publish_exact_output_registry_from_file ~config_path =
+  configure_exact_output_registry ~config_path ()
+;;
+
+module For_testing = struct
+  let configure_exact_output_registry ?config_root () =
+    configure_exact_output_registry ?config_root ()
+  let mandatory_exact_output_lane_violations = mandatory_exact_output_lane_violations
+
+  let require_explicit_mandatory_exact_output_lanes =
+    require_explicit_mandatory_exact_output_lanes
+  let install_domain_pool_references = install_domain_pool_references
+end
+
+(* GC tuning for long-running server with bursty allocation.
+
+   Dashboard refresh loops create 2GB+ transient allocations per cycle.
+   With aggressive GC (space_overhead=40), major GC slices walk
+   MADV_FREE'd pages on macOS, triggering page faults that freeze the
+   Eio event loop — blocking /health and all HTTP endpoints.
+
+   Only apply defaults when OCAMLRUNPARAM is not set, so operators
+   can override at launch without code changes. *)
+let () =
+  ignore (Dashboard.force_link, Operator_tool.force_link);
+  Transport_read_model.register_grpc_service_name Masc_grpc_service.service_name;
+  Transport_read_model.register_grpc_health_service_name Masc_grpc_server.health_service_name;
+  Dashboard_snapshot.register_dashboard_tools_http_result Server_dashboard_http_runtime_info.dashboard_tools_http_result;
+  Dashboard_snapshot.register_namespace_truth_snapshot Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches;
+  if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
+    let open Gc in
+    (* Route through the validated helper: a malformed value (e.g.
+       MASC_GC_SPACE_OVERHEAD=abc) previously raised [Failure] -- the
+       hand-rolled [with Not_found] only caught the unset case, so a typo
+       in this env var crashed server bootstrap. [get_int_nonneg] also
+       maps a negative value to the default. *)
+    let gc_space_overhead =
+      Env_config_core.get_int_nonneg
+        ~default:(Env_setting.Int_knob.default Gc_space_overhead)
+        (Env_setting.Int_knob.env_name Gc_space_overhead)
+    in
+    let ctrl = get () in
+    set { ctrl with
+      (* minor_heap_size is intentionally not set here. [main_eio.ml]
+         sets it to 4M words (32 MiB) to cut stop-the-world minor-GC
+         pressure from JSON parsing and metric encoding; a second 2M
+         setting here would either be dead (if main_eio runs later) or
+         override the intended 4M (if it runs first), depending on init
+         order. Keep a single source in main_eio.ml. *)
+      space_overhead = gc_space_overhead;  (* default 120. Configurable via MASC_GC_SPACE_OVERHEAD.
+                                             100 = triggers major GC when free > live (was 200/3x).
+                                             Lower = shorter individual pauses, more frequent slices.
+                                             P0 allocation fixes (PR #20965) reduced broadcast hot-path
+                                             allocation by ~97%, so the increased frequency has negligible
+                                             throughput impact. *)
+      max_overhead = 500;                 (* compaction triggers when free memory exceeds 500% of live data *)
+    }
+  end
+
+
+let init_runtime_context env =
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  let net = Eio.Stdenv.net env in
+  let domain_mgr = Eio.Stdenv.domain_mgr env in
+  (* Children start with posix_spawn(2), not eio_posix's fork(): on macOS the
+     parent side of a fork locks every malloc zone and held the main domain
+     about 141 ms per spawn with this process's heap (RFC
+     main-domain-scheduler-latency §8.8). *)
+  let proc_mgr = Posix_spawn_process_mgr.mgr in
+  let fs = Eio.Stdenv.fs env in
+  (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
+
+let metric_keeper_runtime_config_load_failures =
+  "masc_keeper_runtime_config_load_failures_total"
+
+let () =
+  Otel_metric_store.register_counter
+    ~name:metric_keeper_runtime_config_load_failures
+    ~help:
+      "Total Keeper_runtime_config.load_and_apply failures. Bootstrap logs WARN; \
+       this counter exposes the same event to monitoring aggregation. Labels: \
+       reason in {read_error | parse_error | validate_error}, derived from \
+       Keeper_runtime_config.load_failure_kind."
+    ()
+
+let record_runtime_toml_load_failure (failure : Keeper_runtime_config.load_failure) =
+  Otel_metric_store.inc_counter
+    metric_keeper_runtime_config_load_failures
+    ~labels:
+      [ "reason", Keeper_runtime_config.load_failure_kind_label failure.kind ]
+    ()
+
+(* Apply the keeper runtime overrides from the resolved config root's
+   runtime.toml. Must run before any module that reads
+   [Env_config_keeper.KeeperKeepalive] settings, and in every process that
+   resolves them: the server at boot, and a CLI that makes a provider call
+   under the keeper's settings (the capability probe), which otherwise reads
+   the process env alone and runs its call with none of what the operator
+   declared in the file. A setting the registry marks [Toml_only] ignores the
+   process env once the file is applied; a [Toml_and_env] setting keeps the env
+   ahead of the file, which only fills its unset slot. A file that does not
+   load is a configuration error and stops the process. *)
+let apply_runtime_toml ~base_path =
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Ok 0 -> ()
+  | Ok n -> Log.Server.info "runtime.toml: applied %d override(s)" n
+  | Error failure ->
+    record_runtime_toml_load_failure failure;
+    let msg = Keeper_runtime_config.load_failure_to_string failure in
+    Log.Server.error "runtime.toml load failed: %s" msg;
+    raise (Env_config_core.Config_error msg)
+
+let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
+    ~proc_mgr ~fs ?env ()
+    : Mcp_server.server_state =
+  let input_base_path =
+    (* DET-OK: absent transport input selects the explicit owner BasePath;
+       normalization below remains the sole interpretation boundary. *)
+    match String.trim (Option.value input_base_path ~default:base_path) with
+    | "" -> None
+    | raw -> Some raw
+  in
+  let base_path = Env_config_core.normalize_masc_base_path_input base_path in
+  Runtime_params.initialize ~base_path;
+  Fs_compat.set_fs fs;
+  Mcp_eio.set_net net;
+  Mcp_eio.set_clock clock;
+  Eio_context.set_switch sw;
+  Eio_context.set_net net;
+  Eio_context.set_clock clock;
+  Eio_context.set_mono_clock mono_clock;
+  Masc_eio_env.init ~sw ~net ~clock ();
+  (* RFC-0257: own detached per-keeper memory-lane fibers on the server root
+     switch. After [set_switch] so the lane and provider calls it forks share
+     the same long-lived switch (cancelled together at shutdown). *)
+  Keeper_memory_lane.init ~sw;
+  Keeper_librarian_queue_refresh.install ();
+  (* RFC-0107 Phase D.2c — record full Eio.Stdenv for piaf-backed
+     Pool in Masc_http_client.  Optional: tests / pre-bootstrap
+     callers may omit [env], in which case Pool falls back to a
+     stub (request returns Error). *)
+  Option.iter Eio_context.set_env env;
+  Process_eio.init ~cwd_default:Eio.Path.(fs / base_path) ~proc_mgr ~clock;
+  Exec_tap.install_from_env ();
+  Unix.putenv Env_config_core.base_path_env_key base_path;
+  Config_dir_resolver.reset ();
+  bootstrap_base_path_config_root ~base_path;
+  let config_root = (startup_config_resolution ~base_path).config_root.path in
+  Server_slack_connector_config.configure ~config_root;
+  warn_ignored_config_root_full_catalogs ~config_root ();
+  let (_ : string option) = configure_agent_core_model_catalog_env () in
+  apply_runtime_toml ~base_path;
+  Keeper_runtime_resolved.init ();
+  (* Boot-time observability: emit the resolved runtime knobs once, right after
+     they freeze. Without this line a knob that is CONFIGURED in runtime.toml but
+     did not reach Keeper_runtime_resolved is indistinguishable at runtime from an
+     unset one — the exact ambiguity that blocked diagnosing #25128 (idle timeout
+     configured yet never observed to fire). The body-timeout override is None
+     when unset; stream_idle_timeout_sec resolves to the RFC-0345 fail-safe
+     floor when unset (stated on the dedicated line below). No existing surface
+     exposes the resolved value. *)
+  Log.Runtime.info
+    ~category:Log.Boundary
+    "resolved runtime config: %s"
+    (Yojson.Safe.to_string
+       (Keeper_runtime_resolved.to_yojson (Keeper_runtime_resolved.current ())));
+  (* RFC-0345 (#25128): state the effective streaming idle timeout and whether it
+     came from an operator value (runtime.toml) or the fail-safe floor, so operators
+     can see the floor is active and raise it if their provider legitimately
+     idles longer. *)
+  Keeper_runtime_resolved.(
+    let idle = (current ()).stream_idle_timeout_sec in
+    Log.Runtime.info
+      ~category:Log.Boundary
+      "keeper stream idle timeout resolved: %.1fs (source: %s)"
+      idle.value
+      (source_to_string idle.source));
+  (* RFC-AC-037: same boot observability for the first-event (TTFT/prefill)
+     budget — configured-vs-effective must stay distinguishable at runtime,
+     the exact ambiguity #25128 hit for the idle knob. *)
+  Keeper_runtime_resolved.(
+    let first_event = (current ()).first_event_timeout_sec in
+    Log.Runtime.info
+      ~category:Log.Boundary
+      "keeper first-event (TTFT/prefill) timeout resolved: %.1fs (source: %s)"
+      first_event.value
+      (source_to_string first_event.source));
+  (* The provider-call no-progress threshold: the attempt watchdog's bound and
+     the only bound on a tool's provider sub-call. Stated with its source for
+     the same reason as the two lines above. *)
+  Keeper_runtime_resolved.(
+    let threshold = (current ()).provider_call_deadline_sec in
+    Log.Runtime.info
+      ~category:Log.Boundary
+      "keeper provider-call no-progress threshold resolved: %.1fs (source: %s)"
+      threshold.value
+      (source_to_string threshold.source));
+  Keeper_task_owner_backend.install_hooks ();
+  Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation
+    ~invalidate_full_health_snapshot:
+      Server_routes_http_runtime.invalidate_full_health_snapshot
+    ();
+  Keeper_registry.install_state_change_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot;
+  Keeper_owner.install_state_change_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot;
+  Keeper_reaction_ledger.install_state_change_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot;
+  Keeper_event_queue_persistence.install_state_change_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot;
+  Skill_catalog_snapshot_service.install_publication_observer
+    Server_routes_http_runtime.invalidate_full_health_snapshot;
+  let state =
+    Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
+      ~mono_clock ~net
+      ~base_path
+  in
+  let config_resolution =
+    startup_config_resolution ~base_path |> Config_dir_resolver.to_json
+  in
+  let config = Mcp_server.workspace_config state in
+  let path_diagnostics =
+    Server_base_path_diagnostics.detect
+      ?input_base_path
+      ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
+      ~effective_base_path:config.base_path
+      ~effective_masc_root:(Workspace.masc_dir config)
+      ()
+    |> Server_base_path_diagnostics.to_yojson
+  in
+  Server_startup_state.note_input_base_path input_base_path;
+  Server_startup_state.note_runtime_resolution ~path_diagnostics
+    ~config_resolution;
+  (* RFC-0107 Phase D.4 — wire piaf connection pool Otel_metric_store exporter.
+     Metric registration itself runs at [Otel_metric_store] module load; this
+     call is the explicit dependency-order anchor and warms the snapshot
+     accessor so a misconfigured pool surfaces here rather than at first
+     telemetry export. *)
+  Pool_metrics.register ();
+  state
+
+let restore_persisted_sessions (state : Mcp_server.server_state) =
+  Session.restore_from_disk state.session_registry
+    ~agents_path:(Workspace.agents_dir (Mcp_server.workspace_config state))
+
+(* Startup maintenance extracted to
+   [Server_runtime_startup_maintenance] (godfile decomp). *)
+include Server_runtime_startup_maintenance
+
+(* Credential sync and egress audit extracted to
+   [Server_runtime_startup_credentials] (godfile decomp). *)
+include Server_runtime_startup_credentials
+
+let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
+  (* [create_server_state] normally resets this after config bootstrap, but
+     direct state constructors used by tests and execute contexts can leave a
+     stale process-global config resolution in place. *)
+  Config_dir_resolver.reset ();
+  let (_init_msg : string) = Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
+  Mcp_server.set_sse_callback state Sse.broadcast
+
+
+type lazy_startup_task = Restore_sessions
+
+type lazy_startup_group = {
+  group_name : string;
+  tasks : lazy_startup_task list;
+}
+
+let lazy_startup_plan () =
+  [ { group_name = "initialize"; tasks = [ Restore_sessions ] } ]
+
+let lazy_startup_task_name = function
+  | Restore_sessions -> "restore_sessions"
+
+let lazy_startup_task_names () =
+  lazy_startup_plan ()
+  |> List.concat_map (fun group -> List.map lazy_startup_task_name group.tasks)
+
+type startup_failure_disposition =
+  | Fatal_pre_ready
+  | Degraded_after_ready
+
+let startup_failure_disposition ~state_ready =
+  if state_ready then Degraded_after_ready else Fatal_pre_ready
+
+type owner_initialization_error =
+  | Runtime_config_read_failed of string
+  | Native_execution_runtime_failed of Runtime_agent_execution_runtime.initialization_error
+  | Domain_budget_exceeded of Domain_budget.error
+  | Keeper_config_recovery_failed of Keeper_config_journal.report
+  | Admin_credential_bootstrap_failed of Masc_domain.masc_error
+  | Run_registry_already_installed of
+      [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
+  | Keeper_persistence_preparation_failed of
+      Server_bootstrap_loops.keeper_persistence_prepare_error
+  | Keeper_persistence_claim_failed of
+      Server_bootstrap_loops.keeper_persistence_claim_error
+  | Keeper_persistence_start_failed of
+      Server_bootstrap_loops.keeper_persistence_start_error
+  | Startup_path_guard_rejected of Server_base_path_diagnostics.t
+  | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
+  | Readiness_transition_failed of Server_startup_state.state_ready_error
+  | Readiness_publication_failed of
+      { observed_phase : Server_startup_state.phase
+      }
+
+exception Owner_initialization_failed of owner_initialization_error
+
+type initialized_owner_state =
+  { state : Mcp_server.server_state
+  ; path_diagnostics : Server_base_path_diagnostics.t
+  ; prepared_keeper_persistence : Server_bootstrap_loops.prepared_keeper_persistence
+  ; domain_pool : Domain_pool.t
+  }
+
+type activated_owner_state =
+  { state : Mcp_server.server_state
+  ; path_diagnostics : Server_base_path_diagnostics.t
+  ; domain_pool : Domain_pool.t
+  }
+
+let owner_initialization_error_to_string = function
+  | Runtime_config_read_failed detail ->
+    "runtime config observation failed: " ^ detail
+  | Native_execution_runtime_failed error ->
+    "native execution runtime initialization failed: "
+    ^ Runtime_agent_execution_runtime.initialization_error_to_string error
+  | Domain_budget_exceeded error ->
+    "executor domain budget refused: " ^ Domain_budget.error_to_string error
+  | Keeper_config_recovery_failed report ->
+    let detail = match report.Keeper_config_journal.outcome with
+      | Journal_corrupt detail -> detail
+      | Recovery_failed { detail; notes } -> String.concat "; " (detail :: notes)
+      | No_journal | Recovered_rolled_back _ -> "recovery completion was not accepted"
+    in
+    "keeper configuration recovery failed: " ^ detail
+  | Admin_credential_bootstrap_failed error ->
+    "Admin credential bootstrap failed: " ^ Masc_domain.masc_error_to_string error
+  | Run_registry_already_installed `Fusion ->
+    "Fusion run registry already has a process owner"
+  | Run_registry_already_installed `Verification ->
+    "Verification run registry already has a process owner"
+  | Run_registry_already_installed `Goal_verification ->
+    "Goal verification run registry already has a process owner"
+  | Run_registry_already_installed `Exact_lane ->
+    "Exact lane run registry already has a process owner"
+  | Keeper_persistence_preparation_failed error ->
+    "Keeper persistence preparation failed: "
+    ^ Server_bootstrap_loops.keeper_persistence_prepare_error_to_string error
+  | Keeper_persistence_claim_failed error ->
+    "Keeper persistence claim failed: "
+    ^ Server_bootstrap_loops.keeper_persistence_claim_error_to_string error
+  | Keeper_persistence_start_failed error ->
+    "Keeper persistence Keeper-loop start failed: "
+    ^ Server_bootstrap_loops.keeper_persistence_start_error_to_string error
+  | Startup_path_guard_rejected diagnostics ->
+    Option.value
+      diagnostics.Server_base_path_diagnostics.warning
+      ~default:"startup path guard rejected malformed runtime state"
+  | Lazy_startup_barrier_failed error ->
+    Server_startup_state.lazy_prepare_error_to_string error
+  | Readiness_transition_failed error ->
+    Server_startup_state.state_ready_error_to_string error
+  | Readiness_publication_failed { observed_phase } ->
+    Printf.sprintf
+      "owner readiness publication failed (observed_phase=%s)"
+      (Server_startup_state.phase_to_string observed_phase)
+
+let initialize_owner_state_blocking
+      ~sw
+      ~env
+      ~base_path
+      ?input_base_path
+      ~accept_store_quarantine
+      ~clock
+      ~mono_clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      ~fs
+      ()
+  =
+  (* DET-OK: the optional transport spelling and the required owner BasePath
+     denote the same requested path when the former is absent. *)
+  let requested_base_path = Option.value input_base_path ~default:base_path in
+  let base_path =
+    match Eio_unix.run_in_systhread ~label:"bootstrap-realpath-base-path" (fun () -> Unix.realpath base_path) with
+    | canonical -> canonical
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception ((Unix.Unix_error _ | Sys_error _) as exception_) ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      let failure : Server_bootstrap_loops.keeper_persistence_failure =
+        { phase = Server_bootstrap_loops.Resolving_base_path
+        ; base_path
+        ; cause =
+            Server_bootstrap_loops.Base_path_identity_unavailable_cause
+              { exception_; backtrace }
+        }
+      in
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_preparation_failed
+              (Server_bootstrap_loops.Preparation_base_path_identity_unavailable
+                 failure)))
+  in
+  let path_diagnostics =
+    Server_base_path_diagnostics.detect
+      ~input_base_path:requested_base_path
+      ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
+      ~effective_base_path:base_path
+      ~effective_masc_root:(Common.masc_dir_from_base_path ~base_path)
+      ()
+  in
+  Server_base_path_diagnostics.log_startup_warning path_diagnostics;
+  if Server_base_path_diagnostics.startup_should_abort path_diagnostics
+  then
+    raise
+      (Owner_initialization_failed
+         (Startup_path_guard_rejected path_diagnostics));
+  Fs_compat.set_fs fs;
+  (* Restore durable configuration before constructing any state from it.
+     A failed read/restore is an initialization error, as for the other
+     authoritative stores; it cannot publish a ready owner. *)
+  let recovery =
+    Server_bootstrap_maintenance.recover_keeper_config_journal_on_startup ~base_path
+  in
+  (match recovery.Keeper_config_journal.outcome with
+   | No_journal | Recovered_rolled_back _ -> ()
+   | Journal_corrupt _ | Recovery_failed _ ->
+     raise (Owner_initialization_failed (Keeper_config_recovery_failed recovery)));
+  let masc_dir = Common.masc_dir_from_base_path ~base_path in
+  let fusion_registry =
+    Filename.concat masc_dir Fusion_run_registry.storage_filename
+    |> Fusion_run_registry.replay
+  in
+  (match Fusion_run_registry.install_global fusion_registry with
+   | Ok () -> ()
+   | Error Fusion_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Fusion)));
+  let verification_registry =
+    Filename.concat masc_dir Verification_run_registry.storage_filename
+    |> Verification_run_registry.replay
+  in
+  (match Verification_run_registry.install_global verification_registry with
+   | Ok () -> ()
+   | Error Verification_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Verification)));
+  let goal_verification_registry =
+    Filename.concat masc_dir Goal_verification_run_registry.storage_filename
+    |> Goal_verification_run_registry.replay
+  in
+  (match
+     Goal_verification_run_registry.install_global goal_verification_registry
+   with
+   | Ok () -> ()
+   | Error Goal_verification_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Goal_verification)));
+  let exact_lane_registry =
+    Filename.concat masc_dir Exact_lane_run_registry.storage_filename
+    |> Exact_lane_run_registry.replay
+  in
+  (match Exact_lane_run_registry.install_global exact_lane_registry with
+   | Ok () -> ()
+   | Error Exact_lane_run_registry.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          (Run_registry_already_installed `Exact_lane)));
+  let broadcast_internal_agent_runs_changed () =
+    Sse.broadcast (Internal_agent_runs_event.to_json ())
+  in
+  Atomic.set
+    Verification_run_registry.change_observer_fn
+    broadcast_internal_agent_runs_changed;
+  Atomic.set
+    Goal_verification_run_registry.change_observer_fn
+    broadcast_internal_agent_runs_changed;
+  Atomic.set
+    Exact_lane_run_registry.change_observer_fn
+    broadcast_internal_agent_runs_changed;
+  (* [main_eio] caches the normalized operator input before entering Eio.
+     Replace that preflight value with the canonical owner identity before
+     [Workspace.default_config_uncached] constructs its backend, otherwise the
+     config record says canonical while its backend still follows an alias. *)
+  Workspace_utils_backend_setup.cache_resolved_base_path base_path;
+  Discovery_cache.set_env ~sw ~clock ~net;
+  Gc_sampler.run ~sw ~clock ~interval:30.0;
+  (* The activity-events parse cache alongside the heap gauges: it is retained
+     for the life of each day file, so its size is a steady state rather than
+     churn, and 30s is often enough to see it move when retention sweeps.
+     Sampled here rather than inside [Gc_sampler] so neither that module nor
+     [Activity_graph] gains a dependency on the other. *)
+  (* The maintenance loops open their named switch once per iteration, not
+     once per fiber: the runtime-events ring keeps a name only until it is
+     overwritten, so a tracer attached later sees the per-iteration names. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Switch.run ~name:"activity-cache-gauges" (fun _ ->
+      (try
+         let stats = Activity_graph.cache_stats () in
+         Otel_metric_store.set_gauge
+           Otel_metric_store.metric_activity_cache_files
+           (float_of_int stats.Activity_graph.past_day_files);
+         Otel_metric_store.set_gauge
+           Otel_metric_store.metric_activity_cache_records
+           (float_of_int stats.Activity_graph.past_day_records)
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Server.warn "activity cache gauge sample failed: %s" (Printexc.to_string exn)));
+      Eio.Time.sleep clock 30.0;
+      loop ()
+    in
+    loop ());
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 5.0;
+      Eio.Switch.run ~name:"tool-usage-flush" (fun _ ->
+      (try Keeper_registry_tool_usage_persistence.flush_all_dirty () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "tool_usage flush_all_dirty failed: %s"
+           (Printexc.to_string exn)));
+      loop ()
+    in
+    loop ());
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 2.0;
+      Eio.Switch.run ~name:"trajectory-flush" (fun _ ->
+      (try Trajectory.flush_all_pending () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "trajectory flush_all_pending failed: %s"
+           (Printexc.to_string exn)));
+      loop ()
+    in
+    loop ());
+  (* Initial owner preparation can checkpoint durable queue state, before
+     the shared runtime pool or Keeper lanes are activated. *)
+  Keeper_event_queue_snapshot_codec.install ~sw domain_mgr;
+  let t0 = Eio.Time.now clock in
+  Llm_metric_bridge.install ();
+  Log.Server.info
+    "Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)";
+  Backend.FileSystem.set_mutex_observers
+    ~acquire:(fun ~op ~seconds ->
+      Otel_metric_store.observe_histogram
+        Otel_metric_store.metric_backend_mutex_acquire_sec
+        ~labels:[ "op", op ]
+        seconds)
+    ~held:(fun ~op ~seconds ->
+      Otel_metric_store.observe_histogram
+        Otel_metric_store.metric_backend_mutex_held_sec
+        ~labels:[ "op", op ]
+        seconds);
+  Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
+  Fd_accountant.install_observers
+    ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit
+    ~on_resource_error:(fun ~kind error exn ->
+      let kind_name = Fd_accountant.kind_to_string kind in
+      let error_name = Fd_accountant.resource_error_to_string error in
+      let site = "fd_accountant." ^ kind_name in
+      Log.Server.error
+        "Fd_accountant observed OS resource error kind=%s error=%s exception=%s"
+        kind_name
+        error_name
+        (Printexc.to_string exn);
+      match error with
+      | Fd_accountant.Process_fd_exhausted
+      | Fd_accountant.System_fd_exhausted ->
+        Keeper_fd_pressure.note_exception ~site exn
+      | Fd_accountant.Storage_space_exhausted ->
+        Keeper_disk_pressure.note_exception ~site exn);
+  Log.Server.info "Fd_accountant OS resource observers installed";
+  Runtime_log_sink.install ();
+  Log.Server.info
+    "Runtime_log_sink installed (agent core -> MASC structured log)";
+  let state, t1, prepared_keeper_persistence =
+    match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+      (fun ~runtime_config_path:locked_runtime_config_path ->
+  (* Keep constructor configuration reads, runtime publication and owner
+     inventory preparation in one journal-free observation interval. No
+     manifest lock is acquired here; composite writers keep their established
+     manifest-before-runtime lock order. *)
+  let state =
+    create_server_state
+      ~sw
+      ~base_path
+      ~input_base_path:requested_base_path
+      ~clock
+      ~mono_clock
+      ~net
+      ~proc_mgr
+      ~fs
+      ~env
+      ()
+  in
+  let runtime_config_path = match Runtime.config_path () with
+    | Some path when not (String.equal path locked_runtime_config_path) ->
+      raise (Owner_initialization_failed
+        (Runtime_config_read_failed "runtime configuration path changed during initial configuration admission"))
+    | path -> path in
+  let runtime_config_observation =
+    match runtime_config_path with
+    | None -> Error Runtime_startup_state.Config_missing
+    | Some runtime_config_path ->
+      Runtime.load_config_observation ~runtime_config_path ()
+      |> Result.map_error (fun detail -> Runtime_startup_state.Config_unreadable { detail })
+  in
+  let runtime_initialization = match runtime_config_observation with
+    | Error reason -> Error reason
+    | Ok observation ->
+      Runtime.init_default_degraded_observation observation
+      |> Result.map_error (fun error ->
+        Runtime_startup_state.Config_invalid
+          { detail = Runtime.strict_init_error_to_string error })
+  in
+  (match runtime_initialization with
+   | Ok Runtime.Initialized -> Log.Server.info "Runtime default initialized: %s" (Runtime.get_default_runtime_id ())
+   | Ok (Runtime.Initialized_degraded degradation) ->
+     Log.Server.warn "Runtime initialized in degraded catalog mode: %s"
+       (Runtime.startup_degradation_to_string degradation)
+   | Error reason ->
+     Runtime.enter_setup_required ~reason ();
+     Log.Server.warn "%s Owner-authenticated settings remain available."
+       (Runtime_startup_state.message reason));
+  (match runtime_config_observation with
+   | Error _ -> ()
+   | Ok runtime_config_observation ->
+  (match
+     Server_skill_snapshot_runtime.refresh_from_observation
+       ~base_path
+       runtime_config_observation
+   with
+   | Error error ->
+     Log.Server.error
+       "Skill snapshot workspace rejected at boot: %s"
+       (Server_skill_snapshot_runtime.error_to_string error)
+   | Ok Workspace_retired ->
+     Log.Server.warn "Skill snapshot workspace retired during boot publication"
+   | Ok (Published _ | Unchanged _) ->
+     (* The publication logged the config state it published, naming the reason
+        and the runtime.toml path when the [skills] table was rejected. *)
+     Option.iter
+       (Log.Server.warn "%s")
+       (Server_skill_snapshot_runtime.boot_notice
+          ~runtime_config_path:runtime_config_observation.Runtime.path
+          ~source_text:runtime_config_observation.Runtime.source_text)));
+  (match runtime_initialization, runtime_config_path with
+   | Ok _, Some path ->
+     (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with
+      | Env_config_core.Config_error _ ->
+        Log.Server.warn "Exact-output authority unavailable; conversational runtime remains available. Configure internal lanes to enable affected features.")
+   | Error _, _ | Ok _, None -> ());
+  let t1 = Eio.Time.now clock in
+  Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
+  bootstrap_server_state_blocking state;
+  (match sync_admin_token_env state with
+    | Ok () -> ()
+    | Error error ->
+      raise (Owner_initialization_failed (Admin_credential_bootstrap_failed error)));
+  sync_internal_keeper_token_env state;
+  sync_bootable_keeper_credentials state;
+  (* Shutdown admission restore below is mailbox-linearized by the Keeper
+     Owner. Install the inventory before persistence preparation so a durable
+     shutdown fence can be restored on a real process restart. The operation
+     runner remains dormant until the corresponding Keeper registry entry is
+     healthy, so queued chat work cannot run across this pre-ready boundary. *)
+  let keeper_owner_count =
+    match
+      Keeper_owner_registry.install_from_store
+        ~sw
+        ~operation_runner:
+          (Some (Server_routes_http_keeper_stream.operation_runner ~state ~clock))
+        (* The chat lane is told when its dependency is ready
+           ([wake_operation_drain]); the autonomous lane had no equivalent and
+           rediscovered a freed slot only on its next keepalive cadence, which
+           RFC-0373 measured as up to five consecutive lost cycles. The Owner
+           fires this only when the freed slot is still unclaimed, so the wake
+           means a turn can start now. *)
+        ~on_turn_slot_released:
+          (Some
+             (fun ~keeper_name ->
+               match
+                 Keeper_registry.wakeup_running
+                   ~intent:Keeper_registry.Turn_slot_released
+                   ~base_path:(Mcp_server.workspace_config state).base_path
+                   keeper_name
+               with
+               | Keeper_registry.Signaled -> ()
+               | Keeper_registry.Deferred_unregistered ->
+                 Log.Keeper.info
+                   ~keeper_name
+                   "turn slot release wake deferred: keeper is no longer registered"
+               | Keeper_registry.Deferred_not_running phase ->
+                 Log.Keeper.info
+                   ~keeper_name
+                   "turn slot release wake deferred: phase=%s"
+                   (Keeper_state_machine.phase_to_string phase)
+               | Keeper_registry.Deferred_lifecycle _ ->
+                 (* The registry already logged this arm and incremented
+                    LifecycleDispatchRejections with intent=turn_slot_released;
+                    repeating it here would double-count one denial. *)
+                 ()))
+        (Mcp_server.workspace_config state)
+    with
+    | Ok count -> count
+    | Error error -> raise (Keeper_owner_registry.Install_failed error)
+  in
+  Log.Keeper.info
+    "keeper_owner: installed %d single-owner actor(s) before persistence recovery"
+    keeper_owner_count;
+  let prepared_keeper_persistence =
+    match
+      Server_bootstrap_loops.prepare_keeper_persistence
+        ~requested_base_path
+        ~accept_store_quarantine
+        ~config:(Mcp_server.workspace_config state)
+        ()
+    with
+    | Ok prepared -> prepared
+    | Error error ->
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_preparation_failed error))
+  in
+  (state, t1, prepared_keeper_persistence)) with
+    | Ok initialized -> initialized
+    | Error detail ->
+      raise (Owner_initialization_failed (Runtime_config_read_failed detail))
+  in
+  Runtime_settings.ensure_init ();
+  Runtime_params.restore ~base_path;
+  Log.Server.info "Runtime_params restored from %s" base_path;
+  Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
+  (try
+     Auth.audit_token_uniqueness base_path
+     |> List.iter (fun (token_hash_prefix, agent_names) ->
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_auth_credential_token_duplicate
+         ~labels:[ "token_hash_prefix", token_hash_prefix ]
+         ();
+       Log.Server.warn
+         "#9786 credential token shared by %d agents [%s] (token_hash_prefix=%s) — rotate via Auth.create_token to prevent bearer-token routing ambiguity"
+         (List.length agent_names)
+         (String.concat ", " agent_names)
+         token_hash_prefix)
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     Log.Server.error
+       "boot: credential token uniqueness audit failed: %s"
+       (Printexc.to_string exn));
+  Log.Server.info "Bootstrap completed in %.1fs" (Eio.Time.now clock -. t1);
+  let stale_threshold_hours = 12 in
+  let build = Build_identity.current () in
+  (match build.binary_commit, build.binary_commit_age_seconds with
+   | Some binary_commit, Some age
+     when age > stale_threshold_hours * Masc_time_constants.hour_int ->
+     let hours = age / Masc_time_constants.hour_int in
+     Log.Server.warn
+       "Server binary commit %s is %d hours old (>%dh threshold). Rebuild + restart recommended to pick up newer fixes; see /health build.binary_commit_age_seconds."
+       binary_commit
+       hours
+       stale_threshold_hours
+   | _ -> ());
+  (* One budget for every domain of the process (RFC-0474 L1). The calling
+     domain counts as one; the systhread host, the snapshot codec and the
+     optional serving domain each report their own. *)
+  let main_domain = 1 in
+  let fixed_domains =
+    main_domain + Systhread_host.domain_count
+    + Keeper_event_queue_snapshot_codec.domain_count
+    + (if Env_config.Transport.serving_domain_enabled () then 1 else 0)
+  in
+  let budget =
+    match
+      Domain_budget.plan ~recommended:(Domain.recommended_domain_count ())
+        ~fixed:fixed_domains ~override:(Env_config.Executor.domain_count_override ())
+    with
+    | Ok budget -> budget
+    | Error error -> raise (Owner_initialization_failed (Domain_budget_exceeded error))
+  in
+  let domain_pool =
+    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.shared_pool domain_mgr
+  in
+  let read_pool =
+    Domain_pool.create ~sw ~domain_count:budget.Domain_budget.read_pool domain_mgr
+  in
+  install_domain_pool_references ~read:read_pool domain_pool;
+  Systhread_host.start ();
+  (match Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr
+      ~domain_count:budget.Domain_budget.execution_codec with
+   | Ok () -> ()
+   | Error error ->
+     raise (Owner_initialization_failed (Native_execution_runtime_failed error)));
+  let log = if Domain_budget.within_limit budget then Log.Server.info else Log.Server.warn in
+  log
+    "Executor domains: %d shared pool + %d read pool + %d execution codec + %d fixed = %d (limit %d = recommended %d - 1)"
+    budget.Domain_budget.shared_pool budget.Domain_budget.read_pool
+    budget.Domain_budget.execution_codec
+    budget.Domain_budget.fixed (Domain_budget.total budget) budget.Domain_budget.limit
+    (Domain.recommended_domain_count ());
+  { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
+
+(* Copies and deletions are two events, so they get two lines with two
+   sample budgets. One line held both and cut the shared sample at ten: a
+   version bump copies enough to fill it, and the deleted paths never
+   reached the line. A deletion is a distribution asset retiring, and its
+   name is the whole message. *)
+let sync_managed_assets_from_binary ~label ~domain ~edit_layer ~dest_dir () =
+  let sync =
+    Managed_asset_sync.sync
+      ~domain
+      ~edit_layer
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+      ~dest_dir
+      ()
+  in
+  Option.iter
+    (fun line -> Log.Misc.info "%s" line)
+    (Managed_asset_sync.distribution_line ~label sync);
+  Option.iter
+    (fun line -> Log.Misc.warn "%s" line)
+    (Managed_asset_sync.removed_line ~label sync);
+  List.iter
+    (fun line -> Log.Misc.warn "%s" line)
+    (Managed_asset_sync.operator_edit_lines ~label sync);
+  List.iter
+    (fun (rel, msg) -> Log.Misc.warn "%s asset sync failed: %s: %s" label rel msg)
+    sync.Managed_asset_sync.failed
+
+(* Tool definitions ship embedded in the binary and are read once at boot
+   (RFC prompts-and-tool-definitions-outside-ocaml §6). A definition that
+   does not decode refuses the boot here, before readiness, instead of
+   publishing a partial tool surface. *)
+let validate_embedded_tool_definitions () =
+  match
+    Tool_definition_toml.validate_embedded
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+  with
+  | Ok () -> ()
+  | Error message -> failwith (Printf.sprintf "embedded tool definition: %s" message)
+
+(* Same contract for the MCP surface TOMLs (config/mcp/*.toml): they are the
+   resources/templates/prompts catalogue prose and the server description,
+   read once at boot. *)
+let validate_embedded_mcp_surface () =
+  match
+    Mcp_surface_toml.validate_embedded
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+  with
+  | Ok () -> ()
+  | Error message -> failwith (Printf.sprintf "embedded mcp surface: %s" message)
+
+(* Prompt files are written with an fsync each; tool and MCP files are not
+   (Managed_asset_sync.asset_write, #37503). A crash can leave a prompt
+   torn with its frontmatter whole, and the edit layer below,
+   Prompt_registry.promote_file_edit, would read that as an operator edit
+   and keep it as an override (#38741). Tools and MCP have no edit layer,
+   so the next boot rewrites a torn file from the binary. *)
+let bootstrap_prompt_assets ~base_path =
+  sync_managed_assets_from_binary
+    ~label:"prompt"
+    ~domain:Managed_asset_sync.Prompts
+    ~edit_layer:
+      (Managed_asset_sync.Prompt_overrides (Prompt_registry.promote_file_edit ~base_path))
+    ~dest_dir:(Config_dir_resolver.prompts_dir ())
+    ()
+
+(* A probe reads the prompts; it does not own the runtime directory. The
+   server's sync is the only writer there, so the manifest's digests only
+   ever describe what this server wrote. The probe unpacks its own
+   binary's prompts into a directory of its own, removed at exit, and
+   reads the workspace's saved overrides on top. *)
+let bootstrap_prompt_registry_from_binary ~base_path =
+  let dir = Filename.temp_dir "masc-probe-prompts" "" in
+  at_exit (fun () ->
+    try Fs_compat.remove_tree dir with
+    | Sys_error msg | Invalid_argument msg ->
+      Log.Misc.warn "probe prompt directory %s was not removed: %s" dir msg
+    | Unix.Unix_error (error, operation, argument) ->
+      Log.Misc.warn
+        "probe prompt directory %s was not removed: %s(%s): %s"
+        dir
+        operation
+        argument
+        (Unix.error_message error));
+  let sync =
+    Managed_asset_sync.sync
+      ~domain:Managed_asset_sync.Prompts
+      ~edit_layer:Managed_asset_sync.No_edit_layer
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+      ~dest_dir:dir
+      ()
+  in
+  List.iter
+    (fun (rel, msg) -> Log.Misc.warn "probe prompt unpack failed: %s: %s" rel msg)
+    sync.Managed_asset_sync.failed;
+  Prompt_defaults.bootstrap_markdown_dir ~workspace_path:base_path ~prompt_markdown_dir:dir
+
+let bootstrap_prompt_state ~boot_stage (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
+  Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
+  Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
+  boot_stage "resolved";
+  (* Converge the runtime prompt markdown and tool definition dirs onto the
+     binary-embedded assets before anything scans them (#20929: merged
+     prompt edits never reached the runtime dir otherwise). *)
+  boot_stage "prompt_assets.begin";
+  bootstrap_prompt_assets ~base_path:config.base_path;
+  boot_stage "prompt_assets.end";
+  boot_stage "tool_assets.begin";
+  sync_managed_assets_from_binary
+    ~label:"tool"
+    ~domain:Managed_asset_sync.Tools
+    ~edit_layer:Managed_asset_sync.No_edit_layer
+    ~dest_dir:(Config_dir_resolver.tools_dir ())
+    ();
+  boot_stage "tool_assets.end";
+  boot_stage "mcp_assets.begin";
+  sync_managed_assets_from_binary
+    ~label:"mcp"
+    ~domain:Managed_asset_sync.Mcp
+    ~edit_layer:Managed_asset_sync.No_edit_layer
+    ~dest_dir:(Config_dir_resolver.mcp_dir ())
+    ();
+  boot_stage "mcp_assets.end";
+  boot_stage "embedded_validation.begin";
+  validate_embedded_tool_definitions ();
+  validate_embedded_mcp_surface ();
+  boot_stage "embedded_validation.end";
+  (* Load the registry and replay operator overrides. The resolved directory is
+     not inspected afterwards: three checks used to stand here and none of them
+     gated. One compared a value against the call that produced it. One
+     re-asserted a post-condition of the directory scan itself, and could not
+     see the failure it read as protecting against, because a file the loader
+     never read is never registered. One logged templates using undeclared
+     variables. All three continued on failure, so a boot serving silently
+     shorter prompts looked healthy.
+
+     The prompts ship embedded in this binary, and
+     [test_prompt_templates_render] requires every file under config/prompts to
+     register as a key, resolve from a real source, render with the variables
+     its own frontmatter declares, and use each one. Repeating that at start
+     decides nothing the build did not already decide. *)
+  boot_stage "prompt_registry.begin";
+  ignore
+    (Prompt_defaults.bootstrap_runtime
+       ~workspace_path:config.workspace_path
+       ~base_path:config.base_path
+     : string);
+  boot_stage "prompt_registry.end"
+
+let start_owner_lazy_tasks ~sw state =
+  let run_lazy_task (task_name, task_fn) =
+    Log.Server.info "lazy_task: starting %s" task_name;
+    try
+      task_fn ();
+      Log.Server.info "lazy_task: finished %s" task_name;
+      Server_startup_state.finish_lazy_task ~task:task_name
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      let error = Printexc.to_string exn in
+      Log.Server.error "lazy startup task %s failed: %s" task_name error;
+      Server_startup_state.fail_lazy_task ~task:task_name ~error
+  in
+  let task_fn = function
+    | Restore_sessions -> fun () -> restore_persisted_sessions state
+  in
+  let task_names = lazy_startup_task_names () in
+  let task_groups =
+    lazy_startup_plan ()
+    |> List.map (fun group ->
+      group, List.map (fun task -> lazy_startup_task_name task, task_fn task) group.tasks)
+  in
+  let run_lazy_task_group (group, tasks) =
+    Log.Server.info
+      "lazy_task_group: starting %s (%d tasks)"
+      group.group_name
+      (List.length tasks);
+    Eio.Fiber.all (List.map (fun task () -> run_lazy_task task) tasks);
+    Log.Server.info "lazy_task_group: finished %s" group.group_name
+  in
+  (match Server_startup_state.prepare_lazy_tasks ~tasks:task_names with
+   | Ok () -> ()
+   | Error error ->
+     raise (Owner_initialization_failed (Lazy_startup_barrier_failed error)));
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"lazy-startup-tasks" @@ fun _ ->
+    List.iter run_lazy_task_group task_groups)
+
+let claim_and_start_keeper_persistence
+      ~prepared_persistence
+      ~sw
+      ~clock
+      ~net
+      ~proc_mgr
+      state
+  =
+  let claimed_persistence =
+    match
+      Server_bootstrap_loops.claim_prepared_keeper_persistence
+        ~config:(Mcp_server.workspace_config state)
+        prepared_persistence
+    with
+    | Ok claimed -> claimed
+    | Error error ->
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_claim_failed error))
+  in
+  try
+    Server_bootstrap_loops.start_keeper_loops
+      ~claimed_persistence
+      ~invalidate_full_health_snapshot:
+        Server_routes_http_runtime.invalidate_full_health_snapshot
+      ~sw
+      ~clock
+      ~net
+      ~proc_mgr
+      state
+  with
+  | Server_bootstrap_loops.Keeper_persistence_start_failed error ->
+    raise
+      (Owner_initialization_failed
+         (Keeper_persistence_start_failed error))
+;;
+
+let mark_owner_state_ready () =
+  match Server_startup_state.mark_state_ready () with
+  | Error error -> Error (Readiness_transition_failed error)
+  | Ok () ->
+    let observed = Server_startup_state.snapshot () in
+    if observed.state_ready then Ok ()
+    else
+      Error
+        (Readiness_publication_failed { observed_phase = observed.phase })
+
+let start_completion_authority ~sw ~clock (state : Mcp_server.server_state) =
+  Completion_authority_agent.start
+    ~sw
+    ~clock
+    ~config:(Mcp_server.workspace_config state)
+
+(* RFC-0387 stage 2 PR-2: the goal-side verifier caller. It must start in the
+   same post-readiness lane as the task completion authority — the stage-2
+   gate is illegal to merge without it (a gate no one calls wedges every goal
+   that enters [Verifying]). *)
+let start_goal_verifier ~sw ~clock (state : Mcp_server.server_state) =
+  Goal_verification_agent.start ~sw ~clock ~config:(Mcp_server.workspace_config state)
+
+let resume_model_configuration () =
+  match Runtime.config_path () with
+  | None ->
+    Error
+      (Server_model_setup_resume.Configuration_unavailable
+         { detail = "this workspace has no runtime.toml path" })
+  | Some path ->
+    let resumed = Runtime.with_config_lock ~runtime_config_path:path (fun () ->
+      let initialized =
+        Runtime.init_default_degraded_report ~config_path:path
+        |> Result.map_error Runtime.strict_init_error_to_string
+      in
+      match initialized with
+      | Error detail ->
+        (* A running runtime stays as it is. While setup is still required,
+           the cause an operator reads becomes this attempt's cause, so a
+           fixed boot error is not reported after a different one replaced it. *)
+        if Runtime_startup_state.requires_setup () then
+          Runtime_startup_state.set
+            (Runtime_startup_state.Setup_required
+               (Runtime_startup_state.Config_invalid { detail }));
+        Error detail
+      | Ok _ ->
+        let registry_published =
+          try configure_exact_output_registry ~config_root:(Filename.dirname path) (); true
+          with Env_config_core.Config_error _ -> false
+        in
+        let withdrawn =
+          if registry_published then Ok ()
+          else Runtime.unpublish_exact_output_registry ()
+        in
+        match withdrawn with
+        | Error _ -> Error "authority publication busy"
+        | Ok () ->
+          Runtime_startup_state.set Available;
+          Server_routes_http_runtime.invalidate_full_health_snapshot ();
+          let authority_available =
+            registry_published
+            && (match Runtime.verifier_exact_lane_readiness () with
+                | Ok [] -> true
+                | Ok (_ :: _ as rejections) ->
+                  (* The authority starts, but on fewer slots than runtime.toml
+                     declares. Say so where the decision is made, not only in
+                     the publication report. *)
+                  Log.Server.warn
+                    "exact_output: completion authority starts on a short lane %S: %s"
+                    (Standalone_lane.to_id Standalone_lane.Verifier)
+                    (String.concat
+                       "; "
+                       (List.map
+                          Runtime.verifier_slot_rejection_to_string
+                          rejections));
+                  true
+                | Error detail ->
+                  Log.Server.warn
+                    "exact_output: completion authority stays off because lane %S \
+                     has no dispatchable slot: %s"
+                    (Standalone_lane.to_id Standalone_lane.Verifier)
+                    detail;
+                  false)
+          in
+          Ok authority_available)
+    in
+    Result.map_error
+      (fun detail -> Server_model_setup_resume.Configuration_unavailable { detail })
+      resumed
+
+let start_post_ready_owner_lanes
+      ~sw
+      ~clock
+      ~env
+      (state : Mcp_server.server_state)
+  =
+  (* Keep the transport-neutral post-readiness order in one place. Both HTTP
+     and stdio must install the system-LLM authority before maintenance can
+     observe or resume AwaitingVerification work. *)
+  Server_model_setup_resume.install ~sw
+    ~base_path:(Mcp_server.workspace_config state).base_path
+    ~resume:resume_model_configuration;
+  Candle_status.install_appraiser_check (Server_candle_appraiser.available ~config:(Mcp_server.workspace_config state));
+  (* Browser hosts register with the browser Add-on's worker, so the browser
+     lane check reads which hosts poll this server from the Add-on, as the
+     surface that asks may see it. *)
+  Browser_lane_launcher.install_browser_addon_reader (Some (fun access ->
+    Server_lane_inventory.browser_presence ~config:(Mcp_server.workspace_config state) ~access
+    |> Browser_addon_presence.polling));
+  Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
+  Server_librarian_addon_wake.install ~sw ~config:(Mcp_server.workspace_config state);
+  let start_authority () =
+    start_completion_authority ~sw ~clock state;
+    start_goal_verifier ~sw ~clock state;
+    Candle_payout_worker.start ~sw ~config:(Mcp_server.workspace_config state)
+      ~appraiser_declaration_changed:(Server_candle_appraiser.declaration_change_probe ~config:(Mcp_server.workspace_config state) ())
+      ~appraise:(Server_candle_appraiser.run ~config:(Mcp_server.workspace_config state)) ();
+    Server_workspace_memory_curator.start ~sw
+      ~config:(Mcp_server.workspace_config state)
+  in
+  if Runtime_startup_state.requires_setup () then
+    Eio.Fiber.fork ~sw (fun () ->
+      Runtime_startup_state.await_available ();
+      start_authority ())
+  else start_authority ();
+
+  start_maintenance ~sw ~task:Jsonl_retention
+    ~run:(fun () -> startup_prune_jsonl state);
+  start_maintenance ~sw ~task:Microvm_guest_sweep
+    ~run:(fun () -> startup_sweep_microvm_guests state);
+  Server_runtime_startup_maintenance.report_unknown_typesafeai_exclusions
+    ~base_path:(Mcp_server.workspace_config state).base_path;
+  Server_runtime_startup_maintenance.report_unknown_memory_recall_keepers
+    ~base_path:(Mcp_server.workspace_config state).base_path;
+  Server_runtime_startup_maintenance.report_unarmed_typesafeai_destinations ();
+  Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
+
+let install_keeper_gate_persistence state =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  match Keeper_approval_queue.install_persistence ~base_path with
+  | Error error ->
+    (* Gate persistence is lane-local. Keep unrelated server subsystems
+       available, but surface the unavailable Gate explicitly instead of
+       treating a malformed durable queue as empty. *)
+    Log.Server.error
+      "keeper_gate: durable queue install failed base_path=%s error=%s"
+      base_path
+      (Keeper_approval_queue_result.install_error_to_string error)
+  | Ok report ->
+    Log.Server.info
+      "keeper_gate: installed durable queue base_path=%s pending=%d replayed=%d replay_failed=%d retired=%d"
+      base_path
+      report.loaded_pending
+      report.replayed_deliveries
+      (List.length report.delivery_replay_failures)
+      report.retired_deliveries;
+    (match report.delivery_retirement_error with
+     | None -> ()
+     | Some error ->
+       Log.Server.warn
+         "keeper_gate: spent deliveries kept after a failed store write base_path=%s error=%s"
+         base_path
+         (Keeper_approval_queue_result.storage_error_to_string error));
+    (match report.replay_projection_error with
+     | None -> ()
+     | Some error ->
+       Log.Server.error
+         "keeper_gate: derived replay projection unavailable; authorization queue remains ready base_path=%s error=%s"
+         base_path
+         (Keeper_approval_queue_result.storage_error_to_string error));
+    List.iter
+      (fun (failure : Keeper_approval_queue_result.delivery_replay_failure) ->
+         Log.Server.error
+           "keeper_gate: durable delivery replay failed approval=%s error=%s"
+           failure.approval_id
+           failure.reason)
+      report.delivery_replay_failures;
+    let resume_report = Keeper_gate.resume_persisted_auto_judges ~base_path in
+    (match resume_report.queue_error with
+     | Some error ->
+       Log.Server.error
+         "keeper_gate: Auto Judge recovery queue unavailable error=%s"
+         (Keeper_approval_queue_result.storage_error_to_string error)
+     | None -> ());
+    Log.Server.info
+      "keeper_gate: recovered Auto Judge work requested=%d started=%d finalized=%d skipped=%d failed=%d"
+      resume_report.requested
+      (List.length resume_report.started_ids)
+      (List.length resume_report.finalized_ids)
+      (List.length resume_report.skipped_ids)
+      (List.length resume_report.failures);
+    List.iter
+      (fun approval_id ->
+         Log.Server.warn
+           "keeper_gate: recovered Auto Judge no longer startable approval=%s"
+           approval_id)
+      resume_report.skipped_ids;
+    List.iter
+      (fun (failure : Keeper_gate.auto_judge_resume_failure) ->
+         Log.Server.error
+           "keeper_gate: recovered Auto Judge failed approval=%s code=%s detail=%s"
+           failure.approval_id
+           (Keeper_gate.auto_judge_resume_failure_code_to_string failure.code)
+           failure.operator_detail)
+      resume_report.failures
+;;
+
+let activate_owner_state
+      ?(boot_stage = fun _ -> ())
+      ~sw
+      ~clock
+      ~net
+      ~proc_mgr
+      (initialized : initialized_owner_state)
+  =
+  let state = initialized.state in
+  (* Establish the complete barrier before the irreversible ownership commit.
+     Gate restore, claim, and start stay ordered inside one transport-neutral
+     function. Each composition root publishes readiness only after its own
+     required transport surfaces are installed. *)
+  (* Auto Judge recovery renders prompts immediately. Prompt state is therefore
+     a recovery prerequisite, not an eventually-consistent lazy task. *)
+  bootstrap_prompt_state ~boot_stage state;
+  boot_stage "gate_persistence.begin";
+  install_keeper_gate_persistence state;
+  boot_stage "gate_persistence.end";
+  boot_stage "mcp_sessions.begin";
+  Server_mcp_transport_http_session.load_sessions_from_file
+    ~base_path:(Mcp_server.workspace_config state).base_path ();
+  boot_stage "mcp_sessions.end";
+  boot_stage "lazy_tasks.begin";
+  start_owner_lazy_tasks ~sw state;
+  boot_stage "lazy_tasks.end";
+  boot_stage "keeper_persistence.begin";
+  claim_and_start_keeper_persistence
+    ~prepared_persistence:initialized.prepared_keeper_persistence
+    ~sw
+    ~clock
+    ~net
+    ~proc_mgr
+    state;
+  boot_stage "keeper_persistence.end";
+  { state
+  ; path_diagnostics = initialized.path_diagnostics
+  ; domain_pool = initialized.domain_pool
+  }
+;;
+
+let run ~sw ~env ~address ~port ~base_path ?input_base_path ?on_ready ~accept_store_quarantine
+    ~make_routes ~make_request_handler ~make_h2_request_handler ~make_h2_error_handler () =
+  let resolved_auth_config =
+    match Server_auth_config.resolve (Server_auth_config.read_env ()) with
+    | Ok config -> config
+    | Error error ->
+      raise
+        (Env_config_core.Config_error
+           (Server_auth_config.resolve_error_to_string error))
+  in
+  (match Server_auth.configure resolved_auth_config with
+   | Ok () -> ()
+   | Error error ->
+     raise
+       (Env_config_core.Config_error
+          (Server_auth.configure_error_to_string error)));
+  let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
+    init_runtime_context env
+  in
+  let configured_agent_transport = Masc_grpc_transport.configure_from_env () in
+  let configured_http_mode = Env_config.Transport.configure_h2_from_env () in
+  (* Route provider diagnostics into the structured log before any
+     provider call runs (#25148). *)
+  Provider_diag_log_sink.install ();
+  (* 0. Dashboard bundle freshness — a stale bundle silently keeps calling
+     routes the current binary already removed (#24332 governance->gate:
+     the served SPA still called DELETE'd /api/v1/dashboard/governance for
+     3+ days because scripts/build-dashboard-if-needed.sh was never re-run
+     after the binary shipped). Cheap synchronous stat comparison; not worth
+     its own fiber. *)
+  Web_dashboard.log_bundle_freshness_warning ();
+  Rate_limit.start_global_cleanup_loop ~sw ~clock;
+  (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
+  let config = Server_bootstrap_http.make_http_config ~address ~port in
+  (* The listener identity comes only from the effective CLI/bootstrap config
+     above.  A public identity is additional trust only when the operator
+     explicitly configured MASC_HTTP_BASE_URL; deriving it again from env
+     MASC_HOST/MASC_HTTP_PORT would diverge from CLI overrides and could admit
+     a host/port on which this process is not listening. *)
+  let explicit_base_url = Env_config_core.masc_http_base_url_opt () in
+  let request_trust_policy =
+    match
+      Server_request_authority.make_trust_policy
+        ~bind_host:config.host
+        ~bind_port:config.port
+        ~explicit_base_url
+    with
+    | Ok policy -> policy
+    | Error error ->
+      raise
+        (Env_config_core.Config_error
+           (Server_request_authority.trust_policy_error_to_string error))
+  in
+  let background_request_authority =
+    Server_request_authority.projection_context request_trust_policy
+  in
+  let http_mode =
+    match configured_http_mode with
+    | Env_config.Transport.H2_only -> `H2_only
+    | Env_config.Transport.H1_only -> `H1_only
+    | Env_config.Transport.Auto -> `Auto
+  in
+  Transport_metrics.set_ws_same_origin_runtime_ready false;
+  clear_server_state ();
+  Server_startup_state.reset ();
+  let listener_bound, publish_listener_bound = Eio.Promise.create () in
+  (* The first mark is ServerBootstrap's resolved line. Each later mark names
+     the time since the previous mark and since resolved; a stage that stalls
+     leaves its .begin line as the last boot timing record. *)
+  let boot_stage =
+    let times = ref None in
+    fun stage ->
+      let now = Mtime_clock.now () in
+      match !times with
+      | None ->
+        times := Some (now, now);
+        Log.Server.info "boot stage=%s elapsed_ms=%.1f total_ms=%.1f" stage 0.0 0.0
+      | Some (started, previous) ->
+        let elapsed_ms =
+          Mtime.Span.to_float_ns (Mtime.span previous now) /. 1_000_000.0
+        in
+        let total_ms =
+          Mtime.Span.to_float_ns (Mtime.span started now) /. 1_000_000.0
+        in
+        times := Some (started, now);
+        Log.Server.info
+          "boot stage=%s elapsed_ms=%.1f total_ms=%.1f"
+          stage elapsed_ms total_ms
+  in
+
+  (* 2. Run owner initialization outside the accept loop. The state and
+     long-lived owner fibers attach to the parent switch because HTTP request
+     handlers use them after this setup fiber returns. A pre-readiness failure
+     exits immediately rather than leaving that partial owner alive; only an
+     auxiliary failure after readiness may continue as degraded serving. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run ~name:"owner-initialization" @@ fun _ ->
+    let handle_initialization_failure error =
+      match
+        startup_failure_disposition
+          ~state_ready:(Server_startup_state.snapshot ()).state_ready
+      with
+      | Fatal_pre_ready ->
+        Log.Server.error
+          "[FATAL] Critical startup failed before readiness; refusing partial BasePath ownership: %s"
+          error;
+        exit 1
+      | Degraded_after_ready ->
+        Server_startup_state.mark_degraded ~error;
+        Log.Server.error
+          "Auxiliary initialization failed after readiness (HTTP remains available in degraded state): %s"
+          error
+    in
+    try
+      Server_startup_state.mark_blocking ();
+      let initialized_owner =
+        initialize_owner_state_blocking ~sw ~env ~base_path ?input_base_path
+          ~accept_store_quarantine ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
+      in
+      let activated_owner =
+        activate_owner_state
+        ~boot_stage
+        ~sw
+        ~clock
+        ~net
+        ~proc_mgr
+        initialized_owner
+      in
+      let state = activated_owner.state in
+      (* Authentication wrappers treat [server_state = Some _] as the mutation
+         capability boundary. Publish only after transport-neutral activation
+         has restored Gate state and started the owner persistence lanes. *)
+      boot_stage "owner_publication.begin";
+      publish_server_state state;
+      (* Global readiness is the transport-neutral owner capability, not a
+         quorum over optional transports. Mark it before starting fallible
+         Discord/gRPC/WS/dashboard auxiliaries so one transport cannot
+         turn an already-published HTTP owner into a process-wide fatal
+         pre-readiness failure. Each auxiliary owns its typed health state. *)
+      (match mark_owner_state_ready () with
+       | Ok () -> ()
+       | Error error -> raise (Owner_initialization_failed error));
+      boot_stage "owner_publication.end";
+      let tool_dispatcher tool_name args_json =
+      Server_grpc_tool_dispatch.dispatch args_json ~dispatch:(fun arguments ->
+          let workspace_scope = Mcp_server.workspace_scope state in
+          let result =
+            Mcp_server_eio_execute.execute_tool_eio
+              ~sw
+              ~clock
+              ~workspace_scope
+              state
+              ~name:tool_name ~arguments
+          in
+          let success = not (Tool_result.is_failed result)
+          and result_str = Tool_result.message result
+          in
+          if not success then
+            Log.Server.error "gRPC tool call failed: tool=%s error_bytes=%d"
+              tool_name (String.length result_str);
+          if success then Ok result_str else Error result_str)
+      in
+      let dispatch_ws_inbound_message ws_session_id body_str =
+          let jsonrpc_id_opt body =
+            match Yojson.Safe.from_string body with
+            | `Assoc fields -> (
+                match List.assoc_opt "id" fields with
+                | Some ((`Int _ | `String _ | `Null) as id) -> Some id
+                | Some _ -> Some `Null
+                | None -> None)
+            | _ -> None
+            | exception _ -> None (* cancel-guard-ok: the scrutinee is a decoded JSON value and the arms only pattern-match on it, so no fiber work runs under this handler *)
+          in
+          let send_overloaded_response rejection =
+            Log.Server.debug
+              "WS inbound dispatch rejected: session=%s reason=%s in_flight=%d limit=%d"
+              ws_session_id
+              rejection.Server_mcp_transport_ws.reason
+              rejection.in_flight
+              rejection.limit;
+            match jsonrpc_id_opt body_str with
+            | None -> ()
+            | Some id ->
+                let response_json =
+                  `Assoc
+                    [
+                      ("jsonrpc", `String "2.0");
+                      ("id", id);
+                      ( "error",
+                        `Assoc
+                          [
+                            ("code", `Int (-32000));
+                            ( "message",
+                              `String
+                                "WebSocket inbound dispatch limit exceeded" );
+                            ( "data",
+                              `Assoc
+                                [
+                                  ("reason", `String rejection.reason);
+                                  ("limit", `Int rejection.limit);
+                                  ("in_flight", `Int rejection.in_flight);
+                                ] );
+                          ] );
+                    ]
+                in
+                let response_str = Yojson.Safe.to_string response_json in
+                ignore
+                  (Server_mcp_transport_ws.send_to_session_result
+                     ws_session_id response_str)
+          in
+          match Server_mcp_transport_ws.try_begin_inbound_dispatch ws_session_id with
+          | Server_mcp_transport_ws.Inbound_dispatch_session_gone ->
+              Log.Server.debug
+                "WS inbound dispatch dropped: session=%s gone before dispatch"
+                ws_session_id
+          | Server_mcp_transport_ws.Inbound_dispatch_rejected rejection ->
+              send_overloaded_response rejection
+          | Server_mcp_transport_ws.Inbound_dispatch_admitted session ->
+              Eio.Fiber.fork ~sw (fun () ->
+                Eio_guard.protect
+                  ~finally:(fun () ->
+                    Server_mcp_transport_ws.finish_inbound_dispatch session)
+                  (fun () ->
+                    try
+                      let response_json =
+                        Mcp_eio.handle_request ~clock ~sw
+                          ~mcp_session_id:ws_session_id state body_str
+                      in
+                      let response_str = Yojson.Safe.to_string response_json in
+                      if response_str <> "null" then begin
+                        (* #10648: split the single conflated WARN into two paths so
+                           operators can distinguish "client disconnected" (expected,
+                           noise) from "transport write failed" (real bug warranting
+                           attention). *)
+                        match
+                          Server_mcp_transport_ws.send_to_session_result
+                            ws_session_id response_str
+                        with
+                        | Sent -> ()
+                        | Session_gone ->
+                            Log.Server.debug
+                              "WS send dropped: session=%s gone (client disconnected, \
+                               expected)"
+                              ws_session_id
+                        | Send_failed ->
+                            Log.Server.warn
+                              "WS send_to_session WRITE FAILED for session=%s \
+                               (transport-side error; session cleaned up)"
+                              ws_session_id
+                      end
+                    with
+                    | Eio.Cancel.Cancelled _ as e -> raise e
+                    | exn ->
+                      Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn)))
+      in
+      (* Each synchronous start owns its attempt outcome. Returning can mean
+         a worker was forked or disabled configuration was skipped; actual
+         transport/gateway readiness remains with its existing owner. *)
+      let failures =
+        Server_auxiliary_startup.run_all Server_auxiliary_startup.global
+        { Server_auxiliary_startup.ready_notification = (fun () ->
+            (* Caller-owned effects still wait for both owner and HTTP bind. *)
+            (match on_ready with
+             | None -> ()
+             | Some on_ready ->
+               boot_stage "listener_wait.begin";
+               Eio.Promise.await listener_bound;
+               on_ready ();
+               boot_stage "listener_wait.end"))
+        ; scheduler_probe = (fun () ->
+            (match Eio_context.get_mono_clock_opt () with
+             | Some mono_clock ->
+               Scheduler_lag.start ~sw ~mono_clock Scheduler_lag.global;
+               Log.Server.info
+                 "scheduler lag probe started on the main domain: interval=%.0fms window=%.0fs"
+                 (Scheduler_lag.default_interval_s *. 1000.0)
+                 (Scheduler_lag.default_interval_s
+                  *. Float.of_int Scheduler_lag.default_window)
+             | None ->
+               Log.Server.warn
+                 "scheduler lag probe not started: Eio_context has no monotonic clock"))
+        ; full_health_refresh = (fun () ->
+            Server_routes_http_runtime.start_full_health_snapshot_refresh_loop
+              ~sw
+              ~clock
+              ~request_authority:background_request_authority)
+        ; heap_roots = (fun () ->
+            List.iter
+              (fun (name, value) ->
+                 match Heap_roots.register ~name value with
+                 | Ok () -> ()
+                 | Error `Duplicate ->
+                   Log.Server.warn
+                     "heap root %S was already registered; the first registration stands"
+                     name)
+              [ ("exact_lane_runs", fun walk -> walk (Some (Obj.repr (Exact_lane_run_registry.global ()))))
+              ; ("verification_runs", fun walk -> walk (Some (Obj.repr (Verification_run_registry.global ()))))
+              ; ( "goal_verification_runs"
+                , fun walk -> walk (Some (Obj.repr (Goal_verification_run_registry.global ()))) )
+              ; ("fusion_runs", fun walk -> walk (Some (Obj.repr (Fusion_run_registry.global ()))))
+              ; ("sse_clients", fun walk -> walk (Some (Obj.repr (Atomic.get Sse.clients))))
+              ; ("dashboard_snapshot", fun walk -> walk (Option.map Obj.repr (Dashboard_snapshot.current ())))
+              ; ( "keeper_registry"
+                , fun walk -> walk (Some (Obj.repr (Atomic.get Keeper_registry_setup.registry))) )
+              ; ( "keeper_owner_pools"
+                , fun walk -> Keeper_owner_registry.heap_root (fun value -> walk (Some value)) )
+              ; ( "board_attention_partition_caches"
+                , fun walk -> Keeper_board_attention_partition.heap_root (fun value -> walk (Some value)) )
+              ; ( "activity_graph_caches"
+                , fun walk -> Activity_graph.heap_root (fun value -> walk (Some value)) )
+              ; ( "telemetry_trajectory_summaries"
+                , fun walk -> Telemetry_unified.heap_root (fun value -> walk (Some value)) )
+              ])
+        ; owner_lanes = (fun () ->
+            boot_stage "post_ready_lanes.begin";
+            ignore (start_post_ready_owner_lanes ~sw ~clock ~env state : string * string);
+            boot_stage "post_ready_lanes.end")
+        ; discord_gateway = (fun () ->
+            boot_stage "discord_gateway.begin";
+            Server_discord_in_process_gateway.start ~sw ~env ~clock ~state;
+            boot_stage "discord_gateway.end")
+        ; slack_gateway = (fun () ->
+            boot_stage "slack_gateway.begin";
+            Server_slack_in_process_gateway.start ~sw ~env ~state;
+            boot_stage "slack_gateway.end")
+        ; slack_poll = (fun () ->
+            boot_stage "slack_poll.begin";
+            Server_slack_poll_lane.start ~sw ~env ~state;
+            boot_stage "slack_poll.end")
+        ; imessage_gateway = (fun () ->
+            boot_stage "imessage_gateway.begin";
+            Server_imessage_in_process_gateway.start ~sw ~env ~state;
+            boot_stage "imessage_gateway.end")
+        ; telegram_gateway = (fun () ->
+            boot_stage "telegram_gateway.begin";
+            Server_telegram_in_process_gateway.start ~sw ~env ~state;
+            boot_stage "telegram_gateway.end")
+        ; startup_banner = (fun () ->
+            boot_stage "listening_banner.begin";
+            let workspace_config = Mcp_server.workspace_config state in
+            Server_bootstrap_http.print_startup_banner ~config
+              ~resolved_base:workspace_config.base_path ~base_path
+              ~masc_dir:(Workspace.masc_dir workspace_config)
+              ~path_diagnostics:activated_owner.path_diagnostics;
+            boot_stage "listening_banner.end")
+        ; grpc_listener = (fun () ->
+            Masc_grpc_server.start ~sw ~env
+              ~workspace_config:(Mcp_server.workspace_config state) ~tool_dispatcher)
+        ; grpc_client = (fun () ->
+            match configured_agent_transport with
+            | Masc_grpc_transport.Grpc ->
+                let client = Masc_grpc_client.create_from_env ~sw ~env in
+                Keeper_grpc_heartbeat.set_grpc_client ~env client;
+                Log.Server.info "gRPC keeper client initialized"
+            | Http | Ws | Local -> ())
+        ; websocket_handler = (fun () ->
+            Server_mcp_transport_ws.set_inbound_message_handler dispatch_ws_inbound_message;
+            Transport_metrics.set_ws_same_origin_runtime_ready true)
+        ; transport_providers = (fun () ->
+            Transport_bridge.register_provider (module struct
+              let name = "sse"
+              let protocol = Transport.Sse
+              let is_enabled () = true  (* SSE is always enabled *)
+              let session_count () = Sse.client_count ()
+            end);
+            Transport_bridge.register_provider (module struct
+              let name = "ws"
+              let protocol = Transport.Ws
+              let is_enabled () = Transport_metrics.ws_enabled ()
+              let session_count () = Server_mcp_transport_ws.session_count ()
+            end);
+            Transport_bridge.register_provider (module struct
+              let name = "grpc"
+              let protocol = Transport.Grpc
+              let is_enabled () = Masc_grpc_server.is_enabled ()
+              let session_count () = 0  (* gRPC uses per-call, no persistent sessions *)
+            end);
+            Transport_bridge.seal ())
+        ; execution_refresh = (fun () ->
+            Server_dashboard_http.start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock)
+        ; transport_health_refresh = (fun () ->
+            Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock)
+        ; execution_trust_refresh = (fun () ->
+            Server_dashboard_http.start_execution_trust_refresh_loop ~state ~sw ~clock)
+        ; mission_refresh = (fun () ->
+            Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock)
+        ; operator_snapshot_refresh = (fun () ->
+            Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock
+              ~broadcast_snapshot:Server_dashboard_http_execution_surfaces.broadcast_refreshed_operator_snapshot)
+        ; operator_digest_refresh = (fun () ->
+            Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock
+              ~broadcast_digest:Server_dashboard_http_execution_surfaces.broadcast_operator_digest)
+        ; shell_prewarm = (fun () ->
+            Atomic.set Server_dashboard_http.shell_warming true;
+            Eio.Fiber.fork ~sw (fun () ->
+              Eio.Switch.run ~name:"dashboard-shell-prewarm" @@ fun _ ->
+              let outer_timeout_sec =
+                Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec
+              in
+              try
+                 (* A pre-warm that finished as its window closed has finished. *)
+                 match
+                   Watched_work.run
+                     ~watcher:(fun () ->
+                       Eio.Time.sleep clock outer_timeout_sec;
+                       Error `Timeout)
+                     (fun () ->
+                        Server_dashboard_http.warm_dashboard_surfaces state;
+                        Ok ())
+                 with
+                 | Ok () -> ()
+                 | Error `Timeout ->
+                   Log.Dashboard.warn "dashboard surfaces pre-warm timed out (%.1fs)"
+                     outer_timeout_sec
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                   Log.Dashboard.warn "dashboard surfaces pre-warm failed: %s"
+                   (Printexc.to_string exn)))
+        }
+      in
+      (match failures with
+       | [] -> ()
+       | _ :: _ ->
+           let names =
+             List.map
+               (fun (component, _) -> Server_auxiliary_startup.component_name component)
+               failures
+           in
+           Server_startup_state.mark_degraded
+             ~error:("Auxiliary starts failed: " ^ String.concat ", " names);
+           Server_routes_http_runtime.invalidate_full_health_snapshot ();
+           (* Diagnostics follow every eligible start, so a failing observer or
+              logger cannot skip unrelated components. Private causes stay out
+              of the health projection. *)
+           List.iter
+             (fun (component, failure) ->
+               Log.Server.error "Auxiliary startup failed component=%s: %s"
+                 (Server_auxiliary_startup.component_name component)
+                 (Printexc.to_string failure.Server_auxiliary_startup.cause))
+             failures);
+      ()
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | Owner_initialization_failed error ->
+      handle_initialization_failure (owner_initialization_error_to_string error)
+    | exn ->
+      handle_initialization_failure (Printexc.to_string exn));
+
+  (* 2b. Startup watchdog: if init does not reach state_ready within timeout,
+     log and exit so external process managers can restart the server.
+     Prevents zombie-listener state where the socket is open but HTTP
+     requests hang because init is stuck. *)
+  (* A daemon: the watchdog only sleeps and then reads a flag, so nothing
+     waits for it and the switch must not either. As an ordinary fiber it
+     kept a normally returning [Switch.run] parked for the rest of the
+     timeout. Cancelling it loses nothing -- a closing switch means the
+     process is already ending, which is what the watchdog would force. *)
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Eio.Switch.run ~name:"startup-watchdog" (fun _ ->
+      try
+        let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
+        Eio.Time.sleep clock timeout_sec;
+        let current = Server_startup_state.snapshot () in
+        if not current.state_ready then (
+          let elapsed = Server_startup_state.elapsed_since_start () in
+          Log.Server.error
+            "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s). Exiting."
+            timeout_sec elapsed
+            (Server_startup_state.phase_to_string current.phase);
+          exit 1)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Server.error "startup watchdog fiber failed: %s"
+          (Printexc.to_string exn));
+    `Stop_daemon);
+
+  (* 3. Start serving -- /health responds before init completes *)
+  let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
+      ~h2_error_handler =
+    Eio.Promise.resolve publish_listener_bound ();
+    (* The browser lane check compares an installed host's port with the port
+       this listener actually bound, which differs from [config.port] when that
+       asks for any free port. A Unix-domain listener has no port to compare,
+       so the port stays unknown. *)
+    (match Eio.Net.listening_addr socket with
+     | `Tcp (_, port) ->
+       Browser_lane.install_serving_port port;
+       Eio.Switch.on_release sw Browser_lane.withdraw_serving_port
+     | `Unix _ -> ());
+    (* The listener is bound. Persist only the desired connection, not readiness. *)
+    (match Workspace_connection.port config.port with
+     | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)
+     | Ok port -> (match Workspace_connection.save ~base_path ~port with
+       | Ok () -> () | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)));
+    let addr_label = Printf.sprintf "%s:%d" config.host config.port in
+    match http_mode with
+    | `H2_only ->
+      Server_bootstrap_http.serve_h2 ~sw ~clock ~socket ~addr_label
+        ~h2_request_handler ~h2_error_handler
+    | `H1_only ->
+      Server_bootstrap_http.serve ~sw ~clock ~socket ~addr_label ~request_handler
+    | `Auto ->
+      Server_bootstrap_http.serve_auto ~sw ~clock ~socket ~addr_label
+        ~request_handler ~h2_request_handler ~h2_error_handler
+  in
+  if Env_config.Transport.serving_domain_enabled ()
+  then (
+    Log.Server.info
+      "HTTP serving domain isolation enabled (RFC-0204 Phase 3): accept loop isolated on dedicated domain";
+    Eio.Domain_manager.run domain_mgr (fun () ->
+      (* This domain starts after [main_eio.ml] tuned the main one, and
+         [Gc.set]'s minor_heap_size is per-domain, so it would otherwise
+         serve every request on the 2 MB default -- the isolation this block
+         exists for would be undone by the domain collecting eight times as
+         often, and a minor collection stops every other domain with it. *)
+      Minor_heap.tune ();
+      Eio.Switch.run (fun serving_sw ->
+        Eio_context.with_turn_switch serving_sw (fun () ->
+          let socket =
+            Server_bootstrap_http.listen_socket ~sw:serving_sw ~net ~address config
+          in
+          let routes =
+            make_routes ~port:config.port ~host:config.host ~sw:serving_sw ~clock
+          in
+          let request_handler =
+            make_request_handler ~trust_policy:request_trust_policy routes
+          in
+          let h2_request_handler =
+            make_h2_request_handler
+              ~trust_policy:request_trust_policy
+              ~routes
+              ~sw:serving_sw
+              ~clock
+              ~server_start_time
+          in
+          let h2_error_handler = make_h2_error_handler () in
+          run_serving
+            ~sw:serving_sw
+            ~socket
+            ~routes
+            ~request_handler
+            ~h2_request_handler
+            ~h2_error_handler))))
+  else (
+    let socket = Server_bootstrap_http.listen_socket ~sw ~net ~address config in
+    let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
+    let request_handler =
+      make_request_handler ~trust_policy:request_trust_policy routes
+    in
+    let h2_request_handler =
+      make_h2_request_handler
+        ~trust_policy:request_trust_policy
+        ~routes
+        ~sw
+        ~clock
+        ~server_start_time
+    in
+    let h2_error_handler = make_h2_error_handler () in
+    run_serving
+      ~sw
+      ~socket
+      ~routes
+      ~request_handler
+      ~h2_request_handler
+      ~h2_error_handler)

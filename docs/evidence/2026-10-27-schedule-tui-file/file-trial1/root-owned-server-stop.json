@@ -1,0 +1,12 @@
+{
+  "pid": 24402,
+  "signal": "SIGTERM",
+  "observed_unix": 1793054238.5939908,
+  "exact_command_verified": true,
+  "command": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/native40396800146/artifact/masc start --base-path /Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/runs/file-effect-deepseek-c2-1/workspace --host 127.0.0.1 --port 57060",
+  "fresh_idle_terminal_receipt": "root-post-failure-readonly.json",
+  "disappeared": true,
+  "exit_status": null,
+  "exit_status_reason": "not a child of this cleanup process",
+  "forced_kills": []
+}

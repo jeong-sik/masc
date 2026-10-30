@@ -1,0 +1,1179 @@
+open Alcotest
+
+module Projection = Server_standalone_lane_projection
+module Exact = Masc.Exact_lane_run_registry
+module Verification = Masc.Verification_run_registry
+module Goal_verification = Masc.Goal_verification_run_registry
+module Typesafeai = Masc.Typesafeai_config
+
+let verifier_lane_id = Standalone_lane.to_id Standalone_lane.Verifier
+
+let exact_run ~run_id ~lane ~started_at ~status : Exact.run =
+  { run_id
+  ; lane
+  ; actor = "keeper-test"
+  ; started_at
+  ; input = Exact.Exact_input (`Assoc [])
+  ; status
+  ; input_availability = Exact.Available
+  ; output_availability =
+      (match status with
+       | Exact.Running -> None
+       | Exact.Completed _ | Exact.Completion_persistence_failed _ ->
+         Some Exact.Available)
+  }
+;;
+
+let lane_by_id json lane_id =
+  json
+  |> Yojson.Safe.Util.member "lanes"
+  |> Yojson.Safe.Util.to_list
+  |> List.find (fun lane ->
+    String.equal
+      lane_id
+      (lane |> Yojson.Safe.Util.member "lane_id" |> Yojson.Safe.Util.to_string))
+;;
+
+(* A finished run that names no slot is not one kind of run. On Board
+   Attention a success without a slot is Vendor System One's answer, which
+   runs before any slot is bound; a run closed on replay after a restart
+   never learned its slot; anything else finished before one was bound. The
+   lane says which, and with the slot counts they add up to every finished
+   run. *)
+let test_runs_without_a_slot_are_split_by_why () =
+  let completed ~run_id ~lane ~outcome ~selected_slot =
+    exact_run ~run_id ~lane ~started_at:50.
+      ~status:(Exact.Completed { origin = Exact.Producer; outcome; elapsed_s = Some 1.; output = `Null; selected_slot; usage = None })
+  in
+  let restarted = Exact.Failed { code = Exact.server_restarted_code; detail = "orphan" } in
+  let provider = Exact.Failed { code = "provider"; detail = "offline" } in
+  let exact_runs =
+    [ completed ~run_id:"board-slot" ~lane:Exact.Board_attention
+        ~outcome:Exact.Succeeded ~selected_slot:(Some "board-primary")
+    ; completed ~run_id:"board-jev-1" ~lane:Exact.Board_attention
+        ~outcome:Exact.Succeeded ~selected_slot:None
+    ; completed ~run_id:"board-jev-2" ~lane:Exact.Board_attention
+        ~outcome:Exact.Succeeded ~selected_slot:None
+    ; exact_run ~run_id:"board-restart" ~lane:Exact.Board_attention ~started_at:50.
+        ~status:(Exact.Completed { origin=Exact.Restart_replay; outcome=restarted; elapsed_s=None;
+          output=`Null; selected_slot=None; usage=None })
+    ; completed ~run_id:"producer-restart-code" ~lane:Exact.Board_attention
+        ~outcome:restarted ~selected_slot:None
+    ; completed ~run_id:"board-failed" ~lane:Exact.Board_attention
+        ~outcome:provider ~selected_slot:None
+    ; completed ~run_id:"board-cancelled" ~lane:Exact.Board_attention
+        ~outcome:Exact.Cancelled ~selected_slot:None
+    ; exact_run ~run_id:"board-persistence" ~lane:Exact.Board_attention ~started_at:40.
+        ~status:
+          (Exact.Completion_persistence_failed
+             { intended_outcome = Exact.Succeeded
+             ; elapsed_s = Some 1.
+             ; output = `Null
+             ; selected_slot = None
+             ; usage = None
+             ; failure = { detail = "disk"; state = Exact.Not_persisted }
+             })
+    ; exact_run ~run_id:"board-running" ~lane:Exact.Board_attention ~started_at:60.
+        ~status:Exact.Running
+    ; completed ~run_id:"librarian-no-slot" ~lane:Exact.Librarian
+        ~outcome:Exact.Succeeded ~selected_slot:None
+    ]
+  in
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane:(fun lane_id ->
+        Projection.Configured
+          { admitted_slots = [ lane_id ^ "-primary" ]
+          ; cli_slots = []
+          ; dropped_slots = []
+          ; declared_slots = [ lane_id ^ "-primary" ]
+          ; declared_cli_slots = []
+          ; admission_error = None
+          })
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:(List.length exact_runs)
+      ~exact_runs
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  let int_at lane path =
+    List.fold_left (fun json key -> Yojson.Safe.Util.member key json) lane path
+    |> Yojson.Safe.Util.to_int
+  in
+  let board = lane_by_id json "board_attention_exact" in
+  let without key = int_at board [ "runs_without_slot"; key ] in
+  check int "Vendor System One answered the slotless successes, recorded or not" 3
+    (without "vendor_system_one");
+  check int "a restart orphan is its own count" 1 (without "server_restarted");
+  check int "producer failure code grants no replay origin" 3 (without "no_slot");
+  let named =
+    board |> Yojson.Safe.Util.member "selected_slots" |> Yojson.Safe.Util.to_list
+    |> List.fold_left (fun sum slot -> sum + int_at slot [ "count" ]) 0
+  in
+  check int "slots and the three counts add up to every finished run"
+    (int_at board [ "succeeded_count" ] + int_at board [ "failed_count" ]
+     + int_at board [ "cancelled_count" ])
+    (named + without "vendor_system_one" + without "server_restarted" + without "no_slot");
+  let librarian = lane_by_id json "librarian_exact" in
+  check int "a slotless success outside Board Attention is not Vendor System One" 0
+    (int_at librarian [ "runs_without_slot"; "vendor_system_one" ]);
+  check int "it is counted as naming no slot" 1
+    (int_at librarian [ "runs_without_slot"; "no_slot" ])
+;;
+
+let test_snapshot_names_every_lane_and_keeps_observed_truth () =
+  let exact_runs =
+    [ exact_run
+        ~run_id:"board-running"
+        ~lane:Exact.Board_attention
+        ~started_at:100.
+        ~status:Exact.Running
+    ; exact_run
+        ~run_id:"hitl-completed"
+        ~lane:Exact.Hitl_auto_judge
+        ~started_at:90.
+        ~status:
+          (Exact.Completed
+             { origin = Exact.Producer; outcome = Exact.Succeeded
+             ; elapsed_s = Some 4.
+             ; output = `Assoc []
+             ; selected_slot = Some "hitl-primary"
+             ; usage = None
+             })
+    ; exact_run
+        ~run_id:"librarian-failed"
+        ~lane:Exact.Librarian
+        ~started_at:80.
+        ~status:
+          (Exact.Completed
+             { origin = Exact.Producer; outcome = Exact.Failed { code = "provider"; detail = "offline" }
+             ; elapsed_s = Some 8.
+             ; output = `Null
+             ; selected_slot = Some "librarian-secondary"
+             ; usage = None
+             })
+    ]
+  in
+  let verification_runs : Verification.run list =
+    [ { verification_id = "verify-1"
+      ; task_id = "task-1"
+      ; producer = "keeper-test"
+      ; authority_kind = "completion"
+      ; authority_actor = "operator"
+      ; started_at = 70.
+      ; status =
+          Verification.Completed
+            { outcome = Verification.Approved { reason = "" }
+            ; evaluator_runtime = Some "verifier-primary"
+            ; elapsed_s = 2.
+            ; tools = []
+            }
+      }
+    ]
+  in
+  let resolve_lane lane_id =
+    Projection.Configured
+      { admitted_slots = [ lane_id ^ "-primary" ]
+      ; cli_slots = []
+      ; dropped_slots = []
+      ; declared_slots = [ lane_id ^ "-primary" ]
+      ; declared_cli_slots = []
+      ; admission_error = None
+      }
+  in
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:(List.length exact_runs)
+      ~exact_runs
+      ~verification_runs
+      ~goal_verification_runs:[]
+  in
+  check string "schema" "masc.standalone_llm_lanes.v2"
+    (json |> Yojson.Safe.Util.member "schema" |> Yojson.Safe.Util.to_string);
+  check bool
+    "observation only"
+    true
+    (json
+     |> Yojson.Safe.Util.member "observation_only"
+     |> Yojson.Safe.Util.to_bool);
+  check int
+    "one row for every standalone lane"
+    (List.length Standalone_lane.all)
+    (json |> Yojson.Safe.Util.member "lanes" |> Yojson.Safe.Util.to_list |> List.length);
+  let status lane_id =
+    lane_by_id json lane_id
+    |> Yojson.Safe.Util.member "status"
+    |> Yojson.Safe.Util.to_string
+  in
+  check string "board running" "running" (status "board_attention_exact");
+  check string
+    "board consumer purpose"
+    "Judges one durable Board candidate for Keeper attention."
+    (lane_by_id json "board_attention_exact"
+     |> Yojson.Safe.Util.member "purpose"
+     |> Yojson.Safe.Util.to_string);
+  check string "hitl idle" "idle" (status "hitl_auto_judge");
+  check string "librarian degraded" "degraded" (status "librarian_exact");
+  check string "verifier idle" "idle" (status verifier_lane_id);
+  check string "Stagehand has no retained run" "no_retained_observation"
+    (status "browser_stagehand_exact");
+  let hitl_slots =
+    lane_by_id json "hitl_auto_judge"
+    |> Yojson.Safe.Util.member "selected_slots"
+    |> Yojson.Safe.Util.to_list
+  in
+  match hitl_slots with
+  | [ slot ] ->
+    check string
+      "selected slot"
+      "hitl-primary"
+      (slot |> Yojson.Safe.Util.member "slot_id" |> Yojson.Safe.Util.to_string);
+    check int
+      "selected slot count"
+      1
+      (slot |> Yojson.Safe.Util.member "count" |> Yojson.Safe.Util.to_int)
+  | _ -> fail "expected one selected HITL slot"
+;;
+
+let test_board_lane_projects_credential_free_jev_readiness () =
+  let http_lane =
+    Projection.Configured
+      { admitted_slots = [ "primary" ]; cli_slots = []; dropped_slots = []
+      ; declared_slots = [ "primary" ]; declared_cli_slots = []; admission_error = None }
+  in
+  let snapshot ?(configuration = http_lane) jev_readiness =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane:(fun _ -> configuration)
+      ~jev_readiness
+      ~exact_runs_total:0
+      ~exact_runs:[]
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  let jev readiness =
+    lane_by_id (snapshot readiness) "board_attention_exact"
+    |> Yojson.Safe.Util.member "jev"
+  in
+  check string "disabled state" "off"
+    (jev Typesafeai.Off
+     |> Yojson.Safe.Util.member "state"
+     |> Yojson.Safe.Util.to_string);
+  let direct : Masc.Typesafeai_client.destination_id =
+    { destination_uri = "https://jev.invalid/v1/systemone"; model = "jev-next" }
+  in
+  let reserve : Masc.Typesafeai_client.destination_id =
+    { destination_uri = "https://reserve.invalid/api/v1/systemone"
+    ; model = "~typesafe/jev-latest"
+    }
+  in
+  let enabled = jev (Typesafeai.Configured { destinations = [ direct; reserve ] }) in
+  check string "configured state" "configured"
+    (enabled |> Yojson.Safe.Util.member "state" |> Yojson.Safe.Util.to_string);
+  check (list (pair string string)) "armed destinations, in walk order"
+    [ direct.destination_uri, direct.model; reserve.destination_uri, reserve.model ]
+    (enabled
+     |> Yojson.Safe.Util.member "destinations"
+     |> Yojson.Safe.Util.to_list
+     |> List.map (fun destination ->
+       ( Yojson.Safe.Util.(member "destination_uri" destination |> to_string)
+       , Yojson.Safe.Util.(member "model" destination |> to_string) )));
+  List.iter
+    (fun (configuration, expected) ->
+       let actual =
+         snapshot ~configuration (Typesafeai.Configured { destinations = [ direct ] })
+         |> fun json -> lane_by_id json "board_attention_exact"
+         |> Yojson.Safe.Util.member "jev"
+         |> Yojson.Safe.Util.member "state"
+         |> Yojson.Safe.Util.to_string
+       in
+       check string "readiness follows the resolved transport" expected actual)
+    [ (Projection.Configured
+         { admitted_slots = []; cli_slots = [ "cli" ]; dropped_slots = []
+         ; declared_slots = []; declared_cli_slots = [ "cli" ]; admission_error = None }, "cli_only")
+    ; (Projection.Configured
+         { admitted_slots = []; cli_slots = []; dropped_slots = []
+         ; declared_slots = []; declared_cli_slots = []; admission_error = None }, "lane_unavailable")
+    ; Projection.Unconfigured "no lane", "lane_unavailable"
+    ; Projection.Registry_unavailable "no registry", "lane_unavailable"
+    ];
+  check bool "no credential field" false
+    (match enabled with
+     | `Assoc fields -> List.mem_assoc "api_key" fields
+     | _ -> true);
+  check bool "JEV belongs only to the Board lane" true
+    (match
+       lane_by_id (snapshot Typesafeai.Off) "librarian_exact"
+       |> Yojson.Safe.Util.member "jev"
+     with
+     | `Null -> true
+     | _ -> false)
+;;
+
+(* Lane audit W5+W7: the verifier lane's success means A VERDICT WAS
+   PRODUCED — an exhausted evaluator (Not_reviewed) counts as failed — and a
+   server-restart orphan has no measured duration and must not
+   enter the latency percentile or invent last_terminal_at. *)
+let test_no_verdict_is_failed_and_unmeasured_elapsed_skips_p50 () =
+  let exact_runs =
+    [ exact_run
+        ~run_id:"librarian-measured"
+        ~lane:Exact.Librarian
+        ~started_at:80.
+        ~status:
+          (Exact.Completed
+             { origin = Exact.Producer; outcome = Exact.Failed { code = "provider"; detail = "offline" }
+             ; elapsed_s = Some 8.
+             ; output = `Null
+             ; selected_slot = None
+             ; usage = None
+             })
+    ; exact_run
+        ~run_id:"librarian-restart-orphan"
+        ~lane:Exact.Librarian
+        ~started_at:10.
+        ~status:
+          (Exact.Completed
+             { origin = Exact.Restart_replay; outcome =
+                 Exact.Failed { code = "server_restarted"; detail = "orphan" }
+             ; elapsed_s = None
+             ; output = `Null
+             ; selected_slot = None
+             ; usage = None
+             })
+    ]
+  in
+  let verification_runs : Verification.run list =
+    [ { verification_id = "verify-exhausted"
+      ; task_id = "task-2"
+      ; producer = "keeper-test"
+      ; authority_kind = "completion"
+      ; authority_actor = "operator"
+      ; started_at = 70.
+      ; status =
+          Verification.Completed
+            { outcome = Verification.Not_reviewed { gate = "Evaluator_unavailable"; detail = "exhausted" }
+            ; evaluator_runtime = None
+            ; elapsed_s = 2.
+            ; tools = []
+            }
+      }
+    ]
+  in
+  let resolve_lane lane_id =
+    Projection.Configured
+      { admitted_slots =
+          (if String.equal lane_id "hitl_auto_judge" then [] else [ "slot" ])
+      ; cli_slots =
+          (if String.equal lane_id "hitl_auto_judge"
+           then [ "antigravity_subscription.gemini-3-7-flash-high" ]
+           else [])
+      ; dropped_slots =
+          (if String.equal lane_id "librarian_exact"
+           then [ "slot-typo" ]
+           else [])
+      ; declared_slots =
+          (if String.equal lane_id "librarian_exact"
+           then [ "slot"; "slot-typo" ]
+           else if String.equal lane_id "hitl_auto_judge"
+           then []
+           else [ "slot" ])
+      ; declared_cli_slots =
+          (if String.equal lane_id "hitl_auto_judge"
+           then [ "antigravity_subscription.gemini-3-7-flash-high"; "cli-backup" ]
+           else [])
+      ; admission_error = None
+      }
+  in
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:(List.length exact_runs)
+      ~exact_runs
+      ~verification_runs
+      ~goal_verification_runs:[]
+  in
+  let field lane_id name =
+    lane_by_id json lane_id |> Yojson.Safe.Util.member name
+  in
+  check int
+    "an exhausted evaluator counts as a lane failure"
+    1
+    (field verifier_lane_id "failed_count"
+     |> Yojson.Safe.Util.to_int);
+  check int
+    "no verdict means no lane success"
+    0
+    (field verifier_lane_id "succeeded_count"
+     |> Yojson.Safe.Util.to_int);
+  check bool
+    "p50 comes from measured durations only"
+    true
+    (match field "librarian_exact" "p50_elapsed_s" with
+     | `Float value -> Float.equal value 8.
+     | _ -> false);
+  (* Lane audit W4: a declared-but-inadmissible slot is visible per lane, so
+     "configured single" and "configured double, one dropped" stop looking
+     identical on this surface. *)
+  check bool
+    "dropped slots are surfaced per lane"
+    true
+    (match field "librarian_exact" "dropped_slots" with
+     | `List [ `String "slot-typo" ] -> true
+     | _ -> false);
+  check bool
+    "a lane with nothing dropped says so"
+    true
+    (match field "hitl_auto_judge" "dropped_slots" with
+     | `List [] -> true
+     | _ -> false);
+  check bool "the declared CLI order survives the observation" true
+    (field "hitl_auto_judge" "declared_cli_slots"
+     = `List
+         [ `String "antigravity_subscription.gemini-3-7-flash-high"
+         ; `String "cli-backup"
+         ]);
+  (* RFC cli-runtimes-as-lane-slots: the declared cli suffix is on the wire,
+     and a lane whose only slots are cli ones is ready, not degraded. *)
+  check bool
+    "cli slots are surfaced per lane"
+    true
+    (match field "hitl_auto_judge" "cli_slots" with
+     | `List [ `String "antigravity_subscription.gemini-3-7-flash-high" ] -> true
+     | _ -> false);
+  check string
+    "a cli-only lane is ready"
+    "ready"
+    (field "hitl_auto_judge" "configuration_state" |> Yojson.Safe.Util.to_string);
+  check bool
+    "an http-only lane carries an empty cli list"
+    true
+    (match field "librarian_exact" "cli_slots" with
+     | `List [] -> true
+     | _ -> false)
+;;
+
+let test_latest_terminal_uses_completion_time () =
+  let exact_runs =
+    [ exact_run
+        ~run_id:"started-later-finished-first"
+        ~lane:Exact.Librarian
+        ~started_at:100.
+        ~status:
+          (Exact.Completed
+             { origin = Exact.Producer; outcome = Exact.Failed { code = "early"; detail = "early" }
+             ; elapsed_s = Some 1.
+             ; output = `Null
+             ; selected_slot = Some "secondary"
+             ; usage = None
+             })
+    ; exact_run
+        ~run_id:"started-first-finished-last"
+        ~lane:Exact.Librarian
+        ~started_at:90.
+        ~status:
+          (Exact.Completed
+             { origin = Exact.Producer; outcome = Exact.Succeeded
+             ; elapsed_s = Some 20.
+             ; output = `Null
+             ; selected_slot = Some "primary"
+             ; usage = None
+             })
+    ]
+  in
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:120.
+      ~resolve_lane:(fun lane_id ->
+        Projection.Configured
+          { admitted_slots = [ lane_id ^ "-primary" ]
+      ; cli_slots = []
+      ; dropped_slots = []
+      ; declared_slots = [ lane_id ^ "-primary" ]
+      ; declared_cli_slots = []
+      ; admission_error = None
+      })
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:10
+      ~exact_runs
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  let librarian = lane_by_id json "librarian_exact" in
+  check bool
+    "bounded exact projection is explicit"
+    true
+    (json
+     |> Yojson.Safe.Util.member "exact_run_projection_truncated"
+     |> Yojson.Safe.Util.to_bool);
+  check int
+    "source total"
+    10
+    (json |> Yojson.Safe.Util.member "exact_run_source_total" |> Yojson.Safe.Util.to_int);
+  check string
+    "status follows last completion"
+    "idle"
+    (librarian |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  check string
+    "outcome follows last completion"
+    "succeeded"
+    (librarian
+     |> Yojson.Safe.Util.member "last_outcome"
+     |> Yojson.Safe.Util.to_string);
+  check (float 0.)
+    "terminal timestamp"
+    110.
+    (librarian
+     |> Yojson.Safe.Util.member "last_terminal_at"
+    |> Yojson.Safe.Util.to_float)
+;;
+
+let test_unmeasured_terminal_uses_observation_anchor_without_inventing_finish () =
+  let measured = exact_run ~run_id:"measured" ~lane:Exact.Librarian ~started_at:90.
+    ~status:(Exact.Completed { origin=Exact.Producer; outcome=Exact.Succeeded; elapsed_s=Some 20.;
+      output=`Null; selected_slot=Some "slot"; usage=None }) in
+  (* The original request was already terminal when observation first recorded
+     it at 200. That registration cannot be treated as its execution start. *)
+  let late = exact_run ~run_id:"z-late-observation" ~lane:Exact.Librarian ~started_at:200.
+    ~status:(Exact.Completed { origin=Exact.Producer;
+      outcome=Exact.Failed {code="original_failure";detail="retained terminal"}; elapsed_s=None;
+      output=`Null; selected_slot=None; usage=None }) in
+  let tied = {late with run_id="a-late-observation";
+    status=Exact.Completed {origin=Exact.Producer;outcome=Exact.Succeeded;elapsed_s=None;
+      output=`Null;selected_slot=None;usage=None}} in
+  let project runs = Projection.For_testing.snapshot_json_with ~now:250.
+    ~resolve_lane:(fun _ -> Projection.Unconfigured "not configured")
+    ~jev_readiness:Typesafeai.Off ~exact_runs_total:(List.length runs) ~exact_runs:runs
+    ~verification_runs:[] ~goal_verification_runs:[]
+    |> fun json -> lane_by_id json "librarian_exact" in
+  List.iter (fun runs ->
+    let row=project runs in
+    check (option (float 0.)) "unknown finish stays absent" None
+      (match Yojson.Safe.Util.member "last_terminal_at" row with `Null -> None | v -> Some (Yojson.Safe.Util.to_float v));
+    check (float 0.) "only measured duration enters latency" 20.
+      (Yojson.Safe.Util.member "p50_elapsed_s" row |> Yojson.Safe.Util.to_float);
+    check string "equal anchors use original ID, independent of traversal" "failed"
+      (Yojson.Safe.Util.member "last_outcome" row |> Yojson.Safe.Util.to_string))
+    [[measured;tied;late];[late;tied;measured]]
+;;
+
+let test_registry_rows_reach_tui_without_synthetic_duration () =
+  let module Decode = Masc.Tui_decode in
+  let root=Filename.temp_dir "curator-retained-identity-" "" in
+  let path=Filename.concat root Exact.storage_filename in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
+  let registry=Exact.create ~path () in
+  Exact.register_running registry ~run_id:"tui-original" ~lane:Exact.Workspace_curator
+    ~actor:"curator" ~started_at:10. ~input:(Exact.Exact_input `Null);
+  (match Exact.mark_completed registry ~run_id:"tui-original" ~outcome:Exact.Succeeded
+    ~elapsed_s:2. ~selected_slot:None ~output:`Null () with
+   | Ok () -> () | Error e -> fail (Exact.completion_error_to_string e));
+  Exact.register_running registry ~run_id:"tui-unmeasured-original" ~lane:Exact.Workspace_curator
+    ~actor:"curator" ~started_at:20. ~input:(Exact.Exact_input `Null);
+  (match Exact.mark_completed_unmeasured registry ~run_id:"tui-unmeasured-original"
+    ~outcome:Exact.Succeeded ~selected_slot:None ~output:`Null () with
+   | Ok () -> () | Error e -> fail (Exact.completion_error_to_string e));
+  (* Reopen the real persisted source. A history read neither resolves a
+     builtin route nor borrows an Addon's current installation scope ID. *)
+  let registry=Exact.replay path in
+  let measured=Exact.get registry ~run_id:"tui-original" |> Option.get in
+  let unknown=Exact.get registry ~run_id:"tui-unmeasured-original" |> Option.get in
+  List.iter (fun (run,expected) ->
+    let listing=match Projection.For_testing.recent_run_page_json_with
+      ~limit:1 ~before:None ~lane:(Some "workspace_curator_exact") ~run_kind:None
+      ~exact_runs:[run] ~verification_runs:[] ~goal_verification_runs:[] with
+      | Ok page -> page | Error e -> fail e in
+    (match Decode.decode_lane_run_page ~lane:Lane_run_identity.Workspace_curator listing with
+     | Ok {lrpg_runs=[row];_} ->
+       check bool "retained identity is independent of current configuration" true
+         (Lane_run_identity.equal row.lrs_lane Lane_run_identity.Workspace_curator);
+       check string "original observation ID reaches the TUI" run.run_id row.lrs_run_id;
+       check (option (float 0.)) "original summary duration" expected row.lrs_elapsed_s
+     | Ok _ -> fail "expected one original summary" | Error e -> fail e);
+    (match Projection.For_testing.run_detail_json_with ~run_id:run.run_id ~exact_runs:[run]
+        ~verification_runs:[] ~goal_verification_runs:[] with
+     | Projection.Detail_found detail -> (match Decode.decode_lane_run_detail detail with
+       | Ok row -> check (option (float 0.)) "original detail duration" expected row.lrd_elapsed_s
+       | Error e -> fail e)
+     | Projection.Detail_not_found | Projection.Detail_ambiguous -> fail "expected original detail"))
+    [measured,Some 2.;unknown,None])
+;;
+
+let verifier_tool : Verification.tool_observation =
+  { tool_name = "masc_task_get"
+  ; input = `Assoc [ "task_id", `String "task-9" ]
+  ; disposition = Tool_result.Completed ()
+  ; output_excerpt = "{\"status\":\"awaiting_verification\"}"
+  ; output_truncated = false
+  ; duration_ms = 12.
+  ; finished_at = 111.
+  }
+;;
+
+let task_verification_run ~verification_id ~started_at : Verification.run =
+  { verification_id
+  ; task_id = "task-9"
+  ; producer = "keeper-test"
+  ; authority_kind = "system_llm"
+  ; authority_actor = verifier_lane_id
+  ; started_at
+  ; status =
+      Verification.Completed
+        { outcome = Verification.Rejected { reason = "missing proof" }
+        ; evaluator_runtime = Some "verifier-primary"
+        ; elapsed_s = 3.
+        ; tools = [ verifier_tool ]
+        }
+  }
+;;
+
+let goal_verification_run ~run_id ~started_at : Goal_verification.run =
+  { run_id
+  ; goal_id = "goal-4"
+  ; request_id = "proof-request-4"
+  ; criterion = Goal_store.Criterion
+      { revision = "criterion-4"; title = "Four verified services";
+        metric = Some "verified services"; target_value = Some "4" }
+  ; review_kind = Goal_verification.Proof
+  ; authority_actor = verifier_lane_id
+  ; started_at
+  ; status =
+      Goal_verification.Completed
+        { outcome = Goal_verification.Committed
+        ; evaluated_verdict = Some (Goal_verification.Approved { reason = "four verified" })
+        ; evaluator_runtime = Some "verifier-secondary"
+        ; elapsed_s = 2.
+        ; tools = []
+        }
+  }
+;;
+
+let run_page_or_fail result =
+  match result with
+  | Ok json -> json
+  | Error detail -> fail detail
+;;
+
+let test_verifier_runs_are_filtered_before_pagination () =
+  let busy_exact_runs =
+    List.init 20 (fun index ->
+      exact_run
+        ~run_id:(Printf.sprintf "lib-%02d" index)
+        ~lane:Exact.Librarian
+        ~started_at:(200. +. Float.of_int index)
+        ~status:Exact.Running)
+  in
+  let task = task_verification_run ~verification_id:"vrf-9" ~started_at:100. in
+  let goal = goal_verification_run ~run_id:"goal-run-4" ~started_at:90. in
+  let page =
+    Projection.For_testing.recent_run_page_json_with
+      ~run_kind:None
+      ~limit:1
+      ~before:None
+      ~lane:(Some verifier_lane_id)
+      ~exact_runs:busy_exact_runs
+      ~verification_runs:[ task ]
+      ~goal_verification_runs:[ goal ]
+    |> run_page_or_fail
+  in
+  check int "total counts only verifier runs" 2
+    (page |> Yojson.Safe.Util.member "total" |> Yojson.Safe.Util.to_int);
+  check bool "one verifier row leaves another page" true
+    (page |> Yojson.Safe.Util.member "has_more" |> Yojson.Safe.Util.to_bool);
+  let first =
+    page |> Yojson.Safe.Util.member "runs" |> Yojson.Safe.Util.to_list
+    |> List.hd
+  in
+  check string "task review is newest" "vrf-9"
+    (first |> Yojson.Safe.Util.member "run_id" |> Yojson.Safe.Util.to_string);
+  check string "verdict is visible in the list" "rejected"
+    (first |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+  check string "subject is visible in the list" "task-9"
+    (first |> Yojson.Safe.Util.member "subject_id" |> Yojson.Safe.Util.to_string);
+  let next =
+    Projection.For_testing.recent_run_page_json_with
+      ~run_kind:None
+      ~limit:1
+      ~before:(Some (100., "vrf-9"))
+      ~lane:(Some verifier_lane_id)
+      ~exact_runs:busy_exact_runs
+      ~verification_runs:[ task ]
+      ~goal_verification_runs:[ goal ]
+    |> run_page_or_fail
+  in
+  let second =
+    next |> Yojson.Safe.Util.member "runs" |> Yojson.Safe.Util.to_list
+    |> List.hd
+  in
+  check string "goal review is on the next verifier page" "goal-run-4"
+    (second |> Yojson.Safe.Util.member "run_id" |> Yojson.Safe.Util.to_string);
+  check string "goal review kind" "goal_verification"
+    (second |> Yojson.Safe.Util.member "run_kind" |> Yojson.Safe.Util.to_string)
+;;
+
+let test_goal_judgement_metric_does_not_depend_on_replacement_request () =
+  List.iter (fun outcome ->
+    let base = goal_verification_run ~run_id:"judged-old-request" ~started_at:10. in
+    let run = match base.status with
+      | Goal_verification.Completed completion ->
+        { base with status = Goal_verification.Completed { completion with outcome } }
+      | Goal_verification.Running -> fail "fixture must have completed evaluation"
+    in
+    let snapshot = Projection.For_testing.snapshot_json_with ~now:20.
+      ~resolve_lane:(fun _ -> Projection.Unconfigured "fixture")
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:0 ~exact_runs:[] ~verification_runs:[] ~goal_verification_runs:[ run ] in
+    let lane = lane_by_id snapshot verifier_lane_id in
+    check int "produced judgement succeeds independently of application" 1
+      (Yojson.Safe.Util.member "succeeded_count" lane |> Yojson.Safe.Util.to_int);
+    check int "application deferral does not become evaluator failure" 0
+      (Yojson.Safe.Util.member "failed_count" lane |> Yojson.Safe.Util.to_int))
+    [ Goal_verification.Deferred { detail = "criterion edited without another request" };
+      Goal_verification.Superseded { detail = "criterion edited and requested again" };
+      Goal_verification.Raised { detail = "persistence failed after evaluation" } ]
+;;
+
+let test_native_kind_filter_preserves_quiet_pages_and_mixed_readers () =
+  let exact_runs =
+    [ exact_run ~run_id:"native-a" ~lane:Exact.Librarian ~started_at:100.
+        ~status:Exact.Running
+    ; exact_run ~run_id:"native-b" ~lane:Exact.Board_attention ~started_at:100.
+        ~status:Exact.Running
+    ]
+  in
+  let verification_runs =
+    List.init 4 (fun index ->
+      task_verification_run ~verification_id:(Printf.sprintf "task-%d" index)
+        ~started_at:(200. +. float_of_int index))
+  in
+  let goal_verification_runs =
+    List.init 3 (fun index ->
+      goal_verification_run ~run_id:(Printf.sprintf "goal-%d" index)
+        ~started_at:(300. +. float_of_int index))
+  in
+  let page ~kind ~before ~lane =
+    let kind =
+      match kind with
+      | None -> Ok None
+      | Some value -> Projection.run_kind_of_string value |> Result.map Option.some
+    in
+    Result.bind kind (fun run_kind ->
+      Projection.For_testing.recent_run_page_json_with
+        ~limit:1 ~before ~lane ~run_kind ~exact_runs ~verification_runs
+        ~goal_verification_runs)
+  in
+  let field name json = Yojson.Safe.Util.member name json in
+  let rows json = field "runs" json |> Yojson.Safe.Util.to_list in
+  let first json = List.hd (rows json) in
+  let id row = field "run_id" row |> Yojson.Safe.Util.to_string in
+  let page_one =
+    page ~kind:(Some "exact_output") ~before:None ~lane:None |> run_page_or_fail
+  in
+  check string "newer reviews do not hide the first native run" "native-b"
+    (id (first page_one));
+  check string "native page keeps its declared wire kind" "exact_output"
+    (field "run_kind" (first page_one) |> Yojson.Safe.Util.to_string);
+  check int "native retained total excludes both verifier registries" 2
+    (field "total" page_one |> Yojson.Safe.Util.to_int);
+  check bool "native tail remains pageable" true
+    (field "has_more" page_one |> Yojson.Safe.Util.to_bool);
+  let cursor =
+    field "started_at" (first page_one) |> Yojson.Safe.Util.to_float,
+    id (first page_one)
+  in
+  let page_two =
+    page ~kind:(Some "exact_output") ~before:(Some cursor) ~lane:None
+    |> run_page_or_fail
+  in
+  check string "the exact ID breaks a timestamp tie on the next page" "native-a"
+    (id (first page_two));
+  check int "total remains the whole selected kind across cursor pages" 2
+    (field "total" page_two |> Yojson.Safe.Util.to_int);
+  check bool "the native page ends without a foreign cursor" false
+    (field "has_more" page_two |> Yojson.Safe.Util.to_bool);
+  let librarian =
+    page ~kind:(Some "exact_output") ~before:None ~lane:(Some "librarian_exact")
+    |> run_page_or_fail
+  in
+  check int "kind and lane filters intersect before total" 1
+    (field "total" librarian |> Yojson.Safe.Util.to_int);
+  check string "the lane-filtered native run remains reachable" "native-a"
+    (id (first librarian));
+  List.iter
+    (fun (kind, expected_total, newest_id) ->
+      let selected = page ~kind:(Some kind) ~before:None ~lane:None |> run_page_or_fail in
+      check int (kind ^ " has its own retained total") expected_total
+        (field "total" selected |> Yojson.Safe.Util.to_int);
+      check string (kind ^ " selects its own newest record") newest_id
+        (id (first selected));
+      check string (kind ^ " preserves the matching wire kind") kind
+        (field "run_kind" (first selected) |> Yojson.Safe.Util.to_string))
+    [ "task_verification", 4, "task-3"; "goal_verification", 3, "goal-2" ];
+  let mixed = page ~kind:None ~before:None ~lane:None |> run_page_or_fail in
+  check int "omitted kind preserves the mixed TUI collection" 9
+    (field "total" mixed |> Yojson.Safe.Util.to_int);
+  check string "mixed chronology remains unchanged" "goal-2" (id (first mixed));
+  List.iter
+    (fun kind ->
+      match page ~kind:(Some kind) ~before:None ~lane:None with
+      | Error detail -> check bool "invalid query has an explicit reason" true (String.length detail > 0)
+      | Ok _ -> fail "unknown run kind must not become an empty or mixed success")
+    [ ""; "made_up" ]
+;;
+
+let test_verifier_detail_keeps_verdict_reason_and_tools () =
+  let task = task_verification_run ~verification_id:"vrf-9" ~started_at:100. in
+  match
+    Projection.For_testing.run_detail_json_with
+      ~run_id:"vrf-9"
+      ~exact_runs:[]
+      ~verification_runs:[ task ]
+      ~goal_verification_runs:[]
+  with
+  | Projection.Detail_not_found | Projection.Detail_ambiguous ->
+    fail "expected one verifier detail"
+  | Projection.Detail_found json ->
+    let run = Yojson.Safe.Util.member "run" json in
+    check string "detail kind" "task_verification"
+      (run |> Yojson.Safe.Util.member "run_kind" |> Yojson.Safe.Util.to_string);
+    let output = Yojson.Safe.Util.member "output" run in
+    check string "verdict reason" "missing proof"
+      (output |> Yojson.Safe.Util.member "reason" |> Yojson.Safe.Util.to_string);
+    let tools = output |> Yojson.Safe.Util.member "tools" |> Yojson.Safe.Util.to_list in
+    check int "one durable tool observation" 1 (List.length tools);
+    check string "tool name" "masc_task_get"
+      (List.hd tools |> Yojson.Safe.Util.member "tool_name"
+       |> Yojson.Safe.Util.to_string)
+;;
+
+let check_no_keeper_skill_evidence ~label = function
+  | Projection.Detail_not_found | Projection.Detail_ambiguous ->
+    fail (label ^ " detail is unavailable")
+  | Projection.Detail_found json ->
+    check string
+      (label ^ " Skill evidence")
+      "no_keeper_skills"
+      (json
+       |> Yojson.Safe.Util.member "run"
+       |> Yojson.Safe.Util.member "skill_evidence"
+       |> Yojson.Safe.Util.member "state"
+       |> Yojson.Safe.Util.to_string)
+;;
+
+let test_every_retained_run_kind_projects_skill_evidence () =
+  [ Exact.Librarian; Exact.Hitl_auto_judge; Exact.Board_attention; Exact.Workspace_curator; Exact.Candle_appraiser ]
+  |> List.iteri (fun index lane ->
+    let run_id = Printf.sprintf "exact-skill-%d" index in
+    let run = exact_run ~run_id ~lane ~started_at:100. ~status:Exact.Running in
+    Projection.For_testing.run_detail_json_with
+      ~run_id
+      ~exact_runs:[ run ]
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+    |> check_no_keeper_skill_evidence
+         ~label:(Exact.lane_id lane));
+  let task = task_verification_run ~verification_id:"task-skill" ~started_at:90. in
+  Projection.For_testing.run_detail_json_with
+    ~run_id:"task-skill"
+    ~exact_runs:[]
+    ~verification_runs:[ task ]
+    ~goal_verification_runs:[]
+  |> check_no_keeper_skill_evidence ~label:"task verification";
+  let goal = goal_verification_run ~run_id:"goal-skill" ~started_at:80. in
+  Projection.For_testing.run_detail_json_with
+    ~run_id:"goal-skill"
+    ~exact_runs:[]
+    ~verification_runs:[]
+    ~goal_verification_runs:[ goal ]
+  |> check_no_keeper_skill_evidence ~label:"goal verification"
+;;
+
+let test_unknown_lane_and_duplicate_identity_fail_explicitly () =
+  (match
+     Projection.For_testing.recent_run_page_json_with
+      ~run_kind:None
+       ~limit:10
+       ~before:None
+       ~lane:(Some "invented")
+       ~exact_runs:[]
+       ~verification_runs:[]
+       ~goal_verification_runs:[]
+   with
+   | Ok _ -> fail "unknown lane must not look empty"
+   | Error detail -> check bool "error names unknown lane" true (String.length detail > 0));
+  let exact =
+    exact_run ~run_id:"collision" ~lane:Exact.Librarian ~started_at:10.
+      ~status:Exact.Running
+  in
+  let goal = goal_verification_run ~run_id:"collision" ~started_at:9. in
+  match
+    Projection.For_testing.run_detail_json_with
+      ~run_id:"collision"
+      ~exact_runs:[ exact ]
+      ~verification_runs:[]
+      ~goal_verification_runs:[ goal ]
+  with
+  | Projection.Detail_ambiguous -> ()
+  | Projection.Detail_found _ | Projection.Detail_not_found ->
+    fail "duplicate retained run ids must not pick a registry by precedence"
+;;
+
+let test_detail_preserves_outcome_when_original_payloads_are_unavailable () =
+  let path =
+    Filename.concat (Filename.temp_dir "lane-detail-payload-" "") Exact.storage_filename
+  in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      let registry = Exact.create ~path () in
+      let run_id = "source-bound-detail" in
+      let detail () =
+        let run =
+          match Exact.get registry ~run_id with
+          | Some run -> run
+          | None -> fail "registered run disappeared"
+        in
+        match
+          Projection.For_testing.run_detail_json_with ~run_id
+            ~exact_runs:[ run ] ~verification_runs:[] ~goal_verification_runs:[]
+        with
+        | Projection.Detail_found json -> Yojson.Safe.Util.member "run" json
+        | Projection.Detail_not_found | Projection.Detail_ambiguous ->
+          fail "registered detail is unavailable"
+      in
+      let availability name run =
+        run |> Yojson.Safe.Util.member "payload_availability"
+        |> Yojson.Safe.Util.member name
+      in
+      let state name run =
+        availability name run |> Yojson.Safe.Util.member "state"
+        |> Yojson.Safe.Util.to_string
+      in
+      Exact.register_running registry ~run_id ~lane:Exact.Librarian
+        ~actor:"keeper-fixture" ~started_at:10. ~input:(Exact.Exact_input `Null);
+      let running = detail () in
+      check string "running input was read" "available" (state "input" running);
+      check bool "running has no output availability yet" true
+        (availability "output" running = `Null);
+      (match
+         Exact.mark_completed registry ~run_id ~outcome:Exact.Succeeded
+           ~elapsed_s:1. ~selected_slot:None ~output:`Null ()
+       with
+       | Ok () -> ()
+       | Error error -> fail (Exact.completion_error_to_string error));
+      let completed = detail () in
+      check string "JSON null is available output" "available"
+        (state "output" completed);
+      check bool "the output field retains an explicit JSON null" true
+        (match completed with
+         | `Assoc fields -> List.assoc_opt "output" fields = Some `Null
+         | _ -> false);
+      let payload_dir =
+        Filename.concat (Filename.concat (Filename.dirname path) Exact.payload_dirname) run_id
+      in
+      Array.iter
+        (fun name -> Sys.remove (Filename.concat payload_dir name))
+        (Sys.readdir payload_dir);
+      let unread = detail () in
+      check string "payload read failure does not change execution outcome"
+        "succeeded"
+        (unread |> Yojson.Safe.Util.member "status" |> Yojson.Safe.Util.to_string);
+      List.iter
+        (fun (name, code) ->
+          check string (name ^ " is explicitly unavailable") "unavailable"
+            (state name unread);
+          let error = availability name unread |> Yojson.Safe.Util.member "error" in
+          check string (name ^ " names its missing payload") code
+            (error |> Yojson.Safe.Util.member "code" |> Yojson.Safe.Util.to_string);
+          check bool (name ^ " retains a failure explanation") true
+            (error |> Yojson.Safe.Util.member "message"
+             |> Yojson.Safe.Util.to_string |> String.length |> ( < ) 0))
+        [ "input", "missing_registration"; "output", "missing_completion" ])
+;;
+
+(* A lane that could not admit is not healthy while it runs.
+
+   An [admission_error] can ride beside a non-empty slot list, and a status
+   match that did not read that field left the lane reading [idle] or
+   [running] with nothing on the row saying otherwise. The table beside this
+   word draws slot names rather than the sentence, so the word is where a
+   reader learns the lane is not right. *)
+let test_a_lane_that_could_not_admit_reads_degraded () =
+  let resolve_lane lane_id =
+    Projection.Configured
+      { admitted_slots = [ lane_id ^ "-primary" ]
+      ; cli_slots = [ lane_id ^ "-cli" ]
+      ; dropped_slots = []
+      ; declared_slots = [ lane_id ^ "-primary" ]
+      ; declared_cli_slots = [ lane_id ^ "-cli" ]
+      ; admission_error = Some "requires admitted exact-output slots"
+      }
+  in
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:0
+      ~exact_runs:[]
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  let status lane =
+    lane_by_id json lane
+    |> Yojson.Safe.Util.member "status"
+    |> Yojson.Safe.Util.to_string
+  in
+  check string "an admission error is a degraded lane" "degraded"
+    (status verifier_lane_id);
+  (* And a lane with the same shape and no error keeps the word it had. *)
+  let clean_lane lane_id =
+    Projection.Configured
+      { admitted_slots = [ lane_id ^ "-primary" ]
+      ; cli_slots = [ lane_id ^ "-cli" ]
+      ; dropped_slots = []
+      ; declared_slots = [ lane_id ^ "-primary" ]
+      ; declared_cli_slots = [ lane_id ^ "-cli" ]
+      ; admission_error = None
+      }
+  in
+  let clean =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane:clean_lane
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:0
+      ~exact_runs:[]
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  check string "a lane with no error is not degraded by this" "no_retained_observation"
+    (lane_by_id clean verifier_lane_id
+    |> Yojson.Safe.Util.member "status"
+    |> Yojson.Safe.Util.to_string)
+
+(* One row per lane, and each row's words come from that lane's own arm. The
+   rows used to be a table of lane-name strings kept beside two other tables of
+   the same names. *)
+let test_every_lane_has_one_row_with_its_own_spec () =
+  let json =
+    Projection.For_testing.snapshot_json_with
+      ~now:110.
+      ~resolve_lane:(fun lane_id -> Projection.Unconfigured lane_id)
+      ~jev_readiness:Typesafeai.Off
+      ~exact_runs_total:0
+      ~exact_runs:[]
+      ~verification_runs:[]
+      ~goal_verification_runs:[]
+  in
+  let rows = json |> Yojson.Safe.Util.member "lanes" |> Yojson.Safe.Util.to_list in
+  let text name row = row |> Yojson.Safe.Util.member name |> Yojson.Safe.Util.to_string in
+  let required row = row |> Yojson.Safe.Util.member "required" |> Yojson.Safe.Util.to_bool in
+  let ids lanes = lanes |> List.map Standalone_lane.to_id |> List.sort String.compare in
+  let distinct values = List.length (List.sort_uniq String.compare values) in
+  check (list string) "one row per lane, no lane twice" (ids Standalone_lane.all)
+    (rows |> List.map (text "lane_id") |> List.sort String.compare);
+  check int "every row has its own label" (List.length rows)
+    (distinct (List.map (text "label") rows));
+  check int "every row has its own purpose" (List.length rows)
+    (distinct (List.map (text "purpose") rows));
+  check (list string) "Board Attention and HITL Auto Judge are the required lanes"
+    (ids [ Standalone_lane.Board_attention; Standalone_lane.Hitl_auto_judge ])
+    (rows |> List.filter required |> List.map (text "lane_id") |> List.sort String.compare);
+  let flags = List.map required rows in
+  check (list bool) "the required lanes are drawn first"
+    (List.sort (fun left right -> Bool.compare right left) flags)
+    flags
+
+let test_off_lane_keeps_declarations_and_running_observation () =
+  let json = Projection.For_testing.snapshot_json_with ~now:100.
+    ~resolve_lane:(fun _ -> Projection.Disabled
+      {declared_slots=["first";"second"];declared_cli_slots=["cli"]})
+    ~jev_readiness:Typesafeai.Off ~exact_runs_total:1
+    ~exact_runs:[exact_run ~run_id:"accepted-before-off" ~lane:Exact.Librarian
+      ~started_at:50. ~status:Exact.Running]
+    ~verification_runs:[] ~goal_verification_runs:[] in
+  let lane = lane_by_id json "librarian_exact" in
+  let open Yojson.Safe.Util in
+  check string "off is configuration, not missing data" "off" (lane |> member "configuration_state" |> to_string);
+  check string "off is visible while accepted work finishes" "off" (lane |> member "status" |> to_string);
+  check int "running work remains observed" 1 (lane |> member "running_count" |> to_int);
+  check (list string) "candidate order retained" ["first";"second"]
+    (lane |> member "declared_slots" |> to_list |> List.map to_string)
+;;
+
+let () =
+  run
+    "server standalone lane projection"
+    [ ( "snapshot"
+      , [ test_case
+            "Goal judgement metric is independent of replacement request"
+            `Quick
+            test_goal_judgement_metric_does_not_depend_on_replacement_request
+        ; test_case
+            "all lanes and observation states"
+            `Quick
+            test_snapshot_names_every_lane_and_keeps_observed_truth
+        ; test_case "off retains declarations and accepted running work" `Quick
+            test_off_lane_keeps_declarations_and_running_observation
+        ; test_case
+            "runs without a slot are split by why"
+            `Quick
+            test_runs_without_a_slot_are_split_by_why
+        ; test_case
+            "latest terminal is ordered by completion time"
+            `Quick
+            test_latest_terminal_uses_completion_time
+        ; test_case
+            "Board lane projects credential-free JEV readiness"
+            `Quick
+            test_board_lane_projects_credential_free_jev_readiness
+        ; test_case "unmeasured original and deterministic terminal selection" `Quick
+            test_unmeasured_terminal_uses_observation_anchor_without_inventing_finish
+        ; test_case "registry summary and detail reach the TUI decoder" `Quick
+            test_registry_rows_reach_tui_without_synthetic_duration
+        ; test_case
+            "no verdict is failed; unmeasured elapsed skips p50"
+            `Quick
+            test_no_verdict_is_failed_and_unmeasured_elapsed_skips_p50
+        ; test_case
+            "verifier runs are filtered before pagination"
+            `Quick
+            test_verifier_runs_are_filtered_before_pagination
+        ; test_case
+            "native kind filtering preserves quiet cursor pages and mixed readers"
+            `Quick
+            test_native_kind_filter_preserves_quiet_pages_and_mixed_readers
+        ; test_case
+            "verifier detail keeps verdict reason and tools"
+            `Quick
+            test_verifier_detail_keeps_verdict_reason_and_tools
+        ; test_case
+            "every retained run kind projects Skill evidence"
+            `Quick
+            test_every_retained_run_kind_projects_skill_evidence
+        ; test_case
+            "detail preserves outcome when original payloads are unavailable"
+            `Quick
+            test_detail_preserves_outcome_when_original_payloads_are_unavailable
+        ; test_case
+            "unknown lane and duplicate identity fail explicitly"
+            `Quick
+            test_unknown_lane_and_duplicate_identity_fail_explicitly
+        ; test_case
+            "a lane that could not admit reads degraded"
+            `Quick
+            test_a_lane_that_could_not_admit_reads_degraded
+        ; test_case
+            "every lane has one row with its own spec"
+            `Quick
+            test_every_lane_has_one_row_with_its_own_spec
+        ] )
+    ]
+;;

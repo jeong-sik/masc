@@ -1,0 +1,97 @@
+{
+  "captured_at_utc": "2026-10-30T08:17:40.186349+00:00",
+  "last_prompt_block_sizes": {
+    "active_goals": {
+      "count": 31,
+      "max_bytes": 53866,
+      "median_bytes": 53522
+    },
+    "admitted_scheduled_input": {
+      "count": 30,
+      "max_bytes": 695,
+      "median_bytes": 188.5
+    },
+    "dynamic_context": {
+      "count": 29,
+      "max_bytes": 87458,
+      "median_bytes": 41951
+    },
+    "keeper_instructions": {
+      "count": 31,
+      "max_bytes": 69129,
+      "median_bytes": 47231
+    },
+    "librarian_working_context": {
+      "count": 29,
+      "max_bytes": 762,
+      "median_bytes": 760
+    },
+    "memory_os_recall": {
+      "count": 29,
+      "max_bytes": 1150,
+      "median_bytes": 1147
+    },
+    "recalled_memory": {
+      "count": 3,
+      "max_bytes": 133776,
+      "median_bytes": 52385
+    },
+    "recalled_memory_status": {
+      "count": 3,
+      "max_bytes": 3963,
+      "median_bytes": 2501
+    },
+    "skill_compositions": {
+      "count": 29,
+      "max_bytes": 405,
+      "median_bytes": 303
+    },
+    "temporal_summary": {
+      "count": 29,
+      "max_bytes": 87,
+      "median_bytes": 36
+    }
+  },
+  "memory_recall_retained_logs": {
+    "counts": {
+      "judgment_completed": 181,
+      "provider_failed": 30,
+      "response_received": 878,
+      "responses_with_usage": 878,
+      "started": 908,
+      "started_candidates": 380,
+      "started_time": 347,
+      "started_turn": 181
+    },
+    "files": 8,
+    "first_recorded_at_utc": "2026-10-29T11:13:43.171370+00:00",
+    "keepers": 4,
+    "last_recorded_at_utc": "2026-10-30T08:09:05.573344+00:00",
+    "reported_usage": {
+      "input_tokens": 16349641,
+      "output_tokens": 1612054
+    },
+    "started_line_bytes_median": 51124.5,
+    "started_line_bytes_sum": 49623492,
+    "time_candidate_distinct_within_keeper": 240,
+    "time_candidate_occurrences": 5935,
+    "time_request_distinct_within_keeper": 281,
+    "time_request_occurrences": 347
+  },
+  "provider_inputs": {
+    "body_bytes_max": 1926598,
+    "body_bytes_median": 1460714.0,
+    "body_bytes_min": 411840,
+    "keepers": 6,
+    "message_count_max": 4387,
+    "message_count_min": 270,
+    "records": 16,
+    "tool_schema_artifact_bytes_max": 105645,
+    "tool_schema_artifact_bytes_median": 91665.0,
+    "tool_schema_count_max": 49,
+    "tool_schema_count_min": 40,
+    "window_end_utc": "2026-10-30T08:10:00+00:00",
+    "window_start_utc": "2026-10-30T07:46:18+00:00"
+  },
+  "read_errors": {}
+}

@@ -1,0 +1,1 @@
+PASS: five generated schema patterns reject all 25 Unicode White_Space characters and empty strings; preserve meaningful text

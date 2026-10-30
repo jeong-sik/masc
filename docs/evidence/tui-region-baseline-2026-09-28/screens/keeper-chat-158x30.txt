@@ -1,0 +1,30 @@
+ Overview  Activity  ▸Keepers  Lanes  Memory  Board  Planning  Fusion  Workspace  Config
+                                                                                                      │[Recent] Changes · 2 keepers
+   Keepers ▸ alpha ▸ chat                                                                             │                   state     tool        calls  new tok
+ ──────────────────────────────────────────────────────────────────────────────────────────────────── │● alpha            no events
+  ┄┄ 2026-08-21 · 21:00 ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  │· beta             no events
+       21:41 ○ STATUS         │ 판정 중 · 이 호출은 미뤄짐 · GATE_CLICK long-argument long-argument   │───────────────────────────────────────────────────────
+                              │ l ⌄ 204자                                                             │alpha · no events on this feed yet
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ────────────────────────────────────────────────────────────────────────────────────────────────────
+    >
+
+ alpha · ● healthy AUTO · gate: Auto Judge · running · confi…aude-opus-5  Context unavailable · Ctrl-X
+  Enter:send  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-N:journal  Ctrl-F:metadata  Esc:list  …?

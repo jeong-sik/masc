@@ -1,0 +1,418 @@
+name: Test
+
+# Explicit full or targeted behavior checks on the selected ref.
+#
+# The nightly schedule is the lane that covers what no pull request can
+# select: @check type-checks test/ but links and runs nothing, and the
+# pull-request gate runs only the suites that request edits, names or
+# calls. A behavioural regression outside that selection used to reach
+# main unrun and wait for the release-candidate lane; the nightly runs
+# the full behavioural suite once a day so it surfaces within ~24h, and
+# files red nights as an issue (label nightly-test-lane) so the failure
+# reaches someone. See #33008, which added the lane, and #40280, which
+# removed the schedule on 2026-09-30 and whose gap this restores.
+on:
+  schedule:
+    # 17:43 UTC = 02:43 KST, off-peak for both GitHub runners and the team.
+    - cron: "43 17 * * *"
+    # Restored 2026-10-06: with the trigger gone, a behavioural regression
+    # outside the pull-request gate selection (the suites it edits, names
+    # or calls) reaches main and waits for the release-candidate lane.
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: 'Comma-separated suites; empty runs the full regression suite'
+        type: string
+        default: ''
+      minimal:
+        description: 'Skip broad sandbox and presentation setup; requires explicit suites'
+        type: boolean
+        default: false
+      eio_backend:
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      candidate_sha:
+        type: string
+        default: ''
+      candidate_verification:
+        type: boolean
+        default: false
+      suite:
+        type: string
+        default: ""
+      minimal:
+        type: boolean
+        default: false
+      eio_backend:
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  # The scheduled failure below files an issue. A dispatch never reaches
+  # that step, so this scope is unused on every other path.
+  issues: write
+
+concurrency:
+  group: test-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: test suite
+    runs-on: ubuntu-24.04
+    # Preserve the existing stalled-job backstop: cold setup can take about
+    # 75 minutes, followed by the full runner's 100-minute hang guard and margin.
+    # This is hang safety, not the size goal or a two-minute limit for minimal checks.
+    timeout-minutes: 180
+    steps:
+      - name: Require explicit minimal suites
+        if: inputs.minimal
+        env:
+          SUITES: ${{ inputs.suite }}
+        run: |
+          python3 - <<'PYCODE'
+          import os
+          if not any(part.strip() for part in os.environ["SUITES"].split(",")):
+              raise SystemExit("Minimal behavior verification requires explicit suites")
+          PYCODE
+
+      - name: Free disk space
+        if: inputs.minimal == false
+        # Same cleanup as ci.yml: linking the test executables is
+        # disk-heavy, and ubuntu-24.04 preinstalls the Android SDK,
+        # .NET, GHC and the CodeQL bundle this build never uses.
+        # See: https://github.com/jeong-sik/masc/issues/22954
+        run: |
+          set -euo pipefail
+          echo "Disk before cleanup:"
+          df -h /
+          cleanup_pids=()
+          sudo rm -rf /usr/local/lib/android & cleanup_pids+=("$!")
+          sudo rm -rf /usr/share/dotnet & cleanup_pids+=("$!")
+          sudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=("$!")
+          sudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=("$!")
+          sudo docker image prune --all --force & cleanup_pids+=("$!")
+          for cleanup_pid in "${cleanup_pids[@]}"; do
+            wait "${cleanup_pid}" || true
+          done
+          echo "Disk after cleanup:"
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+
+      - name: Setup OCaml toolchain
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Pin minimal OCaml dependencies
+        if: inputs.minimal
+        uses: ./.github/actions/pin-ocaml-deps
+
+      - name: Pin external OCaml dependencies
+        if: inputs.minimal == false
+        uses: ./.github/actions/pin-ocaml-deps
+        with:
+          pin-flags: --with-bisect
+
+      - name: Install system and OCaml dependencies
+        uses: ./.github/actions/install-ocaml-deps
+        with:
+          # --with-test is what ci.yml already passes, and it is what
+          # running the suite needs: dune-project gates alcotest,
+          # qcheck-core, qcheck-alcotest and bisect_ppx behind :with-test.
+          install-flags: --with-test
+          os-packages: jq ripgrep
+
+      # Real PDF, presentation and video inspection run on the host. Keep
+      # their dependencies separate from opam and omit optional apt recommends.
+      # The preceding dependency action has already refreshed the apt index.
+      - name: Install native media verification tools
+        if: inputs.minimal == false
+        run: sudo apt-get install -y --no-install-recommends poppler-utils ffmpeg libreoffice-impress python3-venv
+
+      # This explicitly selected suite reads real MP4/PDF fixtures even when
+      # broad sandbox and presentation preparation is omitted. Resolve its
+      # source as the targeted runner does; a same-named suite elsewhere does
+      # not select these host dependencies.
+      - name: Install native media tools for selected minimal verifier checks
+        if: inputs.minimal
+        env:
+          TARGET_SUITES: ${{ inputs.suite }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
+          for suite in "${requested[@]}"; do
+            suite="${suite// /}"
+            [ -n "${suite}" ] || continue
+            if [ -f "test/${suite}.ml" ]; then
+              suite_source="test/${suite}.ml"
+            elif [ -f "${suite}.ml" ]; then
+              suite_source="${suite}.ml"
+            else
+              continue
+            fi
+            if [ "${suite_source}" -ef test/test_verification_authority_tools.ml ]; then
+              sudo apt-get install -y --no-install-recommends poppler-utils ffmpeg
+              break
+            fi
+          done
+
+      - name: Prepare managed presentation verification inputs
+        if: inputs.minimal == false
+        run: python3 scripts/ci/prepare-presentation-verifier.py
+
+      # test_run_local_script builds the PATH a dashboard build would run
+      # under, from the directories holding node, pnpm, python3, git, mkdir
+      # and bash. Every one but pnpm is on the runner, so the suite failed
+      # with "required test command is missing: pnpm" before reaching a
+      # single scenario. pr-check.yml's check job carries the same step for
+      # the pull requests that select this suite. The version is the one
+      # pr-check.yml and release.yml build the SPA with.
+      - name: Make pnpm available to the suites that read a dashboard PATH
+        if: inputs.minimal == false
+        run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+
+      - name: Prepare static shim compiler outside the test workers
+        if: inputs.minimal == false && inputs.suite == ''
+        uses: ./.github/actions/prepare-shim-builder
+        with:
+          arch: amd64
+
+      # Full suites already selected a Buildx builder while preparing the shim.
+      # Targeted non-minimal suites also need one for the sandbox image cache.
+      - name: Set up image cache for targeted suites
+        if: inputs.minimal == false && inputs.suite != ''
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # The release lane exercises the embedded recipe through the shipped CLI.
+      # Behavior only needs the same checked-in image; preparing it must not
+      # force a separate server build before Dune schedules the full suite.
+      - name: Prepare Keeper sandbox image
+        if: inputs.minimal == false
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          DOCKER_BUILD_SUMMARY: 'false'
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: ./sandbox-images/base
+          file: ./sandbox-images/base/Dockerfile
+          tags: masc-sandbox-test:ci
+          load: true
+          pull: true
+          cache-from: type=gha,scope=masc-keeper-sandbox-${{ runner.arch }}
+          cache-to: type=gha,scope=masc-keeper-sandbox-${{ runner.arch }},mode=min,ignore-error=true
+
+      # The sandbox image is built and tagged above; the buildx builder cache
+      # that produced it is dead weight the suite never reads. Full-suite runs
+      # have filled the runner root (#45218), so drop the builder cache and
+      # record the disk before the suite starts.
+      - name: Drop the image build cache the suite never reads
+        if: inputs.minimal == false
+        run: |
+          docker builder prune --all --force
+          df -h /
+
+      - name: Test
+        id: tests
+        env:
+          # Public runners give four CPUs; use all four for the build
+          # and the suite.
+          DUNE_JOBS: "4"
+          # Release full-suite deadlines, innermost first:
+          # 1. MASC_TEST_SUITE_DEADLINE (90 min) bounds the suite itself;
+          #    on expiry ci-run-test-suite.sh lists the executables still
+          #    running under dune, then a log tail, before failing, so a
+          #    hang leaves evidence that names it.
+          # 2. CI_TEST_TIMEOUT_SEC (100 min) is the observer's fail-closed
+          #    backstop -- reached only if the suite script cannot enforce
+          #    its own deadline.
+          # 3. The release job ends after 180 minutes from job start.
+          # Explicit minimal suites select less work; the two-minute example
+          # is not a deadline or a pass/fail boundary.
+          MASC_TEST_SUITE_DEADLINE: "5400"
+          CI_TEST_TIMEOUT_SEC: "6000"
+          CI_TEST_HEARTBEAT_SEC: "30"
+          # A fixed path so the step below can upload it. ci-run-tests.sh
+          # otherwise names the file with mktemp and only its last 120
+          # lines reach the step output. The targeted path appends to the
+          # same file, so the upload step serves both.
+          CI_TEST_LOG_FILE: ${{ runner.temp }}/ci-run-tests.log
+          # scripts/ci-run-test-suite.sh writes the untruncated inner Dune
+          # output here. The always-run upload step below uses this exact
+          # name.
+          MASC_TEST_SUITE_LOG_ARTIFACT: test-suite-log
+          # The targeted path, from the dispatch inputs; both are empty on
+          # the schedule and on a dispatch that names no suite.
+          MINIMAL_CHECK: ${{ inputs.minimal }}
+          TARGET_SUITES: ${{ inputs.suite }}
+          TARGET_EIO_BACKEND: ${{ inputs.eio_backend }}
+          # One suite's budget on the targeted path, where none of the
+          # three deadlines above applies: the run is not under
+          # ci-run-tests.sh, and each suite is under timeout(1). The suites
+          # #33200 is about ran past 5400s under the full lane; one that
+          # needs more than ten minutes alone is the finding, not a run to
+          # wait out. TERM first, KILL after the grace, in case the suite
+          # handles TERM itself.
+          TARGET_SUITE_TIMEOUT_SEC: "600"
+          TARGET_SUITE_KILL_GRACE_SEC: "30"
+        # Run the complete root @runtest alias once. The suite wrapper keeps
+        # Dune's exit status and full log; the observer emits progress and
+        # enforces the outer hang backstop.
+        #
+        # The targeted path selects only the requested suites. Plain test
+        # executables use their declared environment/dependencies; named tests
+        # with custom actions run through Dune's per-test alias so arguments,
+        # wrappers and variable expansion remain Dune's responsibility.
+        # --no-buffer and ALCOTEST_VERBOSE stream case progress. DUNE_SOURCEROOT
+        # is what masc_test_deps reads to find config/ and prompts/ inside _build.
+        run: |
+          set -euo pipefail
+          if [ "${MINIMAL_CHECK}" != true ]; then
+            # Building the image is half of what a sandboxed suite needs. A
+            # fixture whose keeper runs a command starts a persistent
+            # container through the turn sandbox factory, and
+            # Keeper_sandbox_runtime_setup refuses that under a test
+            # executable unless the run says it wants the real daemon: the
+            # guard exists so a developer's daemon does not collect
+            # containers named for temp workspaces. This runner is thrown
+            # away with its daemon, and a fixture that started a container
+            # removes it in its own teardown
+            # (Masc_test_deps.teardown_fixture_sandbox), so this lane says
+            # so, once, here -- not in every stanza that dispatches. Without
+            # it every Docker
+            # case that used to skip on "image not found" fails on the
+            # guard instead (dispatch_runtime, execute_exit_result).
+            export MASC_TEST_ALLOW_REAL_DOCKER=1
+          fi
+          if [ -z "${TARGET_SUITES}" ]; then
+            scripts/ci-run-tests.sh "scripts/ci-run-test-suite.sh"
+            exit 0
+          fi
+          scripts/ci-run-targeted-tests.sh
+
+      - name: Upload equipped portrait HTTP evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candle-equipped-portrait
+          path: ${{ runner.temp }}/candle-equipped-portrait/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload the full Dune suite log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-suite-log
+          overwrite: ${{ inputs.candidate_verification == true }}
+          path: ${{ runner.temp }}/test-suite.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Where the same run's time went: seconds per kind of dune process
+      # (compile, link, test run) and the slowest of each, summarised by
+      # scripts/ci-run-test-suite.sh from dune's trace. The trace itself
+      # records the environment and is not uploaded.
+      - name: Upload the Dune suite timing
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-suite-timing
+          overwrite: ${{ inputs.candidate_verification == true }}
+          path: ${{ runner.temp }}/test-suite-timing.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # The step output carries the heartbeat and the last 120 lines of the
+      # runner log; every per-suite verdict lives only in the file. The
+      # first root @runtest run on 2026-09-05 named its two hung suites and
+      # lost every other verdict with it (#33200). Uploaded on every
+      # outcome, since a red run is when the file is read.
+      - name: Exercise creative artifacts in the built Keeper image
+        if: inputs.minimal == false
+        run: |
+          mkdir -p "$RUNNER_TEMP/keeper-creative-proof"
+          chmod 0777 "$RUNNER_TEMP/keeper-creative-proof"
+          docker image inspect masc-sandbox-test:ci --format '{{.Id}}' > "$RUNNER_TEMP/keeper-creative-image-id.txt"
+          docker run --rm --read-only --network none --cap-drop ALL \
+            --security-opt no-new-privileges --user 65532:65532 \
+            --tmpfs /tmp:rw,mode=1777 -e HOME=/tmp \
+            -v "$GITHUB_WORKSPACE/scripts:/proof:ro" \
+            -v "$RUNNER_TEMP/keeper-creative-proof:/out" \
+            masc-sandbox-test:ci python3 /proof/verify-sandbox-creative-tools.py /out
+
+      - name: Upload creative artifact proof
+        if: always() && inputs.minimal == false
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: keeper-creative-proof-${{ inputs.candidate_sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/keeper-creative-proof
+            ${{ runner.temp }}/keeper-creative-image-id.txt
+          if-no-files-found: ignore
+
+      - name: Upload the suite runner log
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: suite-runner-log
+          overwrite: ${{ inputs.candidate_verification == true }}
+          path: ${{ runner.temp }}/ci-run-tests.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      # The lane's whole point is that a test-only regression surfaces
+      # within ~24h. Without this step it surfaced only to whoever opened
+      # the Actions tab, which is how the 2026-09-05 hang (#33200) sat
+      # unread. Scheduled runs only: a dispatcher already sees their own
+      # run. Cancellation counts as a failure here because the job-level
+      # 180-minute cap is exactly what a hung suite hits.
+      - name: File the scheduled failure as an issue
+        if: (failure() || cancelled()) && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # gh infers the repo from the checkout's git remote. This step also
+          # runs when the job failed before Checkout, where there is no remote
+          # to read, so name the repo outright.
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          label=nightly-test-lane
+          # --force is a no-op when the label already exists, so the first
+          # red night does not fail on a label nobody created yet.
+          gh label create "${label}" \
+            --color B60205 \
+            --description "야간 테스트 레인이 실패한 실행" \
+            --force
+          # The taxonomy workflow comments on any issue with no declaration
+          # block, so this body carries one. A red lane is a ci defect that
+          # degrades and whose root is that nothing said so.
+          body=$(printf '%s\n\n%s\n%s\n\n%s\n%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+            "야간 테스트 레인이 \`${JOB_STATUS}\` 로 끝났습니다." \
+            "- 실행: ${RUN_URL}" \
+            "- 커밋: \`${GITHUB_SHA}\`" \
+            "스위트별 판정은 그 실행의 \`suite-runner-log\` 아티팩트에 있습니다." \
+            "단계 출력에는 마지막 120줄만 남습니다." \
+            '```masc-triage' \
+            "kind: defect" \
+            "area: ci" \
+            "impact: degrades" \
+            "must-do: false" \
+            '```')
+          existing=$(gh issue list --state open --label "${label}" \
+            --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+            echo "commented on #${existing}"
+          else
+            gh issue create --label "${label}" \
+              --title "야간 테스트 레인이 빨갛습니다" \
+              --body "${body}"
+          fi

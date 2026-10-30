@@ -1,0 +1,742 @@
+type standard_field =
+  | Name
+  | Description
+  | License
+  | Compatibility
+  | Metadata
+  | Allowed_tools_syntax_only
+
+type field =
+  | Standard of standard_field
+  | Extension of string
+
+type expected_shape =
+  | String_value
+  | String_mapping
+
+type name_violation =
+  | Empty_name
+  | Name_too_long of
+      { length : int
+      ; maximum : int
+      }
+  | Name_not_lowercase
+  | Name_starts_with_hyphen
+  | Name_ends_with_hyphen
+  | Name_has_consecutive_hyphens
+  | Name_has_invalid_character
+
+type diagnostic =
+  | Missing_frontmatter
+  | Byte_order_mark
+  | Unterminated_frontmatter
+  | Malformed_yaml of string
+  | Frontmatter_not_mapping
+  | Duplicate_field of field
+  | Duplicate_metadata_key of string
+  | Unexpected_frontmatter_field of string
+  | Missing_name
+  | Missing_description
+  | Invalid_field_type of
+      { field : field
+      ; expected : expected_shape
+      }
+  | Invalid_name of
+      { name : string
+      ; violations : name_violation list
+      }
+  | Name_mismatch of
+      { declared : string
+      ; directory : string
+      }
+  | Description_too_long of { length : int }
+  | Compatibility_empty
+  | Compatibility_too_long of { length : int }
+  | Invalid_metadata_value of { key : string }
+
+type extension_value =
+  | Null
+  | Boolean of bool
+  | Number of float
+  | Text of string
+  | Sequence of extension_value list
+  | Mapping of (string * extension_value) list
+
+type t =
+  { name : string
+  ; declared_name : string option
+  ; description : string
+  ; license : string option
+  ; compatibility : string option
+  ; metadata : (string * string) list
+  ; metadata_values : (string * extension_value) list
+  ; body : string
+  }
+
+type load_outcome =
+  | Loaded of t
+  | Unloadable of diagnostic list
+
+type line =
+  { start : int
+  ; next : int
+  ; text : string
+  }
+
+let line_at contents start =
+  let length = String.length contents in
+  if start >= length
+  then None
+  else
+    let stop =
+      match String.index_from_opt contents start '\n' with
+      | Some index -> index
+      | None -> length
+    in
+    let raw = String.sub contents start (stop - start) in
+    let raw_length = String.length raw in
+    let text =
+      if raw_length > 0 && Char.equal raw.[raw_length - 1] '\r'
+      then String.sub raw 0 (raw_length - 1)
+      else raw
+    in
+    let next = if stop < length then stop + 1 else length in
+    Some { start; next; text }
+;;
+
+let split_frontmatter contents =
+  match line_at contents 0 with
+  | None | Some { text = ""; _ } -> Error Missing_frontmatter
+  | Some first when not (String.equal first.text "---") -> Error Missing_frontmatter
+  | Some first ->
+    let rec find_close position =
+      match line_at contents position with
+      | None -> Error Unterminated_frontmatter
+      | Some line when String.equal line.text "---" ->
+        let yaml = String.sub contents first.next (line.start - first.next) in
+        let body =
+          String.sub contents line.next (String.length contents - line.next)
+        in
+        Ok (yaml, body)
+      | Some line -> find_close line.next
+    in
+    find_close first.next
+;;
+
+module Spec_limits = struct
+  let name = 64
+  let description = 1024
+  let compatibility = 500
+end
+
+let standard_field_of_key = function
+  | "name" -> Some Name
+  | "description" -> Some Description
+  | "license" -> Some License
+  | "compatibility" -> Some Compatibility
+  | "metadata" -> Some Metadata
+  | "allowed-tools" -> Some Allowed_tools_syntax_only
+  | _ -> None
+;;
+
+let field_of_key key =
+  match standard_field_of_key key with
+  | Some field -> Standard field
+  | None -> Extension key
+;;
+
+let duplicate_fields fields =
+  let rec loop seen duplicates = function
+    | [] -> List.rev duplicates
+    | (key, _) :: rest ->
+      if List.mem key seen
+      then loop seen (Duplicate_field (field_of_key key) :: duplicates) rest
+      else loop (key :: seen) duplicates rest
+  in
+  loop [] [] fields
+;;
+
+let field fields key = List.assoc_opt key fields
+
+let python_whitespace scalar =
+  let code = Uchar.to_int scalar in
+  Uucp.White.is_white_space scalar || (code >= 0x1c && code <= 0x1f)
+;;
+
+let unicode_trim value =
+  let rec loop index first_nonspace last_nonspace_end =
+    if index = String.length value
+    then
+      match first_nonspace with
+      | None -> ""
+      | Some first -> String.sub value first (last_nonspace_end - first)
+    else
+      let decoded = String.get_utf_8_uchar value index in
+      if not (Uchar.utf_decode_is_valid decoded)
+      then value
+      else
+        let next = index + Uchar.utf_decode_length decoded in
+        let scalar = Uchar.utf_decode_uchar decoded in
+        if python_whitespace scalar
+        then loop next first_nonspace last_nonspace_end
+        else
+          let first_nonspace =
+            match first_nonspace with
+            | Some first -> Some first
+            | None -> Some index
+          in
+          loop next first_nonspace next
+  in
+  loop 0 None 0
+;;
+
+(* The answer [String.equal (unicode_trim value) ""] gives: every scalar
+   decodes and is whitespace. It stops at the first scalar that is not
+   whitespace or the first byte that does not decode, without building the
+   trimmed copy; the skill catalog asks it of a whole body before it checks
+   the body's size. *)
+let is_blank value =
+  let rec blank_from index =
+    index = String.length value
+    ||
+    let decoded = String.get_utf_8_uchar value index in
+    Uchar.utf_decode_is_valid decoded
+    && python_whitespace (Uchar.utf_decode_uchar decoded)
+    && blank_from (index + Uchar.utf_decode_length decoded)
+  in
+  blank_from 0
+;;
+
+let optional_string fields standard_field key =
+  match field fields key with
+  | None -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some _ ->
+    Error
+      (Invalid_field_type
+         { field = Standard standard_field; expected = String_value })
+;;
+
+let required_description fields =
+  match field fields "description" with
+  | None | Some `Null -> Error Missing_description
+  | Some (`String value) when is_blank value -> Error Missing_description
+  | Some (`String value) -> Ok value
+  | Some _ ->
+    Error
+      (Invalid_field_type
+         { field = Standard Description; expected = String_value })
+;;
+
+let declared_name fields =
+  match field fields "name" with
+  | None | Some `Null -> Ok None
+  | Some (`String value) when is_blank value -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some _ ->
+    Error (Invalid_field_type { field = Standard Name; expected = String_value })
+;;
+
+let utf_8_scalar_length value =
+  let rec loop index count =
+    if index = String.length value
+    then Some count
+    else
+      let decoded = String.get_utf_8_uchar value index in
+      if not (Uchar.utf_decode_is_valid decoded)
+      then None
+      else loop (index + Uchar.utf_decode_length decoded) (count + 1)
+  in
+  loop 0 0
+;;
+
+let lowercase_utf_8 value =
+  let buffer = Buffer.create (String.length value) in
+  let rec loop index =
+    if index = String.length value
+    then Some (Buffer.contents buffer)
+    else
+      let decoded = String.get_utf_8_uchar value index in
+      if not (Uchar.utf_decode_is_valid decoded)
+      then None
+      else (
+        let scalar = Uchar.utf_decode_uchar decoded in
+        (match Uucp.Case.Map.to_lower scalar with
+         | `Self -> Buffer.add_utf_8_uchar buffer scalar
+         | `Uchars scalars -> List.iter (Buffer.add_utf_8_uchar buffer) scalars);
+        loop (index + Uchar.utf_decode_length decoded))
+  in
+  loop 0
+;;
+
+let name_has_invalid_character name =
+  let hyphen = Uchar.of_char '-' in
+  let rec loop index =
+    if index = String.length name
+    then false
+    else
+      let decoded = String.get_utf_8_uchar name index in
+      if not (Uchar.utf_decode_is_valid decoded)
+      then true
+      else
+        let scalar = Uchar.utf_decode_uchar decoded in
+        if Uchar.equal scalar hyphen
+           ||
+           match Uucp.Gc.general_category scalar with
+           | `Lu | `Ll | `Lt | `Lm | `Lo | `Nd | `Nl | `No -> true
+           | _ -> false
+        then loop (index + Uchar.utf_decode_length decoded)
+        else true
+  in
+  loop 0
+;;
+
+let name_has_consecutive_hyphens name =
+  let rec loop index =
+    index + 1 < String.length name
+    &&
+    if Char.equal name.[index] '-' && Char.equal name.[index + 1] '-'
+    then true
+    else loop (index + 1)
+  in
+  loop 0
+;;
+
+let analyze_name ?(trim = true) name =
+  let name = if trim then unicode_trim name else name in
+  let normalized = Uunf_string.normalize_utf_8 `NFKC name in
+  let scalar_length = utf_8_scalar_length normalized in
+  let byte_length = String.length normalized in
+  let add_if condition violation violations =
+    if condition then violation :: violations else violations
+  in
+  let violations = [] in
+  let violations = add_if (byte_length = 0) Empty_name violations in
+  let violations =
+    match scalar_length with
+    | Some length when length > Spec_limits.name ->
+      Name_too_long { length; maximum = Spec_limits.name } :: violations
+    | Some _ | None -> violations
+  in
+  let violations =
+    add_if
+      (byte_length > 0 && Char.equal normalized.[0] '-')
+      Name_starts_with_hyphen
+      violations
+  in
+  let violations =
+    add_if
+      (byte_length > 0 && Char.equal normalized.[byte_length - 1] '-')
+      Name_ends_with_hyphen
+      violations
+  in
+  let violations =
+    add_if
+      (name_has_consecutive_hyphens normalized)
+      Name_has_consecutive_hyphens
+      violations
+  in
+  let violations =
+    add_if
+      (name_has_invalid_character normalized)
+      Name_has_invalid_character
+      violations
+  in
+  let violations =
+    match lowercase_utf_8 normalized with
+    | Some lowercase when not (String.equal normalized lowercase) ->
+      Name_not_lowercase :: violations
+    | Some _ | None -> violations
+  in
+  normalized, List.rev violations
+;;
+
+let canonical_name name =
+  match analyze_name name with
+  | canonical, [] -> Ok canonical
+  | _, violations -> Error violations
+;;
+
+let rec extension_value_of_yaml = function
+  | `Null -> Null
+  | `Bool value -> Boolean value
+  | `Float value -> Number value
+  | `String value -> Text value
+  | `A values -> Sequence (List.map extension_value_of_yaml values)
+  | `O fields ->
+    Mapping
+      (List.map
+         (fun (key, value) -> key, extension_value_of_yaml value)
+         fields)
+;;
+
+let duplicate_keys fields =
+  let rec loop seen duplicates = function
+    | [] -> List.rev duplicates
+    | (key, _) :: rest ->
+      if List.mem key seen
+      then
+        let duplicates = if List.mem key duplicates then duplicates else key :: duplicates in
+        loop seen duplicates rest
+      else loop (key :: seen) duplicates rest
+  in
+  loop [] [] fields
+;;
+
+let metadata fields =
+  match field fields "metadata" with
+  | None -> [], [], []
+  | Some (`O pairs) ->
+    let duplicates = duplicate_keys pairs in
+    let values =
+      List.map
+        (fun (key, value) -> key, extension_value_of_yaml value)
+        pairs
+    in
+    let valid, value_diagnostics =
+      List.fold_left
+        (fun (valid, diagnostics) (key, value) ->
+           match value with
+           | `String value when not (List.mem key duplicates) ->
+             (key, value) :: valid, diagnostics
+           | `String _ -> valid, diagnostics
+           | _ -> valid, Invalid_metadata_value { key } :: diagnostics)
+        ([], [])
+        pairs
+    in
+    ( List.rev valid
+    , values
+    , List.map (fun key -> Duplicate_metadata_key key) duplicates
+      @ List.rev value_diagnostics )
+  | Some _ ->
+    ( []
+    , []
+    , [ Invalid_field_type
+          { field = Standard Metadata; expected = String_mapping }
+      ] )
+;;
+
+let runtime_name ?directory_name declared =
+  match declared with
+  | Some declared_name ->
+    let declared, declared_violations = analyze_name declared_name in
+    let diagnostics =
+      (match declared_violations with
+       | [] -> []
+       | violations -> [ Invalid_name { name = declared_name; violations } ])
+      @
+      match directory_name with
+      | None -> []
+      | Some directory_name ->
+        let directory, _directory_violations = analyze_name ~trim:false directory_name in
+        if String.equal declared directory
+        then []
+        else [ Name_mismatch { declared = declared_name; directory = directory_name } ]
+    in
+    (match diagnostics with
+     | [] -> Ok (declared, [])
+     | diagnostics -> Error diagnostics)
+  | None -> Error [ Missing_name ]
+;;
+
+let utf8_byte_order_mark = "\xEF\xBB\xBF"
+
+let decode_stripped ?directory_name contents =
+  match split_frontmatter contents with
+  | Error diagnostic -> Unloadable [ diagnostic ]
+  | Ok (yaml, body) ->
+    (match Yaml.of_string yaml with
+     | Error (`Msg detail) -> Unloadable [ Malformed_yaml detail ]
+     | Ok (`O fields) ->
+       let duplicates = duplicate_fields fields in
+       if duplicates <> []
+       then Unloadable duplicates
+       else (
+         let declared_name_result = declared_name fields in
+         let description_result = required_description fields in
+         let name_result =
+           match declared_name_result with
+           | Error diagnostic -> Error [ diagnostic ]
+           | Ok declared_name -> runtime_name ?directory_name declared_name
+         in
+         let license_result = optional_string fields License "license" in
+         let compatibility_result =
+           optional_string fields Compatibility "compatibility"
+         in
+         let allowed_tools_result =
+           optional_string fields Allowed_tools_syntax_only "allowed-tools"
+         in
+         let metadata, metadata_values, metadata_diagnostics = metadata fields in
+         let result_diagnostics = function
+           | Ok _ -> []
+           | Error diagnostic -> [ diagnostic ]
+         in
+         let name_diagnostics =
+           match name_result with
+           | Ok _ -> []
+           | Error diagnostics -> diagnostics
+         in
+         let extension_diagnostics =
+           List.filter_map
+             (fun (key, _) ->
+                match standard_field_of_key key with
+                | Some _ -> None
+                | None -> Some (Unexpected_frontmatter_field key))
+             fields
+         in
+         let length_diagnostics =
+           (match description_result with
+            | Ok description ->
+              (match utf_8_scalar_length description with
+               | Some length when length > Spec_limits.description ->
+                 [ Description_too_long { length } ]
+               | Some _ | None -> [])
+            | Error _ -> [])
+           @
+           match compatibility_result with
+           | Ok (Some value) when String.equal value "" -> [ Compatibility_empty ]
+           | Ok (Some value) ->
+             (match utf_8_scalar_length value with
+              | Some length when length > Spec_limits.compatibility ->
+                [ Compatibility_too_long { length } ]
+              | Some _ | None -> [])
+           | Ok None | Error _ -> []
+         in
+         let diagnostics =
+           name_diagnostics
+           @ result_diagnostics description_result
+           @ result_diagnostics license_result
+           @ result_diagnostics compatibility_result
+           @ result_diagnostics allowed_tools_result
+           @ metadata_diagnostics
+           @ extension_diagnostics
+           @ length_diagnostics
+         in
+         match
+           diagnostics,
+           name_result,
+           declared_name_result,
+           description_result,
+           license_result,
+           compatibility_result
+         with
+         | ( [],
+             Ok (name, _),
+             Ok declared_name,
+             Ok description,
+             Ok license,
+             Ok compatibility ) ->
+           Loaded
+             { name
+             ; declared_name
+             ; description
+             ; license
+             ; compatibility
+             ; metadata
+             ; metadata_values
+             ; body
+             }
+         | (diagnostics, Ok _, _, _, _, _) | (diagnostics, Error _, _, _, _, _) -> Unloadable diagnostics)
+     | Ok _ -> Unloadable [ Frontmatter_not_mapping ])
+;;
+
+(* A UTF-8 byte-order mark hides the opening "---" from the line reader and
+   used to reject the whole document as frontmatter-less with a message that
+   never named the mark. It carries no content: parse without it and keep the
+   deviation observable as a diagnostic. Content revisions elsewhere still
+   hash the raw bytes, mark included. *)
+let decode_with_directory ?directory_name contents =
+  let bom_stripped =
+    String.length contents >= String.length utf8_byte_order_mark
+    && String.equal
+         (String.sub contents 0 (String.length utf8_byte_order_mark))
+         utf8_byte_order_mark
+  in
+  let contents =
+    if bom_stripped
+    then
+      String.sub
+        contents
+        (String.length utf8_byte_order_mark)
+        (String.length contents - String.length utf8_byte_order_mark)
+    else contents
+  in
+  match decode_stripped ?directory_name contents, bom_stripped with
+  | result, false -> result
+  | Unloadable diagnostics, true -> Unloadable (Byte_order_mark :: diagnostics)
+  | Loaded _, true -> Unloadable [ Byte_order_mark ]
+;;
+
+let decode ~directory_name contents = decode_with_directory ~directory_name contents
+let decode_authored contents = decode_with_directory contents
+
+let diagnostics = function
+  | Loaded _ -> []
+  | Unloadable diagnostics -> diagnostics
+;;
+
+let standard_field_to_string = function
+  | Name -> "name"
+  | Description -> "description"
+  | License -> "license"
+  | Compatibility -> "compatibility"
+  | Metadata -> "metadata"
+  | Allowed_tools_syntax_only -> "allowed-tools"
+;;
+
+let field_to_string = function
+  | Standard field -> standard_field_to_string field
+  | Extension key -> key
+;;
+
+let expected_shape_to_string = function
+  | String_value -> "a string"
+  | String_mapping -> "a mapping of string values"
+;;
+
+let name_violation_to_string = function
+  | Empty_name -> "is empty"
+  | Name_too_long { length; maximum } ->
+    Printf.sprintf "has %d characters; maximum is %d" length maximum
+  | Name_not_lowercase -> "is not lowercase"
+  | Name_starts_with_hyphen -> "starts with a hyphen"
+  | Name_ends_with_hyphen -> "ends with a hyphen"
+  | Name_has_consecutive_hyphens -> "contains consecutive hyphens"
+  | Name_has_invalid_character ->
+    "contains a character that is not a Unicode letter, number, or hyphen"
+;;
+
+let diagnostic_to_string = function
+  | Missing_frontmatter -> "SKILL.md must start with YAML frontmatter"
+  | Byte_order_mark ->
+    "SKILL.md starts with a UTF-8 byte-order mark; it was ignored, and \
+     removing it makes the file conformant"
+  | Unterminated_frontmatter -> "SKILL.md frontmatter has no closing delimiter"
+  | Malformed_yaml detail -> "SKILL.md frontmatter is invalid YAML: " ^ detail
+  | Frontmatter_not_mapping -> "SKILL.md frontmatter must be a YAML mapping"
+  | Duplicate_field field ->
+    Printf.sprintf "SKILL.md frontmatter duplicates %S" (field_to_string field)
+  | Duplicate_metadata_key key ->
+    Printf.sprintf "SKILL.md metadata duplicates %S" key
+  | Unexpected_frontmatter_field field ->
+    Printf.sprintf "SKILL.md frontmatter field %S is not in the specification" field
+  | Missing_name -> "SKILL.md frontmatter is missing required field name"
+  | Missing_description ->
+    "SKILL.md frontmatter is missing required non-empty field description"
+  | Invalid_field_type { field; expected } ->
+    Printf.sprintf
+      "SKILL.md frontmatter field %S must be %s"
+      (field_to_string field)
+      (expected_shape_to_string expected)
+  | Invalid_name { name; violations } ->
+    Printf.sprintf
+      "SKILL.md name %S %s"
+      name
+      (violations
+       |> List.map name_violation_to_string
+       |> String.concat "; ")
+  | Name_mismatch { declared; directory } ->
+    Printf.sprintf "SKILL.md name %S does not match directory %S" declared directory
+  | Description_too_long { length } ->
+    Printf.sprintf
+      "SKILL.md description has %d characters; maximum is %d"
+      length
+      Spec_limits.description
+  | Compatibility_empty -> "SKILL.md compatibility must not be empty"
+  | Compatibility_too_long { length } ->
+    Printf.sprintf
+      "SKILL.md compatibility has %d characters; maximum is %d"
+      length
+      Spec_limits.compatibility
+  | Invalid_metadata_value { key } ->
+    Printf.sprintf "SKILL.md metadata value for %S must be a string" key
+;;
+
+let diagnostic_code = function
+  | Missing_frontmatter -> "missing_frontmatter"
+  | Byte_order_mark -> "byte_order_mark"
+  | Unterminated_frontmatter -> "unterminated_frontmatter"
+  | Malformed_yaml _ -> "malformed_yaml"
+  | Frontmatter_not_mapping -> "frontmatter_not_mapping"
+  | Duplicate_field _ -> "duplicate_field"
+  | Duplicate_metadata_key _ -> "duplicate_metadata_key"
+  | Unexpected_frontmatter_field _ -> "unexpected_frontmatter_field"
+  | Missing_name -> "missing_name"
+  | Missing_description -> "missing_description"
+  | Invalid_field_type _ -> "invalid_field_type"
+  | Invalid_name _ -> "invalid_name"
+  | Name_mismatch _ -> "name_mismatch"
+  | Description_too_long _ -> "description_too_long"
+  | Compatibility_empty -> "compatibility_empty"
+  | Compatibility_too_long _ -> "compatibility_too_long"
+  | Invalid_metadata_value _ -> "invalid_metadata_value"
+;;
+
+let field_to_yojson = function
+  | Standard field ->
+    `Assoc
+      [ "kind", `String "standard"
+      ; "name", `String (standard_field_to_string field)
+      ]
+  | Extension name ->
+    `Assoc [ "kind", `String "extension"; "name", `String name ]
+;;
+
+let expected_shape_to_yojson = function
+  | String_value -> `String "string"
+  | String_mapping -> `String "string_mapping"
+;;
+
+let name_violation_to_yojson = function
+  | Empty_name -> `Assoc [ "kind", `String "empty_name" ]
+  | Name_too_long { length; maximum } ->
+    `Assoc
+      [ "kind", `String "name_too_long"
+      ; "length", `Int length
+      ; "maximum", `Int maximum
+      ]
+  | Name_not_lowercase -> `Assoc [ "kind", `String "name_not_lowercase" ]
+  | Name_starts_with_hyphen ->
+    `Assoc [ "kind", `String "name_starts_with_hyphen" ]
+  | Name_ends_with_hyphen ->
+    `Assoc [ "kind", `String "name_ends_with_hyphen" ]
+  | Name_has_consecutive_hyphens ->
+    `Assoc [ "kind", `String "name_has_consecutive_hyphens" ]
+  | Name_has_invalid_character ->
+    `Assoc [ "kind", `String "name_has_invalid_character" ]
+;;
+
+let diagnostic_to_yojson diagnostic =
+  let payload =
+    match diagnostic with
+    | Missing_frontmatter
+    | Byte_order_mark
+    | Unterminated_frontmatter
+    | Frontmatter_not_mapping
+    | Missing_name
+    | Missing_description
+    | Compatibility_empty -> []
+    | Malformed_yaml detail -> [ "detail", `String detail ]
+    | Duplicate_field field -> [ "field", field_to_yojson field ]
+    | Duplicate_metadata_key key
+    | Invalid_metadata_value { key } -> [ "key", `String key ]
+    | Unexpected_frontmatter_field field -> [ "field", `String field ]
+    | Invalid_field_type { field; expected } ->
+      [ "field", field_to_yojson field
+      ; "expected", expected_shape_to_yojson expected
+      ]
+    | Invalid_name { name; violations } ->
+      [ "name", `String name
+      ; "violations", `List (List.map name_violation_to_yojson violations)
+      ]
+    | Name_mismatch { declared; directory } ->
+      [ "declared", `String declared; "directory", `String directory ]
+    | Description_too_long { length }
+    | Compatibility_too_long { length } -> [ "length", `Int length ]
+  in
+  `Assoc
+    ([ "code", `String (diagnostic_code diagnostic)
+     ; "message", `String (diagnostic_to_string diagnostic)
+     ]
+     @ payload)
+;;

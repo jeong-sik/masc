@@ -1,0 +1,30 @@
+{
+  "driver_returncode": 143,
+  "server_pid": 21649,
+  "server_pid_still_present": false,
+  "cleanup": {
+    "returncode": -15,
+    "model_requests": [],
+    "reaped": true
+  },
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/private/tmp/masc-cold-http-compare.py",
+    "--output",
+    "/private/tmp/masc-cold-http-interrupt-check-20260926",
+    "--repo",
+    "/Users/dancer/me/workspace/yousleepwhen/masc",
+    "--baseline",
+    "/private/tmp/masc-present-timing-artifact-36239521218",
+    "--candidate",
+    "/private/tmp/masc-cold-response-artifact-36241015541",
+    "--runner",
+    "/private/tmp/masc-cold-http-session.py",
+    "--cycles",
+    "20",
+    "--tasks",
+    "250",
+    "--repetitions",
+    "3"
+  ]
+}

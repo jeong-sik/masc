@@ -1,0 +1,32 @@
+[
+  {
+    "log": "run-39916370374-logs/build/10_Type-check the tree (dune build @check).txt",
+    "line": 19,
+    "content": "File \"lib/lane_addon/lane_addon_runtime.ml\", lines 2190-2192, characters 16-36:\n2190 | ................offload (fun () -> Lane_addon_tool_request_owner.retain ~store\n2191 |           ~scope:original.scope ~request_id:original.request_id ~installation_id ~package_id ~tool\n2192 |           ~request:original.request)..................................\nError: This expression has type\n         summary:Yojson.Safe.t ->\n         (unit, Lane_addon_tool_request_owner.error) result\n       but an expression was expected of type\n         ('a, Lane_addon_tool_request_owner.error) result\nHint: This function application is partial, maybe some arguments are missing."
+  },
+  {
+    "log": "run-39916370374-logs/build/10_Type-check the tree (dune build @check).txt",
+    "line": 30,
+    "content": "File \"test/test_lane_addon_submit_once.ml\", line 145, characters 12-21:\n145 |   let bytes=Fs_compat.load_file path and identity=Unix.stat path in\n                  ^^^^^^^^^\nError: Unbound module Fs_compat"
+  },
+  {
+    "log": "run-39916370374-logs/build/10_Type-check the tree (dune build @check).txt",
+    "line": 35,
+    "content": "File \"test/test_workspace_curator_addon_commit.ml\", lines 154-157, characters 18-77:\n154 | ..................function Progress.Commit_retry_observed _ -> true\n155 |       | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _ | Commit_intended _\n156 |       | Commit_uncertain _ | Commit_observed _ | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _\n157 |       | Preparation_intended _ | Preparation_observed _ | Observer _ -> false.....................................\nError (warning 8 [partial-match]): this pattern-matching is not exhaustive.\n  Here is an example of a case that is not matched:\n    (Replacement_intended _|Replacement_observed _)"
+  },
+  {
+    "log": "run-39916370374-logs/build/10_Type-check the tree (dune build @check).txt",
+    "line": 44,
+    "content": "File \"test/test_keeper_addon_deferred_runtime.ml\", lines 45-64, characters 48-106:\n45 | ................................................{\n46 |       browser=None;resource=Lane_addon_lifecycle.Container_resource instance_id;\n47 |       resolved_image=Some (Lane_addon_engine.image_of_inspect Lane_addon_types.Docker\n48 |         (\"sha256:\" ^ String.make 64 'a') |> get);\n49 |       observe=(fun ~binding ~sources -> P.observe protocol ~binding ~sources |> Result.map_error protocol_error);\n...\n61 |         engine=Lane_addon_lifecycle.Docker_engine \"python-process-fixture\";container_id=Some instance_id}));\n62 |       host=Some {await_change=None;\n63 |         list_requests=(fun () -> P.host_requests protocol |> Result.map_error protocol_error);\n64 |         deliver=(fun ~arguments -> P.host_result protocol ~arguments |> Result.map_error protocol_error)}}...\nError: Some record fields are undefined: await_exit"
+  },
+  {
+    "log": "run-39916370374-logs/build/10_Type-check the tree (dune build @check).txt",
+    "line": 57,
+    "content": "File \"test/test_keeper_librarian_addon_owner.ml\", lines 98-122, characters 54-40:\n 98 | ......................................................{\n 99 |       browser=None;resource=Lane_addon_lifecycle.Container_resource instance_id;\n100 |       resolved_image=Some (Lane_addon_engine.image_of_inspect Lane_addon_types.Docker (\"sha256:\" ^ String.make 64 'a') |> get);\n101 |       observe=(fun ~binding ~sources ->\n102 |         let result=Protocol.observe protocol ~binding ~sources |> Result.map_error protocol_error in\n...\n119 |         deliver=(fun ~arguments ->\n120 |           let result=if !delivery then Error \"controlled reply loss before worker delivery\"\n121 |             else Protocol.host_result protocol ~arguments |> Result.map_error protocol_error in\n122 |           delivery_observed ();result)}}...\nError: Some record fields are undefined: await_exit"
+  },
+  {
+    "log": "run-39916370374-logs/build/10_Type-check the tree (dune build @check).txt",
+    "line": 70,
+    "content": "File \"test/test_keeper_librarian_durable_execution.ml\", lines 80-98, characters 54-40:\n80 | ......................................................{\n81 |       browser=None;resource=Lane_addon_lifecycle.Container_resource instance_id;\n82 |       resolved_image=Some (Lane_addon_engine.image_of_inspect Lane_addon_types.Docker (\"sha256:\" ^ String.make 64 'a') |> get);\n83 |       observe=(fun ~binding ~sources -> Protocol.observe protocol ~binding ~sources |> Result.map_error protocol_error);\n84 |       exported_tools=(fun () -> Protocol.exported_tools protocol);\n...\n95 |         deliver=(fun ~arguments ->\n96 |           let result=if !delivery then Error \"controlled reply loss before worker delivery\"\n97 |             else Protocol.host_result protocol ~arguments |> Result.map_error protocol_error in\n98 |           delivery_observed ();result)}}...\nError: Some record fields are undefined: await_exit"
+  }
+]

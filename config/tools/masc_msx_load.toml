@@ -1,0 +1,26 @@
+name = "masc_msx_load"
+description = """
+Replace the running MSX machine with a fresh one that boots one image.
+
+MSX2, C-BIOS. A cartridge goes into the slot, a .dsk floppy into drive A:. Any \
+machine already loaded is replaced and the input ledger starts over, so call \
+this only to start a game, never to look around. Read the inventory with \
+masc_msx_meta (include_inventory=true) and pass one of its names as cart. Runs \
+the boot ahead 45 frames so the first screen is the BIOS logo; a cartridge game \
+reaches its own title after roughly 300 more frames (masc_msx_step). Returns the \
+same observation as masc_msx_screen."""
+additional_properties = false
+
+# Called once per game session; the schema would otherwise ride every request.
+defer_loading = true
+
+[[params]]
+name = "cart"
+type = "string"
+required = true
+description = "A file name from the inventory (masc_msx_meta with include_inventory=true), with or without its extension; a path is refused. A cartridge is a 16/32KB plain cart or a MegaROM (the mapper is guessed from the image, e.g. KOEI 256KB titles); a name ending in .dsk is a raw floppy image and goes into drive A: instead of the slot."
+
+[[params]]
+name = "roms_dir"
+type = "string"
+description = "All three C-BIOS ROMs; a missing one is refused by name. Default: MSX_ROMS, else .masc/msx/bios/ with cbios_main_msx2.rom. With none of them the load is refused, naming the missing ROMs."

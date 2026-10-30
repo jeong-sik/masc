@@ -1,0 +1,43 @@
+name = "masc_dos_click"
+description = """
+Set the mouse and run the shared DOS machine.
+
+The mouse is state: cursor and buttons stay until the next call. buttons 1 \
+is a mask (1 left, 2 right, 4 middle; 3 is left and right together) and \
+clicks -- down, run, up, run, in one call, so the button is never left \
+held; 0 only moves. x and y are pixels inside the frame size masc_dos_screen \
+reports. A game that polls the mouse instead of asking for keys returns \
+settled false with the budget spent; that is normal. Recorded in the ledger."""
+additional_properties = false
+
+defer_loading = true
+
+[[params]]
+name = "x"
+type = "integer"
+required = true
+description = "Frame pixel column, 0 to width-1."
+minimum = 0
+
+[[params]]
+name = "y"
+type = "integer"
+required = true
+description = "Frame pixel row, 0 to height-1."
+minimum = 0
+
+[[params]]
+name = "buttons"
+type = "integer"
+description = "Button mask: 1 left, 2 right, 4 middle, summed to press together. 0 only moves. Default 1."
+minimum = 0
+maximum = 7
+default = 1
+
+[[params]]
+name = "steps"
+type = "integer"
+description = "Machine-step budget for the whole call. Default 4000000."
+minimum = 1
+maximum = 4000000
+default = 4000000

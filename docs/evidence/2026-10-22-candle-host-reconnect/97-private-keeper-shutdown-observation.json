@@ -1,0 +1,1186 @@
+{
+  "at": "2026-10-21T17:28:01.658073+00:00",
+  "identity": "local-admin",
+  "method": "POST",
+  "path": "/mcp",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": "7043c4263b28457baec1ced8ded06616",
+    "method": "tools/call",
+    "params": {
+      "name": "masc_keeper_status",
+      "arguments": {
+        "name": "candle-host-qualifier",
+        "fast": true,
+        "include_repository_checkouts": false
+      }
+    }
+  },
+  "http_status": 200,
+  "response": {
+    "jsonrpc": "2.0",
+    "id": "7043c4263b28457baec1ced8ded06616",
+    "result": {
+      "_meta": {
+        "io.modelcontextprotocol/serverInfo": {
+          "name": "masc",
+          "title": "MASC MCP Server",
+          "version": "0.60.0"
+        },
+        "com.github.yousleepwhen.masc/call": {
+          "envelope": {
+            "kind": "tool_call",
+            "summary": "{\"runtime_class\":\"keeper\",\"name\":\"candle-host-qualifier\",\"meta\":{\"schema\":\"masc.keeper_meta.v2\",\"name\":\"candle-host-qualifier\",\"instructions\":\"Manual isolated Candle qualification producer. Do not run autonomously. The qualification task records exact source bytes and submits its measurement artifact for independent verification.\",\"trace_id\":\"trace-1792601812952-00000\",\"created_at\":\"2026-10-21T16:56:52Z\",\"updated_at\":\"2026-10-21T17:27:41Z\",\"total_turns\":4,\"total_input_tokens\":267836,\"total_output_tokens\":2409,\"total_tokens\":270245,\"total_cost_usd\":{\"known_cost_usd\":0.0,\"priced_readings\":0,\"unpriced_readings\":12,\"unresolved_readings\":0,\"unobserved_attempts\":0,\"history\":\"complete\"},\"last_turn_ts\":1792602651.465663,\"last_input_tokens\":27020,\"last_output_tokens\":259,\"last_total_tokens\":27279,\"usage_cursor\":null,\"last_usage_resolution\":{\"observation\":{\"input_tokens\":27020,\"output_tokens\":259,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cost_usd\":null},\"usage_scope\":\"per_request\",\"basis\":{\"kind\":\"per_request\"},\"delta\":{\"input_tokens\":27020,\"output_tokens\":259,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cost_usd\":null},\"status\":\"exact_cost_unavailable\",\"observed_at\":1792602651.465661},\"last_latency_ms\":8831,\"proactive_count_total\":0,\"last_proactive_ts\":0.0,\"proactive_visible_count_total\":0,\"last_visible_proactive_ts\":0.0,\"last_proactive_outcome\":\"never_started\",\"last_proactive_reason\":\"\",\"last_proactive_preview\":\"\",\"message_scope_ack_id\":\"msg-1792601980995063-0\",\"last_runtime_attempt\":null,\"paused\":true,\"latched_reason\":{\"kind\":\"operator_paused\",\"actor\":\"keeper_down\"},\"current_task_id\":null,\"keeper_id\":\"keeper-95bbdeb7-2f52-4f72-88e9-9293596dc5fc\",\"agent_core_env\":{}},\"instructions\":\"Manual isolated Candle qualification producer. Do not run autonomously. The qualification task records exact source bytes and submits its measurement artifact for independent verification.\",\"paused\":true,\"keepalive_running\":false,\"keeper_age_s\":1869.6229639053345,\"last_turn_ago_s\":1030.1573009490967,\"last_proactive_ago_s\":null,\"last_visible_proactive_ago_s\":null,\"active_model\":null,\"disposition\":\"Pass\",\"disposition_reason\":\"healthy\",\"next_model_hint\":null,\"runtime_runtime_metrics\":null,\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\",\"keeper_last_error\":null,\"sandbox_live\":{\"keeper\":\"candle-host-qualifier\",\"sandbox_profile\":\"microvm\",\"configured_network_mode\":\"none\",\"configured_image_name\":\"base\",\"configured_image\":\"masc-sandbox:general\",\"configured_image_unresolved\":null,\"effective_mode\":\"microvm_vm_not_running\",\"managed_container_kind\":\"keeper-vm\",\"containers\":[],\"preflight\":null,\"resource_config\":{\"memory\":\"2048m\",\"cpus\":\"4\",\"guest_size_error\":null,\"work_volume_size\":\"256g\",\"pids_limit\":null,\"tmpfs_size\":null},\"paths\":{\"host_workspace\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier\",\"guest_home\":null,\"guest_workspace\":\"/masc-work/candle-host-qualifier\",\"guest_config\":\"/tmp/masc-runtime/.masc/config\",\"guest_work_volume\":\"/masc-work\"},\"container_error\":null,\"why_no_container\":\"no visible apple_container microVM guest; a guest is created on this Keeper's first sandboxed tool execution\",\"repository_checkouts\":{\"state\":\"not_inspected\",\"entries\":[]}},\"latest_tool_names\":[],\"latest_tool_call_count\":0,\"latest_action_source\":null,\"tool_audit_source\":\"keeper_metrics\",\"tool_audit_at\":\"2026-10-21T17:10:51Z\",\"lifecycle\":{\"created_at\":\"2026-10-21T16:56:52Z\",\"updated_at\":\"2026-10-21T17:27:41Z\",\"uptime_hours\":0.5193397121959262},\"activation_mode\":\"manual\",\"proactive\":{\"enabled\":false,\"count_total\":0,\"visible_count_total\":0,\"last_ts\":0.0,\"last_ago_s\":null,\"last_visible_ts\":0.0,\"last_visible_ago_s\":null,\"last_outcome\":\"never_started\",\"last_reason\":null,\"last_preview\":null},\"policy\":{\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\"},\"auto_execution_session\":{\"status\":\"removed\",\"enabled\":false},\"runtime_blocker_class\":null,\"runtime_blocker_summary\":null,\"runtime_blocker_signature\":null,\"runtime_blocker_facts\":null,\"needs_attention\":true,\"attention_reason\":\"paused\",\"next_human_action\":\"resume_or_review\",\"approval_queue_state\":{\"state\":\"ready\"},\"pending_approval_count\":0,\"latched_reason\":\"operator_paused:actor=keeper_down\",\"status_options\":{\"tail_turns\":3,\"tail_messages\":5,\"tail_bytes\":60000,\"fast\":true,\"include_context\":false,\"include_metrics_overview\":false,\"include_history_tail\":false,\"include_repository_checkouts\":false,\"tail_order\":\"oldest_first\"},\"context_budget\":{\"runtime_id\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"provider_context_window\":500000,\"budget_source\":\"runtime_provider_cap\",\"runtime_budget_source\":\"binding_override\",\"requested_override\":null,\"primary_budget\":500000,\"runtime_budget\":500000,\"requested_context_window\":500000,\"effective_budget\":500000},\"model_observability\":{\"runtime_id\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"recent_turn_observation\":true,\"runtime_observation_scope\":\"matched\",\"resolved_candidates\":[],\"selected_model\":\"kimi-k3\",\"attempt_summary\":{\"summary\":\"1 attempt(s); selected model observed from runtime_trust.selected_model.\",\"attempts_observed\":1},\"runtime_contract\":{\"source\":\"runtime_trust.selected_model\",\"verified\":true,\"provider_reachable\":null,\"actual_model_id\":null,\"actual_slots\":null,\"actual_ctx\":null,\"chat_completion_compatible\":null,\"runtime_blocker\":null,\"note\":\"Scoped runtime observation is present; selected model label remains AGENT_CORE-owned.\"},\"disposition\":\"Pass\",\"disposition_reason\":\"healthy\"},\"runtime_trust\":{\"trace_id\":\"trace-1792601812952-00000\",\"turn_id\":4,\"phase\":null,\"raw_phase\":null,\"current_task_id\":null,\"active_model\":\"kimi-k3\",\"selected_model\":\"kimi-k3\",\"runtime_contract\":{\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\",\"backend\":\"microvm\",\"sandbox_target\":\"microvm\",\"task_id\":null},\"runtime_blockers\":{\"runtime_blocker_class\":null,\"runtime_blocker_summary\":null,\"runtime_blocker_signature\":null,\"runtime_blocker_facts\":null},\"recent_tool_calls_unavailable\":null,\"disposition\":\"Pass\",\"disposition_reason\":\"healthy\",\"operator_disposition\":\"pass\",\"operator_disposition_reason\":\"healthy\",\"needs_attention\":true,\"attention_reason\":\"paused\",\"next_human_action\":\"resume_or_review\",\"approval_queue_state\":{\"state\":\"ready\"},\"approval\":{\"state\":\"idle\",\"queue_state\":{\"state\":\"ready\"},\"pending_count\":0,\"decision_source\":null,\"latest_event_kind\":null,\"latest_event_at\":null,\"rule_id\":null,\"pending_first\":null},\"execution\":{\"completion_contract_result\":\"response_observed\",\"runtime_lane_observation\":{\"state\":\"observed\",\"turn\":{\"trace_id\":\"trace-1792601812952-00000\",\"turn_count\":4,\"ended_at\":\"2026-10-21T17:10:51Z\"},\"evidence\":{\"failures\":[],\"terminal\":{\"kind\":\"not_observed\"}},\"error\":null},\"provider_attempt_count\":1,\"provider_fallback_applied\":false,\"provider_selected_model\":\"kimi-k3\",\"runtime_outcome\":\"completed\",\"sandbox_summary\":\"microvm / none\",\"sandbox_root\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"completion_observation_summary\":\"response_observed\",\"latest_receipt_at\":\"2026-10-21T17:10:51Z\"},\"latest_terminal_reason\":{\"code\":\"success\",\"disposition\":\"success\",\"source\":\"turn_result\",\"severity\":\"ok\",\"summary\":\"turn completed\",\"next_action\":null},\"latest_next_action\":null,\"pending_approval_count\":0,\"pending_approvals\":[],\"latest_decision\":{\"id\":\"dec-1792602651466-703e16e6\",\"event\":\"turn\",\"ts\":\"2026-10-21T17:10:51Z\",\"ts_unix\":1792602651.466823,\"audience\":\"internal_human_only\",\"trace_id\":\"trace-1792601812952-00000\",\"turn_id\":4,\"keeper_name\":\"candle-host-qualifier\",\"task_id\":null,\"runtime_contract\":{\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\",\"backend\":\"microvm\",\"sandbox_target\":\"microvm\",\"task_id\":null},\"terminal_reason\":{\"code\":\"success\",\"disposition\":\"success\",\"source\":\"turn_result\",\"severity\":\"ok\",\"summary\":\"turn completed\",\"next_action\":null},\"terminal_reason_code\":\"success\",\"terminal_reason_severity\":\"ok\",\"terminal_reason_source\":\"turn_result\",\"provider_context\":{\"runtime_id\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"executed_runtime_id\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"selected_model\":null},\"tool_surface\":{\"turn_lane\":\"tool_optional\"},\"tool_call_count\":0,\"tools_used\":[],\"approval_queue_state\":{\"state\":\"ready\"},\"pending_approval_count\":0,\"channel\":\"turn\",\"outcome\":\"success\",\"execution_path\":\"autonomous_cycle\",\"degraded_retry_applied\":null,\"degraded_retry_deferred\":null,\"turn_mode\":\"tool_use\",\"latency_ms\":8831,\"duration_ms\":8831,\"trigger_signals\":[\"idle_timeout_candidate\"],\"observed_affordances\":[],\"observation\":{\"pending_mentions\":0,\"pending_board_events\":1,\"pending_scope_messages\":0,\"active_goals\":1,\"active_goals_source\":{\"status\":\"available\"},\"idle_seconds\":830,\"unclaimed_task_count\":0,\"claimable_task_count\":0,\"claim_blocked_task_count\":0,\"failed_task_count\":0,\"scheduled_automation_active_count\":0,\"scheduled_automation_due_ready_count\":0,\"running_keeper_fiber_count\":1},\"response_preview\":\"\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\\n\\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c...\",\"response_preview_2000\":\"\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\\n\\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c\u00b7\uc7ac\uc791\uc5c5 \ubd88\ud544\uc694.\\n- **measurement.json**: \uac8c\uc2a4\ud2b8 \uc791\uc5c5 \ub8e8\ud2b8\uc5d0 Write\u00b7Read \ub85c \ud655\uc778 \uc644\ub8cc (400 bytes, \uc9c0\uc2dc\ub41c \uce21\uc815 JSON \uacfc \uc77c\uce58).\\n- **\ubc31\ub85c\uadf8**: \ud074\ub808\uc784 \uac00\ub2a5\ud55c \uc791\uc5c5 0, \uc2e4\ud328 \uc791\uc5c5 0.\\n\\n\ub05d\ub098\uc9c0 \uc54a\uc740 \uc791\uc5c5\uc774\ub098 \uc0c8\ub85c \uc9c4\ud589\ud560 \uc77c\uc774 \uc5c6\uc5b4 \uc774\ubc88 \ud134\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4. \uc2b9\uc778\ub41c task-001 \uc744 \ub2e4\uc2dc \uac74\ub4dc\ub9ac\uac70\ub098 \uc0c8 Task/Goal \uc744 \ub9cc\ub4e4\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\",\"error\":null,\"trace_ref\":{\"worker_run_id\":\"wr-1a15f7198d6-5e32-0000\",\"path\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier/raw-traces/turn-1792602642644-5e32-000003.jsonl\",\"start_seq\":1,\"end_seq\":8,\"agent_name\":\"agent_core-ollama_cloud.ollama-cloud-kimi-k3\",\"session_id\":\"trace-1792601812952-00000\"},\"run_validation\":{\"run_ref\":{\"worker_run_id\":\"wr-1a15f7198d6-5e32-0000\",\"path\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier/raw-traces/turn-1792602642644-5e32-000003.jsonl\",\"start_seq\":1,\"end_seq\":8,\"agent_name\":\"agent_core-ollama_cloud.ollama-cloud-kimi-k3\",\"session_id\":\"trace-1792601812952-00000\"},\"ok\":true,\"checks\":[{\"name\":\"seq_monotonic\",\"passed\":true},{\"name\":\"run_started\",\"passed\":true},{\"name\":\"run_finished\",\"passed\":true},{\"name\":\"tool_pairs\",\"passed\":true}],\"evidence\":[\"record_count=8\",\"assistant_blocks=2\",\"tool_exec_started=0\",\"tool_exec_finished=0\",\"hooks=4\",\"hook_names=after_turn,before_turn,before_turn_params,on_stop\",\"tool_names=\",\"model=kimi-k3\",\"tool_choice=\",\"enable_thinking=true\",\"preserve_thinking=\",\"reasoning_effort=low\",\"thinking_blocks=1\",\"text_blocks=1\",\"tool_use_blocks=0\",\"tool_result_blocks=0\",\"first_assistant_block_kind=thinking\",\"selection_outcome=text_only\",\"saw_tool_use=false\",\"saw_thinking=true\",\"final_text=\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\\n\\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c\u00b7\uc7ac\uc791\uc5c5 \ubd88\ud544\uc694.\\n- **measurement.json**: \uac8c\uc2a4\ud2b8 \uc791\uc5c5 \ub8e8\ud2b8\uc5d0 Write\u00b7Read \ub85c \ud655\uc778 \uc644\ub8cc (400 bytes, \uc9c0\uc2dc\ub41c \uce21\uc815 JSON \uacfc \uc77c\uce58).\\n- **\ubc31\ub85c\uadf8**: \ud074\ub808\uc784 \uac00\ub2a5\ud55c \uc791\uc5c5 0, \uc2e4\ud328 \uc791\uc5c5 0.\\n\\n\ub05d\ub098\uc9c0 \uc54a\uc740 \uc791\uc5c5\uc774\ub098 \uc0c8\ub85c \uc9c4\ud589\ud560 \uc77c\uc774 \uc5c6\uc5b4 \uc774\ubc88 \ud134\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4. \uc2b9\uc778\ub41c task-001 \uc744 \ub2e4\uc2dc \uac74\ub4dc\ub9ac\uac70\ub098 \uc0c8 Task/Goal \uc744 \ub9cc\ub4e4\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\",\"stop_reason=Types.EndTurn\",\"error=\",\"paired_tool_result_count=0\"],\"paired_tool_result_count\":0,\"final_text\":\"\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\\n\\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c\u00b7\uc7ac\uc791\uc5c5 \ubd88\ud544\uc694.\\n- **measurement.json**: \uac8c\uc2a4\ud2b8 \uc791\uc5c5 \ub8e8\ud2b8\uc5d0 Write\u00b7Read \ub85c \ud655\uc778 \uc644\ub8cc (400 bytes, \uc9c0\uc2dc\ub41c \uce21\uc815 JSON \uacfc \uc77c\uce58).\\n- **\ubc31\ub85c\uadf8**: \ud074\ub808\uc784 \uac00\ub2a5\ud55c \uc791\uc5c5 0, \uc2e4\ud328 \uc791\uc5c5 0.\\n\\n\ub05d\ub098\uc9c0 \uc54a\uc740 \uc791\uc5c5\uc774\ub098 \uc0c8\ub85c \uc9c4\ud589\ud560 \uc77c\uc774 \uc5c6\uc5b4 \uc774\ubc88 \ud134\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4. \uc2b9\uc778\ub41c task-001 \uc744 \ub2e4\uc2dc \uac74\ub4dc\ub9ac\uac70\ub098 \uc0c8 Task/Goal \uc744 \ub9cc\ub4e4\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\",\"tool_names\":[],\"stop_reason\":\"Types.EndTurn\",\"failure_reason\":null},\"telemetry\":{\"model_used\":null,\"resolved_model_id\":null,\"outcome\":\"success\",\"turn_count\":12,\"agent_core_turn_ordinal\":11,\"stop_reason\":\"completed\",\"usage_reported\":true,\"telemetry_reported\":true,\"coverage_stage\":null,\"coverage_reason\":null,\"usage_scope\":\"per_request\",\"input_tokens\":27020,\"output_tokens\":259,\"cache_creation_tokens\":0,\"cache_read_tokens\":0,\"cost_usd\":null,\"usage_resolution\":{\"observation\":{\"input_tokens\":27020,\"output_tokens\":259,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cost_usd\":null},\"usage_scope\":\"per_request\",\"basis\":{\"kind\":\"per_request\"},\"delta\":{\"input_tokens\":27020,\"output_tokens\":259,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cost_usd\":null},\"status\":\"exact_cost_unavailable\",\"observed_at\":1792602651.465661},\"tokens_per_second\":29.328501868418073,\"usage_trust\":\"trusted\",\"usage_anomaly\":false,\"usage_anomaly_reasons\":[],\"system_fingerprint\":null,\"reasoning_tokens\":null,\"request_latency_ms\":8795,\"selected_model\":null,\"streaming_ttfrc_ms\":null,\"streaming_inter_chunk_count\":0,\"streaming_inter_chunk_avg_ms\":null,\"turn_lane\":\"tool_optional\",\"config_root\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config\",\"runtime_config_path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/runtime.toml\"}},\"latest_tool_call\":{\"ts\":1792602626.34077,\"record_kind\":\"tool_call\",\"keeper\":\"candle-host-qualifier\",\"tool\":\"masc_transition\",\"input\":{\"_agent_name\":\"candle-host-qualifier\",\"task_id\":\"task-001\",\"action\":\"submit_for_verification\",\"handoff_context\":{\"summary\":\"Guest shim dependency repaired; the actual Keeper wrote and read back measurement.json in its owned running guest. The host performed the source-byte comparison; the Keeper only preserved that measurement.\",\"evidence_refs\":[\"artifact:measurement.json\"]},\"notes\":\"Resubmission after the original artifact_unreadable receipt; inspect the new immutable artifact. This qualifies source bytes only, not behavior or the full54 goal.\"},\"output\":\"{\\\"result\\\":\\\"task-001 awaiting_verification \u2192 awaiting_verification\\\",\\\"evidence_capture\\\":{\\\"verification_id\\\":\\\"vrf-5ee2e4f6674a8ccda7adaa075d60da5b\\\",\\\"diagnostics\\\":[]}}\",\"duration_ms\":84.0,\"runtime_contract\":{\"keeper_name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"session_id\":\"mcp_VYhlw0j_NJy_3J0x\",\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"sandbox_profile\":\"microvm\",\"sandbox_root\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"sandbox_roots\":[\".masc/playground/candle-host-qualifier/\"],\"path_resolution\":{\"read_implicit_cwd\":false,\"read_explicit_cwd_supported\":true,\"read_basis\":\"Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.\",\"discover_before_read\":\"When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.\",\"execute_path_basis\":\"Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.\",\"masc_state_basis\":\".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc.\"},\"network_mode\":\"none\",\"runtime_profile\":\"ollama_cloud.ollama-cloud-kimi-k3\"},\"action_radius\":{\"tool_name\":\"masc_transition\",\"action_key\":\"submit_for_verification\",\"target_kind\":\"tool\",\"target_path\":null,\"sandbox_target\":\"microvm\",\"observed_paths\":[],\"duration_ms\":84.0,\"error\":null},\"route_evidence\":{\"descriptor_id\":\"masc.task.transition\",\"capability_id\":\"masc_transition\",\"keeper_model_projection\":\"transport_alias\",\"public_name\":\"masc_transition\",\"canonical_name\":\"masc_transition\",\"description\":\"Move a Task through the agent actions claim, start, submit_for_verification, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Completion requires the assignee to submit evidence, then wait for an authenticated human-operator or typed auto-judge verdict outside this tool. Direct done and approve/reject are deliberately unavailable here. Supports expected_version CAS.\",\"executor\":\"in_process\",\"backend\":\"ocaml_runtime\",\"sandbox\":\"none\",\"runtime_handler\":\"tool_masc_task_dispatch\",\"execution\":\"serial\",\"tool_kind\":\"atomic\",\"composable_output\":{\"kind\":\"opaque\"},\"receipt_labels\":{\"descriptor_id\":\"masc.task.transition\",\"capability_id\":\"masc_transition\",\"keeper_model_projection\":\"transport_alias\",\"public_name\":\"masc_transition\",\"canonical_name\":\"masc_transition\",\"executor\":\"in_process\",\"backend\":\"ocaml_runtime\",\"sandbox\":\"none\",\"runtime_handler\":\"tool_masc_task_dispatch\",\"execution\":\"serial\",\"composable_output\":\"opaque\",\"input_schema_source\":\"canonical_registry\",\"transport_alias_of\":\"keeper_task_claim\"},\"eval_tags\":[],\"transport_alias_of\":\"keeper_task_claim\",\"readonly\":false,\"cwd_scope\":null,\"polling_read\":false,\"tool_name\":\"masc_transition\"},\"agent_name\":\"candle-host-qualifier\",\"model\":\"runtime\",\"runtime_profile\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"lane\":\"runtime_mcp\",\"execution_id\":\"exec-1792602626340-000f\",\"wire_outcome\":\"ok\",\"disposition\":\"completed\",\"trace_id\":\"trace-1792601812952-00000\",\"session_id\":\"mcp_VYhlw0j_NJy_3J0x\",\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\",\"result_bytes\":164,\"input_fingerprint\":\"5b53f9c26a91b1bc3e0f4511afbcd1ef9ac10cbe165b2bfd730edbf662119bba\",\"output_fingerprint\":\"8bb3b69c1a1a4d721905f741e03efec454e25b07cd61de4430c78245ab3801b8\"},\"latest_receipt\":{\"schema\":\"keeper.execution_receipt.v1\",\"recorded_at\":\"2026-10-21T17:10:51Z\",\"keeper_name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"turn_count\":4,\"agent_core_turn_count\":12,\"current_task_id\":null,\"outcome\":\"receipt_done\",\"terminal_reason_code\":\"success\",\"operator_disposition\":\"pass\",\"operator_disposition_reason\":\"healthy\",\"runtime_contract\":{\"keeper_name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"session_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":4,\"task_id\":null,\"goal_ids\":[],\"sandbox_profile\":\"microvm\",\"sandbox_root\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"sandbox_roots\":[],\"path_resolution\":{\"read_implicit_cwd\":false,\"read_explicit_cwd_supported\":true,\"read_basis\":\"Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.\",\"discover_before_read\":\"When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.\",\"execute_path_basis\":\"Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.\",\"masc_state_basis\":\".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc.\"},\"network_mode\":\"none\",\"runtime_profile\":\"ollama_cloud.ollama-cloud-kimi-k3\"},\"action_radius\":{\"tool_name\":\"keeper_turn\",\"action_key\":\"run_turn\",\"target_kind\":\"keeper\",\"target_path\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"sandbox_target\":\"microvm\",\"observed_paths\":[\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\"],\"duration_ms\":9000.0,\"error\":null},\"response_text_present\":true,\"completion_contract_result\":\"response_observed\",\"actionable_signal\":\"no_actionable_signal\",\"tool_surface\":{\"turn_lane\":\"tool_optional\"},\"sandbox\":{\"kind\":\"microvm\",\"sandbox_root\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"network_mode\":\"none\"},\"runtime\":{\"name\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"selected_model\":\"kimi-k3\",\"attempt_count\":1,\"lane_attempt_count\":1,\"lane_evidence\":{\"failures\":[],\"terminal\":{\"kind\":\"not_observed\"}},\"fallback_applied\":false,\"outcome\":\"completed\",\"agent_core_internal_runtime_allowed\":false,\"degraded_retry_applied\":null,\"degraded_retry_deferred\":null},\"stop_reason\":\"completed\",\"error\":null,\"started_at\":\"2026-10-21T17:10:42Z\",\"ended_at\":\"2026-10-21T17:10:51Z\",\"extra_system_context_digest\":\"84748a9023e9d1fb88ab4ebfc67adda867e12cd1a3cd7620b81a03a4caa5212a\",\"extra_system_context_injected_size\":11270,\"extra_system_context_computed_size\":11270},\"latest_causal_event\":{\"kind\":\"transition\",\"ts\":\"2026-10-21T17:27:41Z\",\"ts_unix\":1792603661.812288,\"observed_at\":\"2026-10-21T17:27:41Z\",\"observed_at_unix\":1792603661.812288,\"observation_only\":false,\"trace_id\":null,\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"title\":\"Transition \u00b7 drain_complete\",\"summary\":\"draining -> stopped via drain_complete; outcome=applied\",\"severity\":\"info\",\"next_human_action\":null},\"causal_timeline\":[{\"kind\":\"transition\",\"ts\":\"2026-10-21T17:27:41Z\",\"ts_unix\":1792603661.812288,\"observed_at\":\"2026-10-21T17:27:41Z\",\"observed_at_unix\":1792603661.812288,\"observation_only\":false,\"trace_id\":null,\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"title\":\"Transition \u00b7 drain_complete\",\"summary\":\"draining -> stopped via drain_complete; outcome=applied\",\"severity\":\"info\",\"next_human_action\":null},{\"kind\":\"transition\",\"ts\":\"2026-10-21T17:27:41Z\",\"ts_unix\":1792603661.812169,\"observed_at\":\"2026-10-21T17:27:41Z\",\"observed_at_unix\":1792603661.812169,\"observation_only\":false,\"trace_id\":null,\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"title\":\"Transition \u00b7 stop_requested\",\"summary\":\"running -> draining via stop_requested; outcome=applied\",\"severity\":\"info\",\"next_human_action\":null},{\"kind\":\"terminal_reason\",\"ts\":\"2026-10-21T17:10:51Z\",\"ts_unix\":1792602651.466823,\"observed_at\":\"2026-10-21T17:10:51Z\",\"observed_at_unix\":1792602651.466823,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":4,\"task_id\":null,\"goal_ids\":[],\"title\":\"Terminal Reason\",\"summary\":\"turn completed\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"execution_receipt\",\"ts\":\"2026-10-21T17:10:51Z\",\"ts_unix\":1792602651.0,\"observed_at\":\"2026-10-21T17:10:51Z\",\"observed_at_unix\":1792602651.0,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":4,\"task_id\":null,\"goal_ids\":[],\"title\":\"Execution Receipt\",\"summary\":\"receipt_done \u00b7 completion_observation=response_observed \u00b7 runtime=completed\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:10:26Z\",\"ts_unix\":1792602626.34077,\"observed_at\":\"2026-10-21T17:10:26Z\",\"observed_at_unix\":1792602626.34077,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 masc_transition\",\"summary\":\"masc_transition succeeded in 84ms\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:09:31Z\",\"ts_unix\":1792602571.887399,\"observed_at\":\"2026-10-21T17:09:31Z\",\"observed_at_unix\":1792602571.887399,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":3,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 Read\",\"summary\":\"Read succeeded in 300ms\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:09:28Z\",\"ts_unix\":1792602568.924627,\"observed_at\":\"2026-10-21T17:09:28Z\",\"observed_at_unix\":1792602568.924627,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":3,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 Write\",\"summary\":\"Write succeeded in 3859ms\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:09:17Z\",\"ts_unix\":1792602557.417783,\"observed_at\":\"2026-10-21T17:09:17Z\",\"observed_at_unix\":1792602557.417783,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":3,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 Write\",\"summary\":\"Write failed in 0ms\",\"severity\":\"bad\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:02:10Z\",\"ts_unix\":1792602130.274025,\"observed_at\":\"2026-10-21T17:02:10Z\",\"observed_at_unix\":1792602130.274025,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":2,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 keeper_lane_status\",\"summary\":\"keeper_lane_status succeeded in 0ms\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:02:07Z\",\"ts_unix\":1792602127.844985,\"observed_at\":\"2026-10-21T17:02:07Z\",\"observed_at_unix\":1792602127.844985,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":2,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 Write\",\"summary\":\"Write failed in 821ms\",\"severity\":\"bad\",\"next_human_action\":null},{\"kind\":\"transition\",\"ts\":\"2026-10-21T16:56:52Z\",\"ts_unix\":1792601812.995499,\"observed_at\":\"2026-10-21T16:56:52Z\",\"observed_at_unix\":1792601812.995499,\"observation_only\":false,\"trace_id\":null,\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"title\":\"Transition \u00b7 fiber_started\",\"summary\":\"offline -> running via fiber_started; outcome=applied\",\"severity\":\"info\",\"next_human_action\":null}],\"last_event_bus_correlation\":null},\"chat_operations\":{\"queued_count\":0,\"running_operation_id\":null,\"terminal_count\":2,\"snapshot_available\":true,\"read_error\":null},\"runtime\":{\"paused\":true,\"keepalive_running\":false,\"phase\":null,\"shutdown_operation_phase\":\"finalized\",\"shutdown_admission_fence\":false,\"fiber_health\":\"unknown\",\"last_runtime_attempt\":null,\"pause_state\":\"paused\",\"runtime_blocker_state\":\"clear\",\"runtime_blocker_class\":null,\"runtime_blocker_summary\":null,\"runtime_blocker_signature\":null,\"runtime_blocker_facts\":null,\"needs_attention\":true,\"attention_reason\":\"paused\",\"next_human_action\":\"resume_or_review\",\"approval_queue_state\":{\"state\":\"ready\"},\"pending_approval_count\":0,\"latched_reason\":\"operator_paused:actor=keeper_down\"},\"workspace\":{\"mention_targets\":[],\"board_interests\":[]},\"sources\":{\"live_meta_path\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.json\",\"live_meta\":{\"exists\":true,\"path\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.json\",\"source\":\"runtime_overlay\"},\"default_manifest_path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/keepers/candle-host-qualifier.toml\",\"default_manifest\":{\"exists\":true,\"path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/keepers/candle-host-qualifier.toml\",\"source\":\"toml\"},\"default_source_kind\":\"toml\",\"default_config_error\":null,\"active_config_root\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config\",\"active_config_root_source\":\"env\",\"config_resolution\":{\"status\":\"ready\",\"warnings\":[],\"config_root\":{\"path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config\",\"exists\":true,\"source\":\"env\"},\"prompts\":{\"path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/prompts\",\"exists\":true,\"source\":\"env\"},\"keepers\":{\"path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/keepers\",\"exists\":true,\"source\":\"env\"}},\"precedence\":[\"live_meta\",\"keeper_config\"],\"has_live_override\":false,\"override_fields\":[],\"override_field_sources\":[]},\"context\":{\"skipped\":true,\"reason\":\"fast_or_disabled\",\"has_checkpoint\":null},\"metrics_overview\":{\"sample_points\":0,\"turn_points\":0,\"heartbeat_points\":0,\"proactive_points\":0,\"window_interactions\":0,\"intervention_share\":null,\"intervention_per_turn\":null},\"metrics_tail\":[{\"schema\":\"keeper.metrics.v1\",\"record_kind\":\"heartbeat\",\"ts\":\"2026-10-21T17:17:16Z\",\"ts_unix\":1792603036.926476,\"channel\":\"heartbeat\",\"name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"message_count\":22,\"stage_timing\":{\"presence\":{\"p50\":0.2830028533935547,\"p95\":0.3039836883544922,\"max\":0.3039836883544922,\"samples\":5},\"snapshot\":{\"p50\":0.621795654296875,\"p95\":0.9200572967529297,\"max\":0.9200572967529297,\"samples\":5},\"board\":{\"p50\":0.04291534423828125,\"p95\":0.09608268737792969,\"max\":0.09608268737792969,\"samples\":5},\"turn\":{\"p50\":20.722150802612305,\"p95\":20383.00085067749,\"max\":20383.00085067749,\"samples\":5}}},{\"schema\":\"keeper.metrics.v1\",\"record_kind\":\"heartbeat\",\"ts\":\"2026-10-21T17:22:17Z\",\"ts_unix\":1792603337.999777,\"channel\":\"heartbeat\",\"name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"message_count\":22,\"stage_timing\":{\"presence\":{\"p50\":0.30303001403808594,\"p95\":0.3058910369873047,\"max\":0.3058910369873047,\"samples\":6},\"snapshot\":{\"p50\":0.6349086761474609,\"p95\":0.9200572967529297,\"max\":0.9200572967529297,\"samples\":6},\"board\":{\"p50\":0.04291534423828125,\"p95\":0.09608268737792969,\"max\":0.09608268737792969,\"samples\":6},\"turn\":{\"p50\":20.722150802612305,\"p95\":20383.00085067749,\"max\":20383.00085067749,\"samples\":6}}},{\"schema\":\"keeper.metrics.v1\",\"record_kind\":\"heartbeat\",\"ts\":\"2026-10-21T17:27:19Z\",\"ts_unix\":1792603639.024762,\"channel\":\"heartbeat\",\"name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"message_count\":22,\"stage_timing\":{\"presence\":{\"p50\":0.30303001403808594,\"p95\":0.32019615173339844,\"max\":0.32019615173339844,\"samples\":7},\"snapshot\":{\"p50\":0.6349086761474609,\"p95\":1.708984375,\"max\":1.708984375,\"samples\":7},\"board\":{\"p50\":0.02002716064453125,\"p95\":0.09608268737792969,\"max\":0.09608268737792969,\"samples\":7},\"turn\":{\"p50\":5.108118057250977,\"p95\":20383.00085067749,\"max\":20383.00085067749,\"samples\":7}}}],\"history_tail\":[],\"history_tail_count\":0,\"history_raw_count\":0,\"history_fragment_count\":0,\"history_fragment_filtered_count\":0,\"history_fragment_filter_enabled\":true,\"storage_paths\":{\"meta\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.json\",\"metrics\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier/metrics\",\"decisions\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.decisions.jsonl\",\"feedback\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.feedback.jsonl\",\"session_dir\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/traces/trace-1792601812952-00000\",\"history\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/traces/trace-1792601812952-00000/history.jsonl\",\"history_internal\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/traces/trace-1792601812952-00000/history.internal.jsonl\",\"evidence_dir\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/evidence/candle-host-qualifier/trace-1792601812952-00000\"},\"execution_context\":{\"sandbox_id\":\"keeper:candle-host-qualifier\",\"sandbox_backend\":\"microvm\",\"sandbox_root\":\".\",\"sandbox_container_root\":null,\"default_cwd\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\",\"keeper_last_error\":null,\"sandbox_live\":{\"keeper\":\"candle-host-qualifier\",\"sandbox_profile\":\"microvm\",\"configured_network_mode\":\"none\",\"configured_image_name\":\"base\",\"configured_image\":\"masc-sandbox:general\",\"configured_image_unresolved\":null,\"effective_mode\":\"microvm_vm_not_running\",\"managed_container_kind\":\"keeper-vm\",\"containers\":[],\"preflight\":null,\"resource_config\":{\"memory\":\"2048m\",\"cpus\":\"4\",\"guest_size_error\":null,\"work_volume_size\":\"256g\",\"pids_limit\":null,\"tmpfs_size\":null},\"paths\":{\"host_workspace\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier\",\"guest_home\":null,\"guest_workspace\":\"/masc-work/candle-host-qualifier\",\"guest_config\":\"/tmp/masc-runtime/.masc/config\",\"guest_work_volume\":\"/masc-work\"},\"container_error\":null,\"why_no_container\":\"no visible apple_container microVM guest; a guest is created on this Keeper's first sandboxed tool execution\",\"repository_checkouts\":{\"state\":\"not_inspected\",\"entries\":[]}},\"repository_checkouts\":{\"state\":\"not_inspected\",\"entries\":[]}}}",
+            "status": "ok",
+            "tool": "masc_keeper_status"
+          },
+          "trace_id": "\"7043c4263b28457baec1ced8ded06616\"",
+          "agent_id": "local-admin",
+          "tool": "masc_keeper_status",
+          "duration_ms": 32,
+          "attempts": 1,
+          "timestamp": "2026-10-21T17:28:01Z"
+        }
+      },
+      "resultType": "complete",
+      "content": [
+        {
+          "type": "text",
+          "text": "{\"runtime_class\":\"keeper\",\"name\":\"candle-host-qualifier\",\"meta\":{\"schema\":\"masc.keeper_meta.v2\",\"name\":\"candle-host-qualifier\",\"instructions\":\"Manual isolated Candle qualification producer. Do not run autonomously. The qualification task records exact source bytes and submits its measurement artifact for independent verification.\",\"trace_id\":\"trace-1792601812952-00000\",\"created_at\":\"2026-10-21T16:56:52Z\",\"updated_at\":\"2026-10-21T17:27:41Z\",\"total_turns\":4,\"total_input_tokens\":267836,\"total_output_tokens\":2409,\"total_tokens\":270245,\"total_cost_usd\":{\"known_cost_usd\":0.0,\"priced_readings\":0,\"unpriced_readings\":12,\"unresolved_readings\":0,\"unobserved_attempts\":0,\"history\":\"complete\"},\"last_turn_ts\":1792602651.465663,\"last_input_tokens\":27020,\"last_output_tokens\":259,\"last_total_tokens\":27279,\"usage_cursor\":null,\"last_usage_resolution\":{\"observation\":{\"input_tokens\":27020,\"output_tokens\":259,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cost_usd\":null},\"usage_scope\":\"per_request\",\"basis\":{\"kind\":\"per_request\"},\"delta\":{\"input_tokens\":27020,\"output_tokens\":259,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cost_usd\":null},\"status\":\"exact_cost_unavailable\",\"observed_at\":1792602651.465661},\"last_latency_ms\":8831,\"proactive_count_total\":0,\"last_proactive_ts\":0.0,\"proactive_visible_count_total\":0,\"last_visible_proactive_ts\":0.0,\"last_proactive_outcome\":\"never_started\",\"last_proactive_reason\":\"\",\"last_proactive_preview\":\"\",\"message_scope_ack_id\":\"msg-1792601980995063-0\",\"last_runtime_attempt\":null,\"paused\":true,\"latched_reason\":{\"kind\":\"operator_paused\",\"actor\":\"keeper_down\"},\"current_task_id\":null,\"keeper_id\":\"keeper-95bbdeb7-2f52-4f72-88e9-9293596dc5fc\",\"agent_core_env\":{}},\"instructions\":\"Manual isolated Candle qualification producer. Do not run autonomously. The qualification task records exact source bytes and submits its measurement artifact for independent verification.\",\"paused\":true,\"keepalive_running\":false,\"keeper_age_s\":1869.6229639053345,\"last_turn_ago_s\":1030.1573009490967,\"last_proactive_ago_s\":null,\"last_visible_proactive_ago_s\":null,\"active_model\":null,\"disposition\":\"Pass\",\"disposition_reason\":\"healthy\",\"next_model_hint\":null,\"runtime_runtime_metrics\":null,\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\",\"keeper_last_error\":null,\"sandbox_live\":{\"keeper\":\"candle-host-qualifier\",\"sandbox_profile\":\"microvm\",\"configured_network_mode\":\"none\",\"configured_image_name\":\"base\",\"configured_image\":\"masc-sandbox:general\",\"configured_image_unresolved\":null,\"effective_mode\":\"microvm_vm_not_running\",\"managed_container_kind\":\"keeper-vm\",\"containers\":[],\"preflight\":null,\"resource_config\":{\"memory\":\"2048m\",\"cpus\":\"4\",\"guest_size_error\":null,\"work_volume_size\":\"256g\",\"pids_limit\":null,\"tmpfs_size\":null},\"paths\":{\"host_workspace\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier\",\"guest_home\":null,\"guest_workspace\":\"/masc-work/candle-host-qualifier\",\"guest_config\":\"/tmp/masc-runtime/.masc/config\",\"guest_work_volume\":\"/masc-work\"},\"container_error\":null,\"why_no_container\":\"no visible apple_container microVM guest; a guest is created on this Keeper's first sandboxed tool execution\",\"repository_checkouts\":{\"state\":\"not_inspected\",\"entries\":[]}},\"latest_tool_names\":[],\"latest_tool_call_count\":0,\"latest_action_source\":null,\"tool_audit_source\":\"keeper_metrics\",\"tool_audit_at\":\"2026-10-21T17:10:51Z\",\"lifecycle\":{\"created_at\":\"2026-10-21T16:56:52Z\",\"updated_at\":\"2026-10-21T17:27:41Z\",\"uptime_hours\":0.5193397121959262},\"activation_mode\":\"manual\",\"proactive\":{\"enabled\":false,\"count_total\":0,\"visible_count_total\":0,\"last_ts\":0.0,\"last_ago_s\":null,\"last_visible_ts\":0.0,\"last_visible_ago_s\":null,\"last_outcome\":\"never_started\",\"last_reason\":null,\"last_preview\":null},\"policy\":{\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\"},\"auto_execution_session\":{\"status\":\"removed\",\"enabled\":false},\"runtime_blocker_class\":null,\"runtime_blocker_summary\":null,\"runtime_blocker_signature\":null,\"runtime_blocker_facts\":null,\"needs_attention\":true,\"attention_reason\":\"paused\",\"next_human_action\":\"resume_or_review\",\"approval_queue_state\":{\"state\":\"ready\"},\"pending_approval_count\":0,\"latched_reason\":\"operator_paused:actor=keeper_down\",\"status_options\":{\"tail_turns\":3,\"tail_messages\":5,\"tail_bytes\":60000,\"fast\":true,\"include_context\":false,\"include_metrics_overview\":false,\"include_history_tail\":false,\"include_repository_checkouts\":false,\"tail_order\":\"oldest_first\"},\"context_budget\":{\"runtime_id\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"provider_context_window\":500000,\"budget_source\":\"runtime_provider_cap\",\"runtime_budget_source\":\"binding_override\",\"requested_override\":null,\"primary_budget\":500000,\"runtime_budget\":500000,\"requested_context_window\":500000,\"effective_budget\":500000},\"model_observability\":{\"runtime_id\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"recent_turn_observation\":true,\"runtime_observation_scope\":\"matched\",\"resolved_candidates\":[],\"selected_model\":\"kimi-k3\",\"attempt_summary\":{\"summary\":\"1 attempt(s); selected model observed from runtime_trust.selected_model.\",\"attempts_observed\":1},\"runtime_contract\":{\"source\":\"runtime_trust.selected_model\",\"verified\":true,\"provider_reachable\":null,\"actual_model_id\":null,\"actual_slots\":null,\"actual_ctx\":null,\"chat_completion_compatible\":null,\"runtime_blocker\":null,\"note\":\"Scoped runtime observation is present; selected model label remains AGENT_CORE-owned.\"},\"disposition\":\"Pass\",\"disposition_reason\":\"healthy\"},\"runtime_trust\":{\"trace_id\":\"trace-1792601812952-00000\",\"turn_id\":4,\"phase\":null,\"raw_phase\":null,\"current_task_id\":null,\"active_model\":\"kimi-k3\",\"selected_model\":\"kimi-k3\",\"runtime_contract\":{\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\",\"backend\":\"microvm\",\"sandbox_target\":\"microvm\",\"task_id\":null},\"runtime_blockers\":{\"runtime_blocker_class\":null,\"runtime_blocker_summary\":null,\"runtime_blocker_signature\":null,\"runtime_blocker_facts\":null},\"recent_tool_calls_unavailable\":null,\"disposition\":\"Pass\",\"disposition_reason\":\"healthy\",\"operator_disposition\":\"pass\",\"operator_disposition_reason\":\"healthy\",\"needs_attention\":true,\"attention_reason\":\"paused\",\"next_human_action\":\"resume_or_review\",\"approval_queue_state\":{\"state\":\"ready\"},\"approval\":{\"state\":\"idle\",\"queue_state\":{\"state\":\"ready\"},\"pending_count\":0,\"decision_source\":null,\"latest_event_kind\":null,\"latest_event_at\":null,\"rule_id\":null,\"pending_first\":null},\"execution\":{\"completion_contract_result\":\"response_observed\",\"runtime_lane_observation\":{\"state\":\"observed\",\"turn\":{\"trace_id\":\"trace-1792601812952-00000\",\"turn_count\":4,\"ended_at\":\"2026-10-21T17:10:51Z\"},\"evidence\":{\"failures\":[],\"terminal\":{\"kind\":\"not_observed\"}},\"error\":null},\"provider_attempt_count\":1,\"provider_fallback_applied\":false,\"provider_selected_model\":\"kimi-k3\",\"runtime_outcome\":\"completed\",\"sandbox_summary\":\"microvm / none\",\"sandbox_root\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"completion_observation_summary\":\"response_observed\",\"latest_receipt_at\":\"2026-10-21T17:10:51Z\"},\"latest_terminal_reason\":{\"code\":\"success\",\"disposition\":\"success\",\"source\":\"turn_result\",\"severity\":\"ok\",\"summary\":\"turn completed\",\"next_action\":null},\"latest_next_action\":null,\"pending_approval_count\":0,\"pending_approvals\":[],\"latest_decision\":{\"id\":\"dec-1792602651466-703e16e6\",\"event\":\"turn\",\"ts\":\"2026-10-21T17:10:51Z\",\"ts_unix\":1792602651.466823,\"audience\":\"internal_human_only\",\"trace_id\":\"trace-1792601812952-00000\",\"turn_id\":4,\"keeper_name\":\"candle-host-qualifier\",\"task_id\":null,\"runtime_contract\":{\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\",\"backend\":\"microvm\",\"sandbox_target\":\"microvm\",\"task_id\":null},\"terminal_reason\":{\"code\":\"success\",\"disposition\":\"success\",\"source\":\"turn_result\",\"severity\":\"ok\",\"summary\":\"turn completed\",\"next_action\":null},\"terminal_reason_code\":\"success\",\"terminal_reason_severity\":\"ok\",\"terminal_reason_source\":\"turn_result\",\"provider_context\":{\"runtime_id\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"executed_runtime_id\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"selected_model\":null},\"tool_surface\":{\"turn_lane\":\"tool_optional\"},\"tool_call_count\":0,\"tools_used\":[],\"approval_queue_state\":{\"state\":\"ready\"},\"pending_approval_count\":0,\"channel\":\"turn\",\"outcome\":\"success\",\"execution_path\":\"autonomous_cycle\",\"degraded_retry_applied\":null,\"degraded_retry_deferred\":null,\"turn_mode\":\"tool_use\",\"latency_ms\":8831,\"duration_ms\":8831,\"trigger_signals\":[\"idle_timeout_candidate\"],\"observed_affordances\":[],\"observation\":{\"pending_mentions\":0,\"pending_board_events\":1,\"pending_scope_messages\":0,\"active_goals\":1,\"active_goals_source\":{\"status\":\"available\"},\"idle_seconds\":830,\"unclaimed_task_count\":0,\"claimable_task_count\":0,\"claim_blocked_task_count\":0,\"failed_task_count\":0,\"scheduled_automation_active_count\":0,\"scheduled_automation_due_ready_count\":0,\"running_keeper_fiber_count\":1},\"response_preview\":\"\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\\n\\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c...\",\"response_preview_2000\":\"\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\\n\\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c\u00b7\uc7ac\uc791\uc5c5 \ubd88\ud544\uc694.\\n- **measurement.json**: \uac8c\uc2a4\ud2b8 \uc791\uc5c5 \ub8e8\ud2b8\uc5d0 Write\u00b7Read \ub85c \ud655\uc778 \uc644\ub8cc (400 bytes, \uc9c0\uc2dc\ub41c \uce21\uc815 JSON \uacfc \uc77c\uce58).\\n- **\ubc31\ub85c\uadf8**: \ud074\ub808\uc784 \uac00\ub2a5\ud55c \uc791\uc5c5 0, \uc2e4\ud328 \uc791\uc5c5 0.\\n\\n\ub05d\ub098\uc9c0 \uc54a\uc740 \uc791\uc5c5\uc774\ub098 \uc0c8\ub85c \uc9c4\ud589\ud560 \uc77c\uc774 \uc5c6\uc5b4 \uc774\ubc88 \ud134\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4. \uc2b9\uc778\ub41c task-001 \uc744 \ub2e4\uc2dc \uac74\ub4dc\ub9ac\uac70\ub098 \uc0c8 Task/Goal \uc744 \ub9cc\ub4e4\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\",\"error\":null,\"trace_ref\":{\"worker_run_id\":\"wr-1a15f7198d6-5e32-0000\",\"path\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier/raw-traces/turn-1792602642644-5e32-000003.jsonl\",\"start_seq\":1,\"end_seq\":8,\"agent_name\":\"agent_core-ollama_cloud.ollama-cloud-kimi-k3\",\"session_id\":\"trace-1792601812952-00000\"},\"run_validation\":{\"run_ref\":{\"worker_run_id\":\"wr-1a15f7198d6-5e32-0000\",\"path\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier/raw-traces/turn-1792602642644-5e32-000003.jsonl\",\"start_seq\":1,\"end_seq\":8,\"agent_name\":\"agent_core-ollama_cloud.ollama-cloud-kimi-k3\",\"session_id\":\"trace-1792601812952-00000\"},\"ok\":true,\"checks\":[{\"name\":\"seq_monotonic\",\"passed\":true},{\"name\":\"run_started\",\"passed\":true},{\"name\":\"run_finished\",\"passed\":true},{\"name\":\"tool_pairs\",\"passed\":true}],\"evidence\":[\"record_count=8\",\"assistant_blocks=2\",\"tool_exec_started=0\",\"tool_exec_finished=0\",\"hooks=4\",\"hook_names=after_turn,before_turn,before_turn_params,on_stop\",\"tool_names=\",\"model=kimi-k3\",\"tool_choice=\",\"enable_thinking=true\",\"preserve_thinking=\",\"reasoning_effort=low\",\"thinking_blocks=1\",\"text_blocks=1\",\"tool_use_blocks=0\",\"tool_result_blocks=0\",\"first_assistant_block_kind=thinking\",\"selection_outcome=text_only\",\"saw_tool_use=false\",\"saw_thinking=true\",\"final_text=\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\\n\\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c\u00b7\uc7ac\uc791\uc5c5 \ubd88\ud544\uc694.\\n- **measurement.json**: \uac8c\uc2a4\ud2b8 \uc791\uc5c5 \ub8e8\ud2b8\uc5d0 Write\u00b7Read \ub85c \ud655\uc778 \uc644\ub8cc (400 bytes, \uc9c0\uc2dc\ub41c \uce21\uc815 JSON \uacfc \uc77c\uce58).\\n- **\ubc31\ub85c\uadf8**: \ud074\ub808\uc784 \uac00\ub2a5\ud55c \uc791\uc5c5 0, \uc2e4\ud328 \uc791\uc5c5 0.\\n\\n\ub05d\ub098\uc9c0 \uc54a\uc740 \uc791\uc5c5\uc774\ub098 \uc0c8\ub85c \uc9c4\ud589\ud560 \uc77c\uc774 \uc5c6\uc5b4 \uc774\ubc88 \ud134\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4. \uc2b9\uc778\ub41c task-001 \uc744 \ub2e4\uc2dc \uac74\ub4dc\ub9ac\uac70\ub098 \uc0c8 Task/Goal \uc744 \ub9cc\ub4e4\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\",\"stop_reason=Types.EndTurn\",\"error=\",\"paired_tool_result_count=0\"],\"paired_tool_result_count\":0,\"final_text\":\"\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\\n\\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c\u00b7\uc7ac\uc791\uc5c5 \ubd88\ud544\uc694.\\n- **measurement.json**: \uac8c\uc2a4\ud2b8 \uc791\uc5c5 \ub8e8\ud2b8\uc5d0 Write\u00b7Read \ub85c \ud655\uc778 \uc644\ub8cc (400 bytes, \uc9c0\uc2dc\ub41c \uce21\uc815 JSON \uacfc \uc77c\uce58).\\n- **\ubc31\ub85c\uadf8**: \ud074\ub808\uc784 \uac00\ub2a5\ud55c \uc791\uc5c5 0, \uc2e4\ud328 \uc791\uc5c5 0.\\n\\n\ub05d\ub098\uc9c0 \uc54a\uc740 \uc791\uc5c5\uc774\ub098 \uc0c8\ub85c \uc9c4\ud589\ud560 \uc77c\uc774 \uc5c6\uc5b4 \uc774\ubc88 \ud134\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4. \uc2b9\uc778\ub41c task-001 \uc744 \ub2e4\uc2dc \uac74\ub4dc\ub9ac\uac70\ub098 \uc0c8 Task/Goal \uc744 \ub9cc\ub4e4\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.\",\"tool_names\":[],\"stop_reason\":\"Types.EndTurn\",\"failure_reason\":null},\"telemetry\":{\"model_used\":null,\"resolved_model_id\":null,\"outcome\":\"success\",\"turn_count\":12,\"agent_core_turn_ordinal\":11,\"stop_reason\":\"completed\",\"usage_reported\":true,\"telemetry_reported\":true,\"coverage_stage\":null,\"coverage_reason\":null,\"usage_scope\":\"per_request\",\"input_tokens\":27020,\"output_tokens\":259,\"cache_creation_tokens\":0,\"cache_read_tokens\":0,\"cost_usd\":null,\"usage_resolution\":{\"observation\":{\"input_tokens\":27020,\"output_tokens\":259,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cost_usd\":null},\"usage_scope\":\"per_request\",\"basis\":{\"kind\":\"per_request\"},\"delta\":{\"input_tokens\":27020,\"output_tokens\":259,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cost_usd\":null},\"status\":\"exact_cost_unavailable\",\"observed_at\":1792602651.465661},\"tokens_per_second\":29.328501868418073,\"usage_trust\":\"trusted\",\"usage_anomaly\":false,\"usage_anomaly_reasons\":[],\"system_fingerprint\":null,\"reasoning_tokens\":null,\"request_latency_ms\":8795,\"selected_model\":null,\"streaming_ttfrc_ms\":null,\"streaming_inter_chunk_count\":0,\"streaming_inter_chunk_avg_ms\":null,\"turn_lane\":\"tool_optional\",\"config_root\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config\",\"runtime_config_path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/runtime.toml\"}},\"latest_tool_call\":{\"ts\":1792602626.34077,\"record_kind\":\"tool_call\",\"keeper\":\"candle-host-qualifier\",\"tool\":\"masc_transition\",\"input\":{\"_agent_name\":\"candle-host-qualifier\",\"task_id\":\"task-001\",\"action\":\"submit_for_verification\",\"handoff_context\":{\"summary\":\"Guest shim dependency repaired; the actual Keeper wrote and read back measurement.json in its owned running guest. The host performed the source-byte comparison; the Keeper only preserved that measurement.\",\"evidence_refs\":[\"artifact:measurement.json\"]},\"notes\":\"Resubmission after the original artifact_unreadable receipt; inspect the new immutable artifact. This qualifies source bytes only, not behavior or the full54 goal.\"},\"output\":\"{\\\"result\\\":\\\"task-001 awaiting_verification \u2192 awaiting_verification\\\",\\\"evidence_capture\\\":{\\\"verification_id\\\":\\\"vrf-5ee2e4f6674a8ccda7adaa075d60da5b\\\",\\\"diagnostics\\\":[]}}\",\"duration_ms\":84.0,\"runtime_contract\":{\"keeper_name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"session_id\":\"mcp_VYhlw0j_NJy_3J0x\",\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"sandbox_profile\":\"microvm\",\"sandbox_root\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"sandbox_roots\":[\".masc/playground/candle-host-qualifier/\"],\"path_resolution\":{\"read_implicit_cwd\":false,\"read_explicit_cwd_supported\":true,\"read_basis\":\"Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.\",\"discover_before_read\":\"When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.\",\"execute_path_basis\":\"Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.\",\"masc_state_basis\":\".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc.\"},\"network_mode\":\"none\",\"runtime_profile\":\"ollama_cloud.ollama-cloud-kimi-k3\"},\"action_radius\":{\"tool_name\":\"masc_transition\",\"action_key\":\"submit_for_verification\",\"target_kind\":\"tool\",\"target_path\":null,\"sandbox_target\":\"microvm\",\"observed_paths\":[],\"duration_ms\":84.0,\"error\":null},\"route_evidence\":{\"descriptor_id\":\"masc.task.transition\",\"capability_id\":\"masc_transition\",\"keeper_model_projection\":\"transport_alias\",\"public_name\":\"masc_transition\",\"canonical_name\":\"masc_transition\",\"description\":\"Move a Task through the agent actions claim, start, submit_for_verification, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Completion requires the assignee to submit evidence, then wait for an authenticated human-operator or typed auto-judge verdict outside this tool. Direct done and approve/reject are deliberately unavailable here. Supports expected_version CAS.\",\"executor\":\"in_process\",\"backend\":\"ocaml_runtime\",\"sandbox\":\"none\",\"runtime_handler\":\"tool_masc_task_dispatch\",\"execution\":\"serial\",\"tool_kind\":\"atomic\",\"composable_output\":{\"kind\":\"opaque\"},\"receipt_labels\":{\"descriptor_id\":\"masc.task.transition\",\"capability_id\":\"masc_transition\",\"keeper_model_projection\":\"transport_alias\",\"public_name\":\"masc_transition\",\"canonical_name\":\"masc_transition\",\"executor\":\"in_process\",\"backend\":\"ocaml_runtime\",\"sandbox\":\"none\",\"runtime_handler\":\"tool_masc_task_dispatch\",\"execution\":\"serial\",\"composable_output\":\"opaque\",\"input_schema_source\":\"canonical_registry\",\"transport_alias_of\":\"keeper_task_claim\"},\"eval_tags\":[],\"transport_alias_of\":\"keeper_task_claim\",\"readonly\":false,\"cwd_scope\":null,\"polling_read\":false,\"tool_name\":\"masc_transition\"},\"agent_name\":\"candle-host-qualifier\",\"model\":\"runtime\",\"runtime_profile\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"lane\":\"runtime_mcp\",\"execution_id\":\"exec-1792602626340-000f\",\"wire_outcome\":\"ok\",\"disposition\":\"completed\",\"trace_id\":\"trace-1792601812952-00000\",\"session_id\":\"mcp_VYhlw0j_NJy_3J0x\",\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\",\"result_bytes\":164,\"input_fingerprint\":\"5b53f9c26a91b1bc3e0f4511afbcd1ef9ac10cbe165b2bfd730edbf662119bba\",\"output_fingerprint\":\"8bb3b69c1a1a4d721905f741e03efec454e25b07cd61de4430c78245ab3801b8\"},\"latest_receipt\":{\"schema\":\"keeper.execution_receipt.v1\",\"recorded_at\":\"2026-10-21T17:10:51Z\",\"keeper_name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"turn_count\":4,\"agent_core_turn_count\":12,\"current_task_id\":null,\"outcome\":\"receipt_done\",\"terminal_reason_code\":\"success\",\"operator_disposition\":\"pass\",\"operator_disposition_reason\":\"healthy\",\"runtime_contract\":{\"keeper_name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"session_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":4,\"task_id\":null,\"goal_ids\":[],\"sandbox_profile\":\"microvm\",\"sandbox_root\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"sandbox_roots\":[],\"path_resolution\":{\"read_implicit_cwd\":false,\"read_explicit_cwd_supported\":true,\"read_basis\":\"Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.\",\"discover_before_read\":\"When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.\",\"execute_path_basis\":\"Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.\",\"masc_state_basis\":\".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc.\"},\"network_mode\":\"none\",\"runtime_profile\":\"ollama_cloud.ollama-cloud-kimi-k3\"},\"action_radius\":{\"tool_name\":\"keeper_turn\",\"action_key\":\"run_turn\",\"target_kind\":\"keeper\",\"target_path\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"sandbox_target\":\"microvm\",\"observed_paths\":[\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\"],\"duration_ms\":9000.0,\"error\":null},\"response_text_present\":true,\"completion_contract_result\":\"response_observed\",\"actionable_signal\":\"no_actionable_signal\",\"tool_surface\":{\"turn_lane\":\"tool_optional\"},\"sandbox\":{\"kind\":\"microvm\",\"sandbox_root\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"network_mode\":\"none\"},\"runtime\":{\"name\":\"ollama_cloud.ollama-cloud-kimi-k3\",\"selected_model\":\"kimi-k3\",\"attempt_count\":1,\"lane_attempt_count\":1,\"lane_evidence\":{\"failures\":[],\"terminal\":{\"kind\":\"not_observed\"}},\"fallback_applied\":false,\"outcome\":\"completed\",\"agent_core_internal_runtime_allowed\":false,\"degraded_retry_applied\":null,\"degraded_retry_deferred\":null},\"stop_reason\":\"completed\",\"error\":null,\"started_at\":\"2026-10-21T17:10:42Z\",\"ended_at\":\"2026-10-21T17:10:51Z\",\"extra_system_context_digest\":\"84748a9023e9d1fb88ab4ebfc67adda867e12cd1a3cd7620b81a03a4caa5212a\",\"extra_system_context_injected_size\":11270,\"extra_system_context_computed_size\":11270},\"latest_causal_event\":{\"kind\":\"transition\",\"ts\":\"2026-10-21T17:27:41Z\",\"ts_unix\":1792603661.812288,\"observed_at\":\"2026-10-21T17:27:41Z\",\"observed_at_unix\":1792603661.812288,\"observation_only\":false,\"trace_id\":null,\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"title\":\"Transition \u00b7 drain_complete\",\"summary\":\"draining -> stopped via drain_complete; outcome=applied\",\"severity\":\"info\",\"next_human_action\":null},\"causal_timeline\":[{\"kind\":\"transition\",\"ts\":\"2026-10-21T17:27:41Z\",\"ts_unix\":1792603661.812288,\"observed_at\":\"2026-10-21T17:27:41Z\",\"observed_at_unix\":1792603661.812288,\"observation_only\":false,\"trace_id\":null,\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"title\":\"Transition \u00b7 drain_complete\",\"summary\":\"draining -> stopped via drain_complete; outcome=applied\",\"severity\":\"info\",\"next_human_action\":null},{\"kind\":\"transition\",\"ts\":\"2026-10-21T17:27:41Z\",\"ts_unix\":1792603661.812169,\"observed_at\":\"2026-10-21T17:27:41Z\",\"observed_at_unix\":1792603661.812169,\"observation_only\":false,\"trace_id\":null,\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"title\":\"Transition \u00b7 stop_requested\",\"summary\":\"running -> draining via stop_requested; outcome=applied\",\"severity\":\"info\",\"next_human_action\":null},{\"kind\":\"terminal_reason\",\"ts\":\"2026-10-21T17:10:51Z\",\"ts_unix\":1792602651.466823,\"observed_at\":\"2026-10-21T17:10:51Z\",\"observed_at_unix\":1792602651.466823,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":4,\"task_id\":null,\"goal_ids\":[],\"title\":\"Terminal Reason\",\"summary\":\"turn completed\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"execution_receipt\",\"ts\":\"2026-10-21T17:10:51Z\",\"ts_unix\":1792602651.0,\"observed_at\":\"2026-10-21T17:10:51Z\",\"observed_at_unix\":1792602651.0,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":4,\"task_id\":null,\"goal_ids\":[],\"title\":\"Execution Receipt\",\"summary\":\"receipt_done \u00b7 completion_observation=response_observed \u00b7 runtime=completed\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:10:26Z\",\"ts_unix\":1792602626.34077,\"observed_at\":\"2026-10-21T17:10:26Z\",\"observed_at_unix\":1792602626.34077,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 masc_transition\",\"summary\":\"masc_transition succeeded in 84ms\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:09:31Z\",\"ts_unix\":1792602571.887399,\"observed_at\":\"2026-10-21T17:09:31Z\",\"observed_at_unix\":1792602571.887399,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":3,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 Read\",\"summary\":\"Read succeeded in 300ms\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:09:28Z\",\"ts_unix\":1792602568.924627,\"observed_at\":\"2026-10-21T17:09:28Z\",\"observed_at_unix\":1792602568.924627,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":3,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 Write\",\"summary\":\"Write succeeded in 3859ms\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:09:17Z\",\"ts_unix\":1792602557.417783,\"observed_at\":\"2026-10-21T17:09:17Z\",\"observed_at_unix\":1792602557.417783,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":3,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 Write\",\"summary\":\"Write failed in 0ms\",\"severity\":\"bad\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:02:10Z\",\"ts_unix\":1792602130.274025,\"observed_at\":\"2026-10-21T17:02:10Z\",\"observed_at_unix\":1792602130.274025,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":2,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 keeper_lane_status\",\"summary\":\"keeper_lane_status succeeded in 0ms\",\"severity\":\"ok\",\"next_human_action\":null},{\"kind\":\"tool_call\",\"ts\":\"2026-10-21T17:02:07Z\",\"ts_unix\":1792602127.844985,\"observed_at\":\"2026-10-21T17:02:07Z\",\"observed_at_unix\":1792602127.844985,\"observation_only\":false,\"trace_id\":\"trace-1792601812952-00000\",\"keeper_turn_id\":2,\"task_id\":null,\"goal_ids\":[],\"title\":\"Tool \u00b7 Write\",\"summary\":\"Write failed in 821ms\",\"severity\":\"bad\",\"next_human_action\":null},{\"kind\":\"transition\",\"ts\":\"2026-10-21T16:56:52Z\",\"ts_unix\":1792601812.995499,\"observed_at\":\"2026-10-21T16:56:52Z\",\"observed_at_unix\":1792601812.995499,\"observation_only\":false,\"trace_id\":null,\"keeper_turn_id\":null,\"task_id\":null,\"goal_ids\":[],\"title\":\"Transition \u00b7 fiber_started\",\"summary\":\"offline -> running via fiber_started; outcome=applied\",\"severity\":\"info\",\"next_human_action\":null}],\"last_event_bus_correlation\":null},\"chat_operations\":{\"queued_count\":0,\"running_operation_id\":null,\"terminal_count\":2,\"snapshot_available\":true,\"read_error\":null},\"runtime\":{\"paused\":true,\"keepalive_running\":false,\"phase\":null,\"shutdown_operation_phase\":\"finalized\",\"shutdown_admission_fence\":false,\"fiber_health\":\"unknown\",\"last_runtime_attempt\":null,\"pause_state\":\"paused\",\"runtime_blocker_state\":\"clear\",\"runtime_blocker_class\":null,\"runtime_blocker_summary\":null,\"runtime_blocker_signature\":null,\"runtime_blocker_facts\":null,\"needs_attention\":true,\"attention_reason\":\"paused\",\"next_human_action\":\"resume_or_review\",\"approval_queue_state\":{\"state\":\"ready\"},\"pending_approval_count\":0,\"latched_reason\":\"operator_paused:actor=keeper_down\"},\"workspace\":{\"mention_targets\":[],\"board_interests\":[]},\"sources\":{\"live_meta_path\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.json\",\"live_meta\":{\"exists\":true,\"path\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.json\",\"source\":\"runtime_overlay\"},\"default_manifest_path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/keepers/candle-host-qualifier.toml\",\"default_manifest\":{\"exists\":true,\"path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/keepers/candle-host-qualifier.toml\",\"source\":\"toml\"},\"default_source_kind\":\"toml\",\"default_config_error\":null,\"active_config_root\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config\",\"active_config_root_source\":\"env\",\"config_resolution\":{\"status\":\"ready\",\"warnings\":[],\"config_root\":{\"path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config\",\"exists\":true,\"source\":\"env\"},\"prompts\":{\"path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/prompts\",\"exists\":true,\"source\":\"env\"},\"keepers\":{\"path\":\"/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/keepers\",\"exists\":true,\"source\":\"env\"}},\"precedence\":[\"live_meta\",\"keeper_config\"],\"has_live_override\":false,\"override_fields\":[],\"override_field_sources\":[]},\"context\":{\"skipped\":true,\"reason\":\"fast_or_disabled\",\"has_checkpoint\":null},\"metrics_overview\":{\"sample_points\":0,\"turn_points\":0,\"heartbeat_points\":0,\"proactive_points\":0,\"window_interactions\":0,\"intervention_share\":null,\"intervention_per_turn\":null},\"metrics_tail\":[{\"schema\":\"keeper.metrics.v1\",\"record_kind\":\"heartbeat\",\"ts\":\"2026-10-21T17:17:16Z\",\"ts_unix\":1792603036.926476,\"channel\":\"heartbeat\",\"name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"message_count\":22,\"stage_timing\":{\"presence\":{\"p50\":0.2830028533935547,\"p95\":0.3039836883544922,\"max\":0.3039836883544922,\"samples\":5},\"snapshot\":{\"p50\":0.621795654296875,\"p95\":0.9200572967529297,\"max\":0.9200572967529297,\"samples\":5},\"board\":{\"p50\":0.04291534423828125,\"p95\":0.09608268737792969,\"max\":0.09608268737792969,\"samples\":5},\"turn\":{\"p50\":20.722150802612305,\"p95\":20383.00085067749,\"max\":20383.00085067749,\"samples\":5}}},{\"schema\":\"keeper.metrics.v1\",\"record_kind\":\"heartbeat\",\"ts\":\"2026-10-21T17:22:17Z\",\"ts_unix\":1792603337.999777,\"channel\":\"heartbeat\",\"name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"message_count\":22,\"stage_timing\":{\"presence\":{\"p50\":0.30303001403808594,\"p95\":0.3058910369873047,\"max\":0.3058910369873047,\"samples\":6},\"snapshot\":{\"p50\":0.6349086761474609,\"p95\":0.9200572967529297,\"max\":0.9200572967529297,\"samples\":6},\"board\":{\"p50\":0.04291534423828125,\"p95\":0.09608268737792969,\"max\":0.09608268737792969,\"samples\":6},\"turn\":{\"p50\":20.722150802612305,\"p95\":20383.00085067749,\"max\":20383.00085067749,\"samples\":6}}},{\"schema\":\"keeper.metrics.v1\",\"record_kind\":\"heartbeat\",\"ts\":\"2026-10-21T17:27:19Z\",\"ts_unix\":1792603639.024762,\"channel\":\"heartbeat\",\"name\":\"candle-host-qualifier\",\"trace_id\":\"trace-1792601812952-00000\",\"message_count\":22,\"stage_timing\":{\"presence\":{\"p50\":0.30303001403808594,\"p95\":0.32019615173339844,\"max\":0.32019615173339844,\"samples\":7},\"snapshot\":{\"p50\":0.6349086761474609,\"p95\":1.708984375,\"max\":1.708984375,\"samples\":7},\"board\":{\"p50\":0.02002716064453125,\"p95\":0.09608268737792969,\"max\":0.09608268737792969,\"samples\":7},\"turn\":{\"p50\":5.108118057250977,\"p95\":20383.00085067749,\"max\":20383.00085067749,\"samples\":7}}}],\"history_tail\":[],\"history_tail_count\":0,\"history_raw_count\":0,\"history_fragment_count\":0,\"history_fragment_filtered_count\":0,\"history_fragment_filter_enabled\":true,\"storage_paths\":{\"meta\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.json\",\"metrics\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier/metrics\",\"decisions\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.decisions.jsonl\",\"feedback\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.feedback.jsonl\",\"session_dir\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/traces/trace-1792601812952-00000\",\"history\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/traces/trace-1792601812952-00000/history.jsonl\",\"history_internal\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/traces/trace-1792601812952-00000/history.internal.jsonl\",\"evidence_dir\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/evidence/candle-host-qualifier/trace-1792601812952-00000\"},\"execution_context\":{\"sandbox_id\":\"keeper:candle-host-qualifier\",\"sandbox_backend\":\"microvm\",\"sandbox_root\":\".\",\"sandbox_container_root\":null,\"default_cwd\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/\",\"sandbox_profile\":\"microvm\",\"network_mode\":\"none\",\"keeper_last_error\":null,\"sandbox_live\":{\"keeper\":\"candle-host-qualifier\",\"sandbox_profile\":\"microvm\",\"configured_network_mode\":\"none\",\"configured_image_name\":\"base\",\"configured_image\":\"masc-sandbox:general\",\"configured_image_unresolved\":null,\"effective_mode\":\"microvm_vm_not_running\",\"managed_container_kind\":\"keeper-vm\",\"containers\":[],\"preflight\":null,\"resource_config\":{\"memory\":\"2048m\",\"cpus\":\"4\",\"guest_size_error\":null,\"work_volume_size\":\"256g\",\"pids_limit\":null,\"tmpfs_size\":null},\"paths\":{\"host_workspace\":\"/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier\",\"guest_home\":null,\"guest_workspace\":\"/masc-work/candle-host-qualifier\",\"guest_config\":\"/tmp/masc-runtime/.masc/config\",\"guest_work_volume\":\"/masc-work\"},\"container_error\":null,\"why_no_container\":\"no visible apple_container microVM guest; a guest is created on this Keeper's first sandboxed tool execution\",\"repository_checkouts\":{\"state\":\"not_inspected\",\"entries\":[]}},\"repository_checkouts\":{\"state\":\"not_inspected\",\"entries\":[]}}}"
+        }
+      ],
+      "isError": false,
+      "structuredContent": {
+        "runtime_class": "keeper",
+        "name": "candle-host-qualifier",
+        "meta": {
+          "schema": "masc.keeper_meta.v2",
+          "name": "candle-host-qualifier",
+          "instructions": "Manual isolated Candle qualification producer. Do not run autonomously. The qualification task records exact source bytes and submits its measurement artifact for independent verification.",
+          "trace_id": "trace-1792601812952-00000",
+          "created_at": "2026-10-21T16:56:52Z",
+          "updated_at": "2026-10-21T17:27:41Z",
+          "total_turns": 4,
+          "total_input_tokens": 267836,
+          "total_output_tokens": 2409,
+          "total_tokens": 270245,
+          "total_cost_usd": {
+            "known_cost_usd": 0.0,
+            "priced_readings": 0,
+            "unpriced_readings": 12,
+            "unresolved_readings": 0,
+            "unobserved_attempts": 0,
+            "history": "complete"
+          },
+          "last_turn_ts": 1792602651.465663,
+          "last_input_tokens": 27020,
+          "last_output_tokens": 259,
+          "last_total_tokens": 27279,
+          "usage_cursor": null,
+          "last_usage_resolution": {
+            "observation": {
+              "input_tokens": 27020,
+              "output_tokens": 259,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cost_usd": null
+            },
+            "usage_scope": "per_request",
+            "basis": {
+              "kind": "per_request"
+            },
+            "delta": {
+              "input_tokens": 27020,
+              "output_tokens": 259,
+              "cache_creation_input_tokens": 0,
+              "cache_read_input_tokens": 0,
+              "cost_usd": null
+            },
+            "status": "exact_cost_unavailable",
+            "observed_at": 1792602651.465661
+          },
+          "last_latency_ms": 8831,
+          "proactive_count_total": 0,
+          "last_proactive_ts": 0.0,
+          "proactive_visible_count_total": 0,
+          "last_visible_proactive_ts": 0.0,
+          "last_proactive_outcome": "never_started",
+          "last_proactive_reason": "",
+          "last_proactive_preview": "",
+          "message_scope_ack_id": "msg-1792601980995063-0",
+          "last_runtime_attempt": null,
+          "paused": true,
+          "latched_reason": {
+            "kind": "operator_paused",
+            "actor": "keeper_down"
+          },
+          "current_task_id": null,
+          "keeper_id": "keeper-95bbdeb7-2f52-4f72-88e9-9293596dc5fc",
+          "agent_core_env": {}
+        },
+        "instructions": "Manual isolated Candle qualification producer. Do not run autonomously. The qualification task records exact source bytes and submits its measurement artifact for independent verification.",
+        "paused": true,
+        "keepalive_running": false,
+        "keeper_age_s": 1869.6229639053345,
+        "last_turn_ago_s": 1030.1573009490967,
+        "last_proactive_ago_s": null,
+        "last_visible_proactive_ago_s": null,
+        "active_model": null,
+        "disposition": "Pass",
+        "disposition_reason": "healthy",
+        "next_model_hint": null,
+        "runtime_runtime_metrics": null,
+        "sandbox_profile": "microvm",
+        "network_mode": "none",
+        "keeper_last_error": null,
+        "sandbox_live": {
+          "keeper": "candle-host-qualifier",
+          "sandbox_profile": "microvm",
+          "configured_network_mode": "none",
+          "configured_image_name": "base",
+          "configured_image": "masc-sandbox:general",
+          "configured_image_unresolved": null,
+          "effective_mode": "microvm_vm_not_running",
+          "managed_container_kind": "keeper-vm",
+          "containers": [],
+          "preflight": null,
+          "resource_config": {
+            "memory": "2048m",
+            "cpus": "4",
+            "guest_size_error": null,
+            "work_volume_size": "256g",
+            "pids_limit": null,
+            "tmpfs_size": null
+          },
+          "paths": {
+            "host_workspace": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier",
+            "guest_home": null,
+            "guest_workspace": "/masc-work/candle-host-qualifier",
+            "guest_config": "/tmp/masc-runtime/.masc/config",
+            "guest_work_volume": "/masc-work"
+          },
+          "container_error": null,
+          "why_no_container": "no visible apple_container microVM guest; a guest is created on this Keeper's first sandboxed tool execution",
+          "repository_checkouts": {
+            "state": "not_inspected",
+            "entries": []
+          }
+        },
+        "latest_tool_names": [],
+        "latest_tool_call_count": 0,
+        "latest_action_source": null,
+        "tool_audit_source": "keeper_metrics",
+        "tool_audit_at": "2026-10-21T17:10:51Z",
+        "lifecycle": {
+          "created_at": "2026-10-21T16:56:52Z",
+          "updated_at": "2026-10-21T17:27:41Z",
+          "uptime_hours": 0.5193397121959262
+        },
+        "activation_mode": "manual",
+        "proactive": {
+          "enabled": false,
+          "count_total": 0,
+          "visible_count_total": 0,
+          "last_ts": 0.0,
+          "last_ago_s": null,
+          "last_visible_ts": 0.0,
+          "last_visible_ago_s": null,
+          "last_outcome": "never_started",
+          "last_reason": null,
+          "last_preview": null
+        },
+        "policy": {
+          "sandbox_profile": "microvm",
+          "network_mode": "none"
+        },
+        "auto_execution_session": {
+          "status": "removed",
+          "enabled": false
+        },
+        "runtime_blocker_class": null,
+        "runtime_blocker_summary": null,
+        "runtime_blocker_signature": null,
+        "runtime_blocker_facts": null,
+        "needs_attention": true,
+        "attention_reason": "paused",
+        "next_human_action": "resume_or_review",
+        "approval_queue_state": {
+          "state": "ready"
+        },
+        "pending_approval_count": 0,
+        "latched_reason": "operator_paused:actor=keeper_down",
+        "status_options": {
+          "tail_turns": 3,
+          "tail_messages": 5,
+          "tail_bytes": 60000,
+          "fast": true,
+          "include_context": false,
+          "include_metrics_overview": false,
+          "include_history_tail": false,
+          "include_repository_checkouts": false,
+          "tail_order": "oldest_first"
+        },
+        "context_budget": {
+          "runtime_id": "ollama_cloud.ollama-cloud-kimi-k3",
+          "provider_context_window": 500000,
+          "budget_source": "runtime_provider_cap",
+          "runtime_budget_source": "binding_override",
+          "requested_override": null,
+          "primary_budget": 500000,
+          "runtime_budget": 500000,
+          "requested_context_window": 500000,
+          "effective_budget": 500000
+        },
+        "model_observability": {
+          "runtime_id": "ollama_cloud.ollama-cloud-kimi-k3",
+          "recent_turn_observation": true,
+          "runtime_observation_scope": "matched",
+          "resolved_candidates": [],
+          "selected_model": "kimi-k3",
+          "attempt_summary": {
+            "summary": "1 attempt(s); selected model observed from runtime_trust.selected_model.",
+            "attempts_observed": 1
+          },
+          "runtime_contract": {
+            "source": "runtime_trust.selected_model",
+            "verified": true,
+            "provider_reachable": null,
+            "actual_model_id": null,
+            "actual_slots": null,
+            "actual_ctx": null,
+            "chat_completion_compatible": null,
+            "runtime_blocker": null,
+            "note": "Scoped runtime observation is present; selected model label remains AGENT_CORE-owned."
+          },
+          "disposition": "Pass",
+          "disposition_reason": "healthy"
+        },
+        "runtime_trust": {
+          "trace_id": "trace-1792601812952-00000",
+          "turn_id": 4,
+          "phase": null,
+          "raw_phase": null,
+          "current_task_id": null,
+          "active_model": "kimi-k3",
+          "selected_model": "kimi-k3",
+          "runtime_contract": {
+            "sandbox_profile": "microvm",
+            "network_mode": "none",
+            "backend": "microvm",
+            "sandbox_target": "microvm",
+            "task_id": null
+          },
+          "runtime_blockers": {
+            "runtime_blocker_class": null,
+            "runtime_blocker_summary": null,
+            "runtime_blocker_signature": null,
+            "runtime_blocker_facts": null
+          },
+          "recent_tool_calls_unavailable": null,
+          "disposition": "Pass",
+          "disposition_reason": "healthy",
+          "operator_disposition": "pass",
+          "operator_disposition_reason": "healthy",
+          "needs_attention": true,
+          "attention_reason": "paused",
+          "next_human_action": "resume_or_review",
+          "approval_queue_state": {
+            "state": "ready"
+          },
+          "approval": {
+            "state": "idle",
+            "queue_state": {
+              "state": "ready"
+            },
+            "pending_count": 0,
+            "decision_source": null,
+            "latest_event_kind": null,
+            "latest_event_at": null,
+            "rule_id": null,
+            "pending_first": null
+          },
+          "execution": {
+            "completion_contract_result": "response_observed",
+            "runtime_lane_observation": {
+              "state": "observed",
+              "turn": {
+                "trace_id": "trace-1792601812952-00000",
+                "turn_count": 4,
+                "ended_at": "2026-10-21T17:10:51Z"
+              },
+              "evidence": {
+                "failures": [],
+                "terminal": {
+                  "kind": "not_observed"
+                }
+              },
+              "error": null
+            },
+            "provider_attempt_count": 1,
+            "provider_fallback_applied": false,
+            "provider_selected_model": "kimi-k3",
+            "runtime_outcome": "completed",
+            "sandbox_summary": "microvm / none",
+            "sandbox_root": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/",
+            "completion_observation_summary": "response_observed",
+            "latest_receipt_at": "2026-10-21T17:10:51Z"
+          },
+          "latest_terminal_reason": {
+            "code": "success",
+            "disposition": "success",
+            "source": "turn_result",
+            "severity": "ok",
+            "summary": "turn completed",
+            "next_action": null
+          },
+          "latest_next_action": null,
+          "pending_approval_count": 0,
+          "pending_approvals": [],
+          "latest_decision": {
+            "id": "dec-1792602651466-703e16e6",
+            "event": "turn",
+            "ts": "2026-10-21T17:10:51Z",
+            "ts_unix": 1792602651.466823,
+            "audience": "internal_human_only",
+            "trace_id": "trace-1792601812952-00000",
+            "turn_id": 4,
+            "keeper_name": "candle-host-qualifier",
+            "task_id": null,
+            "runtime_contract": {
+              "sandbox_profile": "microvm",
+              "network_mode": "none",
+              "backend": "microvm",
+              "sandbox_target": "microvm",
+              "task_id": null
+            },
+            "terminal_reason": {
+              "code": "success",
+              "disposition": "success",
+              "source": "turn_result",
+              "severity": "ok",
+              "summary": "turn completed",
+              "next_action": null
+            },
+            "terminal_reason_code": "success",
+            "terminal_reason_severity": "ok",
+            "terminal_reason_source": "turn_result",
+            "provider_context": {
+              "runtime_id": "ollama_cloud.ollama-cloud-kimi-k3",
+              "executed_runtime_id": "ollama_cloud.ollama-cloud-kimi-k3",
+              "selected_model": null
+            },
+            "tool_surface": {
+              "turn_lane": "tool_optional"
+            },
+            "tool_call_count": 0,
+            "tools_used": [],
+            "approval_queue_state": {
+              "state": "ready"
+            },
+            "pending_approval_count": 0,
+            "channel": "turn",
+            "outcome": "success",
+            "execution_path": "autonomous_cycle",
+            "degraded_retry_applied": null,
+            "degraded_retry_deferred": null,
+            "turn_mode": "tool_use",
+            "latency_ms": 8831,
+            "duration_ms": 8831,
+            "trigger_signals": [
+              "idle_timeout_candidate"
+            ],
+            "observed_affordances": [],
+            "observation": {
+              "pending_mentions": 0,
+              "pending_board_events": 1,
+              "pending_scope_messages": 0,
+              "active_goals": 1,
+              "active_goals_source": {
+                "status": "available"
+              },
+              "idle_seconds": 830,
+              "unclaimed_task_count": 0,
+              "claimable_task_count": 0,
+              "claim_blocked_task_count": 0,
+              "failed_task_count": 0,
+              "scheduled_automation_active_count": 0,
+              "scheduled_automation_due_ready_count": 0,
+              "running_keeper_fiber_count": 1
+            },
+            "response_preview": "\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\n\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c...",
+            "response_preview_2000": "\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\n\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c\u00b7\uc7ac\uc791\uc5c5 \ubd88\ud544\uc694.\n- **measurement.json**: \uac8c\uc2a4\ud2b8 \uc791\uc5c5 \ub8e8\ud2b8\uc5d0 Write\u00b7Read \ub85c \ud655\uc778 \uc644\ub8cc (400 bytes, \uc9c0\uc2dc\ub41c \uce21\uc815 JSON \uacfc \uc77c\uce58).\n- **\ubc31\ub85c\uadf8**: \ud074\ub808\uc784 \uac00\ub2a5\ud55c \uc791\uc5c5 0, \uc2e4\ud328 \uc791\uc5c5 0.\n\n\ub05d\ub098\uc9c0 \uc54a\uc740 \uc791\uc5c5\uc774\ub098 \uc0c8\ub85c \uc9c4\ud589\ud560 \uc77c\uc774 \uc5c6\uc5b4 \uc774\ubc88 \ud134\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4. \uc2b9\uc778\ub41c task-001 \uc744 \ub2e4\uc2dc \uac74\ub4dc\ub9ac\uac70\ub098 \uc0c8 Task/Goal \uc744 \ub9cc\ub4e4\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
+            "error": null,
+            "trace_ref": {
+              "worker_run_id": "wr-1a15f7198d6-5e32-0000",
+              "path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier/raw-traces/turn-1792602642644-5e32-000003.jsonl",
+              "start_seq": 1,
+              "end_seq": 8,
+              "agent_name": "agent_core-ollama_cloud.ollama-cloud-kimi-k3",
+              "session_id": "trace-1792601812952-00000"
+            },
+            "run_validation": {
+              "run_ref": {
+                "worker_run_id": "wr-1a15f7198d6-5e32-0000",
+                "path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier/raw-traces/turn-1792602642644-5e32-000003.jsonl",
+                "start_seq": 1,
+                "end_seq": 8,
+                "agent_name": "agent_core-ollama_cloud.ollama-cloud-kimi-k3",
+                "session_id": "trace-1792601812952-00000"
+              },
+              "ok": true,
+              "checks": [
+                {
+                  "name": "seq_monotonic",
+                  "passed": true
+                },
+                {
+                  "name": "run_started",
+                  "passed": true
+                },
+                {
+                  "name": "run_finished",
+                  "passed": true
+                },
+                {
+                  "name": "tool_pairs",
+                  "passed": true
+                }
+              ],
+              "evidence": [
+                "record_count=8",
+                "assistant_blocks=2",
+                "tool_exec_started=0",
+                "tool_exec_finished=0",
+                "hooks=4",
+                "hook_names=after_turn,before_turn,before_turn_params,on_stop",
+                "tool_names=",
+                "model=kimi-k3",
+                "tool_choice=",
+                "enable_thinking=true",
+                "preserve_thinking=",
+                "reasoning_effort=low",
+                "thinking_blocks=1",
+                "text_blocks=1",
+                "tool_use_blocks=0",
+                "tool_result_blocks=0",
+                "first_assistant_block_kind=thinking",
+                "selection_outcome=text_only",
+                "saw_tool_use=false",
+                "saw_thinking=true",
+                "final_text=\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\n\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c\u00b7\uc7ac\uc791\uc5c5 \ubd88\ud544\uc694.\n- **measurement.json**: \uac8c\uc2a4\ud2b8 \uc791\uc5c5 \ub8e8\ud2b8\uc5d0 Write\u00b7Read \ub85c \ud655\uc778 \uc644\ub8cc (400 bytes, \uc9c0\uc2dc\ub41c \uce21\uc815 JSON \uacfc \uc77c\uce58).\n- **\ubc31\ub85c\uadf8**: \ud074\ub808\uc784 \uac00\ub2a5\ud55c \uc791\uc5c5 0, \uc2e4\ud328 \uc791\uc5c5 0.\n\n\ub05d\ub098\uc9c0 \uc54a\uc740 \uc791\uc5c5\uc774\ub098 \uc0c8\ub85c \uc9c4\ud589\ud560 \uc77c\uc774 \uc5c6\uc5b4 \uc774\ubc88 \ud134\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4. \uc2b9\uc778\ub41c task-001 \uc744 \ub2e4\uc2dc \uac74\ub4dc\ub9ac\uac70\ub098 \uc0c8 Task/Goal \uc744 \ub9cc\ub4e4\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
+                "stop_reason=Types.EndTurn",
+                "error=",
+                "paired_tool_result_count=0"
+              ],
+              "paired_tool_result_count": 0,
+              "final_text": "\ud604\uc7ac \uc0c1\ud0dc\ub97c \ud655\uc778\ud588\uc2b5\ub2c8\ub2e4.\n\n- **task-001**: \uc81c\ucd9c\ub41c \uc99d\uac70\uac00 \uc644\ub8cc \uad8c\ud55c\uc790(verifier_exact)\uc5d0 \uc758\ud574 \uc2b9\uc778\ub428 (verification_id `vrf-5ee2e4f6674a8ccda7adaa075d60da5b`). \uc2b9\uc778\uc740 \ucd5c\uc885\uc774\ubbc0\ub85c \uc7ac\uc81c\ucd9c\u00b7\uc7ac\uc791\uc5c5 \ubd88\ud544\uc694.\n- **measurement.json**: \uac8c\uc2a4\ud2b8 \uc791\uc5c5 \ub8e8\ud2b8\uc5d0 Write\u00b7Read \ub85c \ud655\uc778 \uc644\ub8cc (400 bytes, \uc9c0\uc2dc\ub41c \uce21\uc815 JSON \uacfc \uc77c\uce58).\n- **\ubc31\ub85c\uadf8**: \ud074\ub808\uc784 \uac00\ub2a5\ud55c \uc791\uc5c5 0, \uc2e4\ud328 \uc791\uc5c5 0.\n\n\ub05d\ub098\uc9c0 \uc54a\uc740 \uc791\uc5c5\uc774\ub098 \uc0c8\ub85c \uc9c4\ud589\ud560 \uc77c\uc774 \uc5c6\uc5b4 \uc774\ubc88 \ud134\uc740 \uc5ec\uae30\uc11c \uc885\ub8cc\ud569\ub2c8\ub2e4. \uc2b9\uc778\ub41c task-001 \uc744 \ub2e4\uc2dc \uac74\ub4dc\ub9ac\uac70\ub098 \uc0c8 Task/Goal \uc744 \ub9cc\ub4e4\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.",
+              "tool_names": [],
+              "stop_reason": "Types.EndTurn",
+              "failure_reason": null
+            },
+            "telemetry": {
+              "model_used": null,
+              "resolved_model_id": null,
+              "outcome": "success",
+              "turn_count": 12,
+              "agent_core_turn_ordinal": 11,
+              "stop_reason": "completed",
+              "usage_reported": true,
+              "telemetry_reported": true,
+              "coverage_stage": null,
+              "coverage_reason": null,
+              "usage_scope": "per_request",
+              "input_tokens": 27020,
+              "output_tokens": 259,
+              "cache_creation_tokens": 0,
+              "cache_read_tokens": 0,
+              "cost_usd": null,
+              "usage_resolution": {
+                "observation": {
+                  "input_tokens": 27020,
+                  "output_tokens": 259,
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "cost_usd": null
+                },
+                "usage_scope": "per_request",
+                "basis": {
+                  "kind": "per_request"
+                },
+                "delta": {
+                  "input_tokens": 27020,
+                  "output_tokens": 259,
+                  "cache_creation_input_tokens": 0,
+                  "cache_read_input_tokens": 0,
+                  "cost_usd": null
+                },
+                "status": "exact_cost_unavailable",
+                "observed_at": 1792602651.465661
+              },
+              "tokens_per_second": 29.328501868418073,
+              "usage_trust": "trusted",
+              "usage_anomaly": false,
+              "usage_anomaly_reasons": [],
+              "system_fingerprint": null,
+              "reasoning_tokens": null,
+              "request_latency_ms": 8795,
+              "selected_model": null,
+              "streaming_ttfrc_ms": null,
+              "streaming_inter_chunk_count": 0,
+              "streaming_inter_chunk_avg_ms": null,
+              "turn_lane": "tool_optional",
+              "config_root": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config",
+              "runtime_config_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/runtime.toml"
+            }
+          },
+          "latest_tool_call": {
+            "ts": 1792602626.34077,
+            "record_kind": "tool_call",
+            "keeper": "candle-host-qualifier",
+            "tool": "masc_transition",
+            "input": {
+              "_agent_name": "candle-host-qualifier",
+              "task_id": "task-001",
+              "action": "submit_for_verification",
+              "handoff_context": {
+                "summary": "Guest shim dependency repaired; the actual Keeper wrote and read back measurement.json in its owned running guest. The host performed the source-byte comparison; the Keeper only preserved that measurement.",
+                "evidence_refs": [
+                  "artifact:measurement.json"
+                ]
+              },
+              "notes": "Resubmission after the original artifact_unreadable receipt; inspect the new immutable artifact. This qualifies source bytes only, not behavior or the full54 goal."
+            },
+            "output": "{\"result\":\"task-001 awaiting_verification \u2192 awaiting_verification\",\"evidence_capture\":{\"verification_id\":\"vrf-5ee2e4f6674a8ccda7adaa075d60da5b\",\"diagnostics\":[]}}",
+            "duration_ms": 84.0,
+            "runtime_contract": {
+              "keeper_name": "candle-host-qualifier",
+              "trace_id": "trace-1792601812952-00000",
+              "session_id": "mcp_VYhlw0j_NJy_3J0x",
+              "keeper_turn_id": null,
+              "task_id": null,
+              "goal_ids": [],
+              "sandbox_profile": "microvm",
+              "sandbox_root": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/",
+              "sandbox_roots": [
+                ".masc/playground/candle-host-qualifier/"
+              ],
+              "path_resolution": {
+                "read_implicit_cwd": false,
+                "read_explicit_cwd_supported": true,
+                "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+                "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+                "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+                "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+              },
+              "network_mode": "none",
+              "runtime_profile": "ollama_cloud.ollama-cloud-kimi-k3"
+            },
+            "action_radius": {
+              "tool_name": "masc_transition",
+              "action_key": "submit_for_verification",
+              "target_kind": "tool",
+              "target_path": null,
+              "sandbox_target": "microvm",
+              "observed_paths": [],
+              "duration_ms": 84.0,
+              "error": null
+            },
+            "route_evidence": {
+              "descriptor_id": "masc.task.transition",
+              "capability_id": "masc_transition",
+              "keeper_model_projection": "transport_alias",
+              "public_name": "masc_transition",
+              "canonical_name": "masc_transition",
+              "description": "Move a Task through the agent actions claim, start, submit_for_verification, cancel, or release. Ownership is exact and cannot be overridden by caller arguments. Completion requires the assignee to submit evidence, then wait for an authenticated human-operator or typed auto-judge verdict outside this tool. Direct done and approve/reject are deliberately unavailable here. Supports expected_version CAS.",
+              "executor": "in_process",
+              "backend": "ocaml_runtime",
+              "sandbox": "none",
+              "runtime_handler": "tool_masc_task_dispatch",
+              "execution": "serial",
+              "tool_kind": "atomic",
+              "composable_output": {
+                "kind": "opaque"
+              },
+              "receipt_labels": {
+                "descriptor_id": "masc.task.transition",
+                "capability_id": "masc_transition",
+                "keeper_model_projection": "transport_alias",
+                "public_name": "masc_transition",
+                "canonical_name": "masc_transition",
+                "executor": "in_process",
+                "backend": "ocaml_runtime",
+                "sandbox": "none",
+                "runtime_handler": "tool_masc_task_dispatch",
+                "execution": "serial",
+                "composable_output": "opaque",
+                "input_schema_source": "canonical_registry",
+                "transport_alias_of": "keeper_task_claim"
+              },
+              "eval_tags": [],
+              "transport_alias_of": "keeper_task_claim",
+              "readonly": false,
+              "cwd_scope": null,
+              "polling_read": false,
+              "tool_name": "masc_transition"
+            },
+            "agent_name": "candle-host-qualifier",
+            "model": "runtime",
+            "runtime_profile": "ollama_cloud.ollama-cloud-kimi-k3",
+            "lane": "runtime_mcp",
+            "execution_id": "exec-1792602626340-000f",
+            "wire_outcome": "ok",
+            "disposition": "completed",
+            "trace_id": "trace-1792601812952-00000",
+            "session_id": "mcp_VYhlw0j_NJy_3J0x",
+            "sandbox_profile": "microvm",
+            "network_mode": "none",
+            "result_bytes": 164,
+            "input_fingerprint": "5b53f9c26a91b1bc3e0f4511afbcd1ef9ac10cbe165b2bfd730edbf662119bba",
+            "output_fingerprint": "8bb3b69c1a1a4d721905f741e03efec454e25b07cd61de4430c78245ab3801b8"
+          },
+          "latest_receipt": {
+            "schema": "keeper.execution_receipt.v1",
+            "recorded_at": "2026-10-21T17:10:51Z",
+            "keeper_name": "candle-host-qualifier",
+            "trace_id": "trace-1792601812952-00000",
+            "turn_count": 4,
+            "agent_core_turn_count": 12,
+            "current_task_id": null,
+            "outcome": "receipt_done",
+            "terminal_reason_code": "success",
+            "operator_disposition": "pass",
+            "operator_disposition_reason": "healthy",
+            "runtime_contract": {
+              "keeper_name": "candle-host-qualifier",
+              "trace_id": "trace-1792601812952-00000",
+              "session_id": "trace-1792601812952-00000",
+              "keeper_turn_id": 4,
+              "task_id": null,
+              "goal_ids": [],
+              "sandbox_profile": "microvm",
+              "sandbox_root": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/",
+              "sandbox_roots": [],
+              "path_resolution": {
+                "read_implicit_cwd": false,
+                "read_explicit_cwd_supported": true,
+                "read_basis": "Read file_path resolves against explicit cwd when cwd is provided; otherwise it is relative to the keeper sandbox/sandbox_roots. It does not inherit Execute cwd implicitly.",
+                "discover_before_read": "When unsure, inspect visible paths with the currently exposed read/listing tools before Read. For files inside a checkout, set cwd to that checkout and pass file_path relative to it.",
+                "execute_path_basis": "Execute path arguments resolve against cwd. When cwd is set, pass paths relative to it; do not repeat the cwd prefix in the path.",
+                "masc_state_basis": ".masc runtime state is not a sandbox filesystem target. Use keeper task/context tools for .masc state instead of Read/Grep/Execute paths under .masc."
+              },
+              "network_mode": "none",
+              "runtime_profile": "ollama_cloud.ollama-cloud-kimi-k3"
+            },
+            "action_radius": {
+              "tool_name": "keeper_turn",
+              "action_key": "run_turn",
+              "target_kind": "keeper",
+              "target_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/",
+              "sandbox_target": "microvm",
+              "observed_paths": [
+                "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/"
+              ],
+              "duration_ms": 9000.0,
+              "error": null
+            },
+            "response_text_present": true,
+            "completion_contract_result": "response_observed",
+            "actionable_signal": "no_actionable_signal",
+            "tool_surface": {
+              "turn_lane": "tool_optional"
+            },
+            "sandbox": {
+              "kind": "microvm",
+              "sandbox_root": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/",
+              "network_mode": "none"
+            },
+            "runtime": {
+              "name": "ollama_cloud.ollama-cloud-kimi-k3",
+              "selected_model": "kimi-k3",
+              "attempt_count": 1,
+              "lane_attempt_count": 1,
+              "lane_evidence": {
+                "failures": [],
+                "terminal": {
+                  "kind": "not_observed"
+                }
+              },
+              "fallback_applied": false,
+              "outcome": "completed",
+              "agent_core_internal_runtime_allowed": false,
+              "degraded_retry_applied": null,
+              "degraded_retry_deferred": null
+            },
+            "stop_reason": "completed",
+            "error": null,
+            "started_at": "2026-10-21T17:10:42Z",
+            "ended_at": "2026-10-21T17:10:51Z",
+            "extra_system_context_digest": "84748a9023e9d1fb88ab4ebfc67adda867e12cd1a3cd7620b81a03a4caa5212a",
+            "extra_system_context_injected_size": 11270,
+            "extra_system_context_computed_size": 11270
+          },
+          "latest_causal_event": {
+            "kind": "transition",
+            "ts": "2026-10-21T17:27:41Z",
+            "ts_unix": 1792603661.812288,
+            "observed_at": "2026-10-21T17:27:41Z",
+            "observed_at_unix": 1792603661.812288,
+            "observation_only": false,
+            "trace_id": null,
+            "keeper_turn_id": null,
+            "task_id": null,
+            "goal_ids": [],
+            "title": "Transition \u00b7 drain_complete",
+            "summary": "draining -> stopped via drain_complete; outcome=applied",
+            "severity": "info",
+            "next_human_action": null
+          },
+          "causal_timeline": [
+            {
+              "kind": "transition",
+              "ts": "2026-10-21T17:27:41Z",
+              "ts_unix": 1792603661.812288,
+              "observed_at": "2026-10-21T17:27:41Z",
+              "observed_at_unix": 1792603661.812288,
+              "observation_only": false,
+              "trace_id": null,
+              "keeper_turn_id": null,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Transition \u00b7 drain_complete",
+              "summary": "draining -> stopped via drain_complete; outcome=applied",
+              "severity": "info",
+              "next_human_action": null
+            },
+            {
+              "kind": "transition",
+              "ts": "2026-10-21T17:27:41Z",
+              "ts_unix": 1792603661.812169,
+              "observed_at": "2026-10-21T17:27:41Z",
+              "observed_at_unix": 1792603661.812169,
+              "observation_only": false,
+              "trace_id": null,
+              "keeper_turn_id": null,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Transition \u00b7 stop_requested",
+              "summary": "running -> draining via stop_requested; outcome=applied",
+              "severity": "info",
+              "next_human_action": null
+            },
+            {
+              "kind": "terminal_reason",
+              "ts": "2026-10-21T17:10:51Z",
+              "ts_unix": 1792602651.466823,
+              "observed_at": "2026-10-21T17:10:51Z",
+              "observed_at_unix": 1792602651.466823,
+              "observation_only": false,
+              "trace_id": "trace-1792601812952-00000",
+              "keeper_turn_id": 4,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Terminal Reason",
+              "summary": "turn completed",
+              "severity": "ok",
+              "next_human_action": null
+            },
+            {
+              "kind": "execution_receipt",
+              "ts": "2026-10-21T17:10:51Z",
+              "ts_unix": 1792602651.0,
+              "observed_at": "2026-10-21T17:10:51Z",
+              "observed_at_unix": 1792602651.0,
+              "observation_only": false,
+              "trace_id": "trace-1792601812952-00000",
+              "keeper_turn_id": 4,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Execution Receipt",
+              "summary": "receipt_done \u00b7 completion_observation=response_observed \u00b7 runtime=completed",
+              "severity": "ok",
+              "next_human_action": null
+            },
+            {
+              "kind": "tool_call",
+              "ts": "2026-10-21T17:10:26Z",
+              "ts_unix": 1792602626.34077,
+              "observed_at": "2026-10-21T17:10:26Z",
+              "observed_at_unix": 1792602626.34077,
+              "observation_only": false,
+              "trace_id": "trace-1792601812952-00000",
+              "keeper_turn_id": null,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Tool \u00b7 masc_transition",
+              "summary": "masc_transition succeeded in 84ms",
+              "severity": "ok",
+              "next_human_action": null
+            },
+            {
+              "kind": "tool_call",
+              "ts": "2026-10-21T17:09:31Z",
+              "ts_unix": 1792602571.887399,
+              "observed_at": "2026-10-21T17:09:31Z",
+              "observed_at_unix": 1792602571.887399,
+              "observation_only": false,
+              "trace_id": "trace-1792601812952-00000",
+              "keeper_turn_id": 3,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Tool \u00b7 Read",
+              "summary": "Read succeeded in 300ms",
+              "severity": "ok",
+              "next_human_action": null
+            },
+            {
+              "kind": "tool_call",
+              "ts": "2026-10-21T17:09:28Z",
+              "ts_unix": 1792602568.924627,
+              "observed_at": "2026-10-21T17:09:28Z",
+              "observed_at_unix": 1792602568.924627,
+              "observation_only": false,
+              "trace_id": "trace-1792601812952-00000",
+              "keeper_turn_id": 3,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Tool \u00b7 Write",
+              "summary": "Write succeeded in 3859ms",
+              "severity": "ok",
+              "next_human_action": null
+            },
+            {
+              "kind": "tool_call",
+              "ts": "2026-10-21T17:09:17Z",
+              "ts_unix": 1792602557.417783,
+              "observed_at": "2026-10-21T17:09:17Z",
+              "observed_at_unix": 1792602557.417783,
+              "observation_only": false,
+              "trace_id": "trace-1792601812952-00000",
+              "keeper_turn_id": 3,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Tool \u00b7 Write",
+              "summary": "Write failed in 0ms",
+              "severity": "bad",
+              "next_human_action": null
+            },
+            {
+              "kind": "tool_call",
+              "ts": "2026-10-21T17:02:10Z",
+              "ts_unix": 1792602130.274025,
+              "observed_at": "2026-10-21T17:02:10Z",
+              "observed_at_unix": 1792602130.274025,
+              "observation_only": false,
+              "trace_id": "trace-1792601812952-00000",
+              "keeper_turn_id": 2,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Tool \u00b7 keeper_lane_status",
+              "summary": "keeper_lane_status succeeded in 0ms",
+              "severity": "ok",
+              "next_human_action": null
+            },
+            {
+              "kind": "tool_call",
+              "ts": "2026-10-21T17:02:07Z",
+              "ts_unix": 1792602127.844985,
+              "observed_at": "2026-10-21T17:02:07Z",
+              "observed_at_unix": 1792602127.844985,
+              "observation_only": false,
+              "trace_id": "trace-1792601812952-00000",
+              "keeper_turn_id": 2,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Tool \u00b7 Write",
+              "summary": "Write failed in 821ms",
+              "severity": "bad",
+              "next_human_action": null
+            },
+            {
+              "kind": "transition",
+              "ts": "2026-10-21T16:56:52Z",
+              "ts_unix": 1792601812.995499,
+              "observed_at": "2026-10-21T16:56:52Z",
+              "observed_at_unix": 1792601812.995499,
+              "observation_only": false,
+              "trace_id": null,
+              "keeper_turn_id": null,
+              "task_id": null,
+              "goal_ids": [],
+              "title": "Transition \u00b7 fiber_started",
+              "summary": "offline -> running via fiber_started; outcome=applied",
+              "severity": "info",
+              "next_human_action": null
+            }
+          ],
+          "last_event_bus_correlation": null
+        },
+        "chat_operations": {
+          "queued_count": 0,
+          "running_operation_id": null,
+          "terminal_count": 2,
+          "snapshot_available": true,
+          "read_error": null
+        },
+        "runtime": {
+          "paused": true,
+          "keepalive_running": false,
+          "phase": null,
+          "shutdown_operation_phase": "finalized",
+          "shutdown_admission_fence": false,
+          "fiber_health": "unknown",
+          "last_runtime_attempt": null,
+          "pause_state": "paused",
+          "runtime_blocker_state": "clear",
+          "runtime_blocker_class": null,
+          "runtime_blocker_summary": null,
+          "runtime_blocker_signature": null,
+          "runtime_blocker_facts": null,
+          "needs_attention": true,
+          "attention_reason": "paused",
+          "next_human_action": "resume_or_review",
+          "approval_queue_state": {
+            "state": "ready"
+          },
+          "pending_approval_count": 0,
+          "latched_reason": "operator_paused:actor=keeper_down"
+        },
+        "workspace": {
+          "mention_targets": [],
+          "board_interests": []
+        },
+        "sources": {
+          "live_meta_path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.json",
+          "live_meta": {
+            "exists": true,
+            "path": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.json",
+            "source": "runtime_overlay"
+          },
+          "default_manifest_path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/keepers/candle-host-qualifier.toml",
+          "default_manifest": {
+            "exists": true,
+            "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/keepers/candle-host-qualifier.toml",
+            "source": "toml"
+          },
+          "default_source_kind": "toml",
+          "default_config_error": null,
+          "active_config_root": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config",
+          "active_config_root_source": "env",
+          "config_resolution": {
+            "status": "ready",
+            "warnings": [],
+            "config_root": {
+              "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config",
+              "exists": true,
+              "source": "env"
+            },
+            "prompts": {
+              "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/prompts",
+              "exists": true,
+              "source": "env"
+            },
+            "keepers": {
+              "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/config/keepers",
+              "exists": true,
+              "source": "env"
+            }
+          },
+          "precedence": [
+            "live_meta",
+            "keeper_config"
+          ],
+          "has_live_override": false,
+          "override_fields": [],
+          "override_field_sources": []
+        },
+        "context": {
+          "skipped": true,
+          "reason": "fast_or_disabled",
+          "has_checkpoint": null
+        },
+        "metrics_overview": {
+          "sample_points": 0,
+          "turn_points": 0,
+          "heartbeat_points": 0,
+          "proactive_points": 0,
+          "window_interactions": 0,
+          "intervention_share": null,
+          "intervention_per_turn": null
+        },
+        "metrics_tail": [
+          {
+            "schema": "keeper.metrics.v1",
+            "record_kind": "heartbeat",
+            "ts": "2026-10-21T17:17:16Z",
+            "ts_unix": 1792603036.926476,
+            "channel": "heartbeat",
+            "name": "candle-host-qualifier",
+            "trace_id": "trace-1792601812952-00000",
+            "message_count": 22,
+            "stage_timing": {
+              "presence": {
+                "p50": 0.2830028533935547,
+                "p95": 0.3039836883544922,
+                "max": 0.3039836883544922,
+                "samples": 5
+              },
+              "snapshot": {
+                "p50": 0.621795654296875,
+                "p95": 0.9200572967529297,
+                "max": 0.9200572967529297,
+                "samples": 5
+              },
+              "board": {
+                "p50": 0.04291534423828125,
+                "p95": 0.09608268737792969,
+                "max": 0.09608268737792969,
+                "samples": 5
+              },
+              "turn": {
+                "p50": 20.722150802612305,
+                "p95": 20383.00085067749,
+                "max": 20383.00085067749,
+                "samples": 5
+              }
+            }
+          },
+          {
+            "schema": "keeper.metrics.v1",
+            "record_kind": "heartbeat",
+            "ts": "2026-10-21T17:22:17Z",
+            "ts_unix": 1792603337.999777,
+            "channel": "heartbeat",
+            "name": "candle-host-qualifier",
+            "trace_id": "trace-1792601812952-00000",
+            "message_count": 22,
+            "stage_timing": {
+              "presence": {
+                "p50": 0.30303001403808594,
+                "p95": 0.3058910369873047,
+                "max": 0.3058910369873047,
+                "samples": 6
+              },
+              "snapshot": {
+                "p50": 0.6349086761474609,
+                "p95": 0.9200572967529297,
+                "max": 0.9200572967529297,
+                "samples": 6
+              },
+              "board": {
+                "p50": 0.04291534423828125,
+                "p95": 0.09608268737792969,
+                "max": 0.09608268737792969,
+                "samples": 6
+              },
+              "turn": {
+                "p50": 20.722150802612305,
+                "p95": 20383.00085067749,
+                "max": 20383.00085067749,
+                "samples": 6
+              }
+            }
+          },
+          {
+            "schema": "keeper.metrics.v1",
+            "record_kind": "heartbeat",
+            "ts": "2026-10-21T17:27:19Z",
+            "ts_unix": 1792603639.024762,
+            "channel": "heartbeat",
+            "name": "candle-host-qualifier",
+            "trace_id": "trace-1792601812952-00000",
+            "message_count": 22,
+            "stage_timing": {
+              "presence": {
+                "p50": 0.30303001403808594,
+                "p95": 0.32019615173339844,
+                "max": 0.32019615173339844,
+                "samples": 7
+              },
+              "snapshot": {
+                "p50": 0.6349086761474609,
+                "p95": 1.708984375,
+                "max": 1.708984375,
+                "samples": 7
+              },
+              "board": {
+                "p50": 0.02002716064453125,
+                "p95": 0.09608268737792969,
+                "max": 0.09608268737792969,
+                "samples": 7
+              },
+              "turn": {
+                "p50": 5.108118057250977,
+                "p95": 20383.00085067749,
+                "max": 20383.00085067749,
+                "samples": 7
+              }
+            }
+          }
+        ],
+        "history_tail": [],
+        "history_tail_count": 0,
+        "history_raw_count": 0,
+        "history_fragment_count": 0,
+        "history_fragment_filtered_count": 0,
+        "history_fragment_filter_enabled": true,
+        "storage_paths": {
+          "meta": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.json",
+          "metrics": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier/metrics",
+          "decisions": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.decisions.jsonl",
+          "feedback": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/keepers/candle-host-qualifier.feedback.jsonl",
+          "session_dir": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/traces/trace-1792601812952-00000",
+          "history": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/traces/trace-1792601812952-00000/history.jsonl",
+          "history_internal": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/traces/trace-1792601812952-00000/history.internal.jsonl",
+          "evidence_dir": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/evidence/candle-host-qualifier/trace-1792601812952-00000"
+        },
+        "execution_context": {
+          "sandbox_id": "keeper:candle-host-qualifier",
+          "sandbox_backend": "microvm",
+          "sandbox_root": ".",
+          "sandbox_container_root": null,
+          "default_cwd": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier/",
+          "sandbox_profile": "microvm",
+          "network_mode": "none",
+          "keeper_last_error": null,
+          "sandbox_live": {
+            "keeper": "candle-host-qualifier",
+            "sandbox_profile": "microvm",
+            "configured_network_mode": "none",
+            "configured_image_name": "base",
+            "configured_image": "masc-sandbox:general",
+            "configured_image_unresolved": null,
+            "effective_mode": "microvm_vm_not_running",
+            "managed_container_kind": "keeper-vm",
+            "containers": [],
+            "preflight": null,
+            "resource_config": {
+              "memory": "2048m",
+              "cpus": "4",
+              "guest_size_error": null,
+              "work_volume_size": "256g",
+              "pids_limit": null,
+              "tmpfs_size": null
+            },
+            "paths": {
+              "host_workspace": "/private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-candle-host-eb484-20261022-g2c1pdix/.masc/playground/candle-host-qualifier",
+              "guest_home": null,
+              "guest_workspace": "/masc-work/candle-host-qualifier",
+              "guest_config": "/tmp/masc-runtime/.masc/config",
+              "guest_work_volume": "/masc-work"
+            },
+            "container_error": null,
+            "why_no_container": "no visible apple_container microVM guest; a guest is created on this Keeper's first sandboxed tool execution",
+            "repository_checkouts": {
+              "state": "not_inspected",
+              "entries": []
+            }
+          },
+          "repository_checkouts": {
+            "state": "not_inspected",
+            "entries": []
+          }
+        }
+      }
+    }
+  }
+}

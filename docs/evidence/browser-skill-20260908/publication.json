@@ -1,0 +1,28 @@
+{
+  "at_unix": 1788835137.371711,
+  "identity": {
+    "source_id": "project-masc",
+    "package_id": "browser-lanes",
+    "name": "browser-lanes"
+  },
+  "resources": {
+    "SKILL.md": "ed82ef295c0cc4eb92ebfff7d2c4a2972660e4e7fb4e340a6ee3f09893e20b74",
+    "references/connection.md": "3c026504c12e70f56924d4d47d6d16e3434e8a52c2382cb09389875ccfcfdcf4",
+    "references/verification.md": "c9829cc1ffe8b850f6c2ce924429ec9f239dfb2563eaa7817384a616ff3e6a77",
+    "references/advanced.md": "da9c3ede7bbb9e6d5eabd9017e822b954825bdcee0a4598f21a62fd0f0cef972"
+  },
+  "installations": {
+    "production": {
+      "content_revision": "8a7e01ab34b10c1231c750b28a287c7207bf1469817edd2d2af5aa0b997dce43",
+      "snapshot_revision": "248a6e546b683cc74615f3d886d89ed45c4e3cdf9fee374c86f49c8bea84a993",
+      "catalog_state": "ready",
+      "all_package_bytes_match": true
+    },
+    "scratch": {
+      "content_revision": "8a7e01ab34b10c1231c750b28a287c7207bf1469817edd2d2af5aa0b997dce43",
+      "snapshot_revision": "04c95258cb94cacf2852cc3782c524397ef18f0c6a46bf5d46d67f12c9be4773",
+      "catalog_state": "ready",
+      "all_package_bytes_match": true
+    }
+  }
+}

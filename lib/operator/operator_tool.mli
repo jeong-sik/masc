@@ -1,0 +1,89 @@
+
+(** Tool_operator — MCP tools for operator observation and intervention
+    (snapshot / digest / action / confirm / judgment / surface
+    audit).
+
+    Single dispatch entry: {!dispatch}.  Two schema lists exposed
+    so the Agent Core adapter can advertise the operator-remote subset
+    separately from the full tool catalog.  Every schema body loads
+    from [config/tools/masc_operator_*.toml] through
+    {!Operator_tool_toml}; the dual-surface tools (snapshot / digest /
+    action) carry their remote sentence in the file's
+    [operator_remote_description] key.
+
+    Internal dispatcher helpers stay private — the .mli pins
+    {!schemas} / {!remote_schemas} list contents at module init, so
+    caller contract is the lists. *)
+
+(** {1 Per-call context} *)
+
+type 'a context = 'a Tool_operator.context
+
+(** Per-tool-call capability bundle.  Concrete record because
+    callers (notably {!Mcp_server_eio_execute}) construct it
+    field-by-field at the dispatch site.  Polymorphic [\\'a] on
+    [clock] propagates Eio's row-typed clock through to
+    {!Operator_control}'s downstream context.  {!dispatch}
+    instantiates [\\'a] to [float Eio.Time.clock_ty] to match
+    {!Operator_control}'s concrete-clock requirement. *)
+
+(** {1 Result} *)
+
+type tool_result = Tool_result.result
+(** Re-exported from {!Tool_result}.  RFC-0062 Phase 4c-2:
+    handlers return structured [Tool_result.result] records. *)
+
+(** {1 Dispatch} *)
+
+val dispatch :
+  float Eio.Time.clock_ty context ->
+  name:string ->
+  args:Yojson.Safe.t ->
+  Tool_result.result option
+(** [dispatch ctx ~name ~args] dispatches the named MCP tool call.
+    Returns [None] for unrecognised names so callers can fall
+    through to other dispatchers.
+
+    Recognised names (full catalog — see {!schemas} for the
+    schema bodies):
+    - [masc_operator_snapshot] — read operator state.
+    - [masc_operator_digest] — daily digest.
+    - [masc_operator_action] — schedule an action (requires
+      confirm via separate call).
+    - [masc_operator_board_attention_quarantine_requeue] — exact manual
+      Board-attention quarantine recovery CAS.
+    - [masc_operator_composition_resolution] — exact original continuation owner/version
+    - [masc_operator_task_recovery_resolve] — exact Task owner/version
+      recovery CAS.
+    - [masc_operator_confirm] — confirm a pending action.
+    - [masc_operator_judgment_write] — record a judgment (hidden
+      from default catalog).
+    - [masc_operator_judgment_latest] — read latest judgment. *)
+
+(** {1 Catalog surfaces}
+
+    The full catalog ({!schemas}, internal) and the operator-remote
+    subset ({!remote_schemas}) advertise different tool sets to
+    different MCP profiles.
+
+    {b Why split}: the operator-remote profile is the externally
+    reachable seam (dashboard / Agent Core), so it advertises only the
+    safe-to-expose subset.  The full {!schemas} is consumed inside
+    the keeper-bound dispatcher only. *)
+
+val remote_schemas : Masc_domain.tool_schema list
+(** Operator-remote tool schemas — the subset advertised to remote
+    MCP clients.  Pinned at the .mli seam so dashboard / Agent Core
+    consumers see a stable list ordering. *)
+
+val schemas : Masc_domain.tool_schema list
+(** Full operator tool schemas — consumed by keeper-local dispatchers
+    and schema coverage checks. One per [Tool_name.Operator_name] constructor. *)
+
+val remote_tool_names : string list
+(** Names of {!remote_schemas}, which the Operator_remote profile gates on.
+    Derived from the same function that builds those schemas, so the two cannot
+    disagree; which tools are remote is decided in [Operator_tool.remote_schema]
+    and is exhaustive over [Tool_name.Operator_name]. *)
+
+val force_link : unit

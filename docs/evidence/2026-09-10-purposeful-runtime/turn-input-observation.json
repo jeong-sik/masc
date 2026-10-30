@@ -1,0 +1,173 @@
+{
+  "observed_at": "2026-09-09T18:10:58.988353+00:00",
+  "block_sha256": "e360794c2f4c97427168af510f005a30baaf5d755eb1689aeaeebc863bc32d31",
+  "observations": [
+    {
+      "keeper": "code-reviewer",
+      "latest_ts_iso": "2026-09-09T18:03:58Z",
+      "live_turn_in_progress": true,
+      "live_turn_started_at_unix": 1788977179.708303,
+      "records": [
+        {
+          "identity": {
+            "trace_id": "trace-1788312311286-00006",
+            "turn_ref": "trace-1788312311286-00006#2880",
+            "ts": 1788976572.147451
+          },
+          "record_fields": [
+            "execution_ids",
+            "keeper",
+            "agent_name",
+            "turn_kind",
+            "trace_id",
+            "absolute_turn",
+            "turn_ref",
+            "blocks",
+            "input_components",
+            "runtime_profile",
+            "request_runtime_profile",
+            "request_body_bytes",
+            "transmitted_atoms",
+            "total_atoms",
+            "model_input_measurement",
+            "raw_trace_run_ref",
+            "selected_model",
+            "finish_reason",
+            "tool_surface_ref",
+            "context_window",
+            "request_latency_ms",
+            "ttfrc_ms",
+            "temperature",
+            "enable_thinking",
+            "input_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "output_tokens",
+            "usage_scope",
+            "ts"
+          ],
+          "exact_block_matches": []
+        },
+        {
+          "identity": {
+            "trace_id": "trace-1788312311286-00006",
+            "turn_ref": "trace-1788312311286-00006#2881",
+            "ts": 1788977038.933807
+          },
+          "record_fields": [
+            "execution_ids",
+            "keeper",
+            "agent_name",
+            "turn_kind",
+            "trace_id",
+            "absolute_turn",
+            "turn_ref",
+            "blocks",
+            "input_components",
+            "runtime_profile",
+            "request_runtime_profile",
+            "request_body_bytes",
+            "transmitted_atoms",
+            "total_atoms",
+            "model_input_measurement",
+            "raw_trace_run_ref",
+            "selected_model",
+            "finish_reason",
+            "tool_surface_ref",
+            "context_window",
+            "request_latency_ms",
+            "ttfrc_ms",
+            "temperature",
+            "enable_thinking",
+            "input_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "output_tokens",
+            "usage_scope",
+            "ts"
+          ],
+          "exact_block_matches": []
+        }
+      ]
+    },
+    {
+      "keeper": "msx-retro-mania",
+      "latest_ts_iso": "2026-09-09T18:08:23Z",
+      "live_turn_in_progress": true,
+      "live_turn_started_at_unix": 1788977304.526781,
+      "records": [
+        {
+          "identity": {
+            "trace_id": "trace-1788882319100-00000",
+            "turn_ref": "trace-1788882319100-00000#442",
+            "ts": 1788976389.767926
+          },
+          "record_fields": [
+            "execution_ids",
+            "keeper",
+            "agent_name",
+            "turn_kind",
+            "trace_id",
+            "absolute_turn",
+            "turn_ref",
+            "blocks",
+            "input_components",
+            "runtime_profile",
+            "request_runtime_profile",
+            "request_body_bytes",
+            "transmitted_atoms",
+            "total_atoms",
+            "model_input_measurement",
+            "raw_trace_run_ref",
+            "tool_surface_ref",
+            "temperature",
+            "enable_thinking",
+            "usage_scope",
+            "ts"
+          ],
+          "exact_block_matches": []
+        },
+        {
+          "identity": {
+            "trace_id": "trace-1788882319100-00000",
+            "turn_ref": "trace-1788882319100-00000#443",
+            "ts": 1788977303.02993
+          },
+          "record_fields": [
+            "execution_ids",
+            "keeper",
+            "agent_name",
+            "turn_kind",
+            "trace_id",
+            "absolute_turn",
+            "turn_ref",
+            "blocks",
+            "input_components",
+            "runtime_profile",
+            "request_runtime_profile",
+            "request_body_bytes",
+            "transmitted_atoms",
+            "total_atoms",
+            "model_input_measurement",
+            "raw_trace_run_ref",
+            "selected_model",
+            "finish_reason",
+            "tool_surface_ref",
+            "context_window",
+            "request_latency_ms",
+            "ttfrc_ms",
+            "temperature",
+            "enable_thinking",
+            "input_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "output_tokens",
+            "usage_scope",
+            "ts"
+          ],
+          "exact_block_matches": []
+        }
+      ]
+    }
+  ]
+}

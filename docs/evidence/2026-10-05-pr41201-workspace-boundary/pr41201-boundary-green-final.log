@@ -1,0 +1,7 @@
+Compact Machine help hidden key: b'?'
+Compact Machine help hidden key: b'\x1b'
+Machine compact quit PTY: PASS (synthetic HTTP)
+Machine unavailable file / independent server activity / no save: PASS
+Machine workspace boundary after document: PASS
+Machine workspace boundary after inventory: PASS
+tui machine activity: PASS

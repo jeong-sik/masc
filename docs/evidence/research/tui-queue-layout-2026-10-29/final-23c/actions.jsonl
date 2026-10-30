@@ -1,0 +1,59 @@
+{"at": "2026-10-28T18:05:21.732478+00:00", "action": "Ctrl-T opens count1 Queue at80x24", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:05:22.153362+00:00", "action": "Down Down selects first event", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:05:22.570514+00:00", "action": "f chooses full layout while retaining selected event", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:05:22.992038+00:00", "action": "f allows automatic context again", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:06:19.933326+00:00", "action": "Hold inventory response with18events, r from painted count1 Bottom", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:06:20.396155+00:00", "action": "Release held inventory; wait for new Full frame before input", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:06:21.014812+00:00", "action": "f prefers full at80x24; geometry stays Full and title names preference", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:06:21.354097+00:00", "action": "f returns automatic, then resize120x36", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:06:22.001631+00:00", "action": "f expands same selected item at120x36", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:06:22.333277+00:00", "action": "f allows context, resize160x40", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:06:22.990928+00:00", "action": "f expands same selected item at160x40", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:07:22.575140+00:00", "action": "? opens Help above selected Queue", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:07:23.003327+00:00", "action": "Esc returns from Help", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:07:23.436848+00:00", "action": "Enter opens selected event detail", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:07:23.860206+00:00", "action": "Esc returns to Queue", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:07:24.282931+00:00", "action": "Resize80x24 then f allows automatic placement", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:07:25.028493+00:00", "action": "PageDown browses the overflowing Queue", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:07:25.453007+00:00", "action": "Home returns to start", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:07:25.898990+00:00", "action": "Down Down selects first event again", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:07:26.320118+00:00", "action": "n requests immediate urgency on displayed first event", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:07:26.745629+00:00", "action": "l requests low urgency on the same displayed first event", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:09:47.601601+00:00", "action": "Ctrl-T opens empty Queue", "session": "final-empty", "source": "23c5ea8"}
+{"at": "2026-10-28T18:09:48.023955+00:00", "action": "n with no selected item", "session": "final-empty", "source": "23c5ea8"}
+{"at": "2026-10-28T18:09:48.438087+00:00", "action": "f chooses Full to match earlier baseline geometry", "session": "final-empty", "source": "23c5ea8"}
+{"at": "2026-10-28T18:09:48.864007+00:00", "action": "bracketed paste with no accepted pointer press in this sequence", "session": "pending-0", "source": "38b6edd"}
+{"at": "2026-10-28T18:09:49.284724+00:00", "action": "orphan SGR drag at5,5; gesture is Idle", "session": "pending-0", "source": "38b6edd"}
+{"at": "2026-10-28T18:09:49.696303+00:00", "action": "orphan SGR release at5,5", "session": "pending-0", "source": "38b6edd"}
+{"at": "2026-10-28T18:09:50.111634+00:00", "action": "bracketed paste with no accepted pointer press in this sequence", "session": "final-empty", "source": "23c5ea8"}
+{"at": "2026-10-28T18:09:50.563334+00:00", "action": "orphan SGR drag at5,5; gesture is Idle", "session": "final-empty", "source": "23c5ea8"}
+{"at": "2026-10-28T18:09:50.982292+00:00", "action": "orphan SGR release at5,5", "session": "final-empty", "source": "23c5ea8"}
+{"at": "2026-10-28T18:13:10.071167+00:00", "action": "Home clears selection; resize120x36 for pane-copy observation", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:13:10.819123+00:00", "action": "SGR press5,5; drag100,9 across side boundary; release100,9", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:13:11.611145+00:00", "action": "SGR press65,5; drag110,9 in Queue; release110,9", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:13:12.402350+00:00", "action": "SGR press5,5; drag35,9; f changes placement while held", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:13:13.349459+00:00", "action": "Bracketed paste while the cancelled pointer button remains logically held", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:13:13.619906+00:00", "action": "Late SGR drag after cancelled gesture", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:13:13.887505+00:00", "action": "Late SGR release after cancelled gesture", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:23.127191+00:00", "action": "Esc closes Queue to type a synthetic draft", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:23.493568+00:00", "action": "Type ORIGINAL-DRAFT literally; do not submit", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:23.856100+00:00", "action": "Ctrl-T opens Queue over draft", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:24.222077+00:00", "action": "Bracketed paste into Queue should be handled by Queue owner", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:24.609192+00:00", "action": "Esc returns to chat", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:24.975099+00:00", "action": "Ctrl-X opens Context over draft", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:25.339892+00:00", "action": "Bracketed paste into Context", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:25.710024+00:00", "action": "? opens Help above Context", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:26.072646+00:00", "action": "Bracketed paste into Help", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:26.445293+00:00", "action": "Esc returns Help to Context", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:26.809767+00:00", "action": "Esc returns Context to chat", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:27.178295+00:00", "action": "Ctrl-T opens a new Queue for Unicode command observation", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:27.541025+00:00", "action": "Single two-set jamo \u3153 delivered as a command key", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:27.917803+00:00", "action": "Single two-set jamo \u3153 again", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:28.287391+00:00", "action": "Composed syllable \uc11c delivered as one key, not a series of actions", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:28.652099+00:00", "action": "n on displayed first event after Unicode keys", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:29.017325+00:00", "action": "l on same displayed first event", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:18:29.383659+00:00", "action": "Esc closes Queue after Unicode command sequence", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:19:45.209500+00:00", "action": "Ctrl-T opens Queue; resize80x16; Down Down selects first event", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:19:46.473570+00:00", "action": "Resize80x24 before isolated server-loss observation", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:19:46.948181+00:00", "action": "n obtains synthetic HTTP acknowledgement while follow-up inventory is held", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}
+{"at": "2026-10-28T18:19:47.483069+00:00", "action": "Intentionally stop only the owned synthetic fixture after acknowledgement; no restart", "session": "final-23c", "source": "23c5ea834f89a0988c02ffe3e492980152869179"}

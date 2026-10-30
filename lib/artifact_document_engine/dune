@@ -1,0 +1,7 @@
+(include_subdirs no)
+(library
+ (name masc_artifact_document_engine)
+ (public_name masc.artifact_document_engine)
+ (wrapped false)
+ (modules artifact_document_engine)
+ (libraries masc_process yojson base64 eio eio.unix unix))

@@ -1,0 +1,77 @@
+Testing `Verification operator evidence'.
+This run has ID `HW3TH4JF'.
+
+> [FAIL]        download          0   actual HTTP permissions, identity and l...
+  [OK]          download          1   viewer and write failures retain their ...
+  [OK]          download          2   authority withdrawal and cancellation p...
+  [OK]          download          3   local recovery registry ignores shared ...
+  [OK]          download          4   concurrent exports serialize owner reco...
+  [OK]          download          5   lock-admitted cancellation is not a suc...
+  [OK]          download          6   lane release failure preserves confirme...
+  [OK]          download          7   lock release failure preserves confirme...
+  [OK]          download          8   lock refusal ends active progress.
+  [OK]          download          9   ordinary exception ends active progress.
+  [OK]          download         10   saving creates a private local copy wit...
+  [OK]          download         11   long original filenames remain usable.
+  [OK]          download         12   original text and non-image binary byte...
+  [OK]          download         13   partial and missing snapshots cannot be...
+  [OK]          download         14   identity and content integrity are requ...
+  [OK]          preview           0   an image under the ceiling is inline.
+  [OK]          preview           1   the ceiling is inclusive.
+  [OK]          preview           2   a missing or unfiled body is named.
+  [OK]          preview           3   a body path outside the evidence direct...
+  [OK]          preview           4   formats that never show are not read.
+  [OK]          preview           5   the budget is spent in item order on ex...
+  [OK]          preview           6   a withheld image does not spend the bud...
+  [OK]          wire              0   other kinds and persisted json are unto...
+  [OK]          wire              1   an unavailable access is the persisted ...
+  [OK]          wire              2   the TUI decodes what the server writes.
+  [OK]          wire              3   changed bytes are withheld through the ...
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        download          0   actual HTTP permissions, identity an...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+[2026-10-29 00:33:42] [INFO] [Workspace] MASC base: /tmp/operator_evidence_testfcf280 (no git root found)
+[2026-10-29 00:33:42] [INFO] [Workspace] Synchronized MASC_BASE_PATH=/tmp/operator_evidence_testfcf280 for test executable test_verification_operator_evidence.exe
+[2026-10-29 00:33:42] [WARN] [Auth] HTTP auth rejected: h1 /api/v1/verification/evidence -> 401
+ASSERT HTTP boundary refusal
+ASSERT no binary payload on refusal
+[2026-10-29 00:33:42] [WARN] [Auth] HTTP auth rejected: h1 /api/v1/verification/evidence -> 403
+ASSERT HTTP boundary refusal
+ASSERT no binary payload on refusal
+ASSERT HTTP boundary refusal
+ASSERT no binary payload on refusal
+ASSERT HTTP boundary refusal
+File "test/test_verification_operator_evidence.ml", line 756, character 8:
+FAIL HTTP boundary refusal
+
+   Expected: `400'
+   Received: `409'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Dune__exe__Test_verification_operator_evidence.test_actual_download_route_and_lo in file "test/test_verification_operator_evidence.ml", line 756, characters 8-66
+Called from Dune__exe__Test_verification_operator_evidence.test_actual_download_route_and_lo in file "test/test_verification_operator_evidence.ml", line 762, characters 6-65
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 328, characters 8-12
+Re-raised at Eio_posix__Sched.with_op in file "lib_eio_posix/sched.ml", line 334, characters 4-12
+Called from Eio_posix__Sched.run.(fun) in file "lib_eio_posix/sched.ml", line 396, characters 29-47
+Called from Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 108, characters 8-13
+Re-raised at Eio_unix__Thread_pool.run in file "lib_eio/unix/thread_pool.ml", line 113, characters 4-39
+Re-raised at Eio_posix__Sched.run.fork.(fun) in file "lib_eio_posix/sched.ml", line 352, characters 12-76
+Called from Stdlib__Fun.protect in file "fun.ml", line 34, characters 8-15
+Re-raised at Stdlib__Fun.protect in file "fun.ml", line 39, characters 6-52
+Called from Eio_posix__Sched.run in file "lib_eio_posix/sched.ml", lines 391-398, characters 4-9
+Called from Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 268, characters 8-12
+Re-raised at Eio_posix__Sched.with_sched in file "lib_eio_posix/sched.ml", line 273, characters 4-39
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/Verification operator evidence/download.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `~/me/workspace/yousleepwhen/masc/.worktrees/feat/route-auth-a4b-20261028/_build/_tests/Verification operator evidence'.
+1 failure! in 0.336s. 26 tests run.
+exit=1

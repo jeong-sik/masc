@@ -1,0 +1,384 @@
+type action = Choose_workspace | Initialize_workspace | Configure_models
+  | Configure_sandbox | Start_imp | Inspect_configuration
+
+type condition = Satisfied | Needs_setup | Needs_verification | Invalid
+
+type check_id =
+  | Workspace
+  | Runtime_configuration
+  | Model_connection
+  | Keeper_declaration
+  | Sandbox
+  | Keeper_persistence
+  | Browser_lane
+  | Browser_bidi_host
+
+type role = Required_to_open | Advisory
+
+type opening = Open_existing_history | Needs_journey
+
+type check =
+  { id : check_id
+  ; condition : condition
+  ; message : string
+  ; actions : action list
+  }
+
+type t =
+  { base_path : string option
+  ; checks : check list
+  ; selected_runtime : string option
+  ; selected_model : string option
+  }
+
+type sandbox_observation =
+  | Probe_with of Sandbox_readiness.runner
+  | Not_probed
+
+let action_name = function
+  | Choose_workspace -> "choose_workspace"
+  | Initialize_workspace -> "initialize_workspace"
+  | Configure_models -> "configure_models"
+  | Configure_sandbox -> "configure_sandbox"
+  | Start_imp -> "start_imp"
+  | Inspect_configuration -> "inspect_configuration"
+
+let condition_name = function
+  | Satisfied -> "satisfied"
+  | Needs_setup -> "needs_setup"
+  | Needs_verification -> "needs_verification"
+  | Invalid -> "invalid"
+
+let check_id_name = function
+  | Workspace -> "workspace"
+  | Runtime_configuration -> "runtime_configuration"
+  | Model_connection -> "model_connection"
+  | Keeper_declaration -> "keeper_declaration"
+  | Sandbox -> "sandbox"
+  | Keeper_persistence -> "keeper_persistence"
+  | Browser_lane -> "browser_lane"
+  | Browser_bidi_host -> "browser_bidi_host"
+
+(* Existing history opens on what every Keeper in the workspace shares: the
+   workspace, a runtime.toml the server can load, and Keeper metadata its boot
+   admits. The server boots on a runtime.toml it cannot load or cannot find,
+   but in setup-required mode with no runtime (the embedded file is written
+   only when [.masc/config] is first created), so no Keeper can take a turn
+   and the journey's model step is the repair. imp's model binding, declaration and
+   sandbox concern the Keeper the journey creates: the server skips an imp it
+   cannot load and boots every other Keeper, so a workspace whose history
+   belongs to other Keepers opens and reports them beside it. A browser lane
+   is a separate surface; its drift is reported the same way. *)
+let role = function
+  | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
+  | Model_connection | Keeper_declaration | Sandbox | Browser_lane | Browser_bidi_host -> Advisory
+
+let role_name = function
+  | Required_to_open -> "required_to_open"
+  | Advisory -> "advisory"
+
+let opening_name = function
+  | Open_existing_history -> "open_existing_history"
+  | Needs_journey -> "needs_journey"
+
+let check id condition message actions = { id; condition; message; actions }
+
+let directory_exists path =
+  try Sys.is_directory path with Sys_error _ -> false
+
+let model_checks config_path =
+  if not (Sys.file_exists config_path) then
+    None, None,
+    [check Runtime_configuration Needs_setup "Choose a model connection."
+       [Configure_models]]
+  else match Runtime.load_list ~config_path with
+  | Error failure ->
+    (* The reason reaches the operator now; the condition does not move yet.
+       Saving a selection does repair some of these — a stale imp assignment is
+       rewritten by runtime-default-set over the staged copy, measured — but the
+       branch alone does not say which: a reference failure covers both an
+       assignment the rewrite fixes and a lane reference it does not. Splitting
+       Invalid from Needs_setup needs that measured per situation, not inferred
+       from the constructor. *)
+    None, None,
+    [check Runtime_configuration Invalid
+       (Runtime_config_error.to_operator_text ~config_path failure)
+       [Inspect_configuration; Configure_models]]
+  | Ok (runtimes, default, assignments, _, lanes) ->
+    let loaded = check Runtime_configuration Satisfied "runtime.toml loads." [Configure_models] in
+    let selected = Runtime_verification.initial_runtime_id
+      ~default_runtime_id:default.id ~assignments ~lanes ~keeper_name:"imp" in
+    let runtime = Option.bind selected (fun id ->
+      List.find_opt (fun (runtime : Runtime_instance.t) -> String.equal runtime.id id) runtimes) in
+    match runtime with
+    | None ->
+      (* A loaded list has validated every assignment, lane candidate and the
+         default against its runtimes, so imp always resolves here. Reaching
+         this means the list and its validation disagree, which is a runtime.toml
+         fault the server shares, not a fact about imp. *)
+      selected, None,
+      [check Runtime_configuration Invalid
+         "runtime.toml loaded, but imp's runtime does not resolve against it."
+         [Inspect_configuration; Configure_models]]
+    | Some runtime when not runtime.model.tools_support -> selected, Some runtime.model.api_name,
+      [loaded; check Model_connection Needs_setup "The selected model has tool calling disabled."
+         [Configure_models]]
+    | Some runtime -> selected, Some runtime.model.api_name,
+      [loaded; check Model_connection Needs_verification
+         "A model is configured. Check its current sign-in, response and tool access."
+         [Configure_models; Start_imp]]
+
+(* The workspace's Keeper history is readable exactly when the server's boot
+   reconcile admits it: every metadata file passes the same
+   [validate_current_meta_file_result] (Keeper_store_boot_reconcile), and one
+   that does not refuses the whole boot. Only a content rejection can be
+   accepted for quarantine; I/O failures still need repair. Judging it any
+   other way opens a TUI on a server that will not
+   start. imp is only the Keeper the setup journey creates; a workspace whose
+   Keepers were declared by hand never has it, and judging history by imp alone
+   sent that workspace back into setup on every bare `masc`. *)
+let persistence_check base_path =
+  let root = Common.masc_dir_from_base_path ~base_path in
+  let dir = Filename.concat root Common.keepers_runtime_dirname in
+  let listed = if directory_exists dir then Safe_ops.list_dir_safe dir else Ok [] in
+  match listed with
+  | Error detail -> check Keeper_persistence Invalid
+      (detail ^ ". Inspect configuration before proceeding.") [Inspect_configuration]
+  | Ok entries ->
+    let names =
+      entries
+      |> List.filter_map Keeper_runtime_root_entry.metadata_keeper_name
+      |> List.filter Keeper_config.validate_name
+      |> List.sort String.compare in
+    let refused = List.filter (fun name ->
+        Result.is_error (Keeper_meta_store.validate_current_meta_file_result
+          (Filename.concat dir (Keeper_runtime_root_entry.keeper_basename ~keeper_name:name
+             Keeper_runtime_root_entry.Metadata)))) names in
+    match names, refused with
+    | [], _ -> check Keeper_persistence Needs_setup
+        "No Keeper has persisted history yet. Prepare imp before opening its conversation." [Start_imp]
+    | _ :: _, _ :: _ -> check Keeper_persistence Invalid
+        ("Keeper metadata this build cannot read: " ^ String.concat ", " refused
+         ^ ". The server refuses to boot until the files are repaired; --accept-store-quarantine only permits readable metadata rejected by this build.")
+        [Inspect_configuration]
+    | _ :: _, [] -> check Keeper_persistence Satisfied
+        ("Persisted Keeper history: " ^ String.concat ", " names
+         ^ ". This does not verify that any of them is running or that its model and sandbox are ready.")
+        []
+
+(* What the doctor says of imp's declared sandbox backend, from the one answer
+   [Sandbox_readiness.probe] gave for it. The reason text is the probe's own,
+   so a Mac whose Apple Container builder cannot start reads as that, and one
+   whose builder starts but has no default kernel reads as that, instead of
+   both reading as a service that merely answered.
+
+   Service_ready is Needs_verification: the service answered, no guest was
+   booted. Probe_failed is Needs_setup, not Needs_verification: the probe did
+   ask and got no usable answer (a stopped service, a refused command, a reply
+   that is not the expected JSON), and a backend that cannot be used now is not
+   the same state as one nobody has asked. Reading it as Needs_verification
+   would make a stopped daemon indistinguishable, by condition, from a healthy
+   one. Needs_configuration comes only from a backend the probe cannot observe
+   from here (remote SSH). It is reached after [Sandbox_readiness.boot_declaration]
+   accepted the selection, so the endpoint the probe's reason asks the operator
+   to choose is already declared. The probe's reason is not shown for it; the
+   doctor says what is left, which is that the server verifies the endpoint. *)
+let remote_endpoint_message =
+  "The declared endpoint is verified by the server; this check boots no guest and reaches no remote host."
+
+let not_probed_message =
+  "This view does not probe the service. `masc doctor` reports its state."
+
+let sandbox_check_of_entry (entry : Sandbox_readiness.entry) =
+  let backend_message sentence =
+    Sandbox_readiness.backend_id entry.Sandbox_readiness.backend ^ ": " ^ sentence in
+  let message = backend_message (Sandbox_readiness.state_message entry.Sandbox_readiness.state) in
+  match entry.Sandbox_readiness.state with
+  | Sandbox_readiness.Service_ready ->
+    check Sandbox Needs_verification message [Configure_sandbox; Start_imp]
+  | Sandbox_readiness.Needs_configuration _ ->
+    check Sandbox Needs_verification (backend_message remote_endpoint_message)
+      [Configure_sandbox; Start_imp]
+  | Sandbox_readiness.Missing_prerequisite _ ->
+    check Sandbox Needs_setup message [Configure_sandbox]
+  | Sandbox_readiness.Unsupported_host _ ->
+    check Sandbox Needs_setup message [Configure_sandbox]
+  | Sandbox_readiness.Unsupported_capability _ ->
+    check Sandbox Needs_setup message [Configure_sandbox]
+  | Sandbox_readiness.Probe_failed _ ->
+    check Sandbox Needs_setup message [Configure_sandbox]
+
+(* A declaration that names no usable backend cannot be probed. The detail is
+   the declaration's own reason, so the operator sees which line to repair.
+   The backend is the one the server boots with: a microvm profile that names
+   none takes the host's runtime there, so it is probed here as well instead
+   of being reported as a choice the operator still owes. *)
+let sandbox_check ~sandbox ~base_path =
+  match Sandbox_readiness.boot_declaration ~base_path with
+  | Error { Sandbox_readiness.kind = Declaration_unreadable; detail } ->
+    check Sandbox Needs_setup detail [Inspect_configuration; Configure_sandbox]
+  | Error { Sandbox_readiness.kind = Declaration_invalid; detail } ->
+    check Sandbox Needs_setup detail [Configure_sandbox]
+  | Ok None ->
+    check Sandbox Needs_setup "Choose imp's isolated workspace." [Configure_sandbox]
+  | Ok (Some selection) ->
+    (match sandbox with
+     | Probe_with run ->
+       let host = Sandbox_readiness.detect_host ~run in
+       sandbox_check_of_entry
+         (Sandbox_readiness.probe ~host ~run
+            ~require_rootless:(Env_config_sandbox.Hardening.require_rootless ())
+            ~require_userns:(Env_config_sandbox.Hardening.require_userns ())
+            selection.Sandbox_readiness.backend)
+     | Not_probed ->
+       check Sandbox Needs_verification
+         (Sandbox_readiness.backend_id selection.Sandbox_readiness.backend ^ ": " ^ not_probed_message)
+         [Configure_sandbox; Start_imp])
+
+let keeper_checks ~sandbox base_path =
+  let path = Keeper_sandbox_config.keeper_toml_path ~base_path ~agent_name:"imp" in
+  if not (Sys.file_exists path) then
+    [check Keeper_declaration Needs_setup "Your first Keeper, imp, has not been created."
+       [Initialize_workspace];
+     check Sandbox Needs_setup "Choose imp's isolated workspace." [Configure_sandbox]]
+  else match Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+               ~base_path "imp" with
+  | Error _ ->
+    [check Keeper_declaration Invalid "imp's declaration needs configuration repair."
+       [Inspect_configuration];
+     check Sandbox Needs_setup "Resolve imp's declaration before preparing its sandbox."
+       [Inspect_configuration; Configure_sandbox]]
+  | Ok _ ->
+    [check Keeper_declaration Satisfied "imp is declared. Its running state is observed separately."
+       [Start_imp];
+     sandbox_check ~sandbox ~base_path]
+
+(* The BiDi host is read from its own record on disk, so this answers with
+   no server running. A workspace with no browser lane installed and no host
+   record has nothing to say about one. A running host is satisfied only
+   where the observed server lists its client: that is where hover and drag
+   are served. *)
+let browser_bidi_host_check (host:Browser_bidi_host_status.observation) =
+  let report condition =
+    [check Browser_bidi_host condition (Browser_bidi_host_status.message host)
+       [Inspect_configuration]]
+  in
+  match host.keeper with
+  | Browser_bidi_host_status.Addon_managed _ -> report Needs_verification
+  | Addon_off | Not_configured | Not_known ->
+  match Browser_bidi_host_status.verdict host with
+  | Browser_bidi_host_status.Host_absent -> []
+  | Browser_bidi_host_status.Host_serving -> report Satisfied
+  | Browser_bidi_host_status.Host_unverified -> report Needs_verification
+  | Browser_bidi_host_status.Host_not_running -> report Needs_setup
+  | Browser_bidi_host_status.Host_unreadable -> report Invalid
+
+(* The browser tables of the workspace's runtime.toml, for a reader with no
+   server: only when the whole file loads, as a server loads it, since a
+   server that refuses the file has no browser configuration either. [None]
+   otherwise: who starts the Keeper Firefox is then not known. *)
+let browser_configuration config_path =
+  if not (Sys.file_exists config_path) then None
+  else
+    match Runtime.load_list ~config_path with
+    | Error _ -> None
+    | Ok _ -> Result.to_option (Browser_configuration.of_file config_path)
+
+(* One observation answers both checks, so they say of one launcher and one
+   list of connections. Both are the operator's ([masc doctor] and the
+   CanAdmin setup status), so the Add-on is read as the native host poll
+   reads it. *)
+let browser_lane_check ~configuration base_path =
+  let host =
+    Browser_bidi_host_status.observe ~access:Lane_addon_sources.Operator_configuration
+      ~base_path ~configuration
+  in
+  let observation = host.lane in
+  let message = Browser_lane_launcher.message observation in
+  let report condition = [check Browser_lane condition message [Inspect_configuration]] in
+  (* No browser Add-on, or one switched off, is a step the operator has not
+     taken yet. One declared on whose attach failed is broken, and so, once
+     the Add-on can take a host, is a lane the launcher misdescribes. One
+     declared on that is being started, or that this check knows nothing
+     more of, may still attach: it and an Add-on this server cannot read
+     leave the lane unconfirmed, as no server does. *)
+  (match Browser_lane_launcher.verdict observation with
+   | Browser_lane_launcher.Absent -> []
+   | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned -> report Satisfied
+   | Browser_lane_launcher.Addon_missing | Browser_lane_launcher.Addon_off -> report Needs_setup
+   | Browser_lane_launcher.Addon_not_running
+       (Browser_lane_launcher.Attaching | Browser_lane_launcher.Not_known)
+   | Browser_lane_launcher.Addon_unreadable | Browser_lane_launcher.Unverified ->
+     report Needs_verification
+   | Browser_lane_launcher.Addon_not_running Browser_lane_launcher.Attach_failed
+   | Browser_lane_launcher.Misconfigured -> report Invalid)
+  @ browser_bidi_host_check host
+
+let inspected ~sandbox ~browser ~base_path =
+  match base_path with
+  | None ->
+    { base_path = None; selected_runtime = None; selected_model = None;
+      checks = [check Workspace Needs_setup
+        "Welcome. Choose a workspace for you and imp." [Choose_workspace]] }
+  | Some raw ->
+    let base_path = Env_config.normalize_masc_base_path_input raw in
+    let root = Filename.concat base_path Common.masc_dirname in
+    if not (directory_exists root) then
+      { base_path = Some base_path; selected_runtime = None; selected_model = None;
+        checks = [check Workspace Needs_setup
+          "This location does not contain an initialized MASC workspace."
+          [Initialize_workspace; Choose_workspace]] }
+    else
+      let config_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
+      let selected_runtime, selected_model, models = model_checks config_path in
+      { base_path = Some base_path; selected_runtime; selected_model;
+        checks = check Workspace Satisfied "Workspace found." [Choose_workspace]
+          :: (models @ keeper_checks ~sandbox base_path @ [persistence_check base_path]
+              @ browser_lane_check ~configuration:(browser config_path) base_path) }
+
+let inspect ~sandbox ~base_path =
+  inspected ~sandbox ~browser:browser_configuration ~base_path
+
+let inspect_loaded ~configuration ~base_path =
+  inspected ~sandbox:Not_probed ~browser:(fun _ -> configuration) ~base_path
+
+let optional_string = function None -> `Null | Some value -> `String value
+
+(* Opening existing history is decided here, once, from typed checks. The
+   setup journey reads this answer instead of re-deriving it from the wire
+   condition strings, which cannot tell a surface imp needs from one it does not. *)
+let opening t =
+  let satisfied id =
+    List.exists (fun c -> c.id = id && c.condition = Satisfied) t.checks
+  in
+  let holds_closed c =
+    match role c.id, c.condition with
+    | Required_to_open, Invalid -> true
+    | Required_to_open, (Satisfied | Needs_setup | Needs_verification)
+    | Advisory, (Satisfied | Needs_setup | Needs_verification | Invalid) -> false
+  in
+  match t.base_path with
+  | None -> Needs_journey
+  | Some _ ->
+    if satisfied Workspace && satisfied Runtime_configuration && satisfied Keeper_persistence
+       && not (List.exists holds_closed t.checks)
+    then Open_existing_history
+    else Needs_journey
+
+let to_json t =
+  `Assoc ["schema", `String "masc.onboarding_status.v1";
+    "scope", `String "configuration_observation";
+    "base_path", optional_string t.base_path;
+    "selected_runtime", optional_string t.selected_runtime;
+    "selected_model", optional_string t.selected_model;
+    "opening", `String (opening_name (opening t));
+    "checks", `List (List.map (fun c -> `Assoc [
+      "id", `String (check_id_name c.id); "role", `String (role_name (role c.id));
+      "condition", `String (condition_name c.condition);
+      "message", `String c.message;
+      "actions", `List (List.map (fun a -> `String (action_name a)) c.actions)]) t.checks)]
+
+let to_text t =
+  String.concat "\n"
+    ("MASC — you and imp" :: List.map (fun c ->
+       Printf.sprintf "[%s] %s: %s" (condition_name c.condition) (check_id_name c.id) c.message) t.checks)

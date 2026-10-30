@@ -1,0 +1,16 @@
+Run: https://github.com/jeong-sik/masc/actions/runs/40216063083
+Complete raw log SHA256: e086e5e0f5df7f3ab0a3497f8f0fe7c748388239ffb3e5e29b1504b6a6303a8b
+Complete raw log bytes: 127670
+Selected checkout, checkpoint assertions, failures and full-suite summary.
+
+test suite	Checkout	2026-10-25T17:21:47.8584493Z HEAD is now at 240358b7 test(checkpoint): align scope ordinal and disambiguate context access
+test suite	Test	2026-10-25T17:23:31.1708940Z ASSERT producer context mutation cannot alter a frozen checkpoint
+test suite	Test	2026-10-25T17:23:31.1710415Z ASSERT malformed checkpoint fact is rejected
+test suite	Test	2026-10-25T17:23:31.1714361Z ASSERT checkpoint fact strictly roundtrips
+test suite	Test	2026-10-25T17:23:31.1747330Z ASSERT checkpoint cannot cross Agent identity
+test suite	Test	2026-10-25T17:23:31.1750111Z ASSERT rejected checkpoint does not consume source sequence
+test suite	Test	2026-10-25T17:23:31.1885254Z ASSERT later child checkpoint does not replace root checkpoint
+test suite	Test	2026-10-25T17:23:31.1939758Z ASSERT closed execution rejects checkpoint mutation
+test suite	Test	2026-10-25T17:23:31.1941886Z ASSERT closed checkpoint rejection appends no fact
+test suite	Test	2026-10-25T17:23:31.1962585Z ASSERT reopened root checkpoint keeps exact frozen value
+test suite	Test	2026-10-25T17:23:31.4145915Z Test Successful in 0.317s. 9 tests run.

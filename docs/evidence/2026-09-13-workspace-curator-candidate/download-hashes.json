@@ -1,0 +1,38 @@
+{
+  "masc-deployment-preflight-helper-macos-arm64": {
+    "bytes": 35200224,
+    "sha256": "60c7db2deb2a650e0e2a00be941b47c9a5251b29913799db8a34791a6dd43853"
+  },
+  "masc-macos-arm64": {
+    "bytes": 76231296,
+    "sha256": "93fbec0f483c6763238ee06c4cbb3f32c34070da5d69ea9341ddf31defae10bc"
+  },
+  "masc-check-runtime-deployment-preflight-macos-arm64": {
+    "bytes": 37368,
+    "sha256": "2a0b8b469ec6a7f5044f35f8a539011a3515ffc574a5df9f0c01a48e6f4c427f"
+  },
+  "release-evidence-macos-arm64.md": {
+    "bytes": 5739,
+    "sha256": "7d12e3115ce3a6fc993c7b44edbb63374abbc0e40c820415a9dcf6a1e917ec4f"
+  },
+  "masc-release-dashboard-bundle-macos-arm64.py": {
+    "bytes": 20845,
+    "sha256": "bf06300bfeeea61a58a9f93a9e2973ba1d599a0503ca4da4b957685cd17459ee"
+  },
+  "masc-runtime-macos-arm64.tar.gz": {
+    "bytes": 57196198,
+    "sha256": "92a62cd55409680d9c94dca001e985fb70ad8876f964292893ab04dcbddb20a2"
+  },
+  "masc-tui-macos-arm64": {
+    "bytes": 68724000,
+    "sha256": "ec62744aa18361fb0ddc34bbbd74a97cbbc6e250ff2f5ca6648a2c222ad203ec"
+  },
+  "masc-browser-host-macos-arm64": {
+    "bytes": 7251120,
+    "sha256": "0a07d5a5d3a86670655585a1683072094be44ca853ffbeedc6a6ec6a775cd928"
+  },
+  "masc-dashboard-macos-arm64.tar.gz": {
+    "bytes": 13771221,
+    "sha256": "ffa7219844564e0387e780a2b19e46582e25e832bf6afa80af070064230366ba"
+  }
+}

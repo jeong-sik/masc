@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-24T18:31:26.391447+00:00",
+  "before_sha256": "b0a49ff49eee6dd27e3239fdd5db08c59d86649d3d0601272f84c2a84a6a22c3",
+  "after_sha256": "4fdd1ec82f3953be507615397ecbffd170dea0ff5df5476cd28222f22302905e",
+  "goal_id": "goal-outcome-driven-work-20261024",
+  "criterion_revision": "306708facbfb9379a9e51b8f7c815678",
+  "measured_pass": 11,
+  "required": 11,
+  "scope": "Fixed11 scoped acceptance cases; older scopes/history retained. Not all tested at one head; no Goal Completed.",
+  "registered_main_measurement": "pending API availability; no write attempted",
+  "independent_g3_diagnosis_sha256": "bcac55d465afdfe99e3c6e87ee9201890792ca01d542975f922e34ceb217eb0b"
+}

@@ -1,0 +1,176 @@
+{
+  "untouched_archive_sha256": "69c6cd216afd1c62c513a2636d5b7895602b402a3aa4387321538bb6f82eac1b",
+  "baseline_passed": {
+    "recorded_evidence_files": 209,
+    "api_response_hashes": 57,
+    "browser_response_hashes": 13,
+    "host_blobs": 21,
+    "evidence_reference_checks": 383,
+    "guest_transitions": [
+      "0->1",
+      "0->1"
+    ],
+    "full_pixel_checks": 6,
+    "fresh_runtime_execution": false,
+    "capture_api_blob_joins": 12,
+    "normal_cleanup_instances": 4,
+    "all_attempts_absence_records": 10,
+    "statistics_identity_stages": 4,
+    "companion_after_dos_detach_verified": true
+  },
+  "mutations_in_memory_only": true,
+  "fresh_runtime_execution": false,
+  "rejected_controls": 30,
+  "controls": [
+    {
+      "case": "execution_image_mismatch",
+      "rejected": true,
+      "reason": "DOS execution image differs from qualified input"
+    },
+    {
+      "case": "skill_writable",
+      "rejected": true,
+      "reason": "Skill read is not ready and read-only"
+    },
+    {
+      "case": "skill_wrong_installation",
+      "rejected": true,
+      "reason": "Skill belongs to another installation"
+    },
+    {
+      "case": "skill_read_after_removal",
+      "rejected": true,
+      "reason": "removed Skill still readable"
+    },
+    {
+      "case": "retained_statistics_missing",
+      "rejected": true,
+      "reason": "post-detach statistics row missing"
+    },
+    {
+      "case": "retained_consumer_coverage_missing",
+      "rejected": true,
+      "reason": "retained consumer coverage absent"
+    },
+    {
+      "case": "missing_input_coverage_complete",
+      "rejected": true,
+      "reason": "missing input coverage is not unavailable"
+    },
+    {
+      "case": "missing_input_coverage_absent",
+      "rejected": true,
+      "reason": "missing bound-source coverage absent"
+    },
+    {
+      "case": "capture_measurement_wrong_row",
+      "rejected": true,
+      "reason": "measured capture missing from API"
+    },
+    {
+      "case": "capture_export_changed",
+      "rejected": true,
+      "reason": "exported capture digest differs from measurement"
+    },
+    {
+      "case": "capture_blob_changed",
+      "rejected": true,
+      "reason": "capture export differs from retained blob"
+    },
+    {
+      "case": "cleanup_empty",
+      "rejected": true,
+      "reason": "explicit owned server cleanup required"
+    },
+    {
+      "case": "cleanup_server_exit_missing",
+      "rejected": true,
+      "reason": "'exit_code'"
+    },
+    {
+      "case": "cleanup_server_exit_nonzero",
+      "rejected": true,
+      "reason": "server exit must be explicitly zero"
+    },
+    {
+      "case": "cleanup_final_instance_missing",
+      "rejected": true,
+      "reason": "cleanup must cover every final instance"
+    },
+    {
+      "case": "cleanup_absence_missing",
+      "rejected": true,
+      "reason": "'container_absent'"
+    },
+    {
+      "case": "cleanup_forced_removal_missing",
+      "rejected": true,
+      "reason": "'forced_removal'"
+    },
+    {
+      "case": "cleanup_forced_removal_present",
+      "rejected": true,
+      "reason": "normal container absence must be explicit"
+    },
+    {
+      "case": "all_attempts_empty",
+      "rejected": true,
+      "reason": "all-attempts cleanup is missing"
+    },
+    {
+      "case": "all_attempts_final_instance_missing",
+      "rejected": true,
+      "reason": "all-attempts cleanup omits a final instance"
+    },
+    {
+      "case": "all_attempts_prior_absence_missing",
+      "rejected": true,
+      "reason": "'container_absent'"
+    },
+    {
+      "case": "statistics_wrong_producer",
+      "rejected": true,
+      "reason": "statistics attribution differs from actual producer"
+    },
+    {
+      "case": "statistics_wrong_run",
+      "rejected": true,
+      "reason": "statistics attribution differs from actual producer"
+    },
+    {
+      "case": "statistics_wrong_installation",
+      "rejected": true,
+      "reason": "statistics attribution differs from actual producer"
+    },
+    {
+      "case": "statistics_wrong_consumer",
+      "rejected": true,
+      "reason": "statistics consumer differs from API instance"
+    },
+    {
+      "case": "statistics_wrong_upstream_row",
+      "rejected": true,
+      "reason": "statistics upstream projection differs from DOS row"
+    },
+    {
+      "case": "statistics_reused_consumer_sequence",
+      "rejected": true,
+      "reason": "statistics consumer differs from API instance"
+    },
+    {
+      "case": "companion_detached_with_dos",
+      "rejected": true,
+      "reason": "same companion must remain attached after DOS detach"
+    },
+    {
+      "case": "companion_identity_replaced",
+      "rejected": true,
+      "reason": "exact instance must occur once in snapshot"
+    },
+    {
+      "case": "dos_not_detached",
+      "rejected": true,
+      "reason": "same DOS owner must be detached"
+    }
+  ]
+}

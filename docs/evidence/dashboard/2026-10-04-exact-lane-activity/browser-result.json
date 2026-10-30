@@ -1,0 +1,15 @@
+{
+  "passed": true,
+  "browser": "149.0.7827.55",
+  "scope": "Actual Status, inventory, HTTP decoder and rendering with synthetic readings. No activity writer, native backend/TUI or model run.",
+  "assertions": [
+    "off remains visible with one accepted run",
+    "HTTP and CLI declarations survive off",
+    "finished run does not enable the lane",
+    "on reading retains candidate order",
+    "zero mutations, page errors or unexpected routes"
+  ],
+  "errors": [],
+  "writes": [],
+  "unexpected": []
+}

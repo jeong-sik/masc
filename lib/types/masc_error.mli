@@ -1,0 +1,147 @@
+(** Unified error type for MASC MCP *)
+
+include module type of Rate_limit_types
+
+val default_rate_limit : rate_limit_config
+val rate_limit_config_to_yojson : rate_limit_config -> Yojson.Safe.t
+val rate_limit_config_of_yojson : Yojson.Safe.t -> (rate_limit_config, string) result
+val limit_for_category : rate_limit_config -> rate_limit_category -> int
+val category_for_tool : string -> rate_limit_category
+val category_for_tool_opt : string -> rate_limit_category option
+
+module Task_error : sig
+  type transition_rejection =
+    | Current_owner_required of { current_assignee : string }
+    | Claim_required
+
+  type transition_rejected =
+    { task_id : string
+    ; requested_agent : string
+    ; task_status : Types_core.task_status
+    ; action : Types_core.task_action
+    ; reason : transition_rejection
+    ; valid_next_actions : Types_core.task_action list
+    }
+    (** A lifecycle refusal captured under the backlog lock. The caller's
+        valid actions are computed by that same lifecycle, never inferred
+        from the error message or a second, possibly stale task read. *)
+
+  type t =
+    | NotFound of string
+    | AlreadyClaimed of { task_id: string; by: string }
+    | NotClaimed of string
+    | InvalidState of string
+    | InvalidId of string
+    | TransitionRejected of transition_rejected
+    | VerificationSuperseded of { task_id: string; requested: string; current: string }
+      (** A verdict named a submission that is no longer the one awaiting a
+          verdict: the producer resubmitted, or superseded it with a
+          cancellation, after the verdict's author read it. *)
+  val transition_rejection_message : transition_rejected -> string
+  (** Caller-facing denial sentence, without the diagnostic [TaskError] prefix. *)
+
+  val to_string : t -> string
+end
+
+module Agent_error : sig
+  type t =
+    | NotFound of string
+    | InvalidName of string
+  val to_string : t -> string
+end
+
+module Auth_error : sig
+  type unauthorized_reason =
+    | Actor_mismatch
+    | Missing_token
+    | Generic
+  type t =
+    | Unauthorized of { reason: unauthorized_reason; message: string }
+    | Forbidden of { agent: string; action: string }
+    | SameOriginBlocked
+    | TokenExpired of string
+    | InvalidToken of string
+  val to_string : t -> string
+end
+
+module System_error : sig
+  type t =
+    | NotInitialized
+    | IoError of string
+    | ValidationError of string
+    | LockContention of { key : string; attempts : int }
+      (** Distributed lock acquire budget exhausted under transient
+          fleet contention.  Carries the structured key + attempt count
+          so callers can dispatch on the typed variant instead of
+          substring-matching the IoError message. *)
+  val to_string : t -> string
+end
+
+type t =
+  | Task of Task_error.t
+  | Agent of Agent_error.t
+  | Auth of Auth_error.t
+  | System of System_error.t
+
+val to_string : t -> string
+val show : t -> string
+val to_yojson : t -> Yojson.Safe.t
+val code : t -> int
+
+(** The [auth_error_code] a 401/403 body carries, as a closed type. The server
+    writes it with [to_string]; a client reads it back with [of_string] and
+    matches every constructor, so a new code is a compile error on the reader
+    rather than a string it never compares. The dashboard keeps its own copy of
+    the strings as a TS enum ([dashboard/src/types/dashboard-execution.ts]). *)
+module Auth_error_code : sig
+  type t =
+    | Invalid_token
+    | Token_expired
+    | Same_origin_blocked
+    | Insufficient_role
+    | Actor_mismatch
+    | Missing_token
+    | Unknown
+
+  val to_string : t -> string
+
+  val of_string : string -> t option
+  (** [None] for a string the server never writes. *)
+end
+
+val auth_error_code_of_error : t -> Auth_error_code.t
+
+val dashboard_auth_error_code : t -> string option
+(** [dashboard_auth_error_code err] maps a typed error to the stable
+    dashboard auth-error-code string consumed by the dashboard shell
+    auth summary and the keeper stream 401 retry gate (TS enum in
+    [dashboard/src/types/dashboard-execution.ts]).
+
+    SSOT for both the dashboard shell summary JSON and the HTTP 401
+    error body so the two surfaces never drift. Returns:
+    {ul
+    {- ["invalid_token"] for [Auth (InvalidToken _)];}
+    {- ["token_expired"] for [Auth (TokenExpired _)];}
+    {- ["same_origin_blocked"] for [Auth SameOriginBlocked];}
+    {- ["insufficient_role"] for any other [Auth (Forbidden _)];}
+    {- the [unauthorized_reason] code
+       (["actor_mismatch"] / ["missing_token"] / ["unknown"]) for
+       [Auth (Unauthorized _)];}
+    {- ["unknown"] for all non-auth errors.} } *)
+
+val is_retryable : t -> bool
+(** [is_retryable err] — would replaying the same operation, without
+    additional caller action, have a chance of succeeding?
+
+    Mirrors the [Error.is_retryable] helper that AGENT_CORE exposes on
+    its [core_error]. Conservative: when in doubt the result is
+    [false] so callers don't loop on deterministic failures.
+
+    {ul
+    {- [Task _], [Agent _]: [false] (domain-state
+       errors — replaying changes nothing).}
+    {- [Auth (TokenExpired _)]: [true] (clears once
+       [masc_auth_refresh] runs); other [Auth] variants: [false].}
+    {- [System (IoError _ | LockContention _)]: [true] (transient
+       FS / backend / lock contention); other [System] variants: [false]
+       (caller-provided invariants).} } *)

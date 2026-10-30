@@ -1,0 +1,6 @@
+{
+  "observer_pid": 51231,
+  "reason": "original observer lacked the both-terminal/missing-effect failure oracle; stopped observation after independent API confirmed both terminal and no live turn",
+  "producer_pid": 51306,
+  "producer_left_running": true
+}

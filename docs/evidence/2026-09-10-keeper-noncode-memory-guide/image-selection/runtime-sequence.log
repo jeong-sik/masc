@@ -1,0 +1,7 @@
+[2026-09-10 06:19:17] [INFO] [Keeper] memory-guide-proof: keeper cycle checkpoint runtime_lane=runtime tokens=84350 latency=93039ms mode=tool_use stop=yielded_to_operation_queued(58)
+[2026-09-10 06:19:17] [INFO] [Keeper/memory-guide-proof] yielded autonomous Owner child to a queued operation after 58 turn(s), checkpoint saved — will resume next cycle
+[2026-09-10 06:19:18] [INFO] [runtime_agent] agent_core-deepseek.deepseek-v4-pro: resume checkpoint_turn_count=58
+[2026-09-10 06:19:18] [WARN] [agent_core:pipeline] pipeline stage failed stage=route error="[route] Invalid request (attempt_rejected): model \"deepseek-v4-pro\" declares thinking control, but the resolved typed dialect cannot encode enable_thinking=true...(408B)"
+[2026-09-10 06:19:18] [INFO] [runtime_agent] agent_core-ollama_cloud.ollama-cloud-glm-5-3-flash: resume checkpoint_turn_count=58
+[2026-09-10 06:19:19] [WARN] [Keeper] keeper_stream: request terminal keeper=memory-guide-proof request_id=kmsg-7d68f23c64507c897b3f04f01ea7e428 status=error message=Rate limited: you (yousleepwhen) have reached your weekly usage limit, add usage credits: https://ollama.com/settings (ref: 5cfd1692-a09c-4e39-8998-4ba74623f68b)
+[2026-09-10 06:19:19] [INFO] [agent_core:event] agent started agent=agent_core-deepseek.deepseek-v4-pro task_id=evt-3f3129b72b3aa2d76e73ba184e8e1e6c

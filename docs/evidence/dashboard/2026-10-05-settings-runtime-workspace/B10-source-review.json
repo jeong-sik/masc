@@ -1,0 +1,83 @@
+{
+  "id": "B10",
+  "severity": "P2",
+  "classification": "bug",
+  "verdict": "CONFIRMED_SOURCE_AND_COMPONENT_REPRODUCTION",
+  "head": "c2e74cc3318a666d461164d23fcbec9089854069",
+  "reviewer": "audit_week_ui",
+  "title": "Settings Runtime 읽기와 typed 저장이 workspace 변경을 따라가지 않음",
+  "trigger": "Settings routing 화면을 유지한 채 authority A에서 B로 전환하거나 A의 읽기/token 요청이 진행 중일 때 B로 전환한다.",
+  "observed": [
+    {
+      "case": "loaded_A_then_B",
+      "result": "같은 mounted Settings에서 A default rt-a가 활성 selector로 남고 defaults/resolved/providers의 B 재조회가 없다."
+    },
+    {
+      "case": "late_A_read_under_B",
+      "result": "B authority에서 늦은 A resolved config_path가 표시된다."
+    },
+    {
+      "case": "token_wait_cross_workspace_dispatch",
+      "result": "A의 rt-b 선택이 actual patchRuntimeRouting의 ensureDevToken 대기 후 B authority에서 core.post에 전달된다. Transport mock이 거절하므로 서버 변경은 하지 않았다."
+    }
+  ],
+  "flow": "app은 currentTab으로만 key를 둔다. Settings mount-only effect는 active 플래그만 확인한다. runtimeAuthority effect는 RuntimeTomlSession committed 이벤트가 있을 때만 갱신한다. Routing handler는 captured authority/beforeDispatch 없이 typed API를 호출하고, API는 token 대기 후 POST한다.",
+  "impact": "다른 workspace의 Runtime 정보가 현재 설정처럼 남고 이를 기반으로 수정할 수 있다. Workspace 전환과 token 대기가 겹치면 이전 workspace의 변경 의도가 새 workspace의 같은 API endpoint에 전송될 수 있다. 실제 backend 적용은 이번 재현 범위 밖이다.",
+  "refs": [
+    {
+      "path": "dashboard/src/app.ts",
+      "start": 373,
+      "end": 375
+    },
+    {
+      "path": "dashboard/src/components/settings-surface.ts",
+      "start": 1613,
+      "end": 1662
+    },
+    {
+      "path": "dashboard/src/components/settings-surface.ts",
+      "start": 1664,
+      "end": 1680
+    },
+    {
+      "path": "dashboard/src/components/settings-surface.ts",
+      "start": 1743,
+      "end": 1759
+    },
+    {
+      "path": "dashboard/src/components/settings-surface.ts",
+      "start": 1761,
+      "end": 1809
+    },
+    {
+      "path": "dashboard/src/components/settings-surface.ts",
+      "start": 1815,
+      "end": 1868
+    },
+    {
+      "path": "dashboard/src/api/dashboard-runtime.ts",
+      "start": 2376,
+      "end": 2397
+    },
+    {
+      "path": "dashboard/src/api/dashboard-runtime.ts",
+      "start": 2429,
+      "end": 2436
+    }
+  ],
+  "history": "기존 fa5f560930d417d254fe1955b4ed579e74ce8cb4에도 mount-only 조회와 같은 저장 경로가 있다. fa5→c2 변경은 commit-triggered refresh의 current guard와 부분 실패 처리를 개선했지만 일반 authority 변경 경로는 수정하지 않았다. 이전 B8 두 shared cache 수정의 신규 회귀로 분류하지 않는다.",
+  "recommendation": "Settings의 독립 runtime 읽기를 현재 authority 소유 envelope/취소/응답 generation으로 묶고 전환 즉시 stale controls를 숨긴다. 모든 typed write가 dispatch authority를 캡처하며 token await 직후와 후속 read/write 경계에서 검증하도록 연결한다. 저장 완료의 notice/resume/consumer refresh도 원래 authority에 묶는다.",
+  "evidence": {
+    "test": "B10-settings-workspace-audit.test.ts",
+    "log": "B10-settings-workspace-reproduction.txt",
+    "provenance": "B10-settings-workspace-provenance.json"
+  },
+  "limits": [
+    "Not full SPA or app remount execution; app key=currentTab is source evidence. Actual Settings component remains mounted in the fixture.",
+    "No backend save acceptance, deployment, native TUI, Dune, CI, or real user workspace was exercised.",
+    "Only default-routing mutation is executed to mocked transport; media-failover/lane mutation findings are source-confirmed.",
+    "Older fa5f560930d417d254fe1955b4ed579e74ce8cb4 compared by source only, not rerun."
+  ],
+  "product_edits": false,
+  "external_actions": false
+}

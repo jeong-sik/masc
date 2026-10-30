@@ -1,0 +1,21 @@
+{
+  "head": "2aef4f0ac588ec6f9e098fa9194eab8c9599ba86",
+  "source_sha256": {
+    "dashboard/src/lib/exact-lane-activity-session.ts": "72d6e60148d6af0a34fa3e022f044570ec0f78932e98e0ab62ce2be0b0fd6e47",
+    "dashboard/src/components/exact-lane-activity-panel.test.ts": "ea8bf4743f8e7b7d757558751c2d1462a0502661aeaa532067f7d7b9d07c52ed"
+  },
+  "raw_logs_sha256": {
+    "red.log": "333b3e547e70ae402acce7e6639f66c1aa03e8b0cdd89df9df931ef19e624eb7",
+    "green.log": "a434b6ece76a4a3572f24d656a3e9adbb1b22fc263926edbb5acdd9e18551452",
+    "tsc.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "eslint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "results": {
+    "red": "3 failed / 39 passed",
+    "green": 43,
+    "suites": 1,
+    "tsc_exit": 0,
+    "eslint_exit": 0
+  },
+  "scope": "Actual owner session regressions in component suite with mocked HTTP; no server/browser/native/provider/full-suite execution. No parent propagation."
+}

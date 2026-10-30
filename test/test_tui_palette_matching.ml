@@ -1,0 +1,638 @@
+(* The matchers behind the [:] palette, the [/] surface search, the memory
+   browser filter, and the keeper message find.
+
+   All are pure and fold case on both sides themselves. A caller hands over
+   the operator's text as typed; the one that used to lowercase first and
+   forgot would have found nothing, and that failure was silent. These cases
+   pin the fold so it cannot move back to the callers one at a time. *)
+
+open Masc_tui_types
+open Masc_tui_palette
+
+let check_bool = Alcotest.(check bool)
+
+let test_contains_is_a_substring_over_a_lowercased_haystack () =
+  check_bool "plain substring" true (Masc_tui_pick_list.lowercase_contains ~needle:"adm" "keeper adm-race");
+  check_bool "haystack case is ignored" true
+    (Masc_tui_pick_list.lowercase_contains ~needle:"adm" "Keeper ADM-race");
+  check_bool "absent substring" false (Masc_tui_pick_list.lowercase_contains ~needle:"zzz" "keeper adm-race");
+  check_bool "empty needle matches anything" true (Masc_tui_pick_list.lowercase_contains ~needle:"" "anything");
+  check_bool "needle longer than haystack" false (Masc_tui_pick_list.lowercase_contains ~needle:"keeper" "kee")
+;;
+
+(* [Masc_tui_pick_list.lowercase_contains] stopped taking a lowercase copy of the haystack and a
+   [String.sub] of it per position, and folds case a byte at a time instead.
+   The row search calls it once per row per keystroke, so on a large file the
+   copies were the cost. These pin the answers the copies used to give --
+   including the bytes a byte-wise fold must leave alone, which is every byte
+   a UTF-8 sequence is made of. *)
+let test_the_fold_is_ascii_only_and_leaves_other_bytes_alone () =
+  check_bool "a Hangul needle finds itself" true
+    (Masc_tui_pick_list.lowercase_contains ~needle:"\xed\x95\x9c" "\xed\x95\x9c\xea\xb5\xad");
+  check_bool "a Hangul needle the row lacks" false
+    (Masc_tui_pick_list.lowercase_contains ~needle:"\xea\xb0\x9c" "\xed\x95\x9c\xea\xb5\xad");
+  check_bool "mixed script, ASCII folded" true
+    (Masc_tui_pick_list.lowercase_contains ~needle:"KEEPER-\xed\x95\x9c" "keeper-\xed\x95\x9c 3");
+  (* The boundary characters either side of A-Z in ASCII. A fold written as
+     an arithmetic shift catches these if its range is off by one. *)
+  check_bool "the byte below A is not folded into a letter" false
+    (Masc_tui_pick_list.lowercase_contains ~needle:"@" "`");
+  check_bool "the byte above Z is not folded into a letter" false
+    (Masc_tui_pick_list.lowercase_contains ~needle:"[" "{");
+  check_bool "A folds to a" true (Masc_tui_pick_list.lowercase_contains ~needle:"A" "a");
+  check_bool "Z folds to z" true (Masc_tui_pick_list.lowercase_contains ~needle:"Z" "z")
+;;
+
+(* A scan that walks forward one position at a time has to keep trying after a
+   partial match, and a scan that stops at the first byte that differs has to
+   resume from the next position rather than past the whole attempt. *)
+let test_a_partial_match_does_not_consume_the_row () =
+  check_bool "the match begins inside a failed attempt" true
+    (Masc_tui_pick_list.lowercase_contains ~needle:"aab" "aaab");
+  check_bool "repeated prefixes do not hide the match" true
+    (Masc_tui_pick_list.lowercase_contains ~needle:"abab" "ababab");
+  check_bool "a prefix that never completes" false
+    (Masc_tui_pick_list.lowercase_contains ~needle:"aab" "aaa");
+  check_bool "the match sits at the very end" true
+    (Masc_tui_pick_list.lowercase_contains ~needle:"race" "keeper adm-race")
+;;
+
+let test_subsequence_takes_the_characters_in_order () =
+  (* The comment on the function names this exact case. *)
+  check_bool "kadm finds keeper adm-race" true
+    (palette_subsequence ~needle:"kadm" "keeper adm-race");
+  check_bool "order matters" false
+    (palette_subsequence ~needle:"mdak" "keeper adm-race");
+  check_bool "a substring is also a subsequence" true
+    (palette_subsequence ~needle:"adm" "keeper adm-race");
+  check_bool "empty needle matches anything" true
+    (palette_subsequence ~needle:"" "anything");
+  check_bool "a character the haystack lacks" false
+    (palette_subsequence ~needle:"kz" "keeper adm-race")
+;;
+
+let test_the_matcher_owns_the_needle_case () =
+  (* An uppercase needle finds a lowercase row in every matcher, so no
+     caller has to lowercase first and none can forget to. *)
+  check_bool "uppercase needle finds in starts_with" true
+    (palette_starts_with ~needle:"KEE" "keeper adm-race");
+  check_bool "uppercase needle finds in contains" true
+    (Masc_tui_pick_list.lowercase_contains ~needle:"ADM" "keeper adm-race");
+  check_bool "uppercase needle finds in subsequence" true
+    (palette_subsequence ~needle:"KADM" "keeper adm-race")
+;;
+
+
+let test_the_palette_lists_tasks_and_posts () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.tasks <-
+    [ { id = "task-532"
+      ; title = "다섯 도구 축 사용 증명"
+      ; status = Masc_domain.Todo
+      ; priority = 2
+      ; goal_ids = []
+      } ];
+  ignore (apply_board_posts_load state {bpr_query=board_query state;bpr_result=Ok
+    [ { bp_id = "p-1"
+      ; bp_author = "alpha"
+      ; bp_title = "release evidence sweep"
+      ; bp_body = ""
+      ; bp_votes = 0
+      ; bp_comment_count = 0
+      ; bp_created_at = "2026-08-25T00:00:00Z"
+      ; bp_created_at_unix = None; bp_updated_at = None
+      ; bp_hearth = None
+      ; bp_kind = None
+      ; bp_closed = None
+      ; bp_attachments = []
+      } ]});
+  let labels = List.map fst (palette_entries state) in
+  Alcotest.(check (list string)) "one Browser destination"
+    ["go Browser Lane"]
+    (List.filter_map (function label, Palette_browser_lane -> Some label | _ -> None)
+       (palette_entries state));
+  Alcotest.(check (list string)) "one MSX destination"
+    ["go MSX"]
+    (List.filter_map (function label, Palette_msx -> Some label | _ -> None)
+       (palette_entries state));
+  Alcotest.(check (list string)) "one DOS spectator destination"
+    ["go DOS"]
+    (List.filter_map (function label, Palette_dos -> Some label | _ -> None)
+       (palette_entries state));
+  check_bool "Slack is not a separate destination" false (List.mem "go Slack Lane" labels);
+  check_bool "settings is a direct entry" true
+    (List.exists
+       (function
+         | "settings", Palette_config Config_params -> true
+         | _ -> false)
+       (palette_entries state));
+  check_bool "a task is an entry" true
+    (List.exists
+       (fun l -> Masc_tui_pick_list.lowercase_contains ~needle:"task-532" l)
+       labels);
+  check_bool "a post is an entry" true
+    (List.exists
+       (fun l -> Masc_tui_pick_list.lowercase_contains ~needle:"release evidence" l)
+       labels);
+  (* The actions carry the ids the executor needs, not list positions that a
+     refresh can move. *)
+  check_bool "the task action carries its id" true
+    (List.exists
+       (function _, Palette_task id -> String.equal id "task-532" | _ -> false)
+       (palette_entries state));
+  check_bool "the post action carries its id" true
+    (List.exists
+       (function
+         | _, Palette_board_post id -> String.equal id "p-1"
+         | _ -> false)
+       (palette_entries state))
+;;
+
+let runtime_row ~value_type ~current =
+  { Tui_decode.rpr_key = "test.setting"
+  ; rpr_current_json = current
+  ; rpr_default_json = current
+  ; rpr_has_override = false
+  ; rpr_description = "test setting"
+  ; rpr_value_type = value_type
+  ; rpr_min_json = None
+  ; rpr_max_json = None
+  ; rpr_choices = []
+  ; rpr_surface = None
+  }
+
+let test_friendly_runtime_param_editing () =
+  let number =
+    runtime_param_edit_of_row ~advanced:false
+      (runtime_row ~value_type:"float" ~current:"300.0")
+  in
+  Alcotest.(check string) "friendly number has no JSON ceremony" "300.0"
+    number.rpe_draft;
+  let number = runtime_param_edit_append number "4" in
+  Alcotest.(check string) "first key replaces the selected current value" "4"
+    number.rpe_draft;
+  (match runtime_param_edit_value number with
+   | Ok (`Float value) ->
+     Alcotest.(check (float 0.0001)) "number keeps its declared type" 4.0 value
+   | Ok _ -> Alcotest.fail "number edit produced the wrong JSON type"
+   | Error detail -> Alcotest.fail detail);
+  let boolean =
+    runtime_param_edit_of_row ~advanced:false
+      (runtime_row ~value_type:"bool" ~current:"true")
+  in
+  Alcotest.(check string) "bool speaks operator language" "on"
+    boolean.rpe_draft;
+  Alcotest.(check string) "bool list value uses the same language" "off"
+    (runtime_param_value_text ~value_type:"bool" "false");
+  let boolean = runtime_param_edit_toggle_bool boolean in
+  Alcotest.(check string) "one key toggles" "off" boolean.rpe_draft;
+  (match runtime_param_edit_value boolean with
+   | Ok (`Bool value) -> Alcotest.(check bool) "toggle submits a bool" false value
+   | Ok _ -> Alcotest.fail "bool edit produced the wrong JSON type"
+   | Error detail -> Alcotest.fail detail);
+  let advanced =
+    runtime_param_edit_of_row ~advanced:true
+      (runtime_row ~value_type:"float" ~current:"300.0")
+  in
+  Alcotest.(check bool) "advanced stays explicit" true
+    (advanced.rpe_mode = Advanced_json)
+;;
+
+(* A file that has landed, which is the state these names are read from.
+   Written as a list of rows and stored as an array, the way the load does. *)
+let landed ~path rows =
+  match
+    Masc_tui_fetched.start ~equal:String.equal Masc_tui_fetched.initial ~key:path
+  with
+  | Masc_tui_fetched.Already_loading -> Alcotest.fail "the fixture did not start"
+  | Masc_tui_fetched.Started (t, request) ->
+    let source = rows
+      |> List.map (fun segments -> String.concat "" (List.map fst segments))
+      |> String.concat "\n" in
+    Masc_tui_fetched.complete ~equal:String.equal t request
+      (Ok { cfd_source = source; cfd_revision = String.make 64 'a'; cfd_rows = Array.of_list rows })
+;;
+
+let check_names = Alcotest.(check (list string))
+
+(* K/D/R with several names on the line open the palette as a choice: the
+   list is those names for that question, the typed text filters them, and
+   no task or post rides along however its title spells. *)
+let test_a_choice_lists_the_names_and_nothing_else () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.code_file <-
+    landed ~path:"lib/a.ml" [ [ ("Foo.bar x'", Masc_tui_code_lexer.kind_code) ] ];
+  state.code_file_cursor <- 0;
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  state.palette_open <- true;
+  state.palette_mode <- Palette_choice { choice_question = "hover"; choice_line = 1 };
+  state.palette_query <- "";
+  let labels () = List.map fst (palette_matches state) in
+  check_names "the three names, in reading order" [ "Foo"; "bar"; "x'" ] (labels ());
+  check_bool "every entry asks the question about its name" true
+    (List.for_all
+       (function
+         | name, Palette_lsp ("hover", symbol) -> String.equal name symbol
+         | _ -> false)
+       (palette_matches state));
+  state.palette_query <- "ba";
+  check_names "the typed text filters the names" [ "bar" ] (labels ());
+  state.palette_query <- "zzz";
+  check_names "a filter no name matches lists nothing" [] (labels ());
+  state.palette_mode <- Palette_jump;
+  state.palette_query <- "";
+  check_bool "a jump lists destinations again" true
+    (List.exists (fun label -> String.length label > 3 && String.sub label 0 3 = "go ") (labels ()))
+;;
+
+let test_typed_code_questions_offer_only_executable_candidates () =
+  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  state.palette_query <- "def";
+  check_names "a reserved Code command offers no unrelated destination" []
+    (List.map fst (palette_matches state));
+  state.code_file <- landed ~path:"lib/a.ml"
+    [ [ ("Foo.bar", Masc_tui_code_lexer.kind_code) ] ];
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  state.code_file_cursor <- 0;
+  check_names "bare def offers definition candidates only" [ "def Foo"; "def bar" ]
+    (List.map fst (palette_matches state));
+  check_bool "all highlighted entries execute the reserved question" true
+    (List.for_all (function
+       | _, Palette_lsp ("definition", _) -> true
+       | _ -> false) (palette_matches state));
+  state.palette_query <- "def explicit_symbol";
+  check_names "an explicit symbol has a direct preview, no competing selection" []
+    (List.map fst (palette_matches state));
+  Alcotest.(check (option (pair string (option string)))) "same canonical question and symbol"
+    (Some ("definition", Some "explicit_symbol"))
+    (palette_typed_question state.palette_query);
+  state.palette_query <- "go Code";
+  check_bool "ordinary destination filtering still works" true
+    (List.exists (function _, Palette_goto Code -> true | _ -> false)
+      (palette_matches state))
+;;
+
+let test_the_cursor_lines_names_are_the_candidates () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.code_file <-
+    landed ~path:"lib/a.ml"
+      [ [ ("let ", Masc_tui_code_lexer.kind_keyword);
+          ("x = x + ", Masc_tui_code_lexer.kind_code);
+          ("1", Masc_tui_code_lexer.kind_number) ];
+        [ ("(* x *)", Masc_tui_code_lexer.kind_comment) ];
+        [ ("Foo.bar x'", Masc_tui_code_lexer.kind_code) ] ];
+  state.code_file_cursor <- 0;
+  check_names "a keyword and a number offer no name, x appears once"
+    [ "x" ]
+    (code_cursor_line_symbols state);
+  state.code_file_cursor <- 1;
+  check_names "a comment offers no name" []
+    (code_cursor_line_symbols state);
+  state.code_file_cursor <- 2;
+  check_names "module path splits, primes stay, reading order holds"
+    [ "Foo"; "bar"; "x'" ]
+    (code_cursor_line_symbols state);
+  state.code_file_cursor <- 99;
+  check_names "a cursor past the file names nothing" []
+    (code_cursor_line_symbols state);
+  (* The candidates ride the palette only with the file focused on Code. *)
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  state.code_file_cursor <- 0;
+  check_bool "the palette carries the def candidate" true
+    (List.exists
+       (function
+         | _, Palette_lsp ("definition", "x") -> true
+         | _ -> false)
+       (palette_entries state));
+  state.code_focus_file <- Left_pane;
+  check_bool "an unfocused file offers no candidate" false
+    (List.exists
+       (function _, Palette_lsp _ -> true | _ -> false)
+       (palette_entries state))
+;;
+
+let test_a_label_starting_with_the_query_leads () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  (* Two posts mention "def" inside a word; the cursor line names one thing. *)
+  let post id title =
+    { bp_id = id
+    ; bp_author = "alpha"
+    ; bp_title = title
+    ; bp_body = ""
+    ; bp_votes = 0
+    ; bp_comment_count = 0
+    ; bp_created_at = "2026-08-26T00:00:00Z"
+    ; bp_created_at_unix = None; bp_updated_at = None
+    ; bp_hearth = None
+    ; bp_kind = None
+    ; bp_closed = None
+    ; bp_attachments = []
+    }
+  in
+  ignore (apply_board_posts_load state {bpr_query=board_query state;bpr_result=Ok
+    [ post "p-1" "deferred wakeup evidence"; post "p-2" "head 7def9c review" ]});
+  state.code_file <-
+    landed ~path:"lib/a.ml"
+      [ [ ("open ", Masc_tui_code_lexer.kind_keyword);
+          ("Hook_common", Masc_tui_code_lexer.kind_code) ] ];
+  state.code_file_cursor <- 0;
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  state.palette_query <- "def ";
+  check_names "reserved definition command excludes unrelated posts"
+    [ "def Hook_common" ] (List.map fst (palette_matches state));
+  (* A partial word is still an ordinary search: it finds posts without
+     pretending that Enter would ask the reserved definition question. *)
+  state.palette_query <- "de";
+  let matches = palette_matches state in
+  let posts = List.filter_map (function
+    | label, Palette_board_post id -> Some (label, id)
+    | _ -> None) matches in
+  Alcotest.(check (list (pair string string)))
+    "substring post matches preserve entry order and action identity"
+    [ "post deferred wakeup evidence", "p-1";
+      "post head 7def9c review", "p-2" ] posts;
+  state.palette_query <- "hover ";
+  check_names "hover pre-fill lists only the cursor line's hover entry"
+    [ "hover Hook_common" ]
+    (List.map fst (palette_matches state));
+  state.palette_query <- "";
+  check_bool "an empty query keeps every entry" true
+    (List.length (palette_matches state) = List.length (palette_entries state))
+;;
+
+(* The [&] key opens the MSX screen, but a key is found only by someone who
+   already knows it. The palette is where an operator looks for a screen by
+   name, so "msx" typed there must reach the action the key reaches. *)
+(* Task Review and Task Verdicts are one reading split in two and sit one [v]
+   apart. The palette offered the first and not the second, so typing the name
+   of the half that holds the rulings found nothing that goes there. *)
+let test_the_palette_goes_to_both_halves_of_task_review () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let goes_to label surface =
+    state.palette_query <- label;
+    List.exists
+      (fun (offered, action) ->
+        String.equal offered label && action = Palette_goto surface)
+      (palette_matches state)
+  in
+  check_bool "the queue of tasks waiting for a ruling" true
+    (goes_to "go Task Review" Verification);
+  check_bool "and the rulings themselves" true
+    (goes_to "go Task Verdicts" Harness)
+;;
+
+let test_msx_is_reached_by_its_name () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.palette_query <- "msx";
+  check_bool "typing msx offers the MSX screen" true
+    (List.exists
+       (function _, Palette_msx -> true | _ -> false)
+       (palette_matches state));
+  state.palette_query <- "go msx";
+  (match palette_matches state with
+   | ("go MSX", Palette_msx) :: _ -> ()
+   | _ -> Alcotest.fail "the label spelled out must lead its own matches")
+;;
+
+let test_dos_is_reached_by_its_name () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.palette_query <- "dos";
+  (match palette_matches state with
+   | ("go DOS", Palette_dos) :: _ -> ()
+   | _ -> Alcotest.fail "typing dos must offer the DOS spectator")
+;;
+
+(* One row per destination. Metrics was five rows that all jumped to it; its
+   other names still find it, from the one row. *)
+let test_metrics_is_one_row_that_answers_its_other_names () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  Alcotest.(check (list string)) "one row goes to Usage" [ "go Usage" ]
+    (List.filter_map
+       (function label, Palette_goto Metrics -> Some label | _ -> None)
+       (palette_entries state));
+  List.iter
+    (fun word ->
+      state.palette_query <- word;
+      match palette_matches state with
+      | ("go Usage", Palette_goto Metrics) :: _ -> ()
+      | _ -> Alcotest.fail (Printf.sprintf "%S does not lead with go Usage" word))
+    [ "metrics"; "telemetry"; "charts"; "stats"; "tele" ]
+;;
+
+(* Every surface has a palette row that arrives on it. The list names each
+   constructor once, and the match under it names each again with no
+   wildcard: a surface added to the type fails to compile here until it is
+   decided, so a destination cannot be added and left unreachable by name --
+   which is how Runtime and Changes went without a row.
+
+   Connectors is the one surface decided the other way, for now. Its list
+   half has no path in at all (#35662), and whether that half is retired or
+   given a path is still open there; a palette row here would answer it. *)
+let every_surface =
+  [ Overview; Acting; Metrics; Keepers Keeper_list; Memory; Lanes; Clients
+  ; Board; Approvals; Planning; Schedules; Verification; Harness; Fusion
+  ; Repositories; Code; Changes; Runtime; Config; Resources; Tools
+  ; System_logs
+  ]
+
+let _every_surface_is_decided : surface -> unit = function
+  | Overview | Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
+  | Approvals | Planning | Schedules | Verification | Harness | Fusion
+  | Repositories | Code | Changes | Runtime | Config | Resources | Tools
+  | System_logs -> ()
+  | Connectors -> (* #35662 *) ()
+
+let test_every_surface_and_config_pane_has_a_row () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let entries = palette_entries state in
+  List.iteri
+    (fun index surface ->
+      check_bool
+        (Printf.sprintf "a row goes to every_surface.(%d)" index)
+        true
+        (List.exists
+           (function _, Palette_goto target -> target = surface | _ -> false)
+           entries))
+    every_surface;
+  List.iter
+    (fun (pane, label) ->
+      check_bool
+        (Printf.sprintf "a row opens the %s pane" label)
+        true
+        (List.exists
+           (function
+             | entry, Palette_config target ->
+               entry = "go System / " ^ label && target = pane
+             | _ -> false)
+           entries);
+      (* Typed the way the other destinations are: "go" and the name. *)
+      state.palette_query <- "go System / " ^ label;
+      match palette_matches state with
+      | (_, Palette_config target) :: _ when target = pane -> ()
+      | _ ->
+        Alcotest.fail
+          (Printf.sprintf "%S does not lead with its pane"
+             ("go System / " ^ label)))
+    config_panes;
+  state.palette_query <- "go system";
+  match palette_matches state with
+  | ("go System", Palette_goto Config) :: _ -> ()
+  | _ -> Alcotest.fail "\"go system\" no longer leads with the System surface"
+;;
+
+let test_addons_do_not_require_a_keeper () =
+  let state =
+    create_state ~workspace:"empty" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  Alcotest.(check int) "no Keeper needs to be created" 0
+    (List.length state.keepers);
+  state.palette_query <- "plugins";
+  (match palette_matches state with
+   | (_, Palette_lane_addons) :: _ -> ()
+   | _ -> Alcotest.fail "an empty workspace must offer the plugin inspector");
+  state.palette_query <- "features";
+  (match palette_matches state with
+   | (_, Palette_goto Lanes) :: _ -> ()
+   | _ -> Alcotest.fail "an empty workspace must offer the feature inventory")
+;;
+
+(* An installation the TUI has seen ask a question gets one Results row,
+   found by its declaration id; a Keeper's question adds none. *)
+let test_an_installation_that_asked_has_one_results_row () =
+  let state =
+    create_state ~workspace:"empty" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  let module Asks = Masc.Tui_decode_asks in
+  let ask asker id : Asks.ask_row =
+    { ar_asker = asker; ar_id = id; ar_asked_at = 0.; ar_source_turn_ref = None;
+      ar_context = None; ar_questions = []; ar_resolution = Asks.Ask_open } in
+  let quiz = Asks.Ask_installation { ai_declaration_id = "operator-quiz"; ai_title = "Operator quiz" } in
+  let results state =
+    List.filter_map (function
+      | _, Palette_addon_results id -> Some id
+      | _, ( Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
+           | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _
+           | Palette_goto _ | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _
+           | Palette_gate_mode _ | Palette_chat _ | Palette_task _ | Palette_task_creation _
+           | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
+           | Palette_code_file _ | Palette_code_location _ ) -> None)
+      (palette_entries state) in
+  Alcotest.(check (list string)) "nothing seen, nothing offered" [] (results state);
+  state.asks_snapshot <- Some { Asks.asn_keeper = None; asn_open_count = 3;
+    asn_rows = [ ask quiz "s-1-ask"; ask quiz "s-2-ask"; ask (Asks.Ask_keeper "code-reviewer") "k-1" ] };
+  Alcotest.(check (list string)) "one row per installation, none for a Keeper"
+    [ "operator-quiz" ] (results state);
+  state.palette_query <- "operator-quiz";
+  (match palette_matches state with
+   | (_, Palette_addon_results "operator-quiz") :: _ -> ()
+   | _ -> Alcotest.fail "the declaration id finds the installation's Results")
+;;
+
+let test_retained_history_is_available_without_current_configuration () =
+  let state=create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  (* No current configuration/installation reading supplies these targets. *)
+  check_bool "no current model rows" true (Option.is_none state.standalone_lanes);
+  check_bool "no current inventory" true (Option.is_none state.lane_inventory);
+  List.iter (fun lane ->
+    state.palette_query <- Lane_run_identity.to_id lane;
+    check_bool "the query offers the original observation target" true
+      (List.exists (fun (_,action) -> action=Palette_lane_history lane)
+        (palette_matches state)))
+    [Lane_run_identity.Workspace_curator; Lane_run_identity.Verifier]
+;;
+
+let test_korean_aliases_and_ui_language_entries () =
+  let state = create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 () in
+  state.palette_query <- "모델";
+  check_bool "Korean model query reaches Config_models" true
+    (List.exists (fun (_, action) -> action = Palette_config Config_models)
+       (palette_matches state));
+  state.palette_query <- "파라미터";
+  check_bool "Korean params query reaches Config_params" true
+    (List.exists (fun (_, action) -> action = Palette_config Config_params)
+       (palette_matches state));
+  state.palette_query <- "대시보드";
+  check_bool "Korean dashboard query reaches Overview" true
+    (List.exists (fun (_, action) -> action = Palette_goto Overview)
+       (palette_matches state));
+  state.palette_query <- "한글";
+  check_bool "Korean language query offers Lang_ko" true
+    (List.exists (fun (_, action) -> action = Palette_ui_language Lang_ko)
+       (palette_matches state));
+  state.palette_query <- "영문";
+  check_bool "English language query offers Lang_en" true
+    (List.exists (fun (_, action) -> action = Palette_ui_language Lang_en)
+       (palette_matches state))
+;;
+
+let () =
+  Alcotest.run
+    "masc-tui-palette-matching"
+    [ ( "matchers"
+      , [ Alcotest.test_case "contains is a substring over a lowercased haystack" `Quick
+            test_contains_is_a_substring_over_a_lowercased_haystack
+        ; Alcotest.test_case "subsequence takes the characters in order" `Quick
+            test_subsequence_takes_the_characters_in_order
+        ; Alcotest.test_case "the matcher owns the needle case" `Quick
+            test_the_matcher_owns_the_needle_case
+        ; Alcotest.test_case "a label starting with the query leads" `Quick
+            test_a_label_starting_with_the_query_leads
+        ; Alcotest.test_case "the fold is ASCII only" `Quick
+            test_the_fold_is_ascii_only_and_leaves_other_bytes_alone
+        ; Alcotest.test_case "a partial match does not consume the row" `Quick
+            test_a_partial_match_does_not_consume_the_row
+        ] )
+    ; ( "sources"
+      , [ Alcotest.test_case "typed Code questions have only executable candidates" `Quick
+            test_typed_code_questions_offer_only_executable_candidates
+        ; Alcotest.test_case "the palette lists tasks and posts" `Quick
+            test_the_palette_lists_tasks_and_posts
+        ; Alcotest.test_case "the cursor line's names are the candidates"
+            `Quick test_the_cursor_lines_names_are_the_candidates
+        ; Alcotest.test_case "a choice lists the names and nothing else" `Quick
+            test_a_choice_lists_the_names_and_nothing_else
+        ; Alcotest.test_case "friendly runtime parameter editing" `Quick
+            test_friendly_runtime_param_editing
+        ; Alcotest.test_case "both halves of Task Review are reachable" `Quick
+            test_the_palette_goes_to_both_halves_of_task_review
+        ; Alcotest.test_case "msx is reached by its name" `Quick
+            test_msx_is_reached_by_its_name
+        ; Alcotest.test_case "dos is reached by its name" `Quick
+            test_dos_is_reached_by_its_name
+        ; Alcotest.test_case "Metrics is one row that answers its other names"
+            `Quick test_metrics_is_one_row_that_answers_its_other_names
+        ; Alcotest.test_case "Add-ons do not require a Keeper" `Quick
+            test_addons_do_not_require_a_keeper
+        ; Alcotest.test_case "retained history needs no current configuration" `Quick
+            test_retained_history_is_available_without_current_configuration
+        ; Alcotest.test_case "an installation that asked has one Results row" `Quick
+            test_an_installation_that_asked_has_one_results_row
+        ; Alcotest.test_case "every surface and Config pane has a row" `Quick
+            test_every_surface_and_config_pane_has_a_row
+        ; Alcotest.test_case "Korean aliases and UI language entries" `Quick
+            test_korean_aliases_and_ui_language_entries
+        ] )
+    ]
+;;

@@ -1,0 +1,27 @@
+{
+  "scope": "source-only; synthetic HTTP browser and injected-provider native test source",
+  "vitest": {
+    "suite": "prompt-registry-panel.test.ts",
+    "passed": 17,
+    "exit_code": 0
+  },
+  "typescript": {
+    "whole_project_no_emit": true,
+    "exit_code": 0
+  },
+  "eslint": {
+    "files": 3,
+    "exit_code": 0
+  },
+  "ocaml": {
+    "parse_only_files": 6,
+    "exit_code": 0,
+    "native_execution": "not_run"
+  },
+  "browser": {
+    "receipt": "receipt.json",
+    "desktop_mobile_pngs_directly_inspected": true,
+    "runtime": "not_exercised",
+    "model": "not_exercised"
+  }
+}

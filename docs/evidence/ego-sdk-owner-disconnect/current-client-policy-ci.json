@@ -1,0 +1,24 @@
+{
+  "source": "12c001e55e27c7a9340ae27f956e112fd5360c76",
+  "run_id": 40112787489,
+  "url": "https://github.com/jeong-sik/masc/actions/runs/40112787489",
+  "conclusion": "success",
+  "suites": {
+    "test_browser_addon_client": {
+      "tests": 4,
+      "seconds": 3.385
+    },
+    "test_browser_addon_reply_policy": {
+      "tests": 1,
+      "seconds": 0.001
+    },
+    "test_browser_lane": {
+      "tests": 14,
+      "seconds": 0.036
+    }
+  },
+  "total_tests": 19,
+  "downloaded_log_sha256": "204f72b69991972369dc0c8750edd98ee2e60fb40cf0ef66125389e536988d41",
+  "full_regression": false,
+  "real_host_current_policy_proof": false
+}

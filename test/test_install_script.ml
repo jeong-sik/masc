@@ -1,0 +1,1407 @@
+open Alcotest
+
+let string_contains haystack needle =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen > hlen then false
+  else
+    let found = ref false in
+    for i = 0 to hlen - nlen do
+      if not !found && String.sub haystack i nlen = needle then found := true
+    done;
+    !found
+;;
+
+let read_file path =
+  let ic = open_in path in
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      In_channel.input_all ic)
+;;
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+      output_string oc content)
+;;
+
+let write_runtime_catalog
+    ?(default = "ollama_cloud.deepseek-v4-flash")
+    ?(deepseek_display_name = "DeepSeek API")
+    base_path
+  =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    (Printf.sprintf
+       {|
+[runtime]
+default = "%s"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.com/v1"
+
+[providers.ollama_cloud.healthcheck]
+path = "/models"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[providers.deepseek]
+display-name = "%s"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.healthcheck]
+path = "/models"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[providers.ollama.healthcheck]
+path = "/api/tags"
+
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.gemma4-26b-a4b-qat]
+api-name = "gemma4-26b-a4b-qat"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[ollama_cloud.deepseek-v4-flash]
+wizard-default = true
+
+[deepseek.deepseek-v4-flash]
+wizard-default = true
+
+[ollama.gemma4-26b-a4b-qat]
+wizard-default = true
+|}
+       default
+       deepseek_display_name);
+  runtime_file
+;;
+
+(* A config whose default is a subscription runtime (CLI transport, no endpoint,
+   no API key). It sits beside an HTTP provider so the catalog is not
+   subscription-only, matching how real deployments mix the two. *)
+let write_runtime_catalog_with_subscription base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    {|
+[runtime]
+default = "claude_code.claude-sonnet-5"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[providers.ollama.healthcheck]
+path = "/api/tags"
+
+[providers.claude_code]
+display-name = "Claude Code Max Subscription"
+protocol = "claude-code"
+command = "claude-test-cli"
+is-non-interactive = true
+
+[models.claude-sonnet-5]
+api-name = "claude-sonnet-5"
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.gemma4-26b-a4b-qat]
+api-name = "gemma4-26b-a4b-qat"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[ollama.gemma4-26b-a4b-qat]
+wizard-default = true
+
+[claude_code.claude-sonnet-5]
+wizard-default = true
+|};
+  runtime_file
+;;
+
+(* A config whose default is a local model server, bound to a closed loopback
+   port (127.0.0.1:1 refuses instantly) so the reachability probe deterministically
+   reports "not running". A cloud provider sits beside it to exercise the "cloud"
+   label, which is never probed. *)
+(* A subscription whose CLI is on PATH (/bin/echo stands in), so the wizard gets
+   past "installed" and runs the login probe. /bin/echo is not the real client,
+   so the probe's JSON parse fails and runtime-probe reports "not signed in" --
+   a deterministic stand-in for a present-but-not-signed-in CLI. *)
+let write_runtime_catalog_with_installed_subscription base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    {|
+[runtime]
+default = "claude_code.claude-sonnet-5"
+
+[providers.claude_code]
+display-name = "Claude Code Max Subscription"
+protocol = "claude-code"
+command = "/bin/echo"
+is-non-interactive = true
+
+[models.claude-sonnet-5]
+api-name = "claude-sonnet-5"
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[claude_code.claude-sonnet-5]
+wizard-default = true
+|};
+  runtime_file
+;;
+
+let write_runtime_catalog_with_local_server base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    {|
+[runtime]
+default = "local_llama.qwen"
+
+[providers.local_llama]
+display-name = "Local llama.cpp"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.local_llama.healthcheck]
+path = "/models"
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.healthcheck]
+path = "/models"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[models.qwen]
+api-name = "qwen"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[local_llama.qwen]
+wizard-default = true
+
+[deepseek.qwen]
+wizard-default = true
+|};
+  runtime_file
+;;
+
+let write_runtime_catalog_with_invalid_key base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  let runtime_file = Filename.concat config_dir "runtime.toml" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file
+    runtime_file
+    {|
+[runtime]
+default = "deepseek.deepseek-v4-flash"
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "BAD-KEY"
+
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[deepseek.deepseek-v4-flash]
+wizard-default = true
+|};
+  runtime_file
+;;
+
+let rec find_source_root_from dir hops rel =
+  if hops > 8 then None
+  else if Sys.file_exists (Filename.concat dir rel) then Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None
+    else find_source_root_from parent (hops + 1) rel
+;;
+
+let source_root () =
+  let anchor = "scripts/install.sh" in
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root
+    when String.trim root <> "" && Sys.file_exists (Filename.concat root anchor) ->
+    root
+  | _ ->
+    (match find_source_root_from (Sys.getcwd ()) 0 anchor with
+     | Some root -> root
+     | None -> fail "could not locate repo source root")
+;;
+
+let project_version () =
+  let raw = read_file (Filename.concat (source_root ()) "dune-project") in
+  let prefix = "(version " in
+  raw
+  |> String.split_on_char '\n'
+  |> List.find_map (fun line ->
+    let line = String.trim line in
+    let prefix_len = String.length prefix in
+    if String.length line > prefix_len
+       && String.sub line 0 prefix_len = prefix
+       && line.[String.length line - 1] = ')'
+    then
+      Some
+        (String.sub line prefix_len (String.length line - prefix_len - 1))
+    else None)
+  |> function
+  | Some version -> version
+  | None -> fail "could not parse dune-project version"
+;;
+
+let release_tag () =
+  let version = project_version () in
+  if String.length version > 0 && version.[0] = 'v' then version else "v" ^ version
+;;
+
+let real_masc_binary () =
+  match Sys.getenv_opt "MASC_INSTALL_TEST_MASC" with
+  | Some path when String.trim path <> "" ->
+    if Sys.file_exists path then path
+    else failf "MASC_INSTALL_TEST_MASC does not exist: %s" path
+  | _ ->
+    let root = source_root () in
+    let candidates =
+      [ Filename.concat root "_build/default/bin/main_eio.exe"
+      ; Filename.concat (Sys.getcwd ()) "_build/default/bin/main_eio.exe"
+      ]
+    in
+    (match List.find_opt Sys.file_exists candidates with
+     | Some path -> path
+     | None ->
+       fail
+         "main_eio executable not found. Build dependency ../bin/main_eio.exe or set MASC_INSTALL_TEST_MASC.")
+;;
+
+let unlink_if_exists path =
+  try Unix.unlink path with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+;;
+
+let install_real_masc_binary prefix =
+  let dest = Filename.concat prefix "masc" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote prefix));
+  unlink_if_exists dest;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) dest
+;;
+
+let assert_contains label text needle =
+  check bool label true (string_contains text needle)
+;;
+
+let assert_not_contains label text needle =
+  check bool label false (string_contains text needle)
+;;
+
+(* Mirror install.sh's detect_asset so the staged release names the asset the
+   script will request for this platform. *)
+let platform_release_asset () =
+  let uname flag =
+    let ic = Unix.open_process_in ("uname " ^ flag) in
+    let line = try String.trim (input_line ic) with End_of_file -> "" in
+    ignore (Unix.close_process_in ic);
+    line
+  in
+  match uname "-s", uname "-m" with
+  | "Darwin", "arm64" -> "masc-macos-arm64"
+  | "Darwin", "x86_64" -> "masc-macos-x64"
+  | "Linux", "x86_64" -> "masc-linux-x64"
+  | "Linux", ("aarch64" | "arm64") -> "masc-linux-arm64"
+  | os, arch -> failf "unsupported test platform for release asset: %s/%s" os arch
+;;
+
+(* Stage a file:// release mirror under [base_path] so install paths that
+   download (e.g. the --force refresh) exercise the real curl+install flow
+   hermetically instead of depending on a published GitHub release for the
+   HEAD version — the forced-wizard tests broke on exactly that 404 when
+   dune-project moved past the latest published release. The mirror includes
+   actual checksums, including the mandatory macOS Python bootstrap digest. *)
+let stage_release_mirror base_path =
+  let dir = Filename.concat base_path (Filename.concat ".release" (release_tag ())) in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote dir));
+  let asset = Filename.concat dir (platform_release_asset ()) in
+  unlink_if_exists asset;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) asset;
+  let suffix =
+    let name = platform_release_asset () in
+    String.sub name 5 (String.length name - 5)
+  in
+  (* The terminal UI is a companion the installer refuses to skip, so the mirror
+     has to carry it or every download path fails on a missing asset. The
+     symlink target only has to be an executable file; nothing here runs it. *)
+  let tui = Filename.concat dir ("masc-tui-" ^ suffix) in
+  unlink_if_exists tui;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) tui;
+  let browser_host = Filename.concat dir ("masc-browser-host-" ^ suffix) in
+  unlink_if_exists browser_host;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) browser_host;
+  let helper =
+    Filename.concat
+      dir
+      ("masc-deployment-preflight-helper-" ^ suffix)
+  in
+  unlink_if_exists helper;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) helper;
+  let gate =
+    Filename.concat
+      dir
+      ("masc-check-runtime-deployment-preflight-" ^ suffix)
+  in
+  unlink_if_exists gate;
+  Unix.symlink
+    (Unix.realpath
+       (Filename.concat (source_root ()) "scripts/check-runtime-deployment-preflight.sh"))
+    gate;
+  (* The installer stages the SSH bootstrap companion unconditionally, and the
+     server allowlist accepts exactly this asset name. It is a separate release
+     asset from the guest shim above: the shim keeps its per-arch runtime name
+     while this companion shares the platform suffix of the other mirrors. *)
+  let ssh_bootstrap = Filename.concat dir ("masc-exec-ssh-bootstrap-" ^ suffix) in
+  unlink_if_exists ssh_bootstrap;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) ssh_bootstrap;
+  (* The installer places but does not execute the guest shim. As with the
+     companion fixtures, reuse the test binary bytes and retain the production
+     asset name so missing-shim failures cannot hide wizard behavior. *)
+  let shim_arch =
+    match suffix with
+    | "linux-x64" | "macos-x64" -> "amd64"
+    | "linux-arm64" | "macos-arm64" -> "arm64"
+    | other -> failf "unsupported guest shim fixture platform: %s" other
+  in
+  let shim = Filename.concat dir ("masc-exec-shim-linux-" ^ shim_arch) in
+  unlink_if_exists shim;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) shim;
+  let bundle_helper =
+    Filename.concat (source_root ()) "scripts/release-dashboard-bundle.py"
+  in
+  write_file
+    (Filename.concat dir ("masc-release-dashboard-bundle-" ^ suffix ^ ".py"))
+    (read_file bundle_helper);
+  (* Existing-workspace preflight downloads this release helper even when the
+     model wizard is disabled. Stage its actual source bytes before computing
+     SHA256SUMS, just as release assembly and install-smoke do. *)
+  write_file
+    (Filename.concat dir "install-runtime-setup.py")
+    (read_file (Filename.concat (source_root ()) "scripts/install-runtime-setup.py"));
+  (* These are test-owned bundle bytes, never a product dashboard build. The
+     packaging tool still pairs them with the actual tested binary digest. *)
+  let dashboard = Filename.concat dir "fixture-dashboard" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote dashboard));
+  write_file (Filename.concat dashboard "index.html") "<html>installer fixture</html>";
+  write_file (Filename.concat dashboard ".build-stamp") "2026-09-07T00:00:00Z\n";
+  let commit_channel =
+    Unix.open_process_in (Filename.quote asset ^ " build-commit")
+  in
+  let commit = String.trim (In_channel.input_all commit_channel) in
+  (match Unix.close_process_in commit_channel with
+   | Unix.WEXITED 0 -> ()
+   | _ -> fail "release fixture binary must report embedded commit");
+  let runtime_args =
+    match suffix with
+    | "macos-arm64" | "macos-x64" | "linux-arm64" | "linux-x64" ->
+      let runtime_root = Filename.concat dir "fixture-runtime" in
+      let runtime_archive = Filename.concat dir ("masc-runtime-" ^ suffix ^ ".tar.gz") in
+      (* This forwards to the test host's interpreter. It exercises the verified
+         bootstrap/install contract, not native Python or dylib portability. *)
+      let script =
+        {|import hashlib, io, json, os, pathlib, shlex, sys, tarfile
+root, archive, binary, commit, platform = sys.argv[1:]
+root = pathlib.Path(root)
+root.mkdir(exist_ok=True)
+probe = root / 'masc'
+if probe.is_symlink() or probe.exists():
+    probe.unlink()
+probe.symlink_to(pathlib.Path(binary).resolve())
+python = '#!/bin/sh\nexec ' + shlex.quote(os.path.realpath(sys.executable)) + ' "$@"\n'
+files = {'python/bin/python3': (python.encode(), 0o755),
+         'licenses/fixture.txt': (b'Test-only interpreter forwarding fixture.\n', 0o644),
+         'runtime-provenance.json': (json.dumps({'source_commit': commit, 'platform': platform}).encode(), 0o644)}
+with tarfile.open(archive, 'w:gz') as output:
+    for name, (data, mode) in sorted(files.items()):
+        info = tarfile.TarInfo(name)
+        info.size, info.mode = len(data), mode
+        output.addfile(info, io.BytesIO(data))
+|}
+      in
+      let command =
+        String.concat " "
+          (List.map Filename.quote
+             [ "python3"; "-c"; script; runtime_root; runtime_archive; asset; commit; suffix ])
+      in
+      check int "release fixture packages regular runtime members" 0 (Sys.command command);
+      [ "--runtime-archive"; runtime_archive; "--runtime-root"; runtime_root ]
+    | _ -> []
+  in
+  let companion_args =
+    List.concat_map
+      (fun (name, path) -> [ "--companion"; name; path ])
+      [ "masc-tui", tui; "masc-browser-host", browser_host
+      ; "masc-deployment-preflight-helper", helper
+      ; "masc-check-runtime-deployment-preflight", gate
+      ; "masc-exec-ssh-bootstrap", ssh_bootstrap ]
+  in
+  let package_command =
+    String.concat " "
+      (List.map Filename.quote
+         ([ "python3"; bundle_helper; "package"; "--binary"; asset
+         ; "--binary-asset"; platform_release_asset (); "--assets"; dashboard
+         ; "--source-commit"; commit; "--archive"
+         ; Filename.concat dir ("masc-dashboard-" ^ suffix ^ ".tar.gz") ]
+          @ companion_args @ runtime_args))
+  in
+  check int "release fixture packages matching dashboard" 0 (Sys.command package_command);
+  let checksum_script =
+    {|import hashlib, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+lines = [hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name
+         for path in sorted(root.iterdir()) if path.is_file() and path.name != 'SHA256SUMS']
+(root / 'SHA256SUMS').write_text('\n'.join(lines) + '\n')
+|}
+  in
+  let checksum_command =
+    String.concat " "
+      (List.map Filename.quote [ "python3"; "-c"; checksum_script; dir ])
+  in
+  check int "release fixture publishes artifact checksums" 0 (Sys.command checksum_command);
+  "file://" ^ Filename.concat base_path ".release"
+;;
+
+let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_version args base_path =
+  let root = source_root () in
+  let script = Filename.concat root "scripts/install.sh" in
+  let prefix = Filename.concat base_path ".local" in
+  install_real_masc_binary prefix;
+  Option.iter (fun version ->
+    let installed = Filename.concat prefix "masc" in
+    unlink_if_exists installed;
+    write_file installed
+      (Printf.sprintf "#!/bin/sh\nif [ \"$1\" = --version ]; then printf '%%s\\n' %s; else exec %s \"$@\"; fi\n"
+         (Filename.quote version) (Filename.quote (Unix.realpath (real_masc_binary ()))));
+    Unix.chmod installed 0o755) existing_version;
+  let release_base_url = stage_release_mirror base_path in
+  let quoted_args = String.concat " " (List.map Filename.quote args) in
+  let cmd =
+    Printf.sprintf
+      "%s%sMASC_RELEASE_BASE_URL=%s MASC_PREFIX=%s MASC_VERSION=%s MASC_BASE_PATH=%s bash %s --allow-unverified %s --base-path %s %s 2>&1"
+      extra_env
+      (if String.equal extra_env "" then "" else " ")
+      (Filename.quote release_base_url)
+      (Filename.quote prefix)
+      (Filename.quote (release_tag ()))
+      (Filename.quote base_path)
+      (Filename.quote script)
+      (if seed_config then "" else "--no-seed")
+      (Filename.quote base_path)
+      quoted_args
+  in
+  let ic = Unix.open_process_in cmd in
+  let closed = ref false in
+  Fun.protect
+    ~finally:(fun () -> if not !closed then ignore (Unix.close_process_in ic))
+    (fun () ->
+       let output = In_channel.input_all ic in
+       closed := true;
+       let status = Unix.close_process_in ic in
+       output, status)
+;;
+
+let run_install args base_path =
+  let output, status = run_install_status args base_path in
+  match status with
+  | Unix.WEXITED 0 -> output
+  | _ ->
+    Alcotest.fail
+      (Printf.sprintf
+         "install.sh exited with non-zero status: %s\ninstaller output:\n%s"
+         (String.concat " " (List.map Filename.quote args))
+         output)
+;;
+
+let test_config_seed_skips_each_existing_file_without_force () =
+  let base_path = Filename.temp_dir "masc-install-skills-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let config = Filename.concat base_path ".masc/config" in
+    let init = String.concat " "
+        (List.map Filename.quote [ real_masc_binary (); "init"; "--base-path"; base_path ]) in
+    check int "existing config prepared" 0 (Sys.command (init ^ " >/dev/null"));
+    Fs_compat.remove_tree (Filename.concat base_path ".masc/skills");
+    let runtime = Filename.concat config "runtime.toml" in
+    let edited = read_file runtime ^ "\n# operator config survives\n" in
+    write_file runtime edited;
+    let omitted = Filename.concat config "prompts/keeper.md" in
+    Sys.remove omitted;
+    let output, status = run_install_status ~seed_config:true ["--no-wizard"; "--no-guest-shim"] base_path in
+    check bool output true (status = Unix.WEXITED 0);
+    let body = Filename.concat base_path ".masc/skills/browser-lanes/SKILL.md" in
+    check bool "upgrade installs builtin Skill" true (Sys.file_exists body);
+    check bool "upgrade installs reference" true
+      (Sys.file_exists (Filename.concat (Filename.dirname body) "references/advanced.md"));
+    check string "runtime bytes preserved" edited (read_file runtime);
+    check bool "omitted prompt stays absent" false (Sys.file_exists omitted);
+    write_file body "operator's browser skill";
+    let output, status = run_install_status ~seed_config:true ["--no-wizard"; "--no-guest-shim"] base_path in
+    check bool output true (status = Unix.WEXITED 0);
+    check string "reinstall preserves Skill edit" "operator's browser skill" (read_file body))
+;;
+
+(* What follows [instructions =] in a keeper TOML, with the TOML string
+   delimiters and surrounding whitespace taken off. Empty means the key is
+   there but says nothing, which the loader treats the same as absent. *)
+let instructions_body toml =
+  let key = "instructions" in
+  let rec find i =
+    if i + String.length key > String.length toml then None
+    else if String.sub toml i (String.length key) = key then Some (i + String.length key)
+    else find (i + 1)
+  in
+  match find 0 with
+  | None -> None
+  | Some after_key ->
+    let rest = String.sub toml after_key (String.length toml - after_key) in
+    let rest = String.trim rest in
+    let rest =
+      if String.length rest > 0 && rest.[0] = '=' then
+        String.trim (String.sub rest 1 (String.length rest - 1))
+      else rest
+    in
+    let strip prefix s =
+      let n = String.length prefix in
+      if String.length s >= n && String.sub s 0 n = prefix then
+        String.sub s n (String.length s - n)
+      else s
+    in
+    Some (String.trim (strip "\"" (strip "\"\"\"" rest)))
+;;
+
+(* Every preset keeper TOML has to carry its own prompt.
+
+   The classic preset kept its prompts in keepers/<name>/AGENT.md until #29593
+   removed the only reader of that file. The TOMLs then had no
+   keeper.instructions, which lib/keeper/keeper_types_profile.ml rejects at
+   load, so `quickstart.sh --team classic` seeded four Keepers that could not
+   start -- and nothing noticed, because no test read a preset TOML.
+
+   The manifest check rides along: that list is what install.sh --team fetches,
+   so a name in it with no file behind it is a broken install. *)
+let test_presets_carry_their_own_instructions () =
+  let root = source_root () in
+  let presets_dir = Filename.concat root "presets" in
+  let presets =
+    Sys.readdir presets_dir
+    |> Array.to_list
+    |> List.filter (fun name -> Sys.is_directory (Filename.concat presets_dir name))
+    |> List.sort String.compare
+  in
+  if presets = [] then failf "no presets found under %s" presets_dir;
+  List.iter
+    (fun preset ->
+      let preset_dir = Filename.concat presets_dir preset in
+      let manifest_path = Filename.concat preset_dir "manifest.txt" in
+      if not (Sys.file_exists manifest_path) then
+        failf "preset %s has no manifest.txt" preset;
+      let entries =
+        read_file manifest_path
+        |> String.split_on_char '\n'
+        |> List.map String.trim
+        |> List.filter (fun line -> line <> "")
+      in
+      if entries = [] then failf "preset %s ships an empty manifest" preset;
+      let keeper_tomls = ref 0 in
+      List.iter
+        (fun rel ->
+          let path = Filename.concat preset_dir rel in
+          if not (Sys.file_exists path) then
+            failf "preset %s manifest lists a missing file: %s" preset rel;
+          if Filename.check_suffix rel ".toml" then begin
+            incr keeper_tomls;
+            match instructions_body (read_file path) with
+            | None -> failf "preset %s/%s sets no keeper.instructions" preset rel
+            | Some "" -> failf "preset %s/%s has an empty keeper.instructions" preset rel
+            | Some _ -> ()
+          end)
+        entries;
+      if !keeper_tomls = 0 then failf "preset %s ships no keeper TOML" preset)
+    presets
+;;
+
+let test_force_refreshes_same_version_existing_binary () =
+  let tmpdir = Filename.temp_file "masc-install-force-refresh-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+       let output = run_install [ "--dry-run"; "--force"; "--no-wizard" ] tmpdir in
+       assert_contains
+         "force refreshes same-version binary"
+         output
+         "refreshing because --force is set";
+       assert_contains
+         "force reaches download path"
+         output
+         "[dry-run] would download to";
+       assert_not_contains "force does not skip binary download" output "skipping download")
+;;
+
+let test_existing_release_upgrade_preserves_workspace () =
+  List.iter (fun force ->
+    let dir = Filename.temp_file "masc-install-upgrade-" "" in
+    Sys.remove dir;
+    Unix.mkdir dir 0o700;
+    Fun.protect
+      ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote dir)))
+      (fun () ->
+        let init = String.concat " " (List.map Filename.quote
+          [ real_masc_binary (); "init"; "--base-path"; dir ]) in
+        check int "existing workspace initialized" 0 (Sys.command (init ^ " >/dev/null"));
+        let marker = Filename.concat dir ".masc/config/runtime.toml" in
+        let original = read_file marker ^ "\n# operator-owned config\n" in
+        write_file marker original;
+        let args = [ "--no-wizard" ] @ (if force then [ "--force" ] else []) in
+        let output, status = run_install_status ~seed_config:true ~existing_version:"0.34.0" args dir in
+        check bool "existing release installs successfully" true (status = Unix.WEXITED 0);
+        assert_contains "verified replacement completed" output "installed verified binary/dashboard";
+        assert_contains "upgrade mode is explicit" output
+          (if force then "overwriting because --force is set" else "upgrading");
+        check string "operator runtime configuration preserved" original
+          (read_file marker)))
+    [ false; true ]
+;;
+
+let test_downgrade_and_unknown_version_require_force () =
+  List.iter (fun version ->
+    let dir = Filename.temp_dir "masc-install-version-refusal-" "" in
+    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () ->
+      let output, status = run_install_status ~existing_version:version
+        [ "--dry-run"; "--no-wizard" ] dir in
+      check bool "unrecognized version or downgrade is refused" true
+        (status <> Unix.WEXITED 0);
+      assert_contains "explicit overwrite instruction" output "pass --force to overwrite"))
+    [ "999.0.0"; "development-build" ]
+;;
+
+let test_provider_display_name_with_pipe_round_trips () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog ~deepseek_display_name:"Deep|Seek API" tmpdir);
+      let output, status =
+        run_install_status
+          [ "--dry-run"; "--provider"; "deepseek" ]
+          tmpdir
+      in
+      check bool "display name with pipe exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "dry-run default update logged"
+        output
+        "[dry-run] would set [runtime].default";
+      assert_not_contains
+        "display name pipe does not corrupt catalog"
+        output
+        "invalid provider wizard catalog";
+      assert_not_contains
+        "display name pipe does not truncate catalog"
+        output
+        "truncated provider wizard catalog record")
+;;
+
+let test_wizard_offers_subscription_runtime () =
+  let tmpdir = Filename.temp_file "masc-install-subscription-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_subscription tmpdir);
+      (* A subscription signs in through its own CLI and needs no key at all. *)
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "claude_code" ] tmpdir
+      in
+      check bool "subscription provider exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "subscription default runtime is set"
+        output
+        {|[dry-run] would set [runtime].default = "claude_code.claude-sonnet-5"|};
+      assert_not_contains
+        "subscription does not ask to export an API credential"
+        output
+        "is not set; export it in the shell that starts masc";
+      assert_not_contains
+        "subscription record is not rejected as unknown kind"
+        output
+        "unknown provider wizard catalog record kind";
+      assert_not_contains
+        "subscription record does not truncate the catalog"
+        output
+        "truncated provider wizard catalog record")
+;;
+
+let test_wizard_reports_model_source_availability () =
+  let tmpdir = Filename.temp_file "masc-install-detect-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      let output, status =
+        run_install_status
+          [ "--dry-run"; "--provider"; "deepseek" ]
+          tmpdir
+      in
+      check bool "detection report exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "wizard prints a detection report"
+        output
+        "detected model sources:";
+      assert_contains
+        "a down local server is reported as not running"
+        output
+        "Local llama.cpp: unreachable";
+      assert_contains
+        "a cloud provider is labeled cloud, not probed"
+        output
+        "DeepSeek API: cloud")
+;;
+
+let test_wizard_warns_when_selected_local_server_is_down () =
+  let tmpdir = Filename.temp_file "masc-install-detect-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      (* local_llama is keyless: it declares no credential env var. *)
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "local_llama" ] tmpdir
+      in
+      check bool "selecting a down local server still exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "the down local server is called out before finishing"
+        output
+        "Local llama.cpp is not ready at http://127.0.0.1:1/v1; check its server and authentication before using masc";
+      assert_contains
+        "the default runtime is still set to the chosen server"
+        output
+        {|[dry-run] would set [runtime].default = "local_llama.qwen"|})
+;;
+
+(* A non-dry default update validates AGENT_CORE capabilities, unlike catalog
+   display. Use a registered provider/model with a keyless closed-loopback
+   transport; fictional local_llama.qwen would fail before the ping is reached. *)
+let write_runtime_catalog_for_connectivity_probe base_path =
+  let config_dir = Filename.concat base_path ".masc/config" in
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+  write_file (Filename.concat config_dir "runtime.toml")
+    {|
+[runtime]
+default = "deepseek.deepseek-v4-flash"
+
+[providers.deepseek]
+display-name = "Local connectivity fixture"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.deepseek.healthcheck]
+path = "/models"
+
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[deepseek.deepseek-v4-flash]
+wizard-default = true
+|}
+;;
+
+(* The interactive wizard offers a connectivity test and can retry or abort. The
+   non-TTY path (CI, scripted --provider, or the zero-config auto-select) used to
+   return blind after writing the default. It now runs the same check
+   report-only: the fixture is keyless and bound to a closed loopback port, so
+   the check fails instantly without any network, and the install must still
+   finish 0 -- a first-run install surfaces an unreachable provider, it does not
+   gate on it. This is not a --dry-run: the run reaches the post-write step. *)
+let test_wizard_nontty_runs_report_only_connectivity_check () =
+  let tmpdir = Filename.temp_file "masc-install-nontty-ping-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      write_runtime_catalog_for_connectivity_probe tmpdir;
+      let output, status =
+        run_install_status [ "--provider"; "deepseek" ] tmpdir
+      in
+      if status <> Unix.WEXITED 0 then
+        failf "connectivity probe installer failed:\n%s" output;
+      assert_contains
+        "the non-TTY wizard reports the connectivity result instead of returning blind"
+        output
+        "provider connectivity check did not pass")
+;;
+
+(* MASC_INSTALL_NO_PING=1 is the air-gapped/offline opt-out: the non-TTY wizard
+   skips the connectivity check entirely, so neither the ok nor the failed
+   report line appears. *)
+let test_wizard_nontty_connectivity_check_opt_out () =
+  let tmpdir = Filename.temp_file "masc-install-nontty-noping-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      write_runtime_catalog_for_connectivity_probe tmpdir;
+      let output, status =
+        run_install_status
+          ~extra_env:"MASC_INSTALL_NO_PING=1"
+          [ "--provider"; "deepseek" ]
+          tmpdir
+      in
+      if status <> Unix.WEXITED 0 then
+        failf "connectivity opt-out installer failed:\n%s" output;
+      assert_not_contains
+        "the opt-out skips the post-write connectivity check"
+        output
+        "provider connectivity")
+;;
+
+let test_wizard_reports_execution_sandboxes () =
+  let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "local_llama" ] tmpdir
+      in
+      check bool "sandbox report exits 0" true (status = Unix.WEXITED 0);
+      (* Host-independent structure: the section and each of the three real
+         backends are listed. Whether each is "available" depends on the host,
+         so that is measured, not asserted here. *)
+      assert_contains
+        "the sandbox axis is reported"
+        output
+        "detected execution sandboxes";
+      assert_contains "docker backend is listed" output "docker:";
+      assert_contains
+        "the microvm backend is listed"
+        output
+        "microvm (apple container):";
+      assert_contains "the remote_ssh backend is listed" output "remote_ssh:";
+      assert_contains
+        "the report points at where the choice is actually made"
+        output
+        "sandbox_profile in .masc/config/keepers")
+;;
+
+let test_wizard_reports_subscription_sign_in () =
+  let tmpdir = Filename.temp_file "masc-install-signin-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_installed_subscription tmpdir);
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "claude_code" ] tmpdir
+      in
+      check bool "subscription sign-in probe exits 0" true (status = Unix.WEXITED 0);
+      (* /bin/echo is present (so past "installed") but is not the real client,
+         so runtime-probe reports it as not signed in. *)
+      assert_contains
+        "the report distinguishes installed from signed in"
+        output
+        "Claude Code Max Subscription: installed, not signed in")
+;;
+
+let test_wizard_zero_config_auto_selects_single_ready_source () =
+  let tmpdir = Filename.temp_file "masc-install-zeroconf-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      (* The fixture already has a config root, so --reset-config requests a
+         fresh default selection. Non-TTY and no --provider: the local server is
+         down and only the cloud provider has its key, so exactly one source is
+         ready and the wizard uses it without being told to. *)
+      let output, status =
+        run_install_status ~extra_env:"DEEPSEEK_API_KEY=fake-key"
+          [ "--dry-run"; "--reset-config" ]
+          tmpdir
+      in
+      check bool "zero-config auto-select exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "the one ready source is selected without a prompt"
+        output
+        "using the only ready source: DeepSeek";
+      assert_contains
+        "the selected source becomes the default"
+        output
+        {|[dry-run] would set [runtime].default = "deepseek.qwen"|})
+;;
+
+let test_wizard_skips_when_no_single_ready_source () =
+  let tmpdir = Filename.temp_file "masc-install-zeroconf-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_local_server tmpdir);
+      (* Request a fresh default selection for the existing fixture config.
+         With no key the cloud provider is not ready either, so
+         no source is unambiguously ready. Without a terminal the wizard leaves
+         the choice to the operator rather than guess. *)
+      let output, status =
+        run_install_status ~extra_env:"env -u DEEPSEEK_API_KEY"
+          [ "--dry-run"; "--reset-config" ]
+          tmpdir
+      in
+      check bool "no-ready-source skip exits 0" true (status = Unix.WEXITED 0);
+      assert_contains
+        "the wizard says it will not choose"
+        output
+        "no single ready source";
+      assert_not_contains
+        "and does not seed a default"
+        output
+        "would set [runtime].default")
+;;
+
+let test_wizard_names_the_missing_key_variable () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+       ignore (write_runtime_catalog tmpdir);
+       let output, status =
+         run_install_status
+           ~extra_env:"env -u DEEPSEEK_API_KEY"
+           [ "--provider"; "deepseek" ]
+           tmpdir
+       in
+       (* A key it cannot store is not a reason to fail an install. *)
+       check bool "missing key still exits zero" true (status = Unix.WEXITED 0);
+       assert_contains "names the variable" output "DEEPSEEK_API_KEY is not set";
+       assert_contains "prints the export line" output "export DEEPSEEK_API_KEY=")
+;;
+
+(* A ping with no key tests nothing, and must be reported as neither a pass nor
+   a failure. *)
+let test_wizard_skips_the_ping_without_a_key () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+       ignore (write_runtime_catalog tmpdir);
+       let output, _status =
+         run_install_status
+           ~extra_env:"env -u DEEPSEEK_API_KEY"
+           [ "--provider"; "deepseek" ]
+           tmpdir
+       in
+       assert_contains
+         "says the check was skipped"
+         output
+         "skipping the connectivity check";
+       assert_not_contains "claims no connectivity pass" output "provider connectivity: ok")
+;;
+
+(* The installer writes no secret anywhere under the base path. Asserted over the
+   whole tree rather than one filename, so a future writer under a different name
+   is caught too. *)
+let test_wizard_writes_no_secret_file () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+       ignore (write_runtime_catalog tmpdir);
+       let _output, _status =
+         run_install_status
+           ~extra_env:"DEEPSEEK_API_KEY=supersecret123"
+           [ "--provider"; "deepseek" ]
+           tmpdir
+       in
+       let hits =
+         Filename.quote tmpdir
+         |> Printf.sprintf "grep -rl supersecret123 %s 2>/dev/null | head -5"
+       in
+       let ic = Unix.open_process_in hits in
+       let found = In_channel.input_all ic in
+       ignore (Unix.close_process_in ic);
+       check string "no file under the base path holds the key" "" found)
+;;
+
+let test_wizard_updates_runtime_default () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      let runtime_file = write_runtime_catalog tmpdir in
+      let _output = run_install [ "--provider"; "deepseek" ] tmpdir in
+      let content = read_file runtime_file in
+      assert_contains
+        "default updated to concrete deepseek runtime"
+        content
+        "default = \"deepseek.deepseek-v4-flash\"")
+;;
+
+let test_unknown_provider_aborts () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog tmpdir);
+      let output, status = run_install_status [ "--provider"; "not-a-real-provider" ] tmpdir in
+      check bool "script fails for unknown provider" true (status <> Unix.WEXITED 0);
+      assert_contains "unknown provider message" output "unknown provider")
+;;
+
+let test_unknown_default_provider_aborts () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog ~default:"missing.deepseek-v4-flash" tmpdir);
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "deepseek" ] tmpdir
+      in
+      check bool "script fails for unknown default provider" true (status <> Unix.WEXITED 0);
+      assert_contains
+        "unknown default provider message"
+        output
+        "default runtime id is not present in provider bindings")
+;;
+
+let runtime_toml_or_fail path =
+  match Otoml.Parser.from_file_result path with
+  | Ok toml -> toml
+  | Error msg -> failf "runtime TOML parse failed: %s" msg
+;;
+
+let provider_entries_in_runtime_toml path =
+  let toml = runtime_toml_or_fail path in
+  match Otoml.find_opt toml Fun.id [ "providers" ] with
+  | None -> fail "runtime.toml should define [providers]"
+  | Some providers -> Otoml.get_table providers
+;;
+
+let provider_ids_in_runtime_toml path =
+  provider_entries_in_runtime_toml path |> List.map fst |> List.sort String.compare
+;;
+
+let provider_healthcheck_path provider_tbl =
+  Otoml.find_opt provider_tbl Otoml.get_string [ "healthcheck"; "path" ]
+;;
+
+let test_wizard_dry_run_no_seed_skips () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      let output, status = run_install_status [ "--dry-run"; "--no-seed" ] tmpdir in
+      check bool "dry-run + no-seed exits 0" true (status = Unix.WEXITED 0);
+      assert_contains "skip message" output "runtime.toml not found; skipping")
+;;
+
+let test_wizard_forced_without_catalog_errors () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      let output, status = run_install_status [ "--dry-run"; "--no-seed"; "--wizard" ] tmpdir in
+      check bool "forced wizard without catalog fails" true (status <> Unix.WEXITED 0);
+      assert_contains "catalog missing message" output "runtime.toml not found")
+;;
+
+let test_invalid_provider_key_env_name_errors () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      ignore (write_runtime_catalog_with_invalid_key tmpdir);
+      let output, status =
+        run_install_status [ "--dry-run"; "--provider"; "deepseek" ] tmpdir
+      in
+      check bool "invalid credential key exits nonzero" true (status <> Unix.WEXITED 0);
+      assert_contains
+        "invalid credential key message"
+        output
+        "credential key must be a valid environment variable name")
+;;
+
+let test_wizard_parses_real_runtime_toml () =
+  let root = source_root () in
+  let real_runtime = Filename.concat root "config/runtime.toml" in
+  let ids = provider_ids_in_runtime_toml real_runtime in
+  check bool "real runtime.toml has providers" true (ids <> []);
+  List.iter
+    (fun id ->
+       let tmpdir = Filename.temp_file "masc-install-ratchet-" "" in
+       Sys.remove tmpdir;
+       Unix.mkdir tmpdir 0o700;
+       Fun.protect
+         ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+         (fun () ->
+            let config_dir = Filename.concat tmpdir ".masc/config" in
+            ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+            ignore
+              (Sys.command
+                 (Printf.sprintf
+                    "cp %s %s"
+                    (Filename.quote real_runtime)
+                    (Filename.quote (Filename.concat config_dir "runtime.toml"))));
+            let output, status =
+              run_install_status
+                [ "--dry-run"; "--provider"; id ]
+                tmpdir
+            in
+            check bool ("dry-run succeeds for provider " ^ id) true (status = Unix.WEXITED 0);
+            assert_contains
+              ("dry-run default update logged for provider " ^ id)
+              output
+              "[dry-run] would set [runtime].default"))
+    ids
+;;
+
+let test_real_runtime_toml_provider_healthchecks () =
+  let root = source_root () in
+  let real_runtime = Filename.concat root "config/runtime.toml" in
+  provider_entries_in_runtime_toml real_runtime
+  |> List.iter (fun (id, provider_tbl) ->
+    match provider_healthcheck_path provider_tbl with
+    | Some path when String.length path > 0 && path.[0] = '/' -> ()
+    | Some path -> failf "provider %s healthcheck.path must be absolute, got %s" id path
+    | None ->
+        (* Missing healthcheck.path is advisory; the installer skips the ping. *)
+        ())
+;;
+
+let test_missing_provider_flag_value_errors () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      let output, status = run_install_status [ "--provider" ] tmpdir in
+      check bool "missing provider value exits nonzero" true (status <> Unix.WEXITED 0);
+      assert_contains "missing provider value message" output "--provider requires a value")
+;;
+
+let test_invalid_sandbox_profile_rejected () =
+  let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      let output, status = run_install_status [ "--sandbox"; "bogus" ] tmpdir in
+      check bool "invalid sandbox exits nonzero" true (status <> Unix.WEXITED 0);
+      assert_contains
+        "invalid sandbox names the three real profiles"
+        output
+        "--sandbox must be docker, microvm, or remote_ssh")
+;;
+
+let test_local_sandbox_profile_rejected () =
+  let tmpdir = Filename.temp_file "masc-install-sandbox-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      (* "local" is not a loadable sandbox_profile, so seeding it would break the
+         keeper; the flag rejects it rather than write a keeper that fails to load. *)
+      let output, status = run_install_status [ "--sandbox"; "local" ] tmpdir in
+      check bool "local sandbox exits nonzero" true (status <> Unix.WEXITED 0);
+      assert_contains
+        "local sandbox is called out as not loadable"
+        output
+        "not a loadable profile")
+;;
+
+let test_runtime_default_update_preserves_comments_and_leaves_no_temp () =
+  let tmpdir = Filename.temp_file "masc-install-wizard-" "" in
+  Sys.remove tmpdir;
+  Unix.mkdir tmpdir 0o700;
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote tmpdir)))
+    (fun () ->
+      let config_dir = Filename.concat tmpdir ".masc/config" in
+      let runtime_file = Filename.concat config_dir "runtime.toml" in
+      ignore (Sys.command ("mkdir -p " ^ Filename.quote config_dir));
+      write_file
+        runtime_file
+        {|
+# top comment
+[runtime]
+default = "ollama_cloud.deepseek-v4-flash"
+# keep this comment
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.healthcheck]
+path = "/models"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[deepseek.deepseek-v4-flash]
+wizard-default = true
+|};
+      let _output =
+        run_install [ "--provider"; "deepseek" ] tmpdir
+      in
+      let updated = read_file runtime_file in
+      assert_contains
+        "default updated to concrete deepseek runtime"
+        updated
+        "default = \"deepseek.deepseek-v4-flash\"";
+      assert_contains "pre-existing comment preserved" updated "# keep this comment";
+      assert_contains "top comment preserved" updated "# top comment";
+      check bool "no runtime.toml.bak file" false (Sys.file_exists (runtime_file ^ ".bak"));
+      let stale_atomic_tmps =
+        Sys.readdir (Filename.dirname runtime_file)
+        |> Array.to_list
+        |> List.filter Fs_compat.is_atomic_orphan_name
+      in
+      check (list string) "no stale atomic tmp files" [] stale_atomic_tmps)
+;;
+
+let () =
+  run "install_script"
+    [ ( "config_seed"
+      , [ test_case "an upgrade keeps config and installs missing builtin Skills" `Quick test_config_seed_skips_each_existing_file_without_force
+        ; test_case "--force refreshes same-version existing binary" `Quick test_force_refreshes_same_version_existing_binary
+        ] )
+    ; ( "wizard"
+      , [ test_case "provider display names with pipes round-trip" `Quick test_provider_display_name_with_pipe_round_trips
+        ; test_case "wizard names the missing key variable" `Quick test_wizard_names_the_missing_key_variable
+        ; test_case "wizard skips the ping without a key" `Quick test_wizard_skips_the_ping_without_a_key
+        ; test_case "wizard writes no secret file" `Quick test_wizard_writes_no_secret_file
+        ; test_case "wizard updates runtime.toml default" `Quick test_wizard_updates_runtime_default
+        ; test_case "unknown provider aborts" `Quick test_unknown_provider_aborts
+        ; test_case "unknown default provider aborts" `Quick test_unknown_default_provider_aborts
+        ; test_case "dry-run + no-seed skips wizard when catalog is absent" `Quick test_wizard_dry_run_no_seed_skips
+        ; test_case "older release upgrades with and without force" `Quick test_existing_release_upgrade_preserves_workspace
+        ; test_case "downgrades and unrecognized versions need force" `Quick test_downgrade_and_unknown_version_require_force
+        ; test_case "forced wizard without catalog errors" `Quick test_wizard_forced_without_catalog_errors
+        ; test_case "invalid provider key env name errors" `Quick test_invalid_provider_key_env_name_errors
+        ; test_case "wizard offers a subscription runtime with no api key" `Quick test_wizard_offers_subscription_runtime
+        ; test_case "wizard reports which model sources are available" `Quick test_wizard_reports_model_source_availability
+        ; test_case "wizard warns when the selected local server is down" `Quick test_wizard_warns_when_selected_local_server_is_down
+        ; test_case "non-TTY wizard runs a report-only connectivity check without gating" `Quick test_wizard_nontty_runs_report_only_connectivity_check
+        ; test_case "non-TTY connectivity check honors the MASC_INSTALL_NO_PING opt-out" `Quick test_wizard_nontty_connectivity_check_opt_out
+        ; test_case "wizard reports available execution sandboxes" `Quick test_wizard_reports_execution_sandboxes
+        ; test_case "wizard auto-selects the single ready source without a terminal" `Quick test_wizard_zero_config_auto_selects_single_ready_source
+        ; test_case "wizard skips when no single source is ready" `Quick test_wizard_skips_when_no_single_ready_source
+        ; test_case "wizard reports whether a subscription is signed in" `Quick test_wizard_reports_subscription_sign_in
+        ; test_case "wizard parses the real runtime.toml catalog" `Quick test_wizard_parses_real_runtime_toml
+        ; test_case "real runtime.toml providers declare healthcheck paths" `Quick test_real_runtime_toml_provider_healthchecks
+        ; test_case "--provider requires a value" `Quick test_missing_provider_flag_value_errors
+        ; test_case "invalid --sandbox is rejected" `Quick test_invalid_sandbox_profile_rejected
+        ; test_case "--sandbox local is rejected" `Quick test_local_sandbox_profile_rejected
+        ; test_case "runtime default update preserves comments and leaves no temp/bak files" `Quick test_runtime_default_update_preserves_comments_and_leaves_no_temp
+        ] )
+    ; ( "team"
+      , [ test_case "presets carry their own instructions" `Quick test_presets_carry_their_own_instructions
+        ] )
+    ]
+;;

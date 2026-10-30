@@ -1,0 +1,93 @@
+{
+  "suite_name": "coding-eval",
+  "total_runs": 23,
+  "overall_pass_rate": 0.391304347826087,
+  "total_cost_usd": null,
+  "results": [
+    {
+      "case_id": "l1-bash-classify",
+      "runs": 5,
+      "pass_at_k": 0.0,
+      "mean_score": 0.0,
+      "consistency": 0.0,
+      "ci95_low": 0.0,
+      "ci95_high": 0.0,
+      "min_runs_met": true,
+      "total_cost_usd": null
+    },
+    {
+      "case_id": "l1-calc-add",
+      "runs": 5,
+      "pass_at_k": 0.19999999999999996,
+      "mean_score": 0.2,
+      "consistency": 0.4,
+      "ci95_low": 0.0,
+      "ci95_high": 0.7552000000000001,
+      "min_runs_met": true,
+      "total_cost_usd": null
+    },
+    {
+      "case_id": "l1-node-sum",
+      "runs": 5,
+      "pass_at_k": 0.8,
+      "mean_score": 0.8,
+      "consistency": 0.4,
+      "ci95_low": 0.24480000000000013,
+      "ci95_high": 1.0,
+      "min_runs_met": true,
+      "total_cost_usd": null
+    },
+    {
+      "case_id": "l2-node-stats",
+      "runs": 2,
+      "pass_at_k": 1.0,
+      "mean_score": 1.0,
+      "consistency": 0.0,
+      "ci95_low": 1.0,
+      "ci95_high": 1.0,
+      "min_runs_met": false,
+      "total_cost_usd": null
+    },
+    {
+      "case_id": "l2-py-slugify",
+      "runs": 2,
+      "pass_at_k": 0.5,
+      "mean_score": 0.5,
+      "consistency": 0.5,
+      "ci95_low": 0.0,
+      "ci95_high": 1.0,
+      "min_runs_met": false,
+      "total_cost_usd": null
+    },
+    {
+      "case_id": "l3-py-config-plumb",
+      "runs": 2,
+      "pass_at_k": 0.5,
+      "mean_score": 0.5,
+      "consistency": 0.5,
+      "ci95_low": 0.0,
+      "ci95_high": 1.0,
+      "min_runs_met": false,
+      "total_cost_usd": null
+    },
+    {
+      "case_id": "l3-py-rename-callers",
+      "runs": 2,
+      "pass_at_k": 0.0,
+      "mean_score": 0.0,
+      "consistency": 0.0,
+      "ci95_low": 0.0,
+      "ci95_high": 0.0,
+      "min_runs_met": false,
+      "total_cost_usd": null
+    }
+  ],
+  "bucket_counts": {
+    "verify_green": 9,
+    "verify_red": 14,
+    "timeout": 0,
+    "provider_error": 0,
+    "transport_error": 0
+  },
+  "unrun_case_ids": []
+}

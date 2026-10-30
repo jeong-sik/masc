@@ -1,0 +1,54 @@
+{
+  "is_derivative": true,
+  "source_version": 13,
+  "notes": [
+    {
+      "note_id": "6",
+      "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793044490.927056,
+      "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3"
+    },
+    {
+      "note_id": "11",
+      "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793044496.128044,
+      "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_SECOND"
+    },
+    {
+      "note_id": "12",
+      "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793044507.534183,
+      "body": "SCHEDULE_EFFECT_ca030a072adf40f0a831b8f5ec8615b3_AFTER_B"
+    },
+    {
+      "note_id": "13",
+      "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+      "author_id": "audit-live-deepseek",
+      "author_kind": "automated_actor",
+      "created_at": 1793044514.833301,
+      "body": "정정 기록: 위 AFTER_B 는 선행 조건을 실제로 관측한 결과가 아니다. 두 번째 schedule 의 노트(note_id 11, body ..._SECOND)는 다른 job 이 만든 것이 아니라 이 Keeper(audit-live-deepseek)가 직전 턴에서 실수로 직접 작성했다. 따라서 원래 요구된 \"다른 job 이 남긴 B 노트를 관측한 뒤에만 AFTER_B 기록\" 조건은 충족되지 않았고, 교차 schedule 의존성 관측은 실패다. 이 schedule 의 산출물은 감사 증거로 쓰지 말 것."
+    }
+  ],
+  "total_scenario_notes": 4,
+  "selection": "Every note on either exact synthetic schedule ID, including unrequested/correction notes. No marker-only filtering.",
+  "schedules": [
+    {
+      "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d-second",
+      "schedule_instance_id": "01a179c7-aabb-7000-9c8e-fa7c65385ef4",
+      "status": "succeeded",
+      "due_at": 1793044491.93922
+    },
+    {
+      "schedule_id": "audit-real-model-ba22dc383b7246c1b57a73aa007ec19d",
+      "schedule_instance_id": "01a179c7-723c-7000-a67d-68227ecd2ccc",
+      "status": "succeeded",
+      "due_at": 1793044477.475823
+    }
+  ]
+}

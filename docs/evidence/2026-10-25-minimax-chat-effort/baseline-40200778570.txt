@@ -1,0 +1,12 @@
+run: 40200778570
+url: https://github.com/jeong-sik/masc/actions/runs/40200778570
+head: 5908caa067647a60b856d42e1e1f23a0a2193385
+raw_sha256: c09b30588a6af805b75ea2f7db73e2a3cd7c0e27e5c7ca659f596e30aee41e5e
+raw_bytes: 594579
+
+test suite	Checkout	2026-10-25T14:08:05.7301601Z HEAD is now at 5908caa0 test(minimax): reproduce native M3.1 Chat effort rejection
+test suite	Test	2026-10-25T14:09:12.9534892Z [targeted] @@packages/agent_core/test/runtest-test_backend_openai_codec: start 2026-10-25T14:09:12Z (dune alias)
+test suite	Test	2026-10-25T14:09:50.0562798Z   ^[[31m[FAIL]^[[0m        ^[[36mparse^[[0m             12   MiniMax M3.1 native Chat depth control.
+test suite	Test	2026-10-25T14:09:50.2156716Z ^[[2m│ ^[[0m^[[31m[FAIL]^[[0m        ^[[36mparse^[[0m             12   MiniMax M3.1 native Chat depth cont...^[[2m  │^[[0m
+test suite	Test	2026-10-25T14:09:50.2161121Z ^[[31m1 failure!^[[0m in 0.111s. 65 tests run.
+test suite	Test	2026-10-25T14:09:50.2162730Z [targeted] @@packages/agent_core/test/runtest-test_backend_openai_codec: FAIL exit 1 in 38s

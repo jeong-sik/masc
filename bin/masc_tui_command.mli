@@ -1,0 +1,329 @@
+(** What the operator typed into the composer: a message for the keeper, or
+    a command for the TUI.
+
+    The composer is the one input row every surface shows, addressed to the
+    keeper the roster cursor points at. Most of what is typed there is a
+    message. A line that starts with a slash is a command this module names,
+    and a command this build does not know is reported as such rather than
+    sent to the keeper as text - a mistyped command should not become an
+    instruction the keeper acts on.
+
+    The grammar is closed: one leading slash, one whole word, the rest of the
+    first line, then any further lines. {!parse} matches the word exactly and
+    never by prefix; the prefix work belongs to {!hint} and {!autocomplete},
+    which suggest rather than decide. A command may answer to more than one
+    word - four do - and {!catalog} carries the other spellings in
+    {!command_help.aliases} so the pair is one command everywhere it is read. *)
+
+type t =
+  | Say of string  (** Plain text for the keeper, unchanged. *)
+  | Task_for_keeper of {
+      title : string;  (** The rest of the first line after [/task]. *)
+      body : string;  (** Every line after the first, as typed. *)
+    }
+  | Task_recover  (** Restore the latest retained command for this Keeper/workspace; never sends it. *)
+  | Task_inspect  (** Read exact original creation facts; never sends a Task. *)
+  | Task_missing_title  (** [/task] with nothing after it on the line. *)
+  | Help  (** [/help] — draw the command list into the pane. *)
+  | Features
+      (** [/features] — draw the feature sheet into the pane: what this TUI
+          can do, one sentence each, with the command, key or name that opens
+          each. *)
+  | Show_load_errors
+      (** [/errors] — put current chat loading failures in the scrollable local log. *)
+  | About
+      (** [/about] or [/splash] — the turning MASC imp over the surface, with
+          the theme and the keeper count. *)
+  | Lane_addons of string
+  | Play_invites
+  | Play_link of string option
+      (** [/play link] opens the newest retained card; [/play link <name>]
+          opens that invite's card. *)
+  | Play_invite of { name : string; hours : int }
+  | Play_revoke of string
+  | Play_invalid of string
+  | Open_score of int
+      (** [/score [N]] opens a frozen alphaTex score in this terminal using
+          official alphaTab notation and playback; N is newest-first. *)
+  | Score_invalid_index
+  | Open_images of int
+      (** [/images [N]] selects a frozen image/diagram, newest first, including
+          earlier outputs in one reply and staged composer attachments. *)
+  | List_images
+      (** [/images] lists and freezes image/diagram numbers until the next list. *)
+  | Images_invalid_index
+  | Open_artifacts
+      (** [/artifacts] or [/reports] opens the published artifact library. *)
+  | Open_music
+      (** [/music] opens the terminal music library without score graphics. *)
+  | Open_music_midi
+      (** [/music midi] opens the newest MIDI in this conversation in the phrase editor. *)
+  | Music_invalid_arguments
+  | Listen
+      (** [/listen] — play the newest playable attachment in this
+          conversation (audio through the local player chain, MIDI through
+          fluidsynth with the configured soundfont). *)
+  | Open_metrics
+      (** [/metrics] or [/telemetry] — open Usage with quotas, Keeper reports, and telemetry. *)
+  | Account_login of string
+  | Open_settings
+      (** [/settings] — open the type-aware Runtime parameters pane. *)
+  | Open_diff
+      (** [/diff] — open Git working-tree changes and diff for the workspace. *)
+  | Open_patch_modal
+      (** [/patch] or [/review] — open the patch review overlay. *)
+  | Open_usage
+      (** [/cost] — open Usage for provider quotas and Keeper usage. *)
+  | Open_link_preview of string option
+      (** [/preview [url]] — open the OpenGraph preview overlay for a web link. *)
+  | Open_links_list
+      (** [/links] — browse and inspect all web links mentioned in the conversation. *)
+  | Copy_latest_reply
+      (** [/copy] — send the selected Keeper's latest stored reply through OSC 52. *)
+  | Set_embeds of [ `On | `Compact | `Off ]
+      (** [/embeds [on|compact|off]] — configure inline chat rich embed cards. *)
+  | Open_changes
+      (** [/changes] — open recorded file changes for this keeper. *)
+  | Toggle_acting_pane
+      (** [/activity] — the Activity pane beside this surface, narrow, wide
+          or hidden in turn: the same cycle as Ctrl-L. *)
+  | Show_acting_pane_tab of [ `Fleet | `Changes ]
+      (** [/activity fleet], [/activity changes] — show the pane on that
+          tab: the fleet's feed, or the selected keeper's file changes. *)
+  | Acting_pane_tab_unknown of string
+      (** [/activity <word>] with a word that names no tab; reported, not
+          guessed. *)
+  | Set_acting_pane_call_order of [ `Next | `Newest | `Oldest | `Longest | `By_tool ]
+      (** [/activity order] turns the order of the pane's calls one step,
+          the same step a press on their heading takes; [/activity order
+          newest|oldest|longest|tool] goes straight to that order. The
+          keyboard's way to what was a mouse-only press (#37672). *)
+  | Acting_pane_call_order_unknown of string
+      (** [/activity order <word>] with a word that names no order;
+          reported, not guessed. *)
+  | Scroll_acting_pane of [ `Up | `Down | `Top | `By of int ]
+      (** [/activity scroll up|down|top|+N|-N] — scroll the pane from the
+          keyboard: one wheel notch, back to the top, or a signed number of
+          rows. The wheel and the "more" row were the only ways (#37672). *)
+  | Acting_pane_scroll_unknown of string
+      (** [/activity scroll <word>] with a word that is none of those,
+          including a bare number without its sign; reported, not
+          guessed. *)
+  | Switch_keeper of string
+      (** [/keeper <name>] — point this pane at another keeper. *)
+  | Switch_keeper_missing_name  (** [/keeper] with no name on the line. *)
+  | Queue of string
+  | Run_next
+  | Priority of string option
+      (** [/priority [on|off]] or [/autonext [on|off]] — toggle or set
+          automatic next-turn promotion for queued user input. *)
+  | Answer_tool_approval of bool
+      (** [/approve] or [/deny] answers this Keeper's held tool call. *)
+  | Interrupt_turn
+      (** [/interrupt] — the composer form of the interrupt keybinding, for
+          an operator mid-sentence whose hands are already on letters. *)
+  | Interrupt_keeper_turn of string
+      (** [/interrupt <name>] — stop a turn belonging to a keeper this pane
+          is not showing. Every other way in needs that keeper on screen,
+          and the key that would put it there is refused while any request
+          is in flight, which is exactly when one is running (#33852). *)
+  | Steer_turn of string
+      (** [/steer <message>] — interrupt the streaming turn, then dispatch
+          this exact message before ordinary next-turn input. *)
+  | Steer_missing_message
+      (** [/steer] without replacement text. *)
+  | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
+      (** [/thinking [hidden|folded|full]] — set or cycle reasoning visibility.
+          Replaces the earlier [Toggle_thinking]: two states could not say
+          "keep the count but not the text". *)
+  | Open_calls
+  | Set_tools of [ `Toggle | `Compact | `Results | `Full ]
+      (** [/tools [compact|results|full]] — set or cycle tool-call detail. *)
+  | Cycle_memory
+      (** [/memory] — cycle Librarian/Memory journal rows: summary, full,
+          hidden. Ctrl-N walks the same cycle. *)
+  | Open_fleet_memory
+      (** [/fleet-memory] — browse the facts of every Keeper in the fleet at
+          once. [a] on the Memory overview opens the same screen. *)
+  | Find_in_chat of string
+      (** [/find <text>] — put the pane on the newest message holding [text].
+
+          A slash word rather than a key: every printable byte in this pane is
+          composer text, so [/] cannot arm a search here the way it does on a
+          list surface, and the chords are spent. It is also the shape the
+          pane already has for doing a thing to this conversation. *)
+  | Find_next
+      (** [/find] with nothing after it — the next match older than the one
+          the pane is parked on, in the text it was last given. The arg-less
+          form continues rather than resets, which is what [/thinking] with no
+          argument already means here. *)
+  | Open_measurement of string
+  | Measurement_missing_sha
+  | Inspect_context
+      (** [/context] — inspect the last provider input observed for this
+          Keeper, including exact prompt-block text where it was captured. *)
+  | View_image of string
+      (** [/image <path>] — draw an image file on the terminal, if it can
+          hold one. The path is the rest of the first line, untrimmed of
+          nothing but the space after the word: a path may contain spaces,
+          and quoting it would be a second grammar. *)
+  | View_image_missing_path  (** [/image] with no path on the line. *)
+  | Attach_image of string
+      (** [/attach <path>] — stage an image to send with the next message to
+          this Keeper. Distinct from [/image], which draws on the terminal and
+          sends nothing: one is for the operator to look at, the other is for
+          the Keeper to read. The path grammar matches [/image]. *)
+  | Attach_image_missing_path  (** [/attach] with no path on the line. *)
+  | Attach_image_ref of string
+    (** [/ref <url|file_id>] — stage an image reference the provider fetches. *)
+  | Attach_image_ref_missing_value
+    (** [/ref] with no value on the line. *)
+  | Preset_list  (** [/preset] — list the prompt presets the server holds. *)
+  | Preset_save of {
+      name : string;
+      description : string;
+    }
+      (** [/preset save <name> [description]] — snapshot prompt overrides,
+          keeper instructions and runtime routing under [name]. *)
+  | Preset_save_missing_name  (** [/preset save] with no name. *)
+  | Preset_restore of string
+      (** [/preset restore <name>] — autosave the live state, then apply. *)
+  | Preset_restore_missing_name  (** [/preset restore] with no name. *)
+  | Preset_show of string
+      (** [/preset show <name>] — what that preset holds, by kind. *)
+  | Preset_show_missing_name  (** [/preset show] with no name. *)
+  | Preset_delete of string
+      (** [/preset delete <name>] — remove that preset, whether or not it
+          loads. *)
+  | Preset_delete_missing_name  (** [/preset delete] with no name. *)
+  | Unknown of string  (** A slash word this build does not know, by name. *)
+
+type command_help = {
+  word : string;  (** The slash word itself, without the slash. *)
+  aliases : string list;
+      (** The other spellings the parser answers to with the same command, as
+          {!parse} folds them into one arm. [[]] for a command with one name. *)
+  args : string;  (** How the rest of the line reads, or [""] for none. *)
+  summary : string;  (** One line on what it does. *)
+}
+
+val queue_help : command_help
+(** The [/queue] entry of {!catalog}. The usage error and the queue snapshot
+    print its {!usage}, so the forms are written once. *)
+
+val catalog : command_help list
+(** Every command this build knows, said once: an alias rides in its command's
+    {!aliases} rather than taking an entry of its own. {!help_lines} is drawn
+    from it, so a command cannot be described one way in the help and another
+    in the composer. *)
+
+val spellings : string list
+(** Every slash word the composer accepts: each {!catalog} word followed by its
+    aliases, in that order. {!hint} and {!autocomplete} answer to all of them. *)
+
+val usage : command_help -> string
+(** [/word args], or [/word] where there are none. *)
+
+val help_usage : command_help -> string
+(** {!usage} plus the command's other spellings in parentheses. The column both
+    the [/help] list and the cheat sheet draw. *)
+
+val help_summary_column : int
+(** Where a help row's summary starts, counted from the usage's first cell. *)
+
+val help_summary_padding : string -> string
+(** The spaces between a {!help_usage} column and its summary, so the two
+    readers of that row do not each carry the column width. *)
+
+type hint =
+  | No_command  (** The composer holds a message, not a command. *)
+  | Candidates of {
+      typed : string;  (** The word so far, without its slash. *)
+      entries : command_help list;
+          (** What that word could still become, in catalog order. *)
+    }
+  | Chosen of command_help  (** The word names this command exactly. *)
+  | Unknown_command of string  (** The word begins nothing the parser knows. *)
+
+type hint_span =
+  | Typed of string  (** Glyphs the operator has already entered. *)
+  | Untyped of string  (** What the word would still need. *)
+  | Detail of string  (** Arguments, summaries, separators. *)
+  | Wrong of string  (** A word that names no command. *)
+(** One piece of a hint row, split where its colour changes. This module
+    draws nothing: it says which glyphs were typed and which are still ahead,
+    and the renderer decides what each looks like. *)
+
+val hint_spans : hint -> hint_span list
+(** The hint as coloured pieces, in reading order. Empty for
+    {!No_command}. *)
+
+val hint_span_text : hint_span -> string
+(** The glyphs a span carries, whatever kind it is. *)
+
+val hint : string -> hint
+(** What to show while the operator is typing. A half-typed word lists its
+    candidates rather than describing one, because {!parse} does no prefix
+    matching and the line is not sendable yet. *)
+
+val hint_line : hint -> string option
+(** {!hint} as one row for the composer's footer, or [None] where there is
+    nothing to say. *)
+
+val help_lines : string list
+(** One line per command, the list [/help] draws. Kept beside the parser so a
+    new command cannot ship without its line. An alias shares its command's
+    line rather than repeating the summary below it. *)
+
+(** How [/keeper <name>] resolved against the roster. *)
+type keeper_match =
+  | Keeper_found of string
+  | Keeper_ambiguous of string list
+      (** More than one roster name starts with what was typed; the
+          candidates are reported rather than guessed between. *)
+  | Keeper_unknown
+
+val resolve_keeper_name : names:string list -> string -> keeper_match
+(** Exact name first — a keeper whose full name prefixes another's stays
+    reachable — then a unique prefix. Command words stay closed; only the
+    name argument matches by prefix. *)
+
+val parse : string -> t
+(** Read the composer's text. Leading blanks are not stripped before the
+    slash is looked for: an operator who types a space first meant text. *)
+
+val task_message : task_id:string -> title:string -> body:string -> string
+(** The message handed to the keeper once its task exists: the task id in
+    front of what the operator wrote, so the keeper can claim the exact task
+    and the operator's own words carry the request. *)
+
+type direction = Next | Prev
+
+type menu_state = Menu_idle | Menu_dismissed of string | Menu_selected of { draft : string; index : int }
+type menu_item = { completion : string; label : string; description : string }
+type menu = private { items : menu_item list; selected : int }
+val menu : keeper_names:string list -> state:menu_state -> string -> menu option
+(** Suggestions describe existing commands. Selection never changes the draft
+    or executes a command. A dismissed menu stays closed until the draft changes. *)
+val menu_step : direction:direction -> draft:string -> menu -> menu_state
+val menu_accept : menu -> string
+val menu_window : max_rows:int -> menu -> (bool * menu_item) list
+(** A contiguous window that always contains the selected row. *)
+(** Direction to step when cycling autocomplete candidates. *)
+
+val autocomplete :
+  ?direction:direction ->
+  ?keeper_names:string list ->
+  string ->
+  string option
+(** [autocomplete ?direction ?keeper_names text] computes the completed command line.
+    [direction] defaults to [Next] (e.g. for Tab or ArrowDown). [Prev] moves backward
+    through candidate commands and argument options (e.g. for ArrowUp or Shift-Tab).
+    An exact command word keeps its identity even when it prefixes another command;
+    completion only adds its argument separator, or returns [None] for no arguments.
+    Returns [None] if [text] is not a slash command. *)
+
+val is_slash_navigable : ?keeper_names:string list -> string -> bool
+(** [is_slash_navigable ?keeper_names text] determines if the composer input currently
+    holds an active slash command prefix or enumerated sub-arguments that should be
+    navigated by ArrowUp/ArrowDown instead of message history recall. *)

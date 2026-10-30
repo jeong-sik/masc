@@ -1,0 +1,366 @@
+(** Provider identity rows embedded in the model catalog TOML.
+
+    This module owns the strict parse boundary for [models.toml] [[providers]]
+    rows. Keeping it separate from {!Model_catalog} makes the packaged TOML a
+    reusable provider/model catalog surface instead of adding provider-specific
+    branches to model capability lookup. *)
+
+module Result_syntax = struct
+  let ( let* ) = Result.bind
+end
+
+open Result_syntax
+
+type entry =
+  { id : string
+  ; aliases : string list
+  ; kind : Provider_kind.t
+  ; identity_kinds : Provider_kind.t list
+  ; base_url : string
+  ; request_path : string
+  ; requires_api_key : bool
+  ; default_model : string option
+  ; discovery_timeout_s : float option
+  ; capabilities_base : string option
+  ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
+  ; supports_parallel_tool_suppression : bool
+  ; serves_bare_models : Model_identifiers.Model_id.t list
+  }
+
+let find_string_field ~entry_id key toml =
+  match Otoml.find_opt toml Otoml.get_string [ key ] with
+  | Some s -> Ok (Some s)
+  | None -> Ok None
+  | exception Otoml.Type_error _ ->
+    Error (Printf.sprintf "provider entry %S field %S expected string" entry_id key)
+;;
+
+let exact_non_empty_string_field ~entry_id key toml =
+  match find_string_field ~entry_id key toml with
+  | Error _ as e -> e
+  | Ok None -> Ok None
+  | Ok (Some raw) ->
+    let trimmed = String.trim raw in
+    if trimmed = ""
+    then
+      Error (Printf.sprintf "provider entry %S field %S must not be empty" entry_id key)
+    else if raw <> trimmed
+    then
+      Error
+        (Printf.sprintf
+           "provider entry %S field %S must not have leading or trailing whitespace"
+           entry_id
+           key)
+    else Ok (Some raw)
+;;
+
+let canonical_string_opt ~entry_id key ~allowed toml =
+  match find_string_field ~entry_id key toml with
+  | Error _ as e -> e
+  | Ok None -> Ok None
+  | Ok (Some raw) ->
+    let normalized = String.lowercase_ascii (String.trim raw) in
+    if List.mem normalized allowed
+    then Ok (Some raw)
+    else
+      Error
+        (Printf.sprintf
+           "provider entry %S field %S has unknown value %S (canonical: %s)"
+           entry_id
+           key
+           normalized
+           (String.concat ", " allowed))
+;;
+
+let string_list_field ~entry_id key toml =
+  match Otoml.find_opt toml (Otoml.get_array Otoml.get_string) [ key ] with
+  | Some values ->
+    let rec loop acc = function
+      | [] -> Ok (Some (List.rev acc))
+      | raw :: rest ->
+        let trimmed = String.trim raw in
+        if trimmed = ""
+        then
+          Error
+            (Printf.sprintf
+               "provider entry %S field %S must not contain empty strings"
+               entry_id
+               key)
+        else if raw <> trimmed
+        then
+          Error
+            (Printf.sprintf
+               "provider entry %S field %S must not contain padded strings"
+               entry_id
+               key)
+        else loop (raw :: acc) rest
+    in
+    loop [] values
+  | None -> Ok None
+  | exception Otoml.Type_error _ ->
+    Error (Printf.sprintf "provider entry %S field %S expected string array" entry_id key)
+;;
+
+let positive_finite_float_field ~entry_id key toml =
+  match Otoml.find_opt toml Otoml.get_float [ key ] with
+  | Some value when (not (Float.is_finite value)) || Float.compare value 0.0 <= 0 ->
+    Error (Printf.sprintf "provider entry %S field %S must be finite and greater than zero" entry_id key)
+  | value -> Ok value
+  | exception Otoml.Type_error _ ->
+    Error (Printf.sprintf "provider entry %S field %S expected float" entry_id key)
+
+let known_keys =
+  [ "id"
+  ; "aliases"
+  ; "kind"
+  ; "identity_kinds"
+  ; "base_url"
+  ; "request_path"
+  ; "auth"
+  ; "default_model"
+  ; "discovery_timeout_s"
+  ; "capabilities_base"
+  ; "capabilities_base_by_identity_kind"
+  ; "supports_parallel_tool_suppression"
+  ; "serves_bare_models"
+  ]
+;;
+
+let reject_unknown_keys ~entry_id entry_toml =
+  match Otoml.list_table_keys_result entry_toml with
+  | Error _ -> Ok ()
+  | Ok keys ->
+    (match List.filter (fun k -> not (List.mem k known_keys)) keys with
+     | [] -> Ok ()
+     | unknown ->
+       Error
+         (Printf.sprintf
+            "provider entry %S contains unknown field(s): %s"
+            entry_id
+            (String.concat ", " unknown)))
+;;
+
+let required_string ~entry_id key toml =
+  match exact_non_empty_string_field ~entry_id key toml with
+  | Ok (Some value) -> Ok value
+  | Ok None ->
+    Error (Printf.sprintf "provider entry %S missing required %S field" entry_id key)
+  | Error _ as e -> e
+;;
+
+let required_exact_string_allow_empty ~entry_id key toml =
+  match find_string_field ~entry_id key toml with
+  | Error _ as error -> error
+  | Ok None ->
+    Error (Printf.sprintf "provider entry %S missing required %S field" entry_id key)
+  | Ok (Some raw) ->
+    if raw <> String.trim raw
+    then
+      Error
+        (Printf.sprintf
+           "provider entry %S field %S must not have leading or trailing whitespace"
+           entry_id
+           key)
+    else Ok raw
+;;
+
+let kind_field ~entry_id toml =
+  match required_string ~entry_id "kind" toml with
+  | Error _ as e -> e
+  | Ok raw ->
+    (match Provider_kind.of_string raw with
+     | Some kind -> Ok kind
+     | None ->
+       Error
+         (Printf.sprintf
+            "provider entry %S field \"kind\" has unknown value %S (canonical: %s)"
+            entry_id
+            (String.lowercase_ascii (String.trim raw))
+            (String.concat ", " (List.map Provider_kind.to_string Provider_kind.all))))
+;;
+
+let identity_kinds_field ~entry_id ~default toml =
+  match string_list_field ~entry_id "identity_kinds" toml with
+  | Error _ as error -> error
+  | Ok None -> Ok [ default ]
+  | Ok (Some []) ->
+    Error
+      (Printf.sprintf
+         "provider entry %S field \"identity_kinds\" must not be empty"
+         entry_id)
+  | Ok (Some values) ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | raw :: rest ->
+        (match Provider_kind.of_string raw with
+         | Some kind -> loop (kind :: acc) rest
+         | None ->
+           Error
+             (Printf.sprintf
+                "provider entry %S field \"identity_kinds\" has unknown value %S \
+                 (canonical: %s)"
+                entry_id
+                raw
+                (String.concat ", " (List.map Provider_kind.to_string Provider_kind.all))))
+    in
+    loop [] values
+;;
+
+let capabilities_base_by_identity_kind_field ~entry_id ~identity_kinds toml =
+  match Otoml.find_opt toml Fun.id [ "capabilities_base_by_identity_kind" ] with
+  | None -> Ok []
+  | Some value ->
+    (match Otoml.get_table value with
+     | exception Otoml.Type_error _ ->
+       Error
+         (Printf.sprintf
+            "provider entry %S field \"capabilities_base_by_identity_kind\" expected table"
+            entry_id)
+     | pairs ->
+       let rec loop seen acc = function
+         | [] -> Ok (List.rev acc)
+         | (raw_kind, raw_base) :: rest ->
+           (match Provider_kind.of_string raw_kind with
+            | None ->
+              Error
+                (Printf.sprintf
+                   "provider entry %S capability-base wire %S is unknown (canonical: %s)"
+                   entry_id
+                   raw_kind
+                   (String.concat
+                      ", "
+                      (List.map Provider_kind.to_string Provider_kind.all)))
+            | Some kind when not (List.mem kind identity_kinds) ->
+              Error
+                (Printf.sprintf
+                   "provider entry %S capability-base wire %S is not declared in identity_kinds"
+                   entry_id
+                   raw_kind)
+            | Some kind when List.mem kind seen ->
+              Error
+                (Printf.sprintf
+                   "provider entry %S declares capability-base wire %S twice"
+                   entry_id
+                   raw_kind)
+            | Some kind ->
+              (match Otoml.get_string raw_base with
+               | exception Otoml.Type_error _ ->
+                 Error
+                   (Printf.sprintf
+                      "provider entry %S capability-base wire %S expected string"
+                      entry_id
+                      raw_kind)
+               | base ->
+                 let normalized = String.lowercase_ascii (String.trim base) in
+                 if not (String.equal base (String.trim base))
+                 then
+                   Error
+                     (Printf.sprintf
+                        "provider entry %S capability-base wire %S must not be padded"
+                        entry_id
+                        raw_kind)
+                 else if not (List.mem normalized Capability_vocab.base_label_values)
+                 then
+                   Error
+                     (Printf.sprintf
+                        "provider entry %S capability-base wire %S has unknown base %S"
+                        entry_id
+                        raw_kind
+                        base)
+                 else loop (kind :: seen) ((kind, normalized) :: acc) rest))
+       in
+       loop [] [] pairs)
+;;
+
+let parse_entry provider_toml =
+  let* id =
+    match exact_non_empty_string_field ~entry_id:"<unknown>" "id" provider_toml with
+    | Error _ -> Error "provider entry field \"id\" expected exact non-empty string"
+    | Ok None -> Error "provider entry missing required \"id\" field"
+    | Ok (Some id) -> Ok (String.lowercase_ascii id)
+  in
+  let* () = reject_unknown_keys ~entry_id:id provider_toml in
+  let* kind = kind_field ~entry_id:id provider_toml in
+  let* identity_kinds = identity_kinds_field ~entry_id:id ~default:kind provider_toml in
+  let* base_url = required_string ~entry_id:id "base_url" provider_toml in
+  let* request_path =
+    required_exact_string_allow_empty ~entry_id:id "request_path" provider_toml
+  in
+  let* requires_api_key =
+    let* raw =
+      match Otoml.find_opt provider_toml Otoml.get_string [ "auth" ] with
+      | Some raw -> Ok raw
+      | None ->
+        Error
+          (Printf.sprintf
+             "provider entry %S is missing field \"auth\": a row states whether its \
+              endpoint takes an API key (auth = \"api-key\" or auth = \"none\")"
+             id)
+      | exception Otoml.Type_error _ ->
+        Error (Printf.sprintf "provider entry %S field \"auth\" expected string" id)
+    in
+    match raw with
+    | "api-key" -> Ok true
+    | "none" -> Ok false
+    | other ->
+      Error
+        (Printf.sprintf
+           "provider entry %S field \"auth\" must be \"api-key\" or \"none\" exactly, \
+            without padding; got %S"
+           id other)
+  in
+  let* default_model =
+    exact_non_empty_string_field ~entry_id:id "default_model" provider_toml
+  in
+  let* discovery_timeout_s =
+    positive_finite_float_field ~entry_id:id "discovery_timeout_s" provider_toml
+  in
+  let* capabilities_base =
+    canonical_string_opt
+      ~entry_id:id
+      "capabilities_base"
+      ~allowed:Capability_vocab.base_label_values
+      provider_toml
+  in
+  let* capabilities_base_by_identity_kind =
+    capabilities_base_by_identity_kind_field ~entry_id:id ~identity_kinds provider_toml
+  in
+  let* supports_parallel_tool_suppression =
+    match Otoml.find_opt provider_toml Otoml.get_boolean
+            [ "supports_parallel_tool_suppression" ] with
+    | Some supported -> Ok supported
+    | None -> Ok false
+    | exception Otoml.Type_error _ ->
+      Error (Printf.sprintf
+        "provider entry %S field \"supports_parallel_tool_suppression\" expected bool" id)
+  in
+  let* serves_bare_models =
+    let* models = string_list_field ~entry_id:id "serves_bare_models" provider_toml in
+    let rec parse acc = function
+      | [] -> Ok (List.rev acc)
+      | raw :: rest ->
+        let* model = Model_identifiers.Model_id.of_string raw in
+        if List.exists (Model_identifiers.Model_id.equal model) acc
+        then Error (Printf.sprintf
+          "provider entry %S field \"serves_bare_models\" must not contain duplicate model ids" id)
+        else parse (model :: acc) rest
+    in
+    parse [] (Option.value models ~default:[])
+  in
+  let* aliases = string_list_field ~entry_id:id "aliases" provider_toml in
+  Ok
+    { id
+    ; aliases = Option.value aliases ~default:[]
+    ; kind
+    ; identity_kinds
+    ; base_url
+    ; request_path
+    ; requires_api_key
+    ; default_model
+    ; discovery_timeout_s
+    ; capabilities_base
+    ; capabilities_base_by_identity_kind
+    ; supports_parallel_tool_suppression
+    ; serves_bare_models
+    }
+;;

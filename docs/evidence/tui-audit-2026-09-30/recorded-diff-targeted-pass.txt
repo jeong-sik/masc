@@ -1,0 +1,6 @@
+Focused Test run: 36685060343
+Head: 602762aec20b26045bbf7af3c462d7c7acc01d17 (run metadata, not a raw checkout line)
+Raw: recorded-diff-targeted-pass.raw
+SHA256: ccefaf6df7322bee2db7cb249a9ced5da840be1c6b697079cb42484a47bf22a0
+New PTY suite PASS/OK107s,24 distinct reader/width/color receipts: recorded,keeper_tree,project_tree x40/60/80/120 xcolor/NO_COLOR. Keys126/diff17/git-diff-decode5 compiled cases also passed. Root and independent reviewer read raw. Synthetic fixtures only; refresh/patch-modal/screenshots/installation/required PR checks not proved.
+No local Dune build.

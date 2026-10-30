@@ -1,0 +1,128 @@
+
+> masc-dashboard@1.0.0 test /Users/dancer/me/workspace/yousleepwhen/masc-runtime-cache-workspace-20261004/dashboard
+> vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 src/lib/runtime-workspace-resource.test.ts
+
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-runtime-cache-workspace-20261004/dashboard
+
+ ❯ src/lib/runtime-workspace-resource.test.ts (6 tests | 6 failed) 10029ms
+   × catalog hides loaded A immediately and automatically reads B for existing consumers 4ms
+   × resolved hides loaded A immediately and automatically reads B for existing consumers 0ms
+   × catalog refuses a late A response after B becomes current 5015ms
+   × resolved refuses a late A response after B becomes current 5006ms
+   × catalog withdraws data and refuses reads until authority is restored 2ms
+   × resolved withdraws data and refuses reads until authority is restored 0ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/lib/runtime-workspace-resource.test.ts > catalog hides loaded A immediately and automatically reads B for existing consumers
+ FAIL  src/lib/runtime-workspace-resource.test.ts > resolved hides loaded A immediately and automatically reads B for existing consumers
+AssertionError: expected 'loaded' not to be 'loaded' // Object.is equality
+ ❯ src/lib/runtime-workspace-resource.test.ts:32:39
+     30|   expect(item.state.value).toEqual({ status: 'loaded', data: item.valu…
+     31|   workspace('/fixture/B')
+     32|   expect(item.state.value.status).not.toBe('loaded')
+       |                                       ^
+     33|   await waitFor(() => expect(item.api).toHaveBeenCalledTimes(2))
+     34|   finishB(item.payload('B'))
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/6]⎯
+
+ FAIL  src/lib/runtime-workspace-resource.test.ts > catalog refuses a late A response after B becomes current
+AssertionError: expected { Object (status, data) } to deeply equal { Object (status, data) }
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body />[39m
+[36m</html>[39m
+
+- Expected
++ Received
+
+  {
+    "data": [
+      {
+        "models": [],
+-       "provider": "B",
+-       "runtime_id": "B",
++       "provider": "A",
++       "runtime_id": "A",
+      },
+    ],
+    "status": "loaded",
+  }
+
+ ❯ src/lib/runtime-workspace-resource.test.ts:43:48
+     41|   workspace('/fixture/B')
+     42|   finishA(item.payload('A')); await pending
+     43|   await waitFor(() => expect(item.state.value).toEqual({ status: 'load…
+       |                                                ^
+     44| })
+     45| it.each(cases)('$name withdraws data and refuses reads until authority…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/6]⎯
+
+ FAIL  src/lib/runtime-workspace-resource.test.ts > resolved refuses a late A response after B becomes current
+AssertionError: expected { status: 'loaded', data: { …(4) } } to deeply equal { status: 'loaded', data: { …(4) } }
+
+Ignored nodes: comments, script, style
+[36m<html>[39m
+  [36m<head />[39m
+  [36m<body />[39m
+[36m</html>[39m
+
+- Expected
++ Received
+
+  {
+    "data": {
+      "assignments": [],
+-     "config_path": "B",
++     "config_path": "A",
+      "lanes": [],
+      "runtimes": [],
+    },
+    "status": "loaded",
+  }
+
+ ❯ src/lib/runtime-workspace-resource.test.ts:43:48
+     41|   workspace('/fixture/B')
+     42|   finishA(item.payload('A')); await pending
+     43|   await waitFor(() => expect(item.state.value).toEqual({ status: 'load…
+       |                                                ^
+     44| })
+     45| it.each(cases)('$name withdraws data and refuses reads until authority…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:127:77
+ ❯ Timeout.checkRealTimersCallback ../../masc-package-lane-enabled-20261004/dashboard/node_modules/.pnpm/@testing-library+dom@8.20.1/node_modules/@testing-library/dom/dist/wait-for.js:121:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/6]⎯
+
+ FAIL  src/lib/runtime-workspace-resource.test.ts > catalog withdraws data and refuses reads until authority is restored
+ FAIL  src/lib/runtime-workspace-resource.test.ts > resolved withdraws data and refuses reads until authority is restored
+AssertionError: expected 'loaded' to be 'error' // Object.is equality
+
+Expected: "error"
+Received: "loaded"
+
+ ❯ src/lib/runtime-workspace-resource.test.ts:49:35
+     47|   await item.reload(); workspace(null)
+     48|   item.load()
+     49|   expect(item.state.value.status).toBe('error')
+       |                                   ^
+     50|   expect(item.api).toHaveBeenCalledTimes(1)
+     51|   workspace('/fixture/B')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/6]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  6 failed (6)
+   Start at  19:33:03
+   Duration  10.98s (tests 92%, transform 3%, import 3%, environment 1%, setup 1%)
+
+ ELIFECYCLE  Test failed. See above for more details.

@@ -1,0 +1,17 @@
+{
+  "url": "http://127.0.0.1:18965/dashboard/#workspace?section=planning",
+  "page_errors": [],
+  "ready": true,
+  "source_commit": "worktree-fix/goal-proof-visible-result",
+  "backend_commit": "9cc33feff4917a1ae91804771a708d4a0e75e152",
+  "scope": "Actual refuted Goal from unchanged 9cc33feff4 backend, Vite source preview. Goal proof/criteria unchanged; no installed frontend claim.",
+  "source_files": {
+    "dashboard/src/components/goals/goal-proof.ts": "f99eaefb0483d2cb96156570e9c630c5169802986f1e8acf47d68de86c758740",
+    "dashboard/src/components/goals/goal-tree.ts": "4782ec3f29c707e6e23774a7f417782e8a7413219e51cc02ac899e92e391a337"
+  },
+  "visible_reason_matches_store": true,
+  "screenshot_sha256": {
+    "before.png": "f1d9a990544cbe03d3e8e7bf5bf00692bc7377013b834cd79cc1eebd16661ca9",
+    "after.png": "7920613c8e56d0814e9038f29e1fb20b2faf5fdab47c9ad6e2637c0ed840e4df"
+  }
+}

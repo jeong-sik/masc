@@ -1,0 +1,37 @@
+{
+  "source_sha": "dca2013ebf915a37631a5d95d305d226928c1b6f",
+  "grader_source_sha256": "5427e8af828b2bcc7eeac73a627c3821c0739e7e170eef114428be2ab2b57d96",
+  "image_id": "sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d",
+  "backend": "docker",
+  "scope": "actual Node grader; no live MASC or provider run",
+  "observations": [
+    {
+      "case_id": "l1-node-sum",
+      "control": "oracle_only",
+      "verify_exit": 1,
+      "target_sha256": "3f38f0ed117516ffee3ced6473e9f8271fbc792abe33a59659da6680c705cdf4",
+      "broken_target_unchanged": true
+    },
+    {
+      "case_id": "l1-node-sum",
+      "control": "reference_solution",
+      "verify_exit": 0,
+      "target_sha256": "fc26d91e868d5bb44b118c48f32e0126b05580921fa9099b0cb5970b55e534eb",
+      "broken_target_unchanged": false
+    },
+    {
+      "case_id": "l2-node-stats",
+      "control": "oracle_only",
+      "verify_exit": 1,
+      "target_sha256": "a4dc9032236deca927f118f07371a0198b422e6e70bbcc901b971673ad62db42",
+      "broken_target_unchanged": true
+    },
+    {
+      "case_id": "l2-node-stats",
+      "control": "reference_solution",
+      "verify_exit": 0,
+      "target_sha256": "57e1e53b59e9c5ba25b66fd6f834aca30c746a8018ad7a9e07b417fff3252872",
+      "broken_target_unchanged": false
+    }
+  ]
+}

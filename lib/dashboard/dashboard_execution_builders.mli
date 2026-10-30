@@ -1,0 +1,75 @@
+(** Dashboard_execution_builders — agent / keeper brief builders
+    for the execution dashboard.
+
+    {b Runtime chain}: starts with [include Dashboard_execution_helpers].
+    {!Dashboard_execution} does
+    [include Dashboard_execution_builders] to make the four brief
+    builders visible bare in the dashboard JSON dispatcher.
+
+    Lifecycle types, threshold constants and task/message indexes stay
+    private to the projection. *)
+
+include module type of struct
+  include Dashboard_execution_helpers
+end
+
+(** {1 Brief builders (runtime-visible)} *)
+
+val task_assignee : Masc_domain.task -> string option
+(** [task_assignee task] returns [Some assignee] when [task] is in
+    a status that carries an assignee ([Claimed] / [InProgress] /
+    [AwaitingVerification] / [Done]); else [None].  Pinned at the
+    contract seam — adding a new task status that should also
+    carry an assignee requires extending this match. *)
+
+val build_operation_contexts : tasks:Masc_domain.task list -> operation_context list
+(** [build_operation_contexts ~tasks] projects non-terminal tasks into
+    operation rows. Task contracts may provide an operation id; otherwise
+    the task id is used as the stable operation id. *)
+
+val build_worker_support_briefs :
+  now_ts:float ->
+  tasks:Masc_domain.task list ->
+  agents:Masc_domain.agent list ->
+  messages:Masc_domain.message list ->
+  worker_context list
+(** [build_worker_support_briefs ~now_ts ~tasks ~agents ~messages]
+    returns attention-needing {!worker_context} rows, cross-referencing
+    current tasks and messages. Claimed/in-progress task counts are built
+    once per call for the supplied agents, using exact assignee names.
+    The index is not retained across renders. Used by
+    {!Dashboard_execution}'s worker-support section. *)
+
+val continuity_row_of_keeper :
+  now_ts:float ->
+  Yojson.Safe.t ->
+  (continuity_context, string) result
+(** [continuity_row_of_keeper ~now_ts keeper] is the
+    typed primitive shared by the full execution render and live keeper-row
+    reconciliation. The primitive owns lifecycle, severity, and wire-field
+    derivation. [Error reason] when the row carries a health this build does
+    not know or a [paused] that is not a boolean: neither is read as a
+    default. *)
+
+val build_continuity_briefs :
+  now_ts:float ->
+  Yojson.Safe.t list ->
+  continuity_context list
+(** [build_continuity_briefs ~now_ts keepers]
+    returns one {!continuity_context} per runtime keeper row, classifying its
+    lifecycle / exec-state against the env-cached action-age threshold
+    ([keeper_action_stale_sec], [MASC_DASHBOARD_KEEPER_ACTION_STALE_SEC]).
+
+    The threshold value is env-cached at module init — runtime env
+    mutation does not affect the classification.  Pinned at the
+    contract seam so operators understand why "I changed
+    MASC_DASHBOARD_KEEPER_ACTION_STALE_SEC and nothing happened" — restart
+    required.
+
+    A declaration row ({!Keeper_declared_roster.row_kind_of_json}) is a Keeper
+    that has never booted and has no continuity, so it gets no brief. A
+    runtime row that {!continuity_row_of_keeper} cannot read, or whose row kind
+    cannot be told, gets a critical brief that names the Keeper and the reason,
+    so one unreadable row neither removes the others nor fails the list. Both
+    the full execution render and live keeper-row reconciliation build their
+    briefs here. *)

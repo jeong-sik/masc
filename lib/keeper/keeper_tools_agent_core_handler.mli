@@ -1,0 +1,129 @@
+(** Keeper_tools_agent_core_handler — Tool handler factory for Agent.run().
+
+    Skeleton module: validation and dispatch. The heavy execution body lives
+    in [Keeper_tools_agent_core_handler_exec]; telemetry helpers live in
+    [Keeper_tools_agent_core_handler_telemetry].  Bundle assembly lives in
+    [Keeper_tools_agent_core_bundle].
+
+    @since P1 extraction *)
+
+(** Build the per-tool handler closure used by both internal and
+    alias tool entries. The closure dispatches via
+    [execute_keeper_tool_call_with_outcome] using [~name] as the
+    INTERNAL tool name (telemetry SSOT). Descriptor-backed callers pass the
+    process-owned canonical [?descriptor] and its model-visible [?model_name].
+    The handler takes the canonical input schema and derives validation and
+    translation from the descriptor's typed policy before dispatch; a supplied
+    [?prepare_input] is ignored on this path.
+
+    Without a descriptor and model-visible name, [?prepare_input] supplies
+    input preparation when provided; otherwise [~input_schema] is used for
+    pre-execution validation.
+
+    The closure's [result_projection] is the projection this call's result
+    crosses on its way to the model, resolved for the lane running it. A
+    caller that has no lane leaves it out, and a handler that sizes its
+    output falls back to the descriptor's own projection.
+
+    [keeper_turn_id] is asked each time a call runs and names the keeper turn
+    the call's [keeper_tool_call] broadcast is filed under -- the one the
+    tool-call ledger row names. It is a function because the turn context it
+    reads is filled after the bundle is built. [source_context], when supplied,
+    is read once at invocation entry and passed unchanged through dispatch.
+    That same snapshot supplies the turn id when available. Callers without
+    source context retain [keeper_turn_id] attribution without inventing a
+    source Task. [owned_job_replay] carries only the original job source to
+    the owned-job producer; physical metadata and ordinary call attribution
+    remain those of the current invocation. [prepared_read] selects the owned
+    capability Read consumer; it requires the exact canonical Read descriptor.
+    [prepared_edit] is the opaque
+    existing-file preparation for this canonical Edit descriptor and exact
+    translated input. Its consumer still checks current confinement and owner;
+    it supplies no authorization or replay evidence. [prepared_write] binds
+    the original Overwrite/Append producer and exact input to pinned physical
+    parents; a missing target file is supported. Omission uses ordinary
+    dispatch. A prepared call supplies its original [source_context] snapshot. *)
+val make_keeper_tool_handler
+  :  capability_surface:Keeper_capability_surface.t
+  -> name:string
+  -> ?descriptor:Keeper_tool_descriptor.t
+  -> ?model_name:string
+  -> input_schema:Yojson.Safe.t
+  -> config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery:
+       Keeper_publication_recovery_availability.turn_context
+  -> ctx_snapshot:Keeper_types.working_context
+  -> keeper_turn_id:(unit -> int option)
+  -> ?source_context:(unit -> Keeper_tool_call_log_context.turn_context option)
+  -> ?owned_job_replay:Keeper_owned_job_invocation.replay
+  -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
+  -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
+  -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
+  -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
+  -> ?record_gate_result:
+       (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
+  -> ?observe_execution_evidence:
+       (failure_effect_disposition:Tool_result.failure_effect_disposition option
+        -> deferred_kind:Keeper_tool_execution.deferred_kind option
+        -> unit)
+  -> ?on_completed:
+       (Keeper_tool_execution.terminal_effect_receipt option -> unit)
+  -> ?on_deferred:(unit -> unit)
+  -> ?on_external_effect_deferred:(approval_id:string option -> unit)
+  -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
+  -> ?prepare_input:
+       (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
+  -> unit
+  -> ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t
+  -> ?result_projection:Tool_output.model_projection
+  -> Yojson.Safe.t
+  -> Tool_result.result
+
+val make_keeper_tool_handler_from_meta
+  :  name:string
+  -> ?descriptor:Keeper_tool_descriptor.t
+  -> ?model_name:string
+  -> input_schema:Yojson.Safe.t
+  -> config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery:
+       Keeper_publication_recovery_availability.turn_context
+  -> ctx_snapshot:Keeper_types.working_context
+  -> keeper_turn_id:(unit -> int option)
+  -> ?source_context:(unit -> Keeper_tool_call_log_context.turn_context option)
+  -> ?owned_job_replay:Keeper_owned_job_invocation.replay
+  -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
+  -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
+  -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
+  -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
+  -> ?record_gate_result:
+       (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
+  -> ?observe_execution_evidence:
+       (failure_effect_disposition:Tool_result.failure_effect_disposition option
+        -> deferred_kind:Keeper_tool_execution.deferred_kind option
+        -> unit)
+  -> ?on_completed:
+       (Keeper_tool_execution.terminal_effect_receipt option -> unit)
+  -> ?on_deferred:(unit -> unit)
+  -> ?on_external_effect_deferred:(approval_id:string option -> unit)
+  -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
+  -> ?prepare_input:
+       (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
+  -> unit
+  -> ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t
+  -> ?result_projection:Tool_output.model_projection
+  -> Yojson.Safe.t
+  -> Tool_result.result
+(** Explicit compatibility path for tests and callers without an enclosing
+    Keeper turn. It may project introspection from metadata. *)

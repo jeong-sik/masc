@@ -1,0 +1,1291 @@
+(** Tests for prompt registry markdown sources and override API. *)
+
+module Lib = Masc
+
+let test_dir () =
+  let tmp = Filename.temp_file "masc_prompt_registry" "" in
+  Sys.remove tmp;
+  Unix.mkdir tmp 0o755;
+  tmp
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun f -> rm (Filename.concat path f));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  rm dir
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc content)
+
+let prompt_metadata key =
+  match key with
+  | "test.render" ->
+      ("test prompt for " ^ key,
+       [ "identity_header"; "instructions_block"; "goal_lines" ])
+  | "keeper.deliberation" ->
+      ("test prompt for " ^ key,
+       [ "keeper_name"; "soul_profile"; "goal"; "triggers"; "world_state" ])
+  | "test.templated" ->
+      ("test prompt for " ^ key, [ "facts_json" ])
+  | "judge.board" ->
+      ("test prompt for " ^ key, [ "judgment_request_json" ])
+  | _ -> ("test prompt for " ^ key, [])
+
+let markdown_fixture key body =
+  let description, template_variables = prompt_metadata key in
+  let meta_lines =
+    [
+      "---";
+      "description: " ^ description;
+      "category: test";
+    ]
+    @
+    (if String.equal key "test.plain" then [ "operator_surface: fragment" ]
+     else [])
+    @
+    (if template_variables = [] then []
+     else
+       [
+         "template_variables: ["
+         ^ String.concat ", " template_variables
+         ^ "]";
+       ])
+    @ [ "---" ]
+  in
+  String.concat "\n" (meta_lines @ [ body ])
+
+(* One fixture file per key: [with_registry] writes [<key>.md], so a repeated
+   key would silently overwrite its own file and make [fixture] disagree with
+   the registry. [test_fixture_keys_are_unique] pins that. *)
+let fixtures =
+  [
+    ("keeper", "Keeper system contract from file");
+    ("keeper.reply_guidelines", "Reply guidelines from markdown");
+    ("test.render", "{{identity_header}}\n{{instructions_block}}{{goal_lines}}");
+    ("keeper.deliberation", "Keeper {{keeper_name}} {{soul_profile}} {{goal}} {{triggers}} {{world_state}}");
+    ("test.plain", "plain body, no template variables");
+    ("test.templated", "templated body {{facts_json}}");
+    ( "judge.board"
+    , "Board attention {{judgment_request_json}}" );
+    ("test.unlisted.vars", "template body still has {{missing_var}}");
+  ]
+
+let with_registry f =
+  let dir = test_dir () in
+  let prompts_dir = Filename.concat dir "prompts" in
+  Unix.mkdir prompts_dir 0o755;
+  List.iter
+    (fun (key, content) ->
+      write_file
+        (Filename.concat prompts_dir (key ^ ".md"))
+        (markdown_fixture key content))
+    fixtures;
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.clear ();
+      cleanup_dir dir)
+    (fun () ->
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir prompts_dir;
+      Lib.Prompt_defaults.init ();
+      f ~dir ~prompts_dir)
+
+let fixture key =
+  match List.assoc_opt key fixtures with
+  | Some value -> value
+  | None -> failwith ("missing fixture: " ^ key)
+
+let get_string_field field = function
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`String value) -> Some value
+      | _ -> None)
+  | _ -> None
+
+let get_bool_field field = function
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`Bool value) -> Some value
+      | _ -> None)
+  | _ -> None
+
+let prompt_overrides_path dir =
+  Filename.concat (Filename.concat dir ".masc") "prompt_overrides.json"
+
+(* The keys the file on disk holds. The bug this pins is about the file: the
+   in-memory tables can be perfectly correct while the save path writes a set
+   that has dropped something. *)
+let saved_keys_on_disk dir =
+  match Prompt_override_persistence.load ~path:(prompt_overrides_path dir) with
+  | Error error -> Alcotest.fail (Prompt_override_persistence.error_to_string error)
+  | Ok entries ->
+    entries
+    |> List.map (fun (e : Prompt_override_persistence.entry) -> e.key)
+    |> List.sort String.compare
+;;
+
+let reload_registry prompts_dir =
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir prompts_dir;
+  Lib.Prompt_defaults.init ()
+
+let persist_overrides_or_fail dir =
+  match Prompt_registry.persist_overrides dir with
+  | Ok () -> ()
+  | Error message -> failwith message
+
+let override_restore_failure_count () =
+  Lib.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string PromptFailures)
+    ~labels:[ ("prompt", "override_restore") ]
+    ()
+
+(* What the catalog says about [key]: the flag the TUI and dashboard read,
+   so a test pins the wire and not only the table behind it. *)
+let override_default_moved_in_catalog key =
+  match Prompt_registry.prompts_json () with
+  | `Assoc fields -> (
+      match List.assoc_opt "prompts" fields with
+      | Some (`List items) ->
+          List.find_map
+            (fun item ->
+              match get_string_field "key" item, get_bool_field "override_default_moved" item with
+              | Some item_key, Some moved when String.equal item_key key -> Some moved
+              | _ -> None)
+            items
+      | _ -> None)
+  | _ -> None
+
+let held_back_reason key =
+  Prompt_registry.held_back_overrides ()
+  |> List.find_map (fun ((entry : Prompt_override_persistence.entry), reason) ->
+         if String.equal entry.key key then Some reason else None)
+
+(* ── Fragment-group slots (#32780, #32814) ───────────────────────────
+
+   A group file registers each [### marker] paragraph as <group>.<marker>
+   in file order, and the prose before the first marker under the group
+   key itself. A marker obeys the prompt-key grammar, so a markdown
+   heading with spaces stays inside its paragraph. *)
+let with_prompts_dir_at files f =
+  let dir = test_dir () in
+  let prompts_dir = Filename.concat dir "prompts" in
+  Unix.mkdir prompts_dir 0o755;
+  List.iter
+    (fun (name, content) -> write_file (Filename.concat prompts_dir name) content)
+    files;
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.clear ();
+      cleanup_dir dir)
+    (fun () ->
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir prompts_dir;
+      Lib.Prompt_defaults.init ();
+      f prompts_dir)
+;;
+
+let with_prompts_dir files f = with_prompts_dir_at files (fun _prompts_dir -> f ())
+
+(* (key, operator_surface) for every registered prompt. *)
+let registered_surfaces () =
+  (* By field, not by shape. Matching the envelope exactly made every one of
+     these helpers answer "unregistered" the day the catalog grew a second
+     key, which reads as a registration bug rather than a test that pinned
+     the envelope's arity by accident. *)
+  match
+    match Prompt_registry.prompts_json () with
+    | `Assoc fields -> List.assoc_opt "prompts" fields
+    | _ -> None
+  with
+  | Some (`List prompts) ->
+    List.filter_map
+      (function
+        | `Assoc fields -> (
+          match
+            (List.assoc_opt "key" fields, List.assoc_opt "operator_surface" fields)
+          with
+          | Some (`String key), Some (`String surface) -> Some (key, surface)
+          | _ -> None)
+        | _ -> None)
+      prompts
+  | _ -> []
+;;
+
+(* The registered description of one key; [None] when unregistered. *)
+let registered_description key =
+  (* By field, not by shape. Matching the envelope exactly made every one of
+     these helpers answer "unregistered" the day the catalog grew a second
+     key, which reads as a registration bug rather than a test that pinned
+     the envelope's arity by accident. *)
+  match
+    match Prompt_registry.prompts_json () with
+    | `Assoc fields -> List.assoc_opt "prompts" fields
+    | _ -> None
+  with
+  | Some (`List prompts) ->
+    List.find_map
+      (function
+        | `Assoc fields -> (
+          match (List.assoc_opt "key" fields, List.assoc_opt "description" fields) with
+          | Some (`String k), Some (`String d) when String.equal k key -> Some d
+          | _ -> None)
+        | _ -> None)
+      prompts
+  | _ -> None
+;;
+
+(* The registered template_variables of one key; [None] when unregistered. *)
+let registered_variables key =
+  (* By field, not by shape. Matching the envelope exactly made every one of
+     these helpers answer "unregistered" the day the catalog grew a second
+     key, which reads as a registration bug rather than a test that pinned
+     the envelope's arity by accident. *)
+  match
+    match Prompt_registry.prompts_json () with
+    | `Assoc fields -> List.assoc_opt "prompts" fields
+    | _ -> None
+  with
+  | Some (`List prompts) ->
+    List.find_map
+      (function
+        | `Assoc fields -> (
+          match (List.assoc_opt "key" fields, List.assoc_opt "template_variables" fields) with
+          | Some (`String k), Some (`List vars) when String.equal k key ->
+            Some
+              (List.filter_map
+                 (function `String v -> Some v | _ -> None)
+                 vars)
+          | _ -> None)
+        | _ -> None)
+      prompts
+  | _ -> None
+;;
+
+let group_fixture =
+  {|---
+description: group fragments for the slot test
+category: test
+---
+### standing.current (vars: target, behind)
+At {{target}}, even with {{behind}} behind.
+
+### section (vars: count, rows)
+### Repository Checkouts ({{count}})
+Where each checkout stands.
+
+{{rows}}
+
+### standing.diverged
+Diverged; no numbers.
+|}
+;;
+
+let test_fragment_group_slots () =
+  let open Alcotest in
+  with_prompts_dir [ ("test.group.md", group_fixture) ] (fun () ->
+      check string "the first slot is its own paragraph"
+        "At {{target}}, even with {{behind}} behind."
+        (Prompt_registry.get_prompt "test.group.standing.current");
+      check string "the last slot keeps its paragraph" "Diverged; no numbers."
+        (Prompt_registry.get_prompt "test.group.standing.diverged");
+      check string "a heading with spaces stays inside its slot"
+        "### Repository Checkouts ({{count}})\nWhere each checkout stands.\n\n{{rows}}"
+        (Prompt_registry.get_prompt "test.group.section");
+      check bool "a heading with spaces is not a slot" false
+        (List.exists
+           (fun (key, _) -> String.starts_with ~prefix:"test.group.Repository" key)
+           (registered_surfaces ()));
+      (match
+         Prompt_registry.render_prompt_template "test.group.standing.current"
+           [ ("target", "T"); ("behind", "2") ]
+       with
+       | Ok rendered ->
+         check string "a slot renders its declared variables"
+           "At T, even with 2 behind." rendered
+       | Error message -> fail ("render failed: " ^ message));
+      check string "a group without preamble leaves the group key unregistered"
+        "" (Prompt_registry.get_prompt "test.group"))
+;;
+
+let body_and_slots_fixture =
+  {|---
+description: a main body that also carries slots
+category: test
+operator_surface: primary
+template_variables: [name]
+---
+You are {{name}}.
+
+### identity (vars: role)
+Your role is {{role}}.
+|}
+;;
+
+let test_group_body_registers_under_group_key () =
+  let open Alcotest in
+  with_prompts_dir [ ("test.body.md", body_and_slots_fixture) ] (fun () ->
+      check string "the prose before the first marker is the group body"
+        "You are {{name}}." (Prompt_registry.get_prompt "test.body");
+      check string "the slot is still its own paragraph" "Your role is {{role}}."
+        (Prompt_registry.get_prompt "test.body.identity");
+      let surfaces = registered_surfaces () in
+      check (option string) "the group body keeps the frontmatter surface"
+        (Some "primary") (List.assoc_opt "test.body" surfaces);
+      (* A slot is a fragment of what its group assembles unless its marker
+         says otherwise; [test_a_slot_declares_its_own_surface] covers the
+         marked case. *)
+      check (option string) "an unmarked slot is a fragment" (Some "fragment")
+        (List.assoc_opt "test.body.identity" surfaces))
+;;
+
+let slot_surface_fixture =
+  {|---
+description: a group whose slots do not share one surface
+category: test
+operator_surface: primary
+---
+The body an operator tunes.
+
+### identity (vars: name) [primary: what the keeper is called]
+You are {{name}}.
+
+### row (vars: id)
+- {{id}}
+|}
+;;
+
+(* Folding files by reader put operator-facing prompts and assembly fragments
+   in one file, so the surface has to be per slot. A slot is a fragment unless
+   its marker says otherwise. *)
+let test_a_slot_declares_its_own_surface () =
+  let open Alcotest in
+  with_prompts_dir [ ("test.surface.md", slot_surface_fixture) ] (fun () ->
+      let surfaces = registered_surfaces () in
+      check (option string) "the group body keeps the file surface" (Some "primary")
+        (List.assoc_opt "test.surface" surfaces);
+      check (option string) "a marked slot is operator-facing" (Some "primary")
+        (List.assoc_opt "test.surface.identity" surfaces);
+      check (option string) "an unmarked slot is a fragment" (Some "fragment")
+        (List.assoc_opt "test.surface.row" surfaces);
+      check string "the marker suffix is not part of the value" "You are {{name}}."
+        (Prompt_registry.get_prompt "test.surface.identity");
+      check (option (list string)) "variables still parse beside the suffix"
+        (Some [ "name" ]) (registered_variables "test.surface.identity");
+      (* Without its own sentence every row in a folded file would repeat the
+         group's description, which is what the operator reads the list by. *)
+      check (option string) "a marked slot carries its own description"
+        (Some "what the keeper is called")
+        (registered_description "test.surface.identity");
+      check (option string) "an unmarked slot falls back to the group's"
+        (Some "a group whose slots do not share one surface")
+        (registered_description "test.surface.row"))
+;;
+
+let test_operator_surface_authoring_issues () =
+  let open Alcotest in
+  let markdown ?surface body =
+    String.concat "\n"
+      ([ "---"; "description: surface authoring" ]
+       @ (match surface with None -> [] | Some value -> [ "operator_surface: " ^ value ])
+       @ [ "---"; body ])
+  in
+  with_prompts_dir_at
+    [ "surface.absent.md", markdown "Default body."
+    ; "surface.primary.md", markdown ~surface:"primary" "Primary body."
+    ; "surface.fragment.md", markdown ~surface:"fragment" "Fragment body."
+    ; "surface.invalid.md", markdown ~surface:"primray" "Usable body."
+    ; "surface.group.md", markdown ~surface:"fragmnt" "### row\nUsable slot."
+    ]
+    (fun prompts_dir ->
+      let row key =
+        let open Yojson.Safe.Util in
+        Prompt_registry.prompts_json () |> member "prompts" |> to_list
+        |> List.find (fun item -> member "key" item = `String key)
+      in
+      let check_issue key value source_file =
+        let open Yojson.Safe.Util in
+        match row key |> member "authoring_issues" |> to_list with
+        | [ issue ] ->
+          check string "diagnosis names the invalid field" "operator_surface"
+            (issue |> member "field" |> to_string);
+          check string "diagnosis has a stable code" "invalid_operator_surface"
+            (issue |> member "code" |> to_string);
+          check string "diagnosis retains the authored value" value
+            (issue |> member "value" |> to_string);
+          check string "diagnosis retains the path read by the loader"
+            (Filename.concat prompts_dir source_file)
+            (issue |> member "source_file" |> to_string)
+        | _ -> fail "invalid metadata must retain one authoring issue"
+      in
+      List.iter (fun (key, surface) ->
+        let open Yojson.Safe.Util in
+        check string "recognized and absent metadata retain their placement" surface
+          (row key |> member "operator_surface" |> to_string);
+        check int "recognized and absent metadata have no authoring issue" 0
+          (row key |> member "authoring_issues" |> to_list |> List.length))
+        [ "surface.absent", "primary"
+        ; "surface.primary", "primary"
+        ; "surface.fragment", "fragment"
+        ];
+      check_issue "surface.invalid" "primray" "surface.invalid.md";
+      check_issue "surface.group.row" "fragmnt" "surface.group.md";
+      check string "a slot retains its own placement" "fragment"
+        Yojson.Safe.Util.(row "surface.group.row" |> member "operator_surface" |> to_string);
+      check string "metadata does not suppress the prompt body" "Usable body."
+        (String.trim (Prompt_registry.get_prompt "surface.invalid"));
+      check string "a group without a body retains its usable slot" "Usable slot."
+        (Prompt_registry.get_prompt "surface.group.row");
+      (match Prompt_registry.set_override "surface.invalid" "Operator override." with
+       | Ok () -> ()
+       | Error reason -> fail reason);
+      check string "metadata does not suppress an override" "Operator override."
+        (Prompt_registry.get_prompt "surface.invalid");
+      check_issue "surface.invalid" "primray" "surface.invalid.md";
+      write_file (Filename.concat prompts_dir "surface.invalid.md")
+        (markdown ~surface:"fragment" "Corrected body.");
+      Prompt_registry.set_markdown_dir prompts_dir;
+      check int "reloading corrected metadata clears the issue" 0
+        Yojson.Safe.Util.(row "surface.invalid" |> member "authoring_issues" |> to_list |> List.length);
+      check string "corrected metadata replaces fallback placement" "fragment"
+        Yojson.Safe.Util.(row "surface.invalid" |> member "operator_surface" |> to_string))
+;;
+
+let test_heading_only_body_is_prose () =
+  let open Alcotest in
+  with_prompts_dir
+    [ ( "test.heading.md",
+        "---\ndescription: a heading-only body\ncategory: test\n---\n\n### Skills Named by Tasks You Hold\n"
+      )
+    ; ( "test.oneword.md",
+        "---\ndescription: a one-word capitalised heading\ncategory: test\n---\nIntro.\n\n### Summary\nText.\n"
+      ) ]
+    (fun () ->
+      let surfaces = registered_surfaces () in
+      check string "the heading is the prompt's own body"
+        "### Skills Named by Tasks You Hold"
+        (String.trim (Prompt_registry.get_prompt "test.heading"));
+      check bool "the file key is registered" true
+        (List.mem_assoc "test.heading" surfaces);
+      check bool "no slot key is minted from the heading" false
+        (List.exists
+           (fun (key, _) -> String.starts_with ~prefix:"test.heading." key)
+           surfaces);
+      check string "a capitalised one-word heading is prose"
+        "Intro.\n\n### Summary\nText."
+        (String.trim (Prompt_registry.get_prompt "test.oneword"));
+      check bool "no slot key is minted from a capitalised heading" false
+        (List.exists
+           (fun (key, _) -> String.starts_with ~prefix:"test.oneword." key)
+           surfaces))
+;;
+
+let test_duplicate_and_empty_slots () =
+  let open Alcotest in
+  with_prompts_dir
+    [ ( "test.dup.md",
+        "---\ndescription: repeated and empty markers\ncategory: test\n---\n### a (vars: x)\nA {{x}}\n\n### a\nB\n\n### b\n"
+      ) ]
+    (fun () ->
+      check string "the first paragraph of a repeated marker stands" "A {{x}}"
+        (Prompt_registry.get_prompt "test.dup.a");
+      check (option (list string)) "its variables come from the same paragraph"
+        (Some [ "x" ]) (registered_variables "test.dup.a");
+      check (option (list string)) "a marker without a paragraph is not registered"
+        None (registered_variables "test.dup.b"))
+;;
+
+(* ── Reading a prompt file once per version ─────────────────────────
+
+   A resolution reads its key's file again only when the file is not the
+   version it last read, and a directory scan starts the reads over. *)
+let edited_group_fixture ~slot_text =
+  "---\ndescription: a group edited on disk\ncategory: test\n---\n### note\n"
+  ^ slot_text ^ "\n"
+
+(* A whole-second modification time that [Unix.utimes] puts back exactly. *)
+let pinned_mtime = 1_700_000_000.0
+
+let test_an_edited_prompt_file_is_read_again () =
+  let open Alcotest in
+  with_prompts_dir_at [ ("test.edit.md", edited_group_fixture ~slot_text:"first") ]
+    (fun prompts_dir ->
+      check string "the first reading" "first" (Prompt_registry.get_prompt "test.edit.note");
+      write_file (Filename.concat prompts_dir "test.edit.md")
+        (edited_group_fixture ~slot_text:"second, longer");
+      check string "the next reading after an edit on disk" "second, longer"
+        (Prompt_registry.get_prompt "test.edit.note"))
+;;
+
+(* The edit keeps the inode and the size and has its modification time put
+   back, as one inside a coarse file-time tick would: only the scan shows it. *)
+let test_a_directory_scan_reads_prompt_files_anew () =
+  let open Alcotest in
+  with_prompts_dir_at [ ("test.edit.md", edited_group_fixture ~slot_text:"first") ]
+    (fun prompts_dir ->
+      let path = Filename.concat prompts_dir "test.edit.md" in
+      Unix.utimes path pinned_mtime pinned_mtime;
+      check string "the first reading" "first" (Prompt_registry.get_prompt "test.edit.note");
+      write_file path (edited_group_fixture ~slot_text:"fifth");
+      Unix.utimes path pinned_mtime pinned_mtime;
+      Prompt_registry.load_prompts_from_directory prompts_dir;
+      check string "the reading after the scan" "fifth"
+        (Prompt_registry.get_prompt "test.edit.note"))
+;;
+
+let () =
+  let open Alcotest in
+  run "Prompt_registry_defaults"
+    [
+      ( "fragment_group_slots",
+        [ test_case "slots keep their own paragraphs in file order" `Quick
+            test_fragment_group_slots
+        ; test_case "prose before the first marker registers under the group key"
+            `Quick test_group_body_registers_under_group_key
+        ; test_case "a heading-only body is prose, not a slot" `Quick
+            test_heading_only_body_is_prose
+        ; test_case "a slot declares its own operator surface" `Quick
+            test_a_slot_declares_its_own_surface
+        ; test_case "a repeated marker keeps its first paragraph and an empty one is skipped"
+            `Quick test_duplicate_and_empty_slots ] );
+      ( "file_reads",
+        [ test_case "an edited prompt file is read again" `Quick
+            test_an_edited_prompt_file_is_read_again
+        ; test_case "a directory scan reads prompt files anew" `Quick
+            test_a_directory_scan_reads_prompt_files_anew ] );
+      ( "registration",
+        [
+          (* Guards the count assertion below: a bulk key rename that maps two
+             fixtures onto one key writes one file, and "registered prompt
+             count" would then fail with an unrelated-looking off-by-one while
+             [fixture key] silently returned the shadowed body. *)
+          test_case "fixture keys are unique" `Quick (fun () ->
+              let keys = List.map fst fixtures in
+              check int "one fixture per key"
+                (List.length keys)
+                (List.length (List.sort_uniq String.compare keys)));
+          test_case "all markdown-backed prompts are registered" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              let prompts = Prompt_registry.list_prompts () in
+              check int
+                "registered prompt count"
+                (List.length fixtures)
+                (List.length prompts));
+          test_case "get_prompt resolves markdown content" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              check string "keeper"
+                (fixture "keeper")
+                (Prompt_registry.get_prompt "keeper");
+              check string "test.plain"
+                (fixture "test.plain")
+                (Prompt_registry.get_prompt "test.plain"));
+          test_case "prompt_source reports file" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              check string "file source" "file"
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper.reply_guidelines"));
+        ] );
+      ( "rendering",
+        [
+          test_case "render_prompt_template uses markdown template" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.render_prompt_template "test.render"
+                  [
+                    ("identity_header", "TestKeeper");
+                    ("instructions_block", "do things");
+                    ("goal_lines", "goal1");
+                  ]
+              with
+              | Ok rendered ->
+                  check bool "rendered contains identity" true
+                    (String.length rendered > 0
+                     && (try ignore (Str.search_forward (Str.regexp_string "TestKeeper") rendered 0); true
+                         with Not_found -> false))
+              | Error msg -> fail msg);
+          test_case "resolve and render returns the exact source snapshot" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.resolve_and_render_prompt_template "test.render"
+                  [
+                    ("identity_header", "TestKeeper");
+                    ("instructions_block", "do things");
+                    ("goal_lines", "goal1");
+                  ]
+              with
+              | Ok (resolution, rendered) ->
+                  check string "source" "file"
+                    (Prompt_registry.prompt_source_to_string resolution.source);
+                  check string "rendered from returned template"
+                    rendered
+                    (match
+                       Prompt_registry.render_prompt_template "test.render"
+                         [
+                           ("identity_header", "TestKeeper");
+                           ("instructions_block", "do things");
+                           ("goal_lines", "goal1");
+                         ]
+                     with
+                     | Ok value -> value
+                     | Error msg -> fail msg)
+              | Error msg -> fail msg);
+          test_case "a resolved template stays pinned during batch sizing" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              let pinned = Prompt_registry.resolve_prompt "test.templated" in
+              (match Prompt_registry.set_override "test.templated" "new {{facts_json}}" with
+               | Ok () -> () | Error _ -> fail "could not replace template") ;
+              let vars = ["facts_json", "first batch"] in
+              let from_pinned = Prompt_registry.render_resolved_prompt_template
+                  "test.templated" pinned vars in
+              let from_current = Prompt_registry.render_prompt_template
+                  "test.templated" vars in
+              (match from_pinned, from_current with
+               | Ok pinned_text, Ok current_text ->
+                 check string "pinned source still renders" "templated body first batch" pinned_text;
+                 check string "current override differs" "new first batch" current_text
+               | Error detail, _ | _, Error detail -> fail detail));
+          test_case "render_prompt_template leaves braces in values literal" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.render_prompt_template "test.templated"
+                  [ ("facts_json", {|{"template":"{{ .Release.Name }}"}|}) ]
+              with
+              | Ok rendered ->
+                  check bool "rendered keeps user braces" true
+                    (try
+                       ignore
+                         (Str.search_forward
+                            (Str.regexp_string "{{ .Release.Name }}")
+                            rendered 0);
+                       true
+                     with Not_found -> false)
+              | Error msg -> fail msg);
+          test_case "render_prompt_template replaces whitespace placeholders" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir ->
+              write_file
+                (Filename.concat prompts_dir "test.unlisted.vars.md")
+                (markdown_fixture "test.unlisted.vars" "hello {{ missing_var }}");
+              match
+                Prompt_registry.render_prompt_template "test.unlisted.vars"
+                  [ (" missing_var ", "world") ]
+              with
+              | Ok rendered -> check string "rendered" "hello world" rendered
+              | Error msg -> fail msg);
+          test_case "render_prompt_template detects variables without metadata" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.render_prompt_template "test.unlisted.vars" []
+              with
+              | Error msg ->
+                  check bool "reports unresolved variable" true
+                    (try
+                       ignore
+                         (Str.search_forward
+                            (Str.regexp_string "Unresolved variables")
+                            msg 0);
+                       true
+                     with Not_found -> false)
+              | Ok rendered ->
+                  fail ("expected unresolved variable error, got: " ^ rendered));
+          test_case "render_prompt_template validates effective template variables" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir ->
+              write_file
+                (Filename.concat prompts_dir "test.templated.md")
+                (markdown_fixture "test.templated"
+                   "Gate facts {{runtime_only}}");
+              match
+                Prompt_registry.render_prompt_template "test.templated"
+                  [ ("facts_json", "{}") ]
+              with
+              | Error msg ->
+                  check bool "reports runtime-only variable" true
+                    (try
+                       ignore
+                         (Str.search_forward
+                            (Str.regexp_string "runtime_only")
+                            msg 0);
+                       true
+                     with Not_found -> false)
+              | Ok rendered ->
+                  fail ("expected unresolved variable error, got: " ^ rendered));
+        ] );
+      ( "override",
+        [
+          test_case "set_override replaces file content" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              let override_text = "override the shared system contract" in
+              (match
+                 Prompt_registry.set_override "keeper"
+                   override_text
+               with
+              | Ok () -> ()
+              | Error msg -> fail msg);
+              check string "override value" override_text
+                (Prompt_registry.get_prompt "keeper");
+              check string "override source" "override"
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper"));
+          test_case "set_override accepts a body past 10000 bytes" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              (* 4000 Hangul syllables: 12000 bytes, the shape of a Korean base
+                 prompt that the old byte cap refused. *)
+              let override_text = String.concat "" (List.init 4000 (fun _ -> "가")) in
+              check bool "wider than the old cap" true (String.length override_text > 10000);
+              (match Prompt_registry.set_override "keeper" override_text with
+              | Ok () -> ()
+              | Error msg -> fail msg);
+              check string "large override value" override_text
+                (Prompt_registry.get_prompt "keeper"));
+          test_case "clear_override reverts to file" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              (match
+                 Prompt_registry.set_override "keeper.reply_guidelines"
+                   "temporary override"
+               with
+              | Ok () -> ()
+              | Error msg -> fail msg);
+              Prompt_registry.clear_prompt_override "keeper.reply_guidelines";
+              check string "back to file baseline" (fixture "keeper.reply_guidelines")
+                (Prompt_registry.get_prompt "keeper.reply_guidelines");
+              check string "source is file" "file"
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper.reply_guidelines"));
+          test_case "set_override rejects unknown key" `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match Prompt_registry.set_override "unknown.prompt" "x" with
+              | Error _ -> ()
+              | Ok () -> fail "should reject unknown prompt key");
+          test_case "set_override rejects unknown template variable" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.set_override "keeper.deliberation"
+                  "Keeper {{keeper_name}} {{soul_profile}} {{unknown}}"
+              with
+              | Error msg ->
+                  check bool "mentions unknown variable" true
+                    (try
+                       ignore
+                         (Str.search_forward
+                            (Str.regexp_string "Unknown template variables")
+                            msg 0);
+                       true
+                     with Not_found -> false)
+              | Ok () -> fail "should reject unknown template variable");
+          test_case
+            "invalid persisted override object is rejected observably"
+            `Quick
+            (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir:_ ->
+              (match
+                 Prompt_registry.set_override "keeper"
+                   "pre-existing live override"
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              let before = override_restore_failure_count () in
+              let masc_dir = Filename.concat dir ".masc" in
+              Unix.mkdir masc_dir 0o755;
+              write_file
+                (prompt_overrides_path dir)
+                {|{"unexpected":"value"}|};
+              Prompt_registry.restore_overrides dir;
+              check (float 0.0001) "restore rejection counted"
+                (before +. 1.0)
+                (override_restore_failure_count ());
+              check string "invalid override not applied"
+                (fixture "keeper")
+                (Prompt_registry.get_prompt "keeper"));
+          test_case "a saved override round-trips and applies" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir ->
+              let override_text = "persisted system contract override" in
+              (match
+                 Prompt_registry.set_override "keeper"
+                   override_text
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              persist_overrides_or_fail dir;
+              reload_registry prompts_dir;
+              Prompt_registry.restore_overrides dir;
+              check string "matching override restored" override_text
+                (Prompt_registry.get_prompt "keeper");
+              check string "matching override source" "override"
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper"));
+          test_case "an override is bound to the default it replaces" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              (match
+                 Prompt_registry.set_override "test.templated"
+                   "bound facts {{facts_json}}"
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              match Prompt_registry.override_entries () with
+              | [ entry ] ->
+                  check string "authored against the current default body"
+                    (Prompt_override_persistence.default_revision
+                       ~body:(fixture "test.templated"))
+                    entry.Prompt_override_persistence.authored_against;
+                  check (list string) "with the variables the prompt declared"
+                    [ "facts_json" ]
+                    entry.Prompt_override_persistence.template_variables;
+                  check (option bool) "and the catalog does not call it moved"
+                    (Some false)
+                    (override_default_moved_in_catalog "test.templated")
+              | entries ->
+                  fail
+                    (Printf.sprintf "expected one override, found %d"
+                       (List.length entries)));
+          (* The case this exists for: a release rewrote keeper.md under a
+             4.8 KB operator prompt and the server switched the prompt off,
+             held the text on disk, and served the new default. The operator
+             replaced that text on purpose; a new default is something to
+             show them, not a reason to stop applying what they wrote. *)
+          test_case
+            "a default body that moved under a saved override does not switch it off"
+            `Quick
+            (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir ->
+              let override_text = "persisted reply-guidelines override" in
+              (match
+                 Prompt_registry.set_override "keeper.reply_guidelines" override_text
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              (* Asked while the override is in force: after [reload_registry]
+                 the table is empty until the restore, and an empty table
+                 answers false whatever the digest says. *)
+              check (option bool) "before the move the catalog is quiet"
+                (Some false)
+                (override_default_moved_in_catalog "keeper.reply_guidelines");
+              persist_overrides_or_fail dir;
+              reload_registry prompts_dir;
+              let changed_body = "Reply guidelines contract changed" in
+              write_file
+                (Filename.concat prompts_dir "keeper.reply_guidelines.md")
+                (markdown_fixture "keeper.reply_guidelines" changed_body);
+              reload_registry prompts_dir;
+              let before = override_restore_failure_count () in
+              Prompt_registry.restore_overrides dir;
+              check (float 0.0001) "no restore failure is counted" before
+                (override_restore_failure_count ());
+              check string "the override is what a turn gets" override_text
+                (Prompt_registry.get_prompt "keeper.reply_guidelines");
+              check string "and it says so" "override"
+                (Prompt_registry.prompt_source_to_string
+                 @@ Prompt_registry.prompt_source "keeper.reply_guidelines");
+              check int "nothing is held back" 0
+                (List.length (Prompt_registry.quarantined_entries ()));
+              check (option bool) "the catalog reports the default as moved"
+                (Some true)
+                (override_default_moved_in_catalog "keeper.reply_guidelines");
+              (* Saving the key again binds it to the default as it is now. *)
+              (match
+                 Prompt_registry.set_override_persisted ~base_path:dir
+                   "keeper.reply_guidelines" override_text
+               with
+              | Ok () -> ()
+              | Error _ -> fail "re-saving the same text did not persist");
+              check (option bool) "and the catalog is quiet again"
+                (Some false)
+                (override_default_moved_in_catalog "keeper.reply_guidelines"));
+          test_case
+            "a variable the prompt newly declares keeps the override in force, marked moved"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir ->
+              let override_text = "persisted facts {{facts_json}}" in
+              (match Prompt_registry.set_override "test.templated" override_text with
+              | Ok () -> ()
+              | Error message -> fail message);
+              persist_overrides_or_fail dir;
+              let body = fixture "test.templated" in
+              write_file
+                (Filename.concat prompts_dir "test.templated.md")
+                (String.concat "\n"
+                   [
+                     "---";
+                     "description: changed variable contract";
+                     "category: test";
+                     "template_variables: [facts_json, additional_context]";
+                     "---";
+                     body;
+                   ]);
+              reload_registry prompts_dir;
+              let before = override_restore_failure_count () in
+              Prompt_registry.restore_overrides dir;
+              check (float 0.0001) "no restore failure is counted" before
+                (override_restore_failure_count ());
+              check string "the override still renders, so it applies" override_text
+                (Prompt_registry.get_prompt "test.templated");
+              check (option bool) "the catalog reports the contract as moved"
+                (Some true)
+                (override_default_moved_in_catalog "test.templated"));
+          (* The one thing that still holds an override back: it names a
+             variable the prompt no longer declares, so nothing downstream
+             would fill it and the literal placeholder would reach the
+             model. *)
+          test_case
+            "an override naming a variable the prompt dropped is held back with the reason"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir ->
+              (match
+                 Prompt_registry.set_override "test.templated"
+                   "persisted facts {{facts_json}}"
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              persist_overrides_or_fail dir;
+              let renamed_body = "templated body {{facts_table}}" in
+              write_file
+                (Filename.concat prompts_dir "test.templated.md")
+                (String.concat "\n"
+                   [
+                     "---";
+                     "description: renamed variable contract";
+                     "category: test";
+                     "template_variables: [facts_table]";
+                     "---";
+                     renamed_body;
+                   ]);
+              reload_registry prompts_dir;
+              let before = override_restore_failure_count () in
+              Prompt_registry.restore_overrides dir;
+              check (float 0.0001) "the refusal is counted"
+                (before +. 1.0)
+                (override_restore_failure_count ());
+              check string "a turn gets the file" renamed_body
+                (Prompt_registry.get_prompt "test.templated");
+              check string "and the source says so" "file"
+                (Prompt_registry.prompt_source_to_string
+                 @@ Prompt_registry.prompt_source "test.templated");
+              match held_back_reason "test.templated" with
+              | None -> fail "the refused override is not listed as held back"
+              | Some reason ->
+                  check bool "the reason names the stale variable" true
+                    (try
+                       ignore (Str.search_forward (Str.regexp_string "facts_json") reason 0);
+                       true
+                     with Not_found -> false));
+          (* Refusing an override is not the same as discarding it. It used
+             to be: the save path read only the live table, so the next write
+             of any key rewrote the file without the refused entry, and an
+             operator's saved prompt went from "not applied" to "gone" with
+             nothing in between (2026-09-05). *)
+          test_case "a refused override survives a write of another key" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir ->
+              (match
+                 Prompt_registry.set_override "test.templated"
+                   "the operator's own facts {{facts_json}}"
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              persist_overrides_or_fail dir;
+              (* The prompt drops the variable the override uses, so the
+                 restore refuses. *)
+              write_file
+                (Filename.concat prompts_dir "test.templated.md")
+                (String.concat "\n"
+                   [ "---"; "description: renamed variable contract"; "category: test";
+                     "template_variables: [facts_table]"; "---";
+                     "templated body {{facts_table}}" ]);
+              reload_registry prompts_dir;
+              Prompt_registry.restore_overrides dir;
+              check string "the refused override is not in force" "file"
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "test.templated");
+              check int "but it is still what the operator has saved" 1
+                (List.length (Prompt_registry.quarantined_entries ()));
+              (* Now touch some entirely unrelated prompt. *)
+              (match Prompt_registry.set_override_persisted ~base_path:dir
+                       "test.plain" "an unrelated override" with
+               | Ok () -> ()
+               | Error _ -> fail "the unrelated override did not save");
+              check (list string) "the file on disk still holds both"
+                [ "test.plain"; "test.templated" ]
+                (saved_keys_on_disk dir));
+          (* Clearing is the operator saying so, and it reaches the copy they
+             cannot see. Nothing else does. *)
+          test_case "clearing a refused override removes it" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir ->
+              (match
+                 Prompt_registry.set_override "test.templated" "held {{facts_json}}"
+               with
+              | Ok () -> ()
+              | Error message -> fail message);
+              persist_overrides_or_fail dir;
+              write_file
+                (Filename.concat prompts_dir "test.templated.md")
+                (String.concat "\n"
+                   [ "---"; "description: renamed variable contract"; "category: test";
+                     "template_variables: [facts_table]"; "---";
+                     "templated body {{facts_table}}" ]);
+              reload_registry prompts_dir;
+              Prompt_registry.restore_overrides dir;
+              check int "held before the clear" 1
+                (List.length (Prompt_registry.quarantined_entries ()));
+              (match
+                 Prompt_registry.clear_prompt_override_persisted ~base_path:dir
+                   "test.templated"
+               with
+               | Ok () -> ()
+               | Error _ -> fail "the clear did not save");
+              check int "and gone after it" 0
+                (List.length (Prompt_registry.quarantined_entries ()));
+              check (list string) "with nothing left in the file on disk" []
+                (saved_keys_on_disk dir));
+          test_case "malformed versioned envelopes fail closed observably" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir:_ ->
+              let masc_dir = Filename.concat dir ".masc" in
+              Unix.mkdir masc_dir 0o755;
+              let malformed =
+                [
+                  ("other schema version", {|{"schema_version":1,"overrides":[]}|});
+                  ("top-level array", {|[]|});
+                  ( "non-string value",
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":42,"authored_against":"r","template_variables":[]}]}|}
+                  );
+                  ( "non-string template variable",
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","authored_against":"r","template_variables":[1]}]}|}
+                  );
+                  ( "unknown entry field",
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","pinned_to":"r"}]}|}
+                  );
+                  ( "duplicate entry field",
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","key":"keeper","value":"x","authored_against":"r","template_variables":[]}]}|}
+                  );
+                  ( "duplicate override key",
+                    {|{"schema_version":2,"overrides":[{"key":"keeper.reply_guidelines","value":"x","authored_against":"r","template_variables":[]},{"key":"keeper.reply_guidelines","value":"y","authored_against":"r","template_variables":[]}]}|}
+                  );
+                  ("invalid JSON", {|{"schema_version":2|});
+                ]
+              in
+              List.iter
+                (fun (name, content) ->
+                  write_file (prompt_overrides_path dir) content;
+                  let before = override_restore_failure_count () in
+                  Prompt_registry.restore_overrides dir;
+                  check (float 0.0001) (name ^ " rejection counted")
+                    (before +. 1.0)
+                    (override_restore_failure_count ());
+                  check string (name ^ " fallback") (fixture "keeper.reply_guidelines")
+                    (Prompt_registry.get_prompt "keeper.reply_guidelines"))
+                malformed);
+          test_case
+            "persisted set and clear leave live state unchanged on write failure"
+            `Quick
+            (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir:_ ->
+              let old_value = "pre-existing override" in
+              (match Prompt_registry.set_override "keeper.reply_guidelines" old_value with
+               | Ok () -> ()
+               | Error message -> fail message);
+              write_file (Filename.concat dir ".masc") "not a directory";
+              (match
+                 Prompt_registry.set_override_persisted ~base_path:dir
+                   "keeper.reply_guidelines" "new override"
+               with
+              | Error (Prompt_registry.Persistence_error _) -> ()
+              | Error (Prompt_registry.Validation_error message) ->
+                  fail ("unexpected validation failure: " ^ message)
+              | Ok () -> fail "failed persisted set must not report success");
+              check string "failed set preserves live value" old_value
+                (Prompt_registry.get_prompt "keeper.reply_guidelines");
+              (match
+                 Prompt_registry.clear_prompt_override_persisted ~base_path:dir
+                   "keeper.reply_guidelines"
+               with
+              | Error _ -> ()
+              | Ok () -> fail "failed persisted clear must not report success");
+              check string "failed clear preserves live value" old_value
+                (Prompt_registry.get_prompt "keeper.reply_guidelines"));
+          test_case
+            "set_override rejects placeholder syntax on a prompt with no \
+             declared template_variables"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              (* [keeper] declares an exact empty variable set, so any
+                 placeholder is invalid. *)
+              match
+                Prompt_registry.set_override "keeper"
+                  "Rules {{undeclared_variable}} more text"
+              with
+              | Error msg ->
+                  check bool "mentions the stray placeholder" true
+                    (try
+                       ignore
+                         (Str.search_forward
+                            (Str.regexp_string "undeclared_variable")
+                            msg 0);
+                       true
+                     with Not_found -> false)
+              | Ok () ->
+                  fail
+                    "should reject {{placeholder}} syntax when no \
+                     template_variables are declared");
+          test_case
+            "set_override rejects placeholder syntax on any zero-variable \
+             prompt, not just keeper"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.set_override "keeper.reply_guidelines"
+                  "{{unexpected}} reply-guidelines override"
+              with
+              | Error _ -> ()
+              | Ok () ->
+                  fail
+                    "should reject {{placeholder}} syntax for keeper.reply_guidelines \
+                     too");
+          test_case
+            "restore_overrides rejects a persisted placeholder override and \
+             falls back to the file baseline"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir:_ ->
+              let before = override_restore_failure_count () in
+              let masc_dir = Filename.concat dir ".masc" in
+              Unix.mkdir masc_dir 0o755;
+              write_file
+                (prompt_overrides_path dir)
+                {|{"keeper":"Rules {{undeclared_variable}}"}|};
+              Prompt_registry.restore_overrides dir;
+              check (float 0.0001) "restore rejection counted"
+                (before +. 1.0)
+                (override_restore_failure_count ());
+              check string "stale placeholder override not applied"
+                (fixture "keeper")
+                (Prompt_registry.get_prompt "keeper");
+              check string "source falls back to file" "file"
+                (Prompt_registry.prompt_source_to_string @@ Prompt_registry.prompt_source "keeper"));
+        ] );
+      ( "integration",
+        [
+          test_case "system_prompt_body reads markdown-backed registry" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              check string "keeper system function"
+                (fixture "keeper")
+                (Lib.Keeper_prompt.system_prompt_body ()));
+          test_case
+            "system_prompt_body falls back to file when a persisted \
+             override contains an undeclared placeholder"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir ~prompts_dir:_ ->
+              let masc_dir = Filename.concat dir ".masc" in
+              Unix.mkdir masc_dir 0o755;
+              write_file
+                (prompt_overrides_path dir)
+                {|{"keeper":"Rules {{undeclared_variable}}"}|};
+              Prompt_registry.restore_overrides dir;
+              check string "system_prompt_body ignores the rejected override"
+                (fixture "keeper")
+                (Lib.Keeper_prompt.system_prompt_body ()));
+          test_case "system_prompt_body refuses an empty file and warns once"
+            `Quick (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir ->
+              let cursor =
+                match Log.Ring.recent ~limit:1 () with
+                | entry :: _ -> entry.Log.Ring.seq
+                | [] -> -1
+              in
+              let replace body =
+                write_file (Filename.concat prompts_dir "keeper.md") body;
+                reload_registry prompts_dir
+              in
+              let refuses () =
+                match Lib.Keeper_prompt.system_prompt_body () with
+                | _ -> fail "empty primary prompt must refuse"
+                | exception Invalid_argument _ -> ()
+              in
+              replace "";
+              refuses ();
+              refuses ();
+              let warnings () =
+                Log.Ring.recent ~since_seq:cursor ~module_filter:"Keeper" ()
+                |> List.filter (fun entry -> entry.Log.Ring.level = Log.Warn)
+              in
+              (match warnings () with
+               | [ entry ] ->
+                 check string "warning describes the observed refusal condition"
+                   "keeper_prompt: observed an empty shared [keeper] body; empty primary prompts are refused"
+                   entry.Log.Ring.message
+               | entries -> failf "expected one warning, got %d" (List.length entries));
+              replace (markdown_fixture "keeper" (fixture "keeper"));
+              check string "repaired primary prompt renders" (fixture "keeper")
+                (Lib.Keeper_prompt.system_prompt_body ());
+              replace "";
+              refuses ();
+              check int "warning remains once per process after recovery" 1
+                (List.length (warnings ())));
+        ] );
+      ( "prompts_json",
+        [
+          test_case "invalid surface metadata retains authoring provenance" `Quick
+            test_operator_surface_authoring_issues;
+          test_case "prompts_json exposes effective file and override fields" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              (match
+                 Prompt_registry.set_override "keeper"
+                   "runtime override"
+               with
+              | Ok () -> ()
+              | Error msg -> fail msg);
+              let json = Prompt_registry.prompts_json () in
+              let open Yojson.Safe.Util in
+              let prompts = json |> member "prompts" |> to_list in
+              let keeper_system =
+                prompts
+                |> List.find (fun item ->
+                       get_string_field "key" item = Some "keeper")
+              in
+              check (option string) "effective value"
+                (Some "runtime override")
+                (get_string_field "effective" keeper_system);
+              check (option string) "file value"
+                (Some (fixture "keeper"))
+                (get_string_field "file_value" keeper_system);
+              check (option string) "override value"
+                (Some "runtime override")
+                (get_string_field "override_value" keeper_system);
+              check (option string) "source"
+                (Some "override")
+                (get_string_field "source" keeper_system);
+              check (option string) "legacy metadata stays operator-visible"
+                (Some "primary")
+                (get_string_field "operator_surface" keeper_system);
+              let fragment =
+                prompts
+                |> List.find (fun item ->
+                       get_string_field "key" item = Some "test.plain")
+              in
+              check (option string) "frontmatter exposes assembly fragments"
+                (Some "fragment")
+                (get_string_field "operator_surface" fragment);
+              check (option bool) "required_file"
+                (Some true)
+                (get_bool_field "required_file" keeper_system);
+              match keeper_system with
+              | `Assoc fields ->
+                  check int "template_variables field exists" 0
+                    (match List.assoc_opt "template_variables" fields with
+                     | Some (`List items) -> List.length items
+                     | _ -> -1)
+              | _ -> fail "unexpected prompt JSON");
+        ] );
+    ]

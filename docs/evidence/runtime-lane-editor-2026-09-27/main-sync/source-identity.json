@@ -1,0 +1,24 @@
+{
+  "source_commit": "8ffea1ae2fe3c9be272e72727e599f0932612880",
+  "checkout_head": "8ffea1ae2fe3c9be272e72727e599f0932612880",
+  "dashboard_source_tree": "2e82e8bfb61230ae8a7ac44feacfb8d08cfc86f2",
+  "production_sources": {
+    "dashboard/src/components/settings-surface.ts": "96199140d1b0e928341d88e59acf7286be3701a6ca1cec5512f0932001d7240f",
+    "dashboard/src/api/dashboard-runtime.ts": "f45317fcf8ffd4f2a1e85feaf4496aed1418c540211a83de565747308d1cc0d6",
+    "dashboard/src/lib/runtime-toml-config.ts": "3c9ad80aead9986973c871b3c314c58f65d90d794b97541941ff49358ca4acb5",
+    "dashboard/src/main.ts": "fd52b9fca46e2f167db0abbe270dfcfe0b4c3ef92abc09d09f702cda677b64af",
+    "dashboard/pnpm-lock.yaml": "36ad84463da4623aa35fb2e27ac35525da2df8e9f9c9c43f00a96dcce4f9470c"
+  },
+  "harness": {
+    "run.mjs": "0a16942e41071892a720df3380a7b54852ff9e6e13cb780e961bb03f8b009016",
+    "entry.ts": "c09171e9001ac3c82df99180c8fadc6678cd4704a597dc6ae36c5b159bce68bf",
+    "index.html": "7c350f224729cde3e6614d1508df042a2114b36aaea5d32d3ad0dc8614481bd6",
+    "fixtures.json": "93c8b22f519e608dd5beab08179d871cabfd634f29649f50784e04e80ef3ad4c"
+  },
+  "artifacts": {
+    "01-lane-editor.png": "1fb05ecaa2bdfe4085c01b7014078d1811878039ba9d4df22e56f70b19ede268",
+    "02-stale-click-refused.png": "2588ab6254b70d1e8ed213cb54c92e892bebf1ab03fb54ff5c55c30c5f599d39",
+    "03-server-conflict.png": "3a5f7ad9662ea5e76668646a2394b968e697d0880960e3cbf16d479eadc0edb1",
+    "receipt.json": "feb6d00a8667de5d85a86f8bbd23325201da7ad9f1330dd53f4d28beddb13274"
+  }
+}

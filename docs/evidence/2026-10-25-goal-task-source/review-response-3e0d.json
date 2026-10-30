@@ -1,0 +1,312 @@
+{
+  "schema": "masc.task-source.current-review-response.v1",
+  "status": "FINAL_FROZEN",
+  "created_at_utc": "2026-10-25T13:23:18.453234+00:00",
+  "verdict": "AGREES_WITH_SOURCE_REPAIRS_AND_CURRENT_20_TEST_SCOPE",
+  "head": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+  "base": "975c4751ca41e4e458c9e22103d7c50ba625f716",
+  "canonical_complete_diff_sha256": "a90d4456630859ab54a4317d2e1e5a3676384e284cec1ea1635e0afca4bfdab1",
+  "inputs": [
+    {
+      "name": "review-3e0d.json",
+      "kind": "independent_source_review",
+      "bytes": 24912,
+      "sha256": "f12f6b30cdf9f3d6dc50402ed8bb7cfa1b2ff0488d97a658f8b93be248834500"
+    },
+    {
+      "name": "response-3e0d.json",
+      "kind": "independent_narrow_response_private_original_not_republished",
+      "bytes": 16546,
+      "sha256": "b30faeea9d7c6c52f94c117a3c126093a63a9fdd560a6fda759a504bbe31d9e6"
+    },
+    {
+      "name": "native-3e0d-raw.log",
+      "kind": "retained_current_native_raw",
+      "bytes": 138210,
+      "sha256": "283320f9142ab2ad8511fc8080d1a017e637581c6a4c8968707077b2a96f3bcb"
+    },
+    {
+      "name": "native-0f72-raw.log",
+      "kind": "retained_prior_native_raw",
+      "bytes": 293142,
+      "sha256": "14fed94bae852047ac2b6fe0261c3eea3a7a3e27eceb697c4554145e5f4c9e36"
+    }
+  ],
+  "source_binding": {
+    "immutable_git_objects_checked": 55,
+    "recorded_source_hashes_match": true,
+    "tracked_worktree_matches_head": true,
+    "untracked_publication_drafts_excluded": [
+      "changelog.d/45949.md",
+      "docs/evidence/2026-10-25-goal-task-source/"
+    ],
+    "full_binary_patch_sha256": "96bacf4a349bcd7408c433911b611e50b101a80ced24965c93a153f9621c09ff",
+    "canonical_diff_recomputed_offline": true,
+    "lib_config_changes_since_0f72": []
+  },
+  "adjudication_ko": [
+    "두 source 리뷰의 좁은 수리 판정에 동의한다. real Task FSM fixture가 실제 Verification_protocol.create_submit_request adapter를 명시적으로 제공하며 제품의 hook·소유권·전이 조건을 약화하지 않는다.",
+    "Direct Board fixture 두 곳만 기존 @recipient/@peer를 실제 audience로 해석하는 Human_post로 바꾼다. 나머지 helper 기본은 System_post이며 privacy/author/source 거절 assertion을 유지한다.",
+    "누락됐던 bin의 Task_source match는 기존 typed Task 링크를 반환한다. 현재 Task로 이동하는 기능이며 제출 당시 immutable evidence body를 대체하지 않는다.",
+    "one-primary-per-Task-batch와 submission-bound optional Task lookup은 lib/config byte가0f72와 같아 유지된다. 앞선 mixed-revision/무조건 authority 추가 source P2를 재도입하지 않는다.",
+    "이전 sparse/lib 중심 caller 검토가 bin exhaustive consumer를 놓친 coverage failure와 실제 bundle compile 실패를 보존한다. 이번 targeted source/20-test 확인을 전체 package·모델 실행 증명으로 바꾸지 않는다."
+  ],
+  "new_findings_P0_P1_P2": [],
+  "current_native": {
+    "source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "run": 40196376497,
+    "job": 121177983287,
+    "run_job_identity_basis": "Parent-supplied identifiers; retained log independently shows requested checkout, completed checkout and git log -1 exact source.",
+    "result": "TWO_TARGETED_SUITES_20_PASS_0_FAIL",
+    "suites": {
+      "test_verification_collaboration_evidence": {
+        "PASS": 9,
+        "FAIL": 0
+      },
+      "test_tui_evidence_link": {
+        "PASS": 11,
+        "FAIL": 0
+      }
+    },
+    "total_PASS": 20,
+    "total_FAIL": 0,
+    "case_rows": [
+      {
+        "line": 839,
+        "suite": "test_verification_collaboration_evidence",
+        "result": "PASS",
+        "group": "submission",
+        "case_index": 0
+      },
+      {
+        "line": 853,
+        "suite": "test_verification_collaboration_evidence",
+        "result": "PASS",
+        "group": "submission",
+        "case_index": 1
+      },
+      {
+        "line": 882,
+        "suite": "test_verification_collaboration_evidence",
+        "result": "PASS",
+        "group": "submission",
+        "case_index": 2
+      },
+      {
+        "line": 907,
+        "suite": "test_verification_collaboration_evidence",
+        "result": "PASS",
+        "group": "submission",
+        "case_index": 3
+      },
+      {
+        "line": 931,
+        "suite": "test_verification_collaboration_evidence",
+        "result": "PASS",
+        "group": "submission",
+        "case_index": 4
+      },
+      {
+        "line": 939,
+        "suite": "test_verification_collaboration_evidence",
+        "result": "PASS",
+        "group": "submission",
+        "case_index": 5
+      },
+      {
+        "line": 947,
+        "suite": "test_verification_collaboration_evidence",
+        "result": "PASS",
+        "group": "submission",
+        "case_index": 6
+      },
+      {
+        "line": 962,
+        "suite": "test_verification_collaboration_evidence",
+        "result": "PASS",
+        "group": "submission",
+        "case_index": 7
+      },
+      {
+        "line": 1224,
+        "suite": "test_verification_collaboration_evidence",
+        "result": "PASS",
+        "group": "submission",
+        "case_index": 8
+      },
+      {
+        "line": 1236,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "web urls",
+        "case_index": 0
+      },
+      {
+        "line": 1239,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "web urls",
+        "case_index": 1
+      },
+      {
+        "line": 1246,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "web urls",
+        "case_index": 2
+      },
+      {
+        "line": 1248,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "web urls",
+        "case_index": 3
+      },
+      {
+        "line": 1253,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "web urls",
+        "case_index": 4
+      },
+      {
+        "line": 1257,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "web urls",
+        "case_index": 5
+      },
+      {
+        "line": 1259,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "web urls",
+        "case_index": 6
+      },
+      {
+        "line": 1264,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "items",
+        "case_index": 0
+      },
+      {
+        "line": 1266,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "items",
+        "case_index": 1
+      },
+      {
+        "line": 1269,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "items",
+        "case_index": 2
+      },
+      {
+        "line": 1272,
+        "suite": "test_tui_evidence_link",
+        "result": "PASS",
+        "group": "items",
+        "case_index": 3
+      }
+    ],
+    "source_confirmation_lines": [
+      49,
+      190,
+      192,
+      193
+    ],
+    "build_and_execution_lines": [
+      760,
+      764,
+      1226,
+      1228,
+      1230,
+      1274,
+      1276
+    ],
+    "count_method": "ANSI stripped; count only timestamp-prefixed top-level Alcotest OK/FAIL case rows inside targeted suite start context. Boxed failure-detail repeats are excluded. Suite totals agree with Test Successful summaries.",
+    "scope_ko": "현재3e0d의 collaboration9 + TUI evidence-link11만 실제 실행 PASS다. 실제 startup hook 설치·provider 판정·렌더링 UI를 증명하지 않는다."
+  },
+  "prior_0f72_native": {
+    "source": "0f72a33d9530195a2a3e721ed375974cc7952266",
+    "run": 40195449903,
+    "suites": {
+      "test_verification_collaboration_evidence": {
+        "PASS": 6,
+        "FAIL": 3
+      },
+      "test_verification_authority_tools": {
+        "PASS": 30,
+        "FAIL": 0
+      },
+      "test_goal_verifier_original": {
+        "PASS": 8,
+        "FAIL": 0
+      },
+      "test_verifier_review_worker": {
+        "PASS": 18,
+        "FAIL": 0
+      }
+    },
+    "total_PASS": 62,
+    "total_FAIL": 3,
+    "three_fully_passing_suites_PASS": 56,
+    "partial_collaboration_PASS": 6,
+    "partial_collaboration_FAIL": 3,
+    "independent_raw_count": true,
+    "scope_ko": "authority30+Goal Original8+Task worker18의56PASS는 이전0f72 실행이다. 이전 collab6/9도 보존하지만 현재9/9와 합쳐 독립 sample을 늘리거나 현재56건/full regression PASS라고 하지 않는다."
+  },
+  "historical_failures_preserved": [
+    {
+      "name": "native-a2bf-raw.log",
+      "bytes": 151072,
+      "sha256": "46b1e5e384461aaedb0eeae8a357eb8798b4f841e971bc4cb639e388cbdcdca0",
+      "result": "COMPILE_FAILURE_NO_TEST_EXECUTION",
+      "tests_executed": 0
+    },
+    {
+      "name": "native-e84e-raw.log",
+      "bytes": 150688,
+      "sha256": "6d540009e7e4a44650686624866be95722c81fe341a8f44dd0da8b3b9fe0c4b1",
+      "result": "COMPILE_FAILURE_NO_TEST_EXECUTION",
+      "tests_executed": 0
+    },
+    {
+      "name": "native-0f72-raw.log",
+      "source": "0f72a33d9530195a2a3e721ed375974cc7952266",
+      "result": "EXECUTED_62_PASS_3_FAIL",
+      "sha256": "14fed94bae852047ac2b6fe0261c3eea3a7a3e27eceb697c4554145e5f4c9e36",
+      "bytes": 293142
+    },
+    {
+      "name": "runtime-e84e-failed-raw.log",
+      "source": "e84eb71c4e31ba8440e5506015b603681dc23136",
+      "run": 40195108277,
+      "result": "COMPILE_FAILURE_NO_BUNDLE",
+      "cause": "TUI source match missing Task_source branch",
+      "sha256": "bd439d0ee295b73d0e40b8140933f2e4cfdb7d7faa0fde1b6396942fa69a013e",
+      "bytes": 94029
+    }
+  ],
+  "current_runtime_bundle": {
+    "source": "3e0d83d9d00fd2c133a8bb8cb33147f9479e07e6",
+    "run": 40196379288,
+    "artifact_id": 12600167778,
+    "workflow_outcome": "SUCCESS_REPORTED_BY_PARENT",
+    "independent_local_artifact_verification": false,
+    "installed_or_executed": false,
+    "scope_ko": "로컬 artifact를 읽거나 checksum/embedded source identity를 검증하지 않았다. bundle 실행·설치·실제 모델 성공으로 세지 않는다."
+  },
+  "remaining_original_P2_ko": [
+    "Done row는 특정 verifier/verification_id의 영구 typed 승인 시도 인증서가 아니다.",
+    "Task 완료 시각만으로 실제 Edit가 승인 후 시작됐다는 계약을 증명하지 못한다. actual reviewer의 Task source Read·시간순 근거 대조·올바른 판단은 미실측이다."
+  ],
+  "limits_ko": [
+    "source PASS, 현재 targeted20PASS, 이전56PASS, bundle workflow 보고, 미검증 artifact, 설치·runtime·실제 모델·인간 확인은 별도 증거 수준이다.",
+    "이번에 build/test/polling/API/CI/provider/Docker/Git·제품 변경을 하지 않았다. 기존 로컬 동결 보고서·raw log·Git 객체만 읽고 이 response 하나를 새로 썼다.",
+    "비공개 원본의 absolute host path·전체 raw 내용·credential을 복사하지 않았다. 입력은 이름·bytes·SHA와 안전한 suite/source 좌표로만 결속했다."
+  ]
+}

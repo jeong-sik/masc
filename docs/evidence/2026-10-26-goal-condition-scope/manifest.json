@@ -1,0 +1,92 @@
+{
+  "schema": "masc.goal.condition-scope.public-evidence.v1",
+  "scope": "Exact safe projections and independent reviews of separate529f replay and428e controls. Private original inventories preserve identities; raw private bodies are not published. No primary Goal proof or production apply.",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 5254,
+      "sha256": "e2895f2443f0a80597dfa51f2c5509f307d75cdb08446ab286b131b060da7828"
+    },
+    {
+      "path": "baseline-owned-stop.json",
+      "bytes": 606,
+      "sha256": "290d539f11f5f1d26d80b6689dba5206a93ce784490816fefb30cd96d0afa9d1"
+    },
+    {
+      "path": "baseline-persisted-outcome.json",
+      "bytes": 5795,
+      "sha256": "3ce762b65ab8bc8c45ed4b7a3c6ac4745d5a7e8ff7075b418529aad4586d6a0a"
+    },
+    {
+      "path": "baseline-private-originals-manifest.json",
+      "bytes": 31353,
+      "sha256": "526d578d8500b71168dbcf9b685ed96cc0cdf6ea36e1a341b8bcaf2cf19d2e6b"
+    },
+    {
+      "path": "baseline-proof-review.json",
+      "bytes": 50955,
+      "sha256": "bf1a2f942d7361a4af1fc6a2a713faada618297d353988f99980e424ca9eed19"
+    },
+    {
+      "path": "baseline-protocol.json",
+      "bytes": 31025,
+      "sha256": "a0052d9f492a0ed8d54157f402e39761d5646142edc28cb4321f7a8fc9194d07"
+    },
+    {
+      "path": "baseline-result.json",
+      "bytes": 9808,
+      "sha256": "e3a4d69dc47c475a3522177eef39e5f24076c1a7a922e6322f334e640d55821e"
+    },
+    {
+      "path": "baseline-review-response.json",
+      "bytes": 12372,
+      "sha256": "bcd69ff5a0a694e9c6d7a72a7fe5becc9d7420a125d37dc8ab55c371bb2e1cae"
+    },
+    {
+      "path": "candidate-cohort-review.json",
+      "bytes": 23166,
+      "sha256": "a3a176c4ed8219d60743b6d1ff0670b00441f955a36f8ece78afabfe181b23e2"
+    },
+    {
+      "path": "candidate-owned-stop.json",
+      "bytes": 599,
+      "sha256": "43615087a52827f13b96abdef5f71f749b6491e2b902099400b185048db5bbec"
+    },
+    {
+      "path": "candidate-persisted-outcome.json",
+      "bytes": 10634,
+      "sha256": "046c7e9187e8ab02577f3615610f987700b971d3da313a7ed3964079de328c25"
+    },
+    {
+      "path": "candidate-private-originals-manifest.json",
+      "bytes": 13409,
+      "sha256": "6dbc056b6a4ddec142c8518e433308716863497f99090a63d87a75710dce3d82"
+    },
+    {
+      "path": "candidate-protocol.json",
+      "bytes": 11690,
+      "sha256": "f280ff7d4752ac557cc6fdb9031c77bb8fd59b8370e12873ef62a09e0e47bc0b"
+    },
+    {
+      "path": "candidate-result.json",
+      "bytes": 6512,
+      "sha256": "c82077100755a004f7faf3b45cbbc0ca0bd25e2e43aa4333c447de90bd97fb06"
+    },
+    {
+      "path": "candidate-source-review.json",
+      "bytes": 5660,
+      "sha256": "a0b533c2c37dbb1b57ba43685260b6e03a26f3d47c24c50089ff2f6f63360df9"
+    },
+    {
+      "path": "external-carry-correction.json",
+      "bytes": 3921,
+      "sha256": "d0ca3d4a06ef640dea2ecdcaf21bc4832554501ac75d8f37910b1e7ae550d25d"
+    },
+    {
+      "path": "lookup-interpretation-correction.json",
+      "bytes": 1493,
+      "sha256": "cbb9040a5a7552413b98920970d37b4d5e529c7d7ae033eba7402b8b41ef2260"
+    }
+  ],
+  "file_count_excluding_manifest": 17
+}

@@ -1,0 +1,54 @@
+{
+  "head": "0eb5a318c259d8dc3d72fdf0bb02f7566b6de4cb",
+  "native_stack": 40952,
+  "position": 4,
+  "size": 7,
+  "base": "589fcf5ceb1afb18f4eb180f24ffcd5011e547aa",
+  "red": {
+    "handle": 17489,
+    "exit": 1,
+    "binary_sha256": "06f23fe50ff37a582d2952bb4b417e5be7fb3b1b02dfd1d9b6619e1ca4c83bd7",
+    "scope": "retained combined Native40952 binary; affected Usage renderer identical to current PR; not exact member binary"
+  },
+  "build": {
+    "handle": 28388,
+    "exit": 0
+  },
+  "green": {
+    "handle": 36291,
+    "exit": 0,
+    "scenarios": 3,
+    "binary_sha256": "0a941cd4719fbd0df9b8df128f3ed4b4356b8ec02a37a49a9de656c42834e433"
+  },
+  "lint": {
+    "ruff_exit": 0,
+    "pyright_exit": 0
+  },
+  "source_sha256": {
+    "bin/masc_tui_render.ml": "3e3811dee69b7dcd686420d3bc7b8cdc59ca3a3e823acae5e451ccca8bbb75d0",
+    "test/test_tui_usage_studio_pty.py": "c7cc18798c5bd5482230d3b89b03341cfa2975fba0de3089866390eb9fc8ed80",
+    "test/test_tui_usage_rows_pty.py": "d558a321e84bf3eaaa6612db2cfdadc4a9693040c1ce30b5013d0f2c51b08537"
+  },
+  "logs": {
+    "red.log": {
+      "source": "/tmp/pr40950-reported-totals-red.log",
+      "sha256": "0959f9699d379e1eb36808204846571c68a1fb0f3ad958b7b96461be909c7a6a"
+    },
+    "build.log": {
+      "source": "/tmp/pr40950-reported-totals-build.log",
+      "sha256": "8a1dc340d4772de594825ad830d8e3f71f76002f38c2bc82a57668c14661d6f0"
+    },
+    "green.log": {
+      "source": "/tmp/pr40950-reported-totals-green.log",
+      "sha256": "0b9854302314fc05b03d45259eba6c82b038eb8b51859b868e58ac6abc1f285c"
+    },
+    "ruff.log": {
+      "source": "/tmp/pr40950-reported-totals-ruff.log",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "pyright.json": {
+      "source": "/tmp/pr40950-reported-totals-pyright.json",
+      "sha256": "dfa418dba7027d485ce0900cf63aae1d8ae62b73a4ccaeb0400c4e95acf2cbf9"
+    }
+  }
+}

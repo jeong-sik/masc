@@ -1,0 +1,14 @@
+{
+  "attempted_at": "2026-09-07T14:53:40.236256+00:00",
+  "pid": 62279,
+  "binary_sha256_before_start": "7bb2bc118c0d56fe0f9c71e0920b60c16edcbd926dee36fab4c05423f16bd003",
+  "base_path": "/Users/dancer/me",
+  "port": 8935,
+  "automatic_retry": false,
+  "installed_binary_replaced": false,
+  "runtime_config_modified": false,
+  "start_attempt_by_this_session": true,
+  "outcome": "BasePath already owned; root process exited without starting the runtime",
+  "existing_owner_pid": 61803,
+  "successful_runtime_start": false
+}

@@ -1,0 +1,68 @@
+{
+  "scope": "actual root TOML editor and declaration module; not full TUI or PTY",
+  "sources": {
+    "lib/toml_line_editor/toml_line_editor.mli": "504727d302e6661dcd3669e37cb36d1c73217cbde404867c1488b390e9927db6",
+    "lib/toml_line_editor/toml_line_editor.ml": "8f837763a9abea4a5494b00e6b168b1de4f9f1f284ba95d28810891660f2b045",
+    "bin/masc_tui_lane_declaration.mli": "60d720162b8389b279ee2c0c32c35d3f83b5a994f924475aa4f642ff89cf5043",
+    "bin/masc_tui_lane_declaration.ml": "ccee25e16fed51b0b7b56a2e01a313bd23a17ad1b2dd08c64f85725ade713a28",
+    "test/test_tui_lane_declaration_path.ml": "7eb25aa24f5f0cc5353aafe53c1608dbfd0423642ac9aa204c14292f71a5b5ff"
+  },
+  "commands": [
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,otoml",
+      "-c",
+      "toml_line_editor.mli"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,otoml",
+      "-c",
+      "toml_line_editor.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,otoml",
+      "-c",
+      "masc_tui_lane_declaration.mli"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,otoml",
+      "-c",
+      "masc_tui_lane_declaration.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,otoml",
+      "-c",
+      "test_tui_lane_declaration_path.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlc",
+      "-package",
+      "yojson,alcotest,otoml",
+      "-linkpkg",
+      "toml_line_editor.cmo",
+      "masc_tui_lane_declaration.cmo",
+      "test_tui_lane_declaration_path.cmo",
+      "-o",
+      "test.exe"
+    ],
+    [
+      "./test.exe"
+    ]
+  ],
+  "exit_code": 0
+}

@@ -1,0 +1,56 @@
+ ▸Dashboard  Work  Keepers  Usage  Board  Workspace  System
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ MASC Lane Add-ons                                                                                                                                            │
+├──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│?:help  Esc:back  J/K:scroll                                                                                                                                  │
+│Input: Slice run different-run differs from the detail's original run native-current-ui-proof. Return to the list with Esc to query another run or all runs; e│
+│xisting results are retained.                                                                                                                                 │
+│Results read failed: GET failed: Malformed Response: unexpected eof (http://127.0.0.1:49435/api/v1/lane-addons/slice?run_id=native-current-ui-proof) · previou│
+│s rows, if any, retained · r:retry                                                                                                                            │
+│Raw details                                                                                                                                                   │
+│Snapshot unknown                                                                                                                                              │
+│Records                                                                                                                                                       │
+│SoundFont: pause_requested                                                                                                                                    │
+│Row 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad/1/e8e8b75037064ace8cb1bde36d94521f726b782d9295136ffc7e04d0f326da1d                                                   │
+│Lane 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad/phrase                                                                                                              │
+│Observed 2026-10-21 15:40:32.266 UTC                                                                                                                          │
+│Subject current-input-1                                                                                                                                       │
+│{                                                                                                                                                             │
+│  "source_id": "vst-phrase",                                                                                                                                  │
+│  "incarnation": "current-native-synthetic-source",                                                                                                           │
+│  "source_event_id": "current-input-1",                                                                                                                       │
+│  "state": "pause_requested",                                                                                                                                 │
+│  "scope": "latest_local_phrase_state",                                                                                                                       │
+│  "playback_evidence": "local player process events; device audibility is not measured",                                                                      │
+│  "action_receipt": false                                                                                                                                     │
+│}                                                                                                                                                             │
+│Evidence lane-evidence:f4b0126b1650985e6d1aaba6167d8a907c9abb52661466b93bf426d5a8503621 · sha256 f4b0126b1650985e6d1aaba6167d8a907c9abb52661466b93bf426d5a8503│
+│621                                                                                                                                                           │
+│> 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad · Native MIDI phrase playback · detached · run native-current-ui-proof · rev 0.1.0 · seq 1 · rows 1                    │
+│   TOML /private/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/.masc/config/lane-addons/native-ui.toml          │
+│   binding                                                                                                                                                    │
+│     {                                                                                                                                                        │
+│       "sources": [                                                                                                                                           │
+│         {                                                                                                                                                    │
+│           "path": "/var/folders/bv/cjrbl01x52s6j80krdfb63400000gp/T/masc-addon-current-native-20261022-m8yhupn9/source.json",                                │
+│           "source_id": "vst-phrase",                                                                                                                         │
+│           "kind": "snapshot_file"                                                                                                                            │
+│         }                                                                                                                                                    │
+│       ]                                                                                                                                                      │
+│     }                                                                                                                                                        │
+│   output phrase → phrase                                                                                                                                     │
+│Add-on command: slice {"run_id":"different-run"}                                                                                                              │
+│Evidence preserved: 1 row · sha256 2ed0cb5ec42432edf643fd4393203c6908ade96ded953be8e45c78e683c961a4                                                           │
+│Evidence owner: 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad                                                                                                          │
+│Selected row: 01a15f2e-2d70-7000-b1ff-86b6c9cc5fad/1/e8e8b75037064ace8cb1bde36d94521f726b782d9295136ffc7e04d0f326da1d                                         │
+│Not shared.                                                                                                                                                   │
+│Last receipt:                                                                                                                                                 │
+│{                                                                                                                                                             │
+│  "instance_id": "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad",                                                                                                      │
+│  "row_ids": [                                                                                                                                                │
+│    "01a15f2e-2d70-7000-b1ff-86b6c9cc5fad/1/e8e8b75037064ace8cb1bde36d94521f726b782d9295136ffc7e04d0f326da1d"                                                 │
+│  ],                                                                                                                                                          │
+│  "evidence": {                                                                                                                                               │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ?:help  Colon:palette  Esc:back  A:command  1-4:section  Tab:next section  j/k:move  retained history · D:details  D:raw  J/K:scroll  r:refresh
+ Choose a Keeper before writing · i:choose

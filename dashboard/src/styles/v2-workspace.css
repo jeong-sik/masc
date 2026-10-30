@@ -1,0 +1,96 @@
+/* MASC Dashboard v2 — Workspace surface (Board + Planning/Goals).
+ *
+ * Scoped to .v2-workspace-* so unmigrated surfaces keep their legacy styling.
+ *
+ * Colors come from v2-theme.css; this file handles surface-specific
+ * layout, hairlines, hover states, and brass accent touches.
+ */
+
+.v2-workspace-surface,
+.v2-workspace-panel,
+.v2-workspace-card,
+.v2-workspace-row,
+.v2-workspace-action,
+.v2-workspace-table,
+.v2-workspace-detail {
+  --v2-workspace-top-glow: rgb(var(--brass-glow) / 0.04);
+}
+
+/* ── Panels / cards ───────────────────────────────────────────────────────── */
+
+.v2-workspace-panel,
+.v2-workspace-card,
+.v2-workspace-surface [data-surface-card] {
+  box-shadow: inset 0 1px 0 var(--v2-workspace-top-glow);
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-workspace-panel:hover,
+.v2-workspace-card:hover,
+.v2-workspace-surface [data-surface-card]:hover {
+  border-color: var(--color-border-strong);
+}
+
+/* ── Rows (lists, tables) ─────────────────────────────────────────────────── */
+
+.v2-workspace-row,
+.v2-workspace-table tbody tr,
+.v2-workspace-panel table tbody tr,
+.v2-workspace-detail table tbody tr {
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-workspace-row:hover,
+.v2-workspace-table tbody tr:hover,
+.v2-workspace-panel table tbody tr:hover,
+.v2-workspace-detail table tbody tr:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
+}
+
+/* ── Action buttons ───────────────────────────────────────────────────────── */
+
+.v2-workspace-action:not(:disabled),
+.v2-workspace-panel .v2-workspace-action:not(:disabled),
+.v2-workspace-surface [data-action-button]:not(:disabled) {
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-workspace-action:not(:disabled):hover,
+.v2-workspace-surface [data-action-button]:not(:disabled):hover {
+  border-color: var(--color-accent-fg);
+  background: var(--color-brass-soft);
+}
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+
+.v2-workspace-table,
+.v2-workspace-panel table,
+.v2-workspace-detail table {
+  border-color: var(--color-border-default);
+}
+
+.v2-workspace-table thead,
+.v2-workspace-panel table thead,
+.v2-workspace-detail table thead {
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.v2-workspace-table th,
+.v2-workspace-panel table th,
+.v2-workspace-detail table th {
+  color: var(--color-fg-muted);
+}
+
+.v2-workspace-table td,
+.v2-workspace-panel table td,
+.v2-workspace-detail table td {
+  color: var(--color-fg-secondary);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+/* ── Detail sections ──────────────────────────────────────────────────────── */
+
+.v2-workspace-detail {
+  box-shadow: inset 0 1px 0 var(--v2-workspace-top-glow);
+}

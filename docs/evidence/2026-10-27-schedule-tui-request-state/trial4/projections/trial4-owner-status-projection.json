@@ -1,0 +1,37 @@
+{
+  "scope": "Selected final owner-state fields from already sanitized MCP HTTP response bodies; full owner/config bodies not retained. No missing key defaulting. Not raw wire or byte-identical original bodies.",
+  "owners": [
+    {
+      "source": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/http/00046-response.bin",
+        "bytes": 50155,
+        "sha256": "0511b91672f78674bf5013c84fa8f4bd7512ceacb8fb8067a9c0ef51e2cd353d"
+      },
+      "is_derivative": true,
+      "selected": {
+        "name": "audit-tui-a",
+        "activation_mode": "manual",
+        "paused": true,
+        "total_turns": 0,
+        "last_turn_ts": 0.0,
+        "last_runtime_attempt": null
+      }
+    },
+    {
+      "source": {
+        "path": "/Users/dancer/me/workspace/yousleepwhen/masc-schedule-durable-candidate/artifacts/schedule-durable-candidate-20261027/tui-owned/runs/owned-tui-c2-4/http/00049-response.bin",
+        "bytes": 50158,
+        "sha256": "6c3209a1dd82408106f9e53cda412df548a617f384b87f56ae6eecf3dea0da69"
+      },
+      "is_derivative": true,
+      "selected": {
+        "name": "audit-tui-b",
+        "activation_mode": "manual",
+        "paused": true,
+        "total_turns": 0,
+        "last_turn_ts": 0.0,
+        "last_runtime_attempt": null
+      }
+    }
+  ]
+}

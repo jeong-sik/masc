@@ -1,0 +1,1 @@
+{"type":"object","properties":{"relation":{"type":"string","enum":["related","unrelated"]}},"required":["relation"],"additionalProperties":false}

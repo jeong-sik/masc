@@ -1,0 +1,108 @@
+{
+  "scope": "test fixture repair and source checks; raw native results belong to the earlier published head",
+  "local_parent": "126a50f4b134bb1ddcfb3974d341ec9b14150135",
+  "known_native_run": {
+    "pr": 40214,
+    "run_id": 36676032252,
+    "published_head_prefix": "9b254",
+    "coordinates_source": "root supplied the run/head coordinates and downloaded artifact; child performed no network access",
+    "artifact_source_path": "/tmp/masc-file-backed-current-native-20260930/ci-run-tests.log",
+    "artifact_sha256": "c8e0aac8f51293bdebd9e1b3fab06a4400a2a994f8503fe95ff62c0468969505",
+    "suite": "test_auth_file_backed_transaction",
+    "passed": 18,
+    "failed": 1,
+    "total": 19,
+    "failure_excerpt": "File \"test/test_auth_file_backed_transaction.ml\", line 278, character 2:\nFAIL login reports the real bootstrap transition\n\n   Expected: `true'\n   Received: `false'",
+    "other_successful_suites": [
+      {
+        "suite": "test_auth_token_rotation_transaction",
+        "passed": 16
+      },
+      {
+        "suite": "test_auth_rotate_shared_tokens_10304",
+        "passed": 7
+      },
+      {
+        "suite": "test_auth_token_prune_transaction",
+        "passed": 12
+      },
+      {
+        "suite": "test_credential_expiry",
+        "passed": 3
+      },
+      {
+        "suite": "test_auth",
+        "passed": 64
+      },
+      {
+        "suite": "test_auth_login",
+        "passed": 12
+      },
+      {
+        "suite": "test_auth_oauth",
+        "passed": 14
+      },
+      {
+        "suite": "test_auth_credential_index_cache",
+        "passed": 4
+      },
+      {
+        "suite": "test_play_credential_transaction",
+        "passed": 17
+      }
+    ],
+    "other_passed_total": 149
+  },
+  "source_default": {
+    "file": "lib/types/types_auth.ml",
+    "line": 189,
+    "enabled": true,
+    "require_token": true
+  },
+  "repair": "Explicit enabled=false fixtures for disabled refusal/bootstrap; separate missing-config Admin case requires Auth_already_required, no bootstrap config/secret/Admin marker and a recoverable pair. No production changes.",
+  "fixture_sha256": "72b0216770ae5783e1d938209dc9226d6c6b2d00d4264fb30b6a185d05df3a0b",
+  "prepared_case_count": 23,
+  "checks": [
+    {
+      "command": [
+        "/Users/dancer/.opam/5.5.1/bin/ocamlc",
+        "-stop-after",
+        "parsing",
+        "-impl",
+        "test/test_auth_file_backed_transaction.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "python3",
+        "scripts/lint-ignore-without-comment.py",
+        "--include-tests",
+        "--strict",
+        "--target",
+        "test/test_auth_file_backed_transaction.ml"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ],
+  "repaired_suite_execution": "not run locally; no repaired-head CI result observed",
+  "native_typecheck_build": "not run locally",
+  "original_repair_fixture_sha256": "0572ae3df82b2b000d5af307b319293838e2667b396ab3cffc0db805569fa1aa",
+  "original_repair_prepared_case_count": 20,
+  "checks_scope": "Original20-case fixture before external680 composition; current composed parse check is separate",
+  "composed_external_head": "68069b3af2da03639225f7bac95dcb61fb54c324"
+}

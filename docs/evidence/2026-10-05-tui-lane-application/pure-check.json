@@ -1,0 +1,34 @@
+{
+  "exit": 0,
+  "compiler": "5.5.0",
+  "compile_command": [
+    "ocamlfind",
+    "ocamlopt",
+    "-w",
+    "+32+69",
+    "-warn-error",
+    "+a",
+    "-package",
+    "yojson,otoml,alcotest",
+    "-linkpkg",
+    "toml_line_editor.mli",
+    "toml_line_editor.ml",
+    "masc_tui_lane_application.mli",
+    "masc_tui_lane_application.ml",
+    "masc_tui_lane_declaration.mli",
+    "masc_tui_lane_declaration.ml",
+    "test_tui_lane_application.ml",
+    "-o",
+    "check"
+  ],
+  "source_hashes": {
+    "lib/toml_line_editor/toml_line_editor.mli": "ae2632f055771937026a1e844f14e04c3b0fa84490260e471f7be0bf547e28e7",
+    "lib/toml_line_editor/toml_line_editor.ml": "abf5b063b9f576ec161ac0cbcfd3089a27a20d36d6629cff92377d9f10135d7f",
+    "bin/masc_tui_lane_application.mli": "0ff7beb1ce0e8fd1924ff65562ddb79fd48ea3c7c708059e0745155d1532c30d",
+    "bin/masc_tui_lane_application.ml": "63c217d7c62983650f60ad25bbf99b27ab4c22d13173c1e51a8957df890d03d1",
+    "bin/masc_tui_lane_declaration.mli": "a2d62ee65b01b0e9d8d16fd022039ab667ea9e9eff73d837802aef8acd6c3e0c",
+    "bin/masc_tui_lane_declaration.ml": "f497c5bf53f7624475a3d6d5aecc273b9e4383f66e77870fcf72f523a3343937",
+    "test/test_tui_lane_application.ml": "2c54f48adcb2da222213a7d7e7085893c4a5c7e649c6e7297b3a4d0516fb1ffe"
+  },
+  "scope": "Actual application, declaration and TOML editor source compiled together; not full TUI/native/backend execution"
+}

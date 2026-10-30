@@ -1,0 +1,78 @@
+import { afterEach, expect, it, vi } from 'vitest'
+import { discoverSetupModels, importAntigravityAccount, prepareSetupModel, saveSetupSelections } from './runtime-setup'
+
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals() })
+const source = { integration_id: 'fixture' }
+const model = { id: 'model', label: 'Model', context: 1024, tools: true }
+const cases = [
+  { name: 'model discovery', invoke: (signal: AbortSignal) => discoverSetupModels(source, { signal }), receipt: { models: [model] } },
+  { name: 'selected context', invoke: (signal: AbortSignal) => prepareSetupModel(source, model, false, { signal }), receipt: { model: 'model', context: 1024 } },
+  { name: 'account import', invoke: (signal: AbortSignal) => importAntigravityAccount('fixture', { signal }), receipt: { schema: 'masc.web_setup_account.v1', account_ref: 'a'.repeat(64), account_imported: true, invocation_verified: false, catalog: { models: [model] } } },
+  { name: 'verified model save', invoke: (signal: AbortSignal) => saveSetupSelections('revision', [{ kind: 'existing', id: 'fixture.model', label: 'Model' }], { signal }), receipt: { configured: true, commit: { durability: 'durable', warnings: [] }, readiness: 'verified', runtime_id: 'fixture.model', runtime_ids: ['fixture.model'] } },
+]
+for (const entry of cases) {
+  it(`${entry.name} survives the ordinary POST deadline and accepts its eventual receipt`, async () => {
+    vi.useFakeTimers()
+    let complete!: (response: Response) => void
+    let observed: AbortSignal | null | undefined
+    vi.stubGlobal('fetch', vi.fn((_path, init: RequestInit) => {
+      observed = init.signal
+      return new Promise<Response>((resolve, reject) => {
+        complete = resolve
+        init.signal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true })
+      })
+    }))
+    const controller = new AbortController()
+    let settled = false
+    const pending = entry.invoke(controller.signal).finally(() => { settled = true })
+    await vi.advanceTimersByTimeAsync(30_001)
+    expect(settled).toBe(false); expect(observed?.aborted).toBe(false)
+    complete(new Response(JSON.stringify(entry.receipt), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await pending
+    expect(settled).toBe(true)
+  })
+}
+it('propagates only explicit caller cancellation while a model preparation is pending', async () => {
+  vi.stubGlobal('fetch', vi.fn((_path, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init.signal?.addEventListener('abort', () => reject(new DOMException('operator cancelled', 'AbortError')), { once: true })
+  })))
+  const controller = new AbortController()
+  const pending = prepareSetupModel(source, model, true, { signal: controller.signal })
+  controller.abort()
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+})
+
+it('retains open Codex effort vocabulary and reported defaults through discovery and context preparation', async () => {
+  const reported = { ...model, supported_reasoning_efforts: ['low', 'ultra', 'adaptive-v2'], default_reasoning_effort: 'native-auto' }
+  vi.stubGlobal('fetch', vi.fn(async path => new Response(JSON.stringify(String(path).endsWith('/models')
+    ? { models: [reported, { ...model, id: 'empty', supported_reasoning_efforts: [], default_reasoning_effort: 'medium' }] }
+    : { model: model.id, context: 2048 }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+  const discovered = await discoverSetupModels(source)
+  expect(discovered[0]).toMatchObject(reported)
+  expect(discovered[1]).toMatchObject({ supported_reasoning_efforts: [], default_reasoning_effort: 'medium' })
+  expect(await prepareSetupModel(source, discovered[0]!, false)).toMatchObject({ ...reported, context: 2048 })
+})
+
+it.each([
+  { supported_reasoning_efforts: ['ultra'] },
+  { default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: null, default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: 'ultra', default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: [1], default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: [''], default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: ['ultra', 'ultra'], default_reasoning_effort: 'ultra' },
+  { supported_reasoning_efforts: ['ultra'], default_reasoning_effort: null },
+  { supported_reasoning_efforts: ['ultra'], default_reasoning_effort: '' },
+])('refuses malformed present reasoning effort metadata %j', async metadata => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ models: [{ ...model, ...metadata }] }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } })))
+  await expect(discoverSetupModels(source)).rejects.toThrow('Invalid model reasoning effort metadata')
+})
+
+it('does not invent Codex effort fields for providers that omit them', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ models: [model] }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } })))
+  const discovered = await discoverSetupModels(source)
+  expect(discovered[0]).not.toHaveProperty('supported_reasoning_efforts')
+  expect(discovered[0]).not.toHaveProperty('default_reasoning_effort')
+})

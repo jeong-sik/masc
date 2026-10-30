@@ -1,0 +1,64 @@
+(include_subdirs no)
+
+;; Board MCP adapter.
+;;
+;; This is intentionally not part of lib/tool/:
+;; the neutral Tool substrate must not depend on Board. It is also intentionally
+;; not part of lib/board/: the Board domain should not depend on MCP schema /
+;; dispatch registration. This adapter is the composition boundary that knows
+;; both sides.
+
+(rule
+ (target board_tool_registry_generated.ml)
+ (deps
+  (glob_files ../../config/tools/masc_board_*.toml))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{exe:../../bin/gen_board_tool_registry.exe} %{deps}))))
+
+(library
+ (name board_tool_adapter)
+ (public_name masc.board_tool_adapter)
+ (wrapped false)
+ (private_modules
+  board_tool_curation
+  board_tool_handlers
+  board_tool_post
+  board_tool_sub_board)
+ (modules
+  board_tool
+  board_tool_attachment
+  board_tool_curation
+  board_tool_dispatch
+  board_tool_format
+  board_tool_handlers
+  board_tool_post
+  board_tool_registry
+  board_tool_registry_generated
+  board_tool_schemas
+  board_tool_sub_board)
+ (libraries
+  eio
+  eio.unix
+  re
+  uri
+  time_compat
+  yojson
+  ; Board_tool_schemas reads config/tools/masc_board_*.toml from the
+  ; binary-embedded config tree.
+  masc.embedded_config
+  masc.config
+  masc.config_dir_resolver
+  otoml
+  unix
+  masc.fs_compat
+  masc.masc_core
+  masc.masc_log
+  masc.board_handlers
+  masc.masc_tool_dispatch
+  masc.masc_tool_surface
+  ; Board_tool_post pages a thread against the call's Tool_output.result_boundary.
+  masc.masc_tool_blob_store
+  masc.tool_types
+  masc_types))

@@ -1,0 +1,18 @@
+{
+  "baseline": "8c23cd524c28048a0f3a859fb86f4e001428c9a9",
+  "candidate": "c60d967b19a96d01523d830a777df0c39703c7cc",
+  "PR_source_head": "7e9135c72ecbc28749c0b65bba6527e7e170aefc",
+  "product_diff": [
+    "lib/core/safe_ops.ml"
+  ],
+  "all_candidate_changed_paths": [
+    "lib/core/safe_ops.ml"
+  ],
+  "file_sha256": {
+    "lib/core/safe_ops.ml": {
+      "c60d967b19a96d01523d830a777df0c39703c7cc": "f8680d42fb141a06b1dcb600be1675d2b271821a1489c3c127c167d2ff32b40b",
+      "7e9135c72ecbc28749c0b65bba6527e7e170aefc": "f8680d42fb141a06b1dcb600be1675d2b271821a1489c3c127c167d2ff32b40b"
+    }
+  },
+  "scope": "Only inline attribute differs between arms. The full safe_ops.ml and test_safe_ops.ml match this PR source head. Different PR/probe bases mean whole lib/bin are not identical. No backlog encoding change in either arm."
+}

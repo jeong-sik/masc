@@ -1,0 +1,16 @@
+{
+  "scope": "Actual helper prefix before make_config_root and the three named actual shell fixture functions; Common-dependent other fixtures excluded. Actual complete String_util ML/MLI and installed alcotest/re/digestif/Unix libraries, no library stubs. Actual supervisor/control/artifact contract scripts copied by fixture. Not full test module or Dune/native server build.",
+  "functions": [
+    "test_supervisor_control_starts_reports_and_stops_the_supervisor",
+    "test_supervisor_liveness_without_readiness_preserves_terminal_failure",
+    "test_supervisor_promotes_pid_bound_healthy_candidate"
+  ],
+  "files": {
+    "test/test_start_masc_script.ml": "9bc355203f127ec84b32060912f652f228708e639c2895042816e9c723e2ca27",
+    "scripts/start-masc-supervised.sh": "4c79974b59f6b117d6c7a15ee9aa3f0b09f03dcea9a896be69539280fa8fbc98",
+    "scripts/masc-supervisor-control.sh": "f2e8a95860a5736696b3672814aab3a196caedc103305a1055dad054ce29fccc",
+    "scripts/lib/runtime-artifact-contract.sh": "379ec200781c9e29ef0e0aa534bd841f7ffadaeeb1c1f4e778cb721ea78c9692",
+    "lib/string_util/string_util.ml": "a3164b20317bea9f8f680eddbbc4b18ed976bfbf3592baa8a8d0ae3aa48f5f60",
+    "lib/string_util/string_util.mli": "c2b8317ef383e083cb96b4e1e0c172a16b50c74c84233f0e7c1ea2528482db9a"
+  }
+}

@@ -1,0 +1,55 @@
+; Assertion failures deliberately use catch-all patterns for unexpected variants.
+(executable
+ (name keeper_claimable_membership_bench)
+ (modules keeper_claimable_membership_bench)
+ (libraries masc.keeper_chat_operations masc.keeper_checkpoint_ref masc.keeper_registry mtime mtime.clock unix yojson))
+
+; Keep the production warning policy strict; use the test-directory convention.
+(env
+ (_ (flags (:standard -w -4-69))))
+
+(test
+ (name test_keeper_native_call_store)
+ (modules test_keeper_native_call_store)
+ (libraries alcotest masc.agent_core masc.keeper_chat_operations masc.keeper_execution_scope
+  masc.keeper_checkpoint_ref masc.keeper_registry  masc.agent_core.digest sqlite3 unix yojson))
+
+(test
+ (name test_keeper_chat_operation_store)
+ (modules test_keeper_chat_operation_store)
+ (libraries alcotest masc.keeper_chat_operations sqlite3 unix yojson))
+
+(test
+ (name test_keeper_semantic_execution_store)
+ (modules test_keeper_semantic_execution_store)
+ (libraries alcotest masc.keeper_chat_operations masc.keeper_execution_scope
+  masc.keeper_checkpoint_ref masc.keeper_registry  masc.agent_core.digest sqlite3 unix uuidm yojson))
+
+(test
+ (name test_keeper_direct_runtime_continuation)
+ (modules test_keeper_direct_runtime_continuation)
+ (libraries alcotest masc.keeper_chat_operations masc.keeper_execution_scope
+  masc.keeper_checkpoint_ref masc.keeper_registry unix yojson))
+
+(test
+ (name test_keeper_direct_gate_wait)
+ (modules test_keeper_direct_gate_wait)
+ (libraries alcotest masc.agent_core masc.keeper_chat_operations masc.keeper_execution_scope
+  masc.keeper_checkpoint_ref masc.keeper_registry  masc.agent_core.digest unix))
+
+(test
+ (name test_keeper_retained_checkpoint_sweep)
+ (modules test_keeper_retained_checkpoint_sweep)
+ (libraries alcotest masc masc.agent_core masc.masc_core masc.keeper_chat_operations masc.keeper_execution_scope
+  masc.keeper_checkpoint_ref masc.keeper_registry  masc.agent_core.digest sqlite3 unix yojson))
+
+(test
+ (name test_keeper_chat_operation_public)
+ (modules test_keeper_chat_operation_public)
+ (libraries alcotest masc.keeper_chat_operations yojson))
+
+(test
+ (name test_keeper_direct_input_wait)
+ (modules test_keeper_direct_input_wait)
+ (libraries alcotest masc.agent_core masc.keeper_chat_operations masc.keeper_execution_scope
+  masc.keeper_checkpoint_ref masc.keeper_registry unix yojson))

@@ -1,0 +1,52 @@
+{
+ "masc-ego-empty-reap-20261030-a": {
+  "ok": true,
+  "spaceId": 15,
+  "finish": {
+   "spaceId": 15,
+   "closedSpace": false,
+   "keptManagedLabels": [],
+   "closedManagedLabels": [],
+   "preservedUnmanagedCount": 1
+  }
+ },
+ "masc-ego-empty-reap-20261030-b": {
+  "ok": true,
+  "spaceId": 16,
+  "finish": {
+   "spaceId": 16,
+   "closedSpace": true,
+   "keptManagedLabels": [],
+   "closedManagedLabels": [
+    "p1"
+   ],
+   "preservedUnmanagedCount": 0
+  }
+ },
+ "masc-ego-two-space-20261030-a": {
+  "ok": true,
+  "spaceId": 17,
+  "finish": {
+   "spaceId": 17,
+   "closedSpace": true,
+   "keptManagedLabels": [],
+   "closedManagedLabels": [
+    "p1"
+   ],
+   "preservedUnmanagedCount": 0
+  }
+ },
+ "masc-ego-two-space-20261030-b": {
+  "ok": true,
+  "spaceId": 18,
+  "finish": {
+   "spaceId": 18,
+   "closedSpace": true,
+   "keptManagedLabels": [],
+   "closedManagedLabels": [
+    "p1"
+   ],
+   "preservedUnmanagedCount": 0
+  }
+ }
+}

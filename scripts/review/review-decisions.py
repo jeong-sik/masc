@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Reduce exact-head review decisions by the authenticated GitHub author.
+"""Reduce exact-head decisions by GitHub account and claimed Keeper name.
 
-The core consumes API records, not claimed Keeper names. A later PASS can
-supersede only that account's decisions; an approval is still admitted separately
-by review-refusal.py. This module reads no network or repository state.
+A claimed name is an additional blocking boundary, not an authenticated identity.
+An approval is still admitted separately by review-refusal.py. This module reads
+no network or repository state.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ class ReviewState(str, Enum):
 
 TRUSTED_ASSOCIATIONS = frozenset(("OWNER", "MEMBER", "COLLABORATOR"))
 HEADER = re.compile(
-    r"verdict: (PASS|FAIL) head: ([0-9a-f]{40})"
+    r"verdict: (PASS|FAIL|HOLD|COMMENT) head: ([0-9a-f]{40})"
     r"(?: run: ([1-9][0-9]*))? by: ([A-Za-z0-9._-]+)"
 )
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -56,6 +56,7 @@ class Decision:
     state: State
     run: str
     by: str
+    claimed_owner: str | None
     created_at: datetime
     decision_at: datetime
     url: str | None
@@ -67,10 +68,11 @@ class Decision:
 
     @property
     def actor_key(self) -> tuple:
-        # Unidentified records cannot assert a shared author and withdraw one
-        # another's decisions. The ordinal also keeps missing API IDs distinct.
-        if self.actor is not None:
-            return ("actor", self.actor)
+        # An account alone must not collapse two Keepers' decisions. A missing
+        # or malformed claim cannot withdraw any other record, even on the same
+        # account; the ordinal keeps records without API IDs distinct.
+        if self.actor is not None and self.claimed_owner is not None:
+            return ("actor-and-claim", self.actor, self.claimed_owner)
         return ("unidentified", self.kind.value, self.record_id, self.ordinal)
 
     @property
@@ -179,14 +181,17 @@ def parse_record(envelope: dict, *, head: str, ordinal: int,
     state_name = words[1] if len(words) > 1 else ""
     state = State.__members__.get(state_name, State.UNKNOWN)
     run = by = "-"
-    if state in (State.PASS, State.FAIL):
+    claimed_owner = None
+    if state in (State.PASS, State.FAIL, State.HOLD, State.COMMENT):
         header = HEADER.fullmatch(first_line)
         if header is None or len(head_fields) != 1 or header[2] != head:
-            state = State.INVALID
+            if state in (State.PASS, State.FAIL):
+                state = State.INVALID
         else:
             run = header[3] or "-"
             by = header[4]
-    elif state not in (State.HOLD, State.COMMENT):
+            claimed_owner = by
+    else:
         state = State.UNKNOWN
     if kind is Kind.REVIEW and review_state is None:
         # An unrecognized publication state cannot grant positive authority.
@@ -209,7 +214,7 @@ def parse_record(envelope: dict, *, head: str, ordinal: int,
     if kind is Kind.COMMENT and state is not State.PASS:
         updated = timestamp(record.get("updated_at", record.get("created_at")), "updated_at")
         decision_at = max(created, updated)
-    return Decision(kind, record_id, actor, state, run, by, created, decision_at,
+    return Decision(kind, record_id, actor, state, run, by, claimed_owner, created, decision_at,
                     record.get("html_url") if isinstance(record.get("html_url"), str) else None,
                     ordinal)
 
@@ -232,8 +237,9 @@ def reduce_decisions(envelopes: Iterable[dict], *, head: str,
             latest[decision.actor_key] = decision
     decisions = tuple(sorted(latest.values(), key=lambda d: d.order, reverse=True))
     blockers = tuple(d for d in decisions if d.blocks)
-    # A positive record cannot withdraw a different authenticated author's
-    # refusal. The chosen blocker is diagnostic; every blocker is retained.
+    # A positive record cannot withdraw a different account's refusal or a
+    # differently claimed Keeper's refusal. Names do not authenticate sessions.
+    # The chosen blocker is diagnostic; every blocker is retained.
     selected = (blockers or decisions or (None,))[0]
     return Reduction(decisions, selected)
 

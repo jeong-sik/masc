@@ -455,6 +455,11 @@ class WorklistFlow(unittest.TestCase):
             later_fail = {'id':13, 'user':user('reviewer-b'), 'body':f'verdict: FAIL head: {HEAD} by: reviewer-b',
                           'created_at':'2026-10-26T10:00:00Z', 'updated_at':'2026-10-26T10:00:00Z'}
             self.assertFalse(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [later_fail], accounts, True))
+            other_keeper_fail = later_fail | {
+                'body': f'verdict: FAIL head: {HEAD} by: another-keeper',
+                'created_at': '2026-10-26T08:00:00Z', 'updated_at': '2026-10-26T08:00:00Z'}
+            self.assertFalse(M.GitHub('o/r').independent_source_review(
+                pr, [cr, approved], [other_keeper_fail], accounts, True))
             other_fail = later_fail | {'user':user('reviewer-a')}
             self.assertTrue(M.GitHub('o/r').independent_source_review(pr, [cr, approved], [other_fail], accounts, True))
             unknown_fail = later_fail | {'user':None}

@@ -157,6 +157,21 @@ class ReadFailureNaming(GuardHarness):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stdout)["pr"], 41487)
 
+    def test_same_account_other_keeper_comment_still_blocks_receipt(self):
+        self.review(footer_line())
+        for state in ("FAIL", "HOLD"):
+            for keeper, expected in (("other-keeper", 2), ("reviewer-keeper", 0)):
+                with self.subTest(state=state, keeper=keeper):
+                    comment = {
+                        "id": 88, "body": f"verdict: {state} head: {HEAD} by: {keeper}",
+                        "user": {"login": "reviewer-keeper"}, "author_association": "COLLABORATOR",
+                        "created_at": "2026-10-06T03:45:54Z", "updated_at": "2026-10-06T03:45:54Z"}
+                    (self.data / "comments.json").write_text(json.dumps([comment]))
+                    result = self.run_guard("--source-receipt")
+                    self.assertEqual(result.returncode, expected, result.stderr)
+                    if expected:
+                        self.assertIn(f"structured verdict is {state}", result.stderr)
+
 
 class CommitIndependence(GuardHarness):
     def set_pages(self, pages, name="compare.json"):
@@ -639,13 +654,16 @@ class VerdictWithdrawalCase(GuardHarness):
         approval.update(id=89, submitted_at="2026-10-08T04:00:00Z")
         approval["user"]["login"] = "reviewer-account"
         (self.data / "review.json").write_text(json.dumps(approval))
-        request = self.negative_review()
-        request["body"] = f"verdict: FAIL head: {HEAD} by: other-keeper\nsource findings"
-        self.reviews(request, approval)
-        for mode in ("--source-receipt", "--merge-check"):
-            result = self.run_guard(mode)
-            self.assertEqual(result.returncode, 2, result.stderr)
-            self.assertIn("unresolved change requests", result.stderr)
+        for request_head, diagnostic in ((HEAD, "latest structured verdict is FAIL"),
+                                         ("a" * 40, "unresolved change requests")):
+            request = self.negative_review()
+            request["body"] = f"verdict: FAIL head: {request_head} by: other-keeper\nsource findings"
+            self.reviews(request, approval)
+            for mode in ("--source-receipt", "--merge-check"):
+                with self.subTest(request_head=request_head, mode=mode):
+                    result = self.run_guard(mode)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn(diagnostic, result.stderr)
 
     def test_source_receipt_uses_submission_order_when_review_ids_are_reversed(self):
         footer = footer_line().replace(" · reviewed base", " · replaces own CHANGES_REQUESTED 90 · reviewed base")

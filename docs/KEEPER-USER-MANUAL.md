@@ -144,13 +144,57 @@ before deleting them. `.masc-keep-build` preserves a checkout's output.
 
 `microvm_build_link_mkdir_failed` or `microvm_build_link_apply_failed` can
 report a nonzero exit or signal. Status 127 can mean build preparation could
-not start an interpreter. Execution and transport failures are also possible,
-so no status alone establishes the cause or proves that no effect ran. Preserve the
-guest, volumes, links and any possibly executed effect as unverified; do not
-automatically retry the effect or restart the service or guest to clear the
-warning. The in-process unverified state applies only while that guest
-generation is retained; a restart, forget or replacement can clear it and
-permit another attempt.
+not start an interpreter. A local status alone does not establish the cause
+or prove that no guest effect ran. Preserve the guest, volumes and links for
+inspection; restarting the service or guest does not resolve an unknown effect.
+
+Cleanup is consumed once per backend and Keeper work volume in this server
+process, including across workspace and network aliases. A request known not
+to have been sent is skipped permanently, since later turns can create new
+build output. Receipt-confirmed successful cleanup is not repeated. A matching
+terminal nonzero result, signal, shim-enforced timeout or explicit pre-spawn
+refusal also consumes cleanup
+and permits best-effort handoff, preserving real `_build` entries. Missing
+receipts, exceptions and cancellation leave cleanup unresolved unless the runner
+publishes authoritative request-not-sent evidence.
+`microvm_build_cleanup_effect_unverified` identifies the Keeper whose new
+execution handoff is unavailable: the original cleanup may still rename later
+output. Attached diagnostic reads remain available when the guest and identity
+can be validated; they do not certify that cleanup has stopped.
+
+Guest readiness invalidation permits a fresh read-only link scan. The build
+volume is disposable, so target-directory creation is idempotent and may run
+again after invalidation. Unresolved symlink applications remain shared across
+aliases and are not resent. Targets are prepared for both correct links and
+safe link plans, including entries currently absent: an earlier unresolved
+application can arrive after the scan and still needs its expected target.
+Real directories and differently targeted links are preserved.
+
+Attached maintenance reserves its own attempt on that shared work resource.
+`microvm_build_maintenance_effect_unverified` reports the operation ID when
+maintenance may still be mutating build output; new execution and maintenance
+are refused without resending it. Trusted terminal or request-not-sent evidence
+releases this reservation. Diagnostic reads remain available. The existing
+workspace audit log records intent and result under
+`custom:keeper_microvm_build_maintenance`, with operation ID and redacted receipt
+fields, including boundary, exit, signal, timeout and shim error. Command output
+and credentials are excluded. If the intent audit cannot be written, maintenance
+is not sent. Audit records are flushed forensic evidence, not fsync-backed
+admission authority or automatic reconciliation across server restarts.
+
+An unresolved symlink application still refuses execution handoff: a current
+read-only scan does not prove the original operation stopped. Execution also
+requires a completed link scan and required target preparation in the current
+guest readiness generation. A failed read-only scan may be retried by a later
+handoff. Target-only mkdir failure can also be retried in the same generation
+when no persistent symlink effect is unresolved; it requires no guest stop or
+readiness reset. A warning does not supply a usable execution endpoint.
+
+These records are process-local and use nominal resource names. A server
+restart loses them and its first handoff can attempt cleanup again. Do not
+restart to recover an unknown effect. Neither durable no-replay across server
+restarts nor physical volume identity or cross-process fencing is provided.
+Guest labels do not fence an external instance or mount replacement.
 
 In the affected guest, perform these checks both as root and as the Keeper uid
 and gid: target-directory preparation uses root, while link creation uses the

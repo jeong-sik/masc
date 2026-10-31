@@ -1,0 +1,54 @@
+{
+  "schema": "weekly-core-audit.repeated-stimulus-aggregate.v1",
+  "capture_started_at_utc": "2026-10-30T11:20:42.994858+00:00",
+  "capture_finished_at_utc": "2026-10-30T11:20:43.920755+00:00",
+  "selection": {
+    "scope": "Six previously anonymized official-client context-window observations from one listener process.",
+    "receipt_join": "Each sample time falls within its uniquely matched effect-fenced receipt interval, allowing two seconds on each side; all six distinct trace-and-turn pairs belong to one Keeper.",
+    "reaction_join": "Each selected receipt interval, extended by three seconds at each end, contains exactly one raw schedule turn-start row for the same source identity.",
+    "ledger_window": "Rows recorded since the process-start reference and contained in captured readable file prefixes; file reads and the queue snapshot are not atomic.",
+    "ledger_sources": "Starts and finishes use keeper_event_queue; ACKs and cancellations use keeper_event_queue_transition.",
+    "listener_process_matched_before_and_after_capture": true
+  },
+  "selected_attribution_samples": 6,
+  "uniquely_matched_receipts": 6,
+  "distinct_matched_turns": 6,
+  "matched_reaction_starts": 6,
+  "shared_schedule_stimulus_count": 1,
+  "raw_reaction_rows_for_same_stimulus": {
+    "turn_started": 7,
+    "turn_finished": 7,
+    "turn_finished_failed": 7,
+    "ack": 0,
+    "cancelled": 0,
+    "other_kind_or_source": 0
+  },
+  "distinct_event_ids_for_raw_rows": {
+    "turn_started": 1,
+    "turn_finished": 1
+  },
+  "queue_snapshot": {
+    "pending_entries": 3,
+    "same_schedule_stimulus_pending": 1,
+    "transition_outbox_entries": 0,
+    "transition_wal_present": true,
+    "transition_wal_bytes_at_stat": 0
+  },
+  "capture_errors": {
+    "receipt_unreadable_files": 0,
+    "receipt_malformed_candidate_rows": 0,
+    "receipt_incomplete_file_tails": 0,
+    "reaction_unreadable_files": 0,
+    "reaction_malformed_rows": 0,
+    "reaction_incomplete_file_tails": 0
+  },
+  "limits": [
+    "The six sample joins use timestamps; the provider log does not carry the receipt trace identity.",
+    "Repeated raw start and finish rows reuse event IDs; the raw row count is not a count of unique IDs.",
+    "The pending snapshot, WAL stat and ledger prefixes were read separately while the service was live.",
+    "No ACK or cancellation was observed for this identity only within the captured post-start ledger prefixes; this is not a complete-lifetime proof.",
+    "An effect-fenced receipt does not establish whether an external effect happened, nor that an external effect was duplicated.",
+    "A seventh or later raw reaction can postdate the six originally selected samples.",
+    "Turn-start ledger rows do not carry admitted_revision, so matching source identity does not prove that every row names the same queue incarnation."
+  ]
+}

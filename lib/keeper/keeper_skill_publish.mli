@@ -11,7 +11,9 @@
     [Created_and_published] carries the reference and snapshot revision,
     [Created_but_shadowed] completes too and adds the [winner] identity that
     turns listing Skills by name see instead, [Created_but_unpublished] the
-    reason, and a refusal its [error] code and message. *)
+    reason, and a refusal its [error] code and message. If an audit was
+    attempted, [audit_status] reports [audit_call_returned] or [unconfirmed];
+    neither is a durable transaction with Skill publication. *)
 val handle :
   descriptors:Keeper_tool_descriptor.t list ->
   capability_surface:Keeper_capability_surface.t option ->

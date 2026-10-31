@@ -9571,7 +9571,6 @@ type state = {
   mutable keeper_action_inflight:
     (string * Masc_tui_keeper_control.action) option;
   mutable keeper_action_pending: Masc_tui_keeper_control.pending option;
-  mutable keeper_action_serial: int;
   (* The composer occupies the last terminal row on every surface. It is drawn
      whether or not it holds the keystrokes: an input line that appears only
      once it is already receiving text cannot be found by looking. Focus is
@@ -15963,6 +15962,21 @@ let release_retained_keeper_input state keeper_name ~request_ids =
     name, id, intervention)
     state.keeper_interactive_waiting
 
+(* A Resume or Boot accepted on the Keepers surface has already delivered the
+   server's resume receipt. The input stays held in the queue until explicit
+   /queue resume, which can now verify the live owner and release locally
+   instead of re-posting a duplicate resume directive that 409s. *)
+let acknowledge_keeper_surface_resume state keeper_name =
+  clear_keeper_priority_requests state keeper_name;
+  state.keeper_interactive_waiting <- List.map (fun (name, id, intervention) ->
+    let intervention = match intervention with
+      | Retained_after_stop when String.equal name keeper_name ->
+          Retained_before_dispatch
+      | Retained_after_stop | Retained_before_dispatch | Awaiting_control _ ->
+          intervention in
+    name, id, intervention)
+    state.keeper_interactive_waiting
+
 (* A receipt callback finishes control before its outcome arrives, advancing
    once. A later control advances again; old outcomes cannot mark a resumed
    request as stopped. Pending distinguishes that later control's first step. *)
@@ -17820,7 +17834,6 @@ let create_state
   candle_authority_generation = 0;
   keeper_action_inflight = None;
   keeper_action_pending = None;
-  keeper_action_serial = 0;
   composer_focused = false;
   voice_capture = None;
   voice_capture_phase = Voice_starting;

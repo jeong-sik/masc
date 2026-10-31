@@ -1,0 +1,41 @@
+{
+  "completed_failed": 13,
+  "disposition": {
+    "before_dispatch_refusal": 0,
+    "domain_conflict": 3,
+    "execution_refusal": 10,
+    "unknown": 0
+  },
+  "excluded_duplicate_ids": 0,
+  "execution_final": {
+    "input_refused": 4,
+    "invalid_output": 1,
+    "not_allowed": 0,
+    "outcome_unknown": 5,
+    "output_limit_reached": 0,
+    "request_id_reused": 0,
+    "unknown": 0
+  },
+  "execution_http_status_codes": {},
+  "execution_http_status_unobserved": 10,
+  "index": {
+    "complete_lines": 9011,
+    "duplicate_completions": 0,
+    "duplicate_registrations": 0,
+    "malformed_rows": 0,
+    "orphan_completions": 0,
+    "sampled_bytes": 3270003,
+    "short_read_bytes": 0,
+    "truncated_tail": 0,
+    "unknown_lane_rows": 0
+  },
+  "input_refusal": {
+    "context_overflow": 4,
+    "input_capacity": 0,
+    "invalid_request": 0,
+    "request_body_refused": 0,
+    "unknown": 0
+  },
+  "selected_registrations": 46,
+  "unreadable_or_invalid_receipt": 0
+}

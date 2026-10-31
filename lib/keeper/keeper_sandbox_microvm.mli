@@ -836,10 +836,11 @@ val keeper_work_root_write_probe_argv_for
   -> keeper_name:string
   -> string list
 (** Create and remove a temporary file in {!keeper_work_root} as [uid:gid],
-    the identity the keeper's commands run under. Exit 0 proves the keeper
-    can write its root; any other exit carries the root's owner and mode on
-    stderr. A root that exists but belongs to another uid -- a tree imported
-    from elsewhere -- fails here rather than on the keeper's first Write. *)
+    the identity the keeper's commands run under. Exit 0 is accepted as a
+    successful probe. A nonzero exit or signal leaves the result unverified: the
+    container command, creation, cleanup, or metadata inspection may have
+    failed. The guest script attempts to report owner and mode with [stat],
+    but absence of that output does not establish a permissions problem. *)
 
 val work_volume_mounted_probe_argv_for
   :  Keeper_microvm_backend.t

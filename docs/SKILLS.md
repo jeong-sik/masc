@@ -40,8 +40,14 @@ catalog 순서에서 앞선 package(보통 먼저 선언된 source 의 것)가 �
 이고 `winner` 가 이긴 package 를 가리킨다. Keeper 턴은 이름으로 Skill 목록을 만들어서
 `winner` 를 본다. 새 package 는 파일과 catalog 에 남고, Task 가 그 정확한 reference 를
 지명할 때만 턴에 들어간다.
-발행마다 감사 원장에 `skill_write` 한 줄을
-남긴다(Keeper 이름, 참조, `evidence`). `evidence`는 기록만 하고 참인지 판정하지 않는다.
+쓰기 완료 또는 결과 불명일 때 감사 원장에 Keeper 이름, 정확한 참조 또는 시도한
+package, `evidence`를 담은 `skill_write` 행을 시도한다.
+도구 결과의 `audit_status`가 `audit_call_returned`이면 감사 호출이 반환한 것이고,
+`unconfirmed`이면 예외가 나서 행이 쓰였는지 알 수 없다. 전자는 행의 내구성을
+보장하지 않는다. 두 값 모두 Skill 쓰기와 감사 기록의 원자성을 뜻하지 않으며,
+예외·취소·프로세스 중단 뒤 감사 행이 없을 수 있다. 감사 상태와 별도로 반환된
+발행 상태와 정확한 참조를 확인한다. `evidence`의 참 여부는 판정하지 않는다.
+HTTP 편집기 응답은 감사 상태를 전달하지 않는다.
 삭제는 운영자의 편집기 DELETE 경로로 한다.
 
 Keeper가 composition을 저장하는 `keeper_compose_save`는

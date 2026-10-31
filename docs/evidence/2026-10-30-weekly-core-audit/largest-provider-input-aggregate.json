@@ -1,0 +1,19 @@
+{
+  "matching_snapshots": 16,
+  "messages": 4387,
+  "messages_by_role": {
+    "assistant": 2186,
+    "tool": 2186,
+    "user": 15
+  },
+  "repeated_message_artifact_bytes_after_first": 31720,
+  "repeated_reference_groups": 3,
+  "repeated_reference_occurrences_after_first": 12,
+  "schema": "masc.weekly-audit.largest-provider-input.v1",
+  "selected_snapshot_wire_body_bytes": 1926598,
+  "unique_role_and_content_ref_pairs": 4375,
+  "window_utc": {
+    "end_inclusive": "2026-10-30T08:10:00Z",
+    "start_inclusive": "2026-10-30T07:46:18Z"
+  }
+}

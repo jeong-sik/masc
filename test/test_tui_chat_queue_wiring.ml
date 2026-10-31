@@ -1489,7 +1489,16 @@ let test_preflight_local_resume_keeps_fifo_and_respects_server_stop () =
   check bool "a real stop still requires its server resume receipt" false
     (Tui_types.can_resume_preflight_keeper_input state "alpha");
   check bool "server-stopped input remains held" true
-    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"))
+    (Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  state.keeper_interactive_waiting <-
+    ("beta", "other-stopped", Tui_types.Retained_after_stop)
+    :: state.keeper_interactive_waiting;
+  Tui_types.acknowledge_keeper_surface_resume state "alpha";
+  check bool "Keepers surface resume satisfies the server receipt without auto-sending" true
+    (Tui_types.can_resume_preflight_keeper_input state "alpha"
+     && Option.is_none (Tui_types.next_authorized_keeper_input state "alpha"));
+  check bool "other Keeper stop hold remains untouched" false
+    (Tui_types.can_resume_preflight_keeper_input state "beta")
 ;;
 
 let test_workspace_suspension_preserves_real_stop_ownership () =

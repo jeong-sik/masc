@@ -3924,6 +3924,112 @@ esac
     (List.for_all (String.starts_with ~prefix:"exec ") commands)
 ;;
 
+(* The container CLI may fail before the guest runs the write probe, or after
+   it creates a temporary file. Neither result proves a permissions failure. *)
+let test_keeper_work_root_admission_keeps_failed_probes_unverified () =
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_fs with
+      | Some fs -> Fs_compat.set_fs fs
+      | None -> Fs_compat.clear_fs ())
+  @@ fun () ->
+  with_eio_fs @@ fun () ->
+  let base = temp_dir "microvm-work-root-admission-" in
+  let bin = Filename.concat base "bin" in
+  Unix.mkdir bin 0o700;
+  let mode = Filename.concat base "mode" in
+  let calls = Filename.concat base "calls" in
+  let cli = Filename.concat bin "container" in
+  let write path contents =
+    Out_channel.with_open_bin path (fun out -> output_string out contents)
+  in
+  write calls "";
+  write cli
+    (Printf.sprintf {|#!/bin/sh
+printf '%%s\n' "$*" >> %s
+case "$*" in
+  *masc-mount-probe*) printf 'mounted\n' ;;
+  *masc-probe*)
+    case "$(/bin/cat %s)" in
+      success) exit 0 ;;
+      empty_failure) exit 1 ;;
+      exit_124) exit 124 ;;
+      with_stderr) printf 'fixture transport failed\n' >&2; exit 7 ;;
+      signal) kill -TERM "$$" ;;
+      timeout) exec /bin/sleep 5 ;;
+      *) exit 2 ;;
+    esac ;;
+  *' mkdir -p -m '*) exit 0 ;;
+  *) exit 3 ;;
+esac
+|} (Filename.quote calls) (Filename.quote mode));
+  Unix.chmod cli 0o700;
+  let previous_path = Sys.getenv "PATH" in
+  let previous_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "PATH" (bin ^ ":" ^ previous_path);
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "PATH" previous_path;
+      (match previous_base_path with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.unsetenv "MASC_BASE_PATH");
+      remove_snapshot_fixture base)
+  @@ fun () ->
+  let module Turn = Masc.Keeper_turn_sandbox_runtime in
+  let config = Masc.Workspace.default_config base in
+  let meta = microvm_meta ~name:"lane-smith" in
+  let runtime = Turn.For_testing.create_minimal ~config ~meta ~state:Turn.Not_started in
+  let read_calls () =
+    In_channel.with_open_bin calls In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal line ""))
+  in
+  let probe ~timeout_sec outcome =
+    write mode outcome;
+    let before = List.length (read_calls ()) in
+    let result =
+      Turn.For_testing_microvm.ensure_keeper_work_root ~timeout_sec runtime
+        ~backend:Backend.Apple_container ~container_name:"guest-x"
+    in
+    let commands = List.drop before (read_calls ()) in
+    Alcotest.(check int) (outcome ^ " calls mount, mkdir and probe once") 3
+      (List.length commands);
+    List.iter2
+      (fun needle command ->
+        Alcotest.(check bool) (outcome ^ " runs " ^ needle) true
+          (String.starts_with ~prefix:"exec " command
+           && Astring.String.is_infix ~affix:needle command))
+      [ "masc-mount-probe"; "mkdir -p -m"; "masc-probe" ] commands;
+    result
+  in
+  (match probe ~timeout_sec:5. "success" with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "successful probe was refused: %s" detail);
+  List.iter
+    (fun (outcome, timeout_sec, status) ->
+      match probe ~timeout_sec outcome with
+      | Ok () -> Alcotest.failf "%s unexpectedly admitted the guest" outcome
+      | Error detail ->
+        Alcotest.(check bool) (outcome ^ " remains unverified") true
+          (String.starts_with ~prefix:"microvm_keeper_work_root_probe_unverified:" detail);
+        Alcotest.(check bool) (outcome ^ " preserves process status") true
+          (Astring.String.is_infix ~affix:status detail);
+        Alcotest.(check bool) (outcome ^ " does not assert a permissions failure") false
+          (Astring.String.is_infix ~affix:"not_writable" detail);
+        if String.equal outcome "with_stderr" then
+          Alcotest.(check bool) "available probe output is retained" true
+            (Astring.String.is_infix ~affix:"fixture transport failed" detail))
+    [ "empty_failure", 5., "exit=1"
+    ; "exit_124", 5., "exit=124"
+    ; "with_stderr", 5., "exit=7"
+    ; "signal", 5., "signal="
+    ; "timeout", 1.5, "exit=124"
+    ];
+  Alcotest.(check int) "all admissions use exactly three commands" 18
+    (List.length (read_calls ()))
+;;
+
 (* The running guest as a remote endpoint: the argv the remote runner spawns
    is [container exec] into this guest, the shim it names is the mounted one,
    and the identity it injects is the snapshot the guest already mounts. *)
@@ -4996,6 +5102,8 @@ let () =
             test_work_volume_mounted_probe_grep_against_fixture_mounts
         ; Alcotest.test_case "work volume admission keeps failed probes unverified" `Quick
             test_work_volume_admission_keeps_failed_probes_unverified
+        ; Alcotest.test_case "keeper work root admission keeps failed probes unverified" `Quick
+            test_keeper_work_root_admission_keeps_failed_probes_unverified
         ; Alcotest.test_case "keeper work root write probe runs as the keeper" `Quick
             test_keeper_work_root_write_probe_runs_as_the_keeper
         ; Alcotest.test_case "running guest is a remote endpoint" `Quick

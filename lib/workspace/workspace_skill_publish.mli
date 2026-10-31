@@ -27,7 +27,15 @@ type request =
   ; evidence : evidence
   }
 
-type outcome =
+(** What the audit call observed, not a durable receipt. An exception can be
+    raised either before or after the row was appended. *)
+type audit_observation =
+  | Audit_call_returned
+      (** The audit call returned without an exception. *)
+  | Audit_unconfirmed
+      (** The call raised; the row may or may not have been appended. *)
+
+type creation_outcome =
   | Created_and_published of
       { reference : Skill_reference.t
       ; snapshot_revision : string
@@ -65,6 +73,11 @@ type outcome =
       (** [SKILL.md] was written, but the catalog snapshot that would make
           it visible was not published. *)
 
+type outcome =
+  { creation : creation_outcome
+  ; audit : audit_observation
+  }
+
 (** What kind of refusal the editor returned. The server derives it from the
     editor's own error variant, so the Keeper tool never reads [code]. *)
 type refusal_cause =
@@ -84,4 +97,6 @@ type error =
       { code : string  (** The editor's own [error_code]. *)
       ; message : string
       ; cause : refusal_cause
+      ; audit : audit_observation option
+        (** [None] means no audit was attempted for this refusal. *)
       }

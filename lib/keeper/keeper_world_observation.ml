@@ -1486,7 +1486,10 @@ let collect_board_events_with_cursor_policy
           | [] -> Ok (List.rev acc)
           | (classified, signal) :: rest ->
             (match route_signal ~classified signal with
-             | Error _ as error -> error
+             | Error (Source_unavailable unavailable) ->
+               log_and_count_unavailable ~context:"signal replay" unavailable;
+               collect acc rest
+             | Error (Delivery_failed _ as error) -> Error error
              | Ok None -> collect acc rest
              | Ok (Some event) -> collect (event :: acc) rest)
         in

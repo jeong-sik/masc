@@ -4,6 +4,7 @@ Retained reports explain findings and link to supporting verification records.
 Generate new reports under `artifacts/`; retain selected reports here. See the
 [storage guide](../guides/WORKSPACE-STORAGE.md).
 
+- [최근 7일 핵심 기능 조사와 매트릭스 · 2026-10-30](2026-10-30-weekly-core-audit.md)
 - [MASC Librarian / Memory OS 적대적 감사 보고서](MASC-LIBRARIAN-MEMORY-OS-ADVERSARIAL-AUDIT-2026-07-30.md)
 - [전체 후속 작업 목록 · 2026-10-21](addon-lane-full-worklist-20261021.md)
 - [Browser ego session: listener ownership repair](browser-ego-listener-scope-20261024.md)

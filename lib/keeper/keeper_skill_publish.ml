@@ -92,6 +92,11 @@ let refusal_class_and_effect = function
   | Write_outcome_unknown -> Tool_result.Runtime_failure, Tool_result.Effect_outcome_unknown
 ;;
 
+let audit_fields = function
+  | Publish.Audit_call_returned -> [ "audit_status", `String "audit_call_returned" ]
+  | Publish.Audit_unconfirmed -> [ "audit_status", `String "unconfirmed" ]
+;;
+
 let handle ~descriptors ~capability_surface ~config ~keeper_name ~args =
   match request ~config ~capability_surface ~keeper_name args with
   | Error error ->
@@ -126,13 +131,13 @@ let handle ~descriptors ~capability_surface ~config ~keeper_name ~args =
                 "source_too_large", Printf.sprintf "Skill source is %d bytes; maximum is %d bytes" bytes max_bytes
             | Invalid_document error ->
                 Keeper_skill_catalog.error_code error, Keeper_skill_catalog.error_to_string error in
-          Error (Publish.Refused { code; message; cause = Publish.Request_refused })
+          Error (Publish.Refused { code; message; cause = Publish.Request_refused; audit = None })
     in
     (match publication with
-     | Ok (Publish.Created_and_published { reference; snapshot_revision; kind; diagnostics }) ->
+     | Ok { Publish.creation = Publish.Created_and_published { reference; snapshot_revision; kind; diagnostics }; audit } ->
        Keeper_tool_execution.success_data
          (`Assoc
-            (identity
+            (identity @ audit_fields audit
              @ [ "ok", `Bool true
                ; "status", `String "created_and_published"
                ; "reference", Skill_reference.to_yojson reference
@@ -141,7 +146,7 @@ let handle ~descriptors ~capability_surface ~config ~keeper_name ~args =
                ; ( "diagnostics"
                  , `List (List.map (fun value -> `String value) diagnostics) )
                ]))
-     | Ok (Created_but_shadowed { reference; snapshot_revision; winner; kind; diagnostics }) ->
+     | Ok { Publish.creation = Publish.Created_but_shadowed { reference; snapshot_revision; winner; kind; diagnostics }; audit } ->
        (* The write and the republish both committed; the catalog lists
           [winner] first under the same name, so turns that list Skills by
           name see it instead. The call did what it does, so it completes and
@@ -152,7 +157,7 @@ let handle ~descriptors ~capability_surface ~config ~keeper_name ~args =
           package_already_exists. *)
        Keeper_tool_execution.success_data
          (`Assoc
-            (identity
+            (identity @ audit_fields audit
              @ [ "ok", `Bool true
                ; "status", `String "created_but_shadowed"
                ; "reference", Skill_reference.to_yojson reference
@@ -173,7 +178,7 @@ let handle ~descriptors ~capability_surface ~config ~keeper_name ~args =
                         (Skill_reference.identity_package_id_to_string winner)
                         winner.name) )
                ]))
-     | Ok (Created_but_unpublished { reference; reason; kind; diagnostics }) ->
+     | Ok { Publish.creation = Publish.Created_but_unpublished { reference; reason; kind; diagnostics }; audit } ->
        (* SKILL.md is on disk, so a retry answers package_already_exists; the
           Keeper learns the write committed and why later turns cannot see it
           yet. *)
@@ -182,7 +187,7 @@ let handle ~descriptors ~capability_surface ~config ~keeper_name ~args =
          ~effect_disposition:Tool_result.Proven_post_effect
          ~code:"created_but_unpublished"
          ~message:reason
-         (identity
+         (identity @ audit_fields audit
           @ [ "status", `String "created_but_unpublished"
             ; "reference", Skill_reference.to_yojson reference
             ; "reason", `String reason
@@ -197,7 +202,8 @@ let handle ~descriptors ~capability_surface ~config ~keeper_name ~args =
          ~code:"skill_publish_not_installed"
          ~message:"Skill publication is not installed in this process"
          identity
-     | Error (Refused { code; message; cause }) ->
+     | Error (Refused { code; message; cause; audit }) ->
        let class_, effect_disposition = refusal_class_and_effect cause in
-       failure ~class_ ~effect_disposition ~code ~message identity)
+       let audit_fields = match audit with None -> [] | Some value -> audit_fields value in
+       failure ~class_ ~effect_disposition ~code ~message (identity @ audit_fields))
 ;;

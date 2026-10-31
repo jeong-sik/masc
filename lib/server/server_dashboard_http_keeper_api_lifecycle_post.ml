@@ -319,8 +319,13 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
       | Error Invalid_workspace_precondition ->
         respond_error ~request:req ~ok:false reqd "invalid expected_workspace precondition"
       | Error Workspace_precondition_failed ->
-        respond_error ~status:`Conflict ~request:req ~ok:false reqd
-          "workspace changed since identity probe; Keeper was not created"
+        let refusal = Request_workspace_precondition.Workspace_mismatch in
+        Http.Response.json_value ~status:`Conflict ~request:req
+          (Server_refusal.json
+             ~code:(Request_workspace_precondition.refusal_code refusal)
+             ~fields:[ "ok", `Bool false ]
+             "workspace changed since identity probe; Keeper was not created")
+          reqd
       | Ok args ->
         let started_at = Eio.Time.now clock in
         let duration_ms () =

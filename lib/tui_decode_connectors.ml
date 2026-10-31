@@ -145,6 +145,17 @@ let decode_connector_connection ~status ~available ~connected =
            "connector status %S contradicts available=%b connected=%b" status
            available connected)
 
+(* Telegram's native gateway emits its int64 bot ID as a JSON number. Other
+   connectors emit strings, so keep their stricter wire contract. *)
+let optional_bot_user_id ~connector_id json =
+  match connector_id, member "bot_user_id" json with
+  | "telegram", `Int value -> Ok (Some (string_of_int value))
+  | "telegram", `Intlit raw -> (
+      match Int64.of_string_opt raw with
+      | Some value -> Ok (Some (Int64.to_string value))
+      | None -> Error "field 'bot_user_id' must fit in an int64")
+  | _ -> optional_string_field json "bot_user_id"
+
 let decode_connector json =
   let* cn_id = required_string_field json "connector_id" in
   let* cn_display_name = required_string_field json "display_name" in
@@ -195,7 +206,7 @@ let decode_connector json =
   let* cn_trigger_policy = optional_string_field json "trigger_policy" in
   let* cn_reply_mode = optional_string_field json "reply_mode" in
   let* cn_chat_db_path = optional_string_field json "chat_db_path" in
-  let* cn_bot_user_id = optional_string_field json "bot_user_id" in
+  let* cn_bot_user_id = optional_bot_user_id ~connector_id:cn_id json in
   let* cn_bot_user_name = optional_string_field json "bot_user_name" in
   let* cn_bot_token_present = optional_bool_field json "bot_token_present" in
   let* cn_app_token_present = optional_bool_field json "app_token_present" in

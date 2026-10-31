@@ -5,15 +5,22 @@
     {!Workspace_hooks.keeper_skill_publish_fn} with {!publish}: it creates
     the package in the [project-agents] source through
     [Server_skill_editor.create], the same path as the operator editor, and
-    appends one [skill_write] audit row per created package. *)
+    attempts a [skill_write] audit row per created package. *)
 
 (** The declared Skill source a Keeper writes to. The Keeper cannot choose
     another one. *)
 val project_agents_source_id : string
 
+(** Whether an editor failure happened before any write began or after the
+    write may have touched disk. *)
+val cause_of_editor_error :
+  Server_skill_editor.error -> Workspace_skill_publish.refusal_cause
+
 (** The editor's refusal with its own code and message, and the kind of
     refusal it is. *)
-val refusal_of_editor_error : Server_skill_editor.error -> Workspace_skill_publish.error
+val refusal_of_editor_error :
+  ?audit:Workspace_skill_publish.audit_observation ->
+  Server_skill_editor.error -> Workspace_skill_publish.error
 
 (** [refresh] republishes the catalog snapshot after the write; the installed
     publisher builds it from the live runtime.toml exactly as the operator

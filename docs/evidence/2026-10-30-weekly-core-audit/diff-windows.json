@@ -1,0 +1,84 @@
+{
+  "snapshot_head": "8ef0028e911dd83c78bc57362904e0787df72c3e",
+  "captured_at": "2026-10-30T17:08:10+09:00",
+  "interval": "rolling 24h Asia/Seoul, first-parent snapshots",
+  "rows": [
+    {
+      "window_days_ago": 1,
+      "from": "2026-10-29T17:08:10+09:00",
+      "to": "2026-10-30T17:08:10+09:00",
+      "older": "9b8b566fdb47bb0ae5bed7078f9a141129b2ac9e",
+      "newer": "8ef0028e911dd83c78bc57362904e0787df72c3e",
+      "first_parent_commits": 135,
+      "files": 1547,
+      "added": 73929,
+      "deleted": 14822
+    },
+    {
+      "window_days_ago": 2,
+      "from": "2026-10-28T17:08:10+09:00",
+      "to": "2026-10-29T17:08:10+09:00",
+      "older": "3f5585167eee5315430009d0adc8c075ae91aefc",
+      "newer": "9b8b566fdb47bb0ae5bed7078f9a141129b2ac9e",
+      "first_parent_commits": 143,
+      "files": 1398,
+      "added": 89793,
+      "deleted": 12287
+    },
+    {
+      "window_days_ago": 3,
+      "from": "2026-10-27T17:08:10+09:00",
+      "to": "2026-10-28T17:08:10+09:00",
+      "older": "90dd18193c860cae37dad6fd3976670d92b14266",
+      "newer": "3f5585167eee5315430009d0adc8c075ae91aefc",
+      "first_parent_commits": 175,
+      "files": 2933,
+      "added": 175428,
+      "deleted": 16868
+    },
+    {
+      "window_days_ago": 4,
+      "from": "2026-10-26T17:08:10+09:00",
+      "to": "2026-10-27T17:08:10+09:00",
+      "older": "6d526220bea8fcaf42c88239bfb995aa4b7c9a09",
+      "newer": "90dd18193c860cae37dad6fd3976670d92b14266",
+      "first_parent_commits": 154,
+      "files": 3517,
+      "added": 153694,
+      "deleted": 59114
+    },
+    {
+      "window_days_ago": 5,
+      "from": "2026-10-25T17:08:10+09:00",
+      "to": "2026-10-26T17:08:10+09:00",
+      "older": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+      "newer": "6d526220bea8fcaf42c88239bfb995aa4b7c9a09",
+      "first_parent_commits": 179,
+      "files": 2333,
+      "added": 177611,
+      "deleted": 16837
+    },
+    {
+      "window_days_ago": 6,
+      "from": "2026-10-24T17:08:10+09:00",
+      "to": "2026-10-25T17:08:10+09:00",
+      "older": "ac7fe109acc9a54d479317755a24efb556c004b0",
+      "newer": "3cce9a517b25863c00b48cfb3dd79b994ebc1044",
+      "first_parent_commits": 63,
+      "files": 789,
+      "added": 41613,
+      "deleted": 5268
+    },
+    {
+      "window_days_ago": 7,
+      "from": "2026-10-23T17:08:10+09:00",
+      "to": "2026-10-24T17:08:10+09:00",
+      "older": "2157302cca524ca7bbf58293bcb4c8bbb25a8fe5",
+      "newer": "ac7fe109acc9a54d479317755a24efb556c004b0",
+      "first_parent_commits": 180,
+      "files": 1797,
+      "added": 74530,
+      "deleted": 17680
+    }
+  ]
+}

@@ -31,11 +31,12 @@ let cause_of_editor_error : Server_skill_editor.error -> Publish.refusal_cause =
     Publish.Write_outcome_unknown
 ;;
 
-let refusal_of_editor_error error =
+let refusal_of_editor_error ?audit error =
   Publish.Refused
     { code = Server_skill_editor.error_code error
     ; message = Server_skill_editor.error_to_string error
     ; cause = cause_of_editor_error error
+    ; audit
     }
 ;;
 
@@ -51,6 +52,7 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
          { code = "invalid_source_id"
          ; message = "project-agents source id is invalid: " ^ detail
          ; cause = Publish.Source_unavailable
+         ; audit = None
          })
   | Ok source_id ->
     (match
@@ -64,13 +66,12 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
          ~refresh
      with
      | Error error ->
-       let refusal = refusal_of_editor_error error in
-       (match cause_of_editor_error error with
+       let audit = match cause_of_editor_error error with
         | Publish.Write_outcome_unknown ->
           (* The write began and may have committed: a SKILL.md left on disk
-             reaches the catalog at the next refresh. Record who tried and
-             with what evidence, so such a Skill never appears unattributed. *)
-          Server_skill_write_audit.record
+             reaches the catalog at the next refresh. Attempt to record who
+             tried and with what evidence, without claiming the append landed. *)
+          Some (Server_skill_write_audit.record
             config
             ~agent_id:request.actor
             ~subject:
@@ -82,9 +83,10 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
             ~status:"write_outcome_unknown"
             ~evidence:(Publish.evidence_to_list request.evidence)
             ~outcome:(Audit_log.Failure (Server_skill_editor.error_to_string error))
-            ()
-        | Publish.Request_refused | Publish.Source_unavailable -> ());
-       Error refusal
+            ())
+        | Publish.Request_refused | Publish.Source_unavailable -> None
+       in
+       Error (refusal_of_editor_error ?audit error)
      | Ok outcome ->
        let preview, status, audit_outcome, result =
          match outcome with
@@ -125,7 +127,7 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
                ; diagnostics = preview.diagnostics
                } )
        in
-       Server_skill_write_audit.record
+       let audit = Server_skill_write_audit.record
          config
          ~agent_id:request.actor
          ~subject:(Server_skill_write_audit.Published preview.profile.reference)
@@ -133,8 +135,9 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
          ~status
          ~evidence:(Publish.evidence_to_list request.evidence)
          ~outcome:audit_outcome
-         ();
-       Ok result)
+         ()
+       in
+       Ok { Publish.creation = result; audit })
 ;;
 
 let install () =

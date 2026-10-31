@@ -1,0 +1,58 @@
+{
+  "answered_between_remaining_commit_and_next_overflow": 0,
+  "child_matches_parent_prefix_and_neighbors": 1,
+  "classification_captures_checked": 24,
+  "index": {
+    "complete_lines": 9011,
+    "duplicate_completions": 0,
+    "duplicate_registrations": 0,
+    "malformed_rows": 0,
+    "orphan_completions": 0,
+    "sampled_bytes": 3270003,
+    "short_read_bytes": 0,
+    "truncated_tail": 0,
+    "unknown_lane_rows": 0
+  },
+  "matching_sequence_found": 1,
+  "next_root_covers_remaining_parent_facts": 1,
+  "ordering": "uuid_v7_lexicographic",
+  "steps": [
+    {
+      "matches_remaining_parent_facts": 0,
+      "outcome": "context_overflow",
+      "prepared_up_to": 86,
+      "selected_facts": 86
+    },
+    {
+      "matches_remaining_parent_facts": 0,
+      "outcome": "committed",
+      "prepared_up_to": 86,
+      "selected_facts": 43
+    },
+    {
+      "matches_remaining_parent_facts": 1,
+      "outcome": "outcome_unknown",
+      "prepared_up_to": 43,
+      "selected_facts": 43
+    },
+    {
+      "matches_remaining_parent_facts": 1,
+      "outcome": "outcome_unknown",
+      "prepared_up_to": 43,
+      "selected_facts": 43
+    },
+    {
+      "matches_remaining_parent_facts": 1,
+      "outcome": "committed",
+      "prepared_up_to": 43,
+      "selected_facts": 43
+    },
+    {
+      "matches_remaining_parent_facts": 0,
+      "outcome": "context_overflow",
+      "prepared_up_to": 86,
+      "selected_facts": 86
+    }
+  ],
+  "unavailable_or_invalid_captures": 0
+}

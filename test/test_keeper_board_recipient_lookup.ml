@@ -397,8 +397,7 @@ let test_an_unknown_name_is_not_declared config =
   expect_ok "unknown" ([], [ "nobody" ]) (ask config "nobody")
 ;;
 
-(* The lookup builds a file name from the name it is given.  A name no Keeper
-   can have is answered before any file name exists. *)
+(* An unclaimed alias longer than a Keeper name must not become a filename. *)
 let test_a_name_no_keeper_can_have_is_not_declared config =
   register_keeper config "alice";
   let beyond_the_name_rule = String.make 129 'a' in
@@ -406,13 +405,31 @@ let test_a_name_no_keeper_can_have_is_not_declared config =
     "129 bytes"
     ([], [ beyond_the_name_rule ])
     (ask config beyond_the_name_rule);
-  (* Past 250 bytes the name and its ".json" no longer fit a file name, so
-     reading it would fail with ENAMETOOLONG instead of finding nothing. *)
+  (* Past 250 bytes the name and its ".json" no longer fit a file name. *)
   let beyond_a_file_name = String.make 300 'a' in
   expect_ok
     "300 bytes"
     ([], [ beyond_a_file_name ])
     (ask config beyond_a_file_name)
+;;
+
+(* A runtime store name is not a valid Keeper filename, but is a valid alias.
+   The lookup and the delivery router must agree about the recipient. *)
+let test_a_reserved_keeper_path_can_be_an_alias config =
+  register_keeper config ~mention_targets:[ "alice"; "tool_usage" ] "alice";
+  expect_ok "reserved path alias" ([ "tool_usage" ], []) (ask config "tool_usage");
+  expect_ok "uppercase reserved path alias" ([ "tool_usage" ], []) (ask config "TOOL_USAGE");
+  check bool "the alias reaches alice" true (routed_to config ~keeper:"alice" "tool_usage");
+  register_keeper config ~mention_targets:[ "bob"; "tool_usage" ] "bob";
+  expect_error "conflicting reserved path alias"
+    ~mentioning:[ "@tool_usage"; "alice"; "bob" ] (ask config "tool_usage")
+;;
+
+let test_an_unreadable_setting_fails_a_non_path_alias_lookup config =
+  register_keeper config "alice";
+  Out_channel.with_open_text (Keeper_types_profile.keeper_meta_path config "broken") (fun oc ->
+    output_string oc "{ this is not json");
+  expect_error "long alias scan" ~mentioning:[ "broken" ] (ask config (String.make 129 'a'))
 ;;
 
 let test_two_keepers_claiming_one_alias_fail_the_lookup config =
@@ -484,6 +501,29 @@ let test_a_read_that_raises_fails_the_lookup () =
        | exception exn -> fail ("the lookup raised " ^ Printexc.to_string exn))
 ;;
 
+(* The public lookup also works before an Eio filesystem is installed. In
+   that case mkdir uses Unix and raises Unix_error for a non-directory. *)
+let test_a_unix_read_that_raises_fails_the_lookup () =
+  let previous_fs = Fs_compat.get_fs_opt () in
+  let previous_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  let file = Filename.temp_file "keeper-recipient-lookup-unix" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous_fs with
+       | Some fs -> Fs_compat.set_fs fs
+       | None -> Fs_compat.clear_fs ());
+      (match previous_base_path with
+       | Some base_path -> Unix.putenv "MASC_BASE_PATH" base_path
+       | None -> Unix.unsetenv "MASC_BASE_PATH");
+      try Sys.remove file with Sys_error _ -> ())
+    (fun () ->
+      Fs_compat.clear_fs ();
+      let config = Workspace.default_config (Filename.concat file "base") in
+      expect_error "Unix filesystem error"
+        ~mentioning:[ "@someone"; "mkdir"; Unix.error_message Unix.ENOTDIR ]
+        (ask config "someone"))
+;;
+
 (* The broadcast path finds a Keeper by alias with
    [persisted_keeper_for_mention_target].  It shares its scan with the lookup,
    so what it answers is pinned here: one claim finds the Keeper, no claim finds
@@ -532,9 +572,13 @@ let test_a_keeper_name_too_long_for_a_board_identity_fails_the_lookup config =
 (* The limit holds for an alias too.  It is declared, so it cannot be dropped as
    prose, and a Board identity cannot hold it. *)
 let test_an_alias_too_long_for_a_board_identity_fails_the_lookup config =
-  let alias = String.make 65 'a' in
-  register_keeper config ~mention_targets:[ "long-owner"; alias ] "long-owner";
-  expect_error "65 bytes" ~mentioning:[ "Board recipient" ] (ask config alias)
+  let aliases = List.map (fun length -> String.make length 'a') [ 65; 129; 300 ] in
+  register_keeper config ~mention_targets:("long-owner" :: aliases) "long-owner";
+  List.iter
+    (fun alias ->
+      expect_error (Printf.sprintf "%d bytes" (String.length alias))
+        ~mentioning:[ "Board recipient" ] (ask config alias))
+    aliases
 ;;
 
 let () =
@@ -579,6 +623,10 @@ let () =
             (with_workspace test_an_unknown_name_is_not_declared)
         ; test_case "a name no Keeper can have is not declared" `Quick
             (with_workspace test_a_name_no_keeper_can_have_is_not_declared)
+        ; test_case "a reserved Keeper path can be an alias" `Quick
+            (with_workspace test_a_reserved_keeper_path_can_be_an_alias)
+        ; test_case "an unreadable setting fails a non-path alias lookup" `Quick
+            (with_workspace test_an_unreadable_setting_fails_a_non_path_alias_lookup)
         ; test_case "two Keepers claiming one alias fail the lookup" `Quick
             (with_workspace test_two_keepers_claiming_one_alias_fail_the_lookup)
         ; test_case "an unreadable setting fails an alias lookup only" `Quick
@@ -589,6 +637,8 @@ let () =
             (with_workspace test_a_keeper_file_this_build_cannot_read_fails_the_lookup)
         ; test_case "a read that raises fails the lookup" `Quick
             test_a_read_that_raises_fails_the_lookup
+        ; test_case "a Unix read that raises fails the lookup" `Quick
+            test_a_unix_read_that_raises_fails_the_lookup
         ; test_case "the alias scan the broadcast path uses answers as before" `Quick
             (with_workspace test_the_alias_scan_the_broadcast_path_uses_answers_as_before)
         ; test_case "a Keeper name too long for a Board identity fails the lookup" `Quick

@@ -48,8 +48,11 @@ let record config ~agent_id ~subject ~source_text ~status ?evidence ~outcome () 
               ]
             @ evidence_field))
       ~outcome
-      ()
+      ();
+    Workspace_skill_publish.Audit_call_returned
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Log.Server.warn "Skill write audit failed: %s" (Printexc.to_string exn)
+  | exn ->
+    Log.Server.warn "Skill write audit failed: %s" (Printexc.to_string exn);
+    Workspace_skill_publish.Audit_unconfirmed
 ;;

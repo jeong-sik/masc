@@ -691,8 +691,10 @@ let test_binding_non_dispatch_restore () = with_net (fun net ->
 let test_binding_direct_old_or_invalid_checkpoint () = with_net (fun net ->
   let provider=binding_provider "https://same.example" in
   let cp=binding_checkpoint provider [] in
-  (match Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:{cp with version=15} () with
-   | Error (Agent_checkpoint.Invalid_checkpoint_version {expected=16;got=15}) -> ()
+  (match Agent.resume ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~checkpoint:{cp with version=Checkpoint.checkpoint_version-1} () with
+   | Error (Agent_checkpoint.Invalid_checkpoint_version {expected; got}) ->
+     Alcotest.(check int) "expected current checkpoint version" Checkpoint.checkpoint_version expected;
+     Alcotest.(check int) "rejected the previous checkpoint version" (Checkpoint.checkpoint_version-1) got
    | Error error -> Alcotest.fail(Agent_checkpoint.resume_error_to_string error)
    | Ok _ -> Alcotest.fail "old direct checkpoint cannot silently migrate");
   let source={ (binding_source provider) with Binding_source.canonical_model_id=""} in

@@ -7,7 +7,15 @@
     - [/api/v1/dashboard/tasks/delete] — delete one task
     - [/api/v1/dashboard/goals/delete] — delete one goal
     - [/api/v1/dashboard/agents/purge] — delete an exact agent or accept a
-      durable Keeper purge operation *)
+      durable Keeper purge operation. Its optional [expected_workspace] body
+      field contains the canonical [base_path] and [masc_root]: a mismatch
+      returns 409 before looking up or starting a purge, and malformed values
+      return 400. Omitting the field preserves existing client behavior.
+    - [/api/v1/dashboard/keepers/deletions/retry] and
+      [/api/v1/dashboard/keepers/configuration-deletions/retry] — retry a
+      pending Keeper deletion operation, validating optional
+      [expected_workspace] with the same 400/409 contract before lookup or
+      retry. *)
 
 (** [add_delete_action_routes router] returns [router] with the delete
     endpoints appended.

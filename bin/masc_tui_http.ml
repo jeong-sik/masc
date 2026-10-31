@@ -2400,6 +2400,12 @@ let fetch_keeper_runtimes ~(host : string) ~(port : int)
     ^ "&expected_masc_root="
     ^ percent_encode_path_segment (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root))
 
+let keeper_workspace_headers (identity : Masc.Tui_decode.server_identity) =
+  [ Masc.Request_workspace_precondition.expected_base_path_header,
+    Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path
+  ; Masc.Request_workspace_precondition.expected_masc_root_header,
+    Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root ]
+
 (** POST a keeper lifecycle action ([boot] / [shutdown]).
 
     Returns the HTTP status alongside the body: a paused owner refuses [boot]
@@ -2407,13 +2413,16 @@ let fetch_keeper_runtimes ~(host : string) ~(port : int)
     rather than reporting it as a failure. Collapsing the status into an error
     string would make that decision a substring match. *)
 let post_keeper_lifecycle ~(host : string) ~(port : int) ~(keeper_name : string)
-    ~(action : string) : (int * string, string) result =
+    ~(action : string) ~(expected_workspace : Masc.Tui_decode.server_identity)
+    : (int * string, string) result =
   let path =
     Printf.sprintf "/api/v1/keepers/%s/%s"
       (percent_encode_path_segment keeper_name)
       (percent_encode_path_segment action)
   in
-  http_post ~headers:(auth_headers ()) ~host ~port ~path
+  http_post
+    ~headers:(keeper_workspace_headers expected_workspace @ auth_headers ())
+    ~host ~port ~path
     ~body:Masc_tui_keeper_control.lifecycle_body
 
 (** POST a keeper directive ([pause] / [resume] / [wakeup]). *)
@@ -2428,15 +2437,32 @@ let post_keeper_directive ~(host : string) ~(port : int)
   let body =
     Masc_tui_keeper_control.directive_body ~expected_workspace ~operator_operation_id action
   in
-  http_post ~headers:(auth_headers ()) ~host ~port ~path ~body
+  http_post
+    ~headers:(keeper_workspace_headers expected_workspace @ auth_headers ())
+    ~host ~port ~path ~body
 
 (** POST the keeper purge the web dashboard uses. Not under [/api/v1/keepers/]:
     the route is a dashboard action and reads the keeper from the body. *)
 let post_keeper_purge ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(expected_workspace : Masc.Tui_decode.server_identity)
     : (int * string, string) result =
-  http_post ~headers:(auth_headers ()) ~host ~port
+  http_post ~headers:(keeper_workspace_headers expected_workspace @ auth_headers ()) ~host ~port
     ~path:"/api/v1/dashboard/agents/purge"
-    ~body:(Masc_tui_keeper_control.purge_body keeper_name)
+    ~body:(Masc_tui_keeper_control.purge_body ~expected_workspace keeper_name)
+
+(** POST a Keeper deletion retry (/api/v1/dashboard/keepers/deletions/retry or
+    /api/v1/dashboard/keepers/configuration-deletions/retry), binding both
+    request headers and body to the observed workspace. *)
+let post_keeper_deletion_retry ~(host : string) ~(port : int) ~(path : string)
+    ~(keeper_name : string) ~(operation_id : string)
+    ~(expected_workspace : Masc.Tui_decode.server_identity)
+    : (int * string, string) result =
+  http_post
+    ~headers:(keeper_workspace_headers expected_workspace @ auth_headers ())
+    ~host ~port ~path
+    ~body:
+      (Masc_tui_keeper_control.deletion_retry_body
+         ~expected_workspace ~keeper_name ~operation_id)
 
 (** Fetch /api/v1/dashboard/briefing (Mission / Overview snapshot). *)
 let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

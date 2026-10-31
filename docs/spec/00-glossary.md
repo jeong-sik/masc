@@ -3025,10 +3025,13 @@ status: reference
   - 미기동·정지 대상 수락: 대상 Keeper가 등록되어 있으나 fiber가 돌지 않는 상태
     (`offline`·`crashed`·`restarting`·`draining`)이거나 일시정지(`paused`) 상태일 때의
     due 발화는 재시도 실패로 튕기지 않고 단 1회 수락(`accepted`)되어 해당 Keeper의
-    durable 큐에 대기한다(#38523). 다음 턴이 깨어날 때 stimulus로 읽히며, 새 발화는 아직
-    턴이 시작하지 않은 이전 대기를 대체하여 큐에는 스케줄당 최대 1건만 유지된다.
-    턴이 이미 가져간 발화는 이후 발화가 앞선 대기를 대체하거나 대상 Keeper 퇴역으로
-    예약이 취소돼도 그 턴의 ACK가 올 때까지 남는다(#39521).
+    durable 큐에 대기한다(#38523). 이후 턴에서 선택되면 stimulus로 읽히며, 새 발화는
+    기본 대상 Keeper 큐의 이전 pending 발화를 대체한다. 다른 Keeper로 이관된
+    발화는 그 Keeper의 별도 큐에 있다.
+    턴이 이미 가져간 발화도 이후 발화로 대체되거나 예약이 취소되면 durable 큐에서
+    철회될 수 있다(#40006). 턴은 이미 받은 입력을 계속 실행할 수 있다. 그 턴이
+    해당 발화의 ACK를 시도하면 철회된 항목으로 처리하고 새 ACK 영수증을 만들지
+    않는다. 취소 기록만으로 턴 실행이 없었다고 판단하지 않는다.
   - 보류(hold): due가 된 발화를 이번 tick에 보내지 않고 두는 것. 상태 값이 아니다 — 예약은
     `Due`에 머물고 다음 tick에 다시 판정된다. 이유는 닫힌 둘(`Schedule_runner.hold_reason`)이고
     wire `kind`로 적힌다. `previous_occurrence_unconsumed`는 대상 Keeper가 같은 예약의 이전

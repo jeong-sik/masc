@@ -1,0 +1,157 @@
+{
+  "scope": "Sanitized derivatives assembled after the runs. Runtime paths, response bodies, provider prompts, principals, database/WAL and binary files stay in ignored originals. Composite summary originals also include audit/cleanup files named in README; original summary digest does not certify derivative bytes.",
+  "source_files": [
+    {
+      "retained": "native-30-summary.json",
+      "original": "native-30-v1/summary.json",
+      "original_sha256": "4b2bc73416b37be63def6f6eff36a5183d2dd8732cb125a2bd577057f2df48fb",
+      "derivative": true
+    },
+    {
+      "retained": "native-30-health-samples.json",
+      "original": "native-30-v1/latency-samples.json",
+      "original_sha256": "8adae412715f9e6b00f8d9af32dae36097ad761b50ec7a53722a4d94da4f39d3",
+      "derivative": true
+    },
+    {
+      "retained": "native-30-request-failures.json",
+      "original": "native-30-v1/requests.jsonl",
+      "original_sha256": "9063187215336323a1fd8a0d54a0a0e4c6fc8bd80741734889c62c2016b33769",
+      "derivative": true
+    },
+    {
+      "retained": "native-30-health-diagnostics.json",
+      "original": "native-30-v1/health-after.json",
+      "original_sha256": "5445cf122be2df3c889e5032ee7adb0bc0809b4357b42e22079163cfbf751d32",
+      "derivative": true
+    },
+    {
+      "retained": "native-300-summary.json",
+      "original": "native-300-v1/summary.json",
+      "original_sha256": "be379f86d086a1854f2a5e604d521d194d608b062582200a7b57611e25efdfe0",
+      "derivative": true
+    },
+    {
+      "retained": "native-300-health-samples.json",
+      "original": "native-300-v1/latency-samples.json",
+      "original_sha256": "7fdf6cbdd615baa56bc9b3382cdfd38d5d917a27ffd67d9560ffe44b5bbae3c7",
+      "derivative": true
+    },
+    {
+      "retained": "native-300-request-failures.json",
+      "original": "native-300-v1/requests.jsonl",
+      "original_sha256": "58d3591fed8d75b1ae14db646b84d64e60018f65ab87a1655ebdccfaf19e30b1",
+      "derivative": true
+    },
+    {
+      "retained": "native-300-health-diagnostics.json",
+      "original": "native-300-v1/health-after.json",
+      "original_sha256": "7ea55566da8ca4469bdf50ac077387a3ec0b843aa13a1ce40a9500ffde766cec",
+      "derivative": true
+    },
+    {
+      "retained": "live-http-baseline.json",
+      "original": "live-response-baseline.json",
+      "original_sha256": "4377ac2a4617747f355d036ae99dfdd8186ca26b84bc9758702d571f4f9974e4",
+      "derivative": true
+    }
+  ],
+  "composite_source_files": [
+    {
+      "original": "native-30-v1/summary.json",
+      "sha256": "4b2bc73416b37be63def6f6eff36a5183d2dd8732cb125a2bd577057f2df48fb"
+    },
+    {
+      "original": "native-30-v1/identity.json",
+      "sha256": "2b36031a87a8592a09bf3ea04a626bab4a6a62fe0ba31430f51856395e8527c7"
+    },
+    {
+      "original": "native-30-v1/owned-process.json",
+      "sha256": "7598e3a52a7681b546abc2f8dded13707075e16a4594c5c905663b1bb9eb82fa"
+    },
+    {
+      "original": "native-30-v1/cleanup.json",
+      "sha256": "2b1cdb72642a1149bcb6b2da5e52b986d53e0f365132aa756a6f17b8f35e84ba"
+    },
+    {
+      "original": "native-30-v1/health-before.json",
+      "sha256": "036065f312ebb6a47928dcf6959087fc2cd7b65789bf378e4fe75c8afa80751b"
+    },
+    {
+      "original": "native-30-v1/health-model-held.json",
+      "sha256": "a8ea87b087e1932315ae40879a64f7a4240933b4b879579a7cfca16a5f3cb9d7"
+    },
+    {
+      "original": "native-30-v1/health-after.json",
+      "sha256": "5445cf122be2df3c889e5032ee7adb0bc0809b4357b42e22079163cfbf751d32"
+    },
+    {
+      "original": "native-30-v1/requests.jsonl",
+      "sha256": "9063187215336323a1fd8a0d54a0a0e4c6fc8bd80741734889c62c2016b33769"
+    },
+    {
+      "original": "native-30-v1/latency-samples.json",
+      "sha256": "8adae412715f9e6b00f8d9af32dae36097ad761b50ec7a53722a4d94da4f39d3"
+    },
+    {
+      "original": "native-30-v1/keeper_scale_session.py",
+      "sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284"
+    },
+    {
+      "original": "native-30-audit-v1/post-run-audit.json",
+      "sha256": "47215a9f44dcba9f3cc6cf3fd9dbd1068fb33fa5fc6ad025cb43b228be9d490f"
+    },
+    {
+      "original": "native-30-audit-v1/inventory-sweep-audit.json",
+      "sha256": "60a64cbb1102c80e0375aae5369ccd2321f1ee7c422043181a26f640f29775cf"
+    },
+    {
+      "original": "native-300-v1/summary.json",
+      "sha256": "be379f86d086a1854f2a5e604d521d194d608b062582200a7b57611e25efdfe0"
+    },
+    {
+      "original": "native-300-v1/identity.json",
+      "sha256": "e9379c7b9dc7456bd43a7f526fc9fddeb73d2c49ee17b8ce72427a5b1deb9455"
+    },
+    {
+      "original": "native-300-v1/owned-process.json",
+      "sha256": "3de78ce8b3b17d51435c685fbb9c5b46795dfd00f88e058edf69fbd1670d8a6b"
+    },
+    {
+      "original": "native-300-v1/cleanup.json",
+      "sha256": "9df868909afb671ec04a0e1fb4b54f1e184034fbf6fa89f7d0e7ee378f2cb0eb"
+    },
+    {
+      "original": "native-300-v1/health-before.json",
+      "sha256": "079469ee91a012d6b1c21b790e0a723b6f4302c491e9e34c70955b052aa5243b"
+    },
+    {
+      "original": "native-300-v1/health-model-held.json",
+      "sha256": "8e4143b8a4158aed61a5a333e81e33c904cc3caa136df2be5f09720c545baa1e"
+    },
+    {
+      "original": "native-300-v1/health-after.json",
+      "sha256": "7ea55566da8ca4469bdf50ac077387a3ec0b843aa13a1ce40a9500ffde766cec"
+    },
+    {
+      "original": "native-300-v1/requests.jsonl",
+      "sha256": "58d3591fed8d75b1ae14db646b84d64e60018f65ab87a1655ebdccfaf19e30b1"
+    },
+    {
+      "original": "native-300-v1/latency-samples.json",
+      "sha256": "7fdf6cbdd615baa56bc9b3382cdfd38d5d917a27ffd67d9560ffe44b5bbae3c7"
+    },
+    {
+      "original": "native-300-v1/keeper_scale_session.py",
+      "sha256": "a6df19e949708fb6b44255e2a0623689c1ba9eb9e203c4a0eaf35f30ee537284"
+    },
+    {
+      "original": "native-300-audit-v1/post-run-audit.json",
+      "sha256": "8395bf038d333792afe5f9f5a9e5e2c7e2b6d2620bd97f63e5608eeb5b8b9a1b"
+    },
+    {
+      "original": "native-300-audit-v1/inventory-sweep-audit.json",
+      "sha256": "acf13edc8ea96d92eb24dbcb89ab83fde8072498258271439a000bb6c1f8775a"
+    }
+  ]
+}

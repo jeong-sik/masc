@@ -1,0 +1,338 @@
+[
+  {
+    "phase": "create",
+    "start_ns": 471954660268791,
+    "status": 429,
+    "end_ns": 471954661052250,
+    "wire_ms": 0.783459,
+    "server_timing": null,
+    "tool": "masc_keeper_up"
+  },
+  {
+    "phase": "create",
+    "start_ns": 471956957888583,
+    "status": 429,
+    "end_ns": 471956958658791,
+    "wire_ms": 0.770208,
+    "server_timing": null,
+    "tool": "masc_keeper_up"
+  },
+  {
+    "phase": "create",
+    "start_ns": 471959266519250,
+    "status": 429,
+    "end_ns": 471959267006500,
+    "wire_ms": 0.48725,
+    "server_timing": null,
+    "tool": "masc_keeper_up"
+  },
+  {
+    "phase": "create",
+    "start_ns": 471961262117333,
+    "status": 429,
+    "end_ns": 471961262948041,
+    "wire_ms": 0.830708,
+    "server_timing": null,
+    "tool": "masc_keeper_up"
+  },
+  {
+    "phase": "create",
+    "start_ns": 471963460359916,
+    "status": 429,
+    "end_ns": 471963461180916,
+    "wire_ms": 0.821,
+    "server_timing": null,
+    "tool": "masc_keeper_up"
+  },
+  {
+    "phase": "enqueue",
+    "start_ns": 471969821434375,
+    "status": 429,
+    "end_ns": 471969822965958,
+    "wire_ms": 1.531583,
+    "server_timing": null,
+    "tool": "masc_keeper_msg"
+  },
+  {
+    "phase": "enqueue",
+    "start_ns": 471972161207791,
+    "status": 429,
+    "end_ns": 471972168643166,
+    "wire_ms": 7.435375,
+    "server_timing": null,
+    "tool": "masc_keeper_msg"
+  },
+  {
+    "phase": "enqueue",
+    "start_ns": 471974480610500,
+    "status": 429,
+    "end_ns": 471974481939291,
+    "wire_ms": 1.328791,
+    "server_timing": null,
+    "tool": "masc_keeper_msg"
+  },
+  {
+    "phase": "enqueue",
+    "start_ns": 471978068993750,
+    "status": 429,
+    "end_ns": 471978071481791,
+    "wire_ms": 2.488041,
+    "server_timing": null,
+    "tool": "masc_keeper_msg"
+  },
+  {
+    "phase": "enqueue",
+    "start_ns": 471980669746000,
+    "status": 429,
+    "end_ns": 471980671162791,
+    "wire_ms": 1.416791,
+    "server_timing": null,
+    "tool": "masc_keeper_msg"
+  },
+  {
+    "phase": "enqueue",
+    "start_ns": 471986381697416,
+    "status": 429,
+    "end_ns": 471986384061333,
+    "wire_ms": 2.363917,
+    "server_timing": null,
+    "tool": "masc_keeper_msg"
+  },
+  {
+    "phase": "enqueue",
+    "start_ns": 471989470391250,
+    "status": 429,
+    "end_ns": 471989471826458,
+    "wire_ms": 1.435208,
+    "server_timing": null,
+    "tool": "masc_keeper_msg"
+  },
+  {
+    "phase": "enqueue",
+    "start_ns": 471991083091250,
+    "status": 429,
+    "end_ns": 471991084467958,
+    "wire_ms": 1.376708,
+    "server_timing": null,
+    "tool": "masc_keeper_msg"
+  },
+  {
+    "phase": "enqueue",
+    "start_ns": 471992672873583,
+    "status": 429,
+    "end_ns": 471992674157041,
+    "wire_ms": 1.283458,
+    "server_timing": null,
+    "tool": "masc_keeper_msg"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472001353184833,
+    "status": 429,
+    "end_ns": 472001354575750,
+    "wire_ms": 1.390917,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472002915526375,
+    "status": 429,
+    "end_ns": 472002917142958,
+    "wire_ms": 1.616583,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472004367435208,
+    "status": 429,
+    "end_ns": 472004368666500,
+    "wire_ms": 1.231292,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472006265592333,
+    "status": 429,
+    "end_ns": 472006266939875,
+    "wire_ms": 1.347542,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472007547911916,
+    "status": 429,
+    "end_ns": 472007549474250,
+    "wire_ms": 1.562334,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472008879777750,
+    "status": 429,
+    "end_ns": 472008882745791,
+    "wire_ms": 2.968041,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472010480127833,
+    "status": 429,
+    "end_ns": 472010481306666,
+    "wire_ms": 1.178833,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472011773280541,
+    "status": 429,
+    "end_ns": 472011774348250,
+    "wire_ms": 1.067709,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472020012116041,
+    "status": 429,
+    "end_ns": 472020024437208,
+    "wire_ms": 12.321167,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472022118682041,
+    "status": 429,
+    "end_ns": 472022122256333,
+    "wire_ms": 3.574292,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "queue-held",
+    "start_ns": 472023976622333,
+    "status": 429,
+    "end_ns": 472023978737291,
+    "wire_ms": 2.114958,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472029368628750,
+    "error": "TimeoutError",
+    "end_ns": 472044370099166,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472044370965708,
+    "error": "TimeoutError",
+    "end_ns": 472059372408958,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472059373271000,
+    "error": "TimeoutError",
+    "end_ns": 472074374162000,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472092037371333,
+    "status": 429,
+    "end_ns": 472092038364458,
+    "wire_ms": 0.993125,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472093934309500,
+    "status": 429,
+    "end_ns": 472093935527416,
+    "wire_ms": 1.217916,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472099391238500,
+    "status": 429,
+    "end_ns": 472099391859833,
+    "wire_ms": 0.621333,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472100997602375,
+    "status": 429,
+    "end_ns": 472100998348375,
+    "wire_ms": 0.746,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472103021908541,
+    "status": 429,
+    "end_ns": 472103023046000,
+    "wire_ms": 1.137459,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472105138807375,
+    "status": 429,
+    "end_ns": 472105139484666,
+    "wire_ms": 0.677291,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472107825414166,
+    "status": 429,
+    "end_ns": 472107826249500,
+    "wire_ms": 0.835334,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472109380040541,
+    "status": 429,
+    "end_ns": 472109382118541,
+    "wire_ms": 2.078,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472110748032666,
+    "status": 429,
+    "end_ns": 472110748633500,
+    "wire_ms": 0.600834,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  },
+  {
+    "phase": "settlement",
+    "start_ns": 472112942847791,
+    "status": 429,
+    "end_ns": 472112943570250,
+    "wire_ms": 0.722459,
+    "server_timing": null,
+    "tool": "masc_keeper_delegate_status"
+  }
+]

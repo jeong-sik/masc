@@ -30,6 +30,7 @@ let read_facts ~keepers_dir ~keeper_id =
 let describe_build_error = function
   | Codec.Duplicate_candidate_id id -> "two facts share the id " ^ id
   | Codec.Choice_set_invalid detail -> "the option set is invalid: " ^ detail
+  | Codec.Guidance_unavailable detail -> "recall guidance is unavailable: " ^ detail
 
 let is_judged = Keeper_memory_recall_standing.is_judged
 

@@ -342,7 +342,7 @@ let test_two_candidates_with_one_id_are_refused_before_anything_is_sent () =
     (match judge ~call ~memo:(Turn.create_memo ()) config ~keeper_id ~candidates:[ first_candidate; first_candidate ] () with
      | Error (Codec.Duplicate_candidate_id id) ->
        Alcotest.(check string) "the id" (C.id first_candidate) id
-     | Error (Codec.Choice_set_invalid _) | Ok _ -> Alcotest.fail "expected a duplicate id");
+     | Error (Codec.Choice_set_invalid _ | Codec.Guidance_unavailable _) | Ok _ -> Alcotest.fail "expected a duplicate id");
     Alcotest.(check int) "nothing was sent" 0 !calls;
     Alcotest.(check (float 0.0)) "nothing was counted" 0.0 (total_judgments ~keeper:keeper_id))
 

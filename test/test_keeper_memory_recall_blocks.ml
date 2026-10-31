@@ -222,11 +222,10 @@ let test_facts_that_cannot_be_read_give_no_texts_and_no_judgment () =
 
 let test_a_request_that_cannot_be_built_gives_no_texts () =
   with_policy (recall Runtime_schema.All_keepers) (fun () ->
-    let result =
-      prepare ~probe:(probe ()) ~facts_result:(Ok facts)
-        ~answer:(Error (Codec.Duplicate_candidate_id (id first))) ()
-    in
-    Alcotest.(check bool) "no texts" true (Option.is_none result))
+    List.iter (fun error ->
+      let result = prepare ~probe:(probe ()) ~facts_result:(Ok facts) ~answer:(Error error) () in
+      Alcotest.(check bool) "no status or fabricated decision" true (Option.is_none result))
+      [Codec.Duplicate_candidate_id (id first); Codec.Guidance_unavailable "missing managed recall policy"])
 
 (* The recall must not end the turn it is meant to help: whatever raises in it
    is logged and the Keeper goes on without the texts. *)

@@ -81,15 +81,16 @@ let reason_for_a_lone_candidate turn_done =
 
 let impossible detail = invalid_arg ("Keeper_memory_recall_flow: " ^ detail)
 
-(* A request built after [run] has checked its inputs cannot fail to build:
-   the options are constants and the ids are some of the ids that were
-   checked. An error here is a bug in this module. *)
+(* [run] has captured the complete candidate/time questions for every original
+   ID and checked both request kinds for every original piece. Later partitions
+   and carries only look up subsets of these immutable maps; no renderer or
+   current guidance can fail after dispatch. An error here is a subset bug. *)
 let built = function
   | Ok request -> request
   | Error (Codec.Duplicate_candidate_id id) -> impossible ("duplicate candidate " ^ id)
-  | Error (Codec.Choice_set_invalid detail) -> impossible detail
+  | Error (Codec.Choice_set_invalid detail | Codec.Guidance_unavailable detail) -> impossible detail
 
-let rec resolve ~evaluate ~purpose ~turn_done ~request piece =
+let rec resolve ~guidance ~evaluate ~purpose ~turn_done ~request piece =
   match evaluate request with
   | Ok response ->
     [ Answered_piece
@@ -108,13 +109,13 @@ let rec resolve ~evaluate ~purpose ~turn_done ~request piece =
      | [] -> impossible "a piece without candidates"
      | [ _ ] ->
        [ Unanswered_piece (undecided piece (reason_for_a_lone_candidate turn_done)) ]
-     | _ :: _ :: _ -> in_order (resolve_half ~evaluate ~purpose ~turn_done) (halves piece))
+     | _ :: _ :: _ -> in_order (resolve_half ~guidance ~evaluate ~purpose ~turn_done) (halves piece))
 
-and resolve_half ~evaluate ~purpose ~turn_done piece =
+and resolve_half ~guidance ~evaluate ~purpose ~turn_done piece =
   if stopped turn_done then [ Unanswered_piece (undecided piece J.Capacity) ]
   else
-    resolve ~evaluate ~purpose ~turn_done
-      ~request:(built (Codec.candidate_request ~purpose piece))
+    resolve ~guidance ~evaluate ~purpose ~turn_done
+      ~request:(built (Codec.candidate_request ~guidance ~purpose piece))
       piece
 
 let segment_results = function
@@ -142,16 +143,16 @@ let carried_pieces segments =
              (Candidates.piece_candidates piece)))
     segments
 
-let ask_time ~evaluate piece =
-  match evaluate (built (Codec.time_request piece)) with
+let ask_time ~guidance ~evaluate piece =
+  match evaluate (built (Codec.time_request ~guidance piece)) with
   | Ok response ->
     List.map (fun (id, answer) -> id, Codec.time_mark answer) (Codec.decode_time piece response)
   | Error (Capacity_refused | Rate_limited | Invalid_response | Failed | Not_recorded) ->
     List.map (fun candidate -> Candidates.id candidate, J.Time_unjudged)
       (Candidates.piece_candidates piece)
 
-let ask_times ~evaluate segments =
-  List.concat (Eio.Fiber.List.map (ask_time ~evaluate) (carried_pieces segments))
+let ask_times ~guidance ~evaluate segments =
+  List.concat (Eio.Fiber.List.map (ask_time ~guidance ~evaluate) (carried_pieces segments))
 
 let reduced ~results ~turn ~marks =
   match J.reduce ~candidates:results ~turn with
@@ -161,7 +162,7 @@ let reduced ~results ~turn ~marks =
 (* Question (b) runs in a fiber of the switch and the requests of (a) in its
    body. An exception on either side cancels the other, and a request of (a)
    that waits for (b) does not wait forever when (b) raises. *)
-let judge ~evaluate ~purpose ~initial ~turn_request =
+let judge ~guidance ~evaluate ~purpose ~initial ~turn_request =
   let turn_done, resolve_turn = Eio.Promise.create () in
   let segments =
     Eio.Switch.run @@ fun sw ->
@@ -169,12 +170,12 @@ let judge ~evaluate ~purpose ~initial ~turn_request =
       Eio.Promise.resolve resolve_turn (ask_turn ~evaluate turn_request));
     List.concat
       (Eio.Fiber.List.map
-         (fun (piece, request) -> resolve ~evaluate ~purpose ~turn_done ~request piece)
+         (fun (piece, request) -> resolve ~guidance ~evaluate ~purpose ~turn_done ~request piece)
          initial)
   in
   let results = List.concat_map segment_results segments in
   let turn = turn_answer_of (Eio.Promise.await turn_done) in
-  let marks = ask_times ~evaluate segments in
+  let marks = ask_times ~guidance ~evaluate segments in
   reduced ~results ~turn ~marks
 
 let not_recorded (judged : judged) =
@@ -196,12 +197,15 @@ let first_duplicate candidates =
   in
   go Ids.empty candidates
 
-let build_initial ~purpose pieces =
+let build_initial ~guidance ~purpose pieces =
   let rec go built_rev = function
     | [] -> Ok (List.rev built_rev)
     | piece :: rest ->
-      (match Codec.candidate_request ~purpose piece with
-       | Ok request -> go ((piece, request) :: built_rev) rest
+      (match Codec.candidate_request ~guidance ~purpose piece with
+       | Ok request ->
+         (match Codec.time_request ~guidance piece with
+          | Ok _ -> go ((piece, request) :: built_rev) rest
+          | Error error -> Error error)
        | Error error -> Error error)
   in
   go [] pieces
@@ -213,10 +217,8 @@ let run ~evaluate ~purpose ?(piece_bytes = Candidates.state_bytes_per_piece) can
   | None ->
     (match Candidates.split ~piece_bytes candidates with
      | [] -> Ok None
-     | first :: _ as pieces ->
-       let* initial = build_initial ~purpose pieces in
-       let* turn_request = Codec.turn_request ~purpose in
-       (* Question (c) is built later from some of these candidates. Its options
-          are checked here so that nothing is sent when they cannot be built. *)
-       let* _time_request = Codec.time_request first in
-       Ok (Some (judge ~evaluate ~purpose ~initial ~turn_request)))
+     | _ :: _ as pieces ->
+       let* guidance = Codec.load_guidance ~question_ids:(List.map Candidates.id candidates) in
+       let* initial = build_initial ~guidance ~purpose pieces in
+       let* turn_request = Codec.turn_request ~guidance ~purpose in
+       Ok (Some (judge ~guidance ~evaluate ~purpose ~initial ~turn_request)))

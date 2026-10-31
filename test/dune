@@ -5620,6 +5620,7 @@
 (include stanzas/test_keeper_nerdctl_image_admission.inc)
 
 (include stanzas/test_keeper_kata_inventory.inc)
+(include stanzas/test_keeper_kata_vmm_identity.inc)
 
 (test
  (name test_tui_collab)

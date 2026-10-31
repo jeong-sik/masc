@@ -29,6 +29,7 @@
     playground is never mounted into it. *)
 
 module Backend = Keeper_microvm_backend
+module Kata_vmm = Keeper_microvm_kata_vmm
 
 type build_link_state = Keeper_microvm_build_plan.build_link_state =
   | Build_absent
@@ -2865,7 +2866,13 @@ let nerdctl_label row name = List.assoc_opt name row.nerdctl_labels
 
 let nerdctl_belongs_to_base ~base_path row =
   let exact name expected = nerdctl_label row name = Some expected in
-  String.equal row.nerdctl_runtime Backend.kata_containerd_shim
+  (* Ownership runtime predicate widened by [task-2856]: rows started with any
+     host-validated Kata-family id (default shim or per-VMM split) are ours;
+     before, only the fixed shim id matched.  The component and
+     base_path_hash labels below remain the real gates. *)
+  (match Kata_vmm.classify_runtime_id row.nerdctl_runtime with
+   | Ours _ | Default_shim -> true
+   | Unknown_runtime _ -> false)
   && exact Keeper_sandbox_runtime.sandbox_component_label_key
        Keeper_sandbox_runtime.sandbox_component_label_value
   && exact Keeper_sandbox_runtime.sandbox_base_path_hash_label_key

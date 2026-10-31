@@ -257,7 +257,8 @@ let overlay_window_row ~scroll ~height count =
     (fun row -> Theme.recede () ^ row ^ Ansi.reset)
     (Masc_tui_scroll.position_row ~scroll ~height count)
 
-let detail_reading_width cols = max 1 (framed_inner_width cols - 2)
+let detail_reading_action_width cols = max 0 (framed_inner_width cols - 2)
+let detail_reading_width cols = max 1 (detail_reading_action_width cols)
 let detail_reading_document reading ~cols =
   Masc_tui_detail_reading.rows ~width:(detail_reading_width cols) reading
 
@@ -292,10 +293,13 @@ let detail_reading_height state reading ~terminal_rows ~count =
   | Some _ when surface_chrome_budget state ~terminal_rows <= 1 -> 0
   | Some _ -> overlay_window_height ~rows:(rows - 1) ~count
 
-let detail_reading_viewport (state : state) reading =
-  let terminal_rows, cols = get_terminal_size () in
+let detail_reading_viewport_at (state : state) reading ~terminal_rows ~cols =
   let count = List.length (detail_reading_document reading ~cols) in
   count, detail_reading_height state reading ~terminal_rows ~count
+
+let detail_reading_viewport (state : state) reading =
+  let terminal_rows, cols = get_terminal_size () in
+  detail_reading_viewport_at state reading ~terminal_rows ~cols
 
 let render_detail_reading (state : state) reading =
   let terminal_rows, cols = get_terminal_size () in

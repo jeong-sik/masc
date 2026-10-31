@@ -19,6 +19,7 @@ type peer_snapshot = {
   source_unverified_count : int;
 }
 type peer_page = { snapshot : peer_snapshot; next_sequence : string option }
+type peer_selection_move = Previous_peer | Next_peer
 
 val peer_snapshot : keeper_name:string -> Yojson.Safe.t -> (peer_snapshot, string) result
 (** One page for the exact recipient. Only a durable [sender_keeper] in an
@@ -32,6 +33,11 @@ val read_peer_page :
     page offers another read. An empty page says no rows followed that
     boundary in this read; it does not identify the store generation. *)
 val peer_lines : page_number:int -> peer_page -> string list
+val select_peer :
+  move:peer_selection_move -> selected_operation:string option -> peer_page -> peer_relation option
+(** Cycle within this observation only. An absent selection starts at its first
+    verified peer; a page with no verified peer has no target. *)
+val peer_relation_line : peer_relation -> string
 val parse : string -> (action, string) result
 type item_id =
   | Local_message of string | Server_message of string | Running_message of string

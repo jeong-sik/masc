@@ -37,9 +37,25 @@ val active_ownership_conflict_for_claim :
 val claim_task :
   config -> agent_name:string -> task_id:string -> string
 
+val claim_task_with_details_r :
+  config ->
+  agent_name:string ->
+  task_id:string ->
+  ?auto_start:bool ->
+  unit ->
+  (Masc_domain.task * string) Masc_domain.masc_result
+(** Claim [task_id] for [agent_name] and return both the resulting task record
+    and the human-readable outcome message. When [auto_start = true], a newly
+    claimed [Todo] task or an already-held [Claimed] task is atomically
+    transitioned to [InProgress] inside the same [.backlog] lock and commit. *)
+
 val claim_task_r :
-  config -> agent_name:string -> task_id:string ->
-  unit -> string Masc_domain.masc_result
+  config ->
+  agent_name:string ->
+  task_id:string ->
+  ?auto_start:bool ->
+  unit ->
+  string Masc_domain.masc_result
 
 (** {1 Release/reclaim helpers} *)
 

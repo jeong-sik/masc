@@ -370,7 +370,7 @@ let handle_keeper_task_tool_with_outcome
            |> Result.map (fun links ->
              Some (Option.value ~default:[] (List.assoc_opt goal_id links)))
        in
-       match goal_task_ids, Workspace.read_backlog_observation_with_source_r config with
+       match goal_task_ids, Workspace.read_prepared_backlog_observation_with_source_r config with
      | Error message, _ | _, Error message ->
        let data =
          `Assoc
@@ -386,19 +386,21 @@ let handle_keeper_task_tool_with_outcome
          ~class_:Tool_result.Runtime_failure
          ~message:(Yojson.Safe.to_string data)
          data
-     | Ok goal_task_ids, Ok { Workspace.observed_backlog = backlog; recovered_from } ->
+     | Ok goal_task_ids, Ok { Workspace.observed_prepared = prepared; recovered_from } ->
        let page_key (task : Masc_domain.task) =
          { Keeper_tasks_list_cursor.priority = task.priority
          ; created_at = task.created_at
          ; id = task.id
          }
        in
+       (* [prepared.priority_ordered_tasks] is already ordered by
+          [(priority, created_at, id)] — identical to
+          [Keeper_tasks_list_cursor.compare_key] — so filtering preserves the
+          exact cursor order without re-sorting on every page read. *)
        let matching =
-         backlog.tasks
+         prepared.priority_ordered_tasks
          |> List.filter (Keeper_tasks_list_query.matches_lifecycle lifecycle)
          |> List.filter (Keeper_tasks_list_query.matches selection ~goal_task_ids)
-         |> List.sort (fun (left : Masc_domain.task) right ->
-           Keeper_tasks_list_cursor.compare_key (page_key left) (page_key right))
        in
        let matching_count = List.length matching in
        let row_to_yojson =
@@ -736,97 +738,55 @@ let handle_keeper_task_tool_with_outcome
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
     in
     let explicit_claim_result () =
-      let tasks = Workspace.get_tasks_raw config in
-      let claim_specific (task : Masc_domain.task) =
-        match
-          Workspace.claim_task_r
-            config
-            ~agent_name:meta.name
-            ~task_id:requested_task_id
-            ()
-        with
-        | Ok message ->
-          Workspace.Claim_next_claimed
-            { task_id = requested_task_id
-            ; title = task.title
-            ; priority = task.priority
-            ; message
-            ; scope_widened = false
-            }
-        | Error e -> Workspace.Claim_next_error (Masc_domain.masc_error_to_string e)
-      in
       match
-        List.find_opt
-          (fun (task : Masc_domain.task) -> String.equal task.id requested_task_id)
-          tasks
+        Workspace.claim_task_with_details_r
+          config
+          ~agent_name:meta.name
+          ~task_id:requested_task_id
+          ~auto_start:true
+          ()
       with
-      | None ->
+      | Ok (task, message) ->
+        Workspace.Claim_next_claimed
+          { task_id = requested_task_id
+          ; title = task.title
+          ; priority = task.priority
+          ; message
+          ; scope_widened = false
+          }
+      | Error (Masc_domain.Task (Masc_domain.Task_error.NotFound _)) ->
         Workspace.Claim_next_error
           (Printf.sprintf "unknown task_id: %s" requested_task_id)
-      | Some task -> claim_specific task
-      in
-      let claim_requested_task () =
-        if requested_task_id <> "" then
-          explicit_claim_result ()
-        else
-          (* Auto-claim (no explicit task_id) must not select the keeper's own
-             authored tasks: that closes the routing/report feedback loop
-             (#25429) the claimable count already excludes. Explicit claim by
-             task_id above is intentional and left unfiltered. The self-author
-             exclusion is a [hard_filter], not a [task_filter]: a hard exclusion
-             must survive the [allow_scope_fallback] widening below, otherwise a
-             keeper whose backlog holds only its own routing/report tasks falls
-             into the fallback, drops the goal-scope filter, and claims its own
-             task right back — exactly the case this is meant to prevent. *)
-          Workspace.claim_next_r config ~agent_name:meta.name
-            ~hard_filter:auto_claim_eligible
-            ()
-      in
-      let result = claim_requested_task () in
-    let auto_started_ok = ref false in
+      | Error e -> Workspace.Claim_next_error (Masc_domain.masc_error_to_string e)
+    in
+    let claim_requested_task () =
+      if requested_task_id <> "" then
+        explicit_claim_result ()
+      else
+        (* Auto-claim (no explicit task_id) must not select the keeper's own
+           authored tasks: that closes the routing/report feedback loop
+           (#25429) the claimable count already excludes. Explicit claim by
+           task_id above is intentional and left unfiltered. The self-author
+           exclusion is a [hard_filter], not a [task_filter]: a hard exclusion
+           must survive the [allow_scope_fallback] widening below, otherwise a
+           keeper whose backlog holds only its own routing/report tasks falls
+           into the fallback, drops the goal-scope filter, and claims its own
+           task right back — exactly the case this is meant to prevent. *)
+        Workspace.claim_next_r config ~agent_name:meta.name
+          ~hard_filter:auto_claim_eligible
+          ~auto_start:true
+          ()
+    in
+    let result = claim_requested_task () in
     (match result with
-     | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
-       sync_keeper_meta_current_task ~config ~meta ~task_id;
-       ignore scope_widened;
-       (* Guard: claim_next_r returns existing active tasks via Existing_claim
-          (task_state_schedule.ml:302). When the task is already InProgress,
-          dispatching Start produces an InvalidState transition error every
-          cycle. Only auto-start when the task is in a pre-start state. *)
-       let needs_start =
-         let tasks = Workspace.get_tasks_raw config in
-         match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
-         | Some { task_status = Masc_domain.InProgress _; _ } -> false
-         | Some { task_status = Masc_domain.Done _ | Masc_domain.Cancelled _
-                 | Masc_domain.AwaitingVerification _; _ } -> false
-         | Some { task_status = Masc_domain.Todo | Masc_domain.Claimed _; _ } -> true
-         (* The claim above succeeded, so the task was in the backlog a moment
-            ago. If a concurrent write removed it, the Start dispatch below
-            fails and auto_started_ok records that -- the message then does not
-            claim the task was auto-started. *)
-         | None -> true
-       in
-       if needs_start then begin
-         let start_result =
-           Task.Tool.handle_transition
-             ~tool_name:"keeper_auto_start"
-             ~start_time:(Tool_timing.start ())
-             { Task.Tool.config; agent_name = keeper_agent_sender ~meta;
-               sw = Eio_context.get_switch_opt () }
-             (`Assoc ["task_id", `String task_id; "action", `String "start"])
-         in
-         auto_started_ok := Tool_result.is_success start_result
-       end else
-         auto_started_ok := true;
-       ()
+     | Workspace.Claim_next_claimed { task_id; scope_widened = _; _ } ->
+       sync_keeper_meta_current_task ~config ~meta ~task_id
      | Workspace.Claim_next_no_unclaimed
      | Workspace.Claim_next_no_eligible _
      | Workspace.Claim_next_error _ -> ());
     let message =
       match result with
-      | Workspace.Claim_next_claimed { message; _ } ->
-          if !auto_started_ok then
-            message ^ " Task auto-started — begin work now."
-          else message
+      | Workspace.Claim_next_claimed { message; _ } -> message
       | Workspace.Claim_next_no_unclaimed -> "No unclaimed tasks."
       | Workspace.Claim_next_no_eligible
           { excluded_count

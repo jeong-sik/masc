@@ -9465,8 +9465,7 @@ type state = {
   mutable detail_read_authority: unit ref;
   (* Navigation intent only: never a retained Keeper row or read authority. *)
   mutable detail_focus_recovery: (Tui_decode.server_identity * string * keeper_detail_tab) option;
-  mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
-  mutable keeper_sandbox_view_error: string option;
+  mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.partial) option;
   mutable keeper_sandbox_logs: (string * Masc_tui_keeper_sandbox.logs) option;
   mutable keeper_sandbox_logs_error: (string * string) option;
   mutable keeper_sandbox_logs_generation: int;
@@ -13767,6 +13766,9 @@ let suspend_workspace_readings state =
   state.fleet_stream_reader <- Fleet_stream_idle;
   state.detail_read_authority <- ref ();
   state.detail_reads <- [];
+  (* A partial sandbox reading cannot remain marked loading after its
+     workspace authority and both in-flight reads have been withdrawn. *)
+  state.keeper_sandbox_view <- None;
   suspend_keeper_deletions_read state;
   suspend_voice_wizard_read state;
   (* A pure inspection is retired with this read authority. A mutation whose
@@ -16097,6 +16099,23 @@ let finish_detail_read (state : state) request =
         state.detail_reads;
   current
 
+let apply_keeper_sandbox_result (state : state) ~selected_keeper ~authority_ready
+    request result =
+  let keeper_name = request.drr_keeper in
+  let current = request.drr_tab = Detail_sandbox &&
+    match pending_detail_read state ~tab:request.drr_tab ~keeper:keeper_name with
+    | Some pending -> pending.drr_generation = request.drr_generation
+    | None -> false in
+  if current then
+    match selected_keeper, authority_ready, state.keeper_sandbox_view with
+    | Some selected, true, Some (stamp, partial)
+      when String.equal selected keeper_name && String.equal stamp keeper_name ->
+      let partial = Masc_tui_keeper_sandbox.add_partial partial result in
+      state.keeper_sandbox_view <- Some (keeper_name, partial);
+      if Masc_tui_keeper_sandbox.partial_complete partial then
+        ignore (finish_detail_read state request)
+    | _ -> ignore (finish_detail_read state request)
+
 let detail_read_waiting state ~tab ~keeper =
   Option.is_some (pending_detail_read state ~tab ~keeper)
   || (tab = Detail_sandbox
@@ -17761,7 +17780,6 @@ let create_state
   detail_read_authority = ref ();
   detail_focus_recovery = None;
   keeper_sandbox_view = None;
-  keeper_sandbox_view_error = None;
   keeper_sandbox_logs = None;
   keeper_sandbox_logs_error = None;
   keeper_sandbox_logs_generation = 0;

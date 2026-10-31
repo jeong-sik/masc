@@ -23,6 +23,7 @@ val resolve_connector_status_name : ?name:string -> unit -> string option
 val respond_keeper_tool_json :
   ?config:Workspace.config ->
   ?project:(Yojson.Safe.t -> Yojson.Safe.t) ->
+  ?kind:Pool_work.kind ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Mcp_server.server_state ->
@@ -31,3 +32,10 @@ val respond_keeper_tool_json :
   tool_name:string ->
   args:Yojson.Safe.t ->
   unit
+
+module Sandbox_read_for_testing : sig
+  val work_kind : Pool_work.kind
+  val capture_workspace :
+    Mcp_server.server_state -> Httpun.Request.t ->
+    (Workspace.config, Workspace.expected_workspace_error) result
+end

@@ -429,6 +429,42 @@ workspace users. Preserve the helper and volume if the inventory, ownership,
 or operation completion cannot be established. See the
 [guest survival RFC](rfc/RFC-keeper-guest-survives-restart.md) for the decisions.
 
+The TUI sandbox status separately asks the configured Kata runtime whether the
+current network mode's expected guest name appears in its listing. It shows an
+unavailable listing, a name not seen, a name reported with a different runtime,
+and a name whose runtime was not reported as distinct observations. A name
+reported with the expected runtime is also not proof of ownership: the scoped
+instance list and name listing are separate reads, and their labels can change
+or describe another owner. The result does not fence a later start or cleanup.
+The Kata status inventory, name observation, and local log inventory and log
+commands each use a captured scrubbed environment and working directory of
+the turn start/probe. Existing image and volume helpers can inherit the host
+environment instead. If the known host and turn CLI selectors differ or cannot
+be compared, the name observation is unavailable. A valid explicit execution
+context can still supply inventory and logs when that comparison is unavailable;
+the UI reports the uncertainty. Matching selectors describe only a point-in-time
+environment comparison: they do not verify the CLI binary, wrappers, config
+contents, containerd identity, or later invocations. Executable lookup can also
+use the process PATH at spawn time instead of the captured child environment.
+When the process cwd is unavailable, these reads use the turn runner's
+base-path, HOME or temp fallback; an unobservable or non-directory fallback
+is unavailable. A directory check does not prove which directory an earlier
+turn used. These are separate reads, not an atomic fence around other processes.
+The TUI requests the scoped inventory and the name observation independently,
+using separate workspace-bound routes. Either result can appear while the other
+is still loading or after it fails. Each request is subject to the existing TUI
+HTTP timeout; the server's per-command timeout is not an endpoint-wide deadline.
+An older server without either route is reported as unavailable for that reading;
+the TUI does not fall back to the ordinary status route, which can inspect guest
+checkouts. The existing container-log auto-refresh is a separate, pre-existing
+read and this change does not alter its workspace binding. The ordinary Keeper
+status and checkout inspection retain their defaults. Operators can request the
+additional observation from `masc_keeper_status` with
+`include_kata_name_observation=true`; that tool returns its observations together
+and its per-command timeout is not a limit on their combined duration.
+The new observation GETs preserve tool authorization and do not consume the
+per-agent operation bucket. The separate per-IP request limiter still applies.
+
 ### `mention_targets` is a list, and each entry is one name
 
 ```toml

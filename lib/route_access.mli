@@ -46,6 +46,8 @@ type t =
   | Token_permission of Masc_domain.permission
   | Private_token_permission of Masc_domain.permission
   | Tool of { tool_name : string }
+  | Tool_observation of { tool_name : string }
+      (** Tool authorization with read quota for GET/HEAD observations. *)
   | Tool_actor of { tool_name : string }
   | Self_authenticated of self_authenticated_reason
 

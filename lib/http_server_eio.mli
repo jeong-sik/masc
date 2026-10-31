@@ -496,6 +496,11 @@ module Router : sig
       -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
       -> request_handler
 
+    val with_tool_observation_auth
+      :  tool_name:string
+      -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
     (** The [string] handed to the handler is the principal that authorised the
         tool call. *)
     val with_tool_actor_auth
@@ -538,6 +543,7 @@ module Router : sig
       | Token_permission : Masc_domain.permission -> token_handler auth
       | Private_token_permission : Masc_domain.permission -> token_handler auth
       | Tool : { tool_name : string } -> state_handler auth
+      | Tool_observation : { tool_name : string } -> state_handler auth
       | Tool_actor : { tool_name : string } -> actor_handler auth
       | Self_authenticated :
           Route_access.self_authenticated_reason

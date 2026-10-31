@@ -5281,10 +5281,19 @@ let launch_keeper_sandbox_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_sandbox ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
-  Masc_tui_async_read.launch
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Keeper_sandbox_view_loaded (request, result)))
-    (fun () -> Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name)
+  state.keeper_sandbox_view <- Some (keeper_name, Masc_tui_keeper_sandbox.empty_partial);
+  let inventory = capture_workspace_json_read state (fun () ->
+    Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name) in
+  let name = capture_workspace_json_read state (fun () ->
+    Masc_tui_loader.load_keeper_sandbox_name ~host ~port ~keeper_name) in
+  Masc_tui_async_read.launch_independent_pair
+    ~deliver_first:(fun result ->
+      enqueue_async mailbox (Keeper_sandbox_view_loaded
+        (request, Masc_tui_keeper_sandbox.Inventory_result result)))
+    ~deliver_second:(fun result ->
+      enqueue_async mailbox (Keeper_sandbox_view_loaded
+        (request, Masc_tui_keeper_sandbox.Name_result result)))
+    inventory name
 
 let launch_keeper_sandbox_logs state ~mailbox keeper_name =
   retain_sandbox_log_read state ~keeper_name;
@@ -14285,6 +14294,7 @@ let revoke_detail_readings state =
   close_detail_reading state;
   state.detail_reads <- [];
   state.detail_read_authority <- ref ();
+  state.keeper_sandbox_view <- None;
   state.keeper_board_quarantines <- Masc_tui_fetched.clear state.keeper_board_quarantines;
   state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
   state.keeper_sandbox_logs_inflight <- None;
@@ -14686,7 +14696,6 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_calls_loading <- false;
   state.keeper_calls_refresh_pending <- false;
   state.keeper_sandbox_view <- None;
-  state.keeper_sandbox_view_error <- None;
   state.keeper_sandbox_logs <- None;
   state.keeper_sandbox_logs_error <- None;
   state.keeper_sandbox_logs_generation <- state.keeper_sandbox_logs_generation + 1;
@@ -15635,7 +15644,6 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       launch_keeper_items state ~mailbox keeper.k_name
   | Detail_sandbox ->
       state.keeper_sandbox_view <- None;
-      state.keeper_sandbox_view_error <- None;
       launch_keeper_sandbox_view state ~mailbox keeper.k_name;
       (* Container logs that were open for this Keeper come back with the
          status they hang under. *)
@@ -20452,7 +20460,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                   state.keeper_config_view <- None; state.keeper_config_view_error <- None;
                   launch_keeper_config_view state ~mailbox key.ksk_keeper
               | Detail_sandbox ->
-                  state.keeper_sandbox_view <- None; state.keeper_sandbox_view_error <- None;
+                  state.keeper_sandbox_view <- None;
                   launch_keeper_sandbox_view state ~mailbox key.ksk_keeper
               | Detail_info | Detail_items | Detail_secrets | Detail_github | Detail_identity
               | Detail_channels | Detail_automation | Detail_runs | Detail_terminal -> ()
@@ -20848,20 +20856,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
             state.item_account <- None;
             state.item_account_error <- Some detail)
   | Keeper_sandbox_view_loaded (request, result) -> (
-      let keeper_name = request.drr_keeper in
-      let current = Masc_tui_types.finish_detail_read state request in
-      let still_selected =
-        match List.nth_opt state.keepers state.keeper_cursor with
-        | Some keeper -> String.equal keeper.k_name keeper_name
-        | None -> false
-      in
-      if current && still_selected && server_authority_ready state then
-        match result with
-        | Ok reading ->
-            state.keeper_sandbox_view <- Some (keeper_name, reading);
-            state.keeper_sandbox_view_error <- None
-        | Error detail ->
-            state.keeper_sandbox_view_error <- Some detail)
+      let selected_keeper = List.nth_opt state.keepers state.keeper_cursor
+        |> Option.map (fun (keeper : keeper) -> keeper.k_name) in
+      Masc_tui_types.apply_keeper_sandbox_result state ~selected_keeper
+        ~authority_ready:(server_authority_ready state) request result)
   | Keeper_sandbox_logs_loaded (keeper_name, generation, result) -> (
       let is_current =
         match state.keeper_sandbox_logs_inflight with

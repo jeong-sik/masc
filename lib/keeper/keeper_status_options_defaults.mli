@@ -28,5 +28,6 @@ module Argument : sig
   val include_metrics_overview : string
   val include_history_tail : string
   val include_repository_checkouts : string
+  val include_kata_name_observation : string
   val all : string list
 end

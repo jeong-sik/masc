@@ -6,6 +6,13 @@ type error =
   | Unresolved of Catalog.missing
   | No_image_store of { keeper : string; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile }
 
+let error_code = function
+  | Not_declared -> "not_declared"
+  | Catalog_unreadable _ -> "catalog_unreadable"
+  | Unresolved (Catalog.Unknown_image _) -> "unknown_image"
+  | Unresolved (Catalog.Not_built_on_host _) -> "not_promoted"
+  | No_image_store _ -> "no_image_store"
+
 (* A microVM runtime's store is chosen on the command line; Docker's is the
    default and takes no flag. *)
 let runtime_flag = function

@@ -1,0 +1,18 @@
+module type LOOKUP = sig type snapshot val make:string list -> snapshot val receipt_ids:snapshot -> string list end
+let names n = List.init n (fun i -> Filename.concat "/workspace/undelivered-tools" (String.make 60 'a' ^ Printf.sprintf "%04d.json" i))
+let sink=ref 0
+let sample (type a) label role (module L:LOOKUP with type snapshot=a) (snapshot:a) count =
+ Gc.full_major ();
+ let bytes=Gc.allocated_bytes () and cpu=Sys.time () and wall=Unix.gettimeofday () in
+ for _=1 to count do sink := !sink lxor List.length (L.receipt_ids snapshot) done;
+ Printf.printf "%s,%s,%d,%.6f,%.6f,%.0f\n%!" label role count (Sys.time ()-.cpu) (Unix.gettimeofday ()-.wall) (Gc.allocated_bytes ()-.bytes)
+let () =
+ Printf.printf "scenario,implementation,count,cpu_s,wall_s,allocated_bytes\n%!";
+ List.iter (fun (n,count) ->
+  let paths=names n and label=Printf.sprintf "n%d_ids" n in
+  let old=Old_lookup.make paths and new_=New_lookup.make paths in
+  for i=0 to 6 do
+   if i mod 2=0 then (sample label "old" (module Old_lookup) old count; sample label "new" (module New_lookup) new_ count)
+   else (sample label "new" (module New_lookup) new_ count; sample label "old" (module Old_lookup) old count)
+  done) [1,10000;16,2000;256,200;1024,40];
+ ignore (Sys.opaque_identity !sink)

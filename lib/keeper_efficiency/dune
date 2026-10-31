@@ -1,0 +1,16 @@
+(include_subdirs no)
+
+(library
+ (name keeper_efficiency)
+ (public_name masc.keeper_efficiency)
+ (wrapped false)
+ (modules keeper_efficiency)
+ (libraries
+  dated_jsonl
+  fs_compat
+  masc_cost_ledger
+  masc_core
+  masc_tool_types
+  masc_types
+  unix
+  yojson))

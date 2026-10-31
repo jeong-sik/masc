@@ -1096,7 +1096,7 @@ let assemble_hooks
                        ~artifact_reader_available:
                          (recall_tool_available Keeper_runtime_schemas_toml.artifact_read.name)
                        ~keepers_dir:memory_os_keepers_dir ~keeper_name:meta.name ())
-                 else None in
+                 else Ok None in
                 (if not post_tool_round
                  then
                    let ordinary_recall =
@@ -1159,8 +1159,15 @@ let assemble_hooks
                 (* The Librarian index changes independently of ordinary facts.
                    Keeping separate identities avoids replaying every fact when
                    only the working-context revision or artifact changed. *)
-                Option.iter (record_block Prompt_block_id.Librarian_working_context)
-                  working_context_recall;
+                (match working_context_recall with
+                 | Ok context ->
+                   Option.iter (record_block Prompt_block_id.Librarian_working_context) context
+                 | Error detail ->
+                   Log.Keeper.warn ~keeper_name:meta.name
+                     "working context guidance unavailable; original intake continues: %s" detail;
+                   record_block Prompt_block_id.Librarian_working_context
+                     (Yojson.Safe.to_string (`Assoc
+                        ["status", `String "unavailable"; "guidance_error", `String detail])));
                 (* RFC-0366: last in assembly order. It is the most recent fact
                    the keeper has, and when it disagrees with an earlier block
                    the later text is the one that reads as current. Stamped

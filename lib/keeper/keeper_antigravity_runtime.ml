@@ -480,21 +480,27 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
             |> Result.map_error home_error_to_core_error in
           let* rest = canonicalize rest in Ok (actual :: rest) in
       canonicalize config.add_dirs in
-    let native_workspace, native_workspace_note =
+    let native_workspace, workspace_guidance, workspace_vars =
       match sandbox_profile with
       | Some profile when Keeper_types_profile_sandbox.tree_location_of_profile profile
           = Keeper_types_profile_sandbox.Shared_mount ->
         let path = Filename.concat base_path
             (Keeper_sandbox.host_root_rel_of_profile profile keeper_name) in
         Runtime_antigravity_home.Shared_workspace path,
-        Printf.sprintf
-          "Antigravity native tools use the host workspace %s, the same files mounted at %s for MASC tools. Native commands run in the official client's host sandbox, not inside the Keeper container."
-          path (Keeper_sandbox.container_root keeper_name)
+        Prompt_names.keeper_antigravity_workspace_shared,
+        ["host_workspace", path; "keeper_workspace", Keeper_sandbox.container_root keeper_name]
       | None | Some _ ->
         Runtime_antigravity_home.Private_workspace,
-        "Antigravity native tools use a separate private host workspace. They cannot access the Keeper's endpoint-owned working tree. Use MASC tools for that tree; native commands run in the official client's host sandbox." in
-    let native_workspace_note = native_workspace_note ^
-      " Explicit operator-granted additional native directories: " ^
+        Prompt_names.keeper_antigravity_workspace_private, [] in
+    let render_guidance key vars =
+      Prompt_registry.render_prompt_template key vars
+      |> Result.map String.trim
+      |> Result.map_error (Keeper_internal_error.guidance_preparation_unavailable
+          ~field:"antigravity.native_workspace_guidance") in
+    let* native_workspace_note = render_guidance workspace_guidance workspace_vars in
+    let* additional_directories_label = render_guidance
+        Prompt_names.keeper_antigravity_additional_directories_label [] in
+    let native_workspace_note = native_workspace_note ^ " " ^ additional_directories_label ^ " " ^
       Yojson.Safe.to_string (`List (List.map (fun path -> `String path) add_dirs)) in
     let* () = on_guidance_prepared () in
     let runtime_root = Common.masc_dir_from_base_path ~base_path in

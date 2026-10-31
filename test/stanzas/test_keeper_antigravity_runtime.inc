@@ -1,7 +1,8 @@
 (test
  (name test_keeper_antigravity_runtime)
  (modules test_keeper_antigravity_runtime)
- (libraries masc masc_test_deps))
+ (deps (source_tree %{workspace_root}/config/prompts))
+ (libraries masc masc_test_deps masc.prompt_registry))
 
 (rule
  (alias runtest-test_keeper_antigravity_async_outbox)

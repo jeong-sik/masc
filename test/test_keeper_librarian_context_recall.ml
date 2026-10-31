@@ -4,6 +4,13 @@ module Context = Keeper_librarian_context
 module Recall = Keeper_librarian_context_recall
 
 let ok = function Ok value -> value | Error detail -> fail detail
+let render ?artifact_reader_available ~base_path ~keepers_dir ~keeper_name () =
+  ok (Recall.render ?artifact_reader_available ~base_path ~keepers_dir ~keeper_name ())
+let prompts_dir () = Masc_test_deps.source_path "config/prompts"
+let with_overrides values f =
+  List.iter (fun (key, value) -> ok (Prompt_registry.set_override key value)) values;
+  Fun.protect ~finally:(fun () ->
+    List.iter (fun (key, _) -> Prompt_registry.clear_prompt_override key) values) f
 let with_store f =
   Masc_test_deps.ensure_rng_initialized ();
   Eio_main.run @@ fun env ->
@@ -31,7 +38,7 @@ let artifact_of_index ~keepers_dir =
   | _ -> fail "index must contain a retention-visible typed artifact reference"
 
 let check_notice ~base_path ~keepers_dir ~status =
-  let body = Option.get (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
+  let body = Option.get (render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
   check bool "explicit lifecycle status" true (String_util.contains_substring body status);
   check bool "notice does not revive an artifact pointer" false
     (String_util.contains_substring body "sha256=");
@@ -40,11 +47,11 @@ let check_notice ~base_path ~keepers_dir ~status =
 let test_growth_does_not_expand_prompt () = with_store @@ fun ~base_path ~keepers_dir ->
   let first = commit ~keepers_dir ~previous:None "Campaign in progress" in
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
-  let small = Option.get (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
+  let small = Option.get (render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
   let large_text = String.make (Common.max_tool_result_wire_bytes * 4) 'x' in
   let second = commit ~keepers_dir ~previous:(Some first) large_text in
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" second);
-  let large = Option.get (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
+  let large = Option.get (render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
   check bool "prompt growth contains only byte-count digits" true
     (String.length large - String.length small <= String.length (string_of_int (String.length large_text)));
   let reference = artifact_of_index ~keepers_dir in
@@ -75,14 +82,14 @@ let test_stale_publish_and_corruption () = with_store @@ fun ~base_path ~keepers
   let first = commit ~keepers_dir ~previous:None "first" in
   let second = commit ~keepers_dir ~previous:(Some first) "second" in
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" second);
-  let current = Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" () in
+  let current = render ~base_path ~keepers_dir ~keeper_name:"keeper" () in
   check bool "older publisher cannot overwrite newer index" true
     (Result.is_error (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first));
   check (option string) "newer context stays available" current
-    (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+    (render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
   ok (Fs_compat.save_file_atomic (Recall.path ~keepers_dir ~keeper_name:"keeper") "{");
   check (option string) "recall repairs corrupt index without a new pass" current
-    (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ())
+    (render ~base_path ~keepers_dir ~keeper_name:"keeper" ())
 
 let test_recovered_generation_replaces_old_index () = with_store @@ fun ~base_path ~keepers_dir ->
   let first = commit ~keepers_dir ~previous:None "first generation" in
@@ -94,22 +101,22 @@ let test_recovered_generation_replaces_old_index () = with_store @@ fun ~base_pa
   let rebuilt = commit ~keepers_dir ~previous:None "recovered generation" in
   check bool "new generation has a lower revision" true (rebuilt.revision < second.revision);
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" rebuilt);
-  let current = Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" () in
+  let current = render ~base_path ~keepers_dir ~keeper_name:"keeper" () in
   check bool "old generation cannot publish over recovered snapshot" true
     (Result.is_error (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" second));
   check bool "equal numeric revision from old generation is also rejected" true
     (Result.is_error (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first));
   check (option string) "recovered reference remains available" current
-    (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ())
+    (render ~base_path ~keepers_dir ~keeper_name:"keeper" ())
 
 let test_committed_snapshot_invalidates_stale_projection () =
   with_store @@ fun ~base_path ~keepers_dir ->
   let first = commit ~keepers_dir ~previous:None "first context" in
   ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
   check bool "first projection is available" true
-    (Option.is_some (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ()));
+    (Option.is_some (render ~base_path ~keepers_dir ~keeper_name:"keeper" ()));
   let second = commit ~keepers_dir ~previous:(Some first) "second context" in
-  let repaired = Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" () |> Option.get in
+  let repaired = render ~base_path ~keepers_dir ~keeper_name:"keeper" () |> Option.get in
   check bool "recall publishes latest owner revision without a background pass" true
     (String_util.contains_substring repaired (Printf.sprintf "revision %d:" second.revision));
   check bool "authority remains unchanged" true
@@ -122,7 +129,7 @@ let test_recall_lifecycle_retires_and_restores_held_pointer () =
   let module Host = Keeper_official_client_host in
   let held = ref [] in
   let deliver ?(artifact_reader_available = true) () =
-    let body = Option.get (Recall.render ~base_path ~artifact_reader_available ~keepers_dir ~keeper_name:"keeper" ()) in
+    let body = Option.get (render ~base_path ~artifact_reader_available ~keepers_dir ~keeper_name:"keeper" ()) in
     let composed_context : Host.composed_context =
       Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
         ~blocks:[Prompt_block_id.Librarian_working_context, body] in
@@ -190,7 +197,7 @@ let test_failed_publication_recovers_on_recall () = with_store @@ fun ~base_path
     (Result.is_error (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" snapshot));
   ignore (check_notice ~base_path ~keepers_dir ~status:"working context is unavailable");
   Unix.rmdir index;
-  let body = Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" () |> Option.get in
+  let body = render ~base_path ~keepers_dir ~keeper_name:"keeper" () |> Option.get in
   check bool "same committed snapshot re-enters recall without a model pass" true
     (String_util.contains_substring body "sha256=");
   check bool "repair does not change authority" true
@@ -224,19 +231,19 @@ let test_gc_and_missing_blob_repair () = with_store @@ fun ~base_path ~keepers_d
   sweep Tool_blob_maintenance.Delete_previous_candidates;
   check string "historical context survives GC" historical_body (fetch historical);
   check string "current context survives GC" current_body (fetch current);
-  let before = Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" () in
+  let before = render ~base_path ~keepers_dir ~keeper_name:"keeper" () in
   (match Tool_blob_store.delete store ~sha256:current.sha256 with
    | Ok true -> ()
    | Ok false -> fail "fixture current blob was absent"
    | Error error -> fail error.Tool_blob_store.reason);
   check (option string) "missing artifact repairs to the same prompt" before
-    (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+    (render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
   check string "repair restores exact authoritative context" current_body (fetch current);
   let blob_path = Filename.concat
       (Filename.concat (Tool_blob_store.root_dir store) (String.sub current.sha256 0 2)) current.sha256 in
   Fs_compat.save_file blob_path "damaged working context";
   check (option string) "corrupt artifact repairs to the same prompt" before
-    (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+    (render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
   check string "corrupt artifact restored exactly" current_body (fetch current);
   let root = Tool_blob_store.root_dir store in
   Sys.rename root (root ^ ".saved");
@@ -258,15 +265,79 @@ let test_late_render_cannot_replace_current_pin () = with_store @@ fun ~base_pat
       ~before_retain:(fun () ->
         let next = commit ~keepers_dir ~previous:(Some first) "new context" in
         ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" next);
-        new_pin := Fs_compat.load_file current_pin) () |> Option.get in
+        new_pin := Fs_compat.load_file current_pin) () |> ok |> Option.get in
   check bool "late render withdraws its obsolete pointer" true
     (String_util.contains_substring body "working context is unavailable");
   check string "late render cannot overwrite newer current pin" !new_pin
     (Fs_compat.load_file current_pin)
 
 
-let () = run "working context recall"
-  ["progress", [test_case "failed publication recovers on recall" `Quick test_failed_publication_recovers_on_recall;
+let test_managed_guidance_preserves_artifact_payload () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let snapshot = commit ~keepers_dir ~previous:None "CONTEXT_PAYLOAD_MUST_SURVIVE" in
+  let input = {Context.empty with previous=Some snapshot} in
+  let original = Option.get (ok (Context.render input)) in
+  let json_start = String.index original '[' in
+  let payload = String.sub original json_start (String.length original-json_start) in
+  with_overrides
+    [Prompt_names.keeper_context_librarian_working, "MANAGED_CONTEXT_HEADER";
+     Prompt_names.keeper_context_librarian_recall, "MANAGED_RECALL {{revision}}";
+     Prompt_names.keeper_context_librarian_preview, "MANAGED_CONTEXT_PREVIEW"] @@ fun () ->
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" snapshot);
+  let artifact = artifact_of_index ~keepers_dir in
+  let body = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:artifact.sha256 with
+    | Ok (Some body) -> body
+    | Ok None -> fail "missing managed context artifact"
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
+  check string "editable guidance cannot omit or edit the exact projected JSON"
+    ("MANAGED_CONTEXT_HEADER\n" ^ payload) body;
+  let recall = Option.get (render ~base_path ~keepers_dir ~keeper_name:"keeper" ()) in
+  check bool "actual recall consumes managed summary" true
+    (String_util.contains_substring recall "MANAGED_RECALL");
+  check bool "actual recall consumes managed preview" true
+    (String_util.contains_substring recall "MANAGED_CONTEXT_PREVIEW");
+  check bool "summary without a reference variable still carries the typed reference" true
+    (String_util.contains_substring recall artifact.sha256);
+  let read = Keeper_artifact_read.handle ~base_path ~args:(`Assoc
+      ["sha256", `String artifact.sha256; "offset", `Int 0]) in
+  check bool "published artifact remains readable through the real tool" true
+    (match read.Keeper_tool_execution.disposition with
+     | Tool_result.Completed () -> true
+     | Tool_result.Deferred () | Tool_result.Failed _ -> false)
+
+let test_missing_guidance_precedes_artifact_publication () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let first = commit ~keepers_dir ~previous:None "published context" in
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
+  let index_path = Recall.path ~keepers_dir ~keeper_name:"keeper" in
+  let index = Fs_compat.load_file index_path in
+  let next = commit ~keepers_dir ~previous:(Some first) "unpublished context" in
+  let body = Option.get (ok (Context.render {Context.empty with previous=Some next})) in
+  let sha256 = Agent_core_sha256.(digest_string body |> to_hex) in
+  let empty_dir = Filename.concat base_path "empty-prompts" in
+  Unix.mkdir empty_dir 0o700;
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir empty_dir;
+  Fun.protect ~finally:(fun () ->
+    Prompt_registry.clear (); Prompt_registry.set_markdown_dir (prompts_dir ())) @@ fun () ->
+  check bool "missing body policy is an explicit publication error" true
+    (Result.is_error (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" next));
+  check string "failed policy resolution preserves the prior index" index (Fs_compat.load_file index_path);
+  check bool "failed resolution publishes no new body" true
+    (Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 = Ok None);
+  check bool "unavailable notice policy cannot silently become empty context" true
+    (Result.is_error (Recall.render ~artifact_reader_available:false ~base_path ~keepers_dir ~keeper_name:"keeper" ()));
+  check bool "missing policy preserves the authoritative owner version" true
+    (Option.map Context.version (ok (Context.read ~keepers_dir ~keeper_id:"keeper"))
+     = Some (Context.version next))
+
+let () =
+  Prompt_registry.set_markdown_dir (prompts_dir ());
+  run "working context recall"
+  ["progress", [
+    test_case "managed guidance preserves actual artifact payload and reference" `Quick test_managed_guidance_preserves_artifact_payload;
+    test_case "missing guidance precedes artifact publication" `Quick test_missing_guidance_precedes_artifact_publication;
+    test_case "failed publication recovers on recall" `Quick test_failed_publication_recovers_on_recall;
     test_case "late render cannot replace newer publication pin" `Quick test_late_render_cannot_replace_current_pin;
     test_case "published context survives GC and repairs missing or corrupt bytes" `Quick test_gc_and_missing_blob_repair;
     test_case "held recall follows empty unavailable and recovered context" `Quick test_recall_lifecycle_retires_and_restores_held_pointer;

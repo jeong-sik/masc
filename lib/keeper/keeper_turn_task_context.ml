@@ -22,11 +22,11 @@ let capture ~config = function
       let ids = List.filter_map (fun (goal_id, tasks) ->
           if List.mem (Keeper_id.Task_id.to_string task_id) tasks then Some goal_id else None) links in
       if ids = [] then Ok [] else
-      let* rows = Goal_store.list_goals_result config ()
+      let* goals_by_id = Goal_store.load_goals_by_id_result config
         |> Result.map_error (fun error -> Goal_source_unavailable error) in
       List.fold_right (fun goal_id rest ->
         let* rest = rest in
-        match List.find_opt (fun (goal : Goal_store.goal) -> goal.id = goal_id) rows with
+        match Goal_store.Goal_id_map.find_opt goal_id goals_by_id with
         | None -> Error (Linked_goal_missing goal_id)
         | Some goal -> Ok ({ goal_id; phase = goal.phase;
             criterion = Goal_store.criterion_of_goal goal } :: rest)) ids (Ok [])

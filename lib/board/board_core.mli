@@ -88,8 +88,8 @@ val with_lock : store -> (unit -> 'a) -> 'a
     snapshot under [with_lock], and retain it through the corresponding write. *)
 val with_persist_lock : store -> (unit -> 'a) -> 'a
 
-(** Clears [karma_cache] and [sorted_posts_cache].  Called
-    after every post mutation. *)
+(** Clears [karma_cache].  Called after post mutations that
+    affect karma / persisted state. *)
 val invalidate_post_caches : store -> unit
 
 (** Clears [karma_cache].  Called after every comment
@@ -144,6 +144,13 @@ val append_post : post -> (unit, board_error) result
     rebuild the indexes that {!find_post_by_turn_ref} / {!find_post_by_run_id}
     read.  A [None] origin is a no-op. *)
 val index_post_origin : store -> post -> unit
+val unindex_post_origin : store -> post -> unit
+
+(** Incremental immutable Hot-post index maintenance under [store.mutex]. *)
+val index_hot_post : store -> post -> unit
+val unindex_hot_post : store -> post -> unit
+val reindex_hot_post : store -> previous:post -> updated:post -> unit
+val rebuild_hot_post_index : store -> unit
 
 (** Appends one comment snapshot to {!comments_path}. *)
 val append_comment : comment -> (unit, board_error) result
@@ -341,9 +348,9 @@ val read_post_and_comments
   -> (post * comment list, board_read_error) Result.t
 
 
-(** Returns posts sorted by [(score desc, created_at desc)]
-    with optional visibility / hearth filters. Uses [store.sorted_posts_cache] when
-    warm to skip the sort. *)
+(** Returns posts sorted by [(score desc, created_at desc, post_id asc)]
+    with optional visibility / hearth filters, traversed lazily from
+    [store.hot_post_index] up to [limit] without sorting the full store. *)
 val list_posts
   :  store
   -> ?visibility_filter:visibility option

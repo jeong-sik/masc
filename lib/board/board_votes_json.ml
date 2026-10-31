@@ -431,7 +431,7 @@ let replace_loaded_posts store posts =
     Hashtbl.replace store.posts (Post_id.to_string post.id) post;
     index_post_origin store post) posts;
   store.post_count := Hashtbl.length store.posts;
-  store.sorted_posts_cache <- None;
+  rebuild_hot_post_index store;
   store.karma_cache <- None
 
 let replace_loaded_comments store comments =
@@ -466,7 +466,11 @@ let load_persisted_posts store =
                 SSOT that could drift from the post rows. *)
              index_post_origin store p;
              incr loaded) in
-      (match parsed with Ok () -> replace_loaded_posts store (List.rev !retained) | Error _ -> ());
+      (match parsed with
+       | Ok () -> replace_loaded_posts store (List.rev !retained)
+       | Error _ ->
+         rebuild_hot_post_index store;
+         store.karma_cache <- None);
       store.post_count := Hashtbl.length store.posts;
       let elapsed = Time_compat.now () -. t0 in
       log_loaded ~noun:"posts" ~loaded:!loaded ~path ~elapsed parsed;

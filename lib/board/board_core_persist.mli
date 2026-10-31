@@ -184,3 +184,10 @@ val update_post_with_outcome :
     secondary indexes from a post's [origin].  Idempotent; a [None] origin is
     a no-op.  Called on create and on load so the two paths stay in lockstep. *)
 val index_post_origin : store -> post -> unit
+val unindex_post_origin : store -> post -> unit
+
+(** Incremental immutable Hot-post index maintenance under [store.mutex]. *)
+val index_hot_post : store -> post -> unit
+val unindex_hot_post : store -> post -> unit
+val reindex_hot_post : store -> previous:post -> updated:post -> unit
+val rebuild_hot_post_index : store -> unit

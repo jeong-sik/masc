@@ -4,7 +4,7 @@
     net-vote-only semantics). *)
 
 val hot_compare : Board_types.post -> Board_types.post -> int
-(** Hot ordering comparator: net vote DESC, then created_at DESC. *)
+(** Hot ordering comparator: net vote DESC, then created_at DESC, then post_id ASC. *)
 
 val trending_score : now:float -> Board_types.post -> float
 (** Trending score: net vote / sqrt(age in hours), age floored at 1h. *)

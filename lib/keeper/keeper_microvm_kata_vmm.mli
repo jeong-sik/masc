@@ -34,11 +34,15 @@ val classify_runtime_id : string -> observed
     separate membership tests. *)
 
 val kata_runtime_ids : string list
-(** Every Kata-family runtime id this host validates and supports, including
-    the default shim.  Ids outside this list are unsupported or foreign —
-    never adoptable; report them via {!classify_runtime_id}. *)
+(** Every Kata-family runtime id this host validates as ours, including the
+    default shim.  Membership means "ours", never "supported": ids outside
+    this list are known-unsupported Kata family (e.g. Firecracker) or foreign
+    — never adoptable; report them via {!classify_runtime_id}. *)
 
 val vmm_name : vmm -> string
+(** Stable lowercase name for records and labels.  Only [Ours vmm] carries a
+    VMM: a [Default_shim] row must display as the default shim ("VMM
+    unobserved"), never as a guessed VMM. *)
 
 val vmm_of_choice : string -> (vmm, string) result
 (** The Keeper-facing choice decoder: exactly three names, nothing else. *)

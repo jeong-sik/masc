@@ -41,11 +41,13 @@ let classify_runtime_id id =
     | "io.containerd.kata-dragonball.v2" -> Ours Dragonball
     | _ -> Unknown_runtime id
 
-(* Derived, for tests and diagnostics: the full validated set.  Other
+(* Derived, for tests and diagnostics: the exact set of ids this host
+   validates as ours (the default shim plus the closed per-VMM ids).  Other
    Kata-family ids exist upstream — kata-deploy also registers Firecracker as
-   [io.containerd.kata-fc.v2] — and those are known-unsupported here, not
-   somebody else's containers.  Consumers must report them as unsupported,
-   never as foreign or adoptable. *)
+   [io.containerd.kata-fc.v2] — and membership here means only "ours",
+   never "supported": the known-unsupported Kata family must stay
+   distinguishable from foreign containers.  Consumers must report
+   non-members as unsupported-or-foreign, never as adoptable. *)
 let kata_runtime_ids =
   default_shim_runtime_id :: [ runtime_id_of Qemu; runtime_id_of Cloud_hypervisor;
                                runtime_id_of Dragonball ]

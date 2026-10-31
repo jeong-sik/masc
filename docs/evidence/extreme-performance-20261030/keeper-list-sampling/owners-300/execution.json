@@ -1,0 +1,23 @@
+{
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py",
+    "--binary",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc",
+    "--tui-binary",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc-tui",
+    "--repo",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+    "--output",
+    "artifacts/extreme-perf-20261030/native-tui-profile300-v1",
+    "--keepers",
+    "300",
+    "--messages-per-keeper",
+    "2"
+  ],
+  "started_unix": 1793347313.388402,
+  "completed_unix": 1793347549.8547509,
+  "returncode": 1,
+  "stdout": "",
+  "stderr": "{\"original_error_type\": \"ProbeError\", \"cleanup_errors\": []}\nTraceback (most recent call last):\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py\", line 869, in observe_operation\n    status, _ = client.tool(\"masc_keeper_delegate_status\", {\n                ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        \"target\": {\"kind\": \"keeper\", \"name\": operation[\"keeper\"]},\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n        \"operation_id\": operation[\"operation_id\"]}, label)\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py\", line 456, in tool\n    result, row = self.rpc(\"tools/call\", {\"name\": name, \"arguments\": arguments}, phase)\n                  ~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py\", line 411, in rpc\n    raw, headers, row = self.request(\"POST\", \"/mcp\", payload, phase)\n                        ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py\", line 374, in request\n    response = client.getresponse()\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py\", line 1450, in getresponse\n    response.begin()\n    ~~~~~~~~~~~~~~^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py\", line 336, in begin\n    version, status, reason = self._read_status()\n                              ~~~~~~~~~~~~~~~~~^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/http/client.py\", line 297, in _read_status\n    line = str(self.fp.readline(_MAXLINE + 1), \"iso-8859-1\")\n               ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.4/Frameworks/Python.framework/Versions/3.14/lib/python3.14/socket.py\", line 725, in readinto\n    return self._sock.recv_into(b)\n           ~~~~~~~~~~~~~~~~~~~~^^^\nTimeoutError: timed out\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py\", line 1149, in <module>\n    main()\n    ~~~~^^\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py\", line 1111, in main\n    run(args, owner)\n    ~~~^^^^^^^^^^^^^\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py\", line 916, in run\n    status = observe_operation(operation, \"settlement\", deadline)\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py\", line 887, in observe_operation\n    require(time.monotonic() < deadline,\n    ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n            \"read-only operation observation deadline; owner still live\")\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-owner-profile-v1/keeper_scale_session.py\", line 50, in require\n    raise ProbeError(detail)\nProbeError: read-only operation observation deadline; owner still live\n"
+}

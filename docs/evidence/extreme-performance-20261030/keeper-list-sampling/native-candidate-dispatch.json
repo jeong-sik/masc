@@ -1,0 +1,23 @@
+{
+  "command": [
+    "gh",
+    "workflow",
+    "run",
+    "pr-check.yml",
+    "--repo",
+    "jeong-sik/masc",
+    "--ref",
+    "main",
+    "-f",
+    "native-tui-source-sha=5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+    "-f",
+    "native-tui-scenario=workspace-files"
+  ],
+  "requested_source_head": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+  "started_unix": 1793348217.429129,
+  "completed_unix": 1793348220.539117,
+  "returncode": 0,
+  "stdout": "https://github.com/jeong-sik/masc/actions/runs/41025395547\n",
+  "stderr": "",
+  "scope": "Dispatch for exact candidate native server/TUI compilation and subsequent owned runtime measurement. workspace-files selects three accompanying file suites; it is not a Keeper-list behavioral test or full regression. No CI watch/wait loop."
+}

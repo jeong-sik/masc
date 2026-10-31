@@ -1,0 +1,194 @@
+{
+  "scope": "Native source 529 profile with stack-sampler overhead. Inclusive main-thread stack sample occurrences are not exclusive CPU, call counts, loaded Keeper cardinality or uninstrumented latency. Cleanup cancels live turns; post-shutdown store states are separate from settlement API receipts.",
+  "population": 300,
+  "capture_qualified": true,
+  "profiler": {
+    "command": [
+      "/usr/bin/sample",
+      "88158",
+      "5",
+      "1",
+      "-mayDie",
+      "-file",
+      "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/native-tui-profile300-v1/tui-observer/native-stacks.txt"
+    ],
+    "returncode": 0,
+    "started_ns": "495733686768583",
+    "ended_ns": "495741402736791",
+    "forced": false,
+    "report_sha256": "cdd8cd188ec842d7ec47c4fb17d8a8f670d41d5a38b2d754f88d35ed4f7c9259"
+  },
+  "main_thread_sample_count": 4131,
+  "named_inclusive_sample_occurrences": {
+    "camlMasc_tui_types$keeper_reading_": {
+      "sample_occurrences": 141,
+      "occurrences": [
+        {
+          "line": 274,
+          "prefix_width": 10,
+          "count": 77,
+          "symbol": "camlMasc_tui_types$keeper_reading_16085  (in masc-tui) + 60  [0x1007f4024]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 295,
+          "prefix_width": 8,
+          "count": 4,
+          "symbol": "camlMasc_tui_types$keeper_reading_16085  (in masc-tui) + 60  [0x1007f4024]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 319,
+          "prefix_width": 10,
+          "count": 55,
+          "symbol": "camlMasc_tui_types$keeper_reading_16085  (in masc-tui) + 60  [0x1007f4024]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 327,
+          "prefix_width": 8,
+          "count": 5,
+          "symbol": "camlMasc_tui_types$keeper_reading_16085  (in masc-tui) + 60  [0x1007f4024]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        }
+      ]
+    },
+    "camlMasc_tui_keeper_control$liveness_of_roster_": {
+      "sample_occurrences": 141,
+      "occurrences": [
+        {
+          "line": 275,
+          "prefix_width": 12,
+          "count": 77,
+          "symbol": "camlMasc_tui_keeper_control$liveness_of_roster_2628  (in masc-tui) + 80  [0x100a58878]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 296,
+          "prefix_width": 10,
+          "count": 4,
+          "symbol": "camlMasc_tui_keeper_control$liveness_of_roster_2628  (in masc-tui) + 80  [0x100a58878]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 320,
+          "prefix_width": 12,
+          "count": 55,
+          "symbol": "camlMasc_tui_keeper_control$liveness_of_roster_2628  (in masc-tui) + 80  [0x100a58878]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 328,
+          "prefix_width": 10,
+          "count": 5,
+          "symbol": "camlMasc_tui_keeper_control$liveness_of_roster_2628  (in masc-tui) + 80  [0x100a58878]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        }
+      ]
+    },
+    "camlMasc_tui_types$selected_keeper_": {
+      "sample_occurrences": 4,
+      "occurrences": [
+        {
+          "line": 439,
+          "prefix_width": 10,
+          "count": 1,
+          "symbol": "camlMasc_tui_types$selected_keeper_16418  (in masc-tui) + 36  [0x1007f4c94]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 692,
+          "prefix_width": 12,
+          "count": 2,
+          "symbol": "camlMasc_tui_types$selected_keeper_16418  (in masc-tui) + 36  [0x1007f4c94]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 735,
+          "prefix_width": 14,
+          "count": 1,
+          "symbol": "camlMasc_tui_types$selected_keeper_16418  (in masc-tui) + 36  [0x1007f4c94]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        }
+      ]
+    },
+    "camlDune__exe__Masc_tui_render_keepers$render_keeper_list_": {
+      "sample_occurrences": 9,
+      "occurrences": [
+        {
+          "line": 405,
+          "prefix_width": 8,
+          "count": 4,
+          "symbol": "camlDune__exe__Masc_tui_render_keepers$render_keeper_list_5315  (in masc-tui) + 1952  [0x10062fb68]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 411,
+          "prefix_width": 8,
+          "count": 1,
+          "symbol": "camlDune__exe__Masc_tui_render_keepers$render_keeper_list_5315  (in masc-tui) + 3068  [0x10062ffc4]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 424,
+          "prefix_width": 8,
+          "count": 1,
+          "symbol": "camlDune__exe__Masc_tui_render_keepers$render_keeper_list_5315  (in masc-tui) + 212  [0x10062f49c]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 438,
+          "prefix_width": 8,
+          "count": 1,
+          "symbol": "camlDune__exe__Masc_tui_render_keepers$render_keeper_list_5315  (in masc-tui) + 240  [0x10062f4b8]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 772,
+          "prefix_width": 8,
+          "count": 1,
+          "symbol": "camlDune__exe__Masc_tui_render_keepers$render_keeper_list_5315  (in masc-tui) + 584  [0x10062f610]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        },
+        {
+          "line": 865,
+          "prefix_width": 6,
+          "count": 1,
+          "symbol": "camlDune__exe__Masc_tui_render_keepers$render_keeper_list_5315  (in masc-tui) + 1952  [0x10062fb68]",
+          "thread": "Thread_131559514   DispatchQueue_1: com.apple.main-thread  (serial)"
+        }
+      ]
+    }
+  },
+  "keeper_list_builds": {
+    "count": 103,
+    "p50_ns": "5150833",
+    "p95_ns": "11095875",
+    "max_ns": "23385667"
+  },
+  "post_shutdown_store_states": {
+    "succeeded": 321,
+    "failed": 268,
+    "queued": 11
+  },
+  "post_shutdown_store_failure_kinds": {
+    "None": 332,
+    "Turn_cancelled": 268
+  },
+  "settlement_api_terminal_receipts": 0,
+  "failure": {
+    "type": "ProbeError",
+    "message": "read-only operation observation deadline; owner still live",
+    "notes": [],
+    "cleanup_errors": []
+  },
+  "workload_success": false,
+  "inputs": {
+    "tui-observer/native-stacks.txt": "cdd8cd188ec842d7ec47c4fb17d8a8f670d41d5a38b2d754f88d35ed4f7c9259",
+    "tui-observer/observation.json": "16ac5327d9ccc6cbdb7d9ec55bab6b48b234e95d0a231de3fdbe2f20a4e860ae",
+    "tui-observer/frame-timing.txt": "0aff620915a9ccbc2b34c3876899a45c30ac71b33a121efe7657ddc88a0754db",
+    "durable-operations.json": "f6225d12cb059d7d380f9878d9cdf65da69c5dd3a08eb95fe096606bc880c2a7",
+    "terminal.json": "8775387f1c4307d87ccfe1da60e6b9dca843b18a8379d4f14915d26d45eca99b",
+    "cleanup.json": "92d3844f018328b85fee2b354fca5ca264941dcebebc1271f762a0ffa543dfe3"
+  }
+}

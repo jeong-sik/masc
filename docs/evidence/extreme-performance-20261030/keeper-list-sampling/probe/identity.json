@@ -1,0 +1,10 @@
+{
+  "parent": "tui-owner-probe-v2",
+  "harness_parent": "496a67cd7709a07cee0bcb78b777ebe36730ac92",
+  "scope": "Owned native process stack sampling while original provider requests are held. One complete Keepers key write; no UI text/layout assertions or applied-state claim. Sampler is owned/reaped and instrumentation affects timing.",
+  "files": {
+    "keeper_scale_session.py": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+    "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd",
+    "tui_observer.py": "da908b4681479ff37c44c94bc6d73a927e71a6f932c3617d013c8c3640691477"
+  }
+}

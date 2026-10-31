@@ -10993,8 +10993,7 @@ let clear_current_recall_edit (state : state) =
    owned value. Saving either without the other loses the operator's text. *)
 let message_spill_in_text (state : state) text =
   match state.msg_spill with
-  | Some spill when Option.is_some
-      (Masc_tui_paste_spill.substituted spill ~replacement:"" text) -> Some spill
+  | Some spill when Masc_tui_paste_spill.contains_placeholder spill text -> Some spill
   | Some _ | None -> None
 
 let expand_message_draft_spill spill text =

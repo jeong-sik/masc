@@ -166,6 +166,67 @@ let decode_bytes bytes : (state, reason) result =
        | Ok state -> Ok state
        | Error { field; detail } -> Error (Schema_rejected { field; detail }))
 
+module Goal_id_map = Map.Make (String)
+
+type prepared_state = {
+  state : state;
+  goals_by_id : goal Goal_id_map.t;
+  sorted_goals : goal list;
+}
+
+let sort_goals goals =
+  (* Sort key is [(priority asc, updated_at desc)]. *)
+  List.sort
+    (fun left right ->
+      let by_priority = compare left.priority right.priority in
+      if by_priority <> 0 then
+        by_priority
+      else
+        String.compare right.updated_at left.updated_at)
+    goals
+
+let prepare_state (state : state) : prepared_state =
+  let goals_by_id =
+    List.fold_left
+      (fun acc (goal : goal) -> Goal_id_map.add goal.id goal acc)
+      Goal_id_map.empty
+      state.goals
+  in
+  { state; goals_by_id; sorted_goals = sort_goals state.goals }
+
+let goals_cache : (string, string * prepared_state) Hashtbl.t = Hashtbl.create 8
+let goals_cache_mu = Stdlib.Mutex.create ()
+
+let clear_goals_cache_for path =
+  Stdlib.Mutex.lock goals_cache_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock goals_cache_mu)
+    (fun () -> Hashtbl.remove goals_cache path)
+
+let decode_prepared_bytes ~path bytes : (prepared_state, reason) result =
+  let cached =
+    Stdlib.Mutex.lock goals_cache_mu;
+    Fun.protect
+      ~finally:(fun () -> Stdlib.Mutex.unlock goals_cache_mu)
+      (fun () ->
+        match Hashtbl.find_opt goals_cache path with
+        | Some (cached_bytes, prepared) when String.equal cached_bytes bytes ->
+          Some prepared
+        | Some _ | None -> None)
+  in
+  match cached with
+  | Some prepared -> Ok prepared
+  | None ->
+      (match decode_bytes bytes with
+       | Error _ as error -> error
+       | Ok state ->
+           let prepared = prepare_state state in
+           Stdlib.Mutex.lock goals_cache_mu;
+           Fun.protect
+             ~finally:(fun () -> Stdlib.Mutex.unlock goals_cache_mu)
+             (fun () -> Hashtbl.replace goals_cache path (bytes, prepared));
+           Ok prepared)
+
 (* The mirror is evidence of how far the primary drifted, never state: a
    mirror that decodes is reported with its size and stamp and is not served
    (RFC-0444 §5, "보여주되 서빙하지 않는다"). *)
@@ -182,33 +243,44 @@ let mirror_status_of_read = function
 let make_unavailable config ~reason ~mirror =
   { file = goals_path config; reason; mirror; reset_step = reset_step_of_reason reason }
 
+let load_prepared_source config =
+  let path = goals_path config in
+  let read_mirror () = mirror_status_of_read (read_file (goals_recovery_path config)) in
+  match read_file path with
+  | File_absent ->
+      clear_goals_cache_for path;
+      (match read_mirror () with
+       | Mirror_absent -> `Uninitialized
+       | (Mirror_unreadable _ | Mirror_decodes _ | Mirror_rejected _) as mirror ->
+           `Unavailable (make_unavailable config ~reason:Missing_after_init ~mirror))
+  | File_unreadable error ->
+      clear_goals_cache_for path;
+      `Unavailable (make_unavailable config ~reason:(Unreadable error) ~mirror:(read_mirror ()))
+  | File_bytes bytes ->
+      (match decode_prepared_bytes ~path bytes with
+       | Ok prepared -> `Available prepared
+       | Error reason ->
+           clear_goals_cache_for path;
+           `Unavailable (make_unavailable config ~reason ~mirror:(read_mirror ())))
+
 (* Only opens and reads: no directory creation, rename, write, delete or log
    line. A primary that decodes is [Available] without the mirror being
    opened at all. *)
 let load_source config : source =
-  let read_mirror () = mirror_status_of_read (read_file (goals_recovery_path config)) in
-  match read_file (goals_path config) with
-  | File_absent ->
-      (match read_mirror () with
-       | Mirror_absent -> Uninitialized
-       | (Mirror_unreadable _ | Mirror_decodes _ | Mirror_rejected _) as mirror ->
-           Unavailable (make_unavailable config ~reason:Missing_after_init ~mirror))
-  | File_unreadable error ->
-      Unavailable (make_unavailable config ~reason:(Unreadable error) ~mirror:(read_mirror ()))
-  | File_bytes bytes ->
-      (match decode_bytes bytes with
-       | Ok state -> Available state
-       | Error reason -> Unavailable (make_unavailable config ~reason ~mirror:(read_mirror ())))
+  match load_prepared_source config with
+  | `Uninitialized -> Uninitialized
+  | `Unavailable u -> Unavailable u
+  | `Available prepared -> Available prepared.state
 
 let find_goal_in goals id =
   List.find_opt (fun goal -> String.equal goal.id id) goals
 
 let find_goal config ~goal_id : lookup =
-  match load_source config with
-  | Uninitialized -> Goal_absent
-  | Unavailable u -> Store_unavailable u
-  | Available state ->
-      (match find_goal_in state.goals goal_id with
+  match load_prepared_source config with
+  | `Uninitialized -> Goal_absent
+  | `Unavailable u -> Store_unavailable u
+  | `Available prepared ->
+      (match Goal_id_map.find_opt goal_id prepared.goals_by_id with
        | Some goal -> Goal_found goal
        | None -> Goal_absent)
 
@@ -216,8 +288,10 @@ let find_goal config ~goal_id : lookup =
 
 let write_state_result config state =
   ensure_dirs config;
+  let path = goals_path config in
+  clear_goals_cache_for path;
   let json = state_to_yojson state in
-  let* () = Workspace_utils.write_json_result config (goals_path config) json in
+  let* () = Workspace_utils.write_json_result config path json in
   Goal_projection_generation.advance ();
   (match Workspace_utils.write_json_result config (goals_recovery_path config) json with
    | Ok () -> ()
@@ -291,12 +365,12 @@ let with_existing_goals config ~goal_ids f =
   | [] -> Ok (f ())
   | first_id :: _ ->
     (match Workspace_utils.with_file_lock_r config (goals_path config) (fun () ->
-      match load_source config with
-      | Unavailable u -> Error (Goal_source_unavailable u)
-      | Uninitialized -> Error (Goal_missing first_id)
-      | Available state ->
+      match load_prepared_source config with
+      | `Unavailable u -> Error (Goal_source_unavailable u)
+      | `Uninitialized -> Error (Goal_missing first_id)
+      | `Available prepared ->
         match List.find_opt
-          (fun id -> not (List.exists (fun (goal : goal) -> String.equal goal.id id) state.goals))
+          (fun id -> not (Goal_id_map.mem id prepared.goals_by_id))
           goal_ids with
         | Some id -> Error (Goal_missing id)
         | None -> Ok (f ())) with
@@ -441,29 +515,32 @@ let delete_goal config ~goal_id : (delete_goal_outcome, delete_goal_error) resul
            in
            Ok (Deleted_with_orphaned_links warning)))
 
-let sort_goals goals =
-  (* Sort key is [(priority asc, updated_at desc)]. *)
-  List.sort
-    (fun left right ->
-      let by_priority = compare left.priority right.priority in
-      if by_priority <> 0 then
-        by_priority
-      else
-        String.compare right.updated_at left.updated_at)
-    goals
-
 let list_goals_result config ?phase ?kind () : (goal list, unavailable) result =
-  match load_source config with
-  | Unavailable u -> Error u
-  | Uninitialized -> Ok []
-  | Available state ->
-      Ok (state.goals
-          |> List.filter (fun goal -> match phase with
-              | None -> true
-              | Some phase -> goal.phase = phase)
-          |> List.filter (fun goal -> match kind with
-              | None -> true | Some kind -> Goal_phase.kind goal.phase = kind)
-          |> sort_goals)
+  match load_prepared_source config with
+  | `Unavailable u -> Error u
+  | `Uninitialized -> Ok []
+  | `Available prepared ->
+      let filtered =
+        match phase with
+        | None -> prepared.sorted_goals
+        | Some phase ->
+            List.filter (fun (goal : goal) -> goal.phase = phase) prepared.sorted_goals
+      in
+      let filtered =
+        match kind with
+        | None -> filtered
+        | Some kind ->
+            List.filter
+              (fun (goal : goal) -> Goal_phase.kind goal.phase = kind)
+              filtered
+      in
+      Ok filtered
+
+let load_goals_by_id_result config : (goal Goal_id_map.t, unavailable) result =
+  match load_prepared_source config with
+  | `Unavailable u -> Error u
+  | `Uninitialized -> Ok Goal_id_map.empty
+  | `Available prepared -> Ok prepared.goals_by_id
 
 let blank_opt = function
   | None -> true

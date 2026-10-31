@@ -949,6 +949,55 @@ let test_valid_replay_survives_damaged_event_identity () =
   check_replayed (read ())
 ;;
 
+let test_repeated_turn_reactions_advance_recorded_at_timestamps () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "retry-timestamp-keeper" in
+  let stimulus = board_stimulus ~post_id:"post-retry-timestamps" () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  let store = reaction_ledger_store ~base_path ~keeper_name in
+  let append_reaction ~recorded_at kind =
+    Dated_jsonl.append
+      store
+      (`Assoc
+        [ "schema", `String Keeper_reaction_ledger.schema
+        ; "record_kind", `String "reaction"
+        ; "event_id", `String (stimulus_id ^ ":reaction:" ^ kind)
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float recorded_at
+        ; "stimulus_id", `String stimulus_id
+        ; ( "reaction"
+          , `Assoc
+              [ "kind", `String kind
+              ; "source", `String "keeper_event_queue"
+              ; "post_id", `String stimulus.post_id
+              ; "stimulus_kind", `String "board_signal"
+              ] )
+        ])
+  in
+  append_reaction ~recorded_at:1000.0 "turn_started";
+  append_reaction ~recorded_at:1010.0 "turn_finished";
+  append_reaction ~recorded_at:1020.0 "turn_started";
+  append_reaction ~recorded_at:1030.0 "turn_finished";
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  with
+  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+    check int "turn start and finish identities count once" 2 evidence.matched_record_count;
+    check (option (float 0.001)) "turn_started advances to latest attempt"
+      (Some 1020.0) evidence.turn_started_recorded_at;
+    check (option (float 0.001)) "turn_finished advances to latest attempt"
+      (Some 1030.0) evidence.turn_finished_recorded_at;
+    check (option (float 0.001)) "latest_recorded_at advances to latest attempt"
+      (Some 1030.0) evidence.latest_recorded_at
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+    fail "valid repeated turn reactions must not quarantine evidence"
+  | Error error ->
+    fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+;;
+
 (* RFC-0020: the stimulus payload is a typed closed variant, so a malformed
    payload is unrepresentable — the prior [test_malformed_typed_payload_degrades_summary]
    covered a parse-error path that can no longer occur and was removed. *)
@@ -2156,6 +2205,10 @@ let () =
             "repeated evidence reads do not double count"
             `Quick
             test_repeated_evidence_reads_do_not_double_count
+        ; test_case
+            "repeated turn reactions advance recorded_at timestamps"
+            `Quick
+            test_repeated_turn_reactions_advance_recorded_at_timestamps
         ] )
     ]
 ;;

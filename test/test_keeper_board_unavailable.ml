@@ -594,6 +594,43 @@ let test_board_replay_routes_exact_replies () =
     (List.length (collect bystander))
 ;;
 
+let test_missing_parent_comment_does_not_abort_later_comment_replay () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let parent_author = test_meta "replay-parent-survivor" in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+  @@ fun () ->
+  let post_id =
+    match Board_dispatch.create_post ~author:"external-poster" ~content:"thread topic"
+            ~title:"thread" ~post_kind:Board.Human_post () with
+    | Ok post -> Board.Post_id.to_string post.id
+    | Error error -> fail (Board.show_board_error error)
+  in
+  let parent_id = add_comment ~post_id ~author:parent_author.name "keeper parent comment" in
+  ignore (Keeper_registry.For_testing.register ~base_path parent_author.name parent_author);
+  ignore (Keeper_world_observation.collect_board_events ~base_path ~meta:parent_author);
+  Unix.sleepf write_spacing_seconds;
+  let expired_parent_id = "c-" ^ String.make 32 '1' in
+  (match Board_dispatch.add_comment ~post_id ~parent_id:expired_parent_id
+           ~author:"external" ~content:"reply to expired comment" () with
+   | Ok _ -> () | Error error -> fail (Board.show_board_error error));
+  Unix.sleepf write_spacing_seconds;
+  (match Board_dispatch.add_comment ~post_id ~parent_id
+           ~author:"external" ~content:"reply after expired-parent sibling" () with
+   | Ok _ -> () | Error error -> fail (Board.show_board_error error));
+  let events, _, _ =
+    Keeper_world_observation.collect_board_events ~base_path ~meta:parent_author
+  in
+  check int "live replay uses durable queue" 0 (List.length events);
+  let queued =
+    match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:parent_author.name with
+    | Ok queue -> Keeper_event_queue.to_list queue
+    | Error detail -> fail detail
+  in
+  check int "later reply on the same post still replays after expired-parent sibling"
+    1 (List.length queued)
+;;
+
 let test_catchup_storage_failure_retains_cursor () =
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   let meta = test_meta "catchup-storage" in
@@ -767,6 +804,10 @@ let () =
             "Board replay routes exact replies"
             `Quick
             (with_eio test_board_replay_routes_exact_replies)
+        ; test_case
+            "missing parent comment does not abort later comment replay"
+            `Quick
+            (with_eio test_missing_parent_comment_does_not_abort_later_comment_replay)
         ] )
     ]
 ;;

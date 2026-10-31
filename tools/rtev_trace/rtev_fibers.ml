@@ -5,6 +5,7 @@
    Runtime_events whenever the ring is on; masc turns it on at boot. *)
 module RE = Runtime_events
 module EE = Eio_runtime_events
+type collection_end = Stop_requested | Observation_deadline
 
 let ns_of = RE.Timestamp.to_int64
 let ms ns = Int64.to_float ns /. 1e6
@@ -320,12 +321,20 @@ let () =
   mark "ready" t_start;
   Printf.printf "ready pid=%d started_at_unix=%.6f\n%!" pid t_start;
   let events = ref 0 in
-  while not (stopping ()) && Unix.gettimeofday () -. t_start < seconds do
-    events := !events + RE.read_poll cursor callbacks None;
-    Unix.sleepf 0.02
-  done;
+  let rec collect () =
+    if stopping () then Stop_requested
+    else if not (Unix.gettimeofday () -. t_start < seconds) then Observation_deadline
+    else (
+      events := !events + RE.read_poll cursor callbacks None;
+      Unix.sleepf 0.02;
+      collect ())
+  in
+  let collection_end = collect () in
   events := !events + RE.read_poll cursor callbacks None;
   let t_end = Unix.gettimeofday () in
+  (match collection_end with
+   | Stop_requested -> mark "stop-ack" t_end
+   | Observation_deadline -> ());
   mark "ended" t_end;
   let window = t_end -. t_start in
   Printf.printf "window started_at_unix=%.6f ended_at_unix=%.6f\n" t_start t_end;
@@ -545,4 +554,6 @@ let () =
           (ancestry holder)
           (String.concat ", " (List.filteri (fun j _ -> j < 6) reasons)))
     (List.sort (fun (_, _, a, _, _) (_, _, b, _, _) -> Int64.compare b a) !long_holds);
-  RE.free_cursor cursor
+  RE.free_cursor cursor;
+  flush stdout;
+  mark "report-complete" (Unix.gettimeofday ())

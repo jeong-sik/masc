@@ -1,0 +1,33 @@
+{
+  "cleanup_errors": [
+    {
+      "stage": "run_finalization",
+      "type": "OSError",
+      "message": "injected primary latency receipt write failure",
+      "notes": []
+    },
+    {
+      "stage": "trace_finish",
+      "type": "OSError",
+      "message": "injected secondary trace receipt write failure",
+      "notes": []
+    }
+  ],
+  "server_returncode": 0,
+  "model_thread_stopped": true,
+  "model_socket_closed": true,
+  "sampler_stopped": true,
+  "reader_returncodes": [
+    0,
+    0
+  ],
+  "provider_handlers": 0,
+  "active_provider_requests": 0,
+  "original_error": "injected first workload failure",
+  "verdict": "PASS",
+  "scope": "Injected write failures with real isolated owned processes. Not performance evidence.",
+  "tested_source_sha256": {
+    "keeper_scale_session.py": "5001ae7f53c6922ca4c67f1511819fdb6c07fe86ea5c6341cf11a5c88ecccca0",
+    "keeper_scale_trace.py": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+  }
+}

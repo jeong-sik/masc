@@ -1,0 +1,11 @@
+{
+  "verdict": "PASS",
+  "scope": "Real isolated native 2-Keeper workload: four normal model calls, followed by the explicitly named injected case. Not performance evidence.",
+  "rejection": "provider error recorded through shutdown",
+  "case": "malformed",
+  "before_model_calls": 4,
+  "final_model_calls": 4,
+  "server_reaped": true,
+  "model_socket_closed": true,
+  "tested_source_sha256": "3ce44e1d0e6f2288a60a0bf054d2bbb00d1de3ccb0bff900d469f6b8e37d61ee"
+}

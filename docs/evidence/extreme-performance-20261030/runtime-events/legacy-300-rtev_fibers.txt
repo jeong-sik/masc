@@ -1,0 +1,1181 @@
+ready pid=89041 started_at_unix=1793328127.609324
+window started_at_unix=1793328127.609324 ended_at_unix=1793328496.246993
+pid=89041 window_s=368.6 events=22600471 lost=0
+
+domain       runs     run_ms    busy%   >=10ms   >=50ms  >=100ms    max_ms
+0         1993897   145340.6    39.4%     1572      202       88    2213.9
+1               0        0.0     0.0%        0        0        0       0.0
+2          323922    20187.7     5.5%       77       20        9    2444.6
+3          208789     9884.8     2.7%       58       12        8     303.9
+4          247116    18532.6     5.0%      205       27       12     577.5
+5          245682     9930.8     2.7%       48        6        2     278.4
+6          295728    20803.1     5.6%      160       21       10    2508.5
+7          267417    15725.9     4.3%      115       17        7     336.6
+8          257773    16135.6     4.4%      118       16       11     805.5
+9          229780    10624.7     2.9%       46        9        5     245.0
+10              0        0.0     0.0%        0        0        0       0.0
+11              0        0.0     0.0%        0        0        0       0.0
+12          11687      149.1     0.0%        2        0        0      20.1
+13          35280     1011.8     0.3%        7        1        0      70.4
+14          35306     1075.4     0.3%        6        1        0      70.4
+
+longest uninterrupted fiber runs (domain fiber ms gc_ms turn resumed_from -> ended_by [label])
+6   371766    2508.5    0.0    0 fs-compat-load-file scale-keeper-0299.toml -> fstat                              [with_open_in] <- cc#6148(?)
+2   374075    2444.6    0.0    0 fstat                              -> openat                             [with_open_in] <- cc#3076(?)
+0   446       2213.9    0.0    0                                    -> openat                             [with_open_in]
+2   448405    1944.1    0.0    0 openat                             -> fstat                              [with_open_in] <- cc#3076(?)
+0   490       1563.9    0.0    0 openat                             -> switch                             [with_open_dir > both]
+0   444069    1546.0    0.0  300 Promise.await                      -> fs-compat-append-jsonl 30.jsonl    [with_open_in] <- cc#73(?)
+0   460       1076.6    0.0  300 sleep                              -> sleep                              [-]
+0   792045    1022.4    0.0    5                                    -> fsync                              [with_open_out] <- cc#792041(switch) <- fiber 791926(with_open_in) <- cc#791925(any) <- fiber 791462(with_open_in) <- cc#791283(switch) <- fiber 791282 <- cc#73(?)
+0   804978    1009.8    0.0    5 (first run)                        -> Promise.await                      [Buf_write.with_flow] <- cc#797249(switch) <- fiber 797092(with_open_in) <- cc#797091(any) <- fiber 796033(with_open_in) <- cc#795484(switch) <- fiber 795483 <- cc#73(?)
+0   795581     904.1    0.0    6 file-lock-op                       -> Promise.await                      [Buf_write.with_flow] <- cc#794997(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)
+6   650157     860.0  158.3    0 fs-compat-private-jsonl-rows-read  -> openat                             [with_open_in] <- cc#6148(?)
+2   86752      842.7  842.6    0 fstat                              -> fstat                              [with_open_in] <- cc#3076(?)
+8   712833     805.5    2.4    0 (first run)                        -> fs-compat-atomic-replace e3319808d5841c7f81ba776a97317afc6a0bda6ab1499088d249fd8a0a5fab99 [cc#8196] <- cc#8196(?)
+0   709046     794.4    2.6  157 Promise.await                      -> fs-compat-append-jsonl 30.jsonl    [with_open_in] <- cc#73(?)
+0   795003     790.1    0.0    6                                    ->                                    [with_open_out] <- cc#794999(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)
+0   797092     721.1    0.0    5 mkdir                              -> switch                             [with_open_in] <- cc#797091(any) <- fiber 796033(with_open_in) <- cc#795484(switch) <- fiber 795483 <- cc#73(?)
+0   796258     704.0    0.0    5                                    ->                                    [with_open_out] <- cc#796254(switch) <- fiber 796046(with_open_in) <- cc#796045(any) <- fiber 795104(with_open_in) <- cc#793560(switch) <- fiber 793559 <- cc#73(?)
+0   797255     699.8    0.2    6                                    ->                                    [with_open_out] <- cc#797251(switch) <- fiber 797092(with_open_in) <- cc#797091(any) <- fiber 796033(with_open_in) <- cc#795484(switch) <- fiber 795483 <- cc#73(?)
+0   795003     696.9    0.0    6                                    -> fsync                              [with_open_out] <- cc#794999(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)
+0   531        678.2    0.0  300 sleep                              -> sleep                              [-]
+0   778514     626.8    0.0    1 Promise.await                      -> fs-compat-append-jsonl 30.jsonl    [with_open_in] <- cc#73(?)
+0   795033     620.6    0.0    6                                    ->                                    [with_open_out] <- cc#795029(switch) <- fiber 793548(with_open_in) <- cc#793547(any) <- fiber 792886(with_open_in) <- cc#792397(switch) <- fiber 792396 <- cc#73(?)
+2   664774     586.2   48.8    0 fstat                              -> fstat                              [with_open_in] <- cc#3076(?)
+4   416833     577.5    0.0    0 fstat                              -> fstat                              [all > with_open_in] <- cc#4100(?)
+0   797314     574.9    0.0    5                                    -> Promise.await                      [Buf_write.with_flow] <- cc#796252(switch) <- fiber 796046(with_open_in) <- cc#796045(any) <- fiber 795104(with_open_in) <- cc#793560(switch) <- fiber 793559 <- cc#73(?)
+0   460835     573.3    0.9  300 Promise.await                      -> fs-compat-append-jsonl 30.jsonl    [with_open_in] <- cc#73(?)
+0   462408     558.7    0.0  300 Promise.await                      -> fs-compat-append-jsonl 30.jsonl    [with_open_in] <- cc#73(?)
+8   873005     515.0   82.0    0 fs-compat-private-jsonl-rows-read  -> openat                             [with_open_in] <- cc#8196(?)
+0   804978     491.3    0.0    6                                    -> Promise.await                      [Buf_write.with_flow] <- cc#797249(switch) <- fiber 797092(with_open_in) <- cc#797091(any) <- fiber 796033(with_open_in) <- cc#795484(switch) <- fiber 795483 <- cc#73(?)
+0   548        479.5    0.0    5 backend-save-payload               -> rename                             [with_open_in]
+0   797255     467.7    0.0    5 fstat                              -> fsync                              [with_open_out] <- cc#797251(switch) <- fiber 797092(with_open_in) <- cc#797091(any) <- fiber 796033(with_open_in) <- cc#795484(switch) <- fiber 795483 <- cc#73(?)
+0   797314     455.3    0.0    6 Promise.await                      -> fstat                              [Buf_write.with_flow] <- cc#796252(switch) <- fiber 796046(with_open_in) <- cc#796045(any) <- fiber 795104(with_open_in) <- cc#793560(switch) <- fiber 793559 <- cc#73(?)
+0   490        436.9    0.0  157 openat                             -> switch                             [with_open_dir > both]
+0   795033     431.6    0.0    6                                    -> fsync                              [with_open_out] <- cc#795029(switch) <- fiber 793548(with_open_in) <- cc#793547(any) <- fiber 792886(with_open_in) <- cc#792397(switch) <- fiber 792396 <- cc#73(?)
+0   796258     419.1    0.0    5                                    ->                                    [with_open_out] <- cc#796254(switch) <- fiber 796046(with_open_in) <- cc#796045(any) <- fiber 795104(with_open_in) <- cc#793560(switch) <- fiber 793559 <- cc#73(?)
+2   1258709    418.2   56.3    0 fs-compat-private-jsonl-rows-read  -> openat                             [with_open_in] <- cc#3076(?)
+0   796258     401.0    0.0    5                                    -> fsync                              [with_open_out] <- cc#796254(switch) <- fiber 796046(with_open_in) <- cc#796045(any) <- fiber 795104(with_open_in) <- cc#793560(switch) <- fiber 793559 <- cc#73(?)
+0   795581     366.2    0.0    5 Promise.await                      -> fstat                              [Buf_write.with_flow] <- cc#794997(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)
+0   240829     365.7    0.0    1 backend-save-payload               -> rename                             [with_open_in] <- cc#240459(switch) <- fiber 240458 <- cc#73(?)
+0   795033     365.0    0.8    6                                    ->                                    [with_open_out] <- cc#795029(switch) <- fiber 793548(with_open_in) <- cc#793547(any) <- fiber 792886(with_open_in) <- cc#792397(switch) <- fiber 792396 <- cc#73(?)
+
+longest uninterrupted runs on domain 0 (fiber ms gc_ms turn resumed_from -> ended_by [label])
+446       2213.9    0.0    0                                    -> openat                             [with_open_in]
+490       1563.9    0.0    0 openat                             -> switch                             [with_open_dir > both]
+444069    1546.0    0.0  300 Promise.await                      -> fs-compat-append-jsonl 30.jsonl    [with_open_in] <- cc#73(?)
+460       1076.6    0.0  300 sleep                              -> sleep                              [-]
+792045    1022.4    0.0    5                                    -> fsync                              [with_open_out] <- cc#792041(switch) <- fiber 791926(with_open_in) <- cc#791925(any) <- fiber 791462(with_open_in) <- cc#791283(switch) <- fiber 791282 <- cc#73(?)
+804978    1009.8    0.0    5 (first run)                        -> Promise.await                      [Buf_write.with_flow] <- cc#797249(switch) <- fiber 797092(with_open_in) <- cc#797091(any) <- fiber 796033(with_open_in) <- cc#795484(switch) <- fiber 795483 <- cc#73(?)
+795581     904.1    0.0    6 file-lock-op                       -> Promise.await                      [Buf_write.with_flow] <- cc#794997(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)
+709046     794.4    2.6  157 Promise.await                      -> fs-compat-append-jsonl 30.jsonl    [with_open_in] <- cc#73(?)
+795003     790.1    0.0    6                                    ->                                    [with_open_out] <- cc#794999(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)
+797092     721.1    0.0    5 mkdir                              -> switch                             [with_open_in] <- cc#797091(any) <- fiber 796033(with_open_in) <- cc#795484(switch) <- fiber 795483 <- cc#73(?)
+796258     704.0    0.0    5                                    ->                                    [with_open_out] <- cc#796254(switch) <- fiber 796046(with_open_in) <- cc#796045(any) <- fiber 795104(with_open_in) <- cc#793560(switch) <- fiber 793559 <- cc#73(?)
+797255     699.8    0.2    6                                    ->                                    [with_open_out] <- cc#797251(switch) <- fiber 797092(with_open_in) <- cc#797091(any) <- fiber 796033(with_open_in) <- cc#795484(switch) <- fiber 795483 <- cc#73(?)
+795003     696.9    0.0    6                                    -> fsync                              [with_open_out] <- cc#794999(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)
+531        678.2    0.0  300 sleep                              -> sleep                              [-]
+778514     626.8    0.0    1 Promise.await                      -> fs-compat-append-jsonl 30.jsonl    [with_open_in] <- cc#73(?)
+
+domain 0 runs >= 10ms grouped by label: count total_ms max_ms
+  146    7083.4   1546.0  with_open_in (turn 300)
+   24    5776.6    790.1  with_open_out (turn 6)
+   23    4572.2   1022.4  with_open_out (turn 5)
+  104    3430.9    269.9  with_open_out (turn 300)
+   27    3272.2   2213.9  with_open_in (turn 0)
+    7    2603.2   1009.8  Buf_write.with_flow (turn 5)
+    4    2194.3    904.1  Buf_write.with_flow (turn 6)
+    9    1894.7   1076.6  - (turn 300)
+   14    1742.9    721.1  with_open_in (turn 5)
+   28    1610.2    626.8  with_open_in (turn 1)
+    2    1576.4   1563.9  with_open_dir > both (turn 0)
+   48    1558.5    150.2  Buf_write.with_flow (turn 300)
+    4     832.9    794.4  with_open_in (turn 157)
+   18     805.9    155.8  with_open_out (turn 29)
+   23     672.5     70.4  with_open_out (turn 21)
+   22     651.6    185.7  with_open_out (turn 15)
+   16     561.3    185.5  with_open_out (turn 20)
+   14     541.4    135.0  with_open_out (turn 1)
+   22     528.6    124.4  with_open_in (turn 20)
+   25     499.8     61.9  with_open_in (turn 2)
+   11     443.6    102.2  with_open_out (turn 4)
+    1     436.9    436.9  with_open_dir > both (turn 157)
+   11     417.2     96.1  with_open_in (turn 31)
+    7     412.6    268.9  with_open_out (turn 13)
+   12     400.1    146.3  with_open_in (turn 189)
+   15     349.7     56.5  with_open_in (turn 19)
+    6     346.5    160.1  with_open_dir > both (turn 4)
+   14     343.5     86.5  with_open_in (turn 30)
+   12     340.2     69.0  with_open_out (turn 19)
+   19     332.0     92.9  with_open_in (turn 23)
+   15     331.3     68.5  with_open_dir > both (turn 300)
+   12     322.0    107.7  with_open_in (turn 21)
+   18     320.6     39.5  with_open_in (turn 3)
+   10     319.4     70.1  with_open_out (turn 12)
+    9     317.4    114.5  with_open_out (turn 28)
+   11     306.8     54.2  with_open_out (turn 18)
+    5     298.7    153.1  cc#73 (turn 189)
+    5     295.2    211.7  with_open_out (turn 22)
+   10     289.2     88.4  with_open_out (turn 7)
+    1     283.0    283.0  with_open_out (turn 149)
+   17     279.8     30.1  with_open_in (turn 24)
+    3     270.7    243.8  with_open_in (turn 291)
+   15     270.7     33.4  with_open_in (turn 29)
+   12     266.8     48.2  with_open_out (turn 2)
+   14     263.7     31.0  with_open_in (turn 160)
+    5     262.0    104.5  with_open_out (turn 30)
+    9     258.1     91.3  with_open_in (turn 200)
+    7     253.5    166.8  with_open_in (turn 13)
+   12     252.9     62.6  with_open_in (turn 28)
+    7     247.7     95.3  with_open_out (turn 3)
+    8     240.6     53.8  Buf_write.with_flow (turn 20)
+    1     228.2    228.2  with_open_out (turn 299)
+    6     217.9     54.7  Buf_write.with_flow (turn 1)
+    1     214.2    214.2  with_open_out (turn 96)
+    4     213.5    145.3  Buf_write.with_flow (turn 21)
+   11     210.8     55.1  with_open_in (turn 22)
+    3     204.8    174.6  cc#73 (turn 157)
+   12     202.0     30.8  with_open_in (turn 4)
+    9     196.9     42.1  with_open_out (turn 24)
+    2     189.0    171.1  with_open_in (turn 72)
+    3     188.1    135.7  with_open_out (turn 43)
+   11     178.1     24.7  with_open_in (turn 18)
+    9     174.1     44.2  with_open_in (turn 14)
+    3     172.1    124.4  with_open_in (turn 254)
+    3     169.6     72.7  with_open_out (turn 216)
+   12     168.9     22.0  with_open_in (turn 25)
+    8     164.6     40.4  with_open_out (turn 23)
+    4     163.6     86.7  with_open_out (turn 9)
+    6     160.6     39.2  with_open_in (turn 155)
+    3     158.5     71.8  with_open_dir > both (turn 3)
+    5     158.2     71.5  cc#73 (turn 300)
+    7     154.0     72.5  with_open_in (turn 8)
+    7     152.1     76.4  with_open_in (turn 16)
+    9     152.0     29.8  with_open_in (turn 249)
+   11     151.8     20.2  with_open_in (turn 11)
+    5     151.4     65.6  Buf_write.with_flow (turn 28)
+   11     142.6     19.8  with_open_in (turn 12)
+   10     138.5     23.1  with_open_in (turn 15)
+    6     134.8     67.9  with_open_in (turn 17)
+    8     126.7     27.6  with_open_in (turn 207)
+    5     124.8     41.9  with_open_in (turn 267)
+    5     124.6     55.6  with_open_in (turn 269)
+    3     124.4     53.9  with_open_out (turn 16)
+    4     124.4     40.0  with_open_out (turn 26)
+    7     119.9     30.0  with_open_in (turn 7)
+    1     119.0    119.0  with_open_in (turn 292)
+    6     117.5     42.5  Buf_write.with_flow (turn 19)
+    4     117.3     48.7  Buf_write.with_flow (turn 23)
+    5     116.2     42.9  with_open_out (turn 14)
+    8     114.0     21.7  with_open_in (turn 9)
+    1     111.6    111.6  execution refresh > with_open_in (turn 4)
+    2     110.9     94.3  Buf_write.with_flow (turn 15)
+    2     110.1     95.7  with_open_in (turn 215)
+    1     108.9    108.9  with_open_out (turn 296)
+    7     107.6     35.1  with_open_in (turn 271)
+    6     107.4     36.4  with_open_in (turn 27)
+    4     106.1     37.8  with_open_out (turn 178)
+    2     105.9     82.5  auto 127.0.0.1:58340 > both (turn 300)
+    3     105.6     63.7  Buf_write.with_flow (turn 29)
+    1     104.4    104.4  - (turn 157)
+    3     103.0     65.2  with_open_in (turn 223)
+    5     102.8     37.7  with_open_dir > both (turn 1)
+    6      95.7     24.3  with_open_in (turn 26)
+    7      93.4     15.7  with_open_in (turn 10)
+    5      92.5     39.7  with_open_out (turn 10)
+    4      88.6     42.2  with_open_out (turn 11)
+    3      88.4     42.5  with_open_out (turn 25)
+    1      86.5     86.5  Buf_write.with_flow (turn 217)
+    2      83.8     73.0  with_open_in (turn 272)
+    4      76.1     27.5  with_open_in (turn 295)
+    3      75.3     49.7  with_open_in (turn 206)
+    2      74.3     61.1  with_open_in (turn 181)
+    1      74.2     74.2  Buf_write.with_flow (turn 11)
+    3      74.0     41.0  with_open_in (turn 209)
+    1      73.9     73.9  cc#73 (turn 190)
+    3      73.7     44.1  Buf_write.with_flow (turn 31)
+    5      71.6     25.3  with_open_in (turn 6)
+    5      68.1     24.8  with_open_out (turn 8)
+    1      66.5     66.5  with_open_out (turn 284)
+    1      66.1     66.1  with_open_out (turn 274)
+    1      64.7     64.7  with_open_out (turn 31)
+    2      64.2     43.8  Buf_write.with_flow (turn 18)
+    3      63.3     31.7  - (turn 20)
+    1      62.8     62.8  pair > with_open_in (turn 23)
+    4      62.7     20.9  with_open_in (turn 263)
+    1      62.3     62.3  with_open_out (turn 295)
+    2      61.9     48.6  with_open_out (turn 99)
+    3      57.7     23.7  with_open_in (turn 236)
+    2      55.2     43.0  with_open_in (turn 266)
+    3      54.5     22.1  with_open_in (turn 238)
+    1      53.4     53.4  with_open_dir > both (turn 112)
+    1      53.4     53.4  cc#73 (turn 155)
+    1      53.1     53.1  Buf_write.with_flow (turn 196)
+    4      52.8     16.6  with_open_in (turn 293)
+    1      51.1     51.1  with_open_out (turn 217)
+    2      50.0     36.5  with_open_in (turn 120)
+    4      49.6     15.0  with_open_in (turn 284)
+    3      49.6     18.8  with_open_in (turn 105)
+    2      48.1     30.9  cc:both (turn 0)
+    2      43.4     30.6  cc:both (turn 300)
+    3      43.0     19.3  with_open_in (turn 240)
+    2      42.8     30.1  with_open_in (turn 180)
+    2      42.7     31.4  with_open_in (turn 141)
+    2      42.7     25.5  execution refresh > with_open_in (turn 300)
+    2      42.3     29.1  cc#73 (turn 24)
+    1      41.7     41.7  Buf_write.with_flow (turn 214)
+    1      41.3     41.3  with_open_out (turn 40)
+    1      41.1     41.1  with_open_out (turn 213)
+    3      40.7     17.0  with_open_in (turn 235)
+    1      40.4     40.4  with_open_in (turn 60)
+    1      40.3     40.3  cc#380116 (turn 300)
+    3      40.1     14.1  with_open_dir > both (turn 7)
+    2      39.4     29.4  with_open_in (turn 56)
+    1      38.9     38.9  Buf_write.with_flow (turn 68)
+    1      38.7     38.7  with_open_out (turn 226)
+    1      38.4     38.4  cc#73 (turn 2)
+    1      38.3     38.3  cc#259957 (turn 300)
+    1      37.8     37.8  - (turn 8)
+    3      37.2     14.5  with_open_in (turn 132)
+    2      36.8     24.9  Buf_write.with_flow (turn 24)
+    1      36.8     36.8  cc#73 (turn 21)
+    2      36.8     20.8  with_open_out (turn 101)
+    2      36.5     19.8  with_open_in (turn 261)
+    1      36.4     36.4  with_open_out (turn 223)
+    3      36.4     15.0  with_open_in (turn 144)
+    2      35.9     24.4  Buf_write.with_flow (turn 26)
+    2      35.8     21.5  with_open_in (turn 248)
+    1      35.6     35.6  with_open_out (turn 100)
+    1      35.6     35.6  with_open_in (turn 170)
+    2      35.4     18.1  with_open_out (turn 286)
+    1      35.2     35.2  Buf_write.with_flow (turn 218)
+    1      35.2     35.2  with_open_out (turn 218)
+    3      34.9     12.4  with_open_in (turn 241)
+    1      34.8     34.8  cc#769323 (turn 1)
+    1      34.2     34.2  execution refresh > with_open_in (turn 0)
+    3      34.0     12.3  with_open_in (turn 274)
+    2      33.8     22.5  cc#73 (turn 238)
+    1      32.6     32.6  Buf_write.with_flow (turn 25)
+    2      32.5     18.0  with_open_in (turn 122)
+    1      32.3     32.3  with_open_out (turn 292)
+    1      32.1     32.1  with_open_in (turn 214)
+    1      32.0     32.0  cc#197202 (turn 300)
+    1      31.4     31.4  with_open_out (turn 268)
+    2      31.1     16.8  with_open_in (turn 196)
+    1      30.5     30.5  with_open_out (turn 188)
+    1      30.5     30.5  with_open_out (turn 190)
+    1      30.3     30.3  with_open_out (turn 214)
+    1      30.2     30.2  with_open_out (turn 120)
+    1      29.8     29.8  keeper scale-keeper-0224 (turn 2)
+    1      29.8     29.8  cc#73 (turn 19)
+    2      29.7     16.1  with_open_in (turn 224)
+    1      29.5     29.5  with_open_in (turn 299)
+    2      29.3     18.6  with_open_in (turn 77)
+    2      28.8     15.3  with_open_in (turn 202)
+    2      28.8     17.2  with_open_in (turn 190)
+    2      28.7     16.8  with_open_in (turn 83)
+    1      28.2     28.2  with_open_out (turn 277)
+    1      27.7     27.7  with_open_in (turn 86)
+    2      27.3     13.9  with_open_in (turn 297)
+    1      27.1     27.1  with_open_in (turn 53)
+    2      27.1     16.6  with_open_in (turn 242)
+    2      27.0     14.3  with_open_in (turn 265)
+    2      26.8     14.7  cc#73 (turn 160)
+    2      26.5     14.3  with_open_in (turn 68)
+    2      26.2     13.7  with_open_in (turn 253)
+    2      25.6     13.7  with_open_in (turn 296)
+    2      25.4     14.0  with_open_out (turn 17)
+    2      25.2     13.5  with_open_in (turn 282)
+    1      25.1     25.1  cc:both (turn 126)
+    1      25.1     25.1  cc#376297 (turn 300)
+    2      25.1     13.3  - (turn 23)
+    2      24.8     13.7  with_open_in (turn 89)
+    1      24.1     24.1  Buf_write.with_flow (turn 287)
+    1      23.0     23.0  with_open_in (turn 32)
+    1      22.9     22.9  with_open_out (turn 211)
+    2      22.8     12.6  with_open_in (turn 148)
+    1      22.6     22.6  with_open_out (turn 124)
+    1      22.5     22.5  with_open_in (turn 275)
+    2      22.4     12.3  with_open_in (turn 230)
+    2      22.3     12.2  with_open_in (turn 279)
+    2      22.1     11.5  with_open_in (turn 153)
+    2      22.1     11.4  with_open_in (turn 111)
+    1      22.0     22.0  pair > with_open_in (turn 18)
+    1      21.6     21.6  cc#73 (turn 181)
+    2      21.5     10.8  with_open_in (turn 176)
+    1      21.1     21.1  with_open_out (turn 192)
+    1      20.8     20.8  cc#73 (turn 231)
+    1      20.7     20.7  cc#762108 (turn 4)
+    1      20.7     20.7  cc#73 (turn 206)
+    1      20.5     20.5  with_open_in (turn 162)
+    1      20.2     20.2  with_open_out (turn 111)
+    1      20.2     20.2  cc#73 (turn 17)
+    1      20.1     20.1  Buf_write.with_flow (turn 144)
+    1      20.1     20.1  - (turn 19)
+    1      20.0     20.0  cc#992137 (turn 20)
+    1      19.7     19.7  with_open_in (turn 177)
+    1      19.5     19.5  cc#393253 (turn 300)
+    1      19.5     19.5  with_open_out (turn 294)
+    1      19.5     19.5  with_open_out (turn 27)
+    1      19.3     19.3  cc:pair (turn 28)
+    1      19.2     19.2  cc#1138162 (turn 24)
+    1      19.0     19.0  with_open_out (turn 112)
+    1      18.9     18.9  cc#73 (turn 8)
+    1      18.2     18.2  with_open_in (turn 252)
+    1      18.1     18.1  with_open_in (turn 106)
+    1      18.1     18.1  with_open_in (turn 93)
+    1      17.6     17.6  with_open_out (turn 271)
+    1      17.4     17.4  with_open_in (turn 134)
+    1      17.4     17.4  with_open_in (turn 85)
+    1      17.2     17.2  with_open_in (turn 273)
+    1      17.1     17.1  with_open_out (turn 278)
+    1      17.0     17.0  Buf_write.with_flow (turn 14)
+    1      17.0     17.0  cc#139036 (turn 300)
+    1      17.0     17.0  with_open_in (turn 243)
+    1      16.8     16.8  with_open_in (turn 151)
+    1      16.8     16.8  with_open_in (turn 205)
+    1      16.7     16.7  auto 127.0.0.1:58340 > both (turn 3)
+    1      16.3     16.3  Buf_write.with_flow (turn 77)
+    1      16.1     16.1  pair > with_open_in (turn 20)
+    1      16.0     16.0  Buf_write.with_flow (turn 4)
+    1      15.8     15.8  with_open_in (turn 70)
+    1      15.6     15.6  - (turn 3)
+    1      15.5     15.5  cc#73 (turn 194)
+    1      15.4     15.4  with_open_in (turn 74)
+    1      15.3     15.3  cc#1214943 (turn 16)
+    1      15.3     15.3  with_open_in (turn 67)
+    1      15.1     15.1  with_open_in (turn 258)
+    1      15.0     15.0  with_open_out (turn 70)
+    1      15.0     15.0  - (turn 284)
+    1      15.0     15.0  with_open_in (turn 264)
+    1      14.9     14.9  cc#73 (turn 31)
+    1      14.8     14.8  - (turn 280)
+    1      14.8     14.8  with_open_in (turn 246)
+    1      14.7     14.7  with_open_out (turn 297)
+    1      14.7     14.7  cc#378777 (turn 300)
+    1      14.7     14.7  with_open_in (turn 226)
+    1      14.6     14.6  with_open_in (turn 280)
+    1      14.5     14.5  with_open_in (turn 255)
+    1      14.5     14.5  with_open_in (turn 231)
+    1      14.5     14.5  with_open_dir > both (turn 155)
+    1      14.5     14.5  - (turn 26)
+    1      14.5     14.5  with_open_out (turn 174)
+    1      14.4     14.4  Buf_write.with_flow (turn 27)
+    1      14.4     14.4  execution refresh > with_open_in (turn 22)
+    1      14.3     14.3  with_open_in (turn 257)
+    1      14.3     14.3  with_open_in (turn 130)
+    1      14.1     14.1  with_open_in (turn 184)
+    1      14.0     14.0  with_open_in (turn 173)
+    1      13.8     13.8  pair > with_open_in (turn 14)
+    1      13.8     13.8  with_open_in (turn 182)
+    1      13.7     13.7  cc#681649 (turn 196)
+    1      13.7     13.7  with_open_in (turn 154)
+    1      13.5     13.5  Buf_write.with_flow (turn 30)
+    1      13.5     13.5  with_open_out (turn 185)
+    1      13.4     13.4  with_open_in (turn 228)
+    1      13.4     13.4  with_open_in (turn 44)
+    1      13.3     13.3  with_open_out (turn 177)
+    1      13.2     13.2  with_open_in (turn 102)
+    1      13.2     13.2  with_open_in (turn 59)
+    1      13.2     13.2  with_open_in (turn 222)
+    1      13.1     13.1  with_open_in (turn 113)
+    1      13.0     13.0  with_open_in (turn 66)
+    1      13.0     13.0  with_open_in (turn 158)
+    1      13.0     13.0  with_open_in (turn 192)
+    1      13.0     13.0  with_open_in (turn 47)
+    1      12.9     12.9  with_open_in (turn 152)
+    1      12.7     12.7  with_open_in (turn 210)
+    1      12.6     12.6  Buf_write.with_flow (turn 43)
+    1      12.6     12.6  with_open_in (turn 188)
+    1      12.6     12.6  with_open_in (turn 104)
+    1      12.6     12.6  with_open_in (turn 277)
+    1      12.5     12.5  with_open_in (turn 194)
+    1      12.5     12.5  with_open_in (turn 262)
+    1      12.4     12.4  with_open_in (turn 142)
+    1      12.4     12.4  with_open_in (turn 270)
+    1      12.3     12.3  with_open_in (turn 101)
+    1      12.3     12.3  with_open_in (turn 55)
+    1      12.2     12.2  with_open_in (turn 143)
+    1      12.2     12.2  with_open_in (turn 81)
+    1      12.2     12.2  with_open_in (turn 115)
+    1      12.2     12.2  with_open_in (turn 94)
+    1      12.1     12.1  with_open_in (turn 203)
+    1      12.1     12.1  with_open_in (turn 268)
+    1      12.0     12.0  with_open_in (turn 250)
+    1      12.0     12.0  with_open_in (turn 171)
+    1      12.0     12.0  with_open_in (turn 237)
+    1      12.0     12.0  with_open_in (turn 286)
+    1      12.0     12.0  with_open_in (turn 283)
+    1      12.0     12.0  cc#871421 (turn 1)
+    1      11.9     11.9  cc#73 (turn 207)
+    1      11.9     11.9  - (turn 9)
+    1      11.8     11.8  with_open_in (turn 147)
+    1      11.8     11.8  with_open_in (turn 41)
+    1      11.7     11.7  with_open_in (turn 112)
+    1      11.7     11.7  with_open_in (turn 289)
+    1      11.7     11.7  cc#73 (turn 132)
+    1      11.6     11.6  cc#73 (turn 20)
+    1      11.6     11.6  with_open_in (turn 187)
+    1      11.6     11.6  with_open_in (turn 294)
+    1      11.5     11.5  with_open_in (turn 123)
+    1      11.5     11.5  with_open_in (turn 57)
+    1      11.5     11.5  with_open_in (turn 285)
+    1      11.3     11.3  with_open_in (turn 116)
+    1      11.3     11.3  with_open_in (turn 95)
+    1      11.3     11.3  with_open_in (turn 168)
+    1      11.2     11.2  with_open_in (turn 100)
+    1      11.2     11.2  with_open_in (turn 290)
+    1      11.2     11.2  pair > with_open_in (turn 22)
+    1      11.2     11.2  with_open_in (turn 110)
+    1      11.2     11.2  with_open_in (turn 126)
+    1      11.1     11.1  with_open_in (turn 244)
+    1      11.1     11.1  - (turn 5)
+    1      11.1     11.1  with_open_in (turn 80)
+    1      11.1     11.1  with_open_in (turn 91)
+    1      11.0     11.0  cc#1055060 (turn 18)
+    1      11.0     11.0  with_open_in (turn 84)
+    1      10.9     10.9  with_open_in (turn 108)
+    1      10.9     10.9  with_open_out (turn 287)
+    1      10.8     10.8  Buf_write.with_flow (turn 69)
+    1      10.8     10.8  with_open_in (turn 61)
+    1      10.8     10.8  with_open_in (turn 87)
+    1      10.8     10.8  with_open_in (turn 169)
+    1      10.7     10.7  with_open_in (turn 92)
+    1      10.7     10.7  with_open_in (turn 75)
+    1      10.6     10.6  cc#73 (turn 253)
+    1      10.6     10.6  with_open_in (turn 165)
+    1      10.6     10.6  with_open_out (turn 32)
+    1      10.6     10.6  with_open_in (turn 79)
+    1      10.6     10.6  with_open_in (turn 212)
+    1      10.6     10.6  with_open_in (turn 109)
+    1      10.5     10.5  keeper scale-keeper-0048 (turn 0)
+    1      10.5     10.5  with_open_in (turn 179)
+    1      10.5     10.5  with_open_in (turn 138)
+    1      10.5     10.5  with_open_in (turn 218)
+    1      10.5     10.5  with_open_in (turn 40)
+    1      10.4     10.4  with_open_in (turn 52)
+    1      10.4     10.4  with_open_in (turn 183)
+    1      10.4     10.4  cc#73 (turn 261)
+    1      10.4     10.4  cc#754017 (turn 9)
+    1      10.4     10.4  with_open_in (turn 64)
+    1      10.4     10.4  with_open_in (turn 125)
+    1      10.3     10.3  cc#73 (turn 200)
+    1      10.3     10.3  cc#73 (turn 240)
+    1      10.3     10.3  with_open_in (turn 107)
+    1      10.3     10.3  with_open_in (turn 58)
+    1      10.2     10.2  with_open_in (turn 71)
+    1      10.2     10.2  with_open_in (turn 136)
+    1      10.2     10.2  with_open_in (turn 90)
+    1      10.2     10.2  with_open_out (turn 74)
+    1      10.1     10.1  - (turn 95)
+    1      10.1     10.1  with_open_in (turn 78)
+    1      10.1     10.1  with_open_in (turn 103)
+    1      10.1     10.1  with_open_in (turn 69)
+    1      10.0     10.0  with_open_in (turn 219)
+
+domain 0 runs >= 10ms grouped by (resumed_from -> ended_by): count total_ms max_ms
+  264   13663.8    790.1   ->
+  239   10937.9   1022.4   -> fsync
+   84    8376.7   1546.0  Promise.await -> fs-compat-append-jsonl 30.jsonl
+   28    2835.5   1563.9  openat -> switch
+   36    2373.3    904.1  file-lock-op -> Promise.await
+    4    2264.3   2213.9   -> openat
+   25    2123.8   1009.8  (first run) -> Promise.await
+   26    1884.9    479.5  backend-save-payload -> rename
+    5    1816.2   1076.6  sleep -> sleep
+   34    1646.6    455.3  Promise.await -> fstat
+   30    1578.1    721.1  mkdir -> switch
+   18    1545.0    574.9   -> Promise.await
+   49    1342.1    124.4  Promise.await -> switch
+   22    1045.4    261.3  fs-compat-append-jsonl 30.jsonl -> Promise.await
+   27     498.3     64.3  Promise.await -> Promise.await
+    3     488.5    467.7  fstat -> fsync
+   21     485.1     73.0  openat ->
+   23     473.7     61.1  fstat -> Promise.await
+   13     275.1     72.5  fstat -> fstat
+   14     270.9     45.2  file-lock-op -> fstat
+   11     212.2     36.8   -> fstat
+    1     211.7    211.7  fs-compat-load-file scale-keeper-0168.toml ->
+    5     202.9    111.6  dashboard-keeper-board-addresses -> openat
+    5     176.3    104.4   -> fs-compat-read-owned-directory 6a
+    1     174.6    174.6  Sync.put -> fs-compat-read-owned-directory 6a
+    7     167.2     40.3  Condition.loop_no_mutex -> systhread
+    2     165.2    153.1  Sync.put -> exit
+    7     157.8     42.5  fsync -> rename
+    7     151.4     54.3  mkdir -> fstat
+    4     137.9     76.3  fs-compat-durable-append -> switch
+    8     128.4     31.7   -> fs-compat-append-jsonl 30.jsonl
+    4     127.6     62.8  file-lock-op -> durable-dir-cached-chain
+    1     124.4    124.4  fs-compat-append-file trace-1793328129524-0000f.jsonl -> Promise.await
+    3     115.2     59.1  fstat -> openat
+    7     110.3     23.0  Sync.put -> Promise.await
+    4     108.0     48.6  sleep -> fstat
+    1     107.7    107.7  fs-compat-append-file trace-1793328145767-000ab.jsonl -> fs-compat-read-owned-directory 6a
+    6     106.5     31.0  fstat -> fs-compat-append-jsonl 30.jsonl
+    7     106.1     20.7  fs-compat-append-jsonl 30.jsonl -> backend-blocking-io
+    6     101.1     29.4  fstat -> Mutex.lock
+    3      99.4     38.3  Promise.await -> exit
+    3      96.5     61.9  fs-compat-load-file-opt articles.jsonl -> fstat
+    1      96.1     96.1  fs-compat-append-file trace-1793328147363-000c0.jsonl -> Promise.await
+    1      92.9     92.9  fs-compat-append-file trace-1793328135798-00055.jsonl -> Promise.await
+    2      91.5     71.5  (first run) -> exit
+    1      82.5     82.5  Promise.await -> Switch.await_idle
+    5      80.8     22.6  keeper-fs-durable-write -> fstat
+    4      72.9     21.8  fstat -> file-lock-op
+    2      70.6     58.6  fstat ->
+    3      69.1     42.4  openat -> exit
+    2      68.2     38.4  keeper chat operation projection -> Stream.take
+    1      67.9     67.9  file-lock-op -> file-lock-op
+    4      67.7     25.2  fs-compat-append-jsonl 30.jsonl -> fstat
+    2      65.5     52.4  Promise.await -> Sync.put
+    1      65.2     65.2  fstat -> fs-compat-read-owned-directory 6a
+    3      64.7     30.7  fs-compat-append-jsonl 30.jsonl -> keeper-fs-op
+    4      62.5     19.2  Stream.take -> Stream.take
+    5      59.0     16.9  checkpoint-parent-stat -> file-lock-op
+    4      57.0     20.4   -> file-lock-op
+    1      55.1     55.1  unlink -> file-lock-op
+    2      55.0     43.0  Promise.await -> fs-compat-read-owned-directory 6a
+    3      54.2     27.3  fstat -> Sync.put
+    2      53.8     34.5  Sync.put -> fstat
+    1      53.4     53.4  fs-compat-load-file-opt scale-keeper-0223.json -> fs-compat-load-file scale-keeper-0223.toml
+    2      50.8     37.8  accept -> switch
+    3      49.8     21.4  fstat -> fs-compat-load-file-opt articles.jsonl
+    1      49.5     49.5  fs-compat-append-file trace-1793328131079-00022.jsonl -> fs-compat-load-file state.json
+    1      47.9     47.9  fs-compat-append-file trace-1793328153458-00105.jsonl -> Promise.await
+    3      46.7     17.9  sleep -> switch
+    3      43.8     18.5  Condition.await -> exit
+    1      43.4     43.4  fs-compat-append-file trace-1793328143831-00090.jsonl -> Promise.await
+    1      41.9     41.9  fs-compat-load-owned-file a402ae1cec22d361eed296eea13ee5d65bf8cf5423566dc81a1bcd2147259666.json -> Promise.await
+    1      41.0     41.0  fs-compat-load-owned-file c8185e3f9dfccf6fec2fae74a7001f6272babc56b42945ba8c74f1acd3554b61.json -> file-lock-op
+    2      40.1     24.1  fs-compat-load-file-opt pending-note.json -> fstat
+    3      40.1     13.7   -> readv
+    1      39.7     39.7  checkpoint-parent-stat -> fstat
+    1      39.5     39.5  fs-compat-file-size scale-keeper-0007.decisions.jsonl -> fs-compat-append-file scale-keeper-0007.decisions.jsonl
+    1      38.6     38.6  fs-compat-append-file trace-1793328144922-000a4.jsonl -> Promise.await
+    1      37.6     37.6  fs-compat-load-owned-file afbd66f8dae7ccdc6d2e4a0097f9603976b9d8ab79ea62fadbe0f1a9e61d97af.json -> Promise.await
+    2      36.8     18.5  fs-compat-append-jsonl 30.jsonl -> fs-compat-append-jsonl 30.jsonl
+    2      35.7     25.2  fs-compat-append-file trace-1793328143180-00089.jsonl -> fstat
+    1      35.6     35.6  fs-compat-append-file trace-1793328146072-000b1.jsonl -> Promise.await
+    2      35.5     25.1  readv -> exit
+    1      34.4     34.4  fstat -> switch
+    1      34.2     34.2  fs-compat-append-file trace-1793328143180-00089.jsonl -> Promise.await
+    1      33.3     33.3  (first run) -> fstat
+    1      31.8     31.8  fs-compat-append-file trace-1793328155314-00109.jsonl -> Promise.await
+    1      31.2     31.2  fs-compat-load-owned-file 57eefad9f3096dc6f4bec3bf28c13014ae6e298b11a5f147e9746309a329c567.json -> Promise.await
+    1      30.9     30.9  auth-credential-io -> auth-credential-io
+    1      30.6     30.6  sleep ->
+    1      30.0     30.0  fs-compat-append-file trace-1793328158181-00111.jsonl -> Promise.await
+    1      29.8     29.8  fs-compat-append-file trace-1793328148814-000d7.jsonl -> Promise.await
+    1      29.5     29.5  fs-compat-append-file trace-1793328161058-0012a.jsonl -> fstat
+    2      29.4     17.2  file-lock-op -> exit
+    1      29.0     29.0  fs-compat-append-file trace-1793328130256-0001a.jsonl -> Promise.await
+    1      27.9     27.9  fs-compat-append-file trace-1793328151162-000f4.jsonl -> fstat
+    1      27.9     27.9  fs-compat-append-file trace-1793328135510-00051.jsonl -> Promise.await
+    2      27.8     16.9  Promise.await -> file-lock-op
+    1      27.7     27.7  fs-compat-append-file trace-1793328135798-00055.jsonl -> fstat
+    1      26.7     26.7  fs-compat-load-file scale-keeper-0067.toml -> fstat
+    2      26.6     16.1  fs-compat-load-file-opt dashboard.json -> auth-credential-io
+    1      26.4     26.4  fs-compat-append-file trace-1793328135307-0004e.jsonl -> Promise.await
+    1      26.4     26.4  fs-compat-append-file trace-1793328150002-000e6.jsonl -> Promise.await
+    1      26.2     26.2  fs-compat-append-file trace-1793328139857-00073.jsonl -> Promise.await
+    1      26.1     26.1  fs-compat-append-file trace-1793328144969-000a5.jsonl -> Promise.await
+    1      25.6     25.6  fs-compat-append-file trace-1793328130385-0001b.jsonl -> Promise.await
+    1      25.3     25.3  fs-compat-append-file trace-1793328136443-0005f.jsonl -> Promise.await
+    1      24.7     24.7  fs-compat-append-file trace-1793328159686-0011b.jsonl -> Promise.await
+    2      24.4     13.9  file-lock-op -> openat
+    1      24.3     24.3  fs-compat-append-file trace-1793328137213-00065.jsonl -> Promise.await
+    1      24.3     24.3  fs-compat-append-file trace-1793328128169-00000.jsonl -> fstat
+    1      23.4     23.4  Promise.await ->
+    1      23.0     23.0  fs-compat-append-file trace-1793328143450-0008c.jsonl -> Promise.await
+    2      22.7     12.0  fs-compat-append-jsonl 30.jsonl -> switch
+    1      22.5     22.5  fs-compat-append-file trace-1793328158238-00112.jsonl -> fstat
+    1      22.3     22.3  readv -> switch
+    1      22.2     22.2  fs-compat-append-file trace-1793328136443-0005f.jsonl -> fstat
+    1      22.1     22.1  curator-retry-workspace -> mcp-session-save
+    1      22.0     22.0  Promise.await -> fs-compat-durable-update
+    1      22.0     22.0  fs-compat-append-file trace-1793328140434-0007d.jsonl -> Promise.await
+    1      21.1     21.1  fs-compat-append-file trace-1793328144143-00095.jsonl -> Promise.await
+    1      21.0     21.0  fs-compat-append-file scale-keeper-0094.decisions.jsonl -> Promise.await
+    1      20.6     20.6   -> Sync.put
+    1      20.4     20.4  fs-compat-load-file-opt scale-keeper-0231.json -> fs-compat-load-file scale-keeper-0231.toml
+    1      20.3     20.3  fs-compat-append-file trace-1793328148991-000da.jsonl -> Promise.await
+    1      20.0     20.0  fs-compat-load-owned-file 23714a71bf3f8044529bbd9702d847227e29880a11665e9591c50f14c15a4868.json -> Promise.await
+    1      19.9     19.9  fs-compat-append-file trace-1793328129847-00014.jsonl -> Promise.await
+    1      19.9     19.9  fs-compat-append-file trace-1793328130494-0001c.jsonl -> Promise.await
+    1      19.8     19.8  fs-compat-append-file trace-1793328148353-000ce.jsonl -> Promise.await
+    1      19.8     19.8  fs-compat-append-file trace-1793328153329-00104.jsonl -> fstat
+    1      19.4     19.4  fs-compat-load-owned-file a94c44281892dd472e5be02b0c207623b2555b1a470531132b7bd2047f830e08.json -> Promise.await
+    1      19.1     19.1  fs-compat-append-file trace-1793328155198-00108.jsonl -> Promise.await
+    1      19.0     19.0  fs-compat-append-file trace-1793328144070-00094.jsonl -> Promise.await
+    1      19.0     19.0  file-lock-op -> fs-compat-load-file-opt scale-keeper-0171.json
+    1      18.9     18.9  fs-compat-load-file-opt scale-keeper-0293.json -> fs-compat-load-file scale-keeper-0293.toml
+    1      18.8     18.8  keeper.raw_trace_retention.syscalls -> Promise.await
+    1      18.5     18.5  fs-compat-append-file trace-1793328137276-00066.jsonl -> Promise.await
+    1      18.3     18.3  fs-compat-append-file trace-1793328160196-00123.jsonl -> Promise.await
+    1      18.2     18.2  fs-compat-append-file trace-1793328151472-000fb.jsonl -> fstat
+    1      18.1     18.1  fs-compat-append-file trace-1793328145660-000a8.jsonl -> Promise.await
+    1      18.1     18.1  fs-compat-append-file trace-1793328137466-00069.jsonl -> fstat
+    1      18.1     18.1  Sync.put ->
+    1      18.1     18.1  fs-compat-append-file trace-1793328136253-0005c.jsonl -> fstat
+    1      18.0     18.0  fs-compat-append-file trace-1793328134451-00047.jsonl -> fstat
+    1      17.9     17.9  fs-compat-append-file trace-1793328135744-00054.jsonl -> Promise.await
+    1      17.8     17.8  fs-compat-append-file trace-1793328144363-00099.jsonl -> Promise.await
+    1      17.5     17.5  fs-compat-append-file trace-1793328144691-0009f.jsonl -> fstat
+    1      17.5     17.5  fs-compat-load-owned-file 8f4e26ebd8e5502728b2e2592fd47fabde0d456400d39e55044bd29333aab4e5.json -> Promise.await
+    1      17.5     17.5  fs-compat-append-file trace-1793328129684-00011.jsonl -> Promise.await
+    1      17.5     17.5  fs-compat-append-file trace-1793328147186-000be.jsonl -> Promise.await
+    1      17.4     17.4  fs-compat-append-file trace-1793328140865-00085.jsonl -> fstat
+    1      17.4     17.4  fs-compat-append-file trace-1793328144256-00097.jsonl -> Promise.await
+    1      17.4     17.4  fs-compat-append-file trace-1793328135744-00054.jsonl -> fstat
+    1      17.3     17.3  fs-compat-append-file trace-1793328150061-000e7.jsonl -> Promise.await
+    1      17.3     17.3  Promise.await -> auth-credential-io
+    1      17.2     17.2  fs-compat-append-file trace-1793328149566-000e1.jsonl -> Promise.await
+    1      17.2     17.2  fs-compat-append-file trace-1793328158128-00110.jsonl -> fstat
+    1      17.2     17.2  fs-compat-append-file trace-1793328160498-00124.jsonl -> Promise.await
+    1      17.2     17.2  fs-compat-append-file trace-1793328143601-0008e.jsonl -> Promise.await
+    1      17.0     17.0  fs-compat-append-file trace-1793328150946-000f2.jsonl -> fstat
+    1      16.8     16.8  fs-compat-append-file trace-1793328144207-00096.jsonl -> fstat
+    1      16.8     16.8  fs-compat-append-file trace-1793328148057-000cc.jsonl -> fstat
+    1      16.8     16.8  fs-compat-load-owned-file 01beea6adb0bf12983edd3c3898b8770cd86f0ec645ccc342966cf9e9c7676a3.json -> Promise.await
+    1      16.8     16.8  fs-compat-append-file trace-1793328135567-00052.jsonl -> fstat
+    1      16.7     16.7   -> switch
+    1      16.7     16.7  fs-compat-append-file trace-1793328150795-000ef.jsonl -> Promise.await
+    1      16.7     16.7  fsync -> fstat
+    1      16.6     16.6  file-lock-op -> fs-compat-append-jsonl 30.jsonl
+    1      16.6     16.6  fs-compat-append-file trace-1793328147929-000ca.jsonl -> Promise.await
+    1      16.5     16.5  fs-compat-append-file trace-1793328159916-0011d.jsonl -> Promise.await
+    1      16.5     16.5  fs-compat-append-file trace-1793328136381-0005e.jsonl -> Promise.await
+    1      16.5     16.5  fs-compat-append-file trace-1793328136068-00059.jsonl -> Promise.await
+    1      16.4     16.4  fs-compat-append-file trace-1793328129632-00010.jsonl -> Promise.await
+    1      16.4     16.4  fs-compat-append-file trace-1793328134786-00049.jsonl -> Promise.await
+    1      16.3     16.3  fs-compat-append-file trace-1793328144922-000a4.jsonl -> fs-compat-load-file state.json
+    1      16.2     16.2  fs-compat-append-file trace-1793328141060-00087.jsonl -> Promise.await
+    1      16.1     16.1  fs-compat-append-file trace-1793328147764-000c7.jsonl -> Promise.await
+    1      16.1     16.1  fs-compat-append-file trace-1793328133852-00040.jsonl -> Promise.await
+    1      16.0     16.0  fs-compat-append-file trace-1793328147060-000bc.jsonl -> Promise.await
+    1      16.0     16.0  fs-compat-append-file trace-1793328140865-00085.jsonl -> Promise.await
+    1      16.0     16.0  fs-compat-append-file trace-1793328151317-000f8.jsonl -> Promise.await
+    1      16.0     16.0  fs-compat-load-owned-file e6f5d31b8df7e48e7e7769ee0f6f91d844c4241f07edbc2ec5b0948e81ba87ba.json -> Promise.await
+    1      15.8     15.8  fs-compat-append-file trace-1793328134287-00045.jsonl -> fstat
+    1      15.7     15.7  fs-compat-append-file trace-1793328153080-00103.jsonl -> Promise.await
+    1      15.6     15.6  fs-compat-append-file trace-1793328160808-00127.jsonl -> Promise.await
+    1      15.6     15.6  fs-compat-append-file trace-1793328130764-0001f.jsonl -> Promise.await
+    1      15.6     15.6  fs-compat-append-file trace-1793328131289-00025.jsonl -> Promise.await
+    1      15.5     15.5  fs-compat-append-file trace-1793328146587-000b9.jsonl -> Promise.await
+    1      15.4     15.4  fs-compat-append-file trace-1793328134786-00049.jsonl -> fstat
+    1      15.4     15.4  fs-compat-append-file trace-1793328130385-0001b.jsonl -> fstat
+    1      15.3     15.3  fs-compat-append-file trace-1793328128935-00008.jsonl -> fs-compat-load-file state.json
+    1      15.3     15.3  fs-compat-append-file trace-1793328161058-0012a.jsonl -> Promise.await
+    1      15.3     15.3  fs-compat-append-file trace-1793328134017-00042.jsonl -> fstat
+    1      15.3     15.3  fs-compat-append-file trace-1793328143343-0008b.jsonl -> Promise.await
+    1      15.3     15.3  fs-compat-append-file trace-1793328159762-0011c.jsonl -> Promise.await
+    1      15.2     15.2  fs-compat-append-file trace-1793328151472-000fb.jsonl -> Promise.await
+    1      15.1     15.1  fs-compat-append-file trace-1793328150644-000ed.jsonl -> fstat
+    1      15.0     15.0  fs-compat-load-file-opt scale-keeper-0054.json -> fs-compat-load-file scale-keeper-0054.toml
+    1      15.0     15.0  fs-compat-append-file trace-1793328136563-00061.jsonl -> Promise.await
+    1      15.0     15.0  fs-compat-append-file trace-1793328155165-00107.jsonl -> fstat
+    1      14.9     14.9  fs-compat-append-file trace-1793328146386-000b6.jsonl -> Promise.await
+    1      14.8     14.8  fs-compat-load-file-opt scale-keeper-0051.json -> fstat
+    1      14.8     14.8  fs-compat-append-file trace-1793328135444-00050.jsonl -> Promise.await
+    1      14.8     14.8  fs-compat-append-file trace-1793328151194-000f5.jsonl -> fstat
+    1      14.8     14.8  fs-compat-append-file trace-1793328160924-00128.jsonl -> Promise.await
+    1      14.7     14.7  fs-compat-append-file trace-1793328148416-000d0.jsonl -> fstat
+    1      14.7     14.7  fs-compat-append-file trace-1793328149566-000e1.jsonl -> fstat
+    1      14.6     14.6  fs-compat-append-file trace-1793328159152-00117.jsonl -> fstat
+    1      14.5     14.5  fs-compat-append-file trace-1793328152716-000fe.jsonl -> fstat
+    1      14.5     14.5  fs-compat-append-file trace-1793328140758-00083.jsonl -> fstat
+    1      14.5     14.5  fs-compat-append-file trace-1793328143679-0008f.jsonl -> Promise.await
+    1      14.5     14.5  fs-compat-append-file trace-1793328137406-00068.jsonl -> fstat
+    1      14.5     14.5  fs-compat-append-file trace-1793328140205-00079.jsonl -> fstat
+    1      14.5     14.5  fs-compat-append-file trace-1793328149393-000de.jsonl -> Promise.await
+    1      14.4     14.4  fs-compat-load-owned-file 3c5da5d2419eb1d30315fc683f5069b9926b4bb43ee43cf3d12a7a40248e696e.json -> durable-dir-cached-chain
+    1      14.4     14.4  fs-compat-append-file trace-1793328148759-000d6.jsonl -> fstat
+    1      14.4     14.4  fs-compat-append-file trace-1793328140052-00076.jsonl -> Promise.await
+    1      14.4     14.4  fs-compat-append-file trace-1793328160156-00122.jsonl -> Promise.await
+    1      14.4     14.4  fs-compat-append-file trace-1793328158344-00113.jsonl -> Promise.await
+    1      14.4     14.4  fs-compat-append-file trace-1793328148696-000d5.jsonl -> Promise.await
+    1      14.3     14.3  fs-compat-append-file trace-1793328152853-00100.jsonl -> fstat
+    1      14.3     14.3  fs-compat-append-file trace-1793328147540-000c3.jsonl -> fstat
+    1      14.3     14.3  fs-compat-append-file trace-1793328151258-000f7.jsonl -> fstat
+    1      14.3     14.3  fs-compat-append-file trace-1793328140643-00081.jsonl -> fstat
+    1      14.3     14.3  fs-compat-append-file trace-1793328134098-00043.jsonl -> Promise.await
+    1      14.3     14.3  fs-compat-append-file trace-1793328134098-00043.jsonl -> fstat
+    1      14.3     14.3  fs-compat-load-owned-file 517c6b6b30fc9351bc16308f6f0be31ea1ad69d3c406a88ed90685e761a61a54.json -> Promise.await
+    1      14.2     14.2  fs-compat-append-file trace-1793328130053-00017.jsonl -> fstat
+    1      14.1     14.1  Promise.await -> openat
+    1      14.1     14.1  fs-compat-append-file trace-1793328159639-0011a.jsonl -> Promise.await
+    1      14.1     14.1  fs-compat-append-file trace-1793328146445-000b7.jsonl -> fstat
+    1      13.9     13.9  fs-compat-append-file trace-1793328160716-00126.jsonl -> Promise.await
+    1      13.9     13.9  fs-compat-append-file trace-1793328148416-000d0.jsonl -> Promise.await
+    1      13.8     13.8  fs-compat-append-file trace-1793328132334-00034.jsonl -> Promise.await
+    1      13.8     13.8  fs-compat-append-file trace-1793328148759-000d6.jsonl -> Promise.await
+    1      13.8     13.8  fs-compat-append-file trace-1793328129359-0000d.jsonl -> fstat
+    1      13.8     13.8  sleep -> backend-blocking-io
+    1      13.8     13.8  fs-compat-append-file trace-1793328146330-000b5.jsonl -> fstat
+    1      13.7     13.7  fs-compat-append-file trace-1793328160808-00127.jsonl -> fstat
+    1      13.7     13.7  fs-compat-append-file trace-1793328144363-00099.jsonl -> fstat
+    1      13.7     13.7  fs-compat-append-file trace-1793328139560-0006f.jsonl -> Promise.await
+    1      13.6     13.6  fs-compat-append-file trace-1793328149435-000df.jsonl -> fstat
+    1      13.5     13.5  fs-compat-append-file trace-1793328147540-000c3.jsonl -> Promise.await
+    1      13.5     13.5  fs-compat-append-file trace-1793328159342-00119.jsonl -> fstat
+    1      13.5     13.5  fs-compat-append-file trace-1793328140098-00077.jsonl -> fstat
+    1      13.4     13.4  fs-compat-append-file trace-1793328149814-000e3.jsonl -> fstat
+    1      13.4     13.4  fs-compat-append-file trace-1793328160924-00128.jsonl -> fstat
+    1      13.4     13.4  fs-compat-append-file trace-1793328146260-000b4.jsonl -> Promise.await
+    1      13.4     13.4  fs-compat-append-file trace-1793328160156-00122.jsonl -> fstat
+    1      13.4     13.4  fs-compat-append-file trace-1793328133530-0003d.jsonl -> Promise.await
+    1      13.4     13.4  fs-compat-append-file trace-1793328131656-0002b.jsonl -> fstat
+    1      13.4     13.4  fs-compat-append-file trace-1793328136253-0005c.jsonl -> Promise.await
+    1      13.3     13.3  fs-compat-append-file trace-1793328128935-00008.jsonl -> Promise.await
+    1      13.3     13.3  fs-compat-append-file trace-1793328133780-0003f.jsonl -> Promise.await
+    1      13.3     13.3  fs-compat-load-owned-file 6e97071757418676a093be4c77cc14615db849c3085fbb4ed3ef845ba8cdd613.json -> file-lock-op
+    1      13.3     13.3  fs-compat-append-file trace-1793328137352-00067.jsonl -> Promise.await
+    1      13.3     13.3  fs-compat-append-file trace-1793328139016-0006b.jsonl -> Promise.await
+    1      13.2     13.2  fs-compat-append-file trace-1793328155599-0010e.jsonl -> fstat
+    1      13.2     13.2  fs-compat-append-file trace-1793328160052-00120.jsonl -> Promise.await
+    1      13.2     13.2  fs-compat-append-file trace-1793328137213-00065.jsonl -> fstat
+    1      13.2     13.2  fs-compat-append-file trace-1793328129011-00009.jsonl -> Promise.await
+    1      13.2     13.2  fs-compat-append-file trace-1793328132673-0003a.jsonl -> fstat
+    1      13.2     13.2  fs-compat-append-file trace-1793328129075-0000a.jsonl -> Promise.await
+    1      13.2     13.2  (first run) -> switch
+    1      13.2     13.2  fs-compat-append-file trace-1793328128640-00004.jsonl -> Promise.await
+    1      13.2     13.2  fs-compat-append-file trace-1793328149208-000dd.jsonl -> fstat
+    1      13.1     13.1  fs-compat-append-file trace-1793328129904-00015.jsonl -> Promise.await
+    1      13.1     13.1  fs-compat-append-file trace-1793328147983-000cb.jsonl -> Promise.await
+    1      13.1     13.1  fs-compat-append-file trace-1793328139684-00070.jsonl -> fstat
+    1      13.0     13.0  fs-compat-append-file trace-1793328133940-00041.jsonl -> fstat
+    1      13.0     13.0  fs-compat-append-file trace-1793328145958-000af.jsonl -> Promise.await
+    1      13.0     13.0  fs-compat-append-file trace-1793328146658-000ba.jsonl -> Promise.await
+    1      13.0     13.0  fs-compat-append-file trace-1793328144608-0009d.jsonl -> fstat
+    1      13.0     13.0  fs-compat-append-file trace-1793328152853-00100.jsonl -> Promise.await
+    1      13.0     13.0  fs-compat-append-file trace-1793328147287-000bf.jsonl -> fstat
+    1      13.0     13.0  fs-compat-load-file-opt scale-keeper-0215.json -> fstat
+    1      13.0     13.0  fs-compat-append-file trace-1793328131824-0002e.jsonl -> fstat
+    1      13.0     13.0  fs-compat-append-file trace-1793328132777-0003b.jsonl -> Promise.await
+    1      12.9     12.9  fs-compat-append-file trace-1793328147882-000c9.jsonl -> Promise.await
+    1      12.9     12.9  fs-compat-append-file trace-1793328144256-00097.jsonl -> fstat
+    1      12.9     12.9  fs-compat-append-file trace-1793328143885-00091.jsonl -> Promise.await
+    1      12.9     12.9  fs-compat-append-file trace-1793328134388-00046.jsonl -> Promise.await
+    1      12.8     12.8  fs-compat-load-file-opt scale-keeper-0101.json -> fs-compat-load-file scale-keeper-0101.toml
+    1      12.8     12.8  fs-compat-append-file trace-1793328155198-00108.jsonl -> fstat
+    1      12.7     12.7  fs-compat-append-file trace-1793328133718-0003e.jsonl -> Promise.await
+    1      12.7     12.7  fs-compat-append-file trace-1793328131556-00029.jsonl -> Promise.await
+    1      12.7     12.7  fs-compat-append-file trace-1793328146200-000b3.jsonl -> fstat
+    1      12.7     12.7  fs-compat-append-file trace-1793328150235-000ea.jsonl -> fstat
+    1      12.7     12.7  fs-compat-append-file trace-1793328148448-000d1.jsonl -> fstat
+    1      12.6     12.6  fs-compat-append-file trace-1793328133940-00041.jsonl -> Promise.await
+    1      12.6     12.6  fs-compat-append-file trace-1793328131902-0002f.jsonl -> Promise.await
+    1      12.6     12.6  fs-compat-file-size scale-keeper-0240.decisions.jsonl -> fs-compat-append-file scale-keeper-0240.decisions.jsonl
+    1      12.6     12.6  fs-compat-append-file trace-1793328147028-000bb.jsonl -> fstat
+    1      12.6     12.6  fs-compat-append-file trace-1793328159342-00119.jsonl -> Promise.await
+    1      12.6     12.6  fs-compat-append-file trace-1793328137352-00067.jsonl -> fstat
+    1      12.6     12.6  fs-compat-append-file trace-1793328150292-000eb.jsonl -> Promise.await
+    1      12.6     12.6  fs-compat-append-file trace-1793328158444-00114.jsonl -> fstat
+    1      12.6     12.6  fs-compat-append-file trace-1793328137406-00068.jsonl -> Promise.await
+    1      12.5     12.5  fs-compat-append-file trace-1793328131233-00024.jsonl -> Promise.await
+    1      12.5     12.5  fs-compat-append-file trace-1793328130172-00019.jsonl -> fstat
+    1      12.5     12.5  openat -> fstat
+    1      12.5     12.5  fs-compat-append-file trace-1793328147440-000c1.jsonl -> fstat
+    1      12.5     12.5  fs-compat-append-file trace-1793328139503-0006e.jsonl -> Promise.await
+    1      12.5     12.5  fs-compat-append-file trace-1793328153458-00105.jsonl -> fstat
+    1      12.5     12.5  fs-compat-append-file trace-1793328151600-000fc.jsonl -> fstat
+    1      12.5     12.5  fs-compat-append-file trace-1793328130673-0001e.jsonl -> Promise.await
+    1      12.4     12.4  fs-compat-append-file trace-1793328150745-000ee.jsonl -> Promise.await
+    1      12.4     12.4  fs-compat-append-file trace-1793328155384-0010a.jsonl -> Promise.await
+    1      12.4     12.4  fs-compat-append-file trace-1793328132673-0003a.jsonl -> Promise.await
+    1      12.4     12.4  fs-compat-append-file trace-1793328155430-0010b.jsonl -> Promise.await
+    1      12.4     12.4  fs-compat-append-file trace-1793328144003-00093.jsonl -> Promise.await
+    1      12.4     12.4  fs-compat-append-file trace-1793328160010-0011f.jsonl -> Promise.await
+    1      12.4     12.4  fs-compat-append-file trace-1793328143525-0008d.jsonl -> fstat
+    1      12.4     12.4  fs-compat-append-file trace-1793328135255-0004d.jsonl -> Promise.await
+    1      12.4     12.4  fs-compat-append-file trace-1793328155547-0010d.jsonl -> fstat
+    1      12.4     12.4  sleep -> fs-compat-read-owned-directory 6a
+    1      12.3     12.3  fs-compat-append-file trace-1793328129359-0000d.jsonl -> Promise.await
+    1      12.3     12.3  fs-compat-append-file trace-1793328149932-000e5.jsonl -> fstat
+    1      12.3     12.3  fs-compat-append-file trace-1793328135363-0004f.jsonl -> Promise.await
+    1      12.3     12.3  fs-compat-append-file trace-1793328137097-00064.jsonl -> fstat
+    1      12.3     12.3  fs-compat-append-file trace-1793328132428-00036.jsonl -> fstat
+    1      12.3     12.3  fs-compat-append-file trace-1793328146127-000b2.jsonl -> Promise.await
+    1      12.2     12.2  fs-compat-append-file trace-1793328144831-000a2.jsonl -> Promise.await
+    1      12.2     12.2  fs-compat-append-file trace-1793328143601-0008e.jsonl -> fstat
+    1      12.2     12.2  fs-compat-append-file trace-1793328143946-00092.jsonl -> Promise.await
+    1      12.2     12.2  fs-compat-append-file trace-1793328130600-0001d.jsonl -> Promise.await
+    1      12.2     12.2  fs-compat-append-file trace-1793328144427-0009a.jsonl -> fstat
+    1      12.2     12.2  fs-compat-append-file trace-1793328135444-00050.jsonl -> fstat
+    1      12.2     12.2  fs-compat-append-file trace-1793328139799-00072.jsonl -> fstat
+    1      12.2     12.2  fs-compat-append-file trace-1793328136325-0005d.jsonl -> fstat
+    1      12.2     12.2  fs-compat-append-file trace-1793328155314-00109.jsonl -> fstat
+    1      12.2     12.2  fs-compat-append-file trace-1793328158605-00116.jsonl -> fstat
+    1      12.1     12.1  fs-compat-append-file trace-1793328147929-000ca.jsonl -> fstat
+    1      12.1     12.1  fs-compat-append-file trace-1793328130991-00021.jsonl -> Promise.await
+    1      12.1     12.1  fs-compat-append-file trace-1793328149932-000e5.jsonl -> Promise.await
+    1      12.1     12.1  fs-compat-append-file trace-1793328155430-0010b.jsonl -> fstat
+    1      12.1     12.1  fs-compat-load-file state.json -> fstat
+    1      12.1     12.1  fs-compat-append-file trace-1793328146330-000b5.jsonl -> Promise.await
+    1      12.0     12.0  fs-compat-append-file trace-1793328150841-000f0.jsonl -> fstat
+    1      12.0     12.0  fs-compat-append-file trace-1793328145741-000aa.jsonl -> fstat
+    1      12.0     12.0  fs-compat-append-file trace-1793328150342-000ec.jsonl -> fstat
+    1      12.0     12.0  fs-compat-append-file trace-1793328148602-000d4.jsonl -> Promise.await
+    1      12.0     12.0  fs-compat-append-file trace-1793328159916-0011d.jsonl -> fstat
+    1      12.0     12.0  fs-compat-append-file trace-1793328140098-00077.jsonl -> Promise.await
+    1      12.0     12.0  fs-compat-append-file trace-1793328155165-00107.jsonl -> Promise.await
+    1      12.0     12.0  fs-compat-append-file trace-1793328159639-0011a.jsonl -> fstat
+    1      12.0     12.0  fs-compat-append-file trace-1793328146016-000b0.jsonl -> Promise.await
+    1      11.9     11.9  fs-compat-append-file trace-1793328128579-00003.jsonl -> Promise.await
+    1      11.9     11.9  fs-compat-append-file trace-1793328138179-0006a.jsonl -> Promise.await
+    1      11.9     11.9  fs-compat-append-file trace-1793328128851-00007.jsonl -> fstat
+    1      11.8     11.8  fs-compat-append-file trace-1793328155486-0010c.jsonl -> fstat
+    1      11.8     11.8  fs-compat-append-file trace-1793328143946-00092.jsonl -> fstat
+    1      11.8     11.8  fs-compat-append-file trace-1793328135038-0004a.jsonl -> Promise.await
+    1      11.8     11.8  fs-compat-append-file trace-1793328131507-00028.jsonl -> fstat
+    1      11.8     11.8  fs-compat-append-file trace-1793328160716-00126.jsonl -> fstat
+    1      11.8     11.8  fs-compat-append-file trace-1793328147668-000c5.jsonl -> Promise.await
+    1      11.8     11.8  fs-compat-append-file trace-1793328155547-0010d.jsonl -> Promise.await
+    1      11.7     11.7  fs-compat-append-file trace-1793328145823-000ad.jsonl -> Promise.await
+    1      11.7     11.7  fs-compat-append-file trace-1793328139560-0006f.jsonl -> fstat
+    1      11.7     11.7  backend-blocking-io -> fstat
+    1      11.7     11.7  fs-compat-append-file trace-1793328160052-00120.jsonl -> fstat
+    1      11.7     11.7  fs-compat-append-file trace-1793328146445-000b7.jsonl -> Promise.await
+    1      11.7     11.7  fs-compat-load-file-opt scale-keeper-0257.json -> fs-compat-load-file scale-keeper-0257.toml
+    1      11.6     11.6  fs-compat-append-file trace-1793328147094-000bd.jsonl -> fstat
+    1      11.6     11.6  fs-compat-append-file trace-1793328140701-00082.jsonl -> Promise.await
+    1      11.6     11.6  fs-compat-append-file trace-1793328132428-00036.jsonl -> Promise.await
+    1      11.6     11.6  fs-compat-append-file trace-1793328146658-000ba.jsonl -> fstat
+    1      11.6     11.6  fs-compat-append-file trace-1793328136325-0005d.jsonl -> Promise.await
+    1      11.5     11.5  fs-compat-append-file trace-1793328149163-000dc.jsonl -> Promise.await
+    1      11.5     11.5  fs-compat-append-file trace-1793328151194-000f5.jsonl -> Promise.await
+    1      11.5     11.5  fs-compat-append-file trace-1793328131656-0002b.jsonl -> Promise.await
+    1      11.5     11.5  fs-compat-append-file trace-1793328129524-0000f.jsonl -> fstat
+    1      11.5     11.5  fs-compat-append-file trace-1793328140268-0007a.jsonl -> fstat
+    1      11.5     11.5  fs-compat-append-file trace-1793328158444-00114.jsonl -> Promise.await
+    1      11.5     11.5  fs-compat-append-file trace-1793328132541-00038.jsonl -> fstat
+    1      11.5     11.5  fs-compat-append-file trace-1793328129140-0000b.jsonl -> fstat
+    1      11.4     11.4  fs-compat-append-file trace-1793328135510-00051.jsonl -> fstat
+    1      11.4     11.4  fs-compat-append-file trace-1793328149867-000e4.jsonl -> Promise.await
+    1      11.4     11.4  fs-compat-append-file trace-1793328139503-0006e.jsonl -> fstat
+    1      11.3     11.3  fs-compat-append-file trace-1793328139857-00073.jsonl -> fstat
+    1      11.3     11.3  fs-compat-append-file trace-1793328161006-00129.jsonl -> Promise.await
+    1      11.3     11.3  fs-compat-append-file trace-1793328152716-000fe.jsonl -> Promise.await
+    1      11.3     11.3  fs-compat-append-file trace-1793328131770-0002d.jsonl -> Promise.await
+    1      11.3     11.3  fs-compat-append-file trace-1793328136381-0005e.jsonl -> fstat
+    1      11.3     11.3  fs-compat-append-file trace-1793328145101-000a7.jsonl -> fstat
+    1      11.3     11.3  fs-compat-append-file trace-1793328143253-0008a.jsonl -> fs-compat-read-owned-directory 6a
+    1      11.3     11.3  fs-compat-append-file trace-1793328130600-0001d.jsonl -> fstat
+    1      11.3     11.3  fs-compat-append-file trace-1793328159686-0011b.jsonl -> fstat
+    1      11.3     11.3  fs-compat-append-file trace-1793328129684-00011.jsonl -> fstat
+    1      11.2     11.2  fs-compat-append-file trace-1793328130494-0001c.jsonl -> fstat
+    1      11.2     11.2  fs-compat-append-file trace-1793328136748-00063.jsonl -> fstat
+    1      11.2     11.2  fs-compat-append-file trace-1793328160110-00121.jsonl -> fstat
+    1      11.2     11.2  fs-compat-append-file trace-1793328149736-000e2.jsonl -> Promise.await
+    1      11.2     11.2  fs-compat-append-file trace-1793328132376-00035.jsonl -> Promise.await
+    1      11.2     11.2  fs-compat-append-file trace-1793328139442-0006d.jsonl -> fstat
+    1      11.2     11.2  fs-compat-append-file trace-1793328144207-00096.jsonl -> Promise.await
+    1      11.2     11.2  fs-compat-append-file trace-1793328140434-0007d.jsonl -> fstat
+    1      11.1     11.1  fs-compat-append-file trace-1793328129011-00009.jsonl -> fstat
+    1      11.1     11.1  fs-compat-append-file trace-1793328144564-0009c.jsonl -> Promise.await
+    1      11.1     11.1  fs-compat-append-file trace-1793328151133-000f3.jsonl -> fstat
+    1      11.1     11.1  fs-compat-append-file trace-1793328150891-000f1.jsonl -> Promise.await
+    1      11.1     11.1  fs-compat-append-file trace-1793328135363-0004f.jsonl -> fstat
+    1      11.1     11.1  fs-compat-append-file trace-1793328129966-00016.jsonl -> Promise.await
+    1      11.1     11.1  fs-compat-append-file trace-1793328136138-0005a.jsonl -> fstat
+    1      11.1     11.1  fs-compat-append-file trace-1793328149814-000e3.jsonl -> Promise.await
+    1      11.0     11.0  fs-compat-append-file trace-1793328136004-00058.jsonl -> fstat
+    1      11.0     11.0  file-lock-op -> fs-compat-durable-append
+    1      11.0     11.0  fs-compat-append-file trace-1793328151258-000f7.jsonl -> Promise.await
+    1      11.0     11.0  fs-compat-append-file trace-1793328135936-00057.jsonl -> Promise.await
+    1      11.0     11.0  fs-compat-append-file trace-1793328135631-00053.jsonl -> fstat
+    1      10.9     10.9  fs-compat-append-file trace-1793328139016-0006b.jsonl -> fstat
+    1      10.9     10.9  fs-compat-read-owned-directory 6a -> fs-compat-append-jsonl 30.jsonl
+    1      10.9     10.9  fs-compat-append-file trace-1793328132603-00039.jsonl -> Promise.await
+    1      10.9     10.9  fs-compat-append-file trace-1793328131708-0002c.jsonl -> Promise.await
+    1      10.9     10.9  fs-compat-append-file trace-1793328136748-00063.jsonl -> Promise.await
+    1      10.9     10.9  fs-compat-append-file trace-1793328136498-00060.jsonl -> Promise.await
+    1      10.9     10.9  fs-compat-append-file trace-1793328136004-00058.jsonl -> Promise.await
+    1      10.9     10.9  fs-compat-append-file trace-1793328148057-000cc.jsonl -> Promise.await
+    1      10.9     10.9  fs-compat-append-file trace-1793328131612-0002a.jsonl -> Promise.await
+    1      10.9     10.9  fs-compat-append-file trace-1793328129966-00016.jsonl -> fstat
+    1      10.8     10.8  fs-compat-append-file trace-1793328153329-00104.jsonl -> Promise.await
+    1      10.8     10.8  keeper-fs-durable-write -> durable-dir-cached-chain
+    1      10.8     10.8  fs-compat-append-file trace-1793328130888-00020.jsonl -> Promise.await
+    1      10.8     10.8  fs-compat-append-file trace-1793328133285-0003c.jsonl -> fstat
+    1      10.8     10.8  fs-compat-append-file trace-1793328135202-0004c.jsonl -> fstat
+    1      10.8     10.8  fs-compat-append-file trace-1793328155384-0010a.jsonl -> fstat
+    1      10.8     10.8  fs-compat-append-file trace-1793328135862-00056.jsonl -> fstat
+    1      10.8     10.8  fs-compat-append-file trace-1793328145660-000a8.jsonl -> fstat
+    1      10.8     10.8  fs-compat-append-file trace-1793328145958-000af.jsonl -> fstat
+    1      10.7     10.7  fs-compat-append-file trace-1793328136191-0005b.jsonl -> fstat
+    1      10.7     10.7  fs-compat-append-file trace-1793328135038-0004a.jsonl -> fstat
+    1      10.7     10.7  fs-compat-append-file trace-1793328143343-0008b.jsonl -> tool-blob-put-durable
+    1      10.7     10.7  fs-compat-append-file trace-1793328128701-00005.jsonl -> fstat
+    1      10.7     10.7  fs-compat-append-file trace-1793328144783-000a1.jsonl -> Promise.await
+    1      10.7     10.7  fs-compat-append-file trace-1793328131079-00022.jsonl -> Promise.await
+    1      10.6     10.6  fs-compat-append-file trace-1793328161092-0012b.jsonl -> Promise.await
+    1      10.6     10.6  fs-compat-load-file scale-keeper-0050.toml -> fs-compat-load-file scale-keeper-0051.toml
+    1      10.6     10.6  fs-compat-append-file trace-1793328152951-00102.jsonl -> Promise.await
+    1      10.6     10.6  fs-compat-append-file trace-1793328144922-000a4.jsonl -> fstat
+    1      10.6     10.6  fs-compat-append-file trace-1793328135307-0004e.jsonl -> fstat
+    1      10.6     10.6  fs-compat-append-file trace-1793328148526-000d3.jsonl -> fstat
+    1      10.6     10.6  fs-compat-append-file trace-1793328132489-00037.jsonl -> Promise.await
+    1      10.6     10.6  fs-compat-append-file trace-1793328144308-00098.jsonl -> fstat
+    1      10.6     10.6  fs-compat-file-size scale-keeper-0129.decisions.jsonl -> fs-compat-read-owned-directory 6a
+    1      10.6     10.6  fs-compat-append-file trace-1793328147028-000bb.jsonl -> Promise.await
+    1      10.6     10.6  fs-compat-append-file trace-1793328139294-0006c.jsonl -> fstat
+    1      10.5     10.5  fs-compat-append-file trace-1793328143679-0008f.jsonl -> fstat
+    1      10.5     10.5  fstat -> fs-compat-durable-update
+    1      10.5     10.5  fs-compat-append-file trace-1793328148353-000ce.jsonl -> fstat
+    1      10.5     10.5  fs-compat-append-file trace-1793328145702-000a9.jsonl -> Promise.await
+    1      10.5     10.5  fs-compat-append-file trace-1793328146127-000b2.jsonl -> fstat
+    1      10.5     10.5  fs-compat-append-file trace-1793328148938-000d9.jsonl -> fstat
+    1      10.5     10.5  fs-compat-append-file trace-1793328158181-00111.jsonl -> fstat
+    1      10.5     10.5  fs-compat-append-file trace-1793328136138-0005a.jsonl -> Promise.await
+    1      10.5     10.5  fs-compat-append-file trace-1793328131417-00027.jsonl -> fstat
+    1      10.4     10.4  fs-compat-append-file trace-1793328151317-000f8.jsonl -> fstat
+    1      10.4     10.4  fs-compat-append-file trace-1793328150946-000f2.jsonl -> Promise.await
+    1      10.4     10.4  fs-compat-append-file trace-1793328146386-000b6.jsonl -> fstat
+    1      10.4     10.4  fs-compat-append-file trace-1793328150891-000f1.jsonl -> fstat
+    1      10.4     10.4  fs-compat-append-file trace-1793328147287-000bf.jsonl -> Promise.await
+    1      10.4     10.4  fs-compat-append-file trace-1793328133780-0003f.jsonl -> fstat
+    1      10.4     10.4  fs-compat-append-file trace-1793328140384-0007c.jsonl -> fstat
+    1      10.4     10.4  fs-compat-append-file trace-1793328148116-000cd.jsonl -> Promise.await
+    1      10.3     10.3  fs-compat-append-file trace-1793328132280-00033.jsonl -> Promise.await
+    1      10.3     10.3  fs-compat-append-file trace-1793328139294-0006c.jsonl -> Promise.await
+    1      10.3     10.3  file-lock-op -> fs-compat-load-owned-file bea460d365a9338d74f172e1f73fde1021fc35fe2ace818e00f0b77a9e17641c.json
+    1      10.3     10.3  fs-compat-append-file trace-1793328138179-0006a.jsonl -> fstat
+    1      10.3     10.3  fs-compat-append-file trace-1793328148448-000d1.jsonl -> Promise.await
+    1      10.3     10.3  fs-compat-append-file trace-1793328132603-00039.jsonl -> fstat
+    1      10.3     10.3  fs-compat-append-file trace-1793328141153-00088.jsonl -> Promise.await
+    1      10.2     10.2  fs-compat-append-file trace-1793328134388-00046.jsonl -> fstat
+    1      10.2     10.2  fs-compat-append-file trace-1793328132193-00032.jsonl -> Promise.await
+    1      10.2     10.2  fs-compat-append-file trace-1793328135202-0004c.jsonl -> Promise.await
+    1      10.2     10.2  fs-compat-append-file trace-1793328130108-00018.jsonl -> Promise.await
+    1      10.2     10.2  fs-compat-append-file trace-1793328141060-00087.jsonl -> fstat
+    1      10.2     10.2  fs-compat-append-file trace-1793328136068-00059.jsonl -> fstat
+    1      10.2     10.2  fs-compat-append-file trace-1793328151162-000f4.jsonl -> Promise.await
+    1      10.2     10.2  fs-compat-append-file trace-1793328158128-00110.jsonl -> Promise.await
+    1      10.2     10.2  fs-compat-append-file trace-1793328137097-00064.jsonl -> Promise.await
+    1      10.1     10.1  fs-compat-append-file trace-1793328135255-0004d.jsonl -> fstat
+    1      10.1     10.1  fs-compat-append-file trace-1793328144003-00093.jsonl -> fstat
+    1      10.1     10.1  fs-compat-append-file trace-1793328137276-00066.jsonl -> fstat
+    1      10.1     10.1  fs-compat-append-file trace-1793328160110-00121.jsonl -> Promise.await
+    1      10.1     10.1  file-lock-op -> Mutex.lock
+    1      10.1     10.1  fs-compat-append-file trace-1793328134173-00044.jsonl -> fstat
+    1      10.1     10.1  fs-compat-append-file trace-1793328160498-00124.jsonl -> fstat
+    1      10.1     10.1  fs-compat-append-file trace-1793328128851-00007.jsonl -> Promise.await
+    1      10.0     10.0  fs-compat-append-file trace-1793328150173-000e9.jsonl -> Promise.await
+    1      10.0     10.0  fs-compat-append-file trace-1793328135111-0004b.jsonl -> Promise.await
+    1      10.0     10.0  fs-compat-append-file trace-1793328131824-0002e.jsonl -> Promise.await
+    1      10.0     10.0  fs-compat-append-file trace-1793328148474-000d2.jsonl -> Promise.await
+    1      10.0     10.0  fs-compat-append-file trace-1793328132489-00037.jsonl -> fstat
+    1      10.0     10.0  fs-compat-append-file trace-1793328158238-00112.jsonl -> Promise.await
+    1      10.0     10.0  fs-compat-append-file trace-1793328129802-00013.jsonl -> fstat
+    1      10.0     10.0  fs-compat-append-file trace-1793328148991-000da.jsonl -> fstat
+    1      10.0     10.0  fs-compat-append-file trace-1793328155651-0010f.jsonl -> Promise.await
+
+traced sections (pool jobs) by name: count wall_sum_ms wall_max_ms run_sum_ms run_sum/wall% top waits_ms (sums over fibers; concurrent fibers can pass wall)
+ 95312 34377776.2  127314.8     3478.3     0%  readv  [readv 34374202, fstat 82, fs-compat-read-owned-directory 6a 13]
+  4404   361560.8   25825.4      248.5     0%  accept  [accept 360842, fs-compat-load-file-opt scale-keeper-0055.json 470]
+   131   237490.9    8832.5    24464.1    10%  Server_routes_http_runtime.start_full_health_snapshot_refresh_loop.(fun)  [Promise.await 241157, fstat 107516, fs-compat-private-jsonl-read 9594]
+   107   125988.4    7495.6    23980.0    19%  Dashboard_snapshot.refresh_loop.loop  [Promise.await 128150, fstat 70898, sleep 2112]
+ 12000   110492.2     826.8     3608.1     3%  Masc__Keeper_provider_input_snapshot.store_artifact  [Promise.await 114525, fs-compat-load-owned-file 3308bcf0f1f4129aee78a25a3e72d4a2792d766255239b3763e933b2120d4945 2802, fs-compat-load-owned-file 42e354a718778ef70702d35d568a4fae9eccdb3966a8871d856f2140deacf187 2641]
+ 10200    63055.7     300.7    31359.3    50%  Masc__Keeper_checkpoint_store.offload_checkpoint_cpu  [Promise.await 68041, fs-compat-load-owned-file da23a02f818f33b6478cb44164037898351e6e524a1ba043bcbb6c5be4551f82 5983, fs-compat-load-owned-file 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945 956]
+  4500    27223.5     594.8      254.6     1%  Masc__Keeper_librarian_durable_consumer.read_positions  [Promise.await 27941, fs-compat-load-file-opt librarian-progress.json 14501, fs-compat-load-file-opt librarian-official-progress.json 5826]
+     6    21950.3   10026.5    11721.9    53%  Server_dashboard_http_core_snapshot_refresh.start_operator_snapshot_refresh_loop.compute  [Semaphore.acquire 2246824, Promise.await 187556, sleep 150115]
+ 14827    19970.1     790.1    19970.1   100%  pwritev  []
+     5    17148.9    9515.6     7944.1    46%  Server_dashboard_http_execution_surfaces.start_execution_refresh_loop.compute  [Semaphore.acquire 1158821, sleep 125830, Promise.await 123807]
+ 10327     9052.9    1022.4     9052.8   100%  writev  [writev 0]
+     3     8981.3    5558.7     2716.2    30%  Server_dashboard_http_core.start_mission_refresh_loop.compute  [Semaphore.acquire 114983, Promise.await 23742, sleep 13338]
+  1500     7345.2     170.7      220.7     3%  Masc__Keeper_librarian_durable_consumer.read_meta  [Promise.await 7860, fstat 1493, fs-compat-load-file-opt scale-keeper-0227.json 166]
+     5     6136.1    3159.1     4774.9    78%  Server_dashboard_http_execution_surfaces.compute_execution_trust_json  [fstat 808782, Promise.await 6137, Switch.await_idle 746]
+     3     5917.8    2632.3      383.8     6%  Server_dashboard_http_runtime_info.dashboard_tools_http_result  [Promise.await 5918, fstat 3004, fs-compat-private-jsonl-read 107]
+  1775     5398.9    1563.7     5398.9   100%  spawn  []
+ 89660     5278.0      75.2     5278.0   100%  preadv  []
+  5400     4628.0      14.8      984.7    21%  Masc__Keeper_turn_driver_try_provider.offload_model_input_cpu.(fun)  [Promise.await 6488,  198]
+ 63191     4311.8     478.9     4311.8   100%  close  []
+  1500     3843.5     170.2       43.2     1%  Masc__Keeper_librarian_admission_owner.io  [Promise.await 4409, fs-compat-load-file-opt scale-keeper-0002.memory-admission.json 156, fs-compat-load-file-opt scale-keeper-0246.memory-admission.json 154]
+  1200     3815.5     414.8      194.0     5%  Masc__Keeper_run_tools_hooks.assemble_hooks.(fun)  [Promise.await 4191, fs-compat-load-owned-file memory-recall-current.json 827, fs-compat-load-file-opt scale-keeper-0277.memory-publication.json 68]
+  1200     3502.9     305.7      511.0    15%  Masc__Keeper_turn_driver.run_named.(fun)  [Promise.await 3852, fs-compat-private-jsonl-rows-read 790, fstat 450]
+  1500     3030.9      95.7      902.7    30%  Masc__Keeper_checkpoint_store.list_agent_core_history_files  [Promise.await 4085]
+     5     2641.6     652.0       53.0     2%  Masc__Keeper_event_queue_recovery.project_discovered_bounded  [Promise.await 2642, fstat 2588]
+   600     2413.5     282.4      711.0    29%  dated_jsonl:keeper/turn-records  [Promise.await 2966]
+   600     2281.7     169.5     1261.1    55%  Masc__Keeper_agent_run.run_turn.(fun).compute_input_segments.submit  [Promise.await 2847]
+  1500     2022.5      33.2       33.2     2%  Masc__Keeper_fs.save_encoded_durable_atomic_from_with.(fun)  [Promise.await 3082]
+   600     1996.1      17.8     1600.9    80%  Masc__Keeper_turn_driver_try_provider.run_try_provider_attempt.(fun)  [Promise.await 2215]
+     6     1902.2     513.7      150.9     8%  Server_dashboard_http_core_digest_refresh.start_operator_digest_refresh_loop.compute  [Promise.await 1903, fstat 977, fs-compat-private-jsonl-read 230]
+   900     1829.9      68.0      599.5    33%  Masc__Keeper_librarian_durable_consumer.load_current_checkpoint  [Promise.await 2401]
+
+longest traced sections (domain wall_ms run_ms name [top waits_ms])
+0    127314.8       0.1  readv  [readv 127315]
+0    127209.5       0.0  readv  [readv 127209]
+0    126962.4       0.0  readv  [readv 126962]
+0    126880.4       0.0  readv  [readv 126880]
+0    126873.0       0.0  readv  [readv 126873]
+0    126847.6       0.0  readv  [readv 126848]
+0    126813.6       0.0  readv  [readv 126814]
+0    126660.3       0.0  readv  [readv 126660]
+0    126546.4       3.5  readv  [readv 126543]
+0    126499.4       0.0  readv  [readv 126499]
+0    126273.6       0.2  readv  [readv 126273]
+0    126199.0       0.0  readv  [readv 126199]
+0    126137.1       0.2  readv  [readv 126137]
+0    126116.4       0.0  readv  [readv 126116]
+0    126033.9       0.0  readv  [readv 126034]
+0    125983.2       0.0  readv  [readv 125983]
+0    125804.9       0.0  readv  [readv 125805]
+0    125589.8       0.0  readv  [readv 125590]
+0    125559.0       0.0  readv  [readv 125559]
+0    125530.5       0.0  readv  [readv 125530]
+0    125440.0       0.0  readv  [readv 125440]
+0    125362.1       0.0  readv  [readv 125362]
+0    125327.8       0.0  readv  [readv 125328]
+0    125181.7       0.0  readv  [readv 125182]
+0    125173.2       0.2  readv  [readv 125173]
+
+locks waited on (id total_wait_ms; waiters count total max; holders count total max)
+lock#15518 30386884.7
+   wait  15985 18047688.2   12156.0  (no job)
+   wait   6988  8261256.0   12000.7  preadv
+   wait   1486  1844118.2   12073.1  readv
+   wait   1338  1821822.8   12054.1  close
+   wait    393   411999.6   11987.4  accept
+   hold  19120   116710.1    2251.1  (no job)
+   hold   7064    41295.7    3813.9  preadv
+   hold   1359     8787.0     684.8  close
+   hold   1506     5829.2     193.7  readv
+   hold   1597     4737.2      87.2  accept
+lock#125226 1719589.1
+   wait    360  1718434.5   14830.1  (no job)
+   wait     15      819.6     755.0  preadv
+   wait      3      232.1     191.5  close
+   wait      4      103.0      90.6  readv
+   hold    965    16623.6    1617.5  (no job)
+   hold    156      872.2     215.0  preadv
+   hold     33      573.7     183.5  close
+   hold     45      361.7     123.7  readv
+lock#428 13815.1
+   wait    229    13815.1    1112.5  (no job)
+   hold   6495    60449.3    1600.2  (no job)
+lock#125249 3279.0
+   wait     31     3279.0     410.1  (no job)
+   hold    599     4047.4     905.8  (no job)
+lock#313 2557.1
+   wait     66     1875.2    1717.3  Server_routes_http_runtime.start_full_health_snapshot_refresh_loop.(fun)
+   wait     28      677.6     676.4  Dashboard_snapshot.refresh_loop.loop
+   wait      4        4.3       2.3  (no job)
+   wait      1        0.0       0.0  Server_dashboard_http_runtime_info.dashboard_tools_http_result
+   hold  24905     3358.3    1899.7  (no job)
+   hold 123392       65.5       1.9  Server_routes_http_runtime.start_full_health_snapshot_refresh_loop.(fun)
+   hold  71942       34.4       7.4  Dashboard_snapshot.refresh_loop.loop
+   hold   1513        1.3       0.1  preadv
+   hold   1800        1.0       0.2  Server_dashboard_http_runtime_info.dashboard_tools_http_result
+   hold    609        0.7       0.0  accept
+lock#801057 1600.0
+   wait      1     1600.0    1600.0  accept
+lock#34 1091.4
+   wait     23      739.8      74.0  Server_dashboard_http_execution_surfaces.start_execution_refresh_loop.compute
+   wait     16      351.6      76.9  Server_dashboard_http_core_snapshot_refresh.start_operator_snapshot_refresh_loop.compute
+   wait      1        0.0       0.0  Operator_control_snapshot_tool_audit.cached_tool_audit_json
+   hold   4320       92.8      78.1  Server_dashboard_http_core_snapshot_refresh.start_operator_snapshot_refresh_loop.compute
+   hold   3600        8.4       0.3  Server_dashboard_http_execution_surfaces.start_execution_refresh_loop.compute
+   hold   2700        6.8       0.4  Server_dashboard_http_core.start_mission_refresh_loop.compute
+   hold    767        6.2       1.2  (no job)
+   hold    165        0.4       0.1  preadv
+   hold     87        0.4       0.1  Operator_control_snapshot_tool_audit.cached_tool_audit_json
+lock#15495 949.4
+   wait     17      837.2     700.9  (no job)
+   wait      3       43.3      38.2  close
+   wait      7       35.9      21.4  preadv
+   wait      1       33.0      33.0  readv
+   hold   1874     6245.4    1202.8  (no job)
+   hold    156      855.9      64.4  preadv
+   hold    609      443.5      37.8  accept
+   hold     33      381.3     103.6  close
+   hold     42      234.9      31.9  readv
+lock#662461 744.0
+   wait      1      744.0     744.0  Server_dashboard_http_execution_surfaces.compute_execution_trust_json
+lock#35 720.0
+   wait     15      475.8      39.8  Server_dashboard_http_execution_surfaces.compute_execution_trust_json
+   wait      9      244.2      38.7  Server_dashboard_http_core_snapshot_refresh.start_operator_snapshot_refresh_loop.compute
+   hold   3000       12.6       2.6  Server_dashboard_http_execution_surfaces.compute_execution_trust_json
+   hold   1475        7.5       2.0  Server_dashboard_http_core_snapshot_refresh.start_operator_snapshot_refresh_loop.compute
+   hold   1200        5.7       3.0  Server_dashboard_http_execution_surfaces.start_execution_refresh_loop.compute
+   hold    395        1.7       0.6  (no job)
+   hold    165        1.7       1.3  preadv
+   hold    300        0.8       0.3  Server_dashboard_http_core.start_mission_refresh_loop.compute
+lock#806353 620.6
+   wait      1      620.6     620.6  accept
+lock#797327 348.0
+   wait      1      348.0     348.0  accept
+
+what holders of the three most waited-on locks did around them (count hold_ms before -> after)
+lock#15518  25773  119048.7  Mutex.lock -> sleep
+lock#15518   2103   25193.2  fstat -> fstat
+lock#15518    210   14160.7  Mutex.lock -> fstat
+lock#15518    245     423.1  fstat -> sleep
+lock#15518      1       3.4  mkdir -> fstat
+lock#125226    557    6279.9  Promise.await -> keeper-fs-op
+lock#125226     43     460.0  Mutex.lock -> keeper-fs-op
+lock#125226     15     310.9  Mutex.lock -> fstat
+lock#125226      7      52.3  file-lock-op -> fstat
+lock#125226      5      50.2  file-lock-op -> fs-compat-read-owned-directory 6a
+lock#125226      1      21.5  fstat -> fstat
+lock#428   5867   42415.4  fs-compat-append-jsonl 30.jsonl -> fs-compat-append-jsonl 30.jsonl
+lock#428    197    5432.0  Mutex.lock -> Mutex.lock
+lock#428    190    2290.1  fs-compat-append-jsonl 30.jsonl -> sleep
+lock#428      4    2078.2   -> Mutex.lock
+lock#428    183    2022.0   -> fs-compat-append-jsonl 30.jsonl
+lock#428     12    1752.5  fs-compat-append-jsonl 30.jsonl -> Mutex.lock
+lock#428     16    1697.1  Mutex.lock -> sleep
+lock#428     16    1471.1  Mutex.lock -> fs-compat-append-jsonl 30.jsonl
+lock#428      5    1272.6   -> sleep
+lock#428      2      12.9  fs-compat-read-owned-directory 6a -> fs-compat-append-jsonl 30.jsonl
+lock#428      1       4.7  fs-compat-append-jsonl 30.jsonl -> fs-compat-read-owned-directory 6a
+lock#428      1       0.5  fs-compat-load-file scale-keeper-0195.toml -> fs-compat-append-jsonl 30.jsonl
+
+longest holds of the three most waited-on locks
+lock#15518 258961    3813.9 preadv [with_open_in] <- cc#258685(switch) <- fiber 258684 <- cc#73(?)  {file-lock-op, file-lock-op, openat, fstat, mkdir, fstat, openat, backend-save-payload}
+lock#15518 294782    2251.1 (no job) [with_open_in] <- cc#294408(switch) <- fiber 294407 <- cc#73(?)  {file-lock-op, file-lock-op, openat, , , unlink, file-lock-op, file-lock-op}
+lock#15518 308555    1773.8 preadv [with_open_in] <- cc#307088(switch) <- fiber 307087 <- cc#73(?)  {file-lock-op, file-lock-op, openat, , , file-lock-op, file-lock-op}
+lock#15518 294782    1770.1 (no job) [with_open_in] <- cc#294408(switch) <- fiber 294407 <- cc#73(?)  {file-lock-op, file-lock-op, openat, fstat, mkdir, fstat, openat, backend-save-payload}
+lock#15518 240829    1676.4 (no job) [with_open_in] <- cc#240459(switch) <- fiber 240458 <- cc#73(?)  {file-lock-op, file-lock-op, openat, fstat, mkdir, fstat, openat, backend-save-payload}
+lock#15518 237607    1255.5 (no job) [with_open_in] <- cc#236179(switch) <- fiber 236178 <- cc#73(?)  {file-lock-op, file-lock-op, openat, fstat, mkdir, fstat, openat, backend-save-payload}
+lock#15518 222182    1208.7 (no job) [with_open_in] <- cc#221890(switch) <- fiber 221889 <- cc#73(?)  {file-lock-op, file-lock-op, openat, , , file-lock-op, file-lock-op}
+lock#15518 304792    1176.9 preadv [with_open_in] <- cc#304358(switch) <- fiber 304357 <- cc#73(?)  {file-lock-op, file-lock-op, openat, , , file-lock-op, file-lock-op}
+lock#125226 218245    1617.5 (no job) [with_open_in] <- cc#217861(switch) <- fiber 217860 <- cc#73(?)  {fs-compat-append-jsonl 30.jsonl}
+lock#125226 238659    1029.9 (no job) [with_open_in] <- cc#238246(switch) <- fiber 238245 <- cc#73(?)  {fs-compat-append-jsonl 30.jsonl}
+lock#125226 294782     775.0 (no job) [with_open_in] <- cc#294408(switch) <- fiber 294407 <- cc#73(?)  {fs-compat-append-jsonl 30.jsonl}
+lock#125226 795581     499.2 (no job) [Buf_write.with_flow] <- cc#794997(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)  {fs-compat-append-jsonl 30.jsonl}
+lock#125226 795600     495.6 (no job) [Buf_write.with_flow] <- cc#795027(switch) <- fiber 793548(with_open_in) <- cc#793547(any) <- fiber 792886(with_open_in) <- cc#792397(switch) <- fiber 792396 <- cc#73(?)  {fs-compat-append-jsonl 30.jsonl}
+lock#125226 253209     275.6 (no job) [Buf_write.with_flow] <- cc#252670(switch) <- fiber 252526(with_open_in) <- cc#252525(any) <- fiber 251962(with_open_in) <- cc#251623(switch) <- fiber 251622 <- cc#73(?)  {fs-compat-append-jsonl 30.jsonl}
+lock#125226 264196     215.0 preadv [with_open_in] <- cc#263787(switch) <- fiber 263786 <- cc#73(?)  {fs-compat-append-jsonl 30.jsonl}
+lock#125226 1201282     198.4 (no job) [Buf_write.with_flow] <- cc#1198529(switch) <- fiber 1197926(with_open_in) <- cc#1197925(any) <- fiber 1194892(with_open_in) <- cc#1192718(switch) <- fiber 1192717 <- cc#73(?)  {fs-compat-append-jsonl 30.jsonl}
+lock#428 432    1600.2 (no job) [-]  {fs-compat-append-jsonl 30.jsonl}
+lock#428 436    1212.4 (no job) [-]  {fs-compat-append-jsonl 30.jsonl}
+lock#428 432    1172.8 (no job) [-]  {fs-compat-append-jsonl 30.jsonl}
+lock#428 436    1039.9 (no job) [-]  {fs-compat-append-jsonl 30.jsonl}
+lock#428 432     946.3 (no job) [-]  {fs-compat-append-jsonl 30.jsonl}
+lock#428 436     905.1 (no job) [-]  {fs-compat-append-jsonl 30.jsonl}
+lock#428 432     819.1 (no job) [-]  {fs-compat-append-jsonl 30.jsonl}
+lock#428 432     809.9 (no job) [-]  {fs-compat-append-jsonl 30.jsonl}
+
+longest lock holds (lock holder_fiber hold_ms job [holder label] suspended_on_while_holding)
+lock#66154 795581    5869.0 (no job) [Buf_write.with_flow] <- cc#794997(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)  {file-lock-op, file-lock-op, Promise.await, durable-dir-cached-chain, keeper-fs-durable-write, durable-dir-cached-chain}
+lock#795259 795033    4770.5 pwritev [with_open_out] <- cc#795029(switch) <- fiber 793548(with_open_in) <- cc#793547(any) <- fiber 792886(with_open_in) <- cc#792397(switch) <- fiber 792396 <- cc#73(?)  {, , , Promise.await, openat, }
+lock#795256 795033    4769.2 pwritev [with_open_out] <- cc#795029(switch) <- fiber 793548(with_open_in) <- cc#793547(any) <- fiber 792886(with_open_in) <- cc#792397(switch) <- fiber 792396 <- cc#73(?)  {openat, , , , , }
+lock#796296 796258    4765.5 (no job) [with_open_out] <- cc#796254(switch) <- fiber 796046(with_open_in) <- cc#796045(any) <- fiber 795104(with_open_in) <- cc#793560(switch) <- fiber 793559 <- cc#73(?)  {, , , Promise.await, openat, }
+lock#796293 796258    4764.7 (no job) [with_open_out] <- cc#796254(switch) <- fiber 796046(with_open_in) <- cc#796045(any) <- fiber 795104(with_open_in) <- cc#793560(switch) <- fiber 793559 <- cc#73(?)  {openat, , , , , }
+lock#96629 791462    4455.3 (no job) [with_open_in] <- cc#791283(switch) <- fiber 791282 <- cc#73(?)  {file-lock-op, file-lock-op, Promise.await, durable-dir-cached-chain, durable-dir-ensure-root, durable-dir-visible-preparations}
+lock#98434 795600    4282.9 (no job) [Buf_write.with_flow] <- cc#795027(switch) <- fiber 793548(with_open_in) <- cc#793547(any) <- fiber 792886(with_open_in) <- cc#792397(switch) <- fiber 792396 <- cc#73(?)  {file-lock-op, file-lock-op, Promise.await, durable-dir-cached-chain, keeper-fs-durable-write, durable-dir-cached-chain}
+lock#66154 795581    4107.1 (no job) [Buf_write.with_flow] <- cc#794997(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)  {file-lock-op, file-lock-op, fs-compat-load-owned-file c9686c31e3da453d60424b62cbc6acd5d66c9f7871bb3ce33b7f0764b605c1f8.json, Promise.await, durable-dir-cached-chain, keeper-fs-durable-write}
+lock#98434 795600    4065.6 (no job) [Buf_write.with_flow] <- cc#795027(switch) <- fiber 793548(with_open_in) <- cc#793547(any) <- fiber 792886(with_open_in) <- cc#792397(switch) <- fiber 792396 <- cc#73(?)  {file-lock-op, file-lock-op, fs-compat-load-owned-file 5eae3f12c81704c994188ba06f7e5277313b502aa4d630b055f445b2e36fd53c.json, Promise.await, durable-dir-cached-chain, keeper-fs-durable-write}
+lock#795259 795033    4042.7 pwritev [with_open_out] <- cc#795029(switch) <- fiber 793548(with_open_in) <- cc#793547(any) <- fiber 792886(with_open_in) <- cc#792397(switch) <- fiber 792396 <- cc#73(?)  {, , , Promise.await, openat, }
+lock#795256 795033    4042.2 pwritev [with_open_out] <- cc#795029(switch) <- fiber 793548(with_open_in) <- cc#793547(any) <- fiber 792886(with_open_in) <- cc#792397(switch) <- fiber 792396 <- cc#73(?)  {openat, , , , , }
+lock#15518 258961    3813.9 preadv [with_open_in] <- cc#258685(switch) <- fiber 258684 <- cc#73(?)  {file-lock-op, file-lock-op, openat, fstat, mkdir, fstat}
+lock#167 258961    3811.0 preadv [with_open_in] <- cc#258685(switch) <- fiber 258684 <- cc#73(?)  {fstat, mkdir, fstat, openat, backend-save-payload, rename}
+lock#792216 792045    3679.0 (no job) [with_open_out] <- cc#792041(switch) <- fiber 791926(with_open_in) <- cc#791925(any) <- fiber 791462(with_open_in) <- cc#791283(switch) <- fiber 791282 <- cc#73(?)  {, , , Promise.await, openat, }
+lock#792213 792045    3675.4 (no job) [with_open_out] <- cc#792041(switch) <- fiber 791926(with_open_in) <- cc#791925(any) <- fiber 791462(with_open_in) <- cc#791283(switch) <- fiber 791282 <- cc#73(?)  {openat, , , , , }
+lock#795183 795003    3675.0 (no job) [with_open_out] <- cc#794999(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)  {, , , Promise.await, openat, }
+lock#795180 795003    3673.6 (no job) [with_open_out] <- cc#794999(switch) <- fiber 793398(with_open_in) <- cc#793397(any) <- fiber 792287(with_open_in) <- cc#792013(switch) <- fiber 792012 <- cc#73(?)  {openat, , , , , }
+lock#805371 237607    3529.5 (no job) [with_open_in] <- cc#236179(switch) <- fiber 236178 <- cc#73(?)  {Promise.await, Promise.await, Promise.await}
+lock#801075 797255    3365.6 (no job) [with_open_out] <- cc#797251(switch) <- fiber 797092(with_open_in) <- cc#797091(any) <- fiber 796033(with_open_in) <- cc#795484(switch) <- fiber 795483 <- cc#73(?)  {, , , Promise.await, openat, }
+lock#801072 797255    3357.6 (no job) [with_open_out] <- cc#797251(switch) <- fiber 797092(with_open_in) <- cc#797091(any) <- fiber 796033(with_open_in) <- cc#795484(switch) <- fiber 795483 <- cc#73(?)  {openat, , , , , }

@@ -1,0 +1,373 @@
+ready pid=89041 started_at_unix=1793328128.148415
+window started_at_unix=1793328128.148415 ended_at_unix=1793328496.244826
+pid=89041 dir=<owned-base>/.masc/runtime/events window_s=368.1 backlog_drained=27383 events=22600112 lost=0
+
+phase                                 count   per_s   total_ms   mean_us    p50_us    p99_us    max_us
+domain_condition_wait               2216335  6021.1   845903.3     381.7      51.0    6268.3 2508513.3
+stw_handler                           15470    42.0    62327.2    4028.9    2163.6   26419.9  842960.8
+stw_api_barrier                       15150    41.2    33423.2    2206.2     898.4    9481.4  840816.0
+minor_leave_barrier                   13560    36.8    23516.1    1734.2     939.5   15164.8   68159.0
+interrupt_remote                       2027     5.5     9674.3    4772.7    3194.2   36710.9  121764.5
+stw_leader                             1105     3.0     5370.9    4860.6    2640.2   34217.4  842637.0
+empty_minor                             851     2.3     4958.8    5827.0    3183.1   36827.8  842637.3
+minor                                 13560    36.8     4067.8     300.0      67.4    2875.2   66692.7
+major                                 14530    39.5     3583.8     246.6       0.9    5413.2  128942.9
+minor_remembered_set                  13560    36.8     3370.7     248.6      57.8    2545.7   66670.4
+major_gc_cycle_domains                  795     2.2     2898.1    3645.5    2181.0   47347.1   50031.3
+minor_remembered_set_promote          13560    36.8     2688.7     198.3      26.2    2259.9   66626.6
+major_slice                           14540    39.5     2654.9     182.6       0.2    4516.3   96765.9
+major_mark                             1139     3.1     1628.2    1429.5       5.4   16211.2   96525.1
+major_mark_opportunistic                480     1.3     1245.3    2594.3    1487.3   21037.3   23224.2
+major_gc_stw                            795     2.2     1127.3    1418.0     857.5   14114.4   15272.5
+major_gc_phase_change                  1590     4.3      999.6     628.7     440.6    5023.1    6390.8
+minor_finalized                       13560    36.8      781.7      57.6       1.2     814.8  104136.5
+major_sweep                            2574     7.0      625.2     242.9       0.0    2832.0   27139.3
+minor_local_roots                     13560    36.8      598.0      44.1       1.1     745.4   65873.8
+minor_local_roots_promote             13560    36.8      453.2      33.4       0.0     665.2   15843.5
+major_mark_roots                        795     2.2      151.6     190.7       1.7    3226.8   19722.0
+minor_memprof_roots                   13560    36.8       33.2       2.4       0.4      25.8    2703.3
+major_ephe_mark                         903     2.5       19.5      21.6       4.6     237.1    3850.1
+minor_memprof_clean                   13560    36.8       14.1       1.0       0.1       5.8    6327.1
+major_memprof_clean                     795     2.2       11.7      14.7       2.2     199.5     804.5
+minor_global_roots                      904     2.5       11.2      12.4       3.5     148.8    3120.8
+major_ephe_sweep                        406     1.1       10.5      25.8       7.7     228.0     614.2
+minor_clear                           13560    36.8        7.2       0.5       0.0       0.2    4454.5
+minor_finalizers_oldify               13560    36.8        4.1       0.3       0.1       0.3    2204.1
+major_memprof_roots                     795     2.2        3.4       4.3       0.7      36.4     529.0
+minor_finalizers_admin                13560    36.8        2.3       0.2       0.0       0.3     610.8
+finalise_update_first                   795     2.2        0.2       0.3       0.0       0.2     189.1
+minor_ephe_clean                        543     1.5        0.2       0.4       0.2       2.1      46.1
+finalise_update_last                    795     2.2        0.1       0.1       0.0       0.2      78.2
+
+per-domain count/total_ms/max_ms
+domain    domain_condition_wait            stw_handler        stw_api_barrier    minor_leave_barrier       interrupt_remote             stw_leader            empty_minor                  minor                  major            major_slice           major_gc_stw
+0        657061/194314.0/1564.6    437/ 1635.9/  69.9   1010/ 1863.6/  67.6    904/  934.1/  63.8    280/ 1444.1/ 121.8    668/ 2862.8/ 106.5    570/ 2705.8/ 106.5    904/  895.1/  66.5   1036/ 1158.8/ 121.8   1036/  996.6/  96.8     53/   72.2/  13.0
+1                             -   1100/ 4671.7/ 841.8   1010/ 2354.0/ 840.0    904/ 1728.7/  67.1                      -      5/   13.7/   5.4                      -    904/  194.8/   6.7    936/  113.0/  20.6    938/   84.9/  20.6     53/   83.5/  14.1
+2        251137/90644.8/2444.8   1026/ 3713.5/  69.9   1010/ 2477.3/ 840.1    904/ 1557.5/  67.5    218/ 1016.0/  69.9     79/ 1030.3/ 842.6     56/ 1013.1/ 842.6    904/  255.0/  27.9    989/  135.5/  32.2    989/  115.3/  32.2     53/   79.2/  14.4
+3        151713/64975.5/ 303.9   1072/ 4598.2/ 841.8   1010/ 2446.3/ 840.2    904/ 1599.5/  67.6    170/  705.9/  70.2     33/  122.0/  15.6     26/  104.6/  15.6    904/  241.4/  47.8    974/  145.7/  20.9    974/  114.8/  20.9     53/   81.8/  14.2
+4        186206/82018.3/ 578.0   1074/ 4562.6/ 841.9   1010/ 2225.9/ 840.3    904/ 1788.0/  66.8    115/  542.6/  67.7     31/  151.9/  69.4     15/  122.5/  69.4    904/  293.4/  47.1    976/  281.1/  67.7    976/  171.9/  23.5     53/   74.5/  15.3
+5        175666/63800.2/ 278.5   1085/ 4616.3/ 842.3   1010/ 2473.8/ 840.4    904/ 1561.3/  67.9    212/  945.0/  69.1     20/   34.8/   7.9      9/   19.3/   6.1    904/  182.1/  28.2    975/   73.2/  13.3    975/   60.7/  13.3     53/   77.4/  14.4
+6        234017/96306.7/2508.5   1071/ 4450.2/ 841.9   1010/ 2370.9/ 840.4    904/ 1556.3/  67.8    270/ 1188.6/  68.7     34/  207.9/  30.3     27/  196.2/  30.3    904/  250.5/  24.4    978/  168.3/  16.0    978/  151.1/  13.0     53/   79.8/  14.3
+7        197659/73763.8/ 336.9   1080/ 4549.7/ 842.9   1010/ 2403.5/ 840.5    904/ 1588.0/  67.7    213/ 1042.1/  62.5     25/   96.7/  21.9     18/   77.3/  21.9    904/  195.2/  10.3    971/  193.7/  28.6    971/  161.8/  28.6     53/   74.6/  14.1
+8        195192/80480.0/ 805.5   1052/ 4551.5/ 842.1   1010/ 2435.5/ 840.5    904/ 1573.1/  67.8    230/ 1289.4/  69.1     53/  100.9/  14.1     35/  116.7/  28.3    904/  199.5/  12.4    987/  103.4/  15.5    987/   77.6/   7.6     53/   72.8/  13.2
+9        164975/70988.0/ 251.1   1076/ 4447.3/ 842.9   1010/ 2340.0/ 840.5    904/ 1603.9/  68.0    171/  661.8/  16.9     29/   98.6/  36.7     15/   42.2/   8.7    904/  168.2/   6.4    980/  188.1/  37.5    980/  147.4/  37.5     53/   73.0/  13.9
+10                            -   1101/ 4401.1/ 842.9   1010/ 2316.5/ 840.6    904/ 1494.3/  67.3                      -      4/    7.6/   2.7                      -    904/  193.0/  66.7    936/   90.6/  15.6    939/   50.5/   8.0     53/   77.5/  14.1
+11                            -   1094/ 4293.6/ 842.9   1010/ 2265.2/ 840.6    904/ 1522.0/  67.6                      -     11/   28.8/   8.6                      -    904/  139.6/   7.3    937/  145.1/  17.7    939/   93.7/  10.6     53/   77.1/  14.1
+12         2709/28612.0/  80.5   1090/ 4164.5/ 843.0   1010/ 2088.9/ 840.7    904/ 1561.7/  67.8     24/  132.6/  17.1     15/   23.1/   6.4                      -    904/  158.7/   4.2    955/  188.1/  27.1    956/  153.4/  27.1     53/   63.4/   5.9
+13                            -   1056/ 3886.8/ 843.0   1010/ 1989.4/ 840.7    904/ 1556.1/  68.1     61/  343.9/  35.7     49/  308.9/  70.3     40/  297.8/  70.3    904/  287.7/  28.2    952/  339.2/ 128.9    953/  183.5/  12.2     53/   65.5/   5.9
+14                            -   1056/ 3784.3/ 843.0   1010/ 1372.5/ 840.8    904/ 1891.7/  68.2     63/  362.3/  70.3     49/  282.9/  36.8     40/  263.2/  36.8    904/  413.7/   9.4    948/  260.0/ 128.9    949/   91.8/  14.7     53/   75.2/  13.3
+
+counters (domain counter sum events)
+0        major_alloc_counter                       3740543978658     1036
+1        major_alloc_counter                       3327031618278      939
+2        major_alloc_counter                       3567738451772      989
+3        major_alloc_counter                       3468885639931      975
+4        major_alloc_counter                       3474332374631      976
+5        major_alloc_counter                       3464972929924      976
+6        major_alloc_counter                       3482948547208      979
+7        major_alloc_counter                       3455158040981      971
+8        major_alloc_counter                       3534724638521      990
+9        major_alloc_counter                       3522376252997      981
+10       major_alloc_counter                       3345346914165      943
+11       major_alloc_counter                       3354078383856      942
+12       major_alloc_counter                       3392676140399      958
+13       major_alloc_counter                       3392317312991      954
+14       major_alloc_counter                       3376892342569      951
+0        major_allocated_words                         245227024     1036
+1        major_allocated_words                           5137038      939
+2        major_allocated_words                         126963782      989
+3        major_allocated_words                         105901937      975
+4        major_allocated_words                         108640004      976
+5        major_allocated_words                         107495721      976
+6        major_allocated_words                         103887359      979
+7        major_allocated_words                         100315801      971
+8        major_allocated_words                         114591028      990
+9        major_allocated_words                         112623396      981
+10       major_allocated_words                           3027936      943
+11       major_allocated_words                           3448521      942
+12       major_allocated_words                           4984900      958
+13       major_allocated_words                           3993332      954
+14       major_allocated_words                          13662754      951
+0        major_allocated_work                         1103521129     1036
+1        major_allocated_work                           23116292      939
+2        major_allocated_work                          571336604      989
+3        major_allocated_work                          476558303      975
+4        major_allocated_work                          488879632      976
+5        major_allocated_work                          483730346      976
+6        major_allocated_work                          467492713      979
+7        major_allocated_work                          451420726      971
+8        major_allocated_work                          515659219      990
+9        major_allocated_work                          506804873      981
+10       major_allocated_work                           13625389      943
+11       major_allocated_work                           15518023      942
+12       major_allocated_work                           22431713      958
+13       major_allocated_work                           17969669      954
+14       major_allocated_work                           61482015      951
+0        major_dependent_work                                  0     1036
+1        major_dependent_work                                  0      939
+2        major_dependent_work                                  0      989
+3        major_dependent_work                                  0      975
+4        major_dependent_work                                  0      976
+5        major_dependent_work                                  0      976
+6        major_dependent_work                                  0      979
+7        major_dependent_work                                  0      971
+8        major_dependent_work                                  0      990
+9        major_dependent_work                                  0      981
+10       major_dependent_work                                  0      943
+11       major_dependent_work                                  0      942
+12       major_dependent_work                                  0      958
+13       major_dependent_work                                  0      954
+14       major_dependent_work                                  0      951
+0        major_extra_work                               27381950     1036
+1        major_extra_work                                      0      939
+2        major_extra_work                                 321475      989
+3        major_extra_work                                   5311      975
+4        major_extra_work                                  16659      976
+5        major_extra_work                                  10596      976
+6        major_extra_work                                  20920      979
+7        major_extra_work                                 238536      971
+8        major_extra_work                                 191048      990
+9        major_extra_work                                   6804      981
+10       major_extra_work                                      0      943
+11       major_extra_work                                      0      942
+12       major_extra_work                                      0      958
+13       major_extra_work                                    124      954
+14       major_extra_work                                     86      951
+0        major_heap_large_blocks                          619234       53
+1        major_heap_large_blocks                           11574       53
+2        major_heap_large_blocks                          165645       53
+3        major_heap_large_blocks                          128728       53
+4        major_heap_large_blocks                          165279       53
+5        major_heap_large_blocks                          137212       53
+6        major_heap_large_blocks                          144879       53
+7        major_heap_large_blocks                          145510       53
+8        major_heap_large_blocks                          156066       53
+9        major_heap_large_blocks                          138656       53
+10       major_heap_large_blocks                            4756       53
+11       major_heap_large_blocks                            6706       53
+12       major_heap_large_blocks                           10247       53
+13       major_heap_large_blocks                           32596       53
+14       major_heap_large_blocks                           29314       53
+0        major_heap_large_words                        868619641       53
+1        major_heap_large_words                          2024744       53
+2        major_heap_large_words                        303276145       53
+3        major_heap_large_words                        266212187       53
+4        major_heap_large_words                        283821702       53
+5        major_heap_large_words                        270032161       53
+6        major_heap_large_words                        263127568       53
+7        major_heap_large_words                        256889582       53
+8        major_heap_large_words                        292371483       53
+9        major_heap_large_words                        278161610       53
+10       major_heap_large_words                           805865       53
+11       major_heap_large_words                          1166571       53
+12       major_heap_large_words                          1789057       53
+13       major_heap_large_words                          5144935       53
+14       major_heap_large_words                          4779744       53
+0        major_heap_pool_frag_words                      5733115       53
+1        major_heap_pool_frag_words                       616045       53
+2        major_heap_pool_frag_words                      1252655       53
+3        major_heap_pool_frag_words                       872291       53
+4        major_heap_pool_frag_words                      1138606       53
+5        major_heap_pool_frag_words                       897222       53
+6        major_heap_pool_frag_words                       998771       53
+7        major_heap_pool_frag_words                       919047       53
+8        major_heap_pool_frag_words                       963009       53
+9        major_heap_pool_frag_words                       727303       53
+10       major_heap_pool_frag_words                       550526       53
+11       major_heap_pool_frag_words                       467471       53
+12       major_heap_pool_frag_words                       702865       53
+13       major_heap_pool_frag_words                       990101       53
+14       major_heap_pool_frag_words                      2135741       53
+0        major_heap_pool_live_blocks                    50392596       53
+1        major_heap_pool_live_blocks                    10203820       53
+2        major_heap_pool_live_blocks                    12568403       53
+3        major_heap_pool_live_blocks                    11321189       53
+4        major_heap_pool_live_blocks                    17460331       53
+5        major_heap_pool_live_blocks                    10412909       53
+6        major_heap_pool_live_blocks                    12744973       53
+7        major_heap_pool_live_blocks                    11703128       53
+8        major_heap_pool_live_blocks                    12407865       53
+9        major_heap_pool_live_blocks                    11950152       53
+10       major_heap_pool_live_blocks                     8608684       53
+11       major_heap_pool_live_blocks                     8590816       53
+12       major_heap_pool_live_blocks                    11115187       53
+13       major_heap_pool_live_blocks                    15739142       53
+14       major_heap_pool_live_blocks                    30665114       53
+0        major_heap_pool_live_words                    247283814       53
+1        major_heap_pool_live_words                     42130818       53
+2        major_heap_pool_live_words                     62453647       53
+3        major_heap_pool_live_words                     50356376       53
+4        major_heap_pool_live_words                     72808942       53
+5        major_heap_pool_live_words                     47176678       53
+6        major_heap_pool_live_words                     56362125       53
+7        major_heap_pool_live_words                     51255578       53
+8        major_heap_pool_live_words                     55352569       53
+9        major_heap_pool_live_words                     48880175       53
+10       major_heap_pool_live_words                     36424581       53
+11       major_heap_pool_live_words                     34484102       53
+12       major_heap_pool_live_words                     45763772       53
+13       major_heap_pool_live_words                     65186133       53
+14       major_heap_pool_live_words                    131910742       53
+0        major_heap_pool_words                         304295936       53
+1        major_heap_pool_words                          63262720       53
+2        major_heap_pool_words                          79241216       53
+3        major_heap_pool_words                          65576960       53
+4        major_heap_pool_words                          96714752       53
+5        major_heap_pool_words                          57532416       53
+6        major_heap_pool_words                          71921664       53
+7        major_heap_pool_words                          62701568       53
+8        major_heap_pool_words                          65847296       53
+9        major_heap_pool_words                          60370944       53
+10       major_heap_pool_words                          54054912       53
+11       major_heap_pool_words                          48959488       53
+12       major_heap_pool_words                          81166336       53
+13       major_heap_pool_words                          95703040       53
+14       major_heap_pool_words                         209182720       53
+0        major_heap_words                            27765333410     1036
+1        major_heap_words                             1323466790      939
+2        major_heap_words                             7514797842      989
+3        major_heap_words                             5910482653      975
+4        major_heap_words                             6992295857      976
+5        major_heap_words                             5818784138      976
+6        major_heap_words                             5913078501      979
+7        major_heap_words                             5621351590      971
+8        major_heap_words                             6574149341      990
+9        major_heap_words                             6077795740      981
+10       major_heap_words                             1153365206      943
+11       major_heap_words                             1035027906      942
+12       major_heap_words                             1730798314      958
+13       major_heap_words                             2127840138      954
+14       major_heap_words                             4505325113      951
+0        major_slice_budget                                    0     1036
+1        major_slice_budget                                    0      939
+2        major_slice_budget                                    0      989
+3        major_slice_budget                                    0      975
+4        major_slice_budget                                    0      976
+5        major_slice_budget                                    0      976
+6        major_slice_budget                                    0      979
+7        major_slice_budget                                    0      971
+8        major_slice_budget                                    0      990
+9        major_slice_budget                                    0      981
+10       major_slice_budget                                    0      943
+11       major_slice_budget                                    0      942
+12       major_slice_budget                                    0      958
+13       major_slice_budget                                    0      954
+14       major_slice_budget                                    0      951
+0        major_slice_target                        3740530254140     1036
+1        major_slice_target                        3327029333978      939
+2        major_slice_target                        3567737309412      989
+3        major_slice_target                        3468885544243      975
+4        major_slice_target                        3474325762736      976
+5        major_slice_target                        3464969658067      976
+6        major_slice_target                        3482947032731      979
+7        major_slice_target                        3455157680279      971
+8        major_slice_target                        3534722191356      990
+9        major_slice_target                        3522364765688      981
+10       major_slice_target                        3345345534635      943
+11       major_slice_target                        3354078107334      942
+12       major_slice_target                        3392676025948      958
+13       major_slice_target                        3392311125030      954
+14       major_slice_target                        3376886622419      951
+0        major_work_counter                        3756163032961     1036
+1        major_work_counter                        3342931812189      939
+2        major_work_counter                        3582814888151      989
+3        major_work_counter                        3483801437396      975
+4        major_work_counter                        3488977646304      976
+5        major_work_counter                        3479573977002      976
+6        major_work_counter                        3497832028101      979
+7        major_work_counter                        3469842580930      971
+8        major_work_counter                        3549719875150      990
+9        major_work_counter                        3536879504943      981
+10       major_work_counter                        3361218342595      943
+11       major_work_counter                        3369982484015      942
+12       major_work_counter                        3408157948855      958
+13       major_work_counter                        3407582568324      954
+14       major_work_counter                        3391985427177      951
+0        minor_allocated                             23148015160      904
+1        minor_allocated                                       0      904
+2        minor_allocated                              5472303888      904
+3        minor_allocated                              3688609792      904
+4        minor_allocated                              3539548432      904
+5        minor_allocated                              3481126192      904
+6        minor_allocated                              4243116416      904
+7        minor_allocated                              3572990488      904
+8        minor_allocated                              4303043736      904
+9        minor_allocated                              3498089520      904
+10       minor_allocated                                       0      904
+11       minor_allocated                                       0      904
+12       minor_allocated                                39457824      904
+13       minor_allocated                               334173896      904
+14       minor_allocated                               345044488      904
+0        minor_allocated_words                        2893501895      904
+1        minor_allocated_words                                 0      904
+2        minor_allocated_words                         684037986      904
+3        minor_allocated_words                         461076224      904
+4        minor_allocated_words                         442443554      904
+5        minor_allocated_words                         435140774      904
+6        minor_allocated_words                         530389552      904
+7        minor_allocated_words                         446623811      904
+8        minor_allocated_words                         537880467      904
+9        minor_allocated_words                         437261190      904
+10       minor_allocated_words                                 0      904
+11       minor_allocated_words                                 0      904
+12       minor_allocated_words                           4932228      904
+13       minor_allocated_words                          41771737      904
+14       minor_allocated_words                          43130561      904
+0        minor_promoted                                277545336      904
+1        minor_promoted                                 59534744      904
+2        minor_promoted                                 98597032      904
+3        minor_promoted                                 75232496      904
+4        minor_promoted                                127692008      904
+5        minor_promoted                                 58895192      904
+6        minor_promoted                                 84444448      904
+7        minor_promoted                                 68524888      904
+8        minor_promoted                                 77000728      904
+9        minor_promoted                                 62644120      904
+10       minor_promoted                                 39829752      904
+11       minor_promoted                                 43487216      904
+12       minor_promoted                                 66873752      904
+13       minor_promoted                                 75182368      904
+14       minor_promoted                                136474384      904
+0        minor_promoted_words                           34693167      904
+1        minor_promoted_words                            7441843      904
+2        minor_promoted_words                           12324629      904
+3        minor_promoted_words                            9404062      904
+4        minor_promoted_words                           15961501      904
+5        minor_promoted_words                            7361899      904
+6        minor_promoted_words                           10555556      904
+7        minor_promoted_words                            8565611      904
+8        minor_promoted_words                            9625091      904
+9        minor_promoted_words                            7830515      904
+10       minor_promoted_words                            4978719      904
+11       minor_promoted_words                            5435902      904
+12       minor_promoted_words                            8359219      904
+13       minor_promoted_words                            9397796      904
+14       minor_promoted_words                           17059298      904
+0        request_major_alloc_shr                              51       51
+2        request_major_alloc_shr                              16       16
+3        request_major_alloc_shr                               5        5
+4        request_major_alloc_shr                               8        8
+5        request_major_alloc_shr                               4        4
+6        request_major_alloc_shr                               6        6
+7        request_major_alloc_shr                               4        4
+8        request_major_alloc_shr                              14       14
+9        request_major_alloc_shr                               7        7
+
+stw late arrivals: domain that reached the barrier last (count total_ms p50_ms max_ms)
+0           184   11850.5     0.19   839.69
+14        10817    6477.9     0.28    32.23
+12         1236    1047.5     0.37     5.91
+6            69     951.7     2.38    66.31
+13         1093     914.3     0.26    19.00
+8            45     398.6     0.21    29.91
+4           237     196.4     0.66     3.83
+11          132     126.1     0.54     3.87
+10           92     104.4     0.30     3.95
+7            33      57.9     2.29     3.39
+5            36      51.4     1.81     3.76
+9           108      41.3     0.04     2.93
+1            15      25.7     2.11     2.56
+3            44      16.6     0.05     4.30
+2            17      13.6     0.09     3.03
+
+lifecycle (domain event count)

@@ -1,0 +1,38 @@
+{
+  "scope": "Collection conditions only, with tracing overhead. Ready/stop acknowledgements bracket workload causally; wall stamps are diagnostic. Backlog state is discarded, detailed runs are thresholded/top-N, and neither zero post-drain loss nor completion proves complete causal traces or exclusive CPU attribution.",
+  "started_at_unix": 1793334016.9645052,
+  "ended_at_unix": 1793334018.2731469,
+  "complete": true,
+  "readers": [
+    {
+      "name": "rtev_watch",
+      "returncode": 0,
+      "forced_kill": false,
+      "events": 86625,
+      "lost": 0,
+      "ready_at_unix": 1793334016.533058,
+      "ended_at_unix": 1793334018.294371,
+      "covers_workload": true,
+      "binary_unchanged": true,
+      "post_workload_stop_acknowledged": true,
+      "report_flush_acknowledged": true,
+      "error": null,
+      "complete": true
+    },
+    {
+      "name": "rtev_fibers",
+      "returncode": 0,
+      "forced_kill": false,
+      "events": 86502,
+      "lost": 0,
+      "ready_at_unix": 1793334016.945027,
+      "ended_at_unix": 1793334018.290286,
+      "covers_workload": true,
+      "binary_unchanged": true,
+      "post_workload_stop_acknowledged": true,
+      "report_flush_acknowledged": true,
+      "error": null,
+      "complete": true
+    }
+  ]
+}

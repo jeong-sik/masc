@@ -1,0 +1,46 @@
+{
+  "started_at": "2026-10-30T04:25:26.369920+00:00",
+  "checkout_commit": "6c44201802a280f55fc6bfcba7ee25aa166e3016",
+  "source_scope": "Uncommitted tracing tool source, byte hashes bind the actual inputs; standalone tool build only.",
+  "source_sha256": {
+    "rtev_span.mli": "c958415a791d284363587a2ff2941148d0b21a3b0aa86901de836baffd45a641",
+    "rtev_span.ml": "1e02db51bf3669ee19f4875616041ee798c474aba595ae2280fee977f787f9f4",
+    "rtev_watch.ml": "1011c3a767371ce8af0f56de45a441da918a22ddeaa2999ab6699879de13e164",
+    "rtev_fibers.ml": "7e4a0c2ff4e29f2bfa6d4f9c02696c806dd385f7296be3cbdf4e21922601d332"
+  },
+  "ocaml_version": "5.5.1",
+  "eio_package": "eio 1.3",
+  "commands": [
+    [
+      "ocamlfind",
+      "ocamlopt",
+      "-package",
+      "runtime_events,eio.runtime_events,unix",
+      "-linkpkg",
+      "-o",
+      "rtev_watch.exe",
+      "rtev_watch.ml"
+    ],
+    [
+      "ocamlfind",
+      "ocamlopt",
+      "-package",
+      "runtime_events,eio.runtime_events,unix",
+      "-linkpkg",
+      "-o",
+      "rtev_fibers.exe",
+      "rtev_span.mli",
+      "rtev_span.ml",
+      "rtev_fibers.ml"
+    ]
+  ],
+  "finished_at": "2026-10-30T04:25:27.680431+00:00",
+  "binary_sha256": {
+    "rtev_watch.exe": "2d745a8b0bcfd09d8a927da3a8f08f67c0bbbbae9d601d331ba555f1830b6e86",
+    "rtev_fibers.exe": "fa7b9728ab0b8dcf8158c3f7cc3f492cd8bfa3aedf3da6a5c5df331f8ce5ae27"
+  },
+  "exit_codes": [
+    0,
+    0
+  ]
+}

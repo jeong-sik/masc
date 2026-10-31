@@ -130,6 +130,7 @@ type t =
   ; projected_dispositions : durable_disposition list
   ; transition_outbox : outbox_entry list
   ; accepted_transfer_projections : accepted_transfer list
+  ; last_non_immediate_served : Keeper_event_queue.urgency option
   }
 
 type transition_result =
@@ -148,11 +149,64 @@ let empty =
   ; projected_dispositions = []
   ; transition_outbox = []
   ; accepted_transfer_projections = []
+  ; last_non_immediate_served = None
   }
 ;;
 
 let revision state = state.revision
 let pending_selections state = state.pending_entries
+let last_non_immediate_served state = state.last_non_immediate_served
+
+let non_immediate_urgency = function
+  | (Keeper_event_queue.Normal | Keeper_event_queue.Low) as urgency ->
+    Some urgency
+  | Keeper_event_queue.Immediate -> None
+;;
+
+let non_immediate_urgency_of_transition = function
+  | Ack_source_terminal { source; _ } -> non_immediate_urgency source.urgency
+  | Cancel_accepted _ | Transfer_accepted _ -> None
+;;
+
+let non_immediate_urgency_of_witness (witness : projected_disposition_witness) =
+  match witness.kind with
+  | Projected_fusion_terminal
+  | Projected_hitl_terminal
+  | Projected_turn_completed
+  | Projected_turn_attempt_terminal ->
+    non_immediate_urgency witness.urgency
+  | Projected_cancel _ | Projected_transfer _ -> None
+;;
+
+let derived_last_non_immediate_served
+      ~transition_outbox
+      ~last_transition
+      ~projected_dispositions
+  =
+  let from_outbox =
+    List.find_map
+      (fun (entry : outbox_entry) ->
+         non_immediate_urgency_of_transition entry.receipt.transition)
+      transition_outbox
+  in
+  match from_outbox with
+  | Some _ as served -> served
+  | None ->
+    let from_last =
+      Option.bind last_transition (fun (receipt : transition_receipt) ->
+        non_immediate_urgency_of_transition receipt.transition)
+    in
+    (match from_last with
+     | Some _ as served -> served
+     | None ->
+       List.find_map
+         (function
+           | Current_receipt receipt ->
+             non_immediate_urgency_of_transition receipt.transition
+           | Projected_witness witness ->
+             non_immediate_urgency_of_witness witness)
+         projected_dispositions)
+;;
 
 (* Each admitted entry takes the next number of a counter the state carries, and
    keeps it until it leaves the queue. A reader that loaded the state when the
@@ -488,18 +542,45 @@ let mark_transition_projected ~transition_id ~retain_previous state =
   | _ :: _ :: _ -> Error "event queue state has multiple unprojected transitions"
 ;;
 let reconcile_pending ~first_admitted_at pending state =
-  let rec take_matching source skipped = function
-    | [] -> None, List.rev skipped
-    | entry :: rest
-      when Keeper_event_queue.stimulus_identity_equal entry.source source
-           && entry.source = source ->
-      Some entry, List.rev_append skipped rest
-    | entry :: rest -> take_matching source (entry :: skipped) rest
+  let available_by_identity =
+    List.fold_left
+      (fun acc (entry : pending_selection) ->
+         let key = Keeper_event_queue.stimulus_identity entry.source in
+         let existing =
+           Option.value
+             ~default:[]
+             (Keeper_event_queue.Stimulus_identity_map.find_opt key acc)
+         in
+         Keeper_event_queue.Stimulus_identity_map.add
+           key
+           (existing @ [ entry ])
+           acc)
+      Keeper_event_queue.Stimulus_identity_map.empty
+      state.pending_entries
+  in
+  let take_matching (source : Keeper_event_queue.stimulus) available_map =
+    let key = Keeper_event_queue.stimulus_identity source in
+    match Keeper_event_queue.Stimulus_identity_map.find_opt key available_map with
+    | None -> None, available_map
+    | Some bucket ->
+      let rec pull skipped = function
+        | [] -> None, available_map
+        | (entry : pending_selection) :: rest when entry.source = source ->
+          let remaining = List.rev_append skipped rest in
+          let updated_map =
+            match remaining with
+            | [] -> Keeper_event_queue.Stimulus_identity_map.remove key available_map
+            | _ :: _ -> Keeper_event_queue.Stimulus_identity_map.add key remaining available_map
+          in
+          Some entry, updated_map
+        | entry :: rest -> pull (entry :: skipped) rest
+      in
+      pull [] bucket
   in
   let rec reconcile available acc next_arrival = function
     | [] -> List.rev acc, next_arrival
     | source :: rest ->
-      let existing, available = take_matching source [] available in
+      let existing, available = take_matching source available in
       let entry, next_arrival =
         match existing with
         | Some entry -> entry, next_arrival
@@ -519,7 +600,7 @@ let reconcile_pending ~first_admitted_at pending state =
     Keeper_event_queue.sort_by_urgency pending
     |> Keeper_event_queue.to_list
     |> Keeper_event_queue.uniq_stimuli
-    |> reconcile state.pending_entries [] state.next_arrival
+    |> reconcile available_by_identity [] state.next_arrival
   in
   { state with pending_entries; next_arrival }
 ;;
@@ -536,19 +617,14 @@ let with_revision revision state = { state with revision }
 
 let transition_outbox_blocked state = state.transition_outbox <> []
 
-(* #31597: a plain head-of-list scan never looks past the first ready
-   [Normal]/[Immediate] entry, so a [Low] entry sitting further back never
-   gets picked while the Keeper's own [Normal] backlog keeps refilling ahead
-   of it — measured as a recurring schedule dispatching "succeeded" every
-   hour for 16 days with zero Board output. [pending_entries] is still
-   urgency-sorted on arrival (see [with_pending] above), so this full scan
-   is over an already-short, already-ordered list; it picks the ready entry
-   with the lowest *effective* urgency rank (aging applied), tie-broken by
-   earliest [arrived_at] — which reduces to the old head-of-list behaviour
-   whenever no entry has aged, since the list is still urgency-then-arrival
-   ordered in that case. *)
-let first_ready_entry ~now ~ready entries =
-  let rank_of entry = Keeper_event_queue.effective_urgency_rank ~now entry.source in
+(* #31597: deterministic starvation-free [Normal]/[Low] alternation.
+   [Immediate] strictly preempts both [Normal] and [Low]. Between [Normal] and
+   [Low], selection alternates using [last_non_immediate_served] so a ready
+   [Low] entry waits at most one [Normal] turn without wall-clock aging
+   heuristics. Within the same urgency lane, the first ready entry in
+   [pending_entries] wins, preserving both FIFO arrival order and
+   [defer_pending] lane rotation. *)
+let first_ready_entry ~last_non_immediate_served ~ready entries =
   entries
   |> List.filter (fun entry -> ready entry.source)
   |> List.fold_left
@@ -556,24 +632,33 @@ let first_ready_entry ~now ~ready entries =
           match best with
           | None -> Some entry
           | Some current ->
-            let cmp = Int.compare (rank_of entry) (rank_of current) in
+            let cmp =
+              Keeper_event_queue.compare_selection_urgency
+                ~last_non_immediate_served
+                entry.source.urgency
+                current.source.urgency
+            in
             if cmp < 0
-            then Some entry
-            else if cmp > 0
-            then Some current
-            else if entry.source.arrived_at < current.source.arrived_at
             then Some entry
             else Some current)
        None
 ;;
 
-let peek_when ~now ~ready state =
+let peek_when ~now:_ ~ready state =
   Option.map
     (fun entry -> entry.source)
-    (first_ready_entry ~now ~ready state.pending_entries)
+    (first_ready_entry
+       ~last_non_immediate_served:state.last_non_immediate_served
+       ~ready
+       state.pending_entries)
 ;;
 
-let select_when ~now ~ready state = first_ready_entry ~now ~ready state.pending_entries
+let select_when ~now:_ ~ready state =
+  first_ready_entry
+    ~last_non_immediate_served:state.last_non_immediate_served
+    ~ready
+    state.pending_entries
+;;
 
 let validate_pending_selection
       ~(selection : pending_selection)
@@ -603,7 +688,12 @@ let ack_pending ~(selection : pending_selection) state =
     let pending_entries =
       List.filter (Fun.negate (( = ) selection)) state.pending_entries
     in
-    Ok { state with pending_entries }
+    let last_non_immediate_served =
+      match non_immediate_urgency selection.source.urgency with
+      | Some _ as served -> served
+      | None -> state.last_non_immediate_served
+    in
+    Ok { state with pending_entries; last_non_immediate_served }
 ;;
 
 let bind_pending_repetition_scope ~selections ~scope state =
@@ -904,9 +994,15 @@ let apply_pending_transition ~applied_at ~transition ~source ~pending state =
     let* () = validate_transition_for_stimuli transition [ source ] in
     let receipt = receipt_for_pending_transition ~applied_at ~transition in
     let state = with_pending pending state in
+    let last_non_immediate_served =
+      match non_immediate_urgency_of_transition transition with
+      | Some _ as served -> served
+      | None -> state.last_non_immediate_served
+    in
     Ok
       ( { state with
           transition_outbox = [ { receipt; stimuli = [ source ] } ]
+        ; last_non_immediate_served
         }
       , Transition_applied receipt )
 ;;

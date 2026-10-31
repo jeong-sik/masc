@@ -161,6 +161,7 @@ type t =
   ; projected_dispositions : durable_disposition list
   ; transition_outbox : outbox_entry list
   ; accepted_transfer_projections : accepted_transfer list
+  ; last_non_immediate_served : Keeper_event_queue.urgency option
   }
 
 type transition_result =
@@ -176,6 +177,17 @@ val revision : t -> int64
 val pending : t -> Keeper_event_queue.t
 val pending_selections : t -> pending_selection list
 (** FIFO pending entries with their exact source incarnation authority. *)
+
+val last_non_immediate_served : t -> Keeper_event_queue.urgency option
+(** Most recently acknowledged non-immediate urgency ([Normal] or [Low]), used
+    by {!peek_when} and {!select_when} to alternate deterministically between
+    [Normal] and [Low] lanes without wall-clock aging thresholds. *)
+
+val derived_last_non_immediate_served :
+  transition_outbox:outbox_entry list ->
+  last_transition:transition_receipt option ->
+  projected_dispositions:durable_disposition list ->
+  Keeper_event_queue.urgency option
 
 type frontier
 (** The point in queue history at which one reader loaded the state. *)
@@ -242,15 +254,17 @@ val peek_when :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   t ->
   Keeper_event_queue.stimulus option
-(** [now] ages a waiting [Low] stimulus into [Normal] priority past
-    {!Keeper_event_queue.low_to_normal_aging_threshold_sec} (#31597). *)
+(** Selects the first ready stimulus under strict [Immediate] priority and
+    deterministic [Normal]/[Low] alternation (#31597). [now] is retained in
+    the signature for caller compatibility; selection is pure and independent
+    of wall-clock elapsed time. *)
 
 val select_when :
   now:float ->
   ready:(Keeper_event_queue.stimulus -> bool) ->
   t ->
   pending_selection option
-(** See {!peek_when} on [now]. *)
+(** See {!peek_when}. *)
 
 val validate_pending_selection :
   selection:pending_selection ->

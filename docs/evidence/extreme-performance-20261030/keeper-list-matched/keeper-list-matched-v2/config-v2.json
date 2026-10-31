@@ -1,0 +1,58 @@
+{
+  "repo": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+  "probe": {
+    "runner": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-only-probe-v1/keeper_scale_session.py",
+    "observer": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-only-probe-v1/tui_observer.py",
+    "runtime_fixture": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/scripts/fixtures/release-evidence/runtime.toml"
+  },
+  "variants": {
+    "control": {
+      "source": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+      "server": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc",
+      "tui": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc-tui",
+      "server_sha256": "464fc0090639d89b03e85e73435632a9a709506dc139ccdb50f586e8ead0fc2e",
+      "tui_sha256": "e1e41a1ed79de05ba563bb1fd7d517c7578b475c9eaa6a606da28e89028d991d",
+      "runner_sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "observer_sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+      "runtime_fixture_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+      "trace_sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+    },
+    "candidate": {
+      "source": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+      "server": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-frame-native-v1/masc",
+      "tui": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-frame-native-v1/masc-tui",
+      "server_sha256": "70216f78f9171cb7eaa1b0a072ac6a365838e594c6a9e9ddd2f18c4c686ca4ad",
+      "tui_sha256": "5366682357b8c5ca6cc9f62cca3a87b9187acc527bdf7207566597324fafdadf",
+      "runner_sha256": "2275c38094884418a88407aaecf9f40a2326e67535796df98cc4a1ba8683efe6",
+      "observer_sha256": "7ffa5657c998c9487f27feaee3b038b9ed77aa1459fce72d4e31ccb6b7cc3113",
+      "runtime_fixture_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+      "trace_sha256": "3dd78330c4922fd058b46644df8ea21dace0f8698ceb3f502c16b8add563b2dd"
+    }
+  },
+  "plan": [
+    [
+      2,
+      "control"
+    ],
+    [
+      2,
+      "candidate"
+    ],
+    [
+      30,
+      "candidate"
+    ],
+    [
+      30,
+      "control"
+    ],
+    [
+      300,
+      "control"
+    ],
+    [
+      300,
+      "candidate"
+    ]
+  ]
+}

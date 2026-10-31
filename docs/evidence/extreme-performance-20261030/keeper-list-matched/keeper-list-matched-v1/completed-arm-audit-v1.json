@@ -1,0 +1,38 @@
+{
+  "read_at_unix": 1793350025.8578298,
+  "scope": "Completed arms only; not a prospective gate in running v1 controller.",
+  "results": [
+    {
+      "case": "owners-2-candidate",
+      "returncode": 0,
+      "source_matches": true,
+      "cleanup_ok": true,
+      "fallback": null,
+      "list_builds": 63
+    },
+    {
+      "case": "owners-2-control",
+      "returncode": 0,
+      "source_matches": true,
+      "cleanup_ok": true,
+      "fallback": null,
+      "list_builds": 61
+    },
+    {
+      "case": "owners-30-candidate",
+      "returncode": 0,
+      "source_matches": true,
+      "cleanup_ok": true,
+      "fallback": null,
+      "list_builds": 62
+    },
+    {
+      "case": "owners-30-control",
+      "returncode": 0,
+      "source_matches": true,
+      "cleanup_ok": true,
+      "fallback": null,
+      "list_builds": 71
+    }
+  ]
+}

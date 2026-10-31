@@ -74,10 +74,14 @@ let test_pagination_requires_identity () =
   Alcotest.(check bool) "missing cursor is an error" true
     (Result.is_error (Inbox.next_sequence (`Assoc ["operations",`List [`Assoc []]])))
 
+let peer_page operations = `Assoc [
+  "schema", `String "masc.keeper_chat_operations.list.v1";
+  "state", `String "Queued"; "operations", `List operations ]
+
 let test_peer_page_reads_once () =
   let reads = ref 0 in
   let result = get (Inbox.read_peer_page ~keeper_name:"receiver" ~after_sequence:None ~read_page:(fun () ->
-    incr reads; Ok (`Assoc ["operations", `List []]))) in
+    incr reads; Ok (peer_page []))) in
   Alcotest.(check int) "exactly one server page is read" 1 !reads;
   Alcotest.(check bool) "an empty page has no peer edges" true
     (result.snapshot.queued_count = 0 && result.snapshot.relations = [] && result.next_sequence = None);
@@ -102,7 +106,8 @@ let test_peer_page_workspace_admission () = Eio_main.run (fun _ ->
   let receipts = ref [Masc.Workspace.read_precondition_admission_header] in
   let send ~path ~headers:_ =
     seen := path :: !seen;
-    Ok Masc_http_client.{status = 200; headers = !receipts; body = "{\"operations\":[]}"} in
+    Ok Masc_http_client.{status = 200; headers = !receipts;
+      body = Yojson.Safe.to_string (peer_page [])} in
   let read () =
     Masc_tui_workspace_read.with_binding ~host ~port ~expected
       ~proof:Request_precondition (fun () ->
@@ -139,36 +144,88 @@ let test_peer_relations_use_the_recorded_keeper_identity () =
   let sender = Masc.Keeper_identity.Keeper_id.of_string "sender" in
   let back = get (Keeper_continuation_channel.keeper ~keeper_name:"sender") in
   let dashboard = get (Keeper_continuation_channel.dashboard ~thread_id) in
-  let operation id source = `Assoc ["operation_id", `String id;
-    "state", `String "Queued"; "source", source] in
-  let page = `Assoc ["operations", `List
+  let operation id source = `Assoc ["schema", `String "masc.keeper_chat_operation.v1";
+    "operation_id", `String id;
+    "state", `String "Queued"; "source", source; "source_integrity", `String "intact"] in
+  let page = peer_page
     [operation "peer-1" (source ~sender_keeper:sender ~continuation_channel:back);
-     operation "operator-1" (source ~sender_keeper:None ~continuation_channel:dashboard)]] in
+     operation "operator-1" (source ~sender_keeper:None ~continuation_channel:dashboard)] in
   let snapshot = get (Inbox.peer_snapshot ~keeper_name:target page) in
   Alcotest.(check int) "both queued operations are accounted for" 2 snapshot.queued_count;
   Alcotest.(check bool) "only the recorded Keeper is a peer" true
     (snapshot.relations = [{ Inbox.operation_id = "peer-1"; sender = "sender";
       recipient = target; reply_to = Some "sender" }]);
-  let wrong_state = `Assoc ["operations", `List
-    [`Assoc ["operation_id", `String "peer-1"; "state", `String "Running";
-      "source", source ~sender_keeper:sender ~continuation_channel:back]]] in
+  let with_integrity status = match operation "masked" (source ~sender_keeper:sender ~continuation_channel:back) with
+    | `Assoc fields -> `Assoc (("source_integrity", status) :: List.remove_assoc "source_integrity" fields)
+    | _ -> failwith "operation fixture must be an object" in
+  let legacy = match with_integrity (`String "intact") with
+    | `Assoc fields -> `Assoc (("operation_id", `String "legacy") ::
+        List.remove_assoc "operation_id" (List.remove_assoc "source_integrity" fields))
+    | _ -> failwith "operation fixture must be an object" in
+  let redacted = get (Inbox.peer_snapshot ~keeper_name:target
+    (peer_page [with_integrity (`String "redacted")])) in
+  Alcotest.(check bool) "a redacted sender cannot name a relationship" true
+    (redacted.relations = [] && redacted.source_redacted_count = 1);
+  let unverified = get (Inbox.peer_snapshot ~keeper_name:target
+    (peer_page [legacy; with_integrity (`String "unavailable")])) in
+  Alcotest.(check bool) "legacy or unavailable provenance remains unverified" true
+    (unverified.relations = [] && unverified.source_unverified_count = 2);
+  Alcotest.(check bool) "unknown source integrity is rejected" true
+    (Result.is_error (Inbox.peer_snapshot ~keeper_name:target
+      (peer_page [with_integrity (`String "future")])));
+  let wrong_state = peer_page
+    [`Assoc ["schema", `String "masc.keeper_chat_operation.v1";
+      "operation_id", `String "peer-1"; "state", `String "Running";
+      "source", source ~sender_keeper:sender ~continuation_channel:back]] in
   Alcotest.(check bool) "running operation is not classified as queued" true
     (Result.is_error (Inbox.peer_snapshot ~keeper_name:target wrong_state));
   let moved = operation "peer-1" (source ~sender_keeper:sender ~continuation_channel:back) in
   Alcotest.(check bool) "a request seen twice is not counted twice" true
     (Result.is_error (Inbox.peer_snapshot ~keeper_name:target
-      (`Assoc ["operations", `List [moved; moved]])));
+      (peer_page [moved; moved])));
   Alcotest.(check bool) "missing source is not classified as an empty relationship" true
     (Result.is_error (Inbox.peer_snapshot ~keeper_name:target
-      (`Assoc ["operations", `List [`Assoc ["operation_id", `String "peer-1"; "state", `String "Queued"]]])));
+      (peer_page [`Assoc ["schema", `String "masc.keeper_chat_operation.v1";
+        "operation_id", `String "peer-1"; "state", `String "Queued"]])));
+  let duplicate key value = function
+    | `Assoc fields -> `Assoc ((key, value) :: fields)
+    | _ -> failwith "operation fixture must be an object" in
+  List.iter (fun (key, value) ->
+    Alcotest.(check bool) ("duplicate " ^ key ^ " cannot authorize a relationship") true
+      (Result.is_error (Inbox.peer_snapshot ~keeper_name:target
+        (peer_page [duplicate key value moved]))))
+    [ "operation_id", `String "other"; "state", `String "Queued";
+      "source", source ~sender_keeper:None ~continuation_channel:dashboard;
+      "source_integrity", `String "intact" ];
+  Alcotest.(check bool) "duplicate operations cannot authorize a relationship" true
+    (Result.is_error (Inbox.peer_snapshot ~keeper_name:target
+      (duplicate "operations" (`List []) (peer_page [moved]))));
+  let without key = function
+    | `Assoc fields -> `Assoc (List.remove_assoc key fields)
+    | _ -> failwith "fixture must be an object" in
+  let replace key value json = duplicate key value (without key json) in
+  List.iter (fun invalid ->
+    Alcotest.(check bool) "unknown, absent or duplicate list contract is rejected" true
+      (Result.is_error (Inbox.peer_snapshot ~keeper_name:target invalid)))
+    [without "schema" (peer_page [moved]);
+     replace "schema" (`String "future") (peer_page [moved]);
+     replace "state" (`String "Running") (peer_page [moved]);
+     duplicate "schema" (`String "masc.keeper_chat_operations.list.v1") (peer_page [moved])];
+  List.iter (fun invalid ->
+    Alcotest.(check bool) "unknown, absent or duplicate operation schema is rejected" true
+      (Result.is_error (Inbox.peer_snapshot ~keeper_name:target (peer_page [invalid]))))
+    [without "schema" moved; replace "schema" (`String "future") moved;
+     duplicate "schema" (`String "masc.keeper_chat_operation.v1") moved];
   let sequenced sequence operation = match operation with
     | `Assoc fields -> `Assoc (("sequence", `String sequence) :: fields)
     | _ -> failwith "operation fixture must be an object" in
   let read after operations =
     Inbox.read_peer_page ~keeper_name:target ~after_sequence:after
-      ~read_page:(fun () -> Ok (`Assoc ["operations", `List operations])) in
+      ~read_page:(fun () -> Ok (peer_page operations)) in
   let first = get (read None [sequenced "10" moved]) in
   Alcotest.(check (option string)) "the next read uses the observed sequence" (Some "10") first.next_sequence;
+  Alcotest.(check bool) "duplicate sequence cannot advance a page" true
+    (Result.is_error (read None [duplicate "sequence" (`String "11") (sequenced "10" moved)]));
   Alcotest.(check bool) "a page cannot repeat its boundary" true
     (Result.is_error (read (Some "10") [sequenced "10" moved]));
   Alcotest.(check bool) "out-of-order page rows are rejected" true

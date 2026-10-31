@@ -195,6 +195,125 @@ let test_claim_and_start_broadcast () =
       (contents config ~baseline_seq))
 ;;
 
+(* [auto_start = true] atomically claims and starts a Todo task (or starts an
+   already-held Claimed task) in a single backlog revision increment, while an
+   idempotent retry on an already-InProgress task must neither increment the
+   backlog revision, nor append "Task auto-started — begin work now.", nor
+   broadcast a duplicate "Started <id>". Concurrent claims preserve exclusive
+   ownership. *)
+let test_auto_start_claim_and_idempotent_in_progress_retry () =
+  with_test_env (fun config ~baseline_seq ->
+    seed config (make_task ~id:"task-20" ~status:D.Todo);
+    let version_before = (Workspace.read_backlog config).version in
+    (match
+       Workspace.claim_task_with_details_r
+         config ~agent_name:owner ~task_id:"task-20" ~auto_start:true ()
+     with
+     | Ok (claimed_task, msg) ->
+       Alcotest.(check string)
+         "new claim with auto_start transitions directly to in_progress"
+         "in_progress"
+         (D.task_status_to_string claimed_task.task_status);
+       Alcotest.(check string)
+         "new claim message includes auto-start notice"
+         "alice claimed task-20 Task auto-started — begin work now."
+         msg
+     | Error err ->
+       Alcotest.failf "claim_task_with_details_r failed: %s"
+         (D.masc_error_to_string err));
+    let version_after_claim_and_start = (Workspace.read_backlog config).version in
+    Alcotest.(check int)
+      "atomic claim+start commits in a single backlog revision bump"
+      (version_before + 1)
+      version_after_claim_and_start;
+    Alcotest.(check (list string))
+      "new auto_start claim broadcasts Claimed then Started (newest first)"
+      [ "Started task-20"; "Claimed task-20" ]
+      (contents config ~baseline_seq);
+    (match
+       Workspace.claim_task_with_details_r
+         config ~agent_name:owner ~task_id:"task-20" ~auto_start:true ()
+     with
+     | Ok (existing_task, msg) ->
+       Alcotest.(check string)
+         "already in_progress task remains in_progress"
+         "in_progress"
+         (D.task_status_to_string existing_task.task_status);
+       Alcotest.(check string)
+         "already in_progress retry does not claim a new auto-start happened"
+         "Task task-20 is already claimed by you"
+         msg
+     | Error err ->
+       Alcotest.failf "idempotent claim_task_with_details_r failed: %s"
+         (D.masc_error_to_string err));
+    let expected_held_refusal =
+      match Workspace.find_task_in_backlog_opt (Workspace.read_backlog config) "task-20" with
+      | Some held -> Workspace.held_tasks_refusal_message ~agent_name:owner [ held ]
+      | None -> Alcotest.fail "task-20 missing from backlog"
+    in
+    (match Workspace.claim_next_r config ~agent_name:owner ~auto_start:true () with
+     | D.Claim_next_claimed { task_id; message; _ } ->
+       Alcotest.(check string) "claim_next returns held task" "task-20" task_id;
+       Alcotest.(check string)
+         "claim_next on already in_progress task returns exact held-task refusal without auto-start suffix"
+         expected_held_refusal
+         message
+     | _ -> Alcotest.fail "expected Claim_next_claimed for held task");
+    Alcotest.(check int)
+      "idempotent retries on already in_progress task do not bump backlog revision"
+      version_after_claim_and_start
+      (Workspace.read_backlog config).version;
+    Alcotest.(check (list string))
+      "idempotent retries on already in_progress task emit no duplicate broadcasts"
+      [ "Started task-20"; "Claimed task-20" ]
+      (contents config ~baseline_seq);
+    (* Verify already-held Claimed -> InProgress auto-start via claim_next_r *)
+    seed config
+      (make_task ~id:"task-21" ~status:(D.Claimed { assignee = owner; claimed_at = now }));
+    let expected_claimed_refusal =
+      match Workspace.find_task_in_backlog_opt (Workspace.read_backlog config) "task-21" with
+      | Some held ->
+        Workspace.held_tasks_refusal_message ~agent_name:owner [ held ]
+        ^ " Task auto-started — begin work now."
+      | None -> Alcotest.fail "task-21 missing from backlog"
+    in
+    let version_before_claimed_start = (Workspace.read_backlog config).version in
+    (match Workspace.claim_next_r config ~agent_name:owner ~auto_start:true () with
+     | D.Claim_next_claimed { task_id; message; _ } ->
+       Alcotest.(check string) "claim_next returns held Claimed task" "task-21" task_id;
+       Alcotest.(check string)
+         "claim_next on held Claimed task transitions to InProgress and appends auto-start notice"
+         expected_claimed_refusal
+         message
+     | _ -> Alcotest.fail "expected Claim_next_claimed for held Claimed task");
+    Alcotest.(check int)
+      "starting held Claimed task bumps backlog revision once"
+      (version_before_claimed_start + 1)
+      (Workspace.read_backlog config).version;
+    (* Verify concurrent claim_task_with_details_r ~auto_start:true grants exclusive ownership *)
+    seed config (make_task ~id:"task-22" ~status:D.Todo);
+    let r_alice, r_bob =
+      Eio.Fiber.both
+        (fun () ->
+           Workspace.claim_task_with_details_r
+             config ~agent_name:"alice" ~task_id:"task-22" ~auto_start:true ())
+        (fun () ->
+           Workspace.claim_task_with_details_r
+             config ~agent_name:"bob" ~task_id:"task-22" ~auto_start:true ())
+    in
+    let successes =
+      List.filter_map
+        (function
+          | Ok (task, _) -> Some task
+          | Error _ -> None)
+        [ r_alice; r_bob ]
+    in
+    Alcotest.(check int)
+      "exactly one concurrent claimant succeeds"
+      1
+      (List.length successes))
+;;
+
 (* Submission publishes the request, its criteria, and its evidence refs to
    Board. A message row would restate a poorer version of that post, so the
    transition stays silent here on purpose. *)
@@ -590,6 +709,8 @@ let () =
         ; Alcotest.test_case "release carries its reason" `Quick
             test_release_broadcasts_reason
         ; Alcotest.test_case "claim and start" `Quick test_claim_and_start_broadcast
+        ; Alcotest.test_case "auto_start claim and idempotent in_progress retry" `Quick
+            test_auto_start_claim_and_idempotent_in_progress_retry
         ; Alcotest.test_case "submit defers to its Board post" `Quick
             test_submit_defers_to_board
         ; Alcotest.test_case "release wrapper carries its handoff reason" `Quick

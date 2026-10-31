@@ -46,10 +46,12 @@ let origin_to_json = function
     | Librarian_snapshot _ | Librarian_progress _ | Past_librarian_point _
     | Turn_start _) as origin -> Keeper_carried_front.origin_to_json origin
 
-let to_json ~unread ~runtime_id ~selection ~(range : range) ~wire =
+let to_json ~keeper ~turn_ref ~unread ~runtime_id ~selection ~range ~wire =
   `Assoc
-    [ "schema", `String "masc.continuity-request.v2"
-    ; "association", `String "first_serialization_after_successful_projection"
+    [ "schema", `String "masc.continuity-request.v3"
+    ; "keeper", `String keeper
+    ; "turn_ref", (match turn_ref with Some value -> Ids.Turn_ref.to_yojson value | None -> `Null)
+    ; "association", `String (match range with Some _ -> "projection_associated" | None -> "projection_unavailable")
     ; "evidence", `String "pre_dispatch_projection_and_selection"
     ; "runtime_id", `String runtime_id
     ; "binding", `String (match wire.Llm_provider.Request_wire_observer.capture_id with
@@ -57,15 +59,15 @@ let to_json ~unread ~runtime_id ~selection ~(range : range) ~wire =
     ; "wire", Llm_provider.Request_wire_observer.observation_to_yojson wire
     ; "unread", Keeper_librarian_request_unread.to_json unread
     ; "selection", selection_to_json selection
-    ; "bounded_range", `Assoc
+    ; "bounded_range", (match range with None -> `Null | Some (range : range) -> `Assoc
         [ "origin", origin_to_json range.origin
         ; "first_atom", `Int range.first_atom
         ; "total_atoms", `Int range.total_atoms
         ; "custom_projection_changed", `Bool range.custom_projection_changed
-        ]
+        ])
     ]
 
-let record_best_effort ~config ~keeper_name ~unread ~runtime_id ~selection ~range ~wire =
+let record_best_effort ~config ~keeper_name ~turn_ref ~unread ~runtime_id ~selection ~range ~wire =
   let append () =
     let location =
       Dated_jsonl.Store.keeper
@@ -74,7 +76,7 @@ let record_best_effort ~config ~keeper_name ~unread ~runtime_id ~selection ~rang
         Dated_jsonl.Store.Keeper.Continuity_requests
     in
     Dated_jsonl.append (Dated_jsonl.open_store location)
-      (to_json ~unread ~runtime_id ~selection ~range ~wire)
+      (to_json ~keeper:keeper_name ~turn_ref ~unread ~runtime_id ~selection ~range ~wire)
   in
   match append () with
   | () -> ()

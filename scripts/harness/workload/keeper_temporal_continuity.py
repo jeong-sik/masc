@@ -8,6 +8,7 @@ observations. Semantic judgments retain raw Noul probabilities without threshold
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import copy
 import datetime as dt
 import enum
@@ -86,7 +87,11 @@ def completed_reply(operation: Json, operation_id: str) -> tuple[str, list[Any]]
     if operation.get("schema") != "masc.keeper_chat_operation.v1":
         raise AcceptanceError("unsupported chat operation schema")
     if chat_state(operation) is not ChatState.SUCCEEDED:
-        raise AcceptanceError("operation has no successful completed reply")
+        detail = operation.get("failure_detail")
+        raise AcceptanceError(
+            "operation has no successful completed reply"
+            + (": " + detail if isinstance(detail, str) else "")
+        )
     turn_ref = text(operation.get("outcome_ref"), "operation outcome_ref")
     reply = object_value(operation.get("completed_reply"), "completed_reply")
     if reply.get("status") != "available" or reply.get("turn_ref") != turn_ref:
@@ -155,6 +160,239 @@ def working_state_messages(parts: list[Json]) -> list[Json]:
     return states
 
 
+def natural(value: Any, label: str) -> int:
+    if type(value) is not int or value < 0:
+        raise AcceptanceError(f"{label} must be a nonnegative integer")
+    return value
+
+
+def observation_value(value: Any, label: str) -> Any:
+    observation = object_value(value, label)
+    if observation.get("kind") != "available":
+        raise AcceptanceError(f"{label} is unavailable")
+    return observation.get("value")
+
+
+def completed_boundary(item: Json) -> Json:
+    evidence = object_value(item.get("continuity_evidence"), "continuity evidence")
+    value = object_value(
+        observation_value(evidence.get("completed_boundary"), "completed boundary"),
+        "boundary",
+    )
+    record = object_value(value.get("record"), "boundary record")
+    position = object_value(record.get("position"), "boundary position")
+    if (
+        record.get("kind") != "turn_ended"
+        or record.get("turn_ref") != item.get("turn_ref")
+        or position.get("kind") != "atom_history"
+    ):
+        raise AcceptanceError("the exact completed atom boundary is unavailable")
+    return {
+        "trace_id": item["prepared_input"]["trace_id"],
+        "history_start_boundary_line": natural(
+            value.get("history_start_boundary_line"), "history generation"
+        ),
+        "boundary_line": natural(value.get("boundary_line"), "boundary line"),
+        "end_atom": natural(position.get("end_atom"), "completed end atom"),
+    }
+
+
+def summary_covers(snapshot: Json, boundary: Json) -> bool:
+    return (
+        snapshot.get("kind") == "summarized"
+        and snapshot.get("trace_id") == boundary["trace_id"]
+        and snapshot.get("history_start_boundary_line")
+        == boundary["history_start_boundary_line"]
+        and natural(snapshot.get("end_atom"), "summary end atom")
+        >= boundary["end_atom"]
+        and snapshot.get("unread_messages") == []
+    )
+
+
+def prefix_omission(target: Json, probe: Json) -> Json:
+    result: Json = {
+        "status": "unavailable",
+        "target_turn_ref": target.get("turn_ref"),
+        "scope": "all_attributed_prepared_request_ranges; durable_originals_retained",
+    }
+    try:
+        boundary = completed_boundary(target)
+        result["target_boundary"] = boundary
+        evidence = object_value(
+            probe.get("continuity_evidence"), "probe continuity evidence"
+        )
+        rows = list_value(
+            observation_value(evidence.get("requests"), "attributed requests"),
+            "request rows",
+        )
+        if not rows:
+            raise AcceptanceError("no attributed request range was retained")
+        record = probe["turn_records"]["entries"][0]["record"]
+        expected = []
+        for attempt in list_value(
+            record.get("request_observations"), "request observations"
+        ):
+            observation = object_value(
+                attempt.get("evidence"), "request observation evidence"
+            )
+            if observation.get("status") == "not_dispatched":
+                continue
+            if observation.get("status") != "recorded":
+                raise AcceptanceError(
+                    "a provider attempt has unavailable request evidence"
+                )
+            for request in list_value(
+                observation.get("requests"), "serialized requests"
+            ):
+                provenance = object_value(
+                    request.get("provenance"), "request provenance"
+                )
+                if provenance.get("state") != "serialized":
+                    raise AcceptanceError(
+                        "a provider request has no exact serialized body"
+                    )
+                body = object_value(provenance.get("request"), "serialized request")
+                expected.append(
+                    (
+                        text(body.get("body_sha256"), "request SHA"),
+                        natural(body.get("body_bytes"), "request bytes"),
+                    )
+                )
+        actual = []
+        ranges = []
+        for row in rows:
+            if row.get("schema") != "masc.continuity-request.v3" or (
+                row.get("keeper"),
+                row.get("turn_ref"),
+            ) != (probe["continuity_evidence"]["keeper"], probe["turn_ref"]):
+                raise AcceptanceError(
+                    "attributed request identity differs from the probe"
+                )
+            wire = object_value(row.get("wire"), "request wire")
+            text(wire.get("capture_id"), "request capture id")
+            actual.append(
+                (
+                    text(wire.get("body_sha256"), "request SHA"),
+                    natural(wire.get("body_bytes"), "request bytes"),
+                )
+            )
+            if row.get("association") != "projection_associated":
+                raise AcceptanceError("a serialization has no paired projection")
+            bounded = object_value(row.get("bounded_range"), "bounded request range")
+            if bounded.get("custom_projection_changed") is not False:
+                raise AcceptanceError(
+                    "custom projection prevents a range-only omission claim"
+                )
+            unread = object_value(row.get("unread"), "frozen unread observation")
+            if any(
+                unread.get(source) != {"status": "available", "messages": []}
+                for source in ("snapshot", "memory")
+            ):
+                raise AcceptanceError("unread holes are present or unavailable")
+            snapshot = object_value(row.get("selection"), "request selection")
+            first_atom = natural(bounded.get("first_atom"), "request first atom")
+            ranges.append(
+                {
+                    "capture_id": wire["capture_id"],
+                    "body_sha256": wire["body_sha256"],
+                    "first_atom": first_atom,
+                    "summary_end_atom": snapshot.get("end_atom"),
+                }
+            )
+            if (
+                not summary_covers(snapshot, boundary)
+                or first_atom < boundary["end_atom"]
+            ):
+                result.update(
+                    {
+                        "status": "not_observed",
+                        "reason": "a request carries the prefix or W does not cover it",
+                        "requests": ranges,
+                    }
+                )
+                return result
+        if not expected or Counter(expected) != Counter(actual):
+            raise AcceptanceError(
+                "attributed ranges do not cover every serialized request in the exact turn record"
+            )
+        last_wire = probe["prepared_input"]["wire"]
+        if not any(row["wire"] == last_wire for row in rows) or not probe.get(
+            "working_state_messages"
+        ):
+            raise AcceptanceError(
+                "last canonical request has no exact attributed W projection"
+            )
+        result.update(
+            {
+                "status": "observed",
+                "requests": ranges,
+                "semantic_verdict": "separate",
+                "librarian_causal_attribution": "not_established",
+            }
+        )
+    except (AcceptanceError, KeyError, TypeError) as error:
+        result["reason"] = str(error)
+    return result
+
+
+def view_projection(report: Json, *, report_path: str, report_sha256: str) -> Json:
+    """A compact selection for the TUI; the original report stays authoritative."""
+    build = report.get("server_build") or {}
+    timeline = []
+    for item in report["timeline"]:
+        omitted = item.get("prefix_omission")
+        timeline.append(
+            {
+                "step_id": item["step_id"],
+                "kind": item["kind"],
+                "status": item["status"],
+                "operation_id": item.get("operation_id"),
+                "operation_state": item.get("operation_state"),
+                "turn_ref": item.get("turn_ref"),
+                "working_state_messages": len(item["working_state_messages"])
+                if "working_state_messages" in item
+                else None,
+                "working_state": [
+                    row["message"] for row in item["working_state_messages"]
+                ]
+                if "working_state_messages" in item
+                else None,
+                "reply": [row["text"] for row in item.get("reply", [])],
+                "prefix_omission": omitted,
+                "target_boundary": item.get("target_boundary"),
+                "judgments": [
+                    {
+                        "criterion_id": row["criterion"]["id"],
+                        "scope": row["criterion"]["scope"],
+                        "status": row["status"],
+                        "probability": row.get("probability"),
+                        "response_model": row.get("response_model"),
+                    }
+                    for row in item.get("judgments", [])
+                ],
+            }
+        )
+    return {
+        "schema": "masc.keeper-temporal-continuity-view.v1",
+        "keeper": report["keeper"],
+        "provenance": report["provenance"],
+        "started_at": report["started_at"],
+        "finished_at": report.get("finished_at"),
+        "measurement_status": report.get("measurement_status", "recording"),
+        "error": report.get("error"),
+        "report_path": report_path,
+        "report_sha256": report_sha256,
+        "harness_source_sha256": report["harness_source_sha256"],
+        "source_capture_sha256": report.get("source_capture_sha256"),
+        "binary_commit": build.get("binary_commit"),
+        "executable_sha256": build.get("executable_sha256"),
+        "body_response_binding": report["body_response_binding"],
+        "librarian_causal_attribution": report["librarian_causal_attribution"],
+        "continuity_pass": None,
+        "timeline": timeline,
+    }
+
+
 class Capture:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
@@ -181,7 +419,7 @@ class Capture:
             else "live_keeper",
             "started_at": now(),
             "keeper": args.keeper,
-            "scope": "last_prepared_request_per_turn",
+            "scope": "last_canonical_request_and_all_attributed_request_ranges",
             "body_response_binding": "not_established",
             "librarian_causal_attribution": "not_established",
             "tool_evidence_scope": "recorded_invocation_and_outcome; external_effect_not_verified",
@@ -197,8 +435,15 @@ class Capture:
 
     def save(self) -> None:
         pending = self.directory / "report.json.pending"
-        private_write(pending, encoded(self.report))
+        report_bytes = encoded(self.report)
+        private_write(pending, report_bytes)
         pending.replace(self.directory / "report.json")
+        view = view_projection(
+            self.report,
+            report_path=str((self.directory / "report.json").resolve()),
+            report_sha256=digest(report_bytes),
+        )
+        private_write(self.directory / "view.json", encoded(view))
         lines = [
             "# Keeper continuity observations",
             "",
@@ -216,6 +461,22 @@ class Capture:
             )
         for item in self.report["timeline"]:
             lines.extend(["", f"## {item['step_id']}"])
+            if item.get("prefix_omission") is not None:
+                omitted = item["prefix_omission"]
+                lines.extend(
+                    [
+                        "",
+                        "Prefix omission: " + omitted["status"],
+                        "",
+                        "Target boundary: "
+                        + json.dumps(
+                            omitted.get("target_boundary"), ensure_ascii=False
+                        ),
+                        "",
+                        "Prepared ranges: "
+                        + json.dumps(omitted.get("requests", []), ensure_ascii=False),
+                    ]
+                )
             for reply in item.get("reply", []):
                 lines.extend(["", reply["text"]])
             for judgment in item.get("judgments", []):
@@ -273,6 +534,10 @@ class Capture:
 
     def start(self) -> None:
         health = self.get("/health", full=1)
+        self.report["server_build"] = health.get("build")
+        self.report["expected_binary_commit"] = self.args.expected_binary_commit
+        self.report["expected_executable_sha256"] = self.args.expected_executable_sha256
+        self.save()
         paths = object_value(health.get("paths"), "health paths")
         if (
             pathlib.Path(
@@ -281,8 +546,25 @@ class Capture:
             != pathlib.Path(self.args.expected_base_path).resolve()
         ):
             raise AcceptanceError("the running server owns a different base path")
-        self.report["server_build"] = health.get("build")
+        build = object_value(health.get("build"), "server build")
+        if (
+            self.args.expected_binary_commit
+            and build.get("binary_commit") != self.args.expected_binary_commit
+        ):
+            raise AcceptanceError(
+                "running server differs from the expected candidate commit"
+            )
+        if (
+            self.args.expected_executable_sha256
+            and build.get("executable_sha256") != self.args.expected_executable_sha256
+        ):
+            raise AcceptanceError(
+                "running executable differs from the verified candidate digest"
+            )
         self.report["effective_paths"] = paths
+        self.report["memory_execution_readiness"] = health.get(
+            "keeper_memory_execution"
+        )
         self.save()
         if self.client is None:
             raise AcceptanceError("semantic assessment does not start a Keeper session")
@@ -412,8 +694,45 @@ class Capture:
             turn_ref,
         ) or transcript.get("found") is not True:
             raise AcceptanceError("the exact turn transcript is unavailable")
+        item["continuity_evidence"] = self.continuity_evidence(item)
         item["status"] = "captured"
         self.save()
+
+    def continuity_evidence(self, item: Json) -> Json:
+        route = "/api/v1/keepers/" + urllib.parse.quote(self.args.keeper, safe="")
+        evidence = self.get(
+            route + "/provider-input/continuity", turn_ref=item["turn_ref"]
+        )
+        if evidence.get("schema") != "masc.keeper-continuity-evidence.v1" or (
+            evidence.get("keeper"),
+            evidence.get("turn_ref"),
+            evidence.get("wire"),
+        ) != (self.args.keeper, item["turn_ref"], item["prepared_input"]["wire"]):
+            raise AcceptanceError(
+                "continuity export does not identify the exact canonical request"
+            )
+        return evidence
+
+    def wait_summary(self, item: Json, target: Json) -> None:
+        boundary = completed_boundary(target)
+        item["target_boundary"] = boundary
+        item["target_turn_ref"] = target["turn_ref"]
+        deadline = time.monotonic() + self.args.wait_timeout
+        while True:
+            evidence = self.continuity_evidence(target)
+            item["continuity_evidence"] = evidence
+            self.save()
+            saved = evidence.get("saved_readiness_only", {})
+            if saved.get("kind") == "available" and summary_covers(
+                object_value(saved.get("value"), "saved state"), boundary
+            ):
+                item["status"] = "summary_ready_observed"
+                return
+            if time.monotonic() >= deadline:
+                raise AcceptanceError(
+                    "working state has not covered the target; no probe was submitted"
+                )
+            time.sleep(self.args.poll_interval)
 
 
 def parse_scenario(value: Any) -> Json:
@@ -422,6 +741,7 @@ def parse_scenario(value: Any) -> Json:
         raise AcceptanceError("unsupported scenario schema")
     text(scenario.get("instructions"), "scenario instructions")
     seen: set[str] = set()
+    earlier_messages: set[str] = set()
     for step in list_value(scenario.get("steps"), "scenario steps"):
         step = object_value(step, "step")
         identifier = text(step.get("id"), "step id")
@@ -430,6 +750,17 @@ def parse_scenario(value: Any) -> Json:
         seen.add(identifier)
         if step.get("kind") == "message":
             text(step.get("prompt"), "step prompt")
+            if (
+                step.get("retired_through") is not None
+                and step["retired_through"] not in earlier_messages
+            ):
+                raise AcceptanceError(
+                    "retirement probe must name an earlier message step"
+                )
+            earlier_messages.add(identifier)
+        elif step.get("kind") == "await_summary":
+            if step.get("through_step") not in earlier_messages:
+                raise AcceptanceError("summary wait must name an earlier message step")
         elif step.get("kind") != "restart":
             raise AcceptanceError("unknown scenario step kind")
         criterion_ids: set[str] = set()
@@ -461,11 +792,14 @@ def validate_source_capture(path: pathlib.Path, source: Json) -> None:
     ):
         raise AcceptanceError("source harness snapshot differs from its digest")
     operations: dict[str, Json] = {}
-    calls: list[tuple[str, Json, Json]] = []
+    calls: list[tuple[int, int, str, Json, Json]] = []
     reads: dict[tuple[str, str], Json] = {}
-    pending: Json | None = None
+    all_reads: list[tuple[int, Json]] = []
+    pending: tuple[int, Json] | None = None
     keeper = source["keeper"]
-    for event in list_value(source.get("events"), "source events"):
+    for event_index, event in enumerate(
+        list_value(source.get("events"), "source events")
+    ):
         event = object_value(event, "source event")
         relative = pathlib.Path(text(event.get("path"), "source event path"))
         artifact = root / relative
@@ -484,16 +818,17 @@ def validate_source_capture(path: pathlib.Path, source: Json) -> None:
         if event.get("kind") == "tool_started":
             if pending is not None:
                 raise AcceptanceError("source tool request has no matching response")
-            pending = payload
+            pending = (event_index, payload)
         elif event.get("kind") == "tool_response":
-            if pending is None or pending.get("name") != payload.get("name"):
+            if pending is None or pending[1].get("name") != payload.get("name"):
                 raise AcceptanceError("source tool response has no matching request")
-            arguments = object_value(pending.get("arguments"), "source tool arguments")
+            started_index, started = pending
+            arguments = object_value(started.get("arguments"), "source tool arguments")
             data = tool_data(
                 object_value(payload.get("response"), "source MCP response"),
                 payload["name"],
             )
-            calls.append((payload["name"], arguments, data))
+            calls.append((started_index, event_index, payload["name"], arguments, data))
             if payload["name"] == "masc_keeper_delegate_status" and arguments.get(
                 "target"
             ) == {"kind": "keeper", "name": keeper}:
@@ -502,6 +837,7 @@ def validate_source_capture(path: pathlib.Path, source: Json) -> None:
                 ] = data
             pending = None
         elif event.get("kind") == "http_read":
+            all_reads.append((event_index, payload))
             key = (payload["route"], json.dumps(payload["query"], sort_keys=True))
             reads[key] = object_value(payload.get("response"), "source HTTP response")
     if pending is not None:
@@ -516,15 +852,19 @@ def validate_source_capture(path: pathlib.Path, source: Json) -> None:
         )
 
     cursor = 0
+    last_event = -1
 
     def consume(name: str, expected: Json) -> Json:
-        nonlocal cursor
+        nonlocal cursor, last_event
         while cursor < len(calls):
-            actual_name, arguments, data = calls[cursor]
+            started_index, response_index, actual_name, arguments, data = calls[cursor]
             cursor += 1
-            if actual_name == name and all(
-                arguments.get(key) == value for key, value in expected.items()
+            if (
+                started_index > last_event
+                and actual_name == name
+                and all(arguments.get(key) == value for key, value in expected.items())
             ):
+                last_event = response_index
                 return data
         raise AcceptanceError("source lacks the scenario's ordered Keeper request")
 
@@ -543,7 +883,41 @@ def validate_source_capture(path: pathlib.Path, source: Json) -> None:
                     "source step does not identify its distinct submitted operation"
                 )
             seen_operations.add(operation_id)
-        else:
+            while True:
+                operation = consume(
+                    "masc_keeper_delegate_status",
+                    {
+                        "target": {"kind": "keeper", "name": keeper},
+                        "operation_id": operation_id,
+                    },
+                )
+                if chat_state(operation) not in (ChatState.QUEUED, ChatState.RUNNING):
+                    completed_reply(operation, operation_id)
+                    break
+        elif step["kind"] == "await_summary":
+            evidence = object_value(
+                item.get("continuity_evidence"), "summary readiness evidence"
+            )
+            route = (
+                "/api/v1/keepers/"
+                + urllib.parse.quote(keeper, safe="")
+                + "/provider-input/continuity"
+            )
+            matching = next(
+                (
+                    index
+                    for index, row in all_reads
+                    if index > last_event
+                    and row.get("route") == route
+                    and row.get("query") == {"turn_ref": evidence.get("turn_ref")}
+                    and row.get("response") == evidence
+                ),
+                None,
+            )
+            if matching is None:
+                raise AcceptanceError("source lacks ordered summary readiness")
+            last_event = matching
+        elif step["kind"] == "restart":
             consume(
                 "masc_keeper_down",
                 {"name": keeper, "remove_meta": False, "remove_session": False},
@@ -571,6 +945,19 @@ def validate_source_capture(path: pathlib.Path, source: Json) -> None:
                 "source capture lacks the exact owner HTTP observation"
             )
         return value
+
+    def retained_continuity(evidence: Json) -> bool:
+        route = (
+            "/api/v1/keepers/"
+            + urllib.parse.quote(keeper, safe="")
+            + "/provider-input/continuity"
+        )
+        return any(
+            row.get("route") == route
+            and row.get("query") == {"turn_ref": evidence.get("turn_ref")}
+            and row.get("response") == evidence
+            for _, row in all_reads
+        )
 
     for item in source["timeline"]:
         if item.get("status") != "captured":
@@ -660,6 +1047,59 @@ def validate_source_capture(path: pathlib.Path, source: Json) -> None:
             raise AcceptanceError(
                 "source transcript differs from the exact owner observation"
             )
+        continuity = object_value(
+            item.get("continuity_evidence"), "source continuity evidence"
+        )
+        if (
+            not retained_continuity(continuity)
+            or continuity.get("schema") != "masc.keeper-continuity-evidence.v1"
+            or (
+                continuity.get("keeper"),
+                continuity.get("turn_ref"),
+                continuity.get("wire"),
+            )
+            != (keeper, turn_ref, manifest.get("wire"))
+        ):
+            raise AcceptanceError(
+                "source continuity evidence differs from the exact owner observation"
+            )
+    for step, item in zip(source["scenario"]["steps"], source["timeline"], strict=True):
+        if step["kind"] == "await_summary":
+            target = next(
+                row
+                for row in source["timeline"]
+                if row["step_id"] == step["through_step"]
+            )
+            evidence = object_value(
+                item.get("continuity_evidence"), "summary readiness evidence"
+            )
+            boundary = completed_boundary(target)
+            saved = object_value(
+                observation_value(
+                    evidence.get("saved_readiness_only"), "saved summary"
+                ),
+                "saved summary",
+            )
+            if (
+                not retained_continuity(evidence)
+                or evidence.get("turn_ref") != target["turn_ref"]
+                or item.get("target_turn_ref") != target["turn_ref"]
+                or item.get("target_boundary") != boundary
+                or not summary_covers(saved, boundary)
+            ):
+                raise AcceptanceError(
+                    "source summary readiness lacks its exact target observation"
+                )
+        if step.get("retired_through") is not None:
+            target = next(
+                row
+                for row in source["timeline"]
+                if row["step_id"] == step["retired_through"]
+            )
+            if item.get("prefix_omission") != prefix_omission(target, item):
+                raise AcceptanceError(
+                    "source prefix omission differs from its retained request evidence"
+                )
 
 
 def assess(capture: Capture) -> None:
@@ -677,9 +1117,11 @@ def assess(capture: Capture) -> None:
             "assessment needs all scenario observations; incomplete captures remain incomplete"
         )
     for step, item in zip(scenario["steps"], timeline, strict=True):
-        expected_status = (
-            "captured" if step["kind"] == "message" else "restart_observed"
-        )
+        expected_status = {
+            "message": "captured",
+            "restart": "restart_observed",
+            "await_summary": "summary_ready_observed",
+        }[step["kind"]]
         if item.get("step_id") != step["id"] or item.get("status") != expected_status:
             raise AcceptanceError(
                 "source timeline is incomplete or does not match the scenario"
@@ -694,6 +1136,8 @@ def assess(capture: Capture) -> None:
             "source_capture_integrity": "retained_observation_joins_verified; remote_authenticity_not_established",
             "scenario": scenario,
             "server_build": source.get("server_build"),
+            "expected_binary_commit": source.get("expected_binary_commit"),
+            "expected_executable_sha256": source.get("expected_executable_sha256"),
             "timeline": copy.deepcopy(timeline),
         }
     )
@@ -821,6 +1265,26 @@ def run(capture: Capture, scenario: Json) -> None:
     capture.report["scenario"] = scenario
     capture.report["scenario_sha256"] = digest(encoded(scenario))
     capture.save()
+    if any(step["kind"] == "await_summary" for step in scenario["steps"]):
+        readiness = object_value(
+            capture.report.get("memory_execution_readiness"),
+            "Memory execution readiness",
+        )
+        if readiness.get("schema") != "keeper.memory_execution_availability.v1":
+            raise AcceptanceError("Memory execution readiness schema is unavailable")
+        operations = {
+            row["tool"]: row
+            for row in list_value(readiness.get("operations"), "Memory operations")
+        }
+        for tool in ("admit_memory", "derive_memory"):
+            operation = object_value(operations.get(tool), tool + " readiness")
+            if operation.get("state") == "addon_unattached":
+                raise AcceptanceError(
+                    tool + ": addon_unattached; configure the keeper-librarian Add-on "
+                    "before starting the retirement scenario; no Keeper was created"
+                )
+        # Cached configuration observations are not provider success or a runtime
+        # gate. Earlier provider failures do not prevent a new ordinary attempt.
     capture.call(
         "masc_keeper_up",
         {
@@ -849,7 +1313,14 @@ def run(capture: Capture, scenario: Json) -> None:
         }
         capture.report["timeline"].append(item)
         capture.save()
-        if step["kind"] == "restart":
+        if step["kind"] == "await_summary":
+            target = next(
+                row
+                for row in capture.report["timeline"]
+                if row["step_id"] == step["through_step"]
+            )
+            capture.wait_summary(item, target)
+        elif step["kind"] == "restart":
             capture.call(
                 "masc_keeper_down",
                 {"name": args.keeper, "remove_meta": False, "remove_session": False},
@@ -867,6 +1338,13 @@ def run(capture: Capture, scenario: Json) -> None:
             )
             capture.save()
             capture.capture_turn(item, capture.operation(item["operation_id"]))
+            if step.get("retired_through") is not None:
+                target = next(
+                    row
+                    for row in capture.report["timeline"]
+                    if row["step_id"] == step["retired_through"]
+                )
+                item["prefix_omission"] = prefix_omission(target, item)
         item["finished_at"] = now()
         capture.save()
     # Retain all state and evidence. Shutdown is only for the Keeper this run created,
@@ -892,6 +1370,8 @@ def main() -> int:
     parser.add_argument("--mcp-url")
     parser.add_argument("--token-file")
     parser.add_argument("--expected-base-path")
+    parser.add_argument("--expected-binary-commit")
+    parser.add_argument("--expected-executable-sha256")
     parser.add_argument("--keeper", required=True)
     parser.add_argument(
         "--output",
@@ -931,9 +1411,17 @@ def main() -> int:
                 "run/capture require --mcp-url, --expected-base-path, --wait-timeout and --poll-interval"
             )
         if args.mode == "run":
-            if not all((args.scenario, args.runtime_id, args.sandbox_image)):
+            if not all(
+                (
+                    args.scenario,
+                    args.runtime_id,
+                    args.sandbox_image,
+                    args.expected_binary_commit,
+                    args.expected_executable_sha256,
+                )
+            ):
                 raise AcceptanceError(
-                    "run requires --scenario, --runtime-id and --sandbox-image"
+                    "run requires --scenario, --runtime-id, --sandbox-image, --expected-binary-commit and --expected-executable-sha256"
                 )
             scenario = load_scenario(pathlib.Path(args.scenario))
         elif args.mode == "capture" and not args.operation_id:
@@ -970,6 +1458,7 @@ def main() -> int:
             for operation_id in args.operation_id:
                 item = {
                     "step_id": operation_id,
+                    "kind": "message",
                     "operation_id": operation_id,
                     "status": "started",
                 }

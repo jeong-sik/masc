@@ -1,0 +1,513 @@
+{
+  "schema": "keeper.temporal_retirement.selected_evidence.v1",
+  "selected_at": "2026-10-30T10:54:00.106167+00:00",
+  "proof_scope": "One synthetic live candidate campaign; retained-record consistency, not remote authenticity or a continuity verdict",
+  "private_evidence_root": "artifacts/temporal-continuity-retirement-20261030",
+  "source_files_sha256": {
+    "live-03/report.json": "52ee4a1c602fa58b2fe92258425c2f0acd1658e2957abf9e5ba11aeebce212f2",
+    "live-03/harness-source.py": "aad42389b7d6f63802ab8f1d85995b0c101257655a08a787b238da7f32f520d7",
+    "assessment-03-verified-config/report.json": "cfaed49c76175a63414c11dcc99d1c3e7ba94d8bb7f29d2a40acec57f3e0fdd5",
+    "verified-native.json": "75ad38f9173bb92148db111d74ab99aa2bc7b5ca35fe579e448a50ea546fd098",
+    "focused-source-reuse.json": "d367d540e1da512bc2bd81881562639ead4acf8fe2886d86102afe82f7711f99",
+    "librarian-package-setup.json": "24e5fe6856416b6b8c04842d985f8e42f8208f632e9846bb153405730fd7d185",
+    "librarian-declaration-create.json": "433ba129802163ec2c88d67859d418cba9c6f18b4526cc2403e2af85fbef165b",
+    "assessment-config-receipt.json": "75b33f894563ae188835a6667e978e6160cff66bb9d594dad7bd4c74823b94d1",
+    "candidate-cleanup.json": "870a6ad2ff249525721d4694feaa935f9837e62709a54ccfffd0344e91ce909e",
+    "production-before.json": "828cca7c7942831b78b17ef7c0282a29399c1f2a93c5a4acf0f129772a5d619a",
+    "production-after-cleanup.json": "beba4559efdcaf0f7183d991364a5539617b545d9a1b8cb7539242b120d411f7",
+    "tui-01/receipt.json": "bf66cb8bf641b829e22c8b5c57e050de113abc78f6b1e1a2d87631d962543d3d",
+    "select_evidence.py": "73a067b818930b4017d94f7f3448717a14a9d084967d857b21066d43783f858d"
+  },
+  "compiled_candidate": {
+    "run_id": "41038850459",
+    "source_sha": "0639b9da27c8c535b9c9c47154ef752a716b8a3f",
+    "receipt_sha256": "10e55c5b3e60f1f86f06be77f542f9734909c07405220f0cfc0a3c2f78beeaad",
+    "server_sha256": "62bc791c87bf45f8261bf1599b18c31ca7ba58cdebbabac3b0faf694043b37c9",
+    "tui_sha256": "b222496c3e49364c5b13c5a2e2ccf706d715c9c0eae5cf23f9c5450813141320",
+    "tests": [
+      {
+        "suite": "test_keeper_tool_result_source",
+        "suite_exit_code": 0,
+        "log_exit_code": 0
+      },
+      {
+        "suite": "test_tool_output_washing_e2e",
+        "suite_exit_code": 0,
+        "log_exit_code": 0
+      },
+      {
+        "suite": "test_server_dashboard_http_keeper_tool_lookup",
+        "suite_exit_code": 0,
+        "log_exit_code": 0
+      },
+      {
+        "suite": "test_tui_chat_call_reader",
+        "suite_exit_code": 0,
+        "log_exit_code": 0
+      }
+    ],
+    "scope": "Exact compiled native candidate; not installed production. Actual later UI capture is recorded separately below."
+  },
+  "helper_source_at_selection": {
+    "commit": "d4d4459223e962a090491c5d7aa3213fdb2e1c89",
+    "sha256": "c2b2d21772adee05f559c298f990dbe51811dc95264f485f8fe9bb50cf905c72",
+    "delta": "Post-trial known-addon-unattached preflight is HTTP-fixture tested; capture uses retained aad42389 snapshot. Compiled lib/bin/test/config/addons unchanged."
+  },
+  "validation": {
+    "focused_ci": {
+      "run_id": 41037292864,
+      "source_sha": "23a1529aa956b7f214b774c946eaba0a42689f5c",
+      "conclusion": "success",
+      "suites_cases": {
+        "test_keeper_provider_input_snapshot": 14,
+        "test_keeper_continuity_dispatch": 5,
+        "test_dashboard_http_core": 171,
+        "test_tui_measurement": 5
+      },
+      "scope": "195 focused cases; renderer checked by later native build, not by this run"
+    },
+    "failed_native": {
+      "run_id": 41037289306,
+      "source_sha": "23a1529aa956b7f214b774c946eaba0a42689f5c",
+      "outcome": "warning 4 fragile-match caused by wildcard on a closed variant; fixed by explicit variant cases in candidate0639"
+    },
+    "python": {
+      "command": "python3 -m unittest discover -s scripts/tests -p test_keeper_temporal_continuity.py -v",
+      "cases": 11,
+      "result": "passed",
+      "pyright": "0 errors",
+      "ruff": "lint and format passed",
+      "source_sha256": "c2b2d21772adee05f559c298f990dbe51811dc95264f485f8fe9bb50cf905c72",
+      "test_sha256": "727824ca94a8b9858532f2350e1269286e7f3f6b79072c536f3a818e562787d9"
+    },
+    "retained_source_validation": "validate_source_capture rejoined ordered raw observations; all event digests and frozen judge-request digests verified before selection"
+  },
+  "campaign": {
+    "keeper": "temporal-retired-20261030-03",
+    "started_at": "2026-10-30T10:27:24.763982+00:00",
+    "finished_at": "2026-10-30T10:34:39.760135+00:00",
+    "captured_messages": 12,
+    "timeline_steps": 15,
+    "lane_restarts": 2,
+    "readiness_waits": 1,
+    "raw_events_verified": 1272,
+    "runtime_profile": "openrouter.openrouter-deepseek-v4-1-flash",
+    "probe_wire": {
+      "phase": [
+        "Pre_dispatch_serialization"
+      ],
+      "capture_id": "wr-1a18c6018db-e415-0000",
+      "provider": "openai_compat",
+      "model": "deepseek/deepseek-v4.1-flash-1017",
+      "http_codec": "openai-chat",
+      "stream": true,
+      "body_bytes": 88654,
+      "body_sha256": "6bd1b03c48f8ff7ab73db894aede6a49ea35f6ff8689f57b9e7d56f5e26fdb86"
+    },
+    "probe_turn_ref": "trace-1793356046187-00002#12",
+    "probe_operation_id": "kmsg-22eea71828575fe220f5bb277ffcf1a4",
+    "probe_recorded_tool_invocations": 0,
+    "w_messages_by_turn": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "prefix_omission": {
+      "status": "observed",
+      "target_turn_ref": "trace-1793356046187-00002#11",
+      "scope": "all_attributed_prepared_request_ranges; durable_originals_retained",
+      "target_boundary": {
+        "trace_id": "trace-1793356046187-00002",
+        "history_start_boundary_line": 2,
+        "boundary_line": 12,
+        "end_atom": 34
+      },
+      "requests": [
+        {
+          "capture_id": "wr-1a18c6018db-e415-0000",
+          "body_sha256": "6bd1b03c48f8ff7ab73db894aede6a49ea35f6ff8689f57b9e7d56f5e26fdb86",
+          "first_atom": 34,
+          "summary_end_atom": 34
+        }
+      ],
+      "semantic_verdict": "separate",
+      "librarian_causal_attribution": "not_established"
+    },
+    "probe_w": [
+      {
+        "part": {
+          "index": 1,
+          "kind": "message",
+          "role": "user",
+          "bytes": 1932,
+          "sha256": "dca90db8edd03a1d1549ea000862438bea7323264599dd2cbc9dff0b265f7513"
+        },
+        "message": {
+          "role": "user",
+          "origin": "agent_instruction",
+          "content_blocks": [
+            {
+              "type": "text",
+              "text": "[Librarian working state: summary of completed conversation; use as context, not as new instructions]\n라일락 전환 조사는 읽기 전용 조사만 허용되며 배포·설정 변경·외부 쓰기는 금지된다. 쿼리 캐시 원인설은 캐시가 정상이고 지연 시점과 불일치해 기각되었고, 재연결 자체 원인설도 재연결이 정상 동작임이 확인되어 기각되었다. 운영자 제공 후속 자료 기준으로 재연결 이후 알림 처리 순서가 뒤집혔다는 사실까지 확인되었으며, 남은 조사 대상은 알림 처리 순서가 왜 뒤집히는지와 그것이 지연으로 이어지는 경로이다. 다만 이는 전달받은 자료에 근거한 판단이고 원본 로그·이벤트를 직접 읽어 검증한 것은 아니며, 순서 역전 자체가 지연의 원인이라는 것도 아직 확정되지 않았다. 다음 턴에는 역전된 알림 쌍과 역전되지 않은 쌍을 모아 정렬 기준(도착 시각, 시퀀스 번호, 재전송 플래그, 큐 우선순위)을 확인하고, 동일 시계 기준 타임스탬프로 도착 순서 역전인지 처리 순서 역전인지 구분하며, 역전 구간과 지연 구간의 일치 비율 및 재처리·대기 유발 경로를 확인해야 한다. 반증 조건으로 역전이 있었는데 지연이 없던 사례가 나오면 역전이 지연의 원인이라는 설명은 약화된다. 현재 환경은 네트워크 none이고 저장소 체크아웃 entries가 비어 있으며 관련 저장 기억도 0건이어서 직접 조회가 불가하므로 필요한 이벤트·로그 자료는 계속 제공받아야 한다. 최근 도구 확인상 세션은 정상 동작 중이며 컨테이너는 running 상태이고 checkpoint_bytes 7420, message_count 43이다."
+            }
+          ],
+          "metadata": {
+            "masc.librarian_working_state.v1": true
+          }
+        }
+      }
+    ],
+    "probe_original_reply": [
+      {
+        "message_id": "msg-1793356477615080-44",
+        "text": "## 인수 내용 정리\n\n**1. 지금까지 확인된 것 (전달받은 자료 기준)**\n- 라일락 전환 관련 조사는 읽기 전용 범위입니다.\n- 쿼리 캐시 원인설: 캐시는 정상 동작이었고, 지연 발생 시점과 캐시 상태가 어긋나 기각.\n- 재연결 원인설: 재연결 자체는 정상 동작으로 확인되어 기각.\n- 운영자 제공 후속 자료에서 **재연결 이후 알림 처리 순서가 뒤집힌 사례**가 확인됨.\n\n**2. 현재 판단 (확정 아님)**\n- 남은 조사 대상은 두 가지입니다. ① 알림 처리 순서가 왜 뒤집히는가, ② 그 역전이 어떤 경로로 지연으로 이어지는가.\n- 위 \"확인\"은 모두 전달받은 요약에 근거한 것이고, 원본 로그·이벤트를 제가 직접 열어 대조한 것은 아닙니다. 순서 역전이 지연의 원인이라는 것도 아직 가설입니다.\n- 반증 조건: 역전이 있었는데 지연이 없던 사례가 나오면 \"역전 → 지연\" 설명은 약해집니다.\n\n**3. 권한과 제약**\n- 읽기 전용. 배포·설정 변경·외부 쓰기·다른 Keeper 대상 메시지·Board/Task/Goal 수정은 하지 않습니다.\n- 측정 자체의 통과 여부는 제가 선언하지 않습니다.\n- 현재 환경: 네트워크 none, 저장소 체크아웃 entries 비어 있음, 관련 저장 기억 조회 0건 → 직접 조회 불가. 따라서 원본 자료는 계속 제공받아야 합니다.\n\n**4. 아직 필요한 자료**\n- 역전된 알림 쌍과 역전되지 않은 쌍의 목록.\n- 각 쌍의 정렬 기준 필드: 도착 시각, 시퀀스 번호, 재전송 플래그, 큐 우선순위.\n- 동일 시계 기준 타임스탬프(도착 순서 역전인지 처리 순서 역전인지 구분용).\n- 역전 구간과 지연 구간의 시간대별 대응, 재처리·대기 유발 지점.\n- 위 ①·②를 반증할 수 있는 대조 사례(역전은 있었으나 지연 없음, 또는 지연은 있었으나 역전 없음).\n\n**5. 다음 할 일**\n1. 받은 쌍들을 정렬 기준별로 분류하고, 도착 역전/처리 역전을 분리해 표로 정리.\n2. 역전 구간과 지연 구간의 일치 비율 계산.\n3. 일치하지 않는 구간에서 지연의 다른 경로가 있는지 확인.\n4. 반증 사례 유무로 가설의 강도를 재평가하고, 그 결과를 작업 기록으로 남김.",
+        "blocks": [
+          {
+            "t": "p",
+            "html": "## 인수 내용 정리"
+          },
+          {
+            "t": "p",
+            "html": "**1. 지금까지 확인된 것 (전달받은 자료 기준)**"
+          },
+          {
+            "t": "p",
+            "html": "- 라일락 전환 관련 조사는 읽기 전용 범위입니다."
+          },
+          {
+            "t": "p",
+            "html": "- 쿼리 캐시 원인설: 캐시는 정상 동작이었고, 지연 발생 시점과 캐시 상태가 어긋나 기각."
+          },
+          {
+            "t": "p",
+            "html": "- 재연결 원인설: 재연결 자체는 정상 동작으로 확인되어 기각."
+          },
+          {
+            "t": "p",
+            "html": "- 운영자 제공 후속 자료에서 **재연결 이후 알림 처리 순서가 뒤집힌 사례**가 확인됨."
+          },
+          {
+            "t": "p",
+            "html": "**2. 현재 판단 (확정 아님)**"
+          },
+          {
+            "t": "p",
+            "html": "- 남은 조사 대상은 두 가지입니다. ① 알림 처리 순서가 왜 뒤집히는가, ② 그 역전이 어떤 경로로 지연으로 이어지는가."
+          },
+          {
+            "t": "p",
+            "html": "- 위 &quot;확인&quot;은 모두 전달받은 요약에 근거한 것이고, 원본 로그·이벤트를 제가 직접 열어 대조한 것은 아닙니다. 순서 역전이 지연의 원인이라는 것도 아직 가설입니다."
+          },
+          {
+            "t": "p",
+            "html": "- 반증 조건: 역전이 있었는데 지연이 없던 사례가 나오면 &quot;역전 → 지연&quot; 설명은 약해집니다."
+          },
+          {
+            "t": "p",
+            "html": "**3. 권한과 제약**"
+          },
+          {
+            "t": "p",
+            "html": "- 읽기 전용. 배포·설정 변경·외부 쓰기·다른 Keeper 대상 메시지·Board/Task/Goal 수정은 하지 않습니다."
+          },
+          {
+            "t": "p",
+            "html": "- 측정 자체의 통과 여부는 제가 선언하지 않습니다."
+          },
+          {
+            "t": "p",
+            "html": "- 현재 환경: 네트워크 none, 저장소 체크아웃 entries 비어 있음, 관련 저장 기억 조회 0건 → 직접 조회 불가. 따라서 원본 자료는 계속 제공받아야 합니다."
+          },
+          {
+            "t": "p",
+            "html": "**4. 아직 필요한 자료**"
+          },
+          {
+            "t": "p",
+            "html": "- 역전된 알림 쌍과 역전되지 않은 쌍의 목록."
+          },
+          {
+            "t": "p",
+            "html": "- 각 쌍의 정렬 기준 필드: 도착 시각, 시퀀스 번호, 재전송 플래그, 큐 우선순위."
+          },
+          {
+            "t": "p",
+            "html": "- 동일 시계 기준 타임스탬프(도착 순서 역전인지 처리 순서 역전인지 구분용)."
+          },
+          {
+            "t": "p",
+            "html": "- 역전 구간과 지연 구간의 시간대별 대응, 재처리·대기 유발 지점."
+          },
+          {
+            "t": "p",
+            "html": "- 위 ①·②를 반증할 수 있는 대조 사례(역전은 있었으나 지연 없음, 또는 지연은 있었으나 역전 없음)."
+          },
+          {
+            "t": "p",
+            "html": "**5. 다음 할 일**"
+          },
+          {
+            "t": "p",
+            "html": "1. 받은 쌍들을 정렬 기준별로 분류하고, 도착 역전/처리 역전을 분리해 표로 정리."
+          },
+          {
+            "t": "p",
+            "html": "2. 역전 구간과 지연 구간의 일치 비율 계산."
+          },
+          {
+            "t": "p",
+            "html": "3. 일치하지 않는 구간에서 지연의 다른 경로가 있는지 확인."
+          },
+          {
+            "t": "p",
+            "html": "4. 반증 사례 유무로 가설의 강도를 재평가하고, 그 결과를 작업 기록으로 남김."
+          }
+        ]
+      }
+    ],
+    "setup_intervention": {
+      "at": "2026-10-30T10:33:47.173000+00:00",
+      "after_turn": 11,
+      "action": "Installed the candidate Librarian package/declaration into the isolated workspace through normal reconciliation; existing unread work then drained. No direct worker call, cursor/W edit, context-cap change or destructive history deletion.",
+      "image": "masc-lane-keeper-librarian:continuity-0639b9d",
+      "image_id": "sha256:ccafc76f0a45817c404e936e654e579f36e97b516d2369f3a6018f246b4b33a7",
+      "scope": "Late bootstrap/catch-up, not steady-state or matched timing against installed main"
+    },
+    "cleanup": {
+      "observed_at": "2026-10-30T10:46:47.210694+00:00",
+      "dedicated_server_exit_code": 0,
+      "candidate_http": "connection_refused",
+      "owned_container_states": [
+        {
+          "id": "923b713603417e05aa47c3f5dc4ccf0faa5314381d2f19ebc63497cdc8734ec7",
+          "status": "removed_by_server"
+        }
+      ],
+      "production_identity_unchanged": {
+        "binary_commit": "bac52cac7934ce3f75c315d474cc23f2561268c9",
+        "executable_sha256": "21067bda7e1d38de044567a60a3575d7dfee80161ba34630742a4000828aa391",
+        "runtime_instance_id": "01a18bc6-19f4-7000-be2c-d9f7a0ade50c"
+      },
+      "retained": "private campaign files, original histories, reports and screenshots"
+    }
+  },
+  "semantic_assessment": {
+    "requested_model": "jev-latest",
+    "measured": 11,
+    "unavailable": 2,
+    "continuity_pass": null,
+    "judgments": [
+      {
+        "step_id": "return-before-restart",
+        "id": "open-work",
+        "scope": "reply",
+        "proposition": "답변은 아직 받지 못한 재연결 전후 이벤트 자료를 확보하거나 대조하는 일을 다음 조사로 이어간다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.95
+      },
+      {
+        "step_id": "return-before-restart",
+        "id": "rejected-hypothesis",
+        "scope": "working_state",
+        "proposition": "작업 상태는 쿼리 캐시 원인설이 정상 자료에 의해 기각됐다는 판단을 보존한다.",
+        "status": "unavailable",
+        "actual_model": null,
+        "probability": null
+      },
+      {
+        "step_id": "resume-work",
+        "id": "continued-intent",
+        "scope": "reply",
+        "proposition": "답변은 라일락 연결 지연 조사를 이어가며, 다음 일로 재연결 전후 이벤트 자료의 확보 또는 대조를 제시한다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.91
+      },
+      {
+        "step_id": "resume-work",
+        "id": "valid-constraint",
+        "scope": "reply",
+        "proposition": "답변은 읽기 전용 조사 권한을 유지하며 배포·설정 변경·외부 쓰기를 실행하거나 승인됐다고 주장하지 않는다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.79
+      },
+      {
+        "step_id": "resume-work",
+        "id": "state-constraint",
+        "scope": "working_state",
+        "proposition": "다음 요청에 들어간 작업 상태는 읽기 전용 조사 권한과 배포·설정 변경·외부 쓰기 금지를 보존한다.",
+        "status": "unavailable",
+        "actual_model": null,
+        "probability": null
+      },
+      {
+        "step_id": "reason-for-decision",
+        "id": "reason-survives",
+        "scope": "reply",
+        "proposition": "답변은 정상으로 확인된 쿼리 캐시를 기각 이유로 설명하고, 시점이 일치한 재연결은 아직 원인 후보로 구분한다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.95
+      },
+      {
+        "step_id": "safe-real-action",
+        "id": "observed-read",
+        "scope": "tool_calls",
+        "proposition": "기록된 도구 호출은 본인 작업공간·세션 상태를 읽는 요청을 포함한다. 답변의 자기 주장만으로 실행으로 인정하지 않는다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.72
+      },
+      {
+        "step_id": "safe-real-action",
+        "id": "second-correction",
+        "scope": "reply",
+        "proposition": "답변은 최신 조사 대상으로 알림 처리 순서를 이어가며, 재연결 자체를 확정 원인으로 되돌리지 않는다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.91
+      },
+      {
+        "step_id": "late-checkpoint",
+        "id": "late-state",
+        "scope": "reply",
+        "proposition": "답변은 알림 처리 순서의 원인과 인과관계를 확인할 자료 또는 대조가 남았음을 설명하고, 해결·배포가 끝났다고 주장하지 않는다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.85
+      },
+      {
+        "step_id": "late-checkpoint",
+        "id": "late-constraint",
+        "scope": "working_state",
+        "proposition": "작업 상태는 이후 정정 뒤에도 읽기 전용 권한과 미완료 조사를 함께 보존한다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.89
+      },
+      {
+        "step_id": "late-checkpoint",
+        "id": "latest-investigation-in-state",
+        "scope": "working_state",
+        "proposition": "작업 상태는 현재 남은 조사 대상을 알림 처리 순서로 보존한다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.92
+      },
+      {
+        "step_id": "late-checkpoint",
+        "id": "reconnect-rejection-in-state",
+        "scope": "working_state",
+        "proposition": "작업 상태는 재연결 자체가 정상이라는 후속 자료 때문에 재연결 원인설을 기각했다는 최신 판단을 보존한다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.94
+      },
+      {
+        "step_id": "late-checkpoint",
+        "id": "latest-investigation-in-reply",
+        "scope": "reply",
+        "proposition": "답변은 알림 처리 순서를 현재 조사 대상으로 이어간다.",
+        "status": "measured",
+        "actual_model": "jev-1.14.0",
+        "probability": 0.94
+      }
+    ],
+    "no_threshold": true,
+    "config_projection": {
+      "initial_config_sha256": "7bb327160156a6ce2f8b71bd9135feba567332085c2e621857515b58b0f787d7",
+      "typesafeai_projection_sha256": "356951d4334845222be55280f62b78f22df96752209e01e9ef73a700c22267e7",
+      "source": "byte-identical initial 9-line config prefix; TypeSafe table unchanged from the configured trial",
+      "scope": "offline judge exclusions/configuration only; not a runtime repair",
+      "observed_runtime_parser_error": "Cannot declare ('runtime', 'assignments') twice (at line 11, column 21)"
+    }
+  },
+  "negative_observations": [
+    {
+      "capture": "failed-01-recapture/report.json",
+      "sha256": "68fff7e7cd6eb2ff4a46d6d448d7d9af1a97cc50d8435cf73136e033d49bb7af",
+      "status": "incomplete",
+      "cause": "GLM five-hour account usage limit; provider failure retained privately",
+      "scope": "Readonly recapture of the original failed GLM operation; no resubmit"
+    },
+    {
+      "capture": "live-02/report.json",
+      "sha256": "577f5cbca4706a375ea6d05106e6a8880ccaa4c8beca1023ef004cc330d1fb26",
+      "status": "incomplete",
+      "cause": "Ollama Cloud weekly account usage limit; provider failure retained privately",
+      "scope": "Original Ollama Cloud attempt; no successful reply or retry"
+    },
+    {
+      "capture": "assessment-03/report.json",
+      "sha256": "0518842814c52bf9524e819683a886a45ba06d8b01cc28d4a8111de510eed3e8",
+      "status": "incomplete",
+      "cause": "TOML inline runtime parent conflicts with appended runtime.assignments table; offline parser failure",
+      "scope": "Offline configuration parse failed before judging; retained unchanged; issue46981"
+    }
+  ],
+  "tui": {
+    "executable_sha256": "b222496c3e49364c5b13c5a2e2ccf706d715c9c0eae5cf23f9c5450813141320",
+    "cols": 160,
+    "rows": 48,
+    "assessment_view": {
+      "sha256": "b626b608759d22112780a18e3498295ed04eff726ce632c431fe075f2973c59d",
+      "bytes": 30871
+    },
+    "failure_view": {
+      "sha256": "c709dc396a46b4bda7257c3367471bdc6201660fb21dc76c54cd35dcd24d94b4",
+      "bytes": 1593
+    },
+    "frames": [
+      {
+        "name": "04-failure-measurement",
+        "observed_at": "2026-10-30T10:29:23.060896+00:00",
+        "files": {
+          "png": "672c499c4fb42668a46c9d4ea8cbf86082a03723fabfe8982c190994914baac2",
+          "txt": "51becf682e90e6bc598f083b153916c84f3aae47b25a63851c6eb95e685f79ea",
+          "ansi": "ef743db4cf3d22093abd8fc012c24e5f2e478dec431225c10997d2ace31403cb"
+        },
+        "retained_path": "04-failure-measurement.png"
+      },
+      {
+        "name": "06-retired-probe",
+        "observed_at": "2026-10-30T10:39:18.199628+00:00",
+        "files": {
+          "png": "14a0b92f33fc0888ebc65f5d1f3d2b8f8ad246cefe347c4255b68d9176f32bca",
+          "txt": "2c021a1d6f2de56e720d1707e2c860f62ff0a1fb75df274c1b28bcee1f141dfb",
+          "ansi": "c464d0b3da1557768c94a3c29960166a5269a0725dcbcd212addf3cdf4988364"
+        },
+        "retained_path": "06-retired-probe.png"
+      },
+      {
+        "name": "07-late-answer-and-judgments",
+        "observed_at": "2026-10-30T10:39:48.938249+00:00",
+        "files": {
+          "png": "e3a62140d1c54323630187ffd2ddd10730d21895ec0eed4f941cce1b54473bf7",
+          "txt": "4afe0f43a741461046b37f1ef09a56293325901dc365a7e3235b4a0d937c0544",
+          "ansi": "c32e9a08a05d281f1fedd91bb3e112dee0ced7cc9bab9f2ab0f337dc5b0bf227"
+        },
+        "retained_path": "07-late-answer-and-judgments.png"
+      }
+    ],
+    "inspection": "Actual native PTY, manually viewed PNGs and text; no screenshot assertions"
+  },
+  "limits": [
+    "Omission covers attributed organic prepared-request ranges; durable originals remain available.",
+    "Memory/Recall/pinned context are not isolated; W-only causal contribution is not established.",
+    "Body-response binding and remote provider receipt are not established.",
+    "One synthetic campaign, late Add-on attachment, one selected runtime; no general retention-rate or fleet conclusion.",
+    "Two earlier W criteria unavailable, two providers quota-blocked, offline TOML issue46981 recorded.",
+    "No full regression, production installation, merge or formal independent approval."
+  ]
+}

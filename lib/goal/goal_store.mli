@@ -106,6 +106,16 @@ type state = {
 (** On-disk shape persisted to {!goals_path}. [version] increments on every
     write so concurrent readers detect drift. *)
 
+module Goal_id_map : Map.S with type key = string
+
+type prepared_state = {
+  state : state;
+  goals_by_id : goal Goal_id_map.t;
+  sorted_goals : goal list;
+}
+
+val prepare_state : state -> prepared_state
+
 (** {1 Rollup} *)
 
 type rollup = {
@@ -200,6 +210,11 @@ val list_goals_result :
 (** {!load_source} filtered by [phase] and sorted by
     [(priority asc, updated_at desc)]. {!Uninitialized} is [Ok []] — the one
     legitimate empty list; {!Unavailable} is the typed error. *)
+
+val load_goals_by_id_result :
+  Workspace_utils.config -> (goal Goal_id_map.t, unavailable) result
+(** Immutable [goal_id -> goal] map from {!load_source}. {!Uninitialized} is
+    [Ok Goal_id_map.empty]; {!Unavailable} is the typed error. *)
 
 (** {1 State I/O} *)
 

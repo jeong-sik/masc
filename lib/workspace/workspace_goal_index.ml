@@ -24,31 +24,42 @@ let goal_task_links_recovery_path config =
   goal_task_links_path config ^ ".last-good"
 ;;
 
+module Goal_id_map = Map.Make (String)
+module Task_id_map = Map.Make (String)
+module Task_id_set = Set.Make (String)
+
 let normalize_link_set links =
-  let tbl = Hashtbl.create 16 in
-  List.iter
-    (fun (goal_id, task_ids) ->
-       let goal_id = String.trim goal_id in
-       if not (String.equal goal_id "") then (
-         (* DET-OK: an absent bucket means no accumulated links; this is the
-            same [] returned by the replaced [Not_found] handler. *)
-         let existing = Option.value (Hashtbl.find_opt tbl goal_id) ~default:[] in
-         let merged =
-           List.fold_left
-             (fun acc task_id ->
-                let task_id = String.trim task_id in
-                if String.equal task_id "" || List.mem task_id acc then acc
-                else task_id :: acc)
-             existing
-             task_ids
-         in
-         Hashtbl.replace tbl goal_id merged))
-    links;
-  Hashtbl.fold
-    (fun goal_id task_ids acc -> (goal_id, List.rev task_ids) :: acc)
-    tbl
+  let by_goal =
+    List.fold_left
+      (fun acc (goal_id, task_ids) ->
+         let goal_id = String.trim goal_id in
+         if String.equal goal_id ""
+         then acc
+         else (
+           let seen, rev_ids =
+             match Goal_id_map.find_opt goal_id acc with
+             | Some existing -> existing
+             | None -> Task_id_set.empty, []
+           in
+           let seen, rev_ids =
+             List.fold_left
+               (fun (seen_acc, rev_acc) task_id ->
+                  let task_id = String.trim task_id in
+                  if String.equal task_id "" || Task_id_set.mem task_id seen_acc
+                  then seen_acc, rev_acc
+                  else Task_id_set.add task_id seen_acc, task_id :: rev_acc)
+               (seen, rev_ids)
+               task_ids
+           in
+           Goal_id_map.add goal_id (seen, rev_ids) acc))
+      Goal_id_map.empty
+      links
+  in
+  Goal_id_map.fold
+    (fun goal_id (_seen, rev_ids) acc -> (goal_id, List.rev rev_ids) :: acc)
+    by_goal
     []
-  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+  |> List.rev
 ;;
 
 let link_to_yojson (goal_id, task_ids) =
@@ -104,22 +115,60 @@ let links_of_yojson = function
   | _ -> Error "goal_task_links: top level is not an object"
 ;;
 
-let read_link_json config path =
+let link_registry_cache : (string, string * (string * string list) list) Hashtbl.t =
+  Hashtbl.create 8
+;;
+
+let link_registry_cache_mu = Stdlib.Mutex.create ()
+
+let clear_link_registry_cache_for path =
+  Stdlib.Mutex.lock link_registry_cache_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock link_registry_cache_mu)
+    (fun () -> Hashtbl.remove link_registry_cache path)
+;;
+
+let read_link_registry config path =
   match key_of_path config path with
   | None -> Error (Printf.sprintf "goal_task_links: path is outside backend root: %s" path)
   | Some key ->
     (match backend_get config ~key with
-     | Error error -> Error (Backend_types.show_error error)
-     | Ok None -> Ok None
+     | Error error ->
+       clear_link_registry_cache_for path;
+       Error (Backend_types.show_error error)
+     | Ok None ->
+       clear_link_registry_cache_for path;
+       Ok None
      | Ok (Some content) ->
-       Safe_ops.parse_json_safe ~context:path content |> Result.map Option.some)
-;;
-
-let read_link_registry config path =
-  match read_link_json config path with
-  | Error detail -> Error detail
-  | Ok None -> Ok None
-  | Ok (Some json) -> links_of_yojson json |> Result.map Option.some
+       let cached =
+         Stdlib.Mutex.lock link_registry_cache_mu;
+         Fun.protect
+           ~finally:(fun () -> Stdlib.Mutex.unlock link_registry_cache_mu)
+           (fun () ->
+              match Hashtbl.find_opt link_registry_cache path with
+              | Some (cached_content, links)
+                when String.equal cached_content content ->
+                Some links
+              | Some _ | None -> None)
+       in
+       (match cached with
+        | Some links -> Ok (Some links)
+        | None ->
+          (match Safe_ops.parse_json_safe ~context:path content with
+           | Error detail ->
+             clear_link_registry_cache_for path;
+             Error detail
+           | Ok json ->
+             (match links_of_yojson json with
+              | Error detail ->
+                clear_link_registry_cache_for path;
+                Error detail
+              | Ok links ->
+                Stdlib.Mutex.lock link_registry_cache_mu;
+                Fun.protect
+                  ~finally:(fun () -> Stdlib.Mutex.unlock link_registry_cache_mu)
+                  (fun () -> Hashtbl.replace link_registry_cache path (content, links));
+                Ok (Some links)))))
 ;;
 
 let read_goal_task_links_authoritative_r config =
@@ -135,8 +184,8 @@ let read_goal_task_links_authoritative_r config =
 ;;
 
 let read_goal_task_links_r config =
-  match read_link_json config (goal_task_links_path config) with
-  | Ok (Some json) -> links_of_yojson json
+  match read_link_registry config (goal_task_links_path config) with
+  | Ok (Some links) -> Ok links
   | Ok None -> read_goal_task_links_authoritative_r config
   | Error primary_msg ->
     let recovery_path = goal_task_links_recovery_path config in
@@ -160,6 +209,7 @@ let read_goal_task_links config =
 
 let verify_goal_task_links_write config ~path ~json ~expected_links ~label =
   try
+    clear_link_registry_cache_for path;
     write_json config path json;
     match read_json_doc config path with
     | Ok (Some written) when links_of_yojson written = Ok expected_links -> Ok ()
@@ -515,14 +565,18 @@ let build_goal_task_index
       : (string, task list) Hashtbl.t
   =
   let tbl = Hashtbl.create 16 in
-  let task_by_id = Hashtbl.create (List.length tasks) in
-  List.iter (fun (task : task) -> Hashtbl.replace task_by_id task.id task) tasks;
+  let task_by_id =
+    List.fold_left
+      (fun acc (task : task) -> Task_id_map.add task.id task acc)
+      Task_id_map.empty
+      tasks
+  in
   List.iter
     (fun (goal_id, task_ids) ->
        let linked_tasks =
          List.filter_map
            (fun task_id ->
-              Hashtbl.find_opt task_by_id task_id)
+              Task_id_map.find_opt task_id task_by_id)
            task_ids
        in
        Hashtbl.replace tbl goal_id linked_tasks)

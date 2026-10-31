@@ -1,0 +1,574 @@
+{
+  "scope": "Adversarial component controls, not full UI. Per-call timing and batch CPU distinct.",
+  "rows": [
+    {
+      "rows": 13,
+      "notes": 0,
+      "distribution": "empty",
+      "before": {
+        "wall_median_batch_us": 52.486328125,
+        "cpu_median_batch_us": 77.78125,
+        "per_call_p50_us": 25.834,
+        "per_call_p95_us": 171.458,
+        "per_call_p99_us": 615.625,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 22.074546875000003,
+        "cpu_median_batch_us": 25.296875,
+        "per_call_p50_us": 11.125,
+        "per_call_p95_us": 39.208,
+        "per_call_p99_us": 449.125,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 13,
+      "notes": 30,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 52.96875,
+        "cpu_median_batch_us": 40.359375,
+        "per_call_p50_us": 31.375,
+        "per_call_p95_us": 235.625,
+        "per_call_p99_us": 504.042,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 68.70345312500001,
+        "cpu_median_batch_us": 50.65625,
+        "per_call_p50_us": 19.333,
+        "per_call_p95_us": 178.167,
+        "per_call_p99_us": 1714.5,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 13,
+      "notes": 30,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 63.492515624999996,
+        "cpu_median_batch_us": 63.203125,
+        "per_call_p50_us": 33.209,
+        "per_call_p95_us": 248.917,
+        "per_call_p99_us": 563.625,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 20.1051484375,
+        "cpu_median_batch_us": 27.671875,
+        "per_call_p50_us": 10.334,
+        "per_call_p95_us": 29.583,
+        "per_call_p99_us": 295.916,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 13,
+      "notes": 300,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 59.879875,
+        "cpu_median_batch_us": 89.4453125,
+        "per_call_p50_us": 50.167,
+        "per_call_p95_us": 216.084,
+        "per_call_p99_us": 1813.5,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 98.6966171875,
+        "cpu_median_batch_us": 122.953125,
+        "per_call_p50_us": 46.709,
+        "per_call_p95_us": 474.667,
+        "per_call_p99_us": 2706.083,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 13,
+      "notes": 300,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 52.933265625000004,
+        "cpu_median_batch_us": 37.7421875,
+        "per_call_p50_us": 29.834,
+        "per_call_p95_us": 154.292,
+        "per_call_p99_us": 396.042,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 25.407546875,
+        "cpu_median_batch_us": 16.421875,
+        "per_call_p50_us": 10.209,
+        "per_call_p95_us": 83.917,
+        "per_call_p99_us": 292.958,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 13,
+      "notes": 3000,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 129.7158203125,
+        "cpu_median_batch_us": 117.5546875,
+        "per_call_p50_us": 96.334,
+        "per_call_p95_us": 296.25,
+        "per_call_p99_us": 536.166,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 169.3844375,
+        "cpu_median_batch_us": 164.3828125,
+        "per_call_p50_us": 152.125,
+        "per_call_p95_us": 384.417,
+        "per_call_p99_us": 658.375,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 13,
+      "notes": 3000,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 77.87174218749999,
+        "cpu_median_batch_us": 152.375,
+        "per_call_p50_us": 45.167,
+        "per_call_p95_us": 216.208,
+        "per_call_p99_us": 1470.916,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 58.6836015625,
+        "cpu_median_batch_us": 132.375,
+        "per_call_p50_us": 58.083,
+        "per_call_p95_us": 116.208,
+        "per_call_p99_us": 238.125,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 13,
+      "notes": 30000,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 1773.5273124999999,
+        "cpu_median_batch_us": 1243.1875,
+        "per_call_p50_us": 1204.042,
+        "per_call_p95_us": 3247.25,
+        "per_call_p99_us": 6277.292,
+        "calls": 64
+      },
+      "time-window": {
+        "wall_median_batch_us": 2170.91925,
+        "cpu_median_batch_us": 1829.75,
+        "per_call_p50_us": 1733.125,
+        "per_call_p95_us": 4597.791,
+        "per_call_p99_us": 5672.5,
+        "calls": 64
+      }
+    },
+    {
+      "rows": 13,
+      "notes": 30000,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 219.43228125000002,
+        "cpu_median_batch_us": 167.375,
+        "per_call_p50_us": 179.833,
+        "per_call_p95_us": 478.208,
+        "per_call_p99_us": 735.75,
+        "calls": 64
+      },
+      "time-window": {
+        "wall_median_batch_us": 114.11721874999999,
+        "cpu_median_batch_us": 104.34375,
+        "per_call_p50_us": 98.875,
+        "per_call_p95_us": 321.333,
+        "per_call_p99_us": 1030.667,
+        "calls": 64
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 0,
+      "distribution": "empty",
+      "before": {
+        "wall_median_batch_us": 270.2802734375,
+        "cpu_median_batch_us": 211.46875,
+        "per_call_p50_us": 195.667,
+        "per_call_p95_us": 614.209,
+        "per_call_p99_us": 2731.125,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 182.0940859375,
+        "cpu_median_batch_us": 119.59375,
+        "per_call_p50_us": 96.334,
+        "per_call_p95_us": 497.584,
+        "per_call_p99_us": 1454.708,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 30,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 235.9654921875,
+        "cpu_median_batch_us": 210.640625,
+        "per_call_p50_us": 201.917,
+        "per_call_p95_us": 442.625,
+        "per_call_p99_us": 912.291,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 126.28939062500001,
+        "cpu_median_batch_us": 101.3359375,
+        "per_call_p50_us": 92.584,
+        "per_call_p95_us": 241.5,
+        "per_call_p99_us": 941.459,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 30,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 217.9869765625,
+        "cpu_median_batch_us": 241.6796875,
+        "per_call_p50_us": 198.25,
+        "per_call_p95_us": 336,
+        "per_call_p99_us": 918,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 137.6136171875,
+        "cpu_median_batch_us": 101.2421875,
+        "per_call_p50_us": 89.667,
+        "per_call_p95_us": 238.333,
+        "per_call_p99_us": 1333.542,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 300,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 303.6767578125,
+        "cpu_median_batch_us": 255.0390625,
+        "per_call_p50_us": 224.125,
+        "per_call_p95_us": 627.75,
+        "per_call_p99_us": 1575.333,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 221.4016953125,
+        "cpu_median_batch_us": 139.375,
+        "per_call_p50_us": 117.125,
+        "per_call_p95_us": 885.583,
+        "per_call_p99_us": 1576.416,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 300,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 262.348953125,
+        "cpu_median_batch_us": 230.8671875,
+        "per_call_p50_us": 220.875,
+        "per_call_p95_us": 355.917,
+        "per_call_p99_us": 2012.958,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 155.5045546875,
+        "cpu_median_batch_us": 140.8984375,
+        "per_call_p50_us": 96.709,
+        "per_call_p95_us": 241.25,
+        "per_call_p99_us": 2658.917,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 3000,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 593.8128203125,
+        "cpu_median_batch_us": 460.21875,
+        "per_call_p50_us": 417.25,
+        "per_call_p95_us": 1091.833,
+        "per_call_p99_us": 2167.708,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 382.6529921875,
+        "cpu_median_batch_us": 283.40625,
+        "per_call_p50_us": 270.083,
+        "per_call_p95_us": 864.375,
+        "per_call_p99_us": 1715.667,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 3000,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 439.8821640625,
+        "cpu_median_batch_us": 375.0859375,
+        "per_call_p50_us": 364.125,
+        "per_call_p95_us": 907.583,
+        "per_call_p99_us": 1349.625,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 167.2962265625,
+        "cpu_median_batch_us": 141.203125,
+        "per_call_p50_us": 126.875,
+        "per_call_p95_us": 354.333,
+        "per_call_p99_us": 812.5,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 30000,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 3153.5638125,
+        "cpu_median_batch_us": 2576.65625,
+        "per_call_p50_us": 2515.916,
+        "per_call_p95_us": 5374.667,
+        "per_call_p99_us": 8865.25,
+        "calls": 64
+      },
+      "time-window": {
+        "wall_median_batch_us": 2004.02603125,
+        "cpu_median_batch_us": 1862.375,
+        "per_call_p50_us": 1833.5,
+        "per_call_p95_us": 4146.167,
+        "per_call_p99_us": 5939.708,
+        "calls": 64
+      }
+    },
+    {
+      "rows": 24,
+      "notes": 30000,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 1865.1171875,
+        "cpu_median_batch_us": 1768.5,
+        "per_call_p50_us": 1676.75,
+        "per_call_p95_us": 2506.041,
+        "per_call_p99_us": 3395.334,
+        "calls": 64
+      },
+      "time-window": {
+        "wall_median_batch_us": 385.77734375,
+        "cpu_median_batch_us": 368.90625,
+        "per_call_p50_us": 338.25,
+        "per_call_p95_us": 835.042,
+        "per_call_p99_us": 1083.916,
+        "calls": 64
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 0,
+      "distribution": "empty",
+      "before": {
+        "wall_median_batch_us": 629.783203125,
+        "cpu_median_batch_us": 621.4375,
+        "per_call_p50_us": 597.458,
+        "per_call_p95_us": 897.667,
+        "per_call_p99_us": 1332,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 314.3896484375,
+        "cpu_median_batch_us": 306.40625,
+        "per_call_p50_us": 300,
+        "per_call_p95_us": 426.5,
+        "per_call_p99_us": 1043.083,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 30,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 829.17025,
+        "cpu_median_batch_us": 680.671875,
+        "per_call_p50_us": 618.709,
+        "per_call_p95_us": 1569.791,
+        "per_call_p99_us": 1961.125,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 361.3206328125,
+        "cpu_median_batch_us": 335.34375,
+        "per_call_p50_us": 304.125,
+        "per_call_p95_us": 764.75,
+        "per_call_p99_us": 1701.667,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 30,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 891.271484375,
+        "cpu_median_batch_us": 668.6640625,
+        "per_call_p50_us": 607.25,
+        "per_call_p95_us": 1773.708,
+        "per_call_p99_us": 3812.875,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 355.5979765625,
+        "cpu_median_batch_us": 316.8984375,
+        "per_call_p50_us": 300.792,
+        "per_call_p95_us": 732.792,
+        "per_call_p99_us": 1075.792,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 300,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 759.6656796875,
+        "cpu_median_batch_us": 670.203125,
+        "per_call_p50_us": 643.375,
+        "per_call_p95_us": 1256.334,
+        "per_call_p99_us": 2264.584,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 313.00682812499997,
+        "cpu_median_batch_us": 314.203125,
+        "per_call_p50_us": 313.291,
+        "per_call_p95_us": 489.291,
+        "per_call_p99_us": 618.458,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 300,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 882.5572890625,
+        "cpu_median_batch_us": 772.578125,
+        "per_call_p50_us": 853.75,
+        "per_call_p95_us": 1500.083,
+        "per_call_p99_us": 1965.083,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 417.6266328125,
+        "cpu_median_batch_us": 361.1484375,
+        "per_call_p50_us": 317.292,
+        "per_call_p95_us": 821.792,
+        "per_call_p99_us": 1307.709,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 3000,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 1233.1171875,
+        "cpu_median_batch_us": 1108.390625,
+        "per_call_p50_us": 1059.417,
+        "per_call_p95_us": 2255.75,
+        "per_call_p99_us": 5232.958,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 611.4436875,
+        "cpu_median_batch_us": 521.4765625,
+        "per_call_p50_us": 466.25,
+        "per_call_p95_us": 1180.75,
+        "per_call_p99_us": 1652.375,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 3000,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 1343.7952421875,
+        "cpu_median_batch_us": 1142.1328125,
+        "per_call_p50_us": 1096.667,
+        "per_call_p95_us": 2503.125,
+        "per_call_p99_us": 4574.542,
+        "calls": 256
+      },
+      "time-window": {
+        "wall_median_batch_us": 430.43749218749997,
+        "cpu_median_batch_us": 391.703125,
+        "per_call_p50_us": 361.584,
+        "per_call_p95_us": 1330.458,
+        "per_call_p99_us": 2466.459,
+        "calls": 256
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 30000,
+      "distribution": "onscreen-one-pitch",
+      "before": {
+        "wall_median_batch_us": 12622.290375,
+        "cpu_median_batch_us": 6132.78125,
+        "per_call_p50_us": 8631.291,
+        "per_call_p95_us": 23069.416,
+        "per_call_p99_us": 241167,
+        "calls": 64
+      },
+      "time-window": {
+        "wall_median_batch_us": 3735.32159375,
+        "cpu_median_batch_us": 2467.0625,
+        "per_call_p50_us": 2978.375,
+        "per_call_p95_us": 8481.083,
+        "per_call_p99_us": 11088.375,
+        "calls": 64
+      }
+    },
+    {
+      "rows": 48,
+      "notes": 30000,
+      "distribution": "onscreen-uniform",
+      "before": {
+        "wall_median_batch_us": 6713.0247500000005,
+        "cpu_median_batch_us": 5158.84375,
+        "per_call_p50_us": 6430.375,
+        "per_call_p95_us": 11406.083,
+        "per_call_p99_us": 30764.041,
+        "calls": 64
+      },
+      "time-window": {
+        "wall_median_batch_us": 1662.6952812499999,
+        "cpu_median_batch_us": 1143.875,
+        "per_call_p50_us": 1392.625,
+        "per_call_p95_us": 3732.542,
+        "per_call_p99_us": 6461.708,
+        "calls": 64
+      }
+    }
+  ],
+  "gc_entries": 551,
+  "gc_duration_ms": 255.39274334907532
+}

@@ -1,0 +1,417 @@
+{
+  "base_git": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+  "scope": "Exact copied observational component runs, including rejected/regressing predecessors. v5 grid and private style functions occur byte-for-byte in product; explanatory comments differ. Explicit adapters, no layout/text assertions, real TTY, audio/MIDI or physical presentation proof. Heap deltas are not allocated byte counts.",
+  "product_sha256": {
+    "tools/alphatex/sequencer-tui.mjs": "41325426ccd1dba436fb0f5e8b7c700cf630a8a85254c486eb021517c50be64b",
+    "tools/alphatex/terminal-style.mjs": "b7d476b711e35d00119b222f63eb5ca8bfabfa77e7d936b46d1d7d0c2d6df009"
+  },
+  "measured_fragment_sha256": {
+    "v5_grid": "969c44ad2fc57892b271885bf9dcb22cb37c800887c0d42db6a6da5a49dc9f68",
+    "styles_helper": "f4c83357c05de57329cd02657267bc4e9f411a87e1fb837f84d37da76514fc17",
+    "styles_coalescer": "2833d6f14b254502d034e65c8b2748ac54a1f377eee601a6bce54769bb1c0938"
+  },
+  "files": [
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/before-fragment.mjs.txt",
+      "retained": "v1/before-fragment.mjs.txt",
+      "sha256": "5465b74e6d0023b0e4ffd8ba6f63931e4acbfdf3c289f71984895d8e453c9f00",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/before.mjs",
+      "retained": "v1/before.mjs",
+      "sha256": "57d921432d2f7cc80101c2c1848b6ed2c4820a13f6aca1db05d1c8d076c09ad9",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/bench.mjs",
+      "retained": "v1/bench.mjs",
+      "sha256": "1d6b3a7e21b5bce65abf11a5999d34683be9fd39ff4ceee094786e6fe8367775",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/execution.json",
+      "retained": "v1/execution.json",
+      "sha256": "71e0e4d65679c099aab9bedd24e3238d8d8f74af250827e58f67d5f7cff2618d",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/group-all.mjs",
+      "retained": "v1/group-all.mjs",
+      "sha256": "b298e1b97e1e2f52a4b798bbca7b9bbfc800525d623286e30509745f16bbeefc",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/group-visible.mjs",
+      "retained": "v1/group-visible.mjs",
+      "sha256": "3c603c4e51110d8d70226d31fda9bd8402e281e353dcf0808fa15b1e4b13a5fe",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/identity.json",
+      "retained": "v1/identity.json",
+      "sha256": "4b27b2e639135e67b5a2715cdc7a7114baa10137035a3a3f152488f0825dd40d",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/result.json",
+      "retained": "v1/result.json",
+      "sha256": "1e8e0576a58c6a323e6ae27ef14a0e99eb83d0a3a34d40acb9757127d6b58d0a",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/stderr.txt",
+      "retained": "v1/stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/summary.json",
+      "retained": "v1/summary.json",
+      "sha256": "e70b0a96a73f73403d9f74d69a141de2c5628857e3c108d7f49fdfde750a3c97",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/terminal-style.mjs",
+      "retained": "v1/terminal-style.mjs",
+      "sha256": "107342838265b95bd85598987ab32dd2d89658072cf7bb8831a82461cb848575",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v1/terminal.mjs",
+      "retained": "v1/terminal.mjs",
+      "sha256": "9eaad04739b5c85e8e60a8a53c377aee19cfd4fd8700b370594e59e09030bcb2",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/before-fragment.mjs.txt",
+      "retained": "v2/before-fragment.mjs.txt",
+      "sha256": "5465b74e6d0023b0e4ffd8ba6f63931e4acbfdf3c289f71984895d8e453c9f00",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/before.mjs",
+      "retained": "v2/before.mjs",
+      "sha256": "57d921432d2f7cc80101c2c1848b6ed2c4820a13f6aca1db05d1c8d076c09ad9",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/bench.mjs",
+      "retained": "v2/bench.mjs",
+      "sha256": "880d904a715a5a245c5198f254991393af4aba65e869088d3a9928dc465de120",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/candidate-terminal-style.mjs",
+      "retained": "v2/candidate-terminal-style.mjs",
+      "sha256": "7037021a2a8909e847ef1a79db67e8be00d503f5a867d49a1b6435ea67de89ef",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/combined.mjs",
+      "retained": "v2/combined.mjs",
+      "sha256": "49ed15f20cbfc03da5a06c62927a9fc44e2dc58f6efe36a5af5d59f6d3012528",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/execution.json",
+      "retained": "v2/execution.json",
+      "sha256": "40408a034171ff1f05e8cfac3967673aba0fd5701f614c90c16a3622235fe8aa",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/group-visible.mjs",
+      "retained": "v2/group-visible.mjs",
+      "sha256": "3c603c4e51110d8d70226d31fda9bd8402e281e353dcf0808fa15b1e4b13a5fe",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/identity.json",
+      "retained": "v2/identity.json",
+      "sha256": "49d7c72173cf0d8477d9ddc996d31959ff03cec7d5d1dac0784b922dbe3ae939",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/result.json",
+      "retained": "v2/result.json",
+      "sha256": "e010629e49c9005b008eac1efb4c19b29c7779aa5766f5969f36128f27ef4c16",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/stderr.txt",
+      "retained": "v2/stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/styles-only.mjs",
+      "retained": "v2/styles-only.mjs",
+      "sha256": "84033d21f13f20341da1737b8761022f50c3514cb78223efd64173da6593a57a",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/summary.json",
+      "retained": "v2/summary.json",
+      "sha256": "f92b1e4b1d349233037c24c2496a720be7b681d0af2897853b9298861801540a",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/terminal-style.mjs",
+      "retained": "v2/terminal-style.mjs",
+      "sha256": "107342838265b95bd85598987ab32dd2d89658072cf7bb8831a82461cb848575",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v2/terminal.mjs",
+      "retained": "v2/terminal.mjs",
+      "sha256": "9eaad04739b5c85e8e60a8a53c377aee19cfd4fd8700b370594e59e09030bcb2",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/before-fragment.mjs.txt",
+      "retained": "v3/before-fragment.mjs.txt",
+      "sha256": "5465b74e6d0023b0e4ffd8ba6f63931e4acbfdf3c289f71984895d8e453c9f00",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/before.mjs",
+      "retained": "v3/before.mjs",
+      "sha256": "57d921432d2f7cc80101c2c1848b6ed2c4820a13f6aca1db05d1c8d076c09ad9",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/bench.mjs",
+      "retained": "v3/bench.mjs",
+      "sha256": "d9eeda1cbfb662eed1ce631a45fd18c33b7500dbb9620d4c1171274346d5a541",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/candidate-terminal-style.mjs",
+      "retained": "v3/candidate-terminal-style.mjs",
+      "sha256": "7037021a2a8909e847ef1a79db67e8be00d503f5a867d49a1b6435ea67de89ef",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/combined.mjs",
+      "retained": "v3/combined.mjs",
+      "sha256": "49ed15f20cbfc03da5a06c62927a9fc44e2dc58f6efe36a5af5d59f6d3012528",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/execution.json",
+      "retained": "v3/execution.json",
+      "sha256": "2c0b33c580ab8bb11be6e144ac12ac18998d8557739794fc00ec036916d39df0",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/identity.json",
+      "retained": "v3/identity.json",
+      "sha256": "db9bacea9877745cfcbac6908222a2a9efdc2cd8f170f44dd6065d9f3f472784",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/result.json",
+      "retained": "v3/result.json",
+      "sha256": "bb18b676b31f4f510a1baba981b39227cf16e0fd89c92418896232b808311824",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/stderr.txt",
+      "retained": "v3/stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/summary.json",
+      "retained": "v3/summary.json",
+      "sha256": "8452a67f8b81b735aee31dbf5dbefc1b9de88fde726364e7d9c09d4fcdb446e9",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/terminal-style.mjs",
+      "retained": "v3/terminal-style.mjs",
+      "sha256": "107342838265b95bd85598987ab32dd2d89658072cf7bb8831a82461cb848575",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/terminal.mjs",
+      "retained": "v3/terminal.mjs",
+      "sha256": "9eaad04739b5c85e8e60a8a53c377aee19cfd4fd8700b370594e59e09030bcb2",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v3/time-window.mjs",
+      "retained": "v3/time-window.mjs",
+      "sha256": "5d8306c49b1d43206b362d7234dd21646c7bb7d90b96cbeeb5b9d10d359ca9e5",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/before-fragment.mjs.txt",
+      "retained": "v4/before-fragment.mjs.txt",
+      "sha256": "5465b74e6d0023b0e4ffd8ba6f63931e4acbfdf3c289f71984895d8e453c9f00",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/before.mjs",
+      "retained": "v4/before.mjs",
+      "sha256": "57d921432d2f7cc80101c2c1848b6ed2c4820a13f6aca1db05d1c8d076c09ad9",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/bench.mjs",
+      "retained": "v4/bench.mjs",
+      "sha256": "0521c79678934d3868d7be1d8d7f05d40640dbb2efd655ee603fc17c3ba51d04",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/candidate-terminal-style.mjs",
+      "retained": "v4/candidate-terminal-style.mjs",
+      "sha256": "7037021a2a8909e847ef1a79db67e8be00d503f5a867d49a1b6435ea67de89ef",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/execution.json",
+      "retained": "v4/execution.json",
+      "sha256": "3d04ece80b356da867e91fc78f6433aab4b3e67912b3e731b72405e19b4afae5",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/identity.json",
+      "retained": "v4/identity.json",
+      "sha256": "84f0ec1ff7a9b9eab1a4ad765e32f91a6f63524af1e6df7ef23842486bb064e4",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/result.json",
+      "retained": "v4/result.json",
+      "sha256": "eb1a01f4facd3451e3d6a8a84fc5930e44f95e64e8a0a1ff6477ff419ca8d596",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/stderr.txt",
+      "retained": "v4/stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/summary.json",
+      "retained": "v4/summary.json",
+      "sha256": "acc4f8ce397b7793148f469c868f0f94fcdcfe626c43ab0c88ad996c1be37f06",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/terminal-style.mjs",
+      "retained": "v4/terminal-style.mjs",
+      "sha256": "107342838265b95bd85598987ab32dd2d89658072cf7bb8831a82461cb848575",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/terminal.mjs",
+      "retained": "v4/terminal.mjs",
+      "sha256": "9eaad04739b5c85e8e60a8a53c377aee19cfd4fd8700b370594e59e09030bcb2",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v4/time-window.mjs",
+      "retained": "v4/time-window.mjs",
+      "sha256": "5d8306c49b1d43206b362d7234dd21646c7bb7d90b96cbeeb5b9d10d359ca9e5",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/before-fragment.mjs.txt",
+      "retained": "v5/before-fragment.mjs.txt",
+      "sha256": "5465b74e6d0023b0e4ffd8ba6f63931e4acbfdf3c289f71984895d8e453c9f00",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/before.mjs",
+      "retained": "v5/before.mjs",
+      "sha256": "57d921432d2f7cc80101c2c1848b6ed2c4820a13f6aca1db05d1c8d076c09ad9",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/bench.mjs",
+      "retained": "v5/bench.mjs",
+      "sha256": "81d070d7431b562ee8e69792ecb0b821da7d93f5beb8ae5b7d01c5667403efe2",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/candidate-terminal-style.mjs",
+      "retained": "v5/candidate-terminal-style.mjs",
+      "sha256": "7037021a2a8909e847ef1a79db67e8be00d503f5a867d49a1b6435ea67de89ef",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/execution.json",
+      "retained": "v5/execution.json",
+      "sha256": "b82b0f44a4d346d74343b8d612dfa243c67f9bb639740215ffd3b285f1b0e977",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/identity.json",
+      "retained": "v5/identity.json",
+      "sha256": "e92d48604c7e315340333e2ad3418ee6e315d78bd67ab666248878db18e02de3",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/result.json",
+      "retained": "v5/result.json",
+      "sha256": "1ac609e6b65021d9a9c5467c86c72eb761d31c3ce2816129c11dbe6e40f51069",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/single-pitch.mjs",
+      "retained": "v5/single-pitch.mjs",
+      "sha256": "f14c09ac8bae6f71146a7ea1b59db30c457037db68917f29dcfe8671ea3ddbdd",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/stderr.txt",
+      "retained": "v5/stderr.txt",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/summary.json",
+      "retained": "v5/summary.json",
+      "sha256": "4b66dc05474ca926d82a388b38dd1a9b3e10315569c5f218250180df74af5c1d",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/terminal-style.mjs",
+      "retained": "v5/terminal-style.mjs",
+      "sha256": "107342838265b95bd85598987ab32dd2d89658072cf7bb8831a82461cb848575",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/terminal.mjs",
+      "retained": "v5/terminal.mjs",
+      "sha256": "9eaad04739b5c85e8e60a8a53c377aee19cfd4fd8700b370594e59e09030bcb2",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-piano-roll-v5/time-window.mjs",
+      "retained": "v5/time-window.mjs",
+      "sha256": "5d8306c49b1d43206b362d7234dd21646c7bb7d90b96cbeeb5b9d10d359ca9e5",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-existing-style-tests-v1.json",
+      "retained": "daw-existing-style-tests-v1.json",
+      "sha256": "0aba5ba57444279b9468694d91c8c0a43728165a3efe0f842d8756f845b7cc8e",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-existing-controller-tests-v1.json",
+      "retained": "daw-existing-controller-tests-v1.json",
+      "sha256": "1b974996b056bc4ad58f90c374749d5fcd06b74f7a193b20d03a4219f5a82caf",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/daw-existing-controller-tests-v2.json",
+      "retained": "daw-existing-controller-tests-v2.json",
+      "sha256": "04cc97cb1dc9331ef9eb504dbbc2d88dfff24b3b2983d654cce5a12bbab58c92",
+      "derivative": false
+    }
+  ]
+}

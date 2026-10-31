@@ -1,0 +1,8 @@
+{
+  "started_at_unix": 1793340957.8245509,
+  "ended_at_unix": 1793340969.004941,
+  "returncode": 0,
+  "node_sha256_after": "56694c81b093cc8da273fa017cf91765b3653e5f64f16727976ffaa87b2b6b31",
+  "result_sha256": "1ac609e6b65021d9a9c5467c86c72eb761d31c3ce2816129c11dbe6e40f51069",
+  "bench_sha256": "81d070d7431b562ee8e69792ecb0b821da7d93f5beb8ae5b7d01c5667403efe2"
+}

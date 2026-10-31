@@ -1,0 +1,24 @@
+{
+  "scope": "Extracted actual piano-roll loop. String replaces Tonal pitch labels; explicit synthetic arguments. Header/harmony/editor projection, scheduling, fit/output construction, terminal writes, audio/MIDI and actual display are outside this component. No layout/text expectations or physical flicker test. Candidate grouping arrays/maps are per-call, not persistent mutable UI caches. Second counterfactual also compares style arrays directly in the private cell coalescer. Both source callers supply arrays of SGR parameter strings; no new output expectations are asserted. All v1 observations remain retained separately. Third counterfactual keeps only visible-pitch notes whose interval intersects the time window before per-call grouping. Original order and objects are retained, then the original left/right paint bounds still apply. No note edits or playback changes.",
+  "git_source": "5297349b101d61bb901b3729d43c4dec8bb30ec4",
+  "node_version": "v26.3.0",
+  "source_file": "tools/alphatex/sequencer-tui.mjs",
+  "source_sha256": "4703fc129be917f680d1a9eacfba3400cb489f3af169da4ac4deacd48a577a62",
+  "fragment_sha256": "5465b74e6d0023b0e4ffd8ba6f63931e4acbfdf3c289f71984895d8e453c9f00",
+  "created_at_unix": 1793340518.777893,
+  "files": {
+    "candidate-terminal-style.mjs": "7037021a2a8909e847ef1a79db67e8be00d503f5a867d49a1b6435ea67de89ef",
+    "terminal-style.mjs": "107342838265b95bd85598987ab32dd2d89658072cf7bb8831a82461cb848575",
+    "before.mjs": "57d921432d2f7cc80101c2c1848b6ed2c4820a13f6aca1db05d1c8d076c09ad9",
+    "time-window.mjs": "5d8306c49b1d43206b362d7234dd21646c7bb7d90b96cbeeb5b9d10d359ca9e5",
+    "bench.mjs": "d9eeda1cbfb662eed1ce631a45fd18c33b7500dbb9620d4c1171274346d5a541",
+    "terminal.mjs": "9eaad04739b5c85e8e60a8a53c377aee19cfd4fd8700b370594e59e09030bcb2",
+    "before-fragment.mjs.txt": "5465b74e6d0023b0e4ffd8ba6f63931e4acbfdf3c289f71984895d8e453c9f00",
+    "combined.mjs": "49ed15f20cbfc03da5a06c62927a9fc44e2dc58f6efe36a5af5d59f6d3012528"
+  },
+  "node_executable_sha256": "56694c81b093cc8da273fa017cf91765b3653e5f64f16727976ffaa87b2b6b31",
+  "argv": [
+    "node",
+    "artifacts/extreme-perf-20261030/daw-piano-roll-v3/bench.mjs"
+  ]
+}

@@ -428,12 +428,16 @@ export async function viewSequencer({ path, root = resolve('music-projects'), em
       }
       lines.push([['       ', []], ...cellSegments(ruler)], meters ? [['  bar  ', [dim]], [numbers.join(''), [bold]]]
         : `       ${axis.label} ${first / per} → ${Math.min(project.length, first + cols * editor.step) / per}`)
+      // Preserve source order for overlapping notes; this index belongs only to this frame.
+      // A single pitch row already visits the source list once.
       const height = Math.max(1, rows - 12), high = Math.min(127, Math.max(height - 1, editor.pitch + Math.floor(height / 2)))
+      const notesByPitch = height === 1 ? null : Map.groupBy(track.notes.filter(note => note.pitch <= high && note.pitch > high - height
+        && note.start < first + cols * editor.step && note.start + note.duration > first), note => note.pitch)
       for (let y = 0; y < height; y++) {
         const pitch = high - y
         if (pitch < 0) break
         const cells = Array.from({ length: cols }, (_, x) => first + x * editor.step >= project.length ? [' ', []] : pitch % 12 === 0 ? ['─', [dim, cyan]] : ['·', [dim]])
-        for (const note of track.notes) {
+        for (const note of notesByPitch === null ? track.notes : notesByPitch.get(pitch) ?? []) {
           if (note.pitch !== pitch) continue
           const left = Math.max(0, Math.floor((note.start - first) / editor.step))
           const right = Math.min(cols - 1, Math.ceil((note.start + note.duration - first) / editor.step) - 1)

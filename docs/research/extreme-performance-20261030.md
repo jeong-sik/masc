@@ -45,6 +45,40 @@ trusted merely because it is called canonical: non-ordered input keeps the
 original duplicate check and child-error order. This reduces one measured
 component without changing durability or adding mutable product state.
 
+## Traced stalls and file-writer counterfactuals
+
+The [runtime-events bundle](../evidence/extreme-performance-20261030/runtime-events/README.md)
+retains a separate instrumented 300-owner run: 600 durable operations, one failed
+health sample out of 2,261, released successful-read p95 141.554 ms and maximum
+10.606 seconds. The old consumers record long domain-0 intervals around I/O but
+cannot causally attribute one HTTP stall or certify exclusive CPU. The new
+ready/stop/flush protocol was separately qualified with two native owners.
+
+`Fs_compat.append_jsonl` encodes and writes on the caller domain's system thread.
+The [OCaml 5.5 manual](https://ocaml.org/manual/5.5/parallelism.html#s:par_systhread_interaction)
+explains that OCaml execution remains serialized within one domain. That makes
+main-domain CPU contention plausible, not proven for these HTTP outliers.
+`Systhread_host` already moves eligible work to another domain, but masc_core
+depends on fs_compat: directly calling that core module from Fs_compat would
+create a dependency cycle. Placement needs an appropriate lower-level boundary
+or changes at the owning caller, after measuring its actual critical path.
+
+The next [file-cache study](../evidence/extreme-performance-20261030/fd-cache/README.md)
+compares the actual cache module against two standalone counterfactuals.
+Removing caching regresses a 30-path working set about fivefold. Moving only
+inode validation outside the global mutex has mixed outcomes. The first
+parallel study puts encoding inside a per-path mutex, differing from the product.
+A separate corrected run preserves product ordering and improves normalized
+small-row/eight-worker/hot-cache wall time about 2.30-fold while CPU rises 4.4%;
+other shapes regress and all allocate more. Its compiled-executable digest and
+final-equality receipt apply only to the new run; older runs lack these digests.
+Per-case assertions are visible in source, but Python optimization flags were
+not captured, so those checks have no separate execution receipt.
+The prototype is retained for investigation and
+is not applied to production. The parallel values are inverse throughput,
+not individual action latency or evidence of meeting 0.1 ms. Both rejected
+approaches remain visible with CPU, wall, allocation and exact-byte readback.
+
 ## Measurement matrix still required for completion
 
 Use 100 us as the explicit target for every relevant boundary below. Report

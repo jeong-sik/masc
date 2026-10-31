@@ -1,0 +1,33 @@
+{
+  "scope": "Isolated single-domain append/flush component study, not the Fs_compat module, fsync, concurrent writers, server or TUI. Frozen product Fd_cache versus fresh writer counterfactual. Generated readback files are removed only after exact bytes/count validation. MD5 only identifies generated file bytes, not security provenance.",
+  "argv": [
+    "ocamlfind",
+    "ocamlopt",
+    "-thread",
+    "-package",
+    "threads,unix,yojson,mtime.clock.os",
+    "-linkpkg",
+    "fd_cache.mli",
+    "fd_cache.ml",
+    "bench.ml",
+    "-o",
+    "bench.exe"
+  ],
+  "compiler": "5.5.1",
+  "inputs": {
+    "p50": {
+      "observed_row_bytes": 570,
+      "sha256": "a3ebd0e3569d4cd0a476b63f1575aba7476923b1c9a3c2539ffc29dc39deb897"
+    },
+    "p99": {
+      "observed_row_bytes": 9812,
+      "sha256": "d17bfeff6226867914ce36637ecaa1c3fabd4e71e39de7c4302c245a7836e200"
+    }
+  },
+  "source_sha256": {
+    "fd_cache.mli": "342f4316a19d5d79eba3445109e1cd0bb069bb33b040f903b5a19e0d0ebfd541",
+    "fd_cache.ml": "a5aff8c41c9ed1e324709b0fdaf7ce35be42b76e36259120ebed4dc30d786014",
+    "bench.ml": "fd51988c15fd907520a39916fc6303db290d3594fbae31aabd865af30400671b"
+  },
+  "compile_returncode": 0
+}

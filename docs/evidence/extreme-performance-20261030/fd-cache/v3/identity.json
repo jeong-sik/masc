@@ -1,0 +1,34 @@
+{
+  "scope": "Product-matched lock placement: JSON encoded before per-path mutex. Actual frozen Fd_cache vs validation-outside-global-mutex prototype; 1/8 workers plus idle coordinator; no complete Fs_compat module or Eio/server/latency proof.",
+  "compile_started_at_unix": 1793337153.18532,
+  "compile_ended_at_unix": 1793337153.946056,
+  "argv": [
+    "ocamlfind",
+    "ocamlopt",
+    "-thread",
+    "-package",
+    "threads,unix,yojson,mtime.clock.os",
+    "-linkpkg",
+    "fd_cache.mli",
+    "fd_cache.ml",
+    "fd_cache_split.mli",
+    "fd_cache_split.ml",
+    "bench.ml",
+    "-o",
+    "bench.exe"
+  ],
+  "returncode": 0,
+  "compiler": "5.5.1",
+  "source_sha256": {
+    "fd_cache.ml": "a5aff8c41c9ed1e324709b0fdaf7ce35be42b76e36259120ebed4dc30d786014",
+    "fd_cache.mli": "342f4316a19d5d79eba3445109e1cd0bb069bb33b040f903b5a19e0d0ebfd541",
+    "fd_cache_split.ml": "2f23a230bdd38c476580278687aa888833a34ce55c79ce9bdb749bd3b3779670",
+    "fd_cache_split.mli": "342f4316a19d5d79eba3445109e1cd0bb069bb33b040f903b5a19e0d0ebfd541",
+    "bench.ml": "c6bb92ac1621b3ff269e30c1116ae3aba06f31c628aa631d5faad23e677a4f2b"
+  },
+  "inputs_sha256": {
+    "p50.json": "a3ebd0e3569d4cd0a476b63f1575aba7476923b1c9a3c2539ffc29dc39deb897",
+    "p99.json": "d17bfeff6226867914ce36637ecaa1c3fabd4e71e39de7c4302c245a7836e200"
+  },
+  "executable_sha256": "6de1a5431ccc208a1b477f0419fcb6acc3b6e84f94dddc5af8a67439b1aa0c1f"
+}

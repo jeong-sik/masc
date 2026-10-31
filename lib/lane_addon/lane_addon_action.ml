@@ -29,10 +29,19 @@ let exact names json = let* fields = object_ json in
   else Error ("expected exactly fields: " ^ String.concat ", " names)
 let traverse f values = List.fold_left (fun acc value ->
   let* acc = acc in let* value = f value in Ok (value :: acc)) (Ok []) values |> Result.map List.rev
+(* Retained requests are already canonical. Strict key order proves both
+   uniqueness and the final order without allocating names or sorting twice.
+   Unordered input keeps the original duplicate check and child-error order. *)
+let rec strictly_ordered_members = function
+  | [] | [_] -> true
+  | (left, _) :: (((right, _) :: _) as tail) ->
+      String.compare left right < 0 && strictly_ordered_members tail
 let rec canonical = function
-  | `Assoc fields -> let* () = unique fields in
+  | `Assoc fields ->
+      let ordered = strictly_ordered_members fields in
+      let* () = if ordered then Ok () else unique fields in
       let* fields = traverse (fun (key, value) -> let* value = canonical value in Ok (key, value)) fields in
-      Ok (`Assoc (List.sort (fun (a, _) (b, _) -> String.compare a b) fields))
+      Ok (`Assoc (if ordered then fields else List.sort (fun (a, _) (b, _) -> String.compare a b) fields))
   | `List values -> traverse canonical values |> Result.map (fun values -> `List values)
   | `Float value when not (Float.is_finite value) -> Error "non-finite JSON number"
   | `Float value when Float.is_integer value ->

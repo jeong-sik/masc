@@ -23,6 +23,23 @@ let values key json = member key json |> Yojson.Safe.Util.to_list
 let obj fields = `Assoc fields
 let str value = `String value
 let strings values = `List (List.map str values)
+let test_canonical_request_identity () =
+  let original = obj ["z", `List [`Float 1.; `Float (-0.); `Intlit "123456789012345678901234567890"];
+    "a", obj ["y", `Int 2; "b", `Int 1]] in
+  let retained = "{\"a\":{\"b\":1,\"y\":2},\"z\":[1,0,123456789012345678901234567890]}" in
+  let canonical = Action.canonical original |> unwrap in
+  check string "existing canonical bytes and array order" retained (Yojson.Safe.to_string canonical);
+  let reread = Yojson.Safe.from_string retained |> Action.canonical |> unwrap in
+  check string "retained request digest" (Store.digest retained) (Action.input_digest reread);
+  check string "unordered input has the same identity" (Action.input_digest reread) (Action.input_digest canonical);
+  let refuse expected input = match Action.canonical input with
+    | Error detail -> check string "original refusal" expected detail
+    | Ok _ -> fail "invalid request was canonicalized" in
+  refuse "duplicate object member" (obj ["a", `Float nan; "b", `Null; "a", `Null]);
+  refuse "non-finite JSON number" (obj ["z", `Float nan; "a", `Intlit "1.0"]);
+  refuse "invalid JSON integer" (obj ["a", `Intlit "1.0"; "z", `Float nan]);
+  refuse "duplicate object member" (obj ["a", obj ["x", `Null; "x", `Null]; "z", `Float nan]);
+  refuse "non-finite JSON number" (obj ["z", `Float nan; "a", obj ["x", `Null; "x", `Null]])
 let object_schema properties = obj ["type",str "object"; "properties",obj properties;
   "required",strings (List.map fst properties); "additionalProperties",`Bool false]
 let string_schema = obj ["type",str "string"]
@@ -736,7 +753,9 @@ let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fu
   check int "all strict reads and repair retain one external action" 1 !(fixture.calls);
   detach clock fixture id)
 
-let () = run "Lane action workflow" ["optional world actions",[
+let () = run "Lane action workflow" ["canonical request identity",[
+  test_case "retained bytes, digest and original refusal order" `Quick test_canonical_request_identity];
+  "optional world actions",[
   test_case "action creation stays below workspace anchor" `Quick test_action_creates_only_owned_hierarchy;
   test_case "first action directory must be durable before dispatch and on retry" `Quick test_first_action_requires_durable_directory;
   test_case "terminal and fallback publication failures keep hot uncertainty without replay" `Quick test_failed_terminal_and_fallback_keep_hot_uncertainty;

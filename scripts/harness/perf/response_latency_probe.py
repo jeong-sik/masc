@@ -79,7 +79,8 @@ def main():
     parser.add_argument('--agent-name', help='Credential owner sent in X-MASC-Agent, as in the TUI')
     args = parser.parse_args()
     url = urlsplit(args.base_url)
-    if url.scheme not in ('http', 'https') or not url.hostname or url.username:
+    if (url.scheme not in ('http', 'https') or not url.hostname
+            or url.username is not None or url.password is not None):
         parser.error('base-url must be an HTTP(S) origin without credentials')
     if url.path not in ('', '/') or url.query or url.fragment:
         parser.error('base-url must be an origin without path, query or fragment')

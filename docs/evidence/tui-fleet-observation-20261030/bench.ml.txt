@@ -1,0 +1,67 @@
+module F = Masc.Fleet_stream
+module type CLIENT = sig
+  type t
+  val create : unit -> t
+  val started : t -> unit
+  val lost : t -> now:float -> unit
+  val feed : t -> string -> unit
+  val apply : t -> F.event -> unit
+  val observe : t -> unit
+end
+module Old : CLIENT = struct
+  type t = Old_client.t
+  let create=Old_client.create
+  let started=Old_client.started
+  let lost=Old_client.lost
+  let feed t s = ignore (Old_client.feed t s)
+  let apply t e = ignore (Old_client.apply t e)
+  let observe t = ignore (Old_client.view t)
+end
+module New : CLIENT = struct
+  type t = New_client.t
+  let create=New_client.create
+  let started=New_client.started
+  let lost=New_client.lost
+  let feed t s = ignore (New_client.feed t s)
+  let apply t e = ignore (New_client.apply t e)
+  let observe t = ignore (New_client.view t)
+end
+let fleet : F.fleet =
+  { fs_status=Keeper_fleet_grade.Fleet_ok; fs_blocker=None; fs_operator_action_required=false;
+    fs_bootable_count=0; fs_running_count=1; fs_executable_count=0; fs_failing_count=0;
+    fs_recovering_count=0; fs_turn_configuration_error_count=0; fs_official_client_recovery_required_count=0;
+    fs_paused_count=0; fs_target_reaction_capacity=0; fs_reaction_capacity_shortfall=0;
+    fs_bootable_names=F.Names.empty; fs_running_names=F.Names.empty; fs_executable_names=F.Names.empty;
+    fs_turn_configuration_error_names=F.Names.empty; fs_official_client_recovery_required_names=F.Names.empty;
+    fs_active_task_owner_without_fiber_count=0; fs_completion_authority_pending_count=0; fs_active_task_owner_scan_error_count=0 }
+let revision n = Option.get (F.Revision.of_int n)
+let initial = F.Snapshot {revision=revision 1;measured_at=1.;fleet;degraded=None}
+let events = Array.init 3000 (fun i -> F.Changed {revision=revision (i+2);measured_at=float_of_int (i+2);fleet})
+let frame e = Sse_wire.format_event_yojson ~id:(F.Revision.to_int (F.revision_of_event e)) (F.encode e)
+let initial_wire=frame initial
+let event_wires=Array.map frame events
+let scenarios = [
+  "direct_events", (fun (module C:CLIENT) ->
+    let t=C.create () in C.started t; C.apply t initial;
+    Array.iter (fun event -> C.apply t event; C.observe t) events);
+  "wire_events", (fun (module C:CLIENT) ->
+    let t=C.create () in C.started t; C.feed t initial_wire;
+    Array.iter (fun wire -> C.feed t wire; C.observe t) event_wires);
+  "reconnections", (fun (module C:CLIENT) ->
+    let t=C.create () in
+    for i=1 to 1000 do C.started t; C.feed t initial_wire; C.lost t ~now:(float_of_int i); C.observe t done);
+  "repeated_loss", (fun (module C:CLIENT) ->
+    let t=C.create () in C.started t;
+    for i=1 to 100000 do C.lost t ~now:(float_of_int i) done; C.observe t)
+]
+let sample scenario role run impl =
+ Gc.full_major ();
+ let bytes=Gc.allocated_bytes () and cpu=Sys.time () and wall=Unix.gettimeofday () in
+ run impl;
+ Printf.printf "%s,%s,%.6f,%.6f,%.0f\n%!" scenario role (Sys.time ()-.cpu) (Unix.gettimeofday ()-.wall) (Gc.allocated_bytes ()-.bytes)
+let () =
+ Printf.printf "scenario,implementation,cpu_s,wall_s,allocated_bytes\n%!";
+ List.iter (fun (name,run) -> for i=0 to 6 do
+   if i mod 2=0 then (sample name "old" run (module Old : CLIENT);sample name "new" run (module New : CLIENT))
+   else (sample name "new" run (module New : CLIENT);sample name "old" run (module Old : CLIENT))
+ done) scenarios

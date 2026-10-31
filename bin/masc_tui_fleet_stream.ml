@@ -27,37 +27,39 @@ type step =
   | Keep_reading
   | Reconnect
 
-(* [following] is the revision of the last event of this connection, [None]
-   until its [Snapshot]. [down_since] is the time of the first loss since the
-   last state arrived (a [Snapshot] or an [Unavailable_snapshot]), and [None]
-   before any loss and once a state arrived after it. *)
-type t =
-  { mutable decoder : Sse_wire.decoder
-  ; mutable reading : reading option
-  ; mutable unavailable : F.degradation option
-  ; mutable following : F.Revision.t option
-  ; mutable down_since : float option
-  ; mutable failure : failure option
+(* A scan cannot be both a reading and an unavailable snapshot. [following]
+   is this connection's last event revision, or [None] until its snapshot.
+   [down_since] is the first loss since a state arrived. *)
+type observation =
+  | Not_observed
+  | Observed_reading of reading
+  | Observed_unavailable of F.degradation
+
+type snapshot =
+  { observation : observation
+  ; following : F.Revision.t option
+  ; down_since : float option
+  ; failure : failure option
   }
+
+type t = { mutable decoder : Sse_wire.decoder; mutable snapshot : snapshot }
 
 let create () =
   { decoder = Sse_wire.create_decoder ()
-  ; reading = None
-  ; unavailable = None
-  ; following = None
-  ; down_since = None
-  ; failure = None
+  ; snapshot =
+      { observation = Not_observed; following = None; down_since = None; failure = None }
   }
 ;;
 
 let started t =
-  t.decoder <- Sse_wire.create_decoder ();
-  t.following <- None
+  let decoder = Sse_wire.create_decoder () in
+  let snapshot = { t.snapshot with following = None } in
+  t.decoder <- decoder;
+  t.snapshot <- snapshot
 ;;
 
 let reject t failure =
-  t.failure <- Some failure;
-  t.following <- None;
+  t.snapshot <- { t.snapshot with failure = Some failure; following = None };
   Reconnect
 ;;
 
@@ -66,26 +68,28 @@ let refused t ~status ~detail =
 ;;
 
 let lost t ~now =
-  match t.down_since with
+  match t.snapshot.down_since with
   | Some _ -> ()
-  | None -> t.down_since <- Some now
+  | None -> t.snapshot <- { t.snapshot with down_since = Some now }
 ;;
 
 let take_snapshot t reading =
-  t.reading <- Some reading;
-  t.unavailable <- None;
-  t.following <- Some reading.revision;
-  t.down_since <- None;
-  t.failure <- None;
+  t.snapshot <-
+    { observation = Observed_reading reading
+    ; following = Some reading.revision
+    ; down_since = None
+    ; failure = None
+    };
   Keep_reading
 ;;
 
 let take_unavailable_snapshot t revision degradation =
-  t.reading <- None;
-  t.unavailable <- Some degradation;
-  t.following <- Some revision;
-  t.down_since <- None;
-  t.failure <- None;
+  t.snapshot <-
+    { observation = Observed_unavailable degradation
+    ; following = Some revision
+    ; down_since = None
+    ; failure = None
+    };
   Keep_reading
 ;;
 
@@ -93,13 +97,14 @@ let take_unavailable_snapshot t revision degradation =
    Changed event then supplies the first reading; a Degraded event without a
    reading violates the producer's lifecycle and requires a new snapshot. *)
 let take_next t revision update =
-  match t.following with
-  | Some last when F.Revision.is_next ~after:last revision && update () ->
-    t.following <- Some revision;
-    Keep_reading
-  | Some _ | None ->
-    t.following <- None;
+  let snapshot = t.snapshot in
+  match snapshot.following with
+  | Some last when F.Revision.is_next ~after:last revision ->
+    update snapshot
+  | Some _ ->
+    t.snapshot <- { snapshot with following = None };
     Reconnect
+  | None -> Reconnect
 ;;
 
 let apply t = function
@@ -108,17 +113,26 @@ let apply t = function
   | F.Unavailable_snapshot { revision; degradation } ->
     take_unavailable_snapshot t revision degradation
   | F.Changed { revision; measured_at; fleet } ->
-    take_next t revision (fun () ->
-      t.reading <- Some { revision; measured_at; fleet; degraded = None };
-      t.unavailable <- None;
-      true)
+    take_next t revision (fun snapshot ->
+      t.snapshot <-
+        { snapshot with
+          observation = Observed_reading { revision; measured_at; fleet; degraded = None }
+        ; following = Some revision
+        };
+      Keep_reading)
   | F.Degraded { revision; degradation } ->
-    take_next t revision (fun () ->
-      match t.reading with
-      | None -> false
-      | Some reading ->
-        t.reading <- Some { reading with revision; degraded = Some degradation };
-        true)
+    take_next t revision (fun snapshot ->
+      match snapshot.observation with
+      | Not_observed | Observed_unavailable _ ->
+        t.snapshot <- { snapshot with following = None };
+        Reconnect
+      | Observed_reading reading ->
+        t.snapshot <-
+          { snapshot with
+            observation = Observed_reading { reading with revision; degraded = Some degradation }
+          ; following = Some revision
+          };
+        Keep_reading)
 ;;
 
 let apply_frame t (frame : Sse_wire.frame) =
@@ -149,17 +163,19 @@ let feed t chunk =
 ;;
 
 let view t =
-  match t.failure, t.reading, t.unavailable with
-  | Some failure, (Some _ | None), (Some _ | None) -> Cannot_read failure
-  | None, None, None ->
-    (match t.down_since with
+  let snapshot = t.snapshot in
+  match snapshot.failure, snapshot.observation with
+  | Some failure, (Not_observed | Observed_reading _ | Observed_unavailable _) ->
+    Cannot_read failure
+  | None, Not_observed ->
+    (match snapshot.down_since with
      | None -> Awaiting_first_reading
      | Some since -> Unreachable { since })
-  | None, None, Some degradation ->
-    Unavailable { degradation; disconnected_since = t.down_since }
-  | None, Some reading, (Some _ | None) ->
+  | None, Observed_unavailable degradation ->
+    Unavailable { degradation; disconnected_since = snapshot.down_since }
+  | None, Observed_reading reading ->
     let trouble =
-      match t.down_since with
+      match snapshot.down_since with
       | Some since -> Some (Disconnected { since })
       | None -> Option.map (fun degradation -> Scans_failing degradation) reading.degraded
     in

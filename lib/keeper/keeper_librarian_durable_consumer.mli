@@ -47,8 +47,8 @@ type outcome =
       ; official : Keeper_librarian_official_progress.t
       }
       (** A pass that read official-client lines, with the atoms it read
-          alongside if any. Lines whose fragments are all gone or all untagged
-          are passed without a model call. *)
+          alongside if any. Selected passes with no messages, tool observations
+          or counterpart observations advance without a model call. *)
 
 type error =
   | Keeper_meta_absent
@@ -73,7 +73,29 @@ type error =
   | Counterpart_interval_non_monotone of
       { after : float
       ; before : float
+      ; first_boundary_line : int
+      ; end_boundary_line : int
+      ; atom_bound : (int * float) option
+      ; official_bound : (int * float) option
       }
+      (** Lines in the Keeper's turn-boundary log identify the selected range
+          and preceding cursor witnesses that formed its inverted counterpart
+          interval. A bound is absent if there is no cursor, or its witness
+          does not precede the selected range. *)
+  | Counterpart_input_capacity_refused of
+      { turn_ref : Ids.Turn_ref.t
+      ; atom_range : Keeper_memory_os_current.durable_range_id option
+      ; official_range : Keeper_memory_os_current.official_range_id option
+      ; observation_count : int
+      ; observation_bytes : int
+      ; reports : Keeper_librarian_runtime.not_committed list
+      }
+      (** An input with no messages or tool observations was refused at an
+          authoritative input-capacity boundary. Complete counterpart inputs
+          are preserved: no truncation, invented byte cap, message-floor skip,
+          cursor advance or external ACK is authorized. The original range
+          and reports locate the source and actual refusal. A later retry must
+          accept that full source through its actual input/transport boundary. *)
   | Counterpart_observations_unreadable of Keeper_librarian_input_sources.read_error
   | Progress_write_failed of Keeper_librarian_progress.write_error
   | Official_progress_unreadable of Keeper_librarian_official_progress.read_error
@@ -111,6 +133,20 @@ val publication_unfinished : error -> bool
 (** A blocked original publication retains uncertain work. Queue consumers
     report the actual error and suspend later Memory phases of this wake. *)
 
+val refused_original
+  : Keeper_librarian_durable_capture.t
+  -> Keeper_librarian_runtime.not_committed list
+  -> (outcome, error) result
+(** Classify a definite refusal of the exact original, including a retained
+    original completed on a later wake. Only typed input-capacity evidence
+    with a whole-walk capacity-only classification produces
+    [Counterpart_input_capacity_refused]. Pending/unknown work is not passed
+    here. Historical range-fitting observations such as output limits,
+    timeouts and incomplete output also veto the capacity-only diagnosis.
+    All other definite reports yield [Memory_not_committed]; the capacity
+    refusal is this helper's sole error result.
+    Performs no I/O and grants no consumption authority. *)
+
 (** How far behind the keeper's Librarian is standing (RFC §4.9, invariant
     I4): finished turns beyond each read position, counted over the boundary
     log, the two positions and the current checkpoint. Read-only, and
@@ -147,7 +183,9 @@ val consume_one
     unread turn, of whichever kind ends first in the log. A small successful
     cut keeps that mode until the backlog is empty; a successful all-unread
     pass or a baseline also clears the marker. Durable progress remains the
-    authority across process restarts. [Memory_pending] returns [Pending]
+    authority across process restarts. A counterpart-only capacity refusal
+    cannot descend by messages and keeps only a pre-existing marker, rather
+    than narrowing its recovery range. [Memory_pending] returns [Pending]
     without invoking message-floor inference or changing the pre-existing
     failure marker. A later read still selects from current sources; this
     foundation alone does not retain an immutable original across wakes.

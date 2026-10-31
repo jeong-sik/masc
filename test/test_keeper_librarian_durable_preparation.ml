@@ -119,7 +119,58 @@ let test_restore_refuses_tampering () = with_prompts (fun () ->
   check bool "invalid caller time refuses before durable dispatch" true
     (Result.is_error (R.prepare_durable ~now:(-1.) (input ()))))
 
+let test_counterpart_template_admission_and_legacy_restore () = with_prompts (fun () ->
+  let counterpart : Keeper_counterpart_observation.t =
+    {origin=Durable_chat;channel="direct";workspace_id=None;user_id=Some "speaker";
+     user_name=Some "Speaker";authority=External;content="Original counterpart evidence"} in
+  let original=input () in
+  let with_counterpart={original with counterpart_observations=[counterpart]} in
+  (* This formerly valid capture is reconstructed under the old prompt, without
+     asking the fresh admission path to make a new incomplete original. *)
+  let old=R.prepare_durable ~now:123. original |> get in
+  let legacy=R.restore_durable_preparation ~source_input:with_counterpart ~parsing_now:old.parsing_now
+    ~policy:old.policy ~rule_prompt:old.rule_prompt ~prompt:old.prompt ~output_schema:old.output_schema |> get in
+  R.validate_durable_preparation legacy |> get;
+  check bool "old incomplete original still restores" true (legacy.source_input=with_counterpart);
+  check bool "restoration does not authorize a new effect from the legacy prompt" true
+    (Result.is_error (R.require_counterpart_template legacy));
+  R.require_counterpart_template old |> get;
+  check bool "fresh counterpart original refuses a prompt without the variable" true
+    (Result.is_error (R.prepare_durable ~now:123. with_counterpart));
+  let context : R.durable_step_context = {previous_state=None;unread_messages=[]} in
+  let old_step=R.prepare_durable_step ~now:123. ~context original |> get in
+  let p=old_step.preparation in
+  let restored_step=R.restore_durable_step_preparation ~context
+    ~source_input:(R.durable_step_source_input with_counterpart) ~parsing_now:p.parsing_now
+    ~policy:p.policy ~rule_prompt:p.rule_prompt ~prompt:p.prompt ~output_schema:p.output_schema |> get in
+  R.validate_durable_step_preparation restored_step |> get;
+  check bool "a restored floor question must still pass the live input policy" true
+    (Result.is_error (R.require_counterpart_template restored_step.preparation));
+  check bool "fresh counterpart floor step also refuses the missing variable" true
+    (Result.is_error (R.prepare_durable_step ~now:123. ~context with_counterpart));
+  let refs value variable = Prompt_registry.resolution_references_variable
+    {old.prompt with effective=value} ~variable in
+  check bool "plain text is not a substitution" false (refs "counterpart_observations" "counterpart_observations");
+  check bool "a longer variable name is not the counterpart variable" false
+    (refs "{{counterpart_observations_extra}}" "counterpart_observations");
+  check bool "spaced placeholders use the renderer's parser" true
+    (refs "{{ counterpart_observations }}" "counterpart_observations");
+  Prompt_registry.set_override Prompt_names.librarian
+    "Input: {{ counterpart_observations }}\nAgain: {{counterpart_observations}}" |> get;
+  let expected=Keeper_counterpart_observation.render_for_prompt [counterpart] in
+  let fresh=R.prepare_durable ~now:124. with_counterpart |> get in
+  R.require_counterpart_template fresh |> get;
+  check bool "repairing today's override does not rewrite the old frozen question" true
+    (Result.is_error (R.require_counterpart_template legacy));
+  check string "both actual substitutions contain the original serialized counterpart"
+    ("Input: " ^ expected ^ "\nAgain: " ^ expected) fresh.rendered_prompt;
+  let fresh_step=R.prepare_durable_step ~now:124. ~context with_counterpart |> get in
+  check string "floor question uses the same captured counterpart substitution"
+    fresh.rendered_prompt fresh_step.preparation.rendered_prompt)
+
 let () = run "Original history Memory preparation" ["preparation",[
   test_case "original capture survives current prompt and policy changes" `Quick test_original_preparation;
   test_case "normal raw parser and absorption inputs remain original" `Quick test_original_validation_and_absorption;
-  test_case "restore inconsistency never reaches domain parsing" `Quick test_restore_refuses_tampering]]
+  test_case "restore inconsistency never reaches domain parsing" `Quick test_restore_refuses_tampering;
+  test_case "counterpart admission requires a substitution while legacy restores" `Quick
+    test_counterpart_template_admission_and_legacy_restore]]

@@ -65,6 +65,9 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call
   let prepare () =
     let* ()=confirm_live_owner () in
     Edge.confirm_destination ~config ~reserved destination in
+  let admit () =
+    let* ()=Memory_runtime.require_counterpart_template (Step.step step).preparation |> rejected in
+    prepare () in
   let call ~arguments =
     match prepare () with
     | Error error -> Error (Submit.Not_sent error)
@@ -79,7 +82,7 @@ let resume ~store ~config ~reserved ~(original:Owner.retained) ~step ~(call:call
       Ok (Answer ({raw;proposal},record))
     | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
     | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok (Refusal (final,record)) in
-  let* result=Submit.resume ~store ~label:"Floor step" ~original ~request:exact ~schema ~prepare ~call ~terminal in
+  let* result=Submit.resume ~store ~label:"Floor step" ~original ~request:exact ~schema ~prepare:admit ~call ~terminal in
   match result with
   | Submit.Awaiting (wait,record) -> Ok (Pending (wait,record))
   | Final (Answer (answer,record)) -> Ok (Answered (answer,record))

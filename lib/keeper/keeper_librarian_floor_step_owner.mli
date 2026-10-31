@@ -44,4 +44,7 @@ val resume : store:Lane_addon_store.t -> config:Workspace.config -> reserved:str
     needs no live worker, a pending request is never submitted again, and only
     a pre-send failure or an explicit capacity reply permits another
     submission. The host's retained terminal and latest execution proof precede
-    any answer. The step's gate judgment and Memory decision are not made here. *)
+    any answer. Fresh admission also requires counterpart coverage by the
+    frozen prompt; observing pending/unknown or retained terminals does not
+    rewrite the step or authorize another dispatch. The step's gate judgment
+    and Memory decision are not made here. *)

@@ -281,6 +281,10 @@ let publish_with ~before_settlement ~store ~config ~request ~(original : Owner.r
     let* raw,proposal=original_answer ~store request current in
     let* _=validate ~store ~request ~record:current in
     Ok (current,raw,proposal)) in
+  (* A historical Memory receipt proves an old effect, not that omitted
+     counterpart observations may now be ACKed. Finished decoding stays pure;
+     every new publication/settlement effect must satisfy the live policy. *)
+  let* ()=Keeper_librarian_runtime.require_counterpart_template (Request.preparation request) in
   let* superseded=is_superseded ~request ~record:current in
   if superseded then Ok (Publication.Publication_superseded current) else
   let prepare current =

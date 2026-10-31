@@ -53,7 +53,8 @@ let authorize_history ~base_path ~store ~declaration_id ~(package:Lane_addon_typ
           let* actual=History.observe_record_owner ~base_path ~keepers_dir fresh in
           let* ()=History.owner_matches_json actual (History.owner_to_json owner) in
           let* capture=History.restore ~owner:actual fresh in
-          History.confirm_predecessor ~store ~require_confirmed:true capture) in
+          let* ()=History.confirm_predecessor ~store ~require_confirmed:true capture in
+          Keeper_librarian_runtime.require_counterpart_template (History.preparation capture)) in
         Lane_addon_runtime.authorize_captured_exact_dispatch ~store ~declaration_id
           ~package_id:destination.package_id ~configuration_revision:destination.configuration_revision);
       with_execution=(fun run ->
@@ -95,7 +96,8 @@ let authorize_floor_step ~base_path ~store ~declaration_id ~(package:Lane_addon_
               && fresh.tool=record.tool then Ok ()
             else Error "Original floor step immutable host binding changed before provider dispatch" in
           let* actual=Step.observe_record_owner ~base_path ~keepers_dir fresh in
-          History.owner_matches_json actual (History.owner_to_json owner)) in
+          let* ()=History.owner_matches_json actual (History.owner_to_json owner) in
+          Keeper_librarian_runtime.require_counterpart_template (Step.step step).preparation) in
         Lane_addon_runtime.authorize_captured_exact_dispatch ~store ~declaration_id
           ~package_id:destination.package_id ~configuration_revision:destination.configuration_revision);
       with_execution=(fun run ->

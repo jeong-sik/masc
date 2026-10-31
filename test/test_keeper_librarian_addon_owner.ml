@@ -444,6 +444,31 @@ let test_retained_host_terminal_commits_off ()=with_fixture (fun ~sw:_ fixture -
 
 let refusal error_type=Yojson.Safe.to_string (`Assoc ["error",`Assoc ["type",`String error_type;
   "message",`String "Controlled fixture provider refusal"]])
+let test_actual_output_limit_then_capacity_keeps_both_causes ()=with_fixture (fun ~sw:_ fixture ->
+  fixture.set_response (fun _ -> `OK,
+    {|{"id":"mixed-output-limit","model":"fixture","choices":[{"index":0,"message":{"role":"assistant","content":"{}"},"finish_reason":"length"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|});
+  let other=fixture.extra_server (fun _ -> `Request_entity_too_large,refusal "invalid_request_error") in
+  publish_routes fixture.base_path [fixture.server.base_url;other.base_url];
+  ignore (run_worker fixture);
+  F.await_first_request other;
+  await_host_cycle fixture;
+  let capture=match observed_originals fixture with [_,capture] -> capture
+    | [] | _::_::_ -> fail "mixed output/input refusal minted a different original" in
+  let execution=latest_execution fixture capture in
+  check bool "the last actual provider visit reports HTTP input refusal" true
+    (match execution.Lane_addon_exact.outcome with
+     | Call_ended (Input_refused Request_body_refused) -> true
+     | Call_ended (Answered _ | Invalid_output _ | Output_limit_reached _
+         | Input_refused (Input_capacity | Context_overflow | Invalid_request)) | Call_refused _ -> false);
+  let evidence=Keeper_exact_walk_receipt.failure_evidence execution.receipt in
+  check bool "the earlier output failure survives the retained host receipt" true
+    evidence.non_capacity_execution_failure;
+  check bool "the last named input refusal also survives" true evidence.named_input_capacity;
+  let report=Keeper_librarian_runtime.not_committed_of_failure ~detail:"actual output limit then HTTP 413" evidence in
+  check bool "the Runtime report does not mislabel the whole walk capacity-only" false report.input_capacity_only;
+  check int "observing the mixed host receipt does not consume candidates" 2
+    (io (fun () -> List.length (pending_rows fixture.keepers_dir))))
+
 type veto = Quota | Invalid
 let test_actual_mixed_walk_blocks_partition kind ()=with_fixture (fun ~sw:_ fixture ->
   fixture.set_response (fun _ -> `Request_entity_too_large,refusal "invalid_request_error");
@@ -1112,6 +1137,8 @@ let () =
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
   test_case "new tail rejudges the complete old sparse gap against current Memory" `Quick test_gap_and_new_tail_are_rejudged_together;
   test_case "original host answer recovers locally while Addon is Off" `Quick test_retained_host_terminal_commits_off;
+  test_case "actual output limit followed by HTTP 413 retains mixed diagnosis" `Quick
+    test_actual_output_limit_then_capacity_keeps_both_causes;
   test_case "actual capacity plus quota preserves the original whole batch" `Quick (test_actual_mixed_walk_blocks_partition Quota);
   test_case "actual capacity plus invalid output preserves the original whole batch" `Quick (test_actual_mixed_walk_blocks_partition Invalid);
   test_case "actual size split keeps sparse whole inputs and rereads Memory between siblings" `Quick test_sparse_whole_candidate_partition_reads_fresh_memory;

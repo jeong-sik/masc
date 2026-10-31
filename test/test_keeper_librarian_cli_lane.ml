@@ -1155,7 +1155,9 @@ let test_mixed_admission ~depends_on_deferred () =
 
 let test_a_later_report_without_capacity_evidence_keeps_the_refusal () =
   let report evidence : Runtime.not_committed =
-    { input_capacity_evidence = evidence; provider_input_refusals = []; message_descent=Runtime.No_descent_evidence;
+    { input_capacity_evidence = evidence;
+      input_capacity_only = (evidence = Runtime.Input_capacity_refused);
+      provider_input_refusals = []; message_descent=Runtime.No_descent_evidence;
       detail = "fixture"; walk_shows_size = false;
       smaller_range_meets_same_failure = false } in
   let refused = report Runtime.Input_capacity_refused in
@@ -1188,6 +1190,68 @@ let inference_store_paths ~keepers_dir ~keeper_id =
   ; Current.durable_range_receipt_path ~keepers_dir ~keeper_id
   ; Current.unread_ledger_path ~keepers_dir ~keeper_id
   ; Masc.Keeper_librarian_context.path ~keepers_dir ~keeper_id ]
+
+let test_memory_inference_requires_counterpart_template () =
+  with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
+  Fixture.with_official_client_runtimes @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy
+    {Runtime_schema.default_typesafeai with lane_enabled=false; absorb_gate=false} @@ fun () ->
+  let require = function Ok value -> value | Error detail -> fail detail in
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  publish_unreachable_lane ~cli_only:true ~cli_slot_ids:[Fixture.cli_primary_runtime]
+    ~source:"counterpart Memory inference" ();
+  let keeper_id = "cli-lane-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let counterpart : Masc.Keeper_counterpart_observation.t =
+    {origin=Durable_chat;channel="direct";workspace_id=None;user_id=Some "speaker";
+     user_name=Some "Speaker";authority=External;content="Original floor counterpart"} in
+  let selected_input = {(input ()) with counterpart_observations=[counterpart]} in
+  let paths = inference_store_paths ~keepers_dir ~keeper_id in
+  let before = List.map Fs_compat.load_file_opt paths in
+  let previous = (Prompt_registry.resolve_prompt Prompt_names.librarian).override_value in
+  let restore () = match previous with
+    | None -> Prompt_registry.clear_prompt_override Prompt_names.librarian
+    | Some value -> Prompt_registry.set_override Prompt_names.librarian value |> require in
+  Fun.protect ~finally:restore (fun () ->
+    Prompt_registry.set_override Prompt_names.librarian "Summarize the input" |> require;
+    let prompts = ref [] in
+    let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt =
+      prompts := prompt :: !prompts; Ok (Yojson.Safe.to_string inference_answer) in
+    let infer input = Runtime.infer_memory_step ~cli_runner:runner ~base_path ~keepers_dir ~keeper_id
+      ~previous_state:None ~unread_messages:[] input in
+    (match infer selected_input with
+     | Runtime.Memory_inferred _ -> fail "a missing counterpart substitution produced a Memory step"
+     | Memory_not_inferred {reports;_} ->
+       check bool "the refusal names the missing counterpart substitution" true
+         (List.exists (fun (report : Runtime.not_committed) ->
+           Astring.String.is_infix ~affix:"counterpart_observations" report.detail) reports));
+    check int "the rejected question never reaches the provider" 0 (List.length !prompts);
+    check bool "the rejected inference leaves its stores unchanged" true
+      (before = List.map Fs_compat.load_file_opt paths);
+    (match infer (input ()) with
+     | Runtime.Memory_not_inferred _ -> fail "an empty counterpart input was refused"
+     | Memory_inferred _ -> ());
+    check int "an override may omit an empty counterpart" 1 (List.length !prompts);
+    prompts := [];
+    let state_runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      Ok {|{"working_state":"already-consumed context"}|} in
+    (match (Runtime.infer_working_state ~cli_runner:state_runner ~base_path ~keepers_dir ~keeper_id
+       ~previous_state:None ~unread_messages:[] selected_input).outcome with
+     | Runtime.Inferred _ -> ()
+     | Not_inferred _ -> fail "the separate context-only prompt was blocked");
+    restore ();
+    (match infer selected_input with
+     | Runtime.Memory_not_inferred _ -> fail "the corrected counterpart question was refused"
+     | Memory_inferred {step;_} ->
+       check bool "the resulting step retains the original counterpart" true
+         (step.source_input.counterpart_observations = [counterpart]));
+    (match !prompts with
+     | [prompt] -> check bool "the corrected prompt contains the original counterpart" true
+         (Astring.String.is_infix ~affix:counterpart.content prompt)
+     | _ -> fail "expected one corrected provider question");
+    check bool "successful inference still does not publish Memory" true
+      (before = List.map Fs_compat.load_file_opt paths))
+;;
 
 let test_memory_inference_retains_gated_decision () =
   with_eio @@ fun ~sw:_ ~net:_ ~clock:_ ~base_path ->
@@ -1752,6 +1816,8 @@ let () =
             test_ordered_memory_empty_and_repeated_inference
         ; test_case "Memory inference retains a gated decision without publishing" `Quick
             test_memory_inference_retains_gated_decision
+        ; test_case "Memory inference refuses a missing counterpart substitution" `Quick
+            test_memory_inference_requires_counterpart_template
         ; test_case "invalid Memory inference preserves pending publication" `Quick
             (test_memory_inference_failure_keeps_pending_publication Invalid_memory_answer)
         ; test_case "unavailable inference gate preserves pending publication" `Quick

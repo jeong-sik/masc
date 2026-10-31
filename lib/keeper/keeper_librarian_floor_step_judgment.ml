@@ -123,6 +123,7 @@ let judge_by_fresh_reads ~store ~step ~(record : Owner.retained)
         | None -> decide ~step ~answer ~root gate))
 let judge ~store ~step ~(record : Owner.retained) ~(answer : Keeper_librarian_floor_step_owner.answer)
     ~fresh_authority ~inventory =
+  let* ()=Memory_runtime.require_counterpart_template (Step.step step).preparation in
   let absorbed = answer.proposal.proposal.accepted.selection.absorbed in
   match io (fun () -> settled ~inventory ~step ~record ~absorbed) with
   | Some (root, gate) -> decide ~step ~answer ~root gate

@@ -55,6 +55,7 @@ let preparation_json = function
 let refusals values = `List (List.map (fun value -> text (Keeper_librarian_input_refusal.to_string value)) values)
 let report_json (report : L.not_committed) =
   `Assoc ["detail",text report.detail;"walk_shows_size",`Bool report.walk_shows_size;
+    "input_capacity_only",`Bool report.input_capacity_only;
     "smaller_range_meets_same_failure",`Bool report.smaller_range_meets_same_failure;
     "message_descent",text (match report.message_descent with
       | L.No_descent_evidence -> "no_descent_evidence"

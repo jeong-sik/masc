@@ -817,6 +817,9 @@ let resolve_prompt key =
 (** Get a prompt value. Resolution: override > file > missing *)
 let get_prompt key = (resolve_prompt key).effective
 
+let resolution_references_variable (resolved : prompt_resolution) ~variable =
+  List.mem variable (extract_variables resolved.effective)
+
 let render_resolved_prompt_template key resolved vars =
   if String.trim resolved.effective = "" then
     Error (Printf.sprintf "Prompt '%s' is missing" key)

@@ -120,7 +120,9 @@ let merge_not_committed earlier (outcome : Keeper_librarian_runtime.not_committe
   | None -> outcome
   | Some (earlier : Keeper_librarian_runtime.not_committed) ->
     { outcome with
-      Keeper_librarian_runtime.message_descent =
+      Keeper_librarian_runtime.input_capacity_only =
+        earlier.input_capacity_only && outcome.input_capacity_only
+    ; Keeper_librarian_runtime.message_descent =
         Keeper_librarian_runtime.merge_message_descent earlier.message_descent outcome.message_descent
     ; Keeper_librarian_runtime.walk_shows_size =
         earlier.Keeper_librarian_runtime.walk_shows_size
@@ -262,6 +264,7 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
              | Progress_boundary_missing _
              | Memory_snapshot_unreadable _
              | Counterpart_interval_non_monotone _
+             | Counterpart_input_capacity_refused _
              | Counterpart_observations_unreadable _
              | Progress_write_failed _
              | Official_progress_unreadable _

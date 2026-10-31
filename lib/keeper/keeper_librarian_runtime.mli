@@ -88,6 +88,13 @@ type message_descent =
 
 type not_committed =
   { input_capacity_evidence : input_capacity_evidence
+  ; input_capacity_only : bool
+      (** Derived from {!Keeper_exact_walk_failure.input_capacity_only} for
+          the complete failed walk. Unlike [input_capacity_evidence], this
+          also excludes output limits, timeouts and incomplete/missing output
+          alongside an input refusal. Reports without typed failure evidence
+          answer false.
+          This observation grants no authority to consume or split input. *)
   ; message_descent : message_descent
       (** Whole-walk policy, independent of measured historical fitting and
           actual exhausted API evidence used to authorize unread records. *)
@@ -360,10 +367,21 @@ type durable_preparation = {
 val prepare_durable : now:float -> Keeper_librarian.input ->
   (durable_preparation, string) result
 (** Resolve the original policy and both prompt assets once, on the caller
-    fiber. The synchronous Memory pass consumes this same preparation. *)
+    fiber. When counterpart input is present, the resolved prompt must reference
+    its substitution. The synchronous Memory pass consumes this same preparation. *)
 val validate_durable_preparation : durable_preparation -> (unit, string) result
 (** Pure restoration check of the complete captured input, policy, resolutions,
     substitutions, rendered prompt and schema. No environment/prompt lookup. *)
+val require_counterpart_template : durable_preparation -> (unit, string) result
+(** Pure live-effect policy: a nonempty counterpart input requires its variable
+    in this frozen prompt, using the renderer's own placeholder parser. No
+    current prompt lookup or rewriting occurs. New questions, fresh dispatch,
+    and unfinished publication must pass it, including a receipt-proved Memory
+    commit whose external ACK is still pending. It grants no execution effect.
+    It is deliberately separate from structural validation/restoration, so
+    completed historical captures remain decodable and inspectable. A legacy
+    unfinished question that fails stays blocked with its original bytes and
+    receipts; fixing today's override cannot rewrite or replay that question. *)
 val restore_durable_preparation : source_input:Keeper_librarian.input -> parsing_now:float ->
   policy:durable_policy -> rule_prompt:Prompt_registry.prompt_resolution ->
   prompt:Prompt_registry.prompt_resolution -> output_schema:Yojson.Safe.t ->
@@ -418,7 +436,8 @@ val prepare_durable_step : now:float -> context:durable_step_context -> Keeper_l
   (durable_step_preparation, string) result
 (** Resolve the policy and both prompt assets once, on the caller fiber, for one
     floor question. [input] is the question as {!Keeper_librarian_message_floor.Machine}
-    asks it. *)
+    asks it. A question carrying counterpart input requires its substitution in
+    the resolved prompt. *)
 val validate_durable_step_preparation : durable_step_preparation -> (unit, string) result
 (** Pure restoration check: the captured input holds no working context, and the
     substitutions, rendered prompt and continuity schema match the input,

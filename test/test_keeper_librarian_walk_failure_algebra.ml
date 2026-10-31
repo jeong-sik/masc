@@ -107,6 +107,44 @@ let test_invalid_output_poisons_size () =
   Alcotest.(check bool) "invalid output blocks a smaller range" false
     (S.shows_range_size evidence)
 
+let test_capacity_only_keeps_all_non_capacity_visits () =
+  let capacity = S.of_cause (EO.Provider_response_refused
+      {http_status=413;refusal=Request_body_refused;retry_after_s=None}) in
+  Alcotest.(check bool) "one actual body refusal is capacity-only" true
+    (S.input_capacity_only capacity);
+  let historical_mix = S.combine capacity (S.of_cause EO.Output_limit_reached) in
+  Alcotest.(check bool) "historical range sizing keeps its original evidence" true
+    (S.shows_range_size historical_mix);
+  Alcotest.(check bool) "historical output failure does not become a partition-independent failure" false
+    historical_mix.S.size_independent_execution_failure;
+  List.iter (fun cause ->
+    let other = S.of_cause cause in
+    List.iter (fun evidence ->
+      Alcotest.(check bool) "the named capacity observation survives" true evidence.S.named_input_capacity;
+      Alcotest.(check bool) "the other executed cause survives" true evidence.S.non_capacity_execution_failure;
+      Alcotest.(check bool) "slot order cannot hide a non-capacity visit" false
+        (S.input_capacity_only evidence))
+      [S.combine capacity other;S.combine other capacity])
+    [EO.Output_limit_reached;Incomplete_output;Missing_output;Ambiguous_output 2;
+     Unexpected_output_content;Response_body_deadline_exceeded;Invalid_json_output;
+     Provider_response_refused {http_status=408;refusal=Timeout;retry_after_s=None};
+     Provider_response_refused {http_status=503;refusal=Network_error;retry_after_s=None};
+     Provider_response_refused {http_status=400;refusal=Refusal_body_not_received;retry_after_s=None}];
+  List.iter (fun disposition ->
+    let local = S.of_disposition disposition in
+    Alcotest.(check bool) "a local non-execution does not invent an executed failure" false
+      local.S.non_capacity_execution_failure;
+    Alcotest.(check bool) "neutral admission preserves the capacity-only observation" true
+      (S.input_capacity_only (S.combine local capacity)))
+    [EO.Runtime_slot_unavailable;Runtime_contract_rejected;Input_contract_rejected;
+     Output_requirement_rejected;Request_preparation_failed];
+  Alcotest.(check bool) "empty evidence is not capacity-only" false (S.input_capacity_only S.empty);
+  Alcotest.(check bool) "measured CLI refusal is capacity-only" true
+    (S.input_capacity_only (measured "cli-only" 23 17));
+  Alcotest.(check bool) "an executed opaque CLI failure vetoes capacity-only" false
+    (S.input_capacity_only (S.after_cli_fallback ~prior:capacity
+      [Keeper_lane_cli_oneshot.Execution_failed {runtime_id="opaque-cli";cause=Fusion_official_client.Missing_reply}]))
+
 let test_named_causes_survive_the_receipt_codec () =
   List.iter (fun cause ->
       let original = S.of_cause cause in
@@ -151,6 +189,8 @@ let () =
           test_combine_keeps_larger_cli_limit
       ; Alcotest.test_case "invalid output poisons the size verdict" `Quick
           test_invalid_output_poisons_size
+      ; Alcotest.test_case "capacity-only retains every non-capacity visit" `Quick
+          test_capacity_only_keeps_all_non_capacity_visits
       ; Alcotest.test_case "named causes survive the receipt codec" `Quick
           test_named_causes_survive_the_receipt_codec ]
     ; "fallback"

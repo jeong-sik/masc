@@ -1960,9 +1960,15 @@ let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
          commit_called := true;
          Consumer.Memory_committed)
    with
-   | Error (Consumer.Counterpart_interval_non_monotone { after; before }) ->
+   | Error (Consumer.Counterpart_interval_non_monotone
+       { after; before; first_boundary_line; end_boundary_line
+       ; atom_bound; official_bound }) ->
      check (float 0.001) "prior boundary time" 20.0 after;
-     check (float 0.001) "range end time" 10.0 before
+     check (float 0.001) "range end time" 10.0 before;
+     check int "selected range begins at the second boundary" 2 first_boundary_line;
+     check int "selected range ends at the second boundary" 2 end_boundary_line;
+     check (option (pair int (float 0.001))) "atom witness" (Some (1, 20.0)) atom_bound;
+     check (option (pair int (float 0.001))) "no official witness" None official_bound
    | Error error -> fail (Consumer.error_to_string error)
    | Ok _ -> fail "non-monotone interval advanced as empty evidence");
   check bool "memory commit is not attempted" false !commit_called;
@@ -3016,12 +3022,14 @@ let test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports ()
   let module Runtime = Masc.Keeper_librarian_runtime in
   let reports = if not with_reports then [] else
     [ { Runtime.input_capacity_evidence = Runtime.Input_capacity_refused
+      ; input_capacity_only = true
       ; provider_input_refusals = [Masc.Keeper_librarian_input_refusal.Request_body_refused]
       ; detail = "provider refused the input"
       ; walk_shows_size = true
       ; message_descent = Runtime.Smaller_input_may_help
       ; smaller_range_meets_same_failure = false }
     ; { Runtime.input_capacity_evidence = Runtime.No_input_capacity_refusal
+      ; input_capacity_only = false
       ; provider_input_refusals = []
       ; detail = "later slot did not report input size"
       ; walk_shows_size = false
@@ -4055,6 +4063,259 @@ let test_untagged_fragments_are_passed_without_a_commit () =
   | Consumer.Memory_not_committed _ -> fail "the untagged line was not passed"
 ;;
 
+let test_untagged_turn_preserves_counterparts ~fail_position_after_commit () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-untagged-counterparts" in
+  let base_dir = config.Workspace.base_path in
+  write_meta config trace_id;
+  let path = Masc.Keeper_turn_fragments.path
+      ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_id)
+      Masc.Keeper_turn_fragments.Main in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path
+    ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"old"}]}|} ^ "\n");
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External } in
+  Keeper_chat_store.append_user_message ~base_dir ~keeper_name ~speaker
+    ~content:"independent chat" ();
+  let surface = Keeper_external_attention.Agent in
+  let conversation_id = "agent:untagged" and message_id = "untagged-external" in
+  let now = Time_compat.now () in
+  let item : Keeper_external_attention.item =
+    { event_id = Keeper_external_attention.event_id_of_dedupe_key message_id
+    ; dedupe_key = message_id; keeper_name
+    ; conversation = { conversation_id; surface }
+    ; external_message = Some { surface; message_id; reply_to_message_id = None }
+    ; source_label = "agent"
+    ; actor = { actor_id = Some "external"; display_name = Some "External"
+              ; authority = Keeper_chat_store.External }
+    ; urgency = Keeper_external_attention.Ambient
+    ; content_preview = "external delivery"; content_ref = None; received_at = now; metadata = [] } in
+  (match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> now)
+      ~base_path:base_dir item with
+   | `Recorded -> ()
+   | `Duplicate _ -> fail "duplicate external fixture"
+   | `Error detail -> fail detail);
+  Keeper_chat_store.append_user_message ~base_dir ~keeper_name ~speaker
+    ~conversation_id ~external_message_id:message_id ~content:"external delivery" ();
+  let first_end = Time_compat.now () +. 100. in
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:first_end;
+  let external_path = Masc.Keeper_external_read_cursor.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name in
+  let check_external ~after ~prepared =
+    let open Yojson.Safe.Util in
+    let state = Fs_compat.load_file external_path |> Yojson.Safe.from_string in
+    check int "external offset" after (member "after" state |> to_int);
+    check bool "external preparation" prepared (member "pending" state <> `Null) in
+  let check_input original =
+    let input = Original.input original in
+    check (list string) "untagged turn has no messages" [] (text_markers input);
+    check (list string) "independent chat and external delivery each appear once"
+      ["external delivery"; "independent chat"]
+      (List.sort String.compare (counterpart_contents input));
+    check bool "official receipt remains bound to the turn" true
+      (Option.is_some (Original.official_range_id original));
+    input in
+  (match consume config (fun original -> ignore (check_input original); Consumer.Memory_pending) with
+   | Consumer.Pending -> () | _ -> fail "counterparts did not remain pending");
+  check bool "pending preserves the official cursor" true (Option.is_none (read_official config));
+  check_external ~after:0 ~prepared:true;
+  (match consume config (fun original -> ignore (check_input original); Consumer.Memory_refused []) with
+   | Consumer.Memory_not_committed [] -> () | _ -> fail "refused counterpart input advanced");
+  check bool "refusal preserves the official cursor" true (Option.is_none (read_official config));
+  check_external ~after:0 ~prepared:true;
+  let commits = ref 0 in
+  let commit original =
+    let input = check_input original in
+    incr commits;
+    commit_pending_memory config ~expected_revision:(Original.expected_revision original)
+      ~range_id:(Original.range_id original) ~official_range_id:(Original.official_range_id original) input in
+  if fail_position_after_commit then (
+    let fail_official ~keepers_dir:_ ~keeper_id:_ _ =
+      Error (Official.Write_failed { path = "injected-official-progress"; message = "write failed" }) in
+    (match Consumer.For_testing.consume_one_with_progress_writer
+        ~write_progress_store:Progress.write ~write_official_progress_store:fail_official
+        ~config ~keeper_name ~commit with
+     | Error (Consumer.Official_progress_write_failed _) -> ()
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "official cursor failure was not reported");
+    check bool "failed cursor write leaves the official position" true (Option.is_none (read_official config));
+    check_external ~after:1 ~prepared:false;
+    (match consume config (fun _ -> fail "committed counterparts were synthesized twice") with
+     | Consumer.Official_advanced { atom = None; official } ->
+       check int "receipt recovers the official position" 1 official.boundary_line
+     | _ -> fail "receipt did not recover the official position"))
+  else
+    (match consume config commit with
+     | Consumer.Official_advanced { atom = None; official } ->
+       check int "successful commit advances the official position" 1 official.boundary_line
+     | _ -> fail "counterparts were not committed");
+  check int "the original input was committed once" 1 !commits;
+  check_external ~after:1 ~prepared:false;
+  write_official_turn config ~trace_id ~turn:2 ~user:"next question" ~assistant:"next answer" ~tools:[];
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:(first_end +. 100.);
+  (match consume config (fun original ->
+       let input = Original.input original in
+       check (list string) "the next turn does not repeat counterparts" [] (counterpart_contents input);
+       commit_pending_memory config ~expected_revision:(Original.expected_revision original)
+         ~range_id:(Original.range_id original) ~official_range_id:(Original.official_range_id original) input) with
+   | Consumer.Official_advanced { atom = None; official } ->
+     check int "next turn advances normally" 2 official.boundary_line
+   | _ -> fail "the following official turn did not commit");
+  (match consume config (fun _ -> fail "settled input was read again") with
+   | Consumer.Nothing_to_read -> () | _ -> fail "settled input remains unread")
+;;
+
+let test_untagged_non_monotone_interval_exposes_source_positions () =
+  with_workspace @@ fun config ->
+  let previous_trace = "trace-old-official-clock" in
+  let trace_id = "trace-new-official-clock" in
+  write_meta config previous_trace;
+  append_official_boundary config ~trace_id:previous_trace ~turn:1 ~recorded_at:20.;
+  (match Official.write ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper_name {Official.boundary_line=1} with
+   | Ok () -> () | Error error -> fail (Official.write_error_to_string error));
+  write_meta config trace_id;
+  let path = Masc.Keeper_turn_fragments.path
+      ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_id)
+      Masc.Keeper_turn_fragments.Main in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path
+    ({|{"ts_unix":1.0,"role":"user","content_blocks":[{"type":"text","text":"untagged"}]}|} ^ "\n");
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:10.;
+  List.iter (fun () ->
+    match Consumer.consume_one ~config ~keeper_name
+        ~commit:(fun _ -> fail "empty fragments cannot bypass the inverted interval") with
+    | Error (Consumer.Counterpart_interval_non_monotone
+        {after;before;first_boundary_line;end_boundary_line;atom_bound;official_bound}) ->
+      check int "the stopped first boundary is visible" 2 first_boundary_line;
+      check int "the stopped last boundary is visible" 2 end_boundary_line;
+      check (float 0.001) "the exact lower clock is visible" 20. after;
+      check (float 0.001) "the exact upper clock is visible" 10. before;
+      check (option (pair int (float 0.001))) "there is no preceding atom witness" None atom_bound;
+      check (option (pair int (float 0.001))) "the preceding official boundary and clock are visible"
+        (Some (1,20.)) official_bound
+    | Error error -> fail (Consumer.error_to_string error)
+    | Ok _ -> fail "an empty backwards-clock turn advanced") [();()];
+  (match read_official config with
+   | Some progress -> check int "repeated stopped passes preserve the original cursor" 1 progress.boundary_line
+   | None -> fail "the official cursor was removed");
+  check bool "repeated stopped passes create no atom cursor" true (Option.is_none (read_progress config))
+;;
+
+let test_counterpart_capacity_refusal_preserves_complete_source () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-counterpart-capacity" in
+  let module Runtime = Masc.Keeper_librarian_runtime in
+  write_meta config trace_id;
+  let content = "first byte\n" ^ String.make 65536 'x' ^ "\nlast byte" in
+  let speaker : Keeper_chat_store.speaker =
+    { speaker_id = Some "external"; speaker_name = Some "External"
+    ; speaker_authority = Keeper_chat_store.External } in
+  Keeper_chat_store.append_user_message ~base_dir:config.Workspace.base_path ~keeper_name
+    ~speaker ~content ();
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:(Time_compat.now () +. 10.);
+  append_official_boundary config ~trace_id ~turn:2 ~recorded_at:(Time_compat.now () +. 20.);
+  let module Failure = Masc.Keeper_exact_walk_failure in
+  let module Exact = Agent_core.Exact_output in
+  let capacity = Failure.of_cause (Exact.Provider_response_refused
+      {http_status=413;refusal=Request_body_refused;retry_after_s=None}) in
+  let report = Runtime.not_committed_of_failure
+      ~detail:"the provider refused this complete request body" capacity in
+  let original = ref None in
+  let check_input value =
+    let input = Original.input value in
+    check (list string) "no part of the counterpart text is truncated" [content] (counterpart_contents input);
+    original := Some value in
+  (match Consumer.consume_one ~config ~keeper_name ~commit:(fun value ->
+       check_input value; Consumer.Memory_refused [report]) with
+   | Error (Consumer.Counterpart_input_capacity_refused
+       { turn_ref; atom_range; official_range; observation_count; observation_bytes; reports }) ->
+     check string "refusal names the exact source trace" trace_id (Ids.Turn_ref.trace_id turn_ref);
+     check int "whole observation remains one source item" 1 observation_count;
+     check bool "byte measurement includes the complete content and JSON envelope" true
+       (observation_bytes > String.length content);
+     check bool "capacity evidence is retained without rewriting it" true (reports = [report]);
+     check bool "official-only input does not invent an atom receipt" true (Option.is_none atom_range);
+     (match official_range with
+      | Some range -> check (list int) "the complete unconsumed range is addressable" [1;2] (List.map fst range.turns)
+      | None -> fail "source boundary coordinates are absent")
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "capacity refusal was not explicit");
+  check bool "capacity refusal keeps the official cursor unread" true (Option.is_none (read_official config));
+  (match !original with
+   | None -> fail "the complete original was not captured"
+   | Some value ->
+     let restored = Original.of_json (Original.to_json value) |> Result.map_error Original.error_to_string in
+     (match restored with Ok restored -> check_input restored | Error detail -> fail detail));
+  (match consume config (fun value ->
+       check_input value;
+       check bool "capacity-only counterpart refusal does not narrow the recovery chat window" true
+         (Original.extent value=Masc.Keeper_librarian_range.All_unread);
+       check (list int) "the immediate next selection retains both official rows" [1;2]
+         (Original.official_range_id value |> Option.get |> fun range -> List.map fst range.turns);
+       Consumer.Memory_pending) with
+   | Consumer.Pending -> ()
+   | _ -> fail "the complete recovery selection should remain pending");
+  let ordinary = {report with Runtime.input_capacity_evidence = Runtime.No_input_capacity_refusal;
+    input_capacity_only = false;
+    provider_input_refusals = []; message_descent = Runtime.No_descent_evidence;
+    smaller_range_meets_same_failure = true; detail = "transport failed without a size judgment"} in
+  List.iter (fun reports ->
+    match consume config (fun value -> check_input value; Consumer.Memory_refused reports) with
+    | Consumer.Memory_not_committed actual -> check bool "non-capacity failure retains its actual report" true (actual=reports)
+    | _ -> fail "ordinary or mixed failure was mislabeled capacity refusal")
+    [[ordinary]; [report; ordinary]; [{report with Runtime.message_descent=Runtime.Invalid_output_blocks_descent}]];
+  List.iter (fun cause ->
+    let other = Failure.of_cause cause in
+    List.iter (fun evidence ->
+      let mixed = Runtime.not_committed_of_failure ~detail:"one mixed failed walk" evidence in
+      check bool "an earlier non-capacity visit survives the last capacity refusal" false
+        mixed.input_capacity_only;
+      (match consume config (fun value -> check_input value; Consumer.Memory_refused [mixed]) with
+       | Consumer.Memory_not_committed [actual] ->
+         check bool "the one aggregate report remains an ordinary refusal" true (actual=mixed)
+       | _ -> fail "a mixed walk was mislabeled as a capacity-only refusal"))
+      [Failure.combine other capacity;Failure.combine capacity other])
+    [Exact.Output_limit_reached;Incomplete_output;Missing_output;Ambiguous_output 2;
+     Unexpected_output_content;Response_body_deadline_exceeded;Invalid_json_output;
+     Provider_response_refused {http_status=408;refusal=Timeout;retry_after_s=None};
+     Provider_response_refused {http_status=503;refusal=Network_error;retry_after_s=None};
+     Provider_response_refused {http_status=400;refusal=Refusal_body_not_received;retry_after_s=None}];
+  let unknown = Runtime.not_committed_of_failure ~detail:"runtime was not run"
+      (Failure.of_cli_failure (Masc.Keeper_lane_cli_oneshot.Unknown_runtime {runtime_id="missing-slot"})) in
+  (match consume config (fun value -> check_input value; Consumer.Memory_refused [unknown]) with
+   | Consumer.Memory_not_committed [actual] -> check bool "unexecuted unknown remains ordinary" true (actual=unknown)
+   | _ -> fail "unknown runtime was mislabeled as a capacity-only refusal");
+  (match consume config (fun value -> check_input value; Consumer.Memory_pending) with
+   | Consumer.Pending -> () | _ -> fail "pending work was mislabeled a capacity refusal");
+  check bool "all refusals and Pending leave the official position intact" true (Option.is_none (read_official config));
+  (match consume config (fun value ->
+       check_input value;
+       commit_pending_memory config ~expected_revision:(Original.expected_revision value)
+         ~range_id:(Original.range_id value) ~official_range_id:(Original.official_range_id value)
+         (Original.input value)) with
+   | Consumer.Official_advanced {atom=None;official} -> check int "a later complete-input commit advances once" 1 official.boundary_line
+   | _ -> fail "the intact source could not be reprocessed")
+;;
+
+let test_untagged_turn_with_unreadable_counterparts_keeps_cursor () =
+  with_workspace @@ fun config ->
+  let trace_id = "trace-untagged-unreadable-counterpart" in
+  write_meta config trace_id;
+  let path = Keeper_chat_store.chat_path ~base_dir:config.Workspace.base_path ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  Fs_compat.save_file path
+    ({|{"id":"broken","role":"user","content":"unreadable","ts":1.0,"speaker_id":"external"}|} ^ "\n");
+  append_official_boundary config ~trace_id ~turn:1 ~recorded_at:2.;
+  (match Consumer.consume_one ~config ~keeper_name ~commit:(fun _ -> fail "unreadable chat committed") with
+   | Error (Consumer.Counterpart_observations_unreadable _) -> ()
+   | Error error -> fail (Consumer.error_to_string error)
+   | Ok _ -> fail "unreadable chat advanced the official cursor");
+  check bool "unreadable chat preserves the official cursor" true (Option.is_none (read_official config))
+;;
+
 (* A history line the decoder refuses, after the first named one, stops the
    pass with a typed error naming the line; nothing is skipped. *)
 let test_a_refused_fragment_line_stops_the_pass () =
@@ -4383,6 +4644,22 @@ let test_official_cursor_above_the_range_end_refuses_the_hand_off () =
    with
    | Ok () -> ()
    | Error error -> fail (Official.write_error_to_string error));
+  let external_item : Keeper_external_attention.item =
+    { event_id = Keeper_external_attention.event_id_of_dedupe_key "clock-fixture"
+    ; dedupe_key = "clock-fixture"; keeper_name
+    ; conversation = { conversation_id = "agent:clock-fixture"; surface = Keeper_external_attention.Agent }
+    ; external_message = None; source_label = "agent"
+    ; actor = { actor_id = Some "external"; display_name = Some "External"
+              ; authority = Keeper_chat_store.External }
+    ; urgency = Keeper_external_attention.Ambient
+    ; content_preview = "Previously acknowledged evidence"
+    ; content_ref = None; received_at = now; metadata = [] }
+  in
+  (match Keeper_external_attention.For_testing.record_with_clock ~now:(fun () -> now)
+      ~base_path:config.Workspace.base_path external_item with
+   | `Recorded -> ()
+   | `Duplicate _ -> fail "duplicate external fixture"
+   | `Error detail -> fail detail);
   (match
      Consumer.consume_one ~config ~keeper_name
        ~commit:(fun _original -> Consumer.Memory_committed)
@@ -4409,20 +4686,86 @@ let test_official_cursor_above_the_range_end_refuses_the_hand_off () =
   append_boundary
     config ~trace_id:trace_c ~turn:1 ~recorded_at:(now +. 300.0) [ message "c" ];
   write_meta config trace_c;
-  (match
-     Consumer.consume_one ~config ~keeper_name
-       ~commit:(fun _original ->
-         fail "the hand-off committed a range that strands the row")
-   with
-   | Error (Consumer.Counterpart_interval_non_monotone { after; before }) ->
-     check (float 0.001) "the refusal names the carried bound" a_ended after;
-     check (float 0.001) "and this range's end" (now -. 100.0) before
-   | Error error -> fail (Consumer.error_to_string error)
-   | Ok _ -> fail "the hand-off advanced past a row no later range would read");
-  match read_progress config with
-  | Some progress ->
-    check string "the position stays on the retired trace" trace_a progress.position.trace_id
-  | None -> fail "the refused pass removed progress"
+  let runtime_keepers_dir = Workspace.keepers_runtime_dir config in
+  let atom_before = read_progress config in
+  let official_before = read_official config in
+  (match atom_before with
+   | Some progress -> check string "fixture atom cursor" trace_a progress.position.trace_id
+   | None -> fail "fixture lacks atom cursor");
+  (match official_before with
+   | Some progress -> check int "fixture official cursor" 2 progress.Official.boundary_line
+   | None -> fail "fixture lacks official cursor");
+  let external_cursor () =
+    match Masc.Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name with
+    | Ok value -> Masc.Keeper_external_read_cursor.observation_to_json value
+    | Error error -> fail error
+  in
+  let external_before = external_cursor () in
+  check bool "fixture has a nonzero settled external cursor" true
+    (Yojson.Safe.equal external_before (`Assoc [ "after", `Int 1; "pending", `Null ]));
+  let source_paths =
+    [ Boundaries.path_for_keepers_dir ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    ; Keeper_chat_store.chat_path ~base_dir:config.Workspace.base_path ~keeper_name
+    ; Store.agent_core_checkpoint_path
+        ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_b) ~session_id:trace_b
+    ; Store.agent_core_checkpoint_path
+        ~session_dir:(Masc.Keeper_fs.keeper_session_dir config trace_c) ~session_id:trace_c
+    ]
+  in
+  let source_bytes () = List.map Fs_compat.load_file_opt source_paths in
+  let source_before = source_bytes () in
+  check bool "the selected-source fixture has all four files" true
+    (List.for_all Option.is_some source_before);
+  let selected_checkpoint () =
+    let session_dir = Masc.Keeper_fs.keeper_session_dir config trace_b in
+    match Store.load_agent_core_exact_snapshot ~session_dir ~session_id:trace_b with
+    | Error error -> fail (Store.checkpoint_ref_load_error_to_string error)
+    | Ok snapshot ->
+      Store.exact_snapshot_reference snapshot,
+      `List (List.map Agent_core.Checkpoint.message_to_json (Store.exact_snapshot_messages snapshot))
+  in
+  let checkpoint_before = selected_checkpoint () in
+  let external_source_path =
+    Keeper_external_attention.attention_path ~base_path:config.Workspace.base_path ~keeper_name
+  in
+  let external_source_before = Fs_compat.load_file_opt external_source_path in
+  check bool "fixture has an external source file" true (Option.is_some external_source_before);
+  for attempt = 1 to 3 do
+    (* Attempt 2 keeps the failure marker and retries the narrowed read.
+       Before attempt 3, reset only that process-local marker; this is a
+       restart simulation, not a new process or a reset of other caches. *)
+    if attempt = 3 then Consumer.For_testing.reset_process_state ();
+    (match
+       Consumer.consume_one ~config ~keeper_name
+         ~commit:(fun _original ->
+           fail "the hand-off committed a range that strands the row")
+     with
+     | Error (Consumer.Counterpart_interval_non_monotone
+         { after; before; first_boundary_line; end_boundary_line
+         ; atom_bound; official_bound } as error) ->
+       check (float 0.001) "the refusal names the carried bound" a_ended after;
+       check (float 0.001) "and this range's end" (now -. 100.0) before;
+       check int "first selected boundary" 3 first_boundary_line;
+       check int "last selected boundary" 3 end_boundary_line;
+       check (option (pair int (float 0.001))) "atom witness" (Some (1, a_ended)) atom_bound;
+       check (option (pair int (float 0.001))) "official witness" (Some (2, a_ended)) official_bound;
+       check string "the queued error contains the cursor and selected-range coordinates"
+         (Printf.sprintf
+            "counterpart interval is not monotone: after=%.17g before=%.17g first_boundary_line=3 end_boundary_line=3 atom_bound=(line=1,recorded_at=%.17g) official_bound=(line=2,recorded_at=%.17g)"
+            a_ended (now -. 100.0) a_ended a_ended)
+         (Consumer.error_to_string error)
+     | Error error -> fail (Consumer.error_to_string error)
+     | Ok _ -> fail "the hand-off advanced past a row no later range would read");
+    check bool "the entire atom cursor is unchanged" true (read_progress config = atom_before);
+    check bool "the entire official cursor is unchanged" true (read_official config = official_before);
+    check bool "the entire external cursor observation is unchanged" true
+      (Yojson.Safe.equal (external_cursor ()) external_before);
+    check bool "the selected fixture source files are unchanged" true (source_bytes () = source_before);
+    check bool "the selected checkpoint identity and decoded messages are unchanged" true
+      (selected_checkpoint () = checkpoint_before);
+    check bool "the external source file is unchanged" true
+      (Fs_compat.load_file_opt external_source_path = external_source_before)
+  done
 ;;
 
 let test_memory_count_cleanup_without_history () =
@@ -4822,6 +5165,16 @@ let () =
             (test_official_receipt_rejects_replaced_history ~bad_message_hash:true)
         ; test_case "untagged fragments are passed without a commit" `Quick
             test_untagged_fragments_are_passed_without_a_commit
+        ; test_case "untagged turn retains counterpart observations" `Quick
+            (test_untagged_turn_preserves_counterparts ~fail_position_after_commit:false)
+        ; test_case "untagged counterparts recover a failed cursor write" `Quick
+            (test_untagged_turn_preserves_counterparts ~fail_position_after_commit:true)
+        ; test_case "untagged non-monotone interval exposes source positions" `Quick
+            test_untagged_non_monotone_interval_exposes_source_positions
+        ; test_case "counterpart capacity refusal preserves complete source" `Quick
+            test_counterpart_capacity_refusal_preserves_complete_source
+        ; test_case "untagged turn cannot skip unreadable counterpart input" `Quick
+            test_untagged_turn_with_unreadable_counterparts_keeps_cursor
         ; test_case "a refused fragment line stops the pass" `Quick
             test_a_refused_fragment_line_stops_the_pass
         ; test_case "an official line older than the baseline is read" `Quick

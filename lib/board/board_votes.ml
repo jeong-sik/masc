@@ -219,6 +219,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                                               updated_at = ts }
                       in
                       Hashtbl.replace store.posts post_key flipped;
+                      reindex_hot_post store ~previous:post ~updated:flipped;
                       Hashtbl.replace store.vote_log vote_key (direction, ts);
                       mark_dirty_post store post_key;
                       invalidate_post_caches store;
@@ -229,6 +230,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                         | Down -> { post with votes_down = post.votes_down + 1; updated_at = ts }
                       in
                       Hashtbl.replace store.posts post_key updated;
+                      reindex_hot_post store ~previous:post ~updated:updated;
                       Hashtbl.replace store.vote_log vote_key (direction, ts);
                       mark_dirty_post store post_key;
                       invalidate_post_caches store;
@@ -411,6 +413,7 @@ let recalculate_vote_counts store =
                  target_id
                  { comment with votes_up; votes_down })))
     store.vote_log;
+  rebuild_hot_post_index store;
   invalidate_post_caches store;
   invalidate_comment_caches store
 ;;
@@ -815,7 +818,7 @@ let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
       let post_key = Post_id.to_string pid in
       match Hashtbl.find_opt store.posts post_key with
       | None -> Error (Post_not_found post_id)
-      | Some _ ->
+      | Some post ->
         let comment_ids =
           Hashtbl.fold
             (fun key (c : comment) acc ->
@@ -823,6 +826,8 @@ let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
             store.comments
             []
         in
+        unindex_post_origin store post;
+        unindex_hot_post store post;
         Hashtbl.remove store.posts post_key;
         Hashtbl.remove store.comments_by_post post_key;
         List.iter (fun comment_key -> Hashtbl.remove store.comments comment_key) comment_ids;
@@ -1161,8 +1166,7 @@ let karma_event_to_yojson (e : karma_event) : Yojson.Safe.t =
 (** Get karma for all agents (cached).
 
     Cache check / rebuild / write are all performed inside one
-    [with_lock] block — same pattern as [Board_core.list_posts] for
-    [sorted_posts_cache].  Previously the read at [store.karma_cache]
+    [with_lock] block.  Previously the read at [store.karma_cache]
     and the write to it lived outside [with_lock] while
     [Board_core.invalidate_*_caches] (callers always hold the lock)
     cleared the field under lock — so two fibers could both observe

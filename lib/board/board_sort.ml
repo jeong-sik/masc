@@ -27,12 +27,14 @@ let net_vote (p : Board_types.post) : int = p.votes_up - p.votes_down
 
 (** Hot ordering comparator.
 
-    [compare a b]: net vote DESC, then created_at DESC (newer first).
-    Suitable as the argument to [List.sort]. *)
+    [compare a b]: net vote DESC, then created_at DESC (newer first), then
+    post_id ASC. Delegates to {!Board_types.compare_hot_post_key} so the
+    incremental {!Board_types.Hot_post_set} index and in-memory sort share the
+    exact same total order. *)
 let hot_compare (a : Board_types.post) (b : Board_types.post) : int =
-  let cmp = Stdlib.Int.compare (net_vote b) (net_vote a) in
-  if cmp <> 0 then cmp
-  else Stdlib.Float.compare b.created_at a.created_at
+  Board_types.compare_hot_post_key
+    (Board_types.hot_post_key_of_post a)
+    (Board_types.hot_post_key_of_post b)
 
 (** Trending score for a single post: net vote / sqrt(age in hours).
 

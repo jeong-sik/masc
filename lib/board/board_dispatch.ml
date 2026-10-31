@@ -529,9 +529,12 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
           Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit ()
       in
       let sorted =
-        posts
-        |> apply_visibility_and_hearth_filters
-        |> sort_posts_in_memory ~sort_by
+        if needs_full_scan then
+          posts
+          |> apply_visibility_and_hearth_filters
+          |> sort_posts_in_memory ~sort_by
+        else
+          posts
       in
       let filtered = apply_post_kind_filter sorted in
       let filtered =

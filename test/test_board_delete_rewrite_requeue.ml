@@ -246,6 +246,7 @@ let test_cleanup_counts_pending_separately () =
   let post_id = Board.Post_id.to_string post.id in
   let old_post = { post with Board.created_at = Time_compat.now () -. 7200.0 } in
   Hashtbl.replace (store ()).Board.posts post_id old_post;
+  Board.rebuild_hot_post_index (store ());
   Board.invalidate_post_caches (store ());
   (store ()).Board.dirty_posts <- true;
   flush ();
@@ -271,6 +272,7 @@ let test_cleanup_refusal_is_pre_effect () =
   let post_id = Board.Post_id.to_string post.id in
   Hashtbl.replace (store ()).Board.posts post_id
     { post with Board.created_at = Time_compat.now () -. 7200.0 };
+  Board.rebuild_hot_post_index (store ());
   Board.invalidate_post_caches (store ());
   (store ()).Board.posts_load_result <- Error "snapshot read failed";
   let result =
@@ -299,6 +301,7 @@ let test_cleanup_mixed_pending_and_refused_is_post_effect () =
     { pending with Board.created_at = now -. 7200.0 };
   Hashtbl.replace (store ()).Board.posts refused_id
     { refused with Board.created_at = now -. 10800.0 };
+  Board.rebuild_hot_post_index (store ());
   Board.invalidate_post_caches (store ());
   (store ()).Board.dirty_posts <- true;
   flush ();

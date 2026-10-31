@@ -85,6 +85,62 @@ let test_trending_tiebreaks_on_created_at_desc () =
     "p-newer"
     (Board.Post_id.to_string (List.hd sorted).id)
 
+let test_hot_post_set_matches_hot_compare () =
+  let now = 1_000_000.0 in
+  let p_high =
+    make_post ~id:"p-high" ~created_at:(now -. 100.0) ~votes_up:10 ~votes_down:2
+      ~reply_count:0 ()
+  in
+  let p_tie_newer =
+    make_post ~id:"p-tie-b" ~created_at:(now -. 10.0) ~votes_up:5 ~votes_down:0
+      ~reply_count:0 ()
+  in
+  let p_tie_older_a =
+    make_post ~id:"p-tie-a" ~created_at:(now -. 50.0) ~votes_up:5 ~votes_down:0
+      ~reply_count:10 ()
+  in
+  let p_tie_older_b =
+    make_post ~id:"p-tie-c" ~created_at:(now -. 50.0) ~votes_up:5 ~votes_down:0
+      ~reply_count:1 ()
+  in
+  let posts = [ p_tie_older_b; p_high; p_tie_older_a; p_tie_newer ] in
+  let sorted_ids =
+    List.sort Board_sort.hot_compare posts
+    |> List.map (fun (p : Board.post) -> Board.Post_id.to_string p.id)
+  in
+  let index_ids =
+    List.fold_left
+      (fun acc (p : Board.post) ->
+        Board.Hot_post_set.add (Board.hot_post_key_of_post p) acc)
+      Board.Hot_post_set.empty
+      posts
+    |> Board.Hot_post_set.to_seq
+    |> List.of_seq
+    |> List.map (fun (k : Board.hot_post_key) -> k.post_id)
+  in
+  Alcotest.(check (list string))
+    "Hot_post_set order matches hot_compare total order"
+    [ "p-high"; "p-tie-b"; "p-tie-a"; "p-tie-c" ]
+    sorted_ids;
+  Alcotest.(check (list string))
+    "Hot_post_set sequence equals sorted_ids"
+    sorted_ids
+    index_ids;
+  let recent_ids =
+    List.fold_left
+      (fun acc (p : Board.post) ->
+        Board.Recent_post_set.add (Board.recent_post_key_of_post p) acc)
+      Board.Recent_post_set.empty
+      posts
+    |> Board.Recent_post_set.to_seq
+    |> List.of_seq
+    |> List.map (fun (k : Board.recent_post_key) -> k.recent_post_id)
+  in
+  Alcotest.(check (list string))
+    "Recent_post_set orders created_at desc then post_id asc"
+    [ "p-tie-b"; "p-tie-a"; "p-tie-c"; "p-high" ]
+    recent_ids
+
 let () =
   Alcotest.run "Board_sort"
     [ ( "trending"
@@ -92,5 +148,7 @@ let () =
             test_trending_ranks_net_vote_not_reply_count
         ; Alcotest.test_case "tiebreaks on created_at desc" `Quick
             test_trending_tiebreaks_on_created_at_desc
+        ; Alcotest.test_case "Hot_post_set matches hot_compare total order" `Quick
+            test_hot_post_set_matches_hot_compare
         ] )
     ]

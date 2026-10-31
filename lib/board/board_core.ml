@@ -99,34 +99,35 @@ let read_post_and_comments store ~post_id
 let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post list =
   maybe_sweep store;
   with_lock store (fun () ->
-    (* Use cached sorted list if available (cache hit = skip sort) *)
-    let sorted_all =
-      match store.sorted_posts_cache with
-      | Some cached -> cached
-      | None ->
-        let all = Hashtbl.fold (fun _ (post : post) acc -> post :: acc) store.posts [] in
-        (* Hot formula lives in [Board_sort] (SSOT) — shared with
-           [Board_dispatch.sort_posts_in_memory] to prevent drift. *)
-        let sorted = List.sort Board_sort.hot_compare all in
-        store.sorted_posts_cache <- Some sorted;
-        sorted
-    in
-    (* Apply filters on the pre-sorted list *)
-    let filtered =
-      match visibility_filter with
-      | None -> sorted_all
-      | Some v -> List.filter (fun (p : post) -> p.visibility = v) sorted_all
-    in
-    let filtered =
-      match hearth with
-      | None -> filtered
-      | Some h ->
-        let h_norm = String.lowercase_ascii (String.trim h) in
-        List.filter
-          (fun (p : post) -> Option.equal String.equal p.hearth (Some h_norm))
-          filtered
-    in
-    take limit filtered)
+    let limit = max 0 limit in
+    if limit = 0
+    then []
+    else (
+      let hearth_norm =
+        Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth
+      in
+      let matches_filters (p : post) =
+        (match visibility_filter with
+         | None -> true
+         | Some v -> p.visibility = v)
+        &&
+        match hearth_norm with
+        | None -> true
+        | Some h_norm -> Option.equal String.equal p.hearth (Some h_norm)
+      in
+      let rec collect seq remaining acc =
+        if remaining <= 0
+        then List.rev acc
+        else (
+          match seq () with
+          | Seq.Nil -> List.rev acc
+          | Seq.Cons ((key : hot_post_key), rest) ->
+            (match Hashtbl.find_opt store.posts key.post_id with
+             | Some post when matches_filters post ->
+               collect rest (remaining - 1) (post :: acc)
+             | Some _ | None -> collect rest remaining acc))
+      in
+      collect (Hot_post_set.to_seq store.hot_post_index) limit []))
 ;;
 
 let current_post_cursor store =
@@ -156,24 +157,29 @@ let current_post_cursor store =
     | None -> Time_compat.now (), None)
 ;;
 
-(** Full-scan search over all posts (no limit on scan, only on results).
-    Used by Board_dispatch.search to avoid the list_posts hard cap. *)
+(** Lazily traverses [store.recent_post_index] ([created_at DESC, post_id ASC])
+    and collects up to [limit] posts satisfying [predicate] without sorting the
+    full post table. *)
 let search_posts store ~predicate ~limit : post list =
   maybe_sweep store;
   with_lock store (fun () ->
-    let matches =
-      Hashtbl.fold
-        (fun _ (p : post) acc -> if predicate p then p :: acc else acc)
-        store.posts
-        []
-    in
-    (* Sort by recency for search results *)
-    let sorted =
-      List.sort
-        (fun (a : post) (b : post) -> Stdlib.Float.compare b.created_at a.created_at)
-        matches
-    in
-    take limit sorted)
+    let limit = max 0 limit in
+    if limit = 0
+    then []
+    else (
+      let rec collect seq remaining acc =
+        if remaining <= 0
+        then List.rev acc
+        else (
+          match seq () with
+          | Seq.Nil -> List.rev acc
+          | Seq.Cons ((key : recent_post_key), rest) ->
+            (match Hashtbl.find_opt store.posts key.recent_post_id with
+             | Some post when predicate post ->
+               collect rest (remaining - 1) (post :: acc)
+             | Some _ | None -> collect rest remaining acc))
+      in
+      collect (Recent_post_set.to_seq store.recent_post_index) limit []))
 ;;
 
 (** {1 Comment Operations} *)

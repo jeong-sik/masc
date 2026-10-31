@@ -1,0 +1,41 @@
+module type INPUT = sig
+  type t
+  val create : unit -> t
+  val append : t -> string -> unit
+  val length : t -> int
+end
+module type JOINED = sig
+  include INPUT
+  val append_separated : t -> separator:string -> string -> unit
+end
+let sink = ref 0
+let sample_old n prefix =
+  let drafts = Array.init n (fun _ -> let draft=Baseline_input.create () in
+    if prefix <> "" then Baseline_input.append draft prefix; draft) in
+  Gc.full_major ();
+  let bytes=Gc.allocated_bytes () and cpu=Sys.time () and wall=Unix.gettimeofday () in
+  Array.iter (fun draft ->
+    if Baseline_input.length draft > 0 then Baseline_input.append draft " ";
+    Baseline_input.append draft "completed voice transcript";
+    sink := !sink lxor Baseline_input.length draft) drafts;
+  Printf.printf "baseline,%d,%d,%.6f,%.6f,%.0f\n%!" n (String.length prefix)
+    (Sys.time ()-.cpu) (Unix.gettimeofday ()-.wall) (Gc.allocated_bytes ()-.bytes);
+  Sys.opaque_identity drafts |> ignore
+let sample_new n prefix =
+  let drafts = Array.init n (fun _ -> let draft=Candidate_input.create () in
+    if prefix <> "" then Candidate_input.append draft prefix; draft) in
+  Gc.full_major ();
+  let bytes=Gc.allocated_bytes () and cpu=Sys.time () and wall=Unix.gettimeofday () in
+  Array.iter (fun draft ->
+    Candidate_input.append_separated draft ~separator:" " "completed voice transcript";
+    sink := !sink lxor Candidate_input.length draft) drafts;
+  Printf.printf "joined,%d,%d,%.6f,%.6f,%.0f\n%!" n (String.length prefix)
+    (Sys.time ()-.cpu) (Unix.gettimeofday ()-.wall) (Gc.allocated_bytes ()-.bytes);
+  Sys.opaque_identity drafts |> ignore
+let () =
+  Printf.printf "implementation,n,prefix_bytes,cpu_s,wall_s,allocated_bytes\n%!";
+  List.iter (fun (n,prefix) -> for round=0 to 6 do
+    if round mod 2 = 0 then (sample_old n prefix; sample_new n prefix)
+    else (sample_new n prefix; sample_old n prefix)
+  done) [40000,""; 40000,"hello"; 4000,String.make 4096 'x'];
+  Sys.opaque_identity !sink |> ignore

@@ -1,0 +1,82 @@
+module type INPUT = sig
+  type t
+  val create : unit -> t
+  val insert : t -> string -> unit
+  val append : t -> string -> unit
+  val move_left : t -> unit
+  val move_right : t -> unit
+  val backspace : t -> unit
+  val contents : t -> string
+  val cursor : t -> int
+end
+
+let sink = ref 0
+let use (type a) (module M : INPUT with type t = a) draft =
+  sink := !sink lxor M.cursor draft lxor String.length (M.contents draft)
+
+let scenarios = [
+  "ascii_typing", (fun (module M : INPUT) ->
+    for _ = 1 to 400 do
+      let x = M.create () in
+      for _ = 1 to 64 do M.insert x "a" done;
+      use (module M) x
+    done);
+  "unicode_typing", (fun (module M : INPUT) ->
+    for i = 1 to 200 do
+      let x = M.create () in
+      M.insert x (string_of_int i);
+      for _ = 1 to 64 do
+        Masc_tui_message_layout.begin_frame ();
+        M.insert x "가"
+      done;
+      use (module M) x
+    done);
+  "ascii_navigation", (fun (module M : INPUT) ->
+    let x = M.create () in
+    M.insert x (String.make 4096 'x');
+    for _ = 1 to 400 do M.move_left x; M.move_right x done;
+    use (module M) x);
+  "unicode_navigation", (fun (module M : INPUT) ->
+    let x = M.create () in
+    M.insert x (String.concat "" (List.init 1024 (fun _ -> "가")));
+    for _ = 1 to 400 do M.move_left x; M.move_right x done;
+    use (module M) x);
+  "voice_append_ascii", (fun (module M : INPUT) ->
+    for _ = 1 to 4000 do
+      let x = M.create () in
+      for _ = 1 to 20 do M.append x "abcd" done;
+      use (module M) x
+    done);
+  "mixed_edits", (fun (module M : INPUT) ->
+    for _ = 1 to 1000 do
+      let x = M.create () in
+      M.insert x "hello "; M.insert x "가"; M.insert x " world";
+      M.move_left x; M.insert x "🙂"; M.backspace x; M.append x "!";
+      use (module M) x
+    done);
+  "paste_ascii_64k", (fun (module M : INPUT) ->
+    let text = String.make 65536 'x' in
+    for _ = 1 to 12 do let x = M.create () in M.insert x text; use (module M) x done)
+]
+
+let sample label name run input =
+  Masc_tui_message_layout.with_isolated_pieces_cache (fun () ->
+    Gc.full_major ();
+    let allocated = Gc.allocated_bytes () and cpu = Sys.time () and wall = Unix.gettimeofday () in
+    run input;
+    Printf.printf "%s,%s,%.6f,%.6f,%.0f\n%!" name label
+      (Sys.time () -. cpu) (Unix.gettimeofday () -. wall) (Gc.allocated_bytes () -. allocated))
+
+let () =
+  Printf.printf "scenario,implementation,cpu_s,wall_s,allocated_bytes\n%!";
+  List.iter (fun (name, run) ->
+    for round = 0 to 6 do
+      if round mod 2 = 0 then begin
+        sample "baseline" name run (module Baseline_input : INPUT);
+        sample "candidate" name run (module Candidate_input : INPUT)
+      end else begin
+        sample "candidate" name run (module Candidate_input : INPUT);
+        sample "baseline" name run (module Baseline_input : INPUT)
+      end
+    done) scenarios;
+  Sys.opaque_identity !sink |> ignore

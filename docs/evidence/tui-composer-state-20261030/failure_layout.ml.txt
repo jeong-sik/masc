@@ -1,0 +1,5 @@
+let raise_on_boundaries = ref false
+let input_boundaries text =
+  if !raise_on_boundaries then failwith "injected segmentation failure";
+  List.init (String.length text + 1) Fun.id
+let drop_last_utf8_word text = text

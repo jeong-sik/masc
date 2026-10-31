@@ -19,7 +19,7 @@ module type Capture = sig
   val owner_matches_json : owner -> Yojson.Safe.t -> (unit, string) result
   val request_id : t -> string
   val to_json : t -> Yojson.Safe.t
-  val request : t -> (Lane_addon_exact.request, string) result
+  val decode_final : store:Lane_addon_store.t -> t -> Yojson.Safe.t -> (Lane_addon_exact.final, string) result
   val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final -> (unit, string) result
   val gate_inputs : t -> Yojson.Safe.t -> (inputs, string) result
   (** Revalidate the complete original domain proposal and derive its original

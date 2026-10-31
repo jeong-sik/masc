@@ -25,3 +25,12 @@ val confirm_final : store:Lane_addon_store.t -> target -> Lane_addon_exact.final
     {!Lane_addon_exact.refused_before_host} holds, for a request the host never
     retained: the worker refuses a request no listing reply can carry before the
     host sees it, and that final holds no answer. *)
+
+val decode_final : store:Lane_addon_store.t -> target -> Yojson.Safe.t ->
+  (Lane_addon_exact.final, string) result
+(** Strictly decode the final when possible. If a consumer-schema answer is
+    rejected by the strict decoder, recover it only from the matching original
+    host terminal and latest execution proof, without changing the JSON. This
+    is not domain validation, delivery authority, or permission to write. The
+    caller still validates the final and original domain proposal. Blocking
+    Store reads must be offloaded from Eio. *)

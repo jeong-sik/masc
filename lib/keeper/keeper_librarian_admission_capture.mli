@@ -75,6 +75,10 @@ val input : t -> Keeper_librarian.input
 val expected_revision : t -> int option
 val now : t -> float
 val request : t -> (Lane_addon_exact.request, string) result
+val decode_final : store:Lane_addon_store.t -> t -> Yojson.Safe.t ->
+  (Lane_addon_exact.final, string) result
+(** Reobserve the original owner and decode with its original host evidence.
+    This neither validates the proposal nor grants a Memory write. *)
 val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final ->
   (unit, string) result
 (** Blocking read-only original host proof confirmation. Reobserve the physical

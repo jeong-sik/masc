@@ -41,9 +41,7 @@ let reload ~store ~previous request =
   Ok record
 let original_answer ~store request record =
   let* value=judgment record in
-  let* exact=Request.request request in
-  let* schema=Option.to_result ~none:"Original history request has no output schema" exact.schema in
-  let* final=Exact.final_of_json ~schema value in
+  let* final=Request.decode_final ~store request value in
   let* ()=Request.confirm_final ~store request final in
   match final with
   | Exact.Call_final (Answered {output;_}) ->

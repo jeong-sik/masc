@@ -40,7 +40,8 @@ let reply state = Ok { (Mcp_protocol.Mcp_types.tool_result_of_text "fixture work
   structured_content = Some (`Assoc ["request_id",`String request_id;"state",`String state]) }
 let kind arguments = Yojson.Safe.Util.(member "kind" arguments |> to_string)
 let resume ?(prepare = fun () -> Ok ()) store call =
-  Submit.resume ~store ~label:"Fixture" ~original:(load store) ~request ~schema ~prepare ~call
+  Submit.resume ~store ~label:"Fixture" ~original:(load store) ~request ~schema
+    ~decode_final:(Exact.final_of_json ~schema) ~prepare ~call
     ~terminal:(fun _ final -> Ok final)
 let names = Alcotest.(list string)
 

@@ -355,6 +355,15 @@ let validate_proposal capture output =
   Runtime.validate_admission_proposal ~now:capture.parsing_now ~batch:capture.original_batch
     ~input:capture.original_input output |> Result.map_error L.parse_error_to_string
 
+let decode_final ~store (capture:t) json =
+  let* actual_owner=observe_owner ~base_path:(base_path capture.owner)
+    ~keepers_dir:(keepers_dir capture.owner) ~keeper_id:(keeper_id capture.owner) in
+  let* ()=owner_matches_json actual_owner (owner_to_json capture.owner) in
+  let* exact=request capture in
+  let* target=Keeper_librarian_original_final.target
+    ~installation_id:capture.destination.installation_id exact in
+  Keeper_librarian_original_final.decode_final ~store target json
+
 let confirm_final ~store (capture:t) (final:Lane_addon_exact.final) =
   let module Exact = Lane_addon_exact in
   let* actual_owner = observe_owner ~base_path:(base_path capture.owner)

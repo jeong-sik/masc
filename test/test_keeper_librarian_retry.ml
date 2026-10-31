@@ -1126,6 +1126,34 @@ let test_a_working_context_slip_keeps_the_memory_decision () =
      check string "the selector's reason" "working context requires an array" detail
    | Librarian.Working_contexts_organized _ | Librarian.Working_contexts_missing ->
      fail "an invalid organization was not reported as invalid");
+  let source : Masc.Keeper_librarian_context.source =
+    { reference = "original-source"; content = `String "original request" } in
+  let captured = input () in
+  let captured = { captured with working_context =
+    { Masc.Keeper_librarian_context.empty with sources = [ source ] } } in
+  let pocket extra = `Assoc
+    ([ "merge_contexts", `List []; "sources", `List [ `String "s1" ]
+     ; "context", `String "original request"; "next_steps", `List [] ] @ extra) in
+  let decide extra =
+    let answer = memory_answer [ "working_contexts", `List [ pocket extra ] ] in
+    match Librarian.selection_of_json_result ~now:2_000_000. captured answer with
+    | Ok selection -> selection
+    | Error error -> fail (Librarian.parse_error_to_string error) in
+  let valid = decide [] in
+  (match valid.working_contexts with
+   | Librarian.Working_contexts_organized [ _ ] -> ()
+   | Working_contexts_organized _ | Working_contexts_missing | Working_contexts_invalid _ ->
+     fail "the source-bound original context must be valid");
+  let invalid = decide [ "completeness", `String "current" ] in
+  (match invalid.working_contexts with
+   | Librarian.Working_contexts_invalid detail ->
+     check string "the extra field alone refuses the context"
+       "working context object fields mismatch" detail
+   | Working_contexts_organized _ | Working_contexts_missing ->
+     fail "the extra field was silently accepted");
+  check (list string) "the same Memory drop survives the invalid context"
+    (List.map (fun (d : Memory.dropped_statement) -> d.memory_id) valid.dropped)
+    (List.map (fun (d : Memory.dropped_statement) -> d.memory_id) invalid.dropped);
   match organization "missing" [] with
   | Librarian.Working_contexts_missing -> ()
   | Librarian.Working_contexts_organized _ | Librarian.Working_contexts_invalid _ ->

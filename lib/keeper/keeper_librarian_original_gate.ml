@@ -15,7 +15,7 @@ module type Capture = sig
   val owner_matches_json : owner -> Yojson.Safe.t -> (unit, string) result
   val request_id : t -> string
   val to_json : t -> Yojson.Safe.t
-  val request : t -> (Lane_addon_exact.request, string) result
+  val decode_final : store:Lane_addon_store.t -> t -> Yojson.Safe.t -> (Lane_addon_exact.final, string) result
   val confirm_final : store:Lane_addon_store.t -> t -> Lane_addon_exact.final -> (unit, string) result
   val gate_inputs : t -> Yojson.Safe.t -> (inputs, string) result
   (** Revalidate the complete original domain proposal and derive its original
@@ -91,9 +91,7 @@ let load_parent_with ~read ~store ~owner ~capture ~proposal =
   let* parent = Option.to_result ~none:"Original gate execution parent is absent" parent in
   let* () = equal parent.request (Capture.to_json capture) "Gate parent capture differs" in
   let* judgment = parent_judgment parent in
-  let* exact = Capture.request capture in
-  let* schema = Option.to_result ~none:"Original Librarian request has no schema" exact.schema in
-  let* final = Exact.final_of_json ~schema judgment in
+  let* final = Capture.decode_final ~store capture judgment in
   let* () = Capture.confirm_final ~store capture final in
   let* () = match final with
     | Exact.Call_final (Answered {output;_}) ->

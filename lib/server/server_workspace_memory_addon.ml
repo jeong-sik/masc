@@ -114,8 +114,9 @@ let resume_with ~store ~base_path ~request_id ~prepare ~call =
     |> Result.map_error (fun detail -> Unavailable detail) in
   let* capture=restore ~store ~workspace original in
   let* request=rejected (Binding.request capture) in
+  let schema=Capture.output_schema capture in
   let* resumed=Submit.resume ~store ~label:"Curator" ~original ~request
-    ~schema:(Capture.output_schema capture) ~prepare ~call
+    ~schema ~decode_final:(Exact.final_of_json ~schema) ~prepare ~call
     ~terminal:(fun record final -> terminal ~capture ~record final) in
   match resumed with
   | Submit.Awaiting (wait,record) -> Ok (Awaiting (wait,record))

@@ -10,9 +10,10 @@ type vmm =
   | Cloud_hypervisor
   | Dragonball
 
-(* Host-validated closed mapping: runtime id -> VMM.  The default Kata shim
-   (no per-VMM split) maps to [Qemu] because that is the Kata default VMM;
-   the derived per-VMM ids exist only for Keepers that declared one. *)
+(* Host-validated closed mapping: runtime id -> VMM.  The per-VMM ids below
+   exist only for Keepers that declared a VMM; the default Kata shim (no
+   per-VMM split) carries no VMM claim at all — which VMM it boots is a
+   configuration.toml value this host does not observe, so we do not guess. *)
 let runtime_id_of = function
   | Qemu -> "io.containerd.kata-qemu.v2"
   | Cloud_hypervisor -> "io.containerd.kata-clh.v2"
@@ -20,37 +21,34 @@ let runtime_id_of = function
 
 let default_shim_runtime_id = "io.containerd.kata.v2"
 
-let vmm_of_runtime_id id =
-  match id with
-  | "io.containerd.kata-qemu.v2" -> Some Qemu
-  | "io.containerd.kata-clh.v2" -> Some Cloud_hypervisor
-  | "io.containerd.kata-dragonball.v2" -> Some Dragonball
-  | _ -> None
+(* What the caller should do with an observed runtime id.  [Default_shim]
+   asserts no VMM: the shim's VMM depends on guest configuration this host
+   does not read.  [Unknown_runtime] keeps the mismatch explicit instead of
+   silently dropping or adopting the row. *)
+type observed =
+  | Ours of vmm                     (* one of the closed per-VMM ids above *)
+  | Default_shim                    (* default shim; VMM unobserved, do not guess *)
+  | Unknown_runtime of string       (* not an id this host validates or supports *)
 
-(* All runtime ids that belong to the Kata family on this host: the default
-   shim plus the per-VMM splits.  An inventory row carrying any other id is
-   not ours; a row carrying one of these is one of ours whatever else it
-   says.  The set is closed: there is no fourth id to invent. *)
+(* The single classification entry point: everything else in this module and
+   every consumer decision derives from this match. *)
+let classify_runtime_id id =
+  if String.equal id default_shim_runtime_id then Default_shim
+  else
+    match id with
+    | "io.containerd.kata-qemu.v2" -> Ours Qemu
+    | "io.containerd.kata-clh.v2" -> Ours Cloud_hypervisor
+    | "io.containerd.kata-dragonball.v2" -> Ours Dragonball
+    | _ -> Unknown_runtime id
+
+(* Derived, for tests and diagnostics: the full validated set.  Other
+   Kata-family ids exist upstream — kata-deploy also registers Firecracker as
+   [io.containerd.kata-fc.v2] — and those are known-unsupported here, not
+   somebody else's containers.  Consumers must report them as unsupported,
+   never as foreign or adoptable. *)
 let kata_runtime_ids =
   default_shim_runtime_id :: [ runtime_id_of Qemu; runtime_id_of Cloud_hypervisor;
                                runtime_id_of Dragonball ]
-
-let is_kata_runtime_id id = List.mem id kata_runtime_ids
-
-(* What the caller should do with an observed runtime id, given what the
-   Keeper declared.  [Unknown] keeps the mismatch explicit instead of
-   silently dropping or adopting the row. *)
-type observed =
-  | Ours of vmm                     (* one of the closed ids above *)
-  | Default_shim of vmm             (* default shim; [Qemu] is its VMM today *)
-  | Unknown_runtime of string       (* not a Kata id this host validates *)
-
-let classify_runtime_id id =
-  if String.equal id default_shim_runtime_id then Default_shim Qemu
-  else
-    match vmm_of_runtime_id id with
-    | Some vmm -> Ours vmm
-    | None -> Unknown_runtime id
 
 let vmm_name = function
   | Qemu -> "qemu"

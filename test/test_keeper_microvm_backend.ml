@@ -83,7 +83,7 @@ let test_only_the_containerd_backend_names_a_runtime () =
   check
     (Alcotest.list Alcotest.string)
     "nerdctl names the Kata shim"
-    [ "--runtime"; "io.containerd.kata.v2" ]
+    [ "--runtime"; Backend.kata_containerd_shim ]
     (Backend.run_runtime_args Backend.Nerdctl_kata);
   List.iter
     (fun backend ->
@@ -197,7 +197,7 @@ let test_boot_argv_is_each_runtimes_own () =
      @ [ "--user"; "501:20" ]
      @ [ "--cap-drop"; "ALL"; "--read-only"; "--tmpfs"; "/tmp" ]
      @ [ "--memory"; "2048m"; "--cpus"; "4" ]
-     @ [ "--runtime"; "io.containerd.kata.v2" ]
+     @ [ "--runtime"; Backend.kata_containerd_shim ]
      @ [ "-v"; "h:c:ro" ]
      @ [ "--workdir"; Microvm.work_volume_guest_root ]
      @ [ "--network"; "none" ]

@@ -3,8 +3,10 @@
     A Keeper chooses among [Qemu], [Cloud_hypervisor] and [Dragonball] by
     name; the host maps that choice to a runtime id from a closed set.  The
     Keeper never supplies a runtime id or a configuration path.  Observed
-    inventory rows are classified against the same closed set, and anything
-    outside it stays an explicit [Unknown_runtime] mismatch. *)
+    inventory rows are classified through [classify_runtime_id] — the single
+    classification entry point — and anything outside the validated set stays
+    an explicit [Unknown_runtime] mismatch (known-unsupported Kata family,
+    e.g. Firecracker, or a foreign runtime alike). *)
 
 type vmm =
   | Qemu
@@ -17,23 +19,24 @@ val runtime_id_of : vmm -> string
 val default_shim_runtime_id : string
 (** The unsplit Kata shim id used by existing guests. *)
 
-val vmm_of_runtime_id : string -> vmm option
-(** [Some vmm] for the closed per-VMM ids, [None] otherwise. *)
-
-val kata_runtime_ids : string list
-(** Every Kata-family runtime id this host validates, including the default
-    shim.  Closed: nothing outside this list is ours. *)
-
-val is_kata_runtime_id : string -> bool
-
 type observed =
   | Ours of vmm
-  | Default_shim of vmm  (** the default shim, whose VMM is [Qemu] today *)
+  | Default_shim
+      (** The default Kata shim.  Carries no VMM claim: which VMM it boots is
+          guest configuration this host does not observe, so callers must not
+          display or record a VMM for it. *)
   | Unknown_runtime of string
 
 val classify_runtime_id : string -> observed
 (** Classify an observed runtime id against the closed set without adopting
-    or dropping it. *)
+    or dropping it.  This is the single classification entry point; derive
+    every ownership or reporting decision from its result rather than from
+    separate membership tests. *)
+
+val kata_runtime_ids : string list
+(** Every Kata-family runtime id this host validates and supports, including
+    the default shim.  Ids outside this list are unsupported or foreign —
+    never adoptable; report them via {!classify_runtime_id}. *)
 
 val vmm_name : vmm -> string
 

@@ -35,6 +35,7 @@ trap cleanup EXIT
 nerdctl volume create "$volume"
 nerdctl volume inspect "$volume"
 # Root creates the keeper-owned directory once; no SYS_ADMIN or writable rootfs.
+# Canonical home of this runtime id: lib/keeper/keeper_microvm_kata_vmm.ml (Keeper_microvm_kata_vmm.default_shim_runtime_id). Keep literals in sync with it.
 nerdctl run --rm --runtime io.containerd.kata.v2 --network none \
   --read-only --cap-drop ALL --tmpfs /tmp --pull never \
   -v "$volume:/masc-work" "$image" sh -ec '

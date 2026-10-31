@@ -39,6 +39,11 @@ let lines rows = String.concat "\n" (List.map Yojson.Safe.to_string rows)
 let get = function Ok x -> x | Error e -> fail e
 let alive pid = pid = 41001
 
+let kata_family id =
+  match V.classify_runtime_id id with
+  | V.Ours _ | V.Default_shim -> true
+  | V.Unknown_runtime _ -> false
+
 (* The closed set: exactly four ids — the default shim plus three per-VMM
    splits.  Anything a Keeper might invent outside it stays unknown. *)
 let test_runtime_set_is_closed () =
@@ -48,9 +53,9 @@ let test_runtime_set_is_closed () =
     ; "io.containerd.kata-qemu.v2"; V.default_shim_runtime_id ]
   |> Alcotest.(check bool "closed set of four host-validated ids") true;
   Alcotest.(check bool "invented id is not kata") false
-    (V.is_kata_runtime_id "io.containerd.kata-custom.v2");
+    (kata_family "io.containerd.kata-custom.v2");
   Alcotest.(check bool "runc is not kata") false
-    (V.is_kata_runtime_id "io.containerd.runc.v2")
+    (kata_family "io.containerd.runc.v2")
 
 let test_choice_decoder_refuses_everything_else () =
   Alcotest.(check (result vmm string))
@@ -74,10 +79,18 @@ let test_classify_keeps_mismatch_explicit () =
     (match V.classify_runtime_id (V.runtime_id_of V.Cloud_hypervisor) with
      | V.Ours vmm -> vmm
      | _ -> Alcotest.fail "expected Ours");
-  Alcotest.(check vmm) "default shim maps to its VMM" V.Qemu
-    (match V.classify_runtime_id V.default_shim_runtime_id with
-     | V.Default_shim vmm -> vmm
-     | _ -> Alcotest.fail "expected Default_shim");
+  (match V.classify_runtime_id V.default_shim_runtime_id with
+   | V.Default_shim -> ()
+     (* No VMM claim: the default shim's VMM is guest configuration this host
+        does not observe, and the type now refuses to guess it. *)
+   | _ -> Alcotest.fail "expected Default_shim without a VMM payload");
+  (match V.classify_runtime_id "io.containerd.kata-fc.v2" with
+   | V.Unknown_runtime id ->
+     (* Firecracker is Kata-family but known-unsupported here: keep it
+        unknown rather than treating it as somebody else's container. *)
+     Alcotest.(check string) "firecracker stays unknown-unsupported"
+       "io.containerd.kata-fc.v2" id
+   | _ -> Alcotest.fail "kata-fc must stay Unknown_runtime");
   (match V.classify_runtime_id "io.containerd.runc.v2" with
    | V.Unknown_runtime id ->
      Alcotest.(check string) "unknown keeps the observed id"

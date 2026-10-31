@@ -893,7 +893,11 @@ let object_array_fields () =
   let edit key form = match Form.handle ~key form |> ok with
     | Form.Updated form -> form | _ -> fail "array editing must not submit the enclosing form" in
   let add text form = form |> edit "a" |> Form.insert_text ~text |> edit "\019" |> edit "enter" in
+  let advertises_array_editor form = List.exists (fun line ->
+    List.mem "Ctrl-E:array" (String.split_on_char ' ' line)) (Form.lines form) in
   let initial = Form.create ~schema ~initial:(`Assoc []) |> ok in
+  check bool "object array advertises its item editor" true
+    (advertises_array_editor initial);
   let array = edit "\005" initial in
   check bool "opening an array does not create a required value" true
     (Result.is_error (Form.value (edit "esc" array)));
@@ -929,9 +933,14 @@ let object_array_fields () =
   let primitive_schema = Yojson.Safe.from_string
     {|{"type":"object","properties":{"values":{"type":"array","items":{"type":"string"}}},"required":["values"],"additionalProperties":false}|} in
   let primitive = Form.create ~schema:primitive_schema ~initial:(`Assoc []) |> ok in
+  check bool "primitive array does not advertise an item editor" false
+    (advertises_array_editor primitive);
   check bool "primitive arrays remain direct JSON input" true
     (Result.is_error (Form.handle ~key:"\005" primitive));
-  let primitive = primitive |> Form.insert_text ~text:"[\"one\",\"two\"]" |> edit "\019" in
+  let primitive = primitive |> Form.insert_text ~text:"[\"one\",\"two\"]" in
+  check bool "primitive array draft displays as JSON" true
+    (List.mem {|> values *: ["one","two"]|} (Form.lines primitive));
+  let primitive = primitive |> edit "\019" in
   check bool "primitive array JSON remains valid" true
     ((Form.value primitive |> ok)=`Assoc ["values",`List [`String "one";`String "two"]])
 
@@ -2022,7 +2031,35 @@ let role_refresh_keeps_original_action_and_installation () =
   check (option string) "explicit navigation may select the replacement installation" (Some "replacement")
     (Option.bind (UI.selected_declaration selected) (fun declaration -> declaration.installation_id))
 
+let records_overlay_keeps_draft_identity_and_scroll () =
+  let text = "[binding]\n[[binding.records]]\nsource_id = \"one\"\nkind = \"wiki\"\n" in
+  let first = { (Draft.create "a.toml" |> ok) with text } in
+  let second = { first with file_name="b.toml" } in
+  let view = UI.put_document UI.initial first |> UI.open_records |> ok in
+  let form = UI.edit_records ~key:"a" view |> ok in
+  let form = UI.edit_records ~key:"x" {form with scroll=7} |> ok in
+  check int "typing keeps the scrolled form" 7 form.scroll;
+  let form = UI.paste_records ~text:"more" form in
+  check int "pasting keeps the scrolled form" 7 form.scroll;
+  let listing = UI.edit_records ~key:"esc" form |> ok in
+  check int "return to selected record" 0 listing.scroll;
+  let changed = UI.edit_records ~key:"d" listing |> ok in
+  let selected = match UI.selected_document changed with
+    | Some session -> session | None -> fail "selected draft disappeared" in
+  check string "the selected draft receives the deletion" "[binding]\n" selected.text;
+  check bool "the overlay remains open" true (Option.is_some changed.records);
+  let switched = UI.put_document view second in
+  check bool "a different filename closes an overlay even with identical text" true
+    (Option.is_none switched.records);
+  let mismatched = {view with document_key=Some "b.toml"; documents=[first;second]} in
+  check bool "a mismatched selected draft is not overwritten" true
+    (Result.is_error (UI.edit_records ~key:"d" mismatched));
+  let changed_under_overlay = {view with documents=[{first with text="[binding]\n"}]} in
+  check bool "changed draft text is not overwritten" true
+    (Result.is_error (UI.edit_records ~key:"d" changed_under_overlay))
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "records overlay keeps draft identity and scroll" `Quick records_overlay_keeps_draft_identity_and_scroll;
   test_case "current category requires exact id and path" `Quick
     current_category_requires_exact_id_and_path;
   test_case "Inspect categories use strict shared decoding" `Quick inspect_category_decode_is_strict;

@@ -96,6 +96,7 @@ type t = {
   presentation : presentation; screen : screen; overview_mode : overview_mode; help_open : bool;
   current_selection : overview_selection; history_selection : overview_selection;
   action_menu : action_menu option;
+  records : Masc_tui_lane_records.t option;
   snapshot : snapshot option; loading : bool; error : diagnostic option;
   application_reading : configuration Application.reading;
   snapshot_read_error : string option;
@@ -271,6 +272,14 @@ val pending_action : t -> action_request option
 
 val paste_action : text:string -> t -> t
 val edit_action : key:string -> t -> (t * action_request option, string) result
+val open_records : t -> (t, string) result
+(** Open the record-grants overlay over the selected declaration draft.
+    Refused when no draft is open or its entries do not parse. *)
+val edit_records : key:string -> t -> (t, string) result
+(** Route one key to the records overlay. An applied edit lands in the
+    open declaration draft; [s] saves it like any other draft change. *)
+val paste_records : text:string -> t -> t
+(** Pasted text goes to the overlay's open add form. *)
 val can_observe : instance -> bool
 val removal_block_reason : t -> instance -> string option
 val overview_hints : t -> string

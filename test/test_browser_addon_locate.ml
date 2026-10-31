@@ -17,7 +17,10 @@ let scene ~document ~text ~x=`Assoc ["schema",`String "masc.browser.scene.v1";"d
   "url",`String "https://example.test/";"title",`String "Fixture";"view",`String "content";"scope",`Null;
   "viewport",`Assoc ["width",`Float 800.;"height",`Float 600.;"scrollX",`Float 0.;"scrollY",`Float 0.];
   "nodes",`List [node ~text ~x];"truncated",`Bool false]
-let scenario manifest =
+let marker = "managed-locate-policy-fixture"
+let worker_scenario manifest configuration_directory =
+  check (option string) "worker has no Dune source-root environment" None (Sys.getenv_opt "DUNE_SOURCEROOT");
+  check (option string) "worker starts with no prompt registry installed" None (Prompt_registry.get_markdown_dir ());
   let root=Filename.temp_dir "browser-locate-" "" |> Unix.realpath in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
   Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
@@ -31,8 +34,8 @@ let scenario manifest =
       let incarnation="0b000000-0000-4000-8000-000000000009" in
       let owner=Owner.create ~incarnation |> ok in
       check bool "no selected output exposes no model consumer" true (Browser_addon_locate.for_owner owner=Ok None);
-      let models=Models.create ~incarnation ~configuration:{Models.store_root=Filename.concat root "model-results";
-        outputs=package.exact_outputs} |> ok in
+      let configuration=Models.load_configuration ~directory:configuration_directory |> ok in
+      let models=Models.create ~incarnation ~configuration |> ok in
       Owner.attach_models owner models |> ok;
       let locate=Browser_addon_locate.for_owner owner |> ok in
       check bool "manifest schema matches the implemented consumer" true (Option.is_some locate);
@@ -73,6 +76,7 @@ let scenario manifest =
         let id=match ready.request_ids with [id] -> id | _ -> fail "one original command must own one model request" in
         let listing=Models.listing models |> ok |> Lane_addon_host_request.listing_of_json |> ok in
         (match listing with [Lane_addon_host_request.Exact_output request] ->
+          check (option string) "managed locator system reaches the actual broker request" (Some marker) request.system;
           check string "request uses declared output" "locate" request.output;
           check int "request contains one scoped observation" 1 (List.length request.messages)
          | _ -> fail "missing exact locate request");
@@ -110,6 +114,8 @@ let scenario manifest =
         (fun () -> ignore (Models.wait models ~after:(Some before.revision));true));
       check (list string) "original command cancellation withdraws its model request" []
         (Models.wait models ~after:None |> ok).request_ids;
+      check (option string) "locator requests do not install a worker prompt registry" None
+        (Prompt_registry.get_markdown_dir ());
       let pending,_=start () in
       check bool "private retirement joins the waiting model and driver cleanup" true
         (Owner.dispatch owner {W.incarnation;command=W.Retire}=W.Receipt);
@@ -117,19 +123,73 @@ let scenario manifest =
         ((Eio.Promise.await_exn pending).is_error=Some true);
       check bool "retirement withdraws locate availability" false (Masc.Browser_addon_inventory.observe ()).automation.locate;
       check int "all locate scenarios issued zero browser input" 0 !inputs)))))
+let worker_unavailable configuration_directory =
+  check (option string) "unavailable worker has no Dune environment" None (Sys.getenv_opt "DUNE_SOURCEROOT");
+  check (option string) "unavailable worker has no prompt registry" None (Prompt_registry.get_markdown_dir ());
+  Eio_main.run (fun env ->
+    Time_compat.set_clock (Eio.Stdenv.clock env);
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let incarnation="0b000000-0000-4000-8000-000000000009" in
+    let configuration=Models.load_configuration ~directory:configuration_directory |> ok in
+    let expected=match configuration.locate_system with
+      | Some (Error detail) -> detail | None | Some (Ok _) -> fail "expected an unavailable host prompt" in
+    let owner=Owner.create ~incarnation |> ok in
+    let models=Models.create ~incarnation ~configuration |> ok in
+    Owner.attach_models owner models |> ok;
+    let locate=Browser_addon_locate.for_owner owner |> ok |> Option.get in
+    let scene=Browser_scene.of_json (scene ~document:"d1" ~text:"Menu" ~x:5.) |> ok in
+    check (result (list string) string) "the worker returns the exact host render failure"
+      (Error expected) (locate ~scene ~instruction:(Some "Find Menu") |> Result.map (List.map (fun node -> node.Browser_webdriver.node_id)));
+    check (list string) "unavailable guidance enqueues no external model request" []
+      (Models.wait models ~after:None |> ok).request_ids;
+    ignore (Owner.dispatch owner {W.incarnation;command=W.Retire}))
+
+let scenario manifest =
+  let root=Filename.temp_dir "browser-locate-host-" "" |> Unix.realpath in
+  let prompt_key=Prompt_names.browser_locate in
+  let prompt_root=Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
+  Fun.protect ~finally:(fun () ->
+    Prompt_registry.clear_prompt_override prompt_key; Fs_compat.remove_tree root) (fun () ->
+    Prompt_registry.set_markdown_dir (Filename.concat prompt_root "config/prompts");
+    (match Prompt_registry.set_override prompt_key marker with Ok () -> () | Error detail -> fail detail);
+    let package=Lane_addon_manifest.load ~path:manifest |> ok in
+    let configuration=Models.prepare_configuration ~store_root:(Filename.concat root "model-results")
+      ~outputs:package.exact_outputs in
+    Fs_compat.save_file_atomic_strict (Filename.concat root "models.json")
+      (Yojson.Safe.to_string (Models.configuration_to_json configuration)) |> ok;
+    let executable=Unix.realpath Sys.executable_name in
+    let environment=Browser_addon_environment.project (Unix.environment ()) in
+    let spawn mode =
+      let pid=Unix.create_process_env executable [|executable;mode;Unix.realpath manifest;root|]
+        environment Unix.stdin Unix.stdout Unix.stderr in
+      match snd (Unix.waitpid [] pid) with
+      | Unix.WEXITED 0 -> ()
+      | Unix.WEXITED code -> failf "fresh worker fixture exited %d" code
+      | Unix.WSIGNALED signal | Unix.WSTOPPED signal -> failf "fresh worker fixture signal %d" signal in
+    spawn "--worker-fixture";
+    let empty=Filename.concat root "empty-prompts" in
+    Fs_compat.mkdir_p empty;
+    Prompt_registry.clear (); Prompt_registry.set_markdown_dir empty;
+    let unavailable=Models.prepare_configuration ~store_root:(Filename.concat root "model-results")
+      ~outputs:package.exact_outputs in
+    Fs_compat.save_file_atomic_strict (Filename.concat root "models.json")
+      (Yojson.Safe.to_string (Models.configuration_to_json unavailable)) |> ok;
+    spawn "--unavailable-fixture")
+
 let ()=Mirage_crypto_rng_unix.use_default ();
-  (* The dune stanza passes the manifest it depends on, but the targeted-suite
-     runner executes the exe with no arguments. Resolve the bundled automation
-     package's manifest, the one that declares locate, in that case instead of
-     failing, so the suite can be run both ways. *)
+  if Array.length Sys.argv=4 && Sys.argv.(1)="--worker-fixture" then
+    worker_scenario Sys.argv.(2) Sys.argv.(3)
+  else if Array.length Sys.argv=4 && Sys.argv.(1)="--unavailable-fixture" then
+    worker_unavailable Sys.argv.(3)
+  else (
+  (* The dune stanza passes the manifest; the targeted-suite runner resolves
+     the bundled automation package when it invokes the exe with no args. *)
   let bundled_manifest () =
     let candidates=["addons/browser/automation/lane.toml";"../addons/browser/automation/lane.toml";
       "../../addons/browser/automation/lane.toml"] in
     match List.find_opt Sys.file_exists candidates with
     | Some path -> path
-    | None ->
-      fail ("expected bundled browser automation manifest path; looked for "
-        ^ String.concat ", " candidates) in
+    | None -> fail ("expected bundled browser automation manifest path; looked for " ^ String.concat ", " candidates) in
   let manifest=if Array.length Sys.argv=2 then Sys.argv.(1) else bundled_manifest () in
   run ~argv:[|Sys.argv.(0)|] "browser Add-on locate consumer" ["read-only",[
-    test_case "selected model, current targets, withdrawal and retire" `Quick (fun () -> scenario manifest)]]
+    test_case "fresh worker consumes host prompt without Dune configuration" `Quick (fun () -> scenario manifest)]])

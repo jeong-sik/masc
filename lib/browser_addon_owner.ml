@@ -103,6 +103,9 @@ let generate t request = Result.bind (admitted_models t) (fun models -> Browser_
 let model_output t ~name = match admitted_models t with
   | Error _ -> None
   | Ok models -> Browser_addon_models.output models ~name
+let locate_system t = match admitted_models t with
+  | Error error -> Error (Browser_addon_models.error_to_string error)
+  | Ok models -> Browser_addon_models.locate_system models
 let owned_cleanup backend cleanup =
   Eio.Lazy.from_fun ~cancel:`Protect (fun () -> match cleanup () with
     | result -> result

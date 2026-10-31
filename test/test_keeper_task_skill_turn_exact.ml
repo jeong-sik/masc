@@ -1393,8 +1393,18 @@ let test_pin_into_unconfigured_source_reads_as_deleted () =
 
 let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let open Masc in
+  let prompts_root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
+  Prompt_registry.set_markdown_dir (Filename.concat prompts_root "config/prompts");
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  let prompt_overrides =
+    [Prompt_names.skill_applicability, "managed-applicability-policy-fixture"
+    ;Prompt_names.skill_applicability_advice, "managed-applicability-advice {{decision}}"
+    ;Prompt_names.skill_applicability_projection, "{{advice}}\n\nmanaged-skill-body"] in
+  let install_overrides () = List.iter (fun (key, body) ->
+    match Prompt_registry.set_override key body with Ok () -> () | Error detail -> fail detail) prompt_overrides in
+  install_overrides ();
+  Eio.Switch.on_release sw (fun () -> List.iter (fun (key, _) -> Prompt_registry.clear_prompt_override key) prompt_overrides);
   let net = Eio.Stdenv.net env and clock = Eio.Stdenv.clock env in
   Eio_context.with_test_env ~net ~clock ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
   Masc_http_client.with_scoped_pool ~sw ~env @@ fun () ->
@@ -1443,12 +1453,14 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
       ~execution_id:(Ids.Execution_id.of_string call_id)
       ~tool_use_id:call_id ()
   in
+  let received_assessment = ref None in
   let tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~assess_applicability:(fun ~reference ~body ->
-        Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
+        let assessment = Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
           ~context:(Some (`Assoc [ "request", `String "inspect the current task" ]))
-          ~reference ~body ())
+          ~reference ~body () in
+        received_assessment := Some assessment; assessment)
       ~on_result:(fun ~input:_ result -> captured := Some result)
       ~instruction_skills:[ instruction_skill reference selected.skill ] () in
   let invoke expected =
@@ -1465,6 +1477,10 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
     output, metadata |> member "skill_applicability"
   in
   let judged_output, judged = invoke "not_applicable" in
+  check bool "managed advice reaches actual Agent-Core content" true
+    (String_util.contains_substring judged_output "managed-applicability-advice");
+  check bool "managed projection reaches actual Agent-Core content" true
+    (String_util.contains_substring judged_output "managed-skill-body");
   let open Yojson.Safe.Util in
   check string "negative advice is not a tool failure" "judged" (judged |> member "status" |> to_string);
   check string "returned model is retained" "fixture-jev" (judged |> member "model" |> to_string);
@@ -1472,6 +1488,46 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
     (judged |> member "reference" |> Yojson.Safe.to_string);
   check bool "model advice does not invite an invented confidence threshold" false
     (String_util.contains_substring judged_output "confidence");
+  let retained_assessment = Option.get !received_assessment in
+  let activation_config = Workspace.default_config log_root in
+  let activation_trace = Keeper_id.Trace_id.of_string "skill-body-projection" |> Result.get_ok in
+  Fs_compat.mkdir_p (Keeper_fs.keeper_session_dir activation_config (Keeper_id.Trace_id.to_string activation_trace));
+  let recorder = Keeper_skill_activation_recorder.make ~trace_id:activation_trace
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string activation_trace) ~absolute_turn:0)
+      ~runtime_id:(fun () -> Some "fixture-runtime")
+      ~snapshot_revision:(Snapshot.snapshot_revision captured_snapshot) ~task_selection:Selection.empty
+      |> Result.get_ok in
+  let projection_tool = Keeper_tool_composition_surface.make_instruction_skill_tool
+      ~config:activation_config
+      ~assess_applicability:(fun ~reference:_ ~body:_ -> retained_assessment)
+      ~record_activation:(fun ~invocation ~content reference ->
+        (match content with Keeper_skill_activation_recorder.Body body ->
+          check string "activation records the exact original body" frozen_body body
+         | Keeper_skill_activation_recorder.Resource _ -> fail "expected the original Skill body");
+        Keeper_skill_activation_recorder.record_instruction ~config:activation_config recorder ~invocation ~content reference)
+      ~on_result:(fun ~input:_ result -> captured := Some result)
+      ~instruction_skills:[instruction_skill reference selected.skill] () in
+  Fun.protect ~finally:install_overrides (fun () ->
+    Prompt_registry.set_override Prompt_names.skill_applicability_projection "{{advice}}" |> Result.get_ok;
+    let output = run_skill_tool projection_tool (Reference.to_yojson reference) in
+    check bool "an advice-only override still returns the complete frozen body" true
+      (String.ends_with ~suffix:frozen_body output);
+    let actual_body = String.sub output (String.length output - String.length frozen_body) (String.length frozen_body) in
+    check bool "the structural body projection is a successful Skill read" true
+      (Tool_result.is_success (Option.get !captured));
+    let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
+    check int "metadata describes the actual returned body bytes" (String.length actual_body)
+      (metadata |> member "bytes" |> to_int);
+    let actual_sha = Agent_core_sha256.(digest_string actual_body |> to_hex) in
+    check string "metadata describes the actual returned body digest" actual_sha
+      (metadata |> member "sha256" |> to_string);
+    let ledger = Keeper_skill_activation_ledger.load ~config:activation_config ~trace_id:activation_trace |> Result.get_ok in
+    match Keeper_skill_activation_ledger.activations ledger with
+    | [{Keeper_skill_activation_ledger.invocation=Keeper_skill_activation_ledger.Instruction_invocation
+          {served_content=Keeper_skill_activation_ledger.Skill_body {bytes;sha256};_};_}] ->
+      check int "durable activation records the returned body bytes" (String.length actual_body) bytes;
+      check string "durable activation records the returned body digest" actual_sha sha256
+    | _ -> fail "expected one exact body activation");
   ignore (invoke "applicable");
   ignore (invoke "insufficient_context");
   let _, invalid = invoke "advice unavailable" in
@@ -1546,7 +1602,18 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
     ; { policy with skill_applicability = false } ];
   let sent_bodies = Atomic.get server.requests in
   List.iter (fun encoded ->
-    let state = Yojson.Safe.from_string encoded |> member "state" in
+    let json = Yojson.Safe.from_string encoded in
+    check string "managed applicability question reaches the actual request"
+      (Prompt_registry.render_prompt_template Prompt_names.skill_applicability [] |> Result.get_ok)
+      (json |> member "questions" |> member "applicability" |> member "instructions" |> to_string);
+    List.iter (fun (label, key) ->
+      check string "managed applicability meaning reaches the exact criterion"
+        (Prompt_registry.render_prompt_template key [] |> Result.get_ok)
+        (json |> member "questions" |> member "applicability" |> member "criteria" |> member label |> to_string))
+      ["applicable", Prompt_names.skill_applicability_applicable;
+       "not_applicable", Prompt_names.skill_applicability_not_applicable;
+       "insufficient_context", Prompt_names.skill_applicability_insufficient_context];
+    let state = member "state" json in
     check string "request uses frozen content" frozen_body
       (state |> member "skill" |> member "body" |> to_string)) sent_bodies;
   let rows = match Keeper_tool_call_log.read_recent ~keeper_name:"skill-fixture" ~n:10 () with
@@ -1568,12 +1635,14 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   Masc_test_deps.with_typesafeai_policy { policy with
       destinations = ({ Runtime_schema.typesafe_destination with endpoint = near_server.base_url }, []) }
     (fun () ->
+      let received_assessment = ref None in
       let near_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
           ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
           ~assess_applicability:(fun ~reference ~body ->
-            Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
+            let assessment = Masc.Typesafeai_skill_applicability.assess ~clock ~keeper_id:"skill-fixture"
               ~context:(Some (`Assoc [ "request", `String "inspect the current task" ]))
-              ~reference ~body ())
+              ~reference ~body () in
+            received_assessment := Some assessment; assessment)
           ~on_result:(fun ~input:_ result -> captured := Some result)
           ~instruction_skills:[ instruction_skill near_reference near_selected.skill ] () in
       let output = run_skill_tool near_tool (Reference.to_yojson near_reference) in
@@ -1582,7 +1651,33 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
       check string "non-delivery is explicit, not claimed as consumed advice" "omitted_inline_limit"
         (metadata |> member "applicability_projection" |> to_string);
       check bool "projection does not claim model receipt" false
-        (metadata |> member "applicability_advice_in_model_content" |> to_bool));
+        (metadata |> member "applicability_advice_in_model_content" |> to_bool);
+      let empty_prompts = Filename.concat log_root "empty-prompts" in
+      Fs_compat.mkdir_p empty_prompts;
+      Fun.protect ~finally:(fun () ->
+        Prompt_registry.clear (); Prompt_registry.set_markdown_dir (Filename.concat prompts_root "config/prompts");
+        install_overrides ()) (fun () ->
+        let retained_assessment = Option.get !received_assessment in
+        Prompt_registry.clear (); Prompt_registry.set_markdown_dir empty_prompts;
+        let cached_tool = Masc.Keeper_tool_composition_surface.make_instruction_skill_tool
+          ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+          ~assess_applicability:(fun ~reference:_ ~body:_ -> retained_assessment)
+          ~on_result:(fun ~input:_ result -> captured := Some result)
+          ~instruction_skills:[ instruction_skill near_reference near_selected.skill ] () in
+        let output = run_skill_tool cached_tool (Reference.to_yojson near_reference) in
+        check string "missing advice policy leaves the frozen body unchanged" near_body output;
+        let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
+        check string "projection render failure remains explicit" "unavailable"
+          (metadata |> member "applicability_projection" |> to_string);
+        check bool "projection failure retains a render reason" true
+          (metadata |> member "applicability_projection_error" <> `Null);
+        let sent = Exact_output_fixture.post_count near_server in
+        ignore (run_skill_tool near_tool (Reference.to_yojson near_reference));
+        check int "missing question policy makes no model request" sent (Exact_output_fixture.post_count near_server);
+        let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
+        check string "missing question is observed as unavailable" "unavailable"
+          (metadata |> member "skill_applicability" |> member "status" |> to_string)));
+
   let blocked = Exact_output_fixture.start_server ~sw ~net ~clock
       ~on_request_before_reply:(fun () -> Eio.Fiber.await_cancel ())
       (Exact_output_fixture.Reply (response "applicable")) in

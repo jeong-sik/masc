@@ -2324,6 +2324,7 @@
 (test
  (name test_keeper_board_attention_exact_flow)
  (modules test_keeper_board_attention_exact_flow)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest exact_output_fixture masc_test_deps eio_main unix))
 
 (test
@@ -5098,6 +5099,7 @@
 (test
  (name test_keeper_task_skill_turn_exact)
  (modules test_keeper_task_skill_turn_exact)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
   alcotest
   masc_test_deps
@@ -5995,7 +5997,8 @@
  (name test_browser_addon_locate)
  (modules test_browser_addon_locate)
  (libraries masc_test_deps masc.browser_lane masc.lane_addon_tool_result mcp_protocol)
- (deps (source_tree ../addons/browser/automation))
+ (deps (source_tree ../addons/browser/automation)
+       (source_tree %{workspace_root}/config/prompts))
  (action (run %{test} %{dep:../addons/browser/automation/lane.toml})))
 
 (test
@@ -6390,6 +6393,7 @@
 (test
  (name test_keeper_librarian_context_review)
  (modules test_keeper_librarian_context_review)
+ (deps (source_tree %{workspace_root}/config/prompts))
  (libraries alcotest masc masc_test_deps exact_output_fixture
   librarian_run_tui_reading eio_main))
 

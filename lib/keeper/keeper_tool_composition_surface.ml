@@ -1159,18 +1159,33 @@ let make_instruction_skill_tool
                     match content, assess_applicability with
                     | Keeper_skill_activation_recorder.Body body, Some assess ->
                       let assessment = assess ~reference ~body in
-                      let advice = Typesafeai_skill_applicability.model_advice assessment in
+                      let advice =
+                        let open Result.Syntax in
+                        let* advice = Typesafeai_skill_applicability.model_advice assessment in
+                        match advice with
+                        | None -> Ok None
+                        | Some advice ->
+                          Prompt_registry.render_prompt_template
+                            Prompt_names.skill_applicability_projection
+                            ["advice", advice]
+                          |> Result.map (fun heading -> Some (String.trim heading ^ "\n" ^ wire_content))
+                      in
                       let projected = match advice with
-                        | None -> wire_content
-                        | Some text -> text ^ "\n\n--- Skill body ---\n" ^ wire_content in
+                        | Ok (Some text) -> text
+                        | Ok None | Error _ -> wire_content in
                       let fits = String.length projected <= Common.max_tool_result_wire_bytes in
+                      let has_advice = match advice with Ok (Some _) -> true | Ok None | Error _ -> false in
+                      let metadata = match advice with
+                        | Error reason -> ("applicability_projection_error", `String reason) :: metadata
+                        | Ok _ -> metadata in
                       let metadata =
                         ("skill_applicability", Typesafeai_skill_applicability.to_yojson assessment)
-                        :: ("applicability_advice_in_model_content", `Bool (fits && Option.is_some advice))
+                        :: ("applicability_advice_in_model_content", `Bool (fits && has_advice))
                         :: ("applicability_projection", `String
                               (match advice with
-                               | None -> "not_requested"
-                               | Some _ -> if fits then "inline" else "omitted_inline_limit"))
+                               | Error _ -> "unavailable"
+                               | Ok None -> "not_requested"
+                               | Ok (Some _) -> if fits then "inline" else "omitted_inline_limit"))
                         :: metadata in
                       (if fits then projected else wire_content), metadata
                     | Keeper_skill_activation_recorder.Resource _, _

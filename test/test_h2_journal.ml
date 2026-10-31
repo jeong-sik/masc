@@ -1899,6 +1899,20 @@ let test_task_history_buffered_sources () = with_workspace (fun _env _sw base_pa
   let tail=get ~cursor:(Option.get bottom.next_cursor) () in
   check int "remaining sources contain no observations for this Task" 0 (List.length tail.events);
   check bool "original stored prefix exhausted" true (Option.is_none tail.next_cursor);
+  let after_append=History.read ~config ~task_id ~max_events:10 () |> require "fresh history after append" in
+  check int "fresh read includes appended and cached rows" 4 (List.length after_append.events);
+  check int "unrelated task warm read returns zero rows" 0
+    (List.length ((History.read ~config ~task_id:"absent-task" ~max_events:10 () |> require "warm absent task").events));
+  let inplace=Unix.openfile path [Unix.O_WRONLY] 0o600 in
+  Fun.protect ~finally:(fun () -> Unix.close inplace) (fun () ->
+    ignore (Unix.lseek inplace (String.length first+1) Unix.SEEK_SET);
+    ignore (Unix.write_substring inplace "{" 0 1);
+    ignore (Unix.lseek inplace (String.length first+1+65536) Unix.SEEK_SET);
+    ignore (Unix.write_substring inplace "\"" 0 1));
+  (match History.read ~config ~task_id ~max_events:10 () with
+   | Error (History.Invalid_event {offset;_}) ->
+     check int "in-place interior corruption reports physical row offset" (String.length first+1) offset
+   | Ok _ | Error _ -> fail "in-place interior corruption bypassed cached segment verification");
   (* Early success must not eagerly validate an older malformed row, while
      continuing into that row must still report its original physical offset. *)
   let malformed="not-json\n" in

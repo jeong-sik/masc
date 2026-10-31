@@ -214,6 +214,14 @@ type outcome =
   | Purge_accepted of { operation_id : string }
       (** 2xx. [already_live] is the server saying a boot found the fiber
           already running and woke it instead of starting a second one. *)
+  | Committed_followup_failed of string
+      (** 202 with [ok: false] and [committed: true] (or
+          [projection: "committed_followup_failed"]): the durable receipt
+          committed on disk, but the live registry projection failed (for
+          example, when a paused Keeper has no live registry entry yet). A
+          multi-step recovery that boots the fiber next can proceed; a
+          standalone [Resume] or [/queue resume] must not claim the live owner
+          resumed. *)
   | Paused_owner_conflict of string
       (** 409 — the durable owner state refuses this step. For [Boot] this is
           the answer {!recovers_from_conflict} exists for. *)
@@ -263,6 +271,14 @@ val purge_body :
   expected_workspace:Masc.Tui_decode.server_identity -> string -> string
 (** JSON body for a {!Purge} step, binding [agent_name] and the observed
     workspace to the same request. *)
+
+val deletion_retry_body :
+  expected_workspace:Masc.Tui_decode.server_identity ->
+  keeper_name:string ->
+  operation_id:string ->
+  string
+(** JSON body for a Keeper deletion retry, binding [keeper_name],
+    [operation_id], and the observed workspace to the same request. *)
 
 val mint_operation_id : unit -> string
 (** A fresh resume operation id for one attempt. Retain the returned value

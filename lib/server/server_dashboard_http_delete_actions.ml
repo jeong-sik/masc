@@ -1176,44 +1176,68 @@ let keeper_purge_status_to_json (operation : Keeper_shutdown_types.t) =
     "operation", Keeper_shutdown_store.to_json operation]
 ;;
 
+let validate_expected_workspace state json =
+  let config = (Mcp_server.workspace_scope state).config in
+  Result.map (fun json -> config, json)
+    (Workspace.validate_expected_workspace ~config json)
+;;
+
+let respond_expected_workspace_error ~request reqd = function
+  | Workspace.Invalid_workspace_precondition ->
+    respond_error ~request reqd "invalid expected_workspace precondition"
+  | Workspace.Workspace_precondition_failed ->
+    let refusal = Request_workspace_precondition.Workspace_mismatch in
+    Http.Response.json_value ~status:`Conflict ~request
+      (Server_refusal.json
+         ~code:(Request_workspace_precondition.refusal_code refusal)
+         ~fields:[ "ok", `Bool false ]
+         (Request_workspace_precondition.refusal_message refusal))
+      reqd
+;;
+
 let add_delete_action_routes router =
   router
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/keepers/configuration-deletions/retry" (fun state _actor req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              try
                let json = Yojson.Safe.from_string body in
-               match Safe_ops.json_string_opt "keeper_name" json, Safe_ops.json_string_opt "operation_id" json with
-               | Some keeper_name, Some raw_id ->
-                 (match Keeper_shutdown_types.Operation_id.of_string raw_id with
-                  | Error detail -> respond_error ~request:req reqd detail
-                  | Ok operation_id ->
-                    let config = Mcp_server.workspace_config state in
-                    match Keeper_configuration_removal.retry ~config ~keeper_name ~operation_id
-                      ~cleanup:(cleanup_configuration_artifacts config) with
-                    | Ok receipt -> respond_configuration_removal ~request:req reqd receipt
-                    | Error error -> respond_error ~status:`Conflict ~request:req reqd
-                        (Keeper_configuration_removal.error_to_string error))
-               | _ -> respond_error ~request:req reqd "keeper_name and operation_id are required"
+               match validate_expected_workspace state json with
+               | Error error -> respond_expected_workspace_error ~request:req reqd error
+               | Ok (config, json) ->
+                 match Safe_ops.json_string_opt "keeper_name" json, Safe_ops.json_string_opt "operation_id" json with
+                 | Some keeper_name, Some raw_id ->
+                   (match Keeper_shutdown_types.Operation_id.of_string raw_id with
+                    | Error detail -> respond_error ~request:req reqd detail
+                    | Ok operation_id ->
+                      match Keeper_configuration_removal.retry ~config ~keeper_name ~operation_id
+                        ~cleanup:(cleanup_configuration_artifacts config) with
+                      | Ok receipt -> respond_configuration_removal ~request:req reqd receipt
+                      | Error error -> respond_error ~status:`Conflict ~request:req reqd
+                          (Keeper_configuration_removal.error_to_string error))
+                 | _ -> respond_error ~request:req reqd "keeper_name and operation_id are required"
              with Yojson.Json_error _ -> respond_error ~request:req reqd "invalid deletion retry JSON"))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/keepers/deletions/retry" (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              try
                let json = Yojson.Safe.from_string body in
-               match Safe_ops.json_string_opt "keeper_name" json,
-                     Safe_ops.json_string_opt "operation_id" json with
-               | Some keeper_name, Some raw_id ->
-                 (match Keeper_shutdown_types.Operation_id.of_string raw_id with
-                  | Error detail -> respond_error ~request:req reqd detail
-                  | Ok operation_id ->
-                    match Keeper_shutdown_runtime.retry_completion
-                      ~config:(Mcp_server.workspace_config state) ~keeper_name ~operation_id with
-                    | Ok operation -> respond_keeper_purge_operation_accepted ~request:req reqd operation
-                    | Error `Not_ready -> respond_error ~status:`Conflict ~request:req reqd
-                        "operation is not awaiting Dashboard purge completion"
-                    | Error (`Submit error) -> respond_error
-                        ~status:(keeper_purge_submit_status error) ~request:req reqd
-                        (Keeper_shutdown_runtime.submit_error_to_string error))
-               | _ -> respond_error ~request:req reqd "keeper_name and operation_id are required"
+               match validate_expected_workspace state json with
+               | Error error -> respond_expected_workspace_error ~request:req reqd error
+               | Ok (config, json) ->
+                 match Safe_ops.json_string_opt "keeper_name" json,
+                       Safe_ops.json_string_opt "operation_id" json with
+                 | Some keeper_name, Some raw_id ->
+                   (match Keeper_shutdown_types.Operation_id.of_string raw_id with
+                    | Error detail -> respond_error ~request:req reqd detail
+                    | Ok operation_id ->
+                      match Keeper_shutdown_runtime.retry_completion
+                        ~config ~keeper_name ~operation_id with
+                      | Ok operation -> respond_keeper_purge_operation_accepted ~request:req reqd operation
+                      | Error `Not_ready -> respond_error ~status:`Conflict ~request:req reqd
+                          "operation is not awaiting Dashboard purge completion"
+                      | Error (`Submit error) -> respond_error
+                          ~status:(keeper_purge_submit_status error) ~request:req reqd
+                          (Keeper_shutdown_runtime.submit_error_to_string error))
+                 | _ -> respond_error ~request:req reqd "keeper_name and operation_id are required"
              with Yojson.Json_error _ -> respond_error ~request:req reqd "invalid deletion retry JSON"))
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState) "/api/v1/dashboard/keepers/deletions" (fun state _agent_name req reqd ->
            let config = Mcp_server.workspace_config state in
@@ -1557,19 +1581,9 @@ let add_delete_action_routes router =
              let json = Yojson.Safe.from_string body_str in
              (* Validate and dispatch against one captured workspace.  The
                 check precedes both existing-operation retries and new purges. *)
-             let config = (Mcp_server.workspace_scope state).config in
-             match Workspace.validate_expected_workspace ~config json with
-             | Error Workspace.Invalid_workspace_precondition ->
-               respond_error ~request:req reqd "invalid expected_workspace precondition"
-             | Error Workspace.Workspace_precondition_failed ->
-               let refusal = Request_workspace_precondition.Workspace_mismatch in
-               Http.Response.json_value ~status:`Conflict ~request:req
-                 (Server_refusal.json
-                    ~code:(Request_workspace_precondition.refusal_code refusal)
-                    ~fields:[ "ok", `Bool false ]
-                    (Request_workspace_precondition.refusal_message refusal))
-                 reqd
-             | Ok json ->
+             match validate_expected_workspace state json with
+             | Error error -> respond_expected_workspace_error ~request:req reqd error
+             | Ok (config, json) ->
              (match Safe_ops.json_string_opt "agent_name" json with
              | None ->
                respond_error ~request:req reqd (invalid_request "agent_name")

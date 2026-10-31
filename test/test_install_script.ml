@@ -334,16 +334,6 @@ let unlink_if_exists path =
   | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 ;;
 
-(* install.sh only accepts an existing ~/.local/masc without --force when it is
-   a managed release pointer: a symlink into $PREFIX/.masc-releases/<64-hex>/masc
-   whose bytes match the staged release checksum (PR #46314). Plant the fixture
-   binary in that exact layout — a real file in the release slot, checksummed
-   like the staged mirror checksums it — so wizard/config scenarios exercise the
-   real no-force same-release path instead of tripping the pointer guard. *)
-let managed_release_dir prefix id =
-  Filename.concat (Filename.concat prefix ".masc-releases") id
-;;
-
 let assert_contains label text needle =
   check bool label true (string_contains text needle)
 ;;
@@ -640,6 +630,7 @@ let release_identity_cache =
         (Printf.sprintf "masc-install-identity-%d" (Unix.getpid ()))
     in
     ignore (Sys.command ("rm -rf " ^ Filename.quote base));
+    at_exit (fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote base)));
     ignore (Sys.command ("mkdir -p " ^ Filename.quote base));
     ignore (stage_release_mirror base);
     install_real_masc_binary
@@ -664,10 +655,10 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
      every copied file with now() and install.sh then rejects the case tree
      with "installed dashboard digest or build mtime differs". -p also keeps
      the mode the runtime-file checks in the receipt expect. *)
-  check int "fixture copies the cached release mirror"
+  check int "fixture copies the cached release mirror" 0
     (Sys.command (Printf.sprintf "cp -R -p %s %s"
        (Filename.quote (Filename.concat cache ".release"))
-       (Filename.quote base_path))) 0;
+       (Filename.quote base_path)));
   let release_base_url = "file://" ^ Filename.concat base_path ".release" in
   let cached_releases =
     Filename.concat (Filename.concat cache ".local") ".masc-releases"
@@ -678,11 +669,11 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
        bundle-helper install failed; see the 'fixture installs/commits the \
        managed release identity' assertions in the first failing case)"
       cached_releases;
-  check int "fixture copies the installed release identities"
+  check int "fixture copies the installed release identities" 0
     (Sys.command (Printf.sprintf "mkdir -p %s && cp -R -p %s %s"
        (Filename.quote prefix)
        (Filename.quote cached_releases)
-       (Filename.quote prefix))) 0;
+       (Filename.quote prefix)));
   (* install.sh reads one symlink level and compares it against
      <canonical prefix>/.masc-releases/<digest>/masc, so the copied
      identity tree needs a case-local pointer: recreate it here. *)
@@ -702,10 +693,10 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
         Alcotest.failf "expected exactly one cached release identity, got %d"
           (List.length entries)
   in
-  check int "fixture links the case-local release pointer"
+  check int "fixture links the case-local release pointer" 0
     (Sys.command (Printf.sprintf "ln -sfn %s %s"
        (Filename.quote (Filename.concat identity_dir "masc"))
-       (Filename.quote (Filename.concat prefix "masc")))) 0;
+       (Filename.quote (Filename.concat prefix "masc"))));
   let canonical_prefix = Unix.realpath prefix in
   let expected_link = Filename.concat canonical_prefix
       (Filename.concat ".masc-releases"

@@ -622,11 +622,28 @@ let skill_editor_error_status = function
   | Validation_failed _ ->
     `Bad_request
 
-let respond_skill_editor_error ~request reqd error =
+(* [audit_status] reports whether the audit append itself returned
+   ("audit_call_returned" | "unconfirmed", matching [Workspace_skill_publish]),
+   whereas the audit entry's own [status] field ("write_outcome_unknown", etc.)
+   records the skill package disk-write outcome. *)
+let skill_audit_status_to_string = function
+  | Workspace_skill_publish.Audit_call_returned -> "audit_call_returned"
+  | Workspace_skill_publish.Audit_unconfirmed -> "unconfirmed"
+;;
+
+let with_skill_audit_status audit json =
+  match audit, json with
+  | None, json -> json
+  | Some audit, `Assoc fields ->
+    `Assoc (fields @ [ "audit_status", `String (skill_audit_status_to_string audit) ])
+  | Some _, json -> json
+;;
+
+let respond_skill_editor_error ?audit ~request reqd error =
   Http.Response.json_value
     ~status:(skill_editor_error_status error)
     ~request
-    (Server_skill_editor.error_to_yojson error)
+    (with_skill_audit_status audit (Server_skill_editor.error_to_yojson error))
     reqd
 ;;
 
@@ -831,14 +848,34 @@ let audit_runtime_config_write
       (Printexc.to_string exn)
 
 let audit_skill_write state agent_name ~reference ~source_text ~status ~outcome =
-  ignore (Server_skill_write_audit.record
+  Server_skill_write_audit.record
     (Mcp_server.workspace_config state)
     ~agent_id:agent_name
     ~subject:(Server_skill_write_audit.Published reference)
     ~source_text
     ~status
     ~outcome
-    ())
+    ()
+;;
+
+let audit_skill_create_attempt state agent_name ~source_id ~package_id ~source_text ~error =
+  match Server_keeper_skill_publish.cause_of_editor_error error with
+  | Workspace_skill_publish.Write_outcome_unknown ->
+    Some
+      (Server_skill_write_audit.record
+         (Mcp_server.workspace_config state)
+         ~agent_id:agent_name
+         ~subject:
+           (Server_skill_write_audit.Attempted
+              { source_id = Skill_source_config.source_id_to_string source_id
+              ; package_id
+              })
+         ~source_text
+         ~status:"write_outcome_unknown"
+         ~outcome:(Audit_log.Failure (Server_skill_editor.error_to_string error))
+         ())
+  | Workspace_skill_publish.Request_refused
+  | Workspace_skill_publish.Source_unavailable -> None
 ;;
 
 (* [package_directory] is kept in the audit row because a later create for
@@ -2296,7 +2333,17 @@ let add_routes ~sw ~clock router =
                     ~source_text
                     ~refresh
                 with
-                | Error error -> respond_skill_editor_error ~request:req reqd error
+                | Error error ->
+                  let audit =
+                    audit_skill_create_attempt
+                      state
+                      agent_name
+                      ~source_id
+                      ~package_id
+                      ~source_text
+                      ~error
+                  in
+                  respond_skill_editor_error ?audit ~request:req reqd error
                 | Ok outcome ->
                   let preview, status, audit_outcome =
                     match outcome with
@@ -2308,17 +2355,21 @@ let add_routes ~sw ~clock router =
                     | Created_but_unpublished { preview; reason } ->
                       preview, "created_but_unpublished", Audit_log.Failure reason
                   in
-                  audit_skill_write
-                    state
-                    agent_name
-                    ~reference:preview.profile.reference
-                    ~source_text
-                    ~status
-                    ~outcome:audit_outcome;
+                  let audit =
+                    audit_skill_write
+                      state
+                      agent_name
+                      ~reference:preview.profile.reference
+                      ~source_text
+                      ~status
+                      ~outcome:audit_outcome
+                  in
                   Http.Response.json_value
                     ~compress:true
                     ~request:req
-                    (Server_skill_editor.create_outcome_to_yojson outcome)
+                    (with_skill_audit_status
+                       (Some audit)
+                       (Server_skill_editor.create_outcome_to_yojson outcome))
                     reqd)))
   |> Server_route.add (Server_route.Token_permission Masc_domain.CanAdmin)
        ~path:"/api/v1/skills/editor"
@@ -2448,10 +2499,12 @@ let add_routes ~sw ~clock router =
                     ~refresh
                 with
                 | Error error ->
-                  audit_skill_write state agent_name ~reference ~source_text
-                    ~status:(Server_skill_editor.error_code error)
-                    ~outcome:(Audit_log.Failure (Server_skill_editor.error_to_string error));
-                  respond_skill_editor_error ~request:req reqd error
+                  let audit =
+                    audit_skill_write state agent_name ~reference ~source_text
+                      ~status:(Server_skill_editor.error_code error)
+                      ~outcome:(Audit_log.Failure (Server_skill_editor.error_to_string error))
+                  in
+                  respond_skill_editor_error ~audit ~request:req reqd error
                 | Ok outcome ->
                   let status, audit_outcome =
                     match outcome with
@@ -2462,13 +2515,17 @@ let add_routes ~sw ~clock router =
                     | Saved_but_unpublished { reason; _ } ->
                       "saved_but_unpublished", Audit_log.Failure reason
                   in
-                  audit_skill_write state agent_name ~reference ~source_text
-                    ~status
-                    ~outcome:audit_outcome;
+                  let audit =
+                    audit_skill_write state agent_name ~reference ~source_text
+                      ~status
+                      ~outcome:audit_outcome
+                  in
                   Http.Response.json_value
                     ~compress:true
                     ~request:req
-                    (Server_skill_editor.save_outcome_to_yojson outcome)
+                    (with_skill_audit_status
+                       (Some audit)
+                       (Server_skill_editor.save_outcome_to_yojson outcome))
                     reqd)))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/refresh" (fun state agent_name req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in

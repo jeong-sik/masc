@@ -93,15 +93,18 @@ let keeper_next_action_of_string =
   Keeper_status_runtime.keeper_next_action_path_of_string_opt
 let keeper_phase_to_string = Keeper_state_machine.phase_to_string
 
-(* Exhaustive on purpose, like [keeper_health_reading]: a tenth phase stops
-   the build here instead of silently counting as not-running on screen. *)
-let keeper_phase_is_running : keeper_phase -> bool = function
-  | Keeper_state_machine.Running -> true
+(* Exhaustive on purpose, like [keeper_health_reading]: a new phase stops the
+   build here instead of silently misclassifying running vs paused on screen. *)
+let keeper_phase_category : keeper_phase -> [ `Running | `Paused | `Other ] = function
+  | Keeper_state_machine.Running -> `Running
+  | Keeper_state_machine.Paused -> `Paused
   | Keeper_state_machine.Offline | Keeper_state_machine.Failing
-  | Keeper_state_machine.Draining
-  | Keeper_state_machine.Paused | Keeper_state_machine.Stopped
+  | Keeper_state_machine.Draining | Keeper_state_machine.Stopped
   | Keeper_state_machine.Crashed | Keeper_state_machine.Restarting ->
-      false
+      `Other
+
+let keeper_phase_is_running phase = keeper_phase_category phase = `Running
+let keeper_phase_is_paused phase = keeper_phase_category phase = `Paused
 
 type keeper_activation_mode = Activation_manual | Activation_on_demand | Activation_autonomous
 

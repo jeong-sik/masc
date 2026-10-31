@@ -658,6 +658,11 @@ val keeper_phase_is_running : keeper_phase -> bool
     silences the word for it and spells out every other phase; exhaustive in
     the implementation so a new phase cannot silently count as not-running. *)
 
+val keeper_phase_is_paused : keeper_phase -> bool
+(** Whether the phase is the operator-paused lifecycle ([Paused]). A keeper in
+    this phase still has a live keepalive fiber sleeping on its condition, even
+    though [keepalive_running] (turn admission) is [false]. *)
+
 type keeper_health
 (** A validated keeper health reading — whether the keeper's keepalive is
     running, whether it has turned yet, and whether its turns are failing.

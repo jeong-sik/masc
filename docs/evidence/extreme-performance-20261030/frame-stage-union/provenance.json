@@ -1,0 +1,208 @@
+{
+  "scope": "Exact selected standalone compilation/test/replay captures. Historical helper paths and hash identities remain unchanged; reproduction writes new output. No Dune/full project build, new native TUI session, installed runtime or performance improvement claim.",
+  "parent_head": "b4af430325e09067c8aff172a69d3aa55477519c",
+  "product_and_test_source_sha256": {
+    "bin/masc_tui_frame_timing.mli": "11c3cefb87b5a1ea40ec03b9c97f0175f6b4a9cbd7a54dbccec65551a8e8021a",
+    "bin/masc_tui_frame_timing.ml": "3d11ec5363ba6d0cb2dc41b8be9c18044745567803cbcf833b058e665c58ff4a",
+    "test/test_tui_frame_timing.ml": "147b185c3cb7f15ed4060ebcaa1497259ee1333ffb0cddfb7adc018cb8e74a6a",
+    "test/test_tui_frame_timing_default_off.ml": "0207679df61ead77de7cfefab394a75424331b4712c38596dd4d46f302425cc2"
+  },
+  "files": [
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v1/qualify.py",
+      "retained": "frame-union-v1/qualify.py",
+      "source_sha256": "422dbd4919e165632a221342917a291873379d68da175d730266ae7692d3ac57",
+      "retained_sha256": "422dbd4919e165632a221342917a291873379d68da175d730266ae7692d3ac57",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v1/receipt.json",
+      "retained": "frame-union-v1/receipt.json",
+      "source_sha256": "6cf41eb1c7724d8ed496fd262e2933c72a4c56dc4f8516340e1e56ba91805fc8",
+      "retained_sha256": "6cf41eb1c7724d8ed496fd262e2933c72a4c56dc4f8516340e1e56ba91805fc8",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v1/command-0.stdout",
+      "retained": "frame-union-v1/command-0.stdout",
+      "source_sha256": "db74d0caf81f43029fa28ce9888695d0b54d0a99003e6042823c9bc914897865",
+      "retained_sha256": "db74d0caf81f43029fa28ce9888695d0b54d0a99003e6042823c9bc914897865",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v1/command-1.stderr",
+      "retained": "frame-union-v1/command-1.stderr",
+      "source_sha256": "707be644880ec22b151fe5257acf3a8687886c9526c18d2171506e5e0de562d1",
+      "retained_sha256": "707be644880ec22b151fe5257acf3a8687886c9526c18d2171506e5e0de562d1",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v1/command-2.stdout",
+      "retained": "frame-union-v1/command-2.stdout",
+      "source_sha256": "6bd7c8d216aac020bdffe9fea67b5e1e22f6d25ce8577ee0335f851b99967b39",
+      "retained_sha256": "6bd7c8d216aac020bdffe9fea67b5e1e22f6d25ce8577ee0335f851b99967b39",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v1/command-2.stderr",
+      "retained": "frame-union-v1/command-2.stderr",
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v2/receipt.json",
+      "retained": "frame-union-v2/receipt.json",
+      "source_sha256": "f3e2c23daf04994191a3f7b88265446adb878d48b8a356d086c6827f20d55918",
+      "retained_sha256": "f3e2c23daf04994191a3f7b88265446adb878d48b8a356d086c6827f20d55918",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v2/command-2.stdout",
+      "retained": "frame-union-v2/command-2.stdout",
+      "source_sha256": "6d43def814919074ec6ce8c156366238adcdbb386bc47dea7a9bd1b1d77f3e38",
+      "retained_sha256": "6d43def814919074ec6ce8c156366238adcdbb386bc47dea7a9bd1b1d77f3e38",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/qualify.py",
+      "retained": "frame-union-v3/qualify.py",
+      "source_sha256": "0520146eda2d3d4ba255b67754bdec718741a82e62949b46f9d6c49e859ae3e8",
+      "retained_sha256": "0520146eda2d3d4ba255b67754bdec718741a82e62949b46f9d6c49e859ae3e8",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/receipt.json",
+      "retained": "frame-union-v3/receipt.json",
+      "source_sha256": "203210b7e4fe4fb9abb38aca0b6d998d880872ecc5754f31b90015744cef68fc",
+      "retained_sha256": "203210b7e4fe4fb9abb38aca0b6d998d880872ecc5754f31b90015744cef68fc",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/command-0.stdout",
+      "retained": "frame-union-v3/command-0.stdout",
+      "source_sha256": "db74d0caf81f43029fa28ce9888695d0b54d0a99003e6042823c9bc914897865",
+      "retained_sha256": "db74d0caf81f43029fa28ce9888695d0b54d0a99003e6042823c9bc914897865",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/command-1.stdout",
+      "retained": "frame-union-v3/command-1.stdout",
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/command-1.stderr",
+      "retained": "frame-union-v3/command-1.stderr",
+      "source_sha256": "707be644880ec22b151fe5257acf3a8687886c9526c18d2171506e5e0de562d1",
+      "retained_sha256": "707be644880ec22b151fe5257acf3a8687886c9526c18d2171506e5e0de562d1",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/command-2.stdout",
+      "retained": "frame-union-v3/command-2.stdout",
+      "source_sha256": "2213add1ef3c431912aa6a445efa4a1329d8361fd93a2e949cdf0d361a478ce4",
+      "retained_sha256": "2213add1ef3c431912aa6a445efa4a1329d8361fd93a2e949cdf0d361a478ce4",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/command-2.stderr",
+      "retained": "frame-union-v3/command-2.stderr",
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/replay.ml",
+      "retained": "frame-union-v3/replay.ml",
+      "source_sha256": "a2d466a18280c629ccf4dd43032b5a242d5e9661fd14f208030bb4065ab5ba83",
+      "retained_sha256": "a2d466a18280c629ccf4dd43032b5a242d5e9661fd14f208030bb4065ab5ba83",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/compare.py",
+      "retained": "frame-union-v3/compare.py",
+      "source_sha256": "f8fe594bda41ec2873f962639b1f71b5e1791256aff518d792607d04a105c727",
+      "retained_sha256": "f8fe594bda41ec2873f962639b1f71b5e1791256aff518d792607d04a105c727",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/replay-compile.stdout",
+      "retained": "frame-union-v3/replay-compile.stdout",
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/replay-compile.stderr",
+      "retained": "frame-union-v3/replay-compile.stderr",
+      "source_sha256": "707be644880ec22b151fe5257acf3a8687886c9526c18d2171506e5e0de562d1",
+      "retained_sha256": "707be644880ec22b151fe5257acf3a8687886c9526c18d2171506e5e0de562d1",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/native-replay-2.json",
+      "retained": "frame-union-v3/native-replay-2.json",
+      "source_sha256": "e40198cd5a44d0a9710dd59e58a3b76bc50c4acb0b129b28ca9f3e28a8e77079",
+      "retained_sha256": "e40198cd5a44d0a9710dd59e58a3b76bc50c4acb0b129b28ca9f3e28a8e77079",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/native-replay-30.json",
+      "retained": "frame-union-v3/native-replay-30.json",
+      "source_sha256": "8f1941ee80c4724d9a424785ecea1aa78fca2c8fedadf40f0021e31ef4d93093",
+      "retained_sha256": "8f1941ee80c4724d9a424785ecea1aa78fca2c8fedadf40f0021e31ef4d93093",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/native-replay-300.json",
+      "retained": "frame-union-v3/native-replay-300.json",
+      "source_sha256": "a1324e3cba5daf03d1fb966c3b097b2e435021e235c85466d057e1ba6bd6e7be",
+      "retained_sha256": "a1324e3cba5daf03d1fb966c3b097b2e435021e235c85466d057e1ba6bd6e7be",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/comparison.json",
+      "retained": "frame-union-v3/comparison.json",
+      "source_sha256": "f0ba9ce3275edc06507a513372a73da0a7dccb69508e1791e80b278afa86eb72",
+      "retained_sha256": "f0ba9ce3275edc06507a513372a73da0a7dccb69508e1791e80b278afa86eb72",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/default-off-receipt.json",
+      "retained": "frame-union-v3/default-off-receipt.json",
+      "source_sha256": "559947d93a082a34f76548be4d65a69cb2691cb4c50a638bf68c3f872434eccb",
+      "retained_sha256": "559947d93a082a34f76548be4d65a69cb2691cb4c50a638bf68c3f872434eccb",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/default-off-0.stdout",
+      "retained": "frame-union-v3/default-off-0.stdout",
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/default-off-0.stderr",
+      "retained": "frame-union-v3/default-off-0.stderr",
+      "source_sha256": "707be644880ec22b151fe5257acf3a8687886c9526c18d2171506e5e0de562d1",
+      "retained_sha256": "707be644880ec22b151fe5257acf3a8687886c9526c18d2171506e5e0de562d1",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/default-off-1.stdout",
+      "retained": "frame-union-v3/default-off-1.stdout",
+      "source_sha256": "21e2daa144d4b7f2eb2cca2661913b754062d24f3d5da167e32e067957aa74a5",
+      "retained_sha256": "21e2daa144d4b7f2eb2cca2661913b754062d24f3d5da167e32e067957aa74a5",
+      "derivative": false
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/frame-union-v3/default-off-1.stderr",
+      "retained": "frame-union-v3/default-off-1.stderr",
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "retained_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "derivative": false
+    }
+  ]
+}

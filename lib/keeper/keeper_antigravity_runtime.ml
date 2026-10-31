@@ -377,7 +377,7 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
     }
 ;;
 
-let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~on_model_input_window_observation
     ~carried_front_seed
     ~librarian_front
@@ -460,13 +460,6 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
         ~default:Runtime_native_tools.antigravity_default
         ~none_supported:(Runtime_execution.supports_native_none (Antigravity_cli config))
     in
-    let runtime_root = Common.masc_dir_from_base_path ~base_path in
-    let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
-        ~keeper_name ~oauth_source:config.oauth_source in
-    let* home = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf
-        ~oauth_source:config.oauth_source
-      |> Result.map_error home_error_to_core_error in
-    let account_home = Runtime_antigravity_home.home_dir home in
     let* sandbox_profile = match required_native_posture with
       | Some _ -> Ok None
       | None ->
@@ -503,6 +496,14 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     let native_workspace_note = native_workspace_note ^
       " Explicit operator-granted additional native directories: " ^
       Yojson.Safe.to_string (`List (List.map (fun path -> `String path) add_dirs)) in
+    let* () = on_guidance_prepared () in
+    let runtime_root = Common.masc_dir_from_base_path ~base_path in
+    let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
+        ~keeper_name ~oauth_source:config.oauth_source in
+    let* home = Runtime_antigravity_home.prepare_account ~runtime_root ~owner_leaf
+        ~oauth_source:config.oauth_source
+      |> Result.map_error home_error_to_core_error in
+    let account_home = Runtime_antigravity_home.home_dir home in
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256 ~account_home ~native_posture tools
     in
@@ -1272,7 +1273,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                   recovery_detail))))
 ;;
 
-let run ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks ~context_injector
     ~context
@@ -1302,7 +1303,7 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
   let result =
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
+      run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
         ~required_native_posture
         ~runtime_id
         ~keeper_name

@@ -148,7 +148,9 @@ val render_prompt_template :
     substitutions from the assoc list.  Errors when the
     prompt is missing (empty after trim) or when the
     template references an unresolved variable not in the
-    assoc list. *)
+    assoc list. [Sys_error] or [Unix.Unix_error] raised while locating or
+    reading the source is returned as an error; cancellation and other
+    exceptions still propagate. *)
 
 val resolve_and_render_prompt_template :
   string
@@ -157,7 +159,8 @@ val resolve_and_render_prompt_template :
 (** Resolve the effective template once, then render that exact snapshot.
     Observation planes use the returned resolution to record which file or
     override supplied the bytes sent to the model. This avoids reporting a
-    newer override beside a render produced from an older one. *)
+    newer override beside a render produced from an older one. Source lookup
+    and read errors are handled as in {!render_prompt_template}. *)
 
 val render_resolved_prompt_template
   :  string -> prompt_resolution -> (string * string) list -> (string, string) result

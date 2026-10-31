@@ -505,3 +505,22 @@ val direct_gate_binding : t -> operation_id:Operation.Operation_id.t -> (Semanti
 val direct_gate_bindings : t -> ((Operation.Operation_id.t * Semantic.gate_binding) list, error) result
 val reconcile_direct_gate_binding : t -> now:float -> operation_id:Operation.Operation_id.t ->
   binding:Semantic.gate_binding -> waiting:Semantic.gate_wait -> (unit, error) result
+
+(** A durable preparation failure blocks this operation until an operator retries
+    the exact observed revision and original input digest. It is not a timer. *)
+type preparation_wait_observation = private
+  { revision : int64; execution_digest : string; waiting : Semantic.preparation_wait }
+val direct_preparation_wait : t -> operation_id:Operation.Operation_id.t ->
+  (preparation_wait_observation option, error) result
+val wait_direct_preparation : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  execution_digest:string -> observed:Semantic.gate_checkpoint -> detail:string -> (Operation.t, error) result
+val retry_direct_preparation : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  expected_revision:int64 -> execution_digest:string -> (Operation.t, error) result
+
+(** Commit before any official-client account/session/transport entry. An
+    uncertain write is Error even if its transaction committed. *)
+val enter_direct_preparation : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  execution_digest:string -> (unit,error) result
+val block_preparing_checkpoint : t -> now:float -> operation_id:Operation.Operation_id.t ->
+  detail:string -> (Operation.t option,error) result
+val block_preparing_operations : t -> now:float -> (unit,error) result

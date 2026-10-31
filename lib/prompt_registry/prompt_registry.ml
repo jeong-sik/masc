@@ -793,10 +793,12 @@ let warn_template_metadata_drift key meta effective =
         "Prompt '%s' metadata template_variables drift from effective template: metadata=[%s] effective=[%s]"
         key (String.concat ", " metadata_variables) (String.concat ", " effective_variables)
 
-(** Resolve a prompt. Resolution: override > file > missing. *)
-let resolve_prompt key =
+let prompt_file_values key =
   let file_path = prompt_source_path key in
   let file_value = file_value_of_key key in
+  file_path, file_value
+
+let resolve_prompt_with_file key ~file_path ~file_value =
   let resolved, meta = with_mutex (fun () ->
     let override_value =
       Hashtbl.find_opt override_tbl key
@@ -814,6 +816,11 @@ let resolve_prompt key =
   warn_template_metadata_drift key meta resolved.effective;
   resolved
 
+(** Resolve a prompt. Resolution: override > file > missing. *)
+let resolve_prompt key =
+  let file_path, file_value = prompt_file_values key in
+  resolve_prompt_with_file key ~file_path ~file_value
+
 (** Get a prompt value. Resolution: override > file > missing *)
 let get_prompt key = (resolve_prompt key).effective
 
@@ -825,9 +832,17 @@ let render_resolved_prompt_template key resolved vars =
       ~template:resolved.effective ~vars ()
 
 let resolve_and_render_prompt_template key vars =
-  let resolved = resolve_prompt key in
-  Result.map (fun rendered -> resolved, rendered)
-    (render_resolved_prompt_template key resolved vars)
+  match prompt_file_values key with
+  | file_path, file_value ->
+    let resolved = resolve_prompt_with_file key ~file_path ~file_value in
+    Result.map (fun rendered -> resolved, rendered)
+      (render_resolved_prompt_template key resolved vars)
+  | exception Sys_error detail ->
+    Error (Printf.sprintf "Prompt '%s' could not be resolved: %s" key detail)
+  | exception Unix.Unix_error (error, operation, path) ->
+    Error
+      (Printf.sprintf "Prompt '%s' could not be resolved: %s (%s %s)"
+         key (Unix.error_message error) operation path)
 
 let render_prompt_template key vars =
   Result.map snd (resolve_and_render_prompt_template key vars)

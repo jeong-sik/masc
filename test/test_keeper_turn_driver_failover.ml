@@ -2812,6 +2812,36 @@ let test_first_candidate_success_keeps_lane_attempt_index_zero () =
         0
         selected.Driver.lane_attempt_index)
 
+let test_preparation_marker_requires_no_prior_dispatch () =
+  let module Internal = Keeper_internal_error in
+  let error = Internal.guidance_preparation_unavailable ~field:"managed.guidance" "missing asset" in
+  let run first =
+    Driver.For_testing.attempt_runtime_candidates ~walk_owner:(Driver.Fleet_keeper_turn test_recorder)
+      ~runtime_id:"preparation" ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+        if String.equal runtime_id "entered" then
+          attempt_without_effect (Error (retryable_network_error "unknown transport result")) None
+        else attempt_rejected_before_dispatch error)
+      (if first then ["entered";"preparation"] else ["preparation"]) in
+  let failure = function Error error -> error | Ok _ -> Alcotest.fail "expected preparation failure" in
+  Alcotest.(check bool) "positive preparation failure retains marker" true
+    (Option.is_some (Internal.guidance_preparation_failure (failure (run false))));
+  Alcotest.(check bool) "prior entered/unknown transport removes retry authority" true
+    (Option.is_none (Internal.guidance_preparation_failure (failure (run true))));
+  Alcotest.check dispatch_disposition "positive preparation result is rejected before dispatch"
+    Masc.Keeper_attempt_dispatch.Rejected_before_dispatch
+    (Driver.For_testing.official_client_dispatch ~provider_config_transform:None (Error error));
+  let ordinary = Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field="other";detail="not a witness"}) in
+  Alcotest.check dispatch_disposition "ordinary Config failure keeps conservative dispatch"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (Driver.For_testing.official_client_dispatch ~provider_config_transform:None (Error ordinary));
+  Alcotest.check dispatch_disposition "unknown transport failure keeps conservative dispatch"
+    Masc.Keeper_attempt_dispatch.Dispatched
+    (Driver.For_testing.official_client_dispatch ~provider_config_transform:None
+      (Error (retryable_network_error "partial write or unknown outcome")))
+;;
+
 let test_attempt_loop_retries_provider_wire_failure_same_turn () =
   let attempts = ref [] in
   let deferred = ref 0 in
@@ -6998,6 +7028,8 @@ let () =
             "first-candidate success keeps lane_attempt_index at 0"
             `Quick
             test_first_candidate_success_keeps_lane_attempt_index_zero;
+          Alcotest.test_case "preparation retry requires all attempts undispatched" `Quick
+            test_preparation_marker_requires_no_prior_dispatch;
           Alcotest.test_case
             "provider-wire failure rotates in the same turn"
             `Quick

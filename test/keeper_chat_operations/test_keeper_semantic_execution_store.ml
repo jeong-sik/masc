@@ -670,9 +670,120 @@ let test_corrupt_input_cannot_become_fresh_or_repaired () =
     check string "corrupt payload evidence is retained" before (raw_file path)))
     [`Null; `Assoc ["payload", `String "different input with stale digest"]]
 
+let test_dispatch_admission_requires_semantic_checkpoint () =
+  with_store (fun _path store ->
+    submit store ~now:1. "no-preparation" fixture_input;
+    let operation = claim store ~now:2. in
+    let scope = direct_scope operation in
+    let before = Chat.to_json operation in
+    check bool "fresh claimed operation has no semantic preparation" true
+      (Store.semantic_get store scope |> execution_ok = None);
+    (match Store.enter_direct_preparation store ~now:3. ~operation_id:operation.operation_id
+        ~execution_digest:operation.execution_digest with
+     | Error (Store.Invalid_input _) -> ()
+     | Error error -> fail (Store.error_to_string error)
+     | Ok () -> fail "an operation without semantic preparation gained dispatch admission");
+    let after = Store.get store operation.operation_id |> store_ok |> Option.get in
+    check bool "refused admission preserves exact operation and input" true (Chat.to_json after = before);
+    check bool "refused admission creates no semantic row" true
+      (Store.semantic_get store scope |> execution_ok = None))
+
+let test_preparation_wait_preserves_official_checkpoint client_kind fault () =
+  with_path (fun path ->
+    let operation_id = operation_id "preparation-original" in
+    let scope = Scope.direct_operation operation_id in
+    let input = `Assoc ["instructions",`String "original authority";"message",`String "original input"] in
+    let frame = Frame.admit Frame.empty (Frame.Fresh scope) |> frame_ok in
+    let checkpoint = Execution.Official_client
+      {client_kind;runtime_id="official.test";session_id="original-session";
+       turn_id="original-turn";tool_surface_sha256=hash "original tools";frame} in
+    let operation, waiting = with_open path (fun store ->
+      submit store ~now:1. "preparation-original" input;
+      let original = claim store ~now:2. in
+      Store.defer_direct_checkpoint store ~now:3. ~operation_id
+        ~execution_digest:original.execution_digest ~checkpoint |> store_ok |> ignore;
+      let operation = claim store ~now:4. in
+      Store.resume_direct_checkpoint store ~now:5. ~operation_id ~observed:checkpoint |> store_ok;
+      let before = Execution.to_json (get store scope) in
+      let changed = match checkpoint with
+        | Execution.Official_client original -> Execution.Official_client {original with turn_id="unrelated-turn"}
+        | Agent_core _ -> fail "expected official checkpoint" in
+      assert_execution_error (Store.wait_direct_preparation store ~now:6. ~operation_id
+        ~execution_digest:operation.execution_digest ~observed:changed ~detail:"missing managed guidance");
+      check bool "stale checkpoint changes no authority" true (before = Execution.to_json (get store scope));
+      Option.iter Store.For_testing.fail_next_commit fault;
+      let result = Store.wait_direct_preparation store ~now:6. ~operation_id
+        ~execution_digest:operation.execution_digest ~observed:checkpoint ~detail:"missing managed guidance" in
+      (match fault,result with
+       | Some Store.For_testing.Fail_before_commit, Error (Store.Store_unavailable _) ->
+         check bool "rollback retains exact not-entered preparation" true
+           (match (get store scope).phase with Execution.Preparing_checkpoint saved ->
+             Execution.equal_gate_checkpoint checkpoint (Execution.Official_client saved) | _ -> false);
+         Store.settle_running_after_restart store ~now:6. |> store_ok |> ignore
+       | _,result -> result |> store_ok |> ignore);
+      let waiting = Store.direct_preparation_wait store ~operation_id |> store_ok |> Option.get in
+      check bool "ordinary drain cannot claim preparation wait" true
+        (Option.is_none (Store.claim_next store ~now:7. |> store_ok));
+      operation,waiting) in
+    with_open path (fun store ->
+      check int "restart settles no blocked operation" 0
+        (List.length (Store.settle_running_after_restart store ~now:8. |> store_ok));
+      let reread = Store.direct_preparation_wait store ~operation_id |> store_ok |> Option.get in
+      check bool "exact wait survives reopening" true (reread = waiting);
+      let retained = get store scope in
+      check bool "original input remains independently owned" true (retained.input = Some input);
+      check bool "original checkpoint remains exact" true
+        (Execution.equal_gate_checkpoint checkpoint (Execution.Official_client reread.waiting.checkpoint));
+      check bool "reopened wait does not spin" true
+        (Option.is_none (Store.claim_next store ~now:9. |> store_ok));
+      submit store ~now:10. "preparation-independent" (`String "new steering");
+      let newer = claim store ~now:11. in
+      check bool "independent work has its own identity" true
+        (Chat.Operation_id.equal newer.operation_id (Chat.Operation_id.of_string "preparation-independent" |> string_ok));
+      Store.succeed_running store ~now:12. ~operation_id:newer.operation_id ~outcome_ref:"newer-completed"
+        |> store_ok |> ignore;
+      assert_execution_error (Store.retry_direct_preparation store ~now:13. ~operation_id
+        ~expected_revision:(Int64.pred waiting.revision) ~execution_digest:operation.execution_digest);
+      assert_execution_error (Store.retry_direct_preparation store ~now:13. ~operation_id
+        ~expected_revision:waiting.revision ~execution_digest:(hash "another input"));
+      check bool "failed retry keeps exact blocked state" true
+        (Store.direct_preparation_wait store ~operation_id |> store_ok = Some waiting);
+      Store.retry_direct_preparation store ~now:14. ~operation_id
+        ~expected_revision:waiting.revision ~execution_digest:operation.execution_digest |> store_ok |> ignore;
+      assert_execution_error (Store.retry_direct_preparation store ~now:14. ~operation_id
+        ~expected_revision:waiting.revision ~execution_digest:operation.execution_digest);
+      let resumed = claim store ~now:15. in
+      check bool "retry selects original operation once" true
+        (Chat.Operation_id.equal resumed.operation_id operation_id && resumed.input=Some input
+         && resumed.execution_digest=operation.execution_digest);
+      Store.resume_direct_checkpoint store ~now:16. ~operation_id ~observed:checkpoint |> store_ok;
+      Store.enter_direct_preparation store ~now:16. ~operation_id ~execution_digest:operation.execution_digest |> store_ok;
+      let entered = Execution.to_json (get store scope) in
+      Store.enter_direct_preparation store ~now:16. ~operation_id ~execution_digest:operation.execution_digest |> store_ok;
+      check bool "repeated callback preserves confirmed dispatch admission" true
+        (Execution.to_json (get store scope) = entered);
+      Store.succeed_running store ~now:17. ~operation_id ~outcome_ref:"original-completed" |> store_ok |> ignore;
+      check bool "terminal acknowledgement releases original input" true
+        (Option.is_none (get store scope).input);
+      check bool "no duplicate invocation remains" true
+        (Option.is_none (Store.claim_next store ~now:18. |> store_ok))))
+
 let () =
   run "keeper semantic execution store"
-    [ "offline preparation", [
+    [ "preparation wait", [
+        test_case "fresh claim without semantic checkpoint refuses dispatch admission" `Quick
+          test_dispatch_admission_requires_semantic_checkpoint;
+        test_case "Muse after consume retains original authority" `Quick
+          (test_preparation_wait_preserves_official_checkpoint Execution.Muse None);
+        test_case "Codex after consume retains original authority" `Quick
+          (test_preparation_wait_preserves_official_checkpoint Execution.Codex None);
+        test_case "Antigravity after consume retains original authority" `Quick
+          (test_preparation_wait_preserves_official_checkpoint Execution.Antigravity None);
+        test_case "rolled-back wait survives restart with original authority" `Quick
+          (test_preparation_wait_preserves_official_checkpoint Execution.Muse (Some Store.For_testing.Fail_before_commit));
+        test_case "committed uncertain wait is confirmed exactly" `Quick
+          (test_preparation_wait_preserves_official_checkpoint Execution.Muse (Some Store.For_testing.Fail_after_commit)) ];
+      "offline preparation", [
         test_case "copy preserves original rows and unknown input" `Quick test_offline_copy_preserves_evidence_and_prior_uncertainty;
         test_case "occupied destinations and corrupt source are refused" `Quick test_offline_copy_refuses_nonempty_destination_and_corrupt_source;
         test_case "reused sequence refuses preparation before copying" `Quick test_offline_copy_refuses_reused_sequence;

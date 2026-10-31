@@ -676,7 +676,11 @@ let attempt_runtime_candidates
   in
   (* Every error the walk returns from a candidate passes through here, so
      the caller learns which candidate produced the lane's error. *)
+  let dispatched_seen = ref false in
   let lane_terminal (terminal : lane_terminal_error) =
+    let terminal = if !dispatched_seen then
+      {terminal with lane_error=Keeper_internal_error.without_guidance_preparation_authority terminal.lane_error}
+      else terminal in
     on_lane_terminal_error terminal;
     Error terminal.lane_error
   in
@@ -713,9 +717,12 @@ let attempt_runtime_candidates
       ~status:"attempt"
       ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
       Keeper_runtime_manifest.Runtime_routed;
-    (match
-       run_attempt ~idx ~runtime_id:attempt_runtime_id candidate
-     with
+    let attempt = run_attempt ~idx ~runtime_id:attempt_runtime_id candidate in
+    let _, _, _, dispatch = attempt in
+    (match dispatch with
+     | Keeper_attempt_dispatch.Dispatched -> dispatched_seen := true
+     | Rejected_before_dispatch -> ());
+    (match attempt with
      | Ok value, _checkpoint_after, _effect_disposition, _dispatch ->
        emit_runtime_manifest
          ~status:"completed"
@@ -1576,10 +1583,12 @@ let muse_serve_client_config (execution : Runtime_execution.muse_serve)
 
 (* An official-client lane cannot apply a provider config transform, so a
    transform on such a lane is refused before the client is invoked. *)
-let official_client_dispatch ~provider_config_transform =
-  match provider_config_transform with
-  | Some _ -> Keeper_attempt_dispatch.Rejected_before_dispatch
-  | None -> Keeper_attempt_dispatch.Dispatched
+let official_client_dispatch ~provider_config_transform result =
+  match provider_config_transform, result with
+  | Some _, _ -> Keeper_attempt_dispatch.Rejected_before_dispatch
+  | None, Error error when Option.is_some (Keeper_internal_error.guidance_preparation_failure error) ->
+    Keeper_attempt_dispatch.Rejected_before_dispatch
+  | None, (Ok _ | Error _) -> Keeper_attempt_dispatch.Dispatched
 
 (* Whether any request of this attempt reached a provider. The pre-dispatch
    serialization observer fires just before a request leaves, after the
@@ -1755,6 +1764,7 @@ let run_named
     ?on_request_wire_observation
     ?on_request_attribution
     ?official_client_continuation
+    ?on_official_checkpoint_prepared
     ?official_task_reference
     ?official_client_composed_context
     ?on_official_client_tool_boundary
@@ -2549,6 +2559,15 @@ let run_named
            "input policy runtime=%s selected=%s context_owner=official_client argument_source_available=%b"
            attempt_runtime_id (Keeper_input_policy.to_string input_policy)
            (Option.is_some official_argument_source));
+      let guidance_entry = ref false in
+      let on_guidance_prepared () =
+        let open Result.Syntax in
+        let* () = match on_official_checkpoint_prepared with None -> Ok () | Some enter -> enter () in
+        guidance_entry := true;
+        Ok () in
+      let guidance_result result =
+        if !guidance_entry then Result.map_error Keeper_internal_error.without_guidance_preparation_authority result
+        else result in
       match runtime.Runtime_instance.execution with
       | Runtime_execution.Codex_app_server config ->
         let ( reset_model_input_observation
@@ -2566,7 +2585,7 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          Keeper_codex_runtime.run ~input_source ~media_store ?on_native_tool_completion ?on_native_tool_progress
+          Keeper_codex_runtime.run ~on_guidance_prepared ~input_source ~media_store ?on_native_tool_completion ?on_native_tool_progress
             ?argument_source:official_argument_source
             ?on_memory_capacity_refusal
             ?on_tool_execution
@@ -2711,10 +2730,11 @@ let run_named
           ~pending_result_receipts:codex_attempt.pending_result_receipts codex_result in
         let codex_result = observe_official_result
           ~execution_result:codex_attempt.result codex_result in
+        let codex_result = guidance_result codex_result in
         ( selected_runtime_result ?official_client_settlement:codex_attempt.settled_session runtime ~lane_attempt_index:idx codex_result
         , None
         , codex_attempt.effect_disposition
-        , official_client_dispatch ~provider_config_transform )
+        , official_client_dispatch ~provider_config_transform codex_result )
       | Runtime_execution.Antigravity_cli config ->
         let ( reset_model_input_observation
             , on_model_input_window_observation
@@ -2731,7 +2751,7 @@ let run_named
                  observe ~runtime_id:attempt_runtime_id ~tools ~transmitted)
               on_request_attribution
           in
-          Keeper_antigravity_runtime.run ~input_source ?on_native_tool_completion
+          Keeper_antigravity_runtime.run ~on_guidance_prepared ~input_source ?on_native_tool_completion
             ?argument_source:official_argument_source
             ?on_tool_execution
             ?composed_context:official_client_composed_context
@@ -2835,10 +2855,11 @@ let run_named
           ~pending_result_receipts:antigravity_attempt.pending_result_receipts antigravity_result in
         let antigravity_result = observe_official_result
           ~execution_result:antigravity_attempt.result antigravity_result in
+        let antigravity_result = guidance_result antigravity_result in
         ( selected_runtime_result ?official_client_settlement:antigravity_attempt.settled_session runtime ~lane_attempt_index:idx antigravity_result
         , None
         , antigravity_attempt.effect_disposition
-        , official_client_dispatch ~provider_config_transform )
+        , official_client_dispatch ~provider_config_transform antigravity_result )
       | Runtime_execution.Muse_serve execution ->
         let ( reset_model_input_observation
             , on_model_input_window_observation
@@ -2864,7 +2885,7 @@ let run_named
             ; settled_session = None
             ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
           | Ok (workspace_root, native_context) ->
-          Keeper_muse_runtime.run ~input_source ~media_store
+          Keeper_muse_runtime.run ~on_guidance_prepared ~input_source ~media_store
             ?on_native_tool_completion
             ?argument_source:official_argument_source
             ?on_tool_execution
@@ -2971,10 +2992,11 @@ let run_named
           ~pending_result_receipts:muse_attempt.pending_result_receipts muse_result in
         let muse_result = observe_official_result
           ~execution_result:muse_attempt.result muse_result in
+        let muse_result = guidance_result muse_result in
         ( selected_runtime_result ?official_client_settlement:muse_attempt.settled_session runtime ~lane_attempt_index:idx muse_result
         , None
         , muse_attempt.effect_disposition
-        , official_client_dispatch ~provider_config_transform )
+        , official_client_dispatch ~provider_config_transform muse_result )
       | Runtime_execution.Claude_code config ->
         let ( reset_model_input_observation
             , on_model_input_window_observation
@@ -2983,6 +3005,11 @@ let run_named
           official_model_input_observation hooks
         in
         let run_claude ~initial_messages () =
+          match on_guidance_prepared () with
+          | Error error -> {Keeper_claude_code_runtime.result=Error error;
+              pending_result_receipts=None;settled_session=None;
+              effect_disposition=Keeper_provider_attempt_effect.No_effect_observed}
+          | Ok () ->
           reset_model_input_observation ();
           let tools = if runtime.model.tools_support then tools else [] in
           let on_transmitted_model_input transmitted =
@@ -3116,7 +3143,7 @@ let run_named
         ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result
         , None
         , claude_attempt.effect_disposition
-        , official_client_dispatch ~provider_config_transform )
+        , official_client_dispatch ~provider_config_transform claude_attempt.result )
       | Runtime_execution.Agent_core runtime_provider_config ->
        (* Held to this candidate's own rendering of the history, for the
           reason [official_client_librarian_front] states. *)
@@ -3365,6 +3392,7 @@ module For_testing = struct
     resolve_runtime_candidate_for_attempt
 
   let selected_runtime_result = selected_runtime_result
+  let official_client_dispatch = official_client_dispatch
   let provider_attempt_dispatch = provider_attempt_dispatch
   let official_client_observation = official_client_observation
   let apply_official_client_accept = apply_official_client_accept

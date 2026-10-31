@@ -125,10 +125,16 @@ type recovery_origin =
   | Gate_binding of gate_binding
   | Input_wait of input_wait
 type recovery = { origin : recovery_origin; diagnostic : string }
+type preparation_wait = private { checkpoint : official_client_checkpoint; detail : string }
 type phase =
   | Preparing
   | Ready
   | Running
+  | Preparing_checkpoint of official_client_checkpoint
+      (** Positive durable exclusion of transport entry. Only Enter, Wait or
+          explicit cancellation can leave it; an entered/uncertain attempt
+          has already committed Running. *)
+  | Preparation_wait of preparation_wait
   | Resuming_runtime_retry of runtime_retry
   | Resuming_gate of gate_wait * gate_resolution
   | Recovering of recovery
@@ -168,6 +174,9 @@ type action =
   | Begin_execution
   | Resume_checkpoint of Keeper_checkpoint_ref.t
   | Resume_official_checkpoint of official_client_checkpoint
+  | Wait_preparation of { observed : official_client_checkpoint; detail : string }
+  | Enter_official_checkpoint
+  | Retry_preparation of preparation_wait
   | Require_reconciliation of string
   | Suspend of Keeper_checkpoint_ref.t
   | Suspend_official_checkpoint of official_client_checkpoint

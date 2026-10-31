@@ -14,10 +14,13 @@ type get_route =
       (** [GET /api/v1/keepers/:name/turns/:turn_ref/events], same cursors,
           keyed by the durable autonomous turn reference. *)
 
+(** [retry-preparation] requires the exact GET response's preparation_wait
+    expected_revision and execution_digest; it does not pause the Keeper. *)
 type mutation =
   | Edit
   | Move_to_end
   | Cancel
+  | Retry_preparation
 
 type mutation_route =
   { keeper_name : string

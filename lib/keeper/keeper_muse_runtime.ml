@@ -23,25 +23,14 @@ let provider_name = "muse_serve"
    MASC's tools under it. *)
 let mcp_server_name = "masc"
 
-(* The session's posture as the model meets it. Muse Code still lists
-   built-in tools MASC will not approve, and a model that learns that only
-   from each rejection spends calls on them. This projects the configuration
-   MASC already chose ({!Runtime_muse_serve.config}), as the Codex lane's
-   note does; it is not an instruction. *)
+(* The selected posture chooses its managed explanation. Native flags and
+   approval decisions remain in Runtime_muse_serve. *)
 let native_posture_note = function
   | Runtime_native_tools.Native_read ->
-    [ "Muse Code's built-in reads remain available under the selected profile; \
-       built-in writes and shell execution are disabled. These restrictions do \
-       not disable the attached MASC MCP tools. Discover their schemas through \
-       the available tool loader; when provided, MASC Execute, Read, Write and \
-       Edit run through the Keeper's configured execution and approval paths. \
-       A built-in network denial describes that call, not GitHub access through \
-       MASC tools. Tool availability does not prove execution success or grant \
-       permission beyond the current request and role. MASC approves only exact \
-       attached MCP tool requests; other native approval requests are refused."
-    ]
-  | Runtime_native_tools.Native_full -> []
-  | Runtime_native_tools.Native_none -> []
+    Prompt_registry.render_prompt_template Prompt_names.keeper_muse_native_read []
+    |> Result.map (fun note -> [ String.trim note ])
+  | Runtime_native_tools.Native_full -> Ok []
+  | Runtime_native_tools.Native_none -> Ok []
 ;;
 
 let config_error = Host.config_error
@@ -759,7 +748,7 @@ let phase_name : Session_store.phase -> string = function
   | Session_store.Settled _ -> "Settled"
 ;;
 
-let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready
     ~required_native_posture ~official_client_continuation ~runtime_id ~keeper_name
     ~configured_reasoning_effort ~turn_timeout_s ~quota_scope
     ~on_model_input_window_observation ~carried_front_seed ~librarian_front ~on_carried_front
@@ -825,6 +814,12 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
     let* native_posture =
       resolve_native_posture ~base_path ~keeper_name ~required_native_posture
     in
+    let* posture_notes =
+      native_posture_note native_posture
+      |> Result.map_error (Keeper_internal_error.guidance_preparation_unavailable
+          ~field:Prompt_names.keeper_muse_native_read)
+    in
+    let* () = on_guidance_prepared () in
     let* account_home = match config.account_home with
       | None -> Error (config_error ~field:"account_home"
           "Keeper Muse requires an explicitly selected account home")
@@ -865,7 +860,7 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
       |> Result.map_error internal_error in
     let prepared = { prepared with
       system_prompt = String.concat "\n\n"
-        (prepared.system_prompt :: native_posture_note native_posture
+        (prepared.system_prompt :: posture_notes
          @ Option.to_list native_workspace_context) } in
     let tool_surface_sha256 = Session_store.tool_surface_sha256
       ~account_home
@@ -1757,7 +1752,7 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
                  recovery_detail)))
 ;;
 
-let run ~input_source ~media_store ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
+let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture
     ?official_client_continuation ~runtime_id ~configured_reasoning_effort
     ~turn_timeout_s ~quota_scope ~keeper_name ~pre_tool_rejects ~base_path ~workspace_root ?native_workspace_context ~goal
     ~goal_blocks ~system_prompt ~tools
@@ -1791,7 +1786,7 @@ let run ~input_source ~media_store ?argument_source ?official_task_reference ?co
   let result =
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle ~result_scope ~media_store ~input_source
+      run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~input_source
         ~argument_source
         ~official_task_reference
         ~composed_context
@@ -1928,5 +1923,4 @@ module For_testing = struct
   let runtime_error_to_core_error = runtime_error_to_core_error
   let recovery_failure_of_runtime_error = recovery_failure_of_runtime_error
 
-  let native_posture_note = native_posture_note
 end

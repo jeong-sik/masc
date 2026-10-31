@@ -15,6 +15,7 @@ type attempt_outcome =
     closes the same-turn retry boundary before user/tool code can run. *)
 
 val run :
+  ?on_guidance_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
   input_source:Keeper_request_source.t ->
   ?argument_source:Keeper_official_client_host.argument_source ->
   ?official_task_reference:Keeper_official_task_reference.t ->

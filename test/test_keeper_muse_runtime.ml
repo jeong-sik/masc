@@ -902,6 +902,7 @@ let declare_keeper ~base_path profile_lines =
 
 type observed_run =
   { outcome : Keeper_muse_runtime.attempt_outcome
+  ; adapter_result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; events : Agent_core.Types.sse_event list
   ; reports : Keeper_client_usage_report.t list
   ; transmitted : Keeper_official_client_host.transmitted_model_input list
@@ -910,7 +911,7 @@ type observed_run =
 
 (* [on_stream_event] sees each Keeper stream event as it is emitted;
    [on_transmitted] sees the transmission report after it is recorded. *)
-let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary ?on_tool_execution
+let run_turn_with ?on_guidance_prepared ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary ?on_tool_execution
     ?argument_source ?librarian_front
     ?model_input_projection ?on_model_input_window_observation ?on_carried_front
     ?(initial_messages = [ user_message "MUSE_FIXTURE_HISTORY" ])
@@ -935,7 +936,7 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
     }
   in
   let outcome =
-    Keeper_muse_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+    Keeper_muse_runtime.run ?on_guidance_prepared ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
       ?argument_source ?librarian_front
       ?composed_context
       ~configured_reasoning_effort:(Runtime_inference.resolve_reasoning_effort ~runtime_id)
@@ -982,7 +983,8 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
   (* This direct adapter fixture is its caller: accept the returned result
      before consuming the opaque durable result set. The routed Keeper test
      separately exercises a rejecting caller predicate. *)
-  let result = Result.bind outcome.result (fun result ->
+  let adapter_result = outcome.result in
+  let result = Result.bind adapter_result (fun result ->
     Result.bind
       (Keeper_turn_driver.For_testing.apply_official_client_accept ~runtime_id
         ~accept:(fun _ -> true)
@@ -996,6 +998,7 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
         | Ok () -> Ok result | Error detail -> Error (Agent_core.Error.Internal detail))) in
   let outcome = {outcome with result} in
   { outcome
+  ; adapter_result
   ; events = List.rev !events
   ; reports = List.rev !reports
   ; transmitted = List.rev !transmitted
@@ -1004,6 +1007,27 @@ let run_turn_with ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_inpu
 ;;
 
 let run_turn ~base_path ~tool = run_turn_with ~base_path ~tool ()
+
+(* The adapter settles the acknowledged host turn and returns its stop
+   details. The Keeper driver then turns a repetition into a typed failure,
+   so it cannot be accepted as a runnable continuation. *)
+let check_repeated_host_stop run =
+  (match run.adapter_result with
+   | Ok { Runtime_agent.stop_reason =
+            Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
+     check string "stopped tool" "masc_probe" tool_name;
+     check int "repetition count" 3 repeated_count
+   | Ok _ -> fail "the adapter lost the repeated-tool stop"
+   | Error error -> fail (Agent_core.Error.to_string error));
+  match run.outcome.result with
+  | Error error ->
+    (match Keeper_internal_error.carried_masc_internal_error error with
+     | Some (Keeper_internal_error.Host_stopped_turn
+         { runtime_id = stopped_runtime; stop = Repeated_tool_call }) ->
+       check string "stopped runtime" runtime_id stopped_runtime
+     | Some _ | None -> failf "the driver lost the typed host stop: %s" (Agent_core.Error.to_string error))
+  | Ok _ -> fail "the driver accepted the repeated-tool stop"
+;;
 
 let read_text path = In_channel.with_open_bin path In_channel.input_all
 
@@ -1754,16 +1778,10 @@ let test_a_stop_before_the_turn_start_answer_settles () =
         ~tool:(masc_probe_tool (ref `Null))
         ()
     in
-    (match run.outcome.result with
-     | Ok { Runtime_agent.stop_reason =
-              Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
-       check string "stopped tool" "masc_probe" tool_name;
-       check int "repetition count" 3 repeated_count
-     | Ok _ -> fail "the stop did not retain its repeated-tool cause"
-     | Error error -> fail (Agent_core.Error.to_string error));
+    check_repeated_host_stop run;
     (match List.rev run.events with
      | Agent_core.Types.MessageStop :: MessageDelta _ :: _ -> ()
-     | _ -> fail "successful host stop left its SSE message open");
+     | _ -> fail "settled adapter host stop left its SSE message open");
     check int "host stop closes once" 1
       (List.length (List.filter (function Agent_core.Types.MessageStop -> true | _ -> false) run.events));
     let settled_session, settled_turn_id, _ = settled_turn ~base_path in
@@ -2611,10 +2629,7 @@ let test_a_host_stopped_turns_context_stays_held_whatever_the_host_counted () =
         ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
           Ok (Some (Keeper_official_client_host.Repeated_tool_call
             { tool_name = "masc_probe"; repeated_count = 3 }))) in
-    (match stopped.outcome.result with
-     | Ok { Runtime_agent.stop_reason = Runtime_agent.Yielded_after_repeated_tool_call _; _ } -> ()
-     | Ok _ -> fail "the host stop lost its cause"
-     | Error error -> fail (Agent_core.Error.to_string error));
+    check_repeated_host_stop stopped;
     check bool "the stopped turn sent the revised recall" true
       (String_util.contains_substring (resume_prompt ()) "RECALL_SENT_BY_THE_STOPPED_TURN");
     write_file ~mode:0o600 (Filename.concat base_path "host-turn-count.txt")
@@ -2730,13 +2745,7 @@ let test_host_stop_resume_admits_either_ending_of_the_stopped_turn () =
         ~on_official_client_tool_boundary:(fun ~tool_name:_ ->
           Ok (Some (Keeper_official_client_host.Repeated_tool_call
             { tool_name = "masc_probe"; repeated_count = 3 }))) () in
-      (match stopped.outcome.result with
-       | Ok { Runtime_agent.stop_reason =
-                Runtime_agent.Yielded_after_repeated_tool_call { tool_name; repeated_count; _ }; _ } ->
-         check string "stopped tool" "masc_probe" tool_name;
-         check int "repetition count" 3 repeated_count
-       | Ok _ -> fail "host stop lost its repeated-tool cause"
-       | Error error -> fail (Agent_core.Error.to_string error));
+      check_repeated_host_stop stopped;
       let _, _, local_count = settled_turn ~base_path in
       check int "host stop acknowledges one local turn" 1 local_count;
       check string "fixture emitted no native terminal" "0"
@@ -2936,23 +2945,116 @@ let test_native_none_is_refused_before_spawn () =
       (Sys.file_exists (Filename.concat base_path "selected-home.txt")))
 ;;
 
-let test_attached_mcp_approvals_are_exact () =
+let test_missing_native_guidance_is_typed_before_claim () =
+  let key = Prompt_names.keeper_muse_native_read in
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  Fun.protect
+    ~finally:(fun () ->
+      Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+      match previous with
+      | Some value -> Prompt_registry.set_override key value |> Result.get_ok
+      | None -> Prompt_registry.clear_prompt_override key)
+    (fun () -> with_scripted_host (fun ~base_path ->
+      let empty = Filename.concat base_path "missing-guidance" in
+      Unix.mkdir empty 0o700;
+      Prompt_registry.clear_prompt_override key;
+      Prompt_registry.set_markdown_dir empty;
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      (match run.outcome.result with
+       | Error error -> check bool "actual adapter returns positive preparation failure" true
+           (Option.is_some (Keeper_internal_error.guidance_preparation_failure error))
+       | Ok _ -> fail "missing managed guidance dispatched Muse");
+      check bool "no account preparation or client spawn" false
+        (Sys.file_exists (Filename.concat base_path "selected-home.txt"));
+      check bool "no start prompt reached the host" false
+        (Sys.file_exists (Filename.concat base_path "start-prompt.txt"));
+      check int "no input transmission" 0 (List.length run.transmitted);
+      check bool "no session claim changed durable authority" true
+        (Store.load ~base_path ~keeper_name |> Result.get_ok = None)))
+;;
+
+let test_guidance_admission_fault_never_enters_sdk fault () =
+  let module Operations = Keeper_chat_operation_store in
+  let module Semantic = Keeper_semantic_execution in
   with_scripted_host (fun ~base_path ->
-    (match (run_turn ~base_path ~tool:(masc_probe_tool (ref `Null))).outcome.result with
-     | Ok _ -> ()
-     | Error error -> fail (Agent_core.Error.to_string error));
-    check (list string) "answers"
-      [ "mcp__masc__masc_probe allow_once -"; "mcp__unattached__masc_probe abort -";
-        "mcp__masc__masc_probe abort -"; "mcp__masc__masc_probe abort -"; "bash abort -"; "read_file abort -" ]
-      (read_text (Filename.concat base_path "decisions.log")
-       |> String.split_on_char '\n'
-       |> List.filter (fun line -> line <> ""));
-    let start_prompt = read_text (Filename.concat base_path "start-prompt.txt") in
-    List.iter
-      (fun note ->
-         check bool "the start prompt states the posture" true
-           (String_util.contains_substring start_prompt note))
-      (Adapter.native_posture_note Runtime_native_tools.Native_read))
+    let operations = Operations.open_or_create ~path:(Filename.concat base_path "preparation.sqlite3") |> Result.get_ok in
+    Fun.protect ~finally:(fun () ->
+      Operations.For_testing.clear_commit_fault ();
+      Operations.close operations |> Result.get_ok)
+      (fun () ->
+        let operation_id = Keeper_chat_operation.Operation_id.of_string "muse-admission-proof" |> Result.get_ok in
+        let input = `Assoc ["message",`String "original checkpoint input"] in
+        Operations.submit operations ~now:1. ~operation_id ~source:(`String "original caller") ~input
+          |> Result.get_ok |> ignore;
+        let operation = Operations.claim_next operations ~now:2. |> Result.get_ok |> Option.get in
+        let frame = Keeper_repetition_snapshot.admit Keeper_repetition_snapshot.empty
+            (Keeper_repetition_snapshot.Fresh (Keeper_execution_scope_id.direct_operation operation_id)) |> Result.get_ok in
+        let checkpoint = Semantic.Official_client {client_kind=Muse;runtime_id;session_id;
+            turn_id="original-turn";tool_surface_sha256=Keeper_checkpoint_ref.sha256_of_canonical_bytes "tools";frame} in
+        Operations.defer_direct_checkpoint operations ~now:3. ~operation_id
+          ~execution_digest:operation.execution_digest ~checkpoint |> Result.get_ok |> ignore;
+        Operations.claim_next operations ~now:4. |> Result.get_ok |> Option.get |> ignore;
+        Operations.resume_direct_checkpoint operations ~now:5. ~operation_id ~observed:checkpoint |> Result.get_ok;
+        let callbacks = ref 0 in
+        let on_guidance_prepared () =
+          incr callbacks;
+          Operations.For_testing.fail_next_commit fault;
+          Operations.enter_direct_preparation operations ~now:6. ~operation_id ~execution_digest:operation.execution_digest
+          |> Result.map_error (fun error -> Agent_core.Error.Internal (Operations.error_to_string error)) in
+        let run = run_turn_with ~on_guidance_prepared ~base_path ~tool:(masc_probe_tool (ref `Null)) () in
+        check int "actual adapter requested write admission once" 1 !callbacks;
+        (match run.outcome.result with Error _ -> () | Ok _ -> fail "unconfirmed write admission entered SDK");
+        check int "no model input was transmitted" 0 (List.length run.transmitted);
+        check bool "account/session preparation follows confirmed admission" false
+          (Sys.file_exists (Filename.concat base_path "selected-home.txt"));
+        check bool "no session was claimed" true (Store.load ~base_path ~keeper_name |> Result.get_ok = None);
+        let execution = Operations.semantic_get operations (Keeper_execution_scope_id.direct_operation operation_id)
+            |> Result.get_ok |> Option.get in
+        (match fault,execution.phase with
+         | Operations.For_testing.Fail_before_commit, Semantic.Preparing_checkpoint original ->
+           check bool "rollback retains exact original checkpoint" true
+             (Semantic.equal_gate_checkpoint checkpoint (Semantic.Official_client original));
+           check bool "rollback retains original input" true (execution.input=Some input);
+           Operations.settle_running_after_restart operations ~now:7. |> Result.get_ok |> ignore;
+           check bool "restart blocks the not-entered preparation" true
+             (Option.is_some (Operations.direct_preparation_wait operations ~operation_id |> Result.get_ok));
+           check bool "restart dispatches nothing automatically" true
+             (Option.is_none (Operations.claim_next operations ~now:8. |> Result.get_ok))
+         | Operations.For_testing.Fail_after_commit, Semantic.Running ->
+           check bool "unconfirmed committed entry grants no preparation retry" true
+             (Option.is_none (Operations.direct_preparation_wait operations ~operation_id |> Result.get_ok))
+         | _ -> fail "write admission fault lost its exact disposition")))
+;;
+
+let test_attached_mcp_approvals_are_exact () =
+  let key = Prompt_names.keeper_muse_native_read in
+  let previous = (Prompt_registry.resolve_prompt key).override_value in
+  let note = "MUSE_POSTURE_FROM_MANAGED_OVERRIDE" in
+  let set value =
+    match Prompt_registry.set_override key value with
+    | Ok () -> ()
+    | Error detail -> fail detail
+  in
+  set note;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> set value
+      | None -> Prompt_registry.clear_prompt_override key)
+    (fun () ->
+      with_scripted_host (fun ~base_path ->
+        (match (run_turn ~base_path ~tool:(masc_probe_tool (ref `Null))).outcome.result with
+         | Ok _ -> ()
+         | Error error -> fail (Agent_core.Error.to_string error));
+        check (list string) "answers"
+          [ "mcp__masc__masc_probe allow_once -"; "mcp__unattached__masc_probe abort -";
+            "mcp__masc__masc_probe abort -"; "mcp__masc__masc_probe abort -"; "bash abort -"; "read_file abort -" ]
+          (read_text (Filename.concat base_path "decisions.log")
+           |> String.split_on_char '\n'
+           |> List.filter (fun line -> line <> ""));
+        let start_prompt = read_text (Filename.concat base_path "start-prompt.txt") in
+        check bool "the managed override reaches the native start prompt" true
+          (String_util.contains_substring start_prompt note)))
 ;;
 
 (* Exercise the actual adapter writer, then recover its serialized argument
@@ -3348,7 +3450,12 @@ let () =
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh
         ; test_case "missing selected auth requires sign-in before spawn" `Quick test_missing_selected_account_auth_requires_sign_in
         ; test_case "invalid goal media refuses before claim and spawn" `Quick test_invalid_goal_media_never_claims_or_spawns
-        ; test_case "native none refuses before spawn" `Quick test_native_none_is_refused_before_spawn ])
+        ; test_case "native none refuses before spawn" `Quick test_native_none_is_refused_before_spawn
+        ; test_case "missing guidance is typed before claim" `Quick test_missing_native_guidance_is_typed_before_claim
+        ; test_case "rolled-back admission never enters SDK" `Quick
+            (test_guidance_admission_fault_never_enters_sdk Keeper_chat_operation_store.For_testing.Fail_before_commit)
+        ; test_case "uncertain admission never enters SDK" `Quick
+            (test_guidance_admission_fault_never_enters_sdk Keeper_chat_operation_store.For_testing.Fail_after_commit) ])
     ; ( "workspace root"
       , [ test_case "the session works in the Keeper's playground" `Quick
             test_the_session_works_in_the_keepers_playground

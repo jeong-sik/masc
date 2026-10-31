@@ -124,7 +124,8 @@ let test_healthy_status_is_silent_and_unknown_failure_is_preserved () =
         (status.kfs_current_activity = Decode.Keeper_activity_unknown)
   | None -> Alcotest.fail "failing keeper with missing cause still needs a status"
 
-let complete rows = Control.Roster_complete rows
+let complete rows = Control.roster_of_reading
+    ~errors:[] ~rows ~truncated:false ~total:(List.length rows)
 
 let reading ?(paused = false) ?(liveness = Control.Unobserved) name :
     Control.reading =
@@ -496,7 +497,8 @@ let test_operation_id_is_per_attempt () =
    showed all ten as offline and offered to boot every one of them. *)
 let test_short_roster_is_partial () =
   match
-    Control.roster_of_reading ~errors:[] ~rows:[] ~truncated:false ~total:10
+    Control.roster_view
+      (Control.roster_of_reading ~errors:[] ~rows:[] ~truncated:false ~total:10)
   with
   | Control.Roster_partial { observed; total } ->
       Alcotest.(check int) "nothing observed" 0 (List.length observed);
@@ -577,8 +579,9 @@ let test_refusal_distinguishes_absent_from_rejected () =
 
 let test_truncated_roster_is_partial () =
   match
-    Control.roster_of_reading ~errors:[] ~rows:[ runtime "analyst" ] ~truncated:true
-      ~total:1
+    Control.roster_view
+      (Control.roster_of_reading ~errors:[] ~rows:[ runtime "analyst" ] ~truncated:true
+        ~total:1)
   with
   | Control.Roster_partial { observed; _ } ->
       Alcotest.(check int) "the row it did return is kept" 1
@@ -605,8 +608,9 @@ let test_partial_roster_still_confirms_what_it_holds () =
 
 let test_full_roster_is_complete () =
   match
-    Control.roster_of_reading ~errors:[] ~rows:[ runtime "analyst" ] ~truncated:false
-      ~total:1
+    Control.roster_view
+      (Control.roster_of_reading ~errors:[] ~rows:[ runtime "analyst" ] ~truncated:false
+        ~total:1)
   with
   | Control.Roster_complete rows ->
       Alcotest.(check int) "one row" 1 (List.length rows);
@@ -621,6 +625,51 @@ let test_full_roster_is_complete () =
   | Control.Roster_invalid _ | Control.Roster_partial _ ->
       Alcotest.fail "a roster matching its own total is complete"
   | Control.Roster_unobserved -> Alcotest.fail "the route did answer"
+
+let test_prepared_roster_first_duplicate_keeps_lifecycle () =
+  let first = runtime ~keepalive_running:true ~runtime_id:"first-runtime" "analyst" in
+  let later = runtime ~keepalive_running:false ~runtime_id:"later-runtime" "analyst" in
+  let roster = complete [first; later] in
+  let liveness = Control.liveness_of_roster roster "analyst" in
+  (match liveness with
+   | Control.Present observed ->
+       Alcotest.(check string) "first runtime supplies the reading"
+         first.kr_runtime_id observed.kr_runtime_id
+   | Control.Absent | Control.Unobserved | Control.Invalid _ ->
+       Alcotest.fail "the first observed runtime must remain present");
+  check_actions "a later stopped duplicate cannot offer boot"
+    [Control.Pause; Control.Wakeup; Control.Shutdown; Control.Delete]
+    (Control.available (reading ~liveness "analyst"))
+
+let test_prepared_roster_first_error_overrides_present_lifecycle () =
+  let roster = Control.roster_of_reading
+      ~errors:["analyst", "first error"; "analyst", "later error"]
+      ~rows:[runtime "analyst"] ~truncated:false ~total:1 in
+  let liveness = Control.liveness_of_roster roster "analyst" in
+  (match liveness with
+   | Control.Invalid detail ->
+       Alcotest.(check string) "first source error is preserved" "first error" detail
+   | Control.Absent | Control.Unobserved | Control.Present _ ->
+       Alcotest.fail "configuration errors take precedence over observed rows");
+  check_actions "an invalid runtime cannot authorize lifecycle changes"
+    [Control.Delete] (Control.available (reading ~liveness "analyst"))
+
+let test_prepared_roster_replacement_withdraws_live_decisions () =
+  let previous = complete [runtime "analyst"] in
+  let current = Control.roster_of_reading
+      ~errors:[] ~rows:[] ~truncated:true ~total:1 in
+  List.iter
+    (fun roster ->
+      let liveness = Control.liveness_of_roster roster "analyst" in
+      Alcotest.(check bool) "a new unread observation borrows no old runtime" true
+        (liveness = Control.Unobserved);
+      check_actions "unconfirmed presence cannot offer boot or live control"
+        [Control.Delete] (Control.available (reading ~liveness "analyst")))
+    [current; Control.unobserved_roster];
+  check_actions "the previous value still belongs to its original observation"
+    [Control.Pause; Control.Wakeup; Control.Shutdown; Control.Delete]
+    (Control.available (reading
+       ~liveness:(Control.liveness_of_roster previous "analyst") "analyst"))
 
 (* {1 Response classification} *)
 
@@ -820,7 +869,7 @@ let test_item_revision_hint_preserves_keeper_observation () =
   List.iter (fun (runtime : Decode.keeper_runtime) ->
     Alcotest.(check bool) "invalid authority reported independently" true
       (Result.is_error runtime.kr_candle_account_revision);
-    let roster = Control.Roster_complete [runtime] in
+    let roster = complete [runtime] in
     Alcotest.(check bool) "invalid authority retains lifecycle controls" true
       (List.mem Control.Shutdown
         (Control.available (reading ~liveness:(Control.liveness_of_roster roster "analyst") "analyst"))))
@@ -1380,6 +1429,12 @@ let () =
             test_partial_roster_still_confirms_what_it_holds
         ; Alcotest.test_case "a full roster is complete" `Quick
             test_full_roster_is_complete
+        ; Alcotest.test_case "duplicate runtime preserves lifecycle decisions" `Quick
+            test_prepared_roster_first_duplicate_keeps_lifecycle
+        ; Alcotest.test_case "first error overrides a live duplicate" `Quick
+            test_prepared_roster_first_error_overrides_present_lifecycle
+        ; Alcotest.test_case "replacement withdraws old live decisions" `Quick
+            test_prepared_roster_replacement_withdraws_live_decisions
         ] )
     ; ( "responses"
       , [ Alcotest.test_case "purge binds exact operation" `Quick test_purge_response_binds_exact_operation

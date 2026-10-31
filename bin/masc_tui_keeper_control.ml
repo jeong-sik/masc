@@ -35,7 +35,7 @@ type reading = {
   liveness : liveness;
 }
 
-type roster =
+type roster_view =
   | Roster_unobserved
   | Roster_partial of
       { observed : Decode.keeper_runtime list
@@ -48,17 +48,52 @@ type roster =
       }
   | Roster_complete of Decode.keeper_runtime list
 
+module Roster_names = Map.Make (String)
+
+type roster = { source : roster_view; names : liveness Roster_names.t }
+
+let unobserved_roster = { source = Roster_unobserved; names = Roster_names.empty }
+
+let roster_view roster = roster.source
+
+let prepare_roster source =
+  let observed, errors =
+    match source with
+    | Roster_unobserved -> [], []
+    | Roster_partial { observed; total = _ }
+    | Roster_complete observed -> observed, []
+    | Roster_invalid { observed; errors; complete = _ } -> observed, errors
+  in
+  let observed =
+    List.fold_left
+      (fun index (row : Decode.keeper_runtime) ->
+        Roster_names.update row.kr_name
+          (function None -> Some (Present row) | Some _ as first -> first) index)
+      Roster_names.empty observed
+  in
+  let errors =
+    List.fold_left
+      (fun index (name, detail) ->
+        Roster_names.update name
+          (function None -> Some (Invalid detail) | Some _ as first -> first) index)
+      Roster_names.empty errors
+  in
+  { source; names = Roster_names.union (fun _ error _ -> Some error) errors observed }
+
 let roster_of_reading ~errors ~rows ~truncated ~total =
   (* [count] short of [total] is the same fact as truncation: rows that belong
      here are missing. The route drops a keeper whose metadata it cannot read,
      and that keeper's fiber is still running. *)
   let observed_count = List.length rows in
-  if errors <> [] then
-    Roster_invalid { observed = rows; errors;
-      complete = not truncated && observed_count + List.length errors >= total }
-  else if truncated || observed_count < total then
-    Roster_partial { observed = rows; total = max total observed_count }
-  else Roster_complete rows
+  let source =
+    if errors <> [] then
+      Roster_invalid { observed = rows; errors;
+        complete = not truncated && observed_count + List.length errors >= total }
+    else if truncated || observed_count < total then
+      Roster_partial { observed = rows; total = max total observed_count }
+    else Roster_complete rows
+  in
+  prepare_roster source
 
 type roster_failure =
   | Roster_unauthorized of Masc_tui_credential.server_reason
@@ -91,31 +126,14 @@ let roster_failure_of_status ~status ~body =
             (Printf.sprintf "HTTP %d: %s" status (response_detail ~status body)))
   | _ -> unreachable ()
 
-let find_row rows name =
-  List.find_opt
-    (fun (row : Decode.keeper_runtime) -> String.equal row.kr_name name)
-    rows
-
 let liveness_of_roster roster name =
-  match roster with
-  | Roster_invalid { observed; errors; complete } -> (
-      match List.assoc_opt name errors with
-      | Some detail -> Invalid detail
-      | None -> (match find_row observed name with
-          | Some row -> Present row
-          | None -> if complete then Absent else Unobserved))
-  | Roster_unobserved -> Unobserved
-  | Roster_partial { observed; total = _ } -> (
-      match find_row observed name with
-      | Some row -> Present row
-      | None ->
-          (* Rows are missing from this roster, so this name may be one of
-             them. That is not evidence of a stopped fiber. *)
-          Unobserved)
-  | Roster_complete rows -> (
-      match find_row rows name with
-      | Some row -> Present row
-      | None -> Absent)
+  match Roster_names.find_opt name roster.names with
+  | Some reading -> reading
+  | None ->
+      match roster.source with
+      | Roster_unobserved | Roster_partial _ -> Unobserved
+      | Roster_complete _ -> Absent
+      | Roster_invalid { complete; _ } -> if complete then Absent else Unobserved
 
 
 (* One keeper, four separate readings, one accessor each. Nothing here folds

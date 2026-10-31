@@ -5197,7 +5197,7 @@ let launch_keeper_items ?(keep_observed_account = false) state ~mailbox keeper_n
   | Workspace_identity_match, Some _ when not (server_authority_ready state) ->
     state.item_account_error <- Some "Server workspace identity is unavailable or differs from the local workspace"
   | Workspace_identity_match, Some _
-    when state.keeper_roster = Keeper_control.Roster_unobserved ->
+    when Keeper_control.roster_view state.keeper_roster = Keeper_control.Roster_unobserved ->
     state.item_account_error <- Some "Keeper roster authority is unavailable"
   | Workspace_identity_match, Some identity ->
   (* The read-state Item endpoint owns account authority. Public roster
@@ -13701,7 +13701,7 @@ let apply_remote_keeper_rows state =
   | Workspace_identity_match | Workspace_identity_match_unconfirmed _
   | Workspace_identity_unread -> ()
   | Workspace_identity_mismatch _ ->
-    let keepers, error = match state.keeper_roster with
+    let keepers, error = match Keeper_control.roster_view state.keeper_roster with
       | Keeper_control.Roster_unobserved -> [],
         Some (Option.value state.keeper_roster_error ~default:"Remote Keeper roster not observed")
       | Keeper_control.Roster_complete rows -> List.map Tui_decode.keeper_of_runtime rows, None
@@ -13749,7 +13749,7 @@ let apply_keeper_roster_load state result =
          and every lifecycle action on this surface is chosen from it. Going
          back to unobserved withdraws the actions instead of offering the
          wrong one. *)
-      state.keeper_roster <- Keeper_control.Roster_unobserved;
+      state.keeper_roster <- Keeper_control.unobserved_roster;
       withdraw_keeper_items state;
       state.item_account_error <- Some "Keeper roster authority is unavailable";
       state.candle_observation <- Some (Error (Keeper_control.roster_failure_message
@@ -14998,7 +14998,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     state.board_census <- Masc_tui_fetched.Absent;
     state.board_detail <- Board_detail.clear state.board_detail;
     state.board_vote_armed <- None;
-    state.keeper_roster <- Keeper_control.Roster_unobserved;
+    state.keeper_roster <- Keeper_control.unobserved_roster;
     state.keeper_roster_error <- Some reason;
     state.msg_history_load_generation <- state.msg_history_load_generation + 1;
     state.msg_history_inflight <- None;
@@ -15158,7 +15158,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     clear_local_workspace ~keep_keeper_rows:same_remote state;
     clear_keeper_logs state;
     if not same_remote then begin
-      state.keeper_roster <- Keeper_control.Roster_unobserved;
+      state.keeper_roster <- Keeper_control.unobserved_roster;
       state.keeper_roster_error <- None
     end
   | Masc_tui_types.Workspace_identity_match ->
@@ -15191,7 +15191,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
   | Masc_tui_types.Workspace_identity_unread ->
     state.item_account_error <- Some "Server workspace identity is unavailable";
     clear_local_workspace state;
-    state.keeper_roster <- Keeper_control.Roster_unobserved;
+    state.keeper_roster <- Keeper_control.unobserved_roster;
     clear_keeper_logs state
   | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
     (* [workspace_identity_of_refresh] answers only the three confirmed
@@ -20829,7 +20829,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
       if current && still_selected
          && state.workspace_identity = Masc_tui_types.Workspace_identity_match
          && server_authority_ready state
-         && state.keeper_roster <> Keeper_control.Roster_unobserved
+         && Keeper_control.roster_view state.keeper_roster <> Keeper_control.Roster_unobserved
          (* The same reading the dispatch guard makes: a partial roster's
             silence is not absence, so a read this TUI legitimately launched
             for an Unobserved Keeper is accepted here too. A complete

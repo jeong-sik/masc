@@ -1805,7 +1805,8 @@ let early_roster_fixture () =
   state,
   { er_ticket=ticket; er_authority=state.workspace_authority; er_identity=server;
     er_observation={roster_request=request;
-      roster_result=Ok (Masc_tui_keeper_control.Roster_complete [],Error "Candle unavailable")} }
+      roster_result=Ok (Masc_tui_keeper_control.roster_of_reading
+        ~errors:[] ~rows:[] ~truncated:false ~total:0,Error "Candle unavailable")} }
 
 let test_early_roster_settles_before_slow_siblings_once () =
   let open Masc_tui_types in

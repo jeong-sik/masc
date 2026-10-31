@@ -17806,7 +17806,7 @@ let create_state
   keeper_creation_focus = None;
   keeper_creations = [];
   keeper_creation_pending = [];
-  keeper_roster = Masc_tui_keeper_control.Roster_unobserved;
+  keeper_roster = Masc_tui_keeper_control.unobserved_roster;
   keeper_roster_error = None;
   keeper_roster_read = Snapshot_read.idle;
   local_workspace_read_order = Local_read_order.idle;
@@ -18586,7 +18586,7 @@ let keeper_rows_page (state : state) ~error =
   | Workspace_identity_unread -> empty_page_of ~error ~snapshot:None
   | Workspace_identity_mismatch _ ->
     empty_page_of ~error ~snapshot:
-      (match state.keeper_roster with
+      (match Masc_tui_keeper_control.roster_view state.keeper_roster with
        | Masc_tui_keeper_control.Roster_unobserved -> None
        | Roster_complete _ | Roster_partial _ | Roster_invalid _ -> Some ())
 

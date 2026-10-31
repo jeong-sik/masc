@@ -1288,7 +1288,7 @@ let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row
   let account_email, account_notes =
     models_source_account_reading ~provider:row.provider state.runtime_config_view in
   let keepers =
-    match state.keeper_roster with
+    match Masc_tui_keeper_control.roster_view state.keeper_roster with
     | Masc_tui_keeper_control.Roster_complete rows ->
         Some
           (Masc_tui_model_runtime_table.keepers_on_login

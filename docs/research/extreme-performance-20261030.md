@@ -219,6 +219,28 @@ source/revision and workspace ownership, replacement and failure/reset handling;
 an index must not survive as independent lifecycle authority. Compare cold
 preparation/fetch, memory and actual native frames together before selecting one.
 
+## Prepared roster lifetime candidate
+
+The [source-owned roster study](../evidence/extreme-performance-20261030/keeper-roster-prepared/README.md)
+measures a narrower proposal: one immutable fetched value owns both its original
+roster and derived lookup. At 300 entries, the reduced-record prototype records
+26.947 us for source construction plus preparation, and a 300-name warm batch
+at 21.683 us versus 146.446 us for linear reads. Single early-hit queries and
+the two-name batch retain negative results. Preparation allocates about 166.6 KB
+and adds about 19.2 KB of live graph per 300-row value; actual refresh reuse and
+discard/reclamation remain unmeasured. These are batch averages, not native
+TUI latency or a completed 100 us boundary.
+
+The product candidate makes the roster opaque and prepares it in the existing
+response-decode executor path, including its inline policy. It preserves the
+original view, read admission, partial/error semantics and failure withdrawal;
+identity-unconfirmed display retention remains. There is no additional mutable
+field or independently refreshed index. The local `/queue resume` guard is a
+cold single-lookup caller and must remain visible in performance comparisons.
+Exact product-fragment checks compare 1,262 readings and 2,524 lifecycle-choice
+pairs, while product whole-module build and native execution remain separate
+pending evidence at this capture boundary.
+
 ## Measurement matrix still required for completion
 
 Use 100 us as the explicit target for every relevant boundary below. Report

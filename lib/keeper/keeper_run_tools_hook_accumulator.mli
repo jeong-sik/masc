@@ -13,8 +13,6 @@ type hook_accumulator =
   ; mutable receipt_actionable_signal :
       Keeper_contract_classifier.actionable_signal option
   ; mutable prompt_blocks : Turn_record.prompt_block list
-  ; mutable extra_system_context_digest : string option
-  ; mutable extra_system_context_size : int option
   ; mutable extra_system_context_assembly : Keeper_context_assembly.t option
     (** The renderer-issued proof from the latest assembly. [None] means the
         assembly hook has not produced a value yet. Prefix coverage and empty
@@ -28,6 +26,11 @@ val create :
   tool_surface:Keeper_agent_tool_surface.tool_surface_metrics ->
   hook_accumulator
 (** Begin a new invocation with no executed calls. *)
+
+val extra_system_context_receipt :
+  hook_accumulator -> Keeper_context_assembly.receipt option
+(** The latest assembly's extra-context receipt, if that carrier exists.
+    An existing empty carrier has a receipt with zero bytes. *)
 
 val record_requested_tool_names :
   hook_accumulator -> string list -> unit

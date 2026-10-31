@@ -633,6 +633,53 @@ let test_checkpoint_history_is_not_current_tool_execution () =
     (List.length acc.tool_calls)
 ;;
 
+let test_extra_context_receipt_follows_latest_assembly () =
+  let module Acc = Masc.Keeper_run_tools_hook_accumulator in
+  let module Assembly = Masc.Keeper_context_assembly in
+  let meta =
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "context-receipt-probe" ]) |> Result.get_ok
+  in
+  let acc =
+    Acc.create ~meta
+      ~tool_surface:
+        { turn_lane = Masc.Keeper_agent_tool_surface.Lane_text_only
+        ; config_root = "fixture"
+        ; runtime_config_path = Some "fixture/runtime.toml"
+        }
+  in
+  let observe expected =
+    let actual = Option.bind acc.extra_system_context_assembly
+        (fun assembly -> assembly.Assembly.extra_system_context) in
+    check (option string) "assembly retains the exact carrier bytes" expected actual;
+    match expected, Acc.extra_system_context_receipt acc with
+    | None, None -> ()
+    | Some text, Some receipt ->
+      check int "receipt measures the exact carrier bytes"
+        (String.length text) receipt.Assembly.bytes;
+      check string "receipt hashes the exact carrier bytes"
+        Agent_core_sha256.(digest_string text |> to_hex) receipt.sha256
+    | None, Some _ -> fail "an absent extra context has no receipt"
+    | Some _, None -> fail "an existing extra context has a receipt"
+  in
+  observe None;
+  let assembly prefix blocks =
+    Assembly.assemble ~dynamic_context_partition:None
+      ~existing_extra_system_context:prefix ~blocks
+    |> Assembly.with_system_observations ~base_text:"system"
+         ~observations:[Assembly.Active_goals "system-only"]
+  in
+  acc.extra_system_context_assembly <- Some (assembly None []);
+  observe None;
+  acc.extra_system_context_assembly <- Some (assembly (Some "") []);
+  observe (Some "");
+  acc.extra_system_context_assembly <-
+    Some (assembly (Some "prefix\000\255") [Prompt_block_id.Temporal_summary, "한글"]);
+  observe (Some "prefix\000\255\n\n한글");
+  acc.extra_system_context_assembly <- Some (assembly None []);
+  observe None
+;;
+
 let test_history_memo_answers_a_purged_body_from_its_new_bytes () =
   let input = `Assoc [ ("argv", `List [ `String "status" ]) ] in
   let history_memo = Masc.Keeper_tool_progress_identity.History_memo.create () in
@@ -1326,6 +1373,8 @@ let () =
             test_applied_gate_replay_seeds_terminal_settlement;
           test_case "checkpoint history is not current execution" `Quick
             test_checkpoint_history_is_not_current_tool_execution;
+          test_case "extra-context receipt follows the latest assembly" `Quick
+            test_extra_context_receipt_follows_latest_assembly;
           test_case "history memo answers a purged body from its new bytes" `Quick
             test_history_memo_answers_a_purged_body_from_its_new_bytes;
           test_case "page cursors retain identity while logs mask them" `Quick

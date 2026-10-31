@@ -126,21 +126,21 @@ let finalize
       ~turn_succeeded:(Result.is_ok turn_result)
       ~last_attempt_index:lane_attempt_index
   in
-  (* #20936: the before_turn_params hook snapshots the final injected
-     extra_system_context (digest + byte size) into the accumulator each
-     agent-core turn; the receipt reports the last agent-core turn's values. Agent Core
-     injects the assembled string verbatim, so computed and injected
-     sizes coincide — they diverge only if an injection-side truncation
-     layer ever appears. *)
-  let extra_system_context_digest =
-    acc.Keeper_run_tools.extra_system_context_digest
+  (* #20936: the before_turn_params hook retains the final assembled
+     extra_system_context assembly in the accumulator each agent-core turn;
+     the receipt reports the last assembly's digest and byte size. Both size
+     fields currently describe that issuer-side carrier; neither by itself
+     proves what a provider or an official client actually transmitted. *)
+  let extra_context_receipt =
+    Keeper_run_tools_hook_accumulator.extra_system_context_receipt acc
   in
-  let extra_system_context_computed_size =
-    acc.Keeper_run_tools.extra_system_context_size
-  in
-  let extra_system_context_injected_size =
-    acc.Keeper_run_tools.extra_system_context_size
-  in
+  let extra_system_context_digest = Option.map
+      (fun (receipt : Keeper_context_assembly.receipt) -> receipt.sha256)
+      extra_context_receipt in
+  let extra_system_context_computed_size = Option.map
+      (fun (receipt : Keeper_context_assembly.receipt) -> receipt.bytes)
+      extra_context_receipt in
+  let extra_system_context_injected_size = extra_system_context_computed_size in
   let runtime_outcome =
     Keeper_agent_error.runtime_outcome_of_observation
       ~lane_failover_applied

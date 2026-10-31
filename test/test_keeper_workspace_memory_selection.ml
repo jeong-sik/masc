@@ -517,6 +517,101 @@ let test_failed_revalidation_and_receipt_keep_unavailable_projection () =
    | _ -> Alcotest.fail "unexpected validation or receipt calls")
 ;;
 
+let overlapping_projection_fixture () =
+  let row id = `Assoc ["id",`String id;"text",`String (id ^ String.make 1000 'x')] in
+  `Assoc ["status",`String "selected";"selection_id",`String "overlap-fixture";
+          "selected",`List [row "row-a";row "row-b";row "row-c";row "row-d"]]
+;;
+
+let test_capacity_receipt_cannot_overwrite_revalidation_failure () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  let module Host = Masc.Keeper_workspace_memory_host_recall in
+  let prepared = ref None and source_changed = ref false and receipts = ref [] in
+  let validate payload =
+    if !source_changed && Yojson.Safe.Util.member "status" payload = `String "selected"
+    then Error "source changed" else Ok () in
+  let retain ~reason ~payload =
+    receipts := (reason,payload) :: !receipts;
+    if not !source_changed then begin
+      source_changed := true;
+      ignore (Host.render_prepared (Option.get !prepared))
+    end;
+    Ok () in
+  let value = Host.For_testing.prepare_projection ~payload:(overlapping_projection_fixture ())
+      ~validate ~retain in
+  prepared := Some value;
+  let refusal = Agent_core.Error.Api (ContextOverflow {message="fixture";limit=None}) in
+  (match Host.defer_for_capacity value ~refusal with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "a stale reduction was accepted");
+  Alcotest.(check int) "both proposals remain recorded" 2 (List.length !receipts);
+  let current = Host.render_prepared value in
+  Alcotest.(check bool) "unavailable state survives the older capacity receipt" true
+    (String_util.contains_substring current "source changed");
+  Alcotest.(check bool) "old selected records did not reappear" false
+    (String_util.contains_substring current "row-a")
+;;
+
+let test_revalidation_does_not_publish_a_changed_projection () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  let module Host = Masc.Keeper_workspace_memory_host_recall in
+  let refusal = Agent_core.Error.Api (ContextOverflow {message="fixture";limit=None}) in
+  List.iter (fun fail_old_validation ->
+    let prepared = ref None and reentered = ref false and receipts = ref [] in
+    let retain ~reason ~payload = receipts := (reason,payload) :: !receipts; Ok () in
+    let validate _ =
+      if !reentered then Ok ()
+      else begin
+        reentered := true;
+        (match Host.defer_for_capacity (Option.get !prepared) ~refusal with
+         | Ok Reprojected -> ()
+         | Ok Unchanged | Error _ -> Alcotest.fail "nested reduction failed");
+        if fail_old_validation then Error "old source changed" else Ok ()
+      end in
+    let value = Host.For_testing.prepare_projection ~payload:(overlapping_projection_fixture ())
+        ~validate ~retain in
+    prepared := Some value;
+    let first = Host.render_prepared value in
+    Alcotest.(check bool) "stale validation returns an explicit unavailable projection" true
+      (String_util.contains_substring first "selection changed during revalidation");
+    Alcotest.(check bool) "stale validation publishes no selected record" false
+      (String_util.contains_substring first "row-a");
+    Alcotest.(check bool) "stale failure records no revalidation proposal" false
+      (List.exists (fun (reason,_) -> reason = "source_revalidation_failed") !receipts);
+    let next = Host.render_prepared value in
+    Alcotest.(check bool) "next call validates and renders the newer subset" true
+      (String_util.contains_substring next "row-a");
+    Alcotest.(check bool) "new subset still omits deferred rows" false
+      (String_util.contains_substring next "row-c")) [false;true]
+;;
+
+let test_revalidation_receipt_cannot_overwrite_newer_reduction () =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  let module Host = Masc.Keeper_workspace_memory_host_recall in
+  let refusal = Agent_core.Error.Api (ContextOverflow {message="fixture";limit=None}) in
+  let prepared = ref None and reentered = ref false in
+  let validate _ = if !reentered then Ok () else Error "source changed" in
+  let retain ~reason:_ ~payload:_ =
+    if not !reentered then begin
+      reentered := true;
+      (match Host.defer_for_capacity (Option.get !prepared) ~refusal with
+       | Ok Reprojected -> ()
+       | Ok Unchanged | Error _ -> Alcotest.fail "nested reduction failed")
+    end;
+    Ok () in
+  let value = Host.For_testing.prepare_projection ~payload:(overlapping_projection_fixture ())
+      ~validate ~retain in
+  prepared := Some value;
+  let first = Host.render_prepared value in
+  Alcotest.(check bool) "stale receipt returns an explicit unavailable projection" true
+    (String_util.contains_substring first "selection changed during revalidation");
+  let next = Host.render_prepared value in
+  Alcotest.(check bool) "newer reduction remains available after revalidation" true
+    (String_util.contains_substring next "row-a");
+  Alcotest.(check bool) "older failure did not overwrite the subset" false
+    (String_util.contains_substring next "row-c")
+;;
+
 let () = Alcotest.run "purpose-specific workspace memory selection"
   ["selection",[
     Alcotest.test_case "resolved first assessment sees full lineage" `Quick
@@ -551,4 +646,10 @@ let () = Alcotest.run "purpose-specific workspace memory selection"
     Alcotest.test_case "provider capacity projects whole records only after durable receipt" `Quick
       test_provider_capacity_projection_keeps_whole_records_and_receipts;
     Alcotest.test_case "failed revalidation and receipt stay unavailable" `Quick
-      test_failed_revalidation_and_receipt_keep_unavailable_projection]]
+      test_failed_revalidation_and_receipt_keep_unavailable_projection;
+    Alcotest.test_case "capacity receipt cannot overwrite revalidation failure" `Quick
+      test_capacity_receipt_cannot_overwrite_revalidation_failure;
+    Alcotest.test_case "revalidation does not publish a changed projection" `Quick
+      test_revalidation_does_not_publish_a_changed_projection;
+    Alcotest.test_case "revalidation receipt cannot overwrite newer reduction" `Quick
+      test_revalidation_receipt_cannot_overwrite_newer_reduction]]

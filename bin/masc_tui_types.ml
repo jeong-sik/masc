@@ -8949,6 +8949,52 @@ type resource_share_recovery_prompt = {
   recovery_confirmation : Masc_tui_artifact_share_confirmation.t;
 }
 
+type keeper_peer_position = {
+  kpp_after : string option;
+  kpp_previous : string option list;
+}
+
+type keeper_peer_pending = {
+  kpn_token : unit ref;
+  kpn_position : keeper_peer_position;
+  (* The immutable reader at dispatch. User scroll/search replaces it, and
+     then owns its position when the page response arrives. *)
+  kpn_reading : Masc_tui_detail_reading.t;
+  (* A terminal response waits for the reader's next frame, so input already
+     directed at the old frame can still change that reader first. *)
+  kpn_result : (Masc_tui_queue_inspection.peer_page, string) result option;
+}
+
+type keeper_peer_failure = {
+  kpf_position : keeper_peer_position;
+  kpf_reason : string;
+}
+
+(* Opaque identity of the reader and the observation that a frame shows.
+   Scrolling and pending reads do not replace it. *)
+type keeper_peer_frame_owner = {
+  kpfo_reader : unit ref;
+  kpfo_page : unit ref;
+}
+
+type keeper_peer_reading = {
+  kpr_keeper : string;
+  kpr_authority : unit ref;
+  kpr_frame_owner : keeper_peer_frame_owner;
+  kpr_committed : (keeper_peer_position * Masc_tui_queue_inspection.peer_page) option;
+  kpr_pending : keeper_peer_pending option;
+  kpr_failure : keeper_peer_failure option;
+}
+
+type keeper_peer_move = Peer_previous | Peer_next | Peer_refresh | Peer_restart
+
+type keeper_peer_status =
+  | Keeper_peer_loading of { page : int; retained : int option; retry : int option }
+  | Keeper_peer_arrived of { page : int; retained : int option; retry : int option }
+  | Keeper_peer_failed of { page : int; retained : int option; reason : string }
+  | Keeper_peer_current of int
+  | Keeper_peer_unread
+
 type state = {
   observation_instance : Masc_tui_observation_origin.instance;
   mutable ui_language : ui_language;
@@ -9006,9 +9052,8 @@ type state = {
   mutable detail_reading: (workspace_authority * surface * Masc_tui_detail_reading.t) option;
   (* The roster's peer-queue read belongs to one reader and one workspace
      observation epoch. A late answer must not reopen a closed reader. *)
-  (* The optional token exists only while the request is pending; the epoch
-     remains owned after completion until the reader closes or is replaced. *)
-  mutable keeper_peer_reading: (string * unit ref option * unit ref) option;
+  (* A pending page does not replace the last observed page until it succeeds. *)
+  mutable keeper_peer_reading: keeper_peer_reading option;
   mutable board_reader_owner: (workspace_authority * unit ref) option;
   mutable board_reader: Masc_tui_board_reader.t;
   mutable keeper_deletions_open: bool;
@@ -17429,12 +17474,65 @@ let board_successor (state : state) =
 
 let current_detail_reading (state : state) =
   let peer_owner_current = match state.keeper_peer_reading with
-    | Some (_, _, epoch) -> epoch == state.workspace_read_authority
+    | Some peer -> peer.kpr_authority == state.workspace_read_authority
     | None -> true in
   match state.detail_reading with
   | Some (authority, surface, reading)
     when authority = state.workspace_authority && surface = state.view && peer_owner_current -> Some reading
   | Some _ | None -> None
+
+let keeper_peer_page_number position = List.length position.kpp_previous + 1
+
+(* This state follows the reader, not its scrollable text: a kept page remains
+   visibly kept while the next page is pending or failed. *)
+let keeper_peer_status state =
+  match current_detail_reading state, state.keeper_peer_reading with
+  | Some _, Some peer ->
+      let retained = Option.map (fun (position, _) -> keeper_peer_page_number position)
+          peer.kpr_committed in
+      let retry = Option.map (fun failure -> keeper_peer_page_number failure.kpf_position)
+          peer.kpr_failure in
+      Some (match peer.kpr_pending, peer.kpr_failure, retained with
+        | Some pending, _, retained ->
+            let page = keeper_peer_page_number pending.kpn_position in
+            (match pending.kpn_result with
+             | None -> Keeper_peer_loading {page; retained; retry}
+             | Some (Ok _ | Error _) -> Keeper_peer_arrived {page; retained; retry})
+        | None, Some failure, retained ->
+            Keeper_peer_failed {page = keeper_peer_page_number failure.kpf_position;
+                                retained; reason = failure.kpf_reason}
+        | None, None, Some page -> Keeper_peer_current page
+        | None, None, None -> Keeper_peer_unread)
+  | (Some _ | None), (Some _ | None) -> None
+
+let keeper_peer_status_for_reading state reading =
+  match current_detail_reading state with
+  | Some current when current == reading -> keeper_peer_status state
+  | Some _ | None -> None
+
+(* Put the recovery key before page details, so it survives narrow rows. *)
+let keeper_peer_failure_status ~page ~retained ~reason =
+  let previous = Option.fold ~none:"" ~some:(fun page ->
+      Printf.sprintf " · page %d retained" page) retained in
+  Printf.sprintf "  failed r retry · page %d%s · %s" page previous
+    (Masc.Tui_terminal_text.sanitize_terminal_text reason)
+
+let keeper_peer_frame_owner state reading =
+  match state.keeper_peer_reading, current_detail_reading state with
+  | Some peer, Some current when current == reading -> Some peer.kpr_frame_owner
+  | (Some _ | None), (Some _ | None) -> None
+
+(* A compact or non-peer frame cannot publish peer input authority. The
+   reading is the exact typed choice captured for the frame being drawn. *)
+let keeper_peer_drawn_owner state ~compact ~drawn_reading =
+  if compact then None
+  else Option.bind drawn_reading (keeper_peer_frame_owner state)
+
+let same_keeper_peer_frame_owner left right =
+  left.kpfo_reader == right.kpfo_reader && left.kpfo_page == right.kpfo_page
+
+let keeper_peer_frame_owner_changed ~presented ~candidate =
+  not (Option.equal same_keeper_peer_frame_owner presented candidate)
 
 let current_board_reader (state : state) =
   match state.board_reader_owner, Masc_tui_board_reader.key state.board_reader,
@@ -17468,31 +17566,129 @@ let update_detail_reading (state : state) reading =
 
 let begin_keeper_peer_reading (state : state) ~keeper_name =
   let token = ref () in
-  open_detail_reading state
+  let reading =
     (Masc_tui_detail_reading.create_observation ~title:("Keeper relationships · " ^ keeper_name)
-      [{ heading = "Queued requests"; body = "Loading this Keeper's queued requests…" }]);
-  state.keeper_peer_reading <- Some (keeper_name, Some token, state.workspace_read_authority);
+      [{ heading = "Queued requests"; body = "Loading this Keeper's queued requests…" }]) in
+  open_detail_reading state reading;
+  state.keeper_peer_reading <- Some {
+    kpr_keeper = keeper_name; kpr_authority = state.workspace_read_authority;
+    kpr_frame_owner = {kpfo_reader = ref (); kpfo_page = ref ()};
+    kpr_committed = None;
+    kpr_pending = Some {kpn_token = token;
+      kpn_position = {kpp_after = None; kpp_previous = []}; kpn_reading = reading;
+      kpn_result = None};
+    kpr_failure = None };
   token
 
 let keeper_peer_read_current (state : state) ~keeper_name ~token =
   match state.keeper_peer_reading, current_detail_reading state with
-  | Some (name, Some current, authority), Some _ ->
-      String.equal name keeper_name && current == token
-      && authority == state.workspace_read_authority
+  | Some {kpr_keeper; kpr_pending = Some current; kpr_authority; _}, Some _ ->
+      String.equal kpr_keeper keeper_name && current.kpn_token == token
+      && kpr_authority == state.workspace_read_authority
   | (Some _ | None), (Some _ | None) -> false
 
+(* The fixed status can be clipped by the terminal width. Retain the whole
+   failure after the old page so it can wrap, scroll and be searched without
+   shifting the old page's existing offsets. *)
+let keeper_peer_failure_lines failure =
+  [""; "r:retry";
+   Printf.sprintf "Page %d read failed:" (keeper_peer_page_number failure.kpf_position);
+   failure.kpf_reason]
+
 let finish_keeper_peer_reading (state : state) ~keeper_name ~token result =
-  match current_detail_reading state with
-  | Some reading when keeper_peer_read_current state ~keeper_name ~token ->
-      let body = match result with
-        | Ok lines -> String.concat "\n" lines
-        | Error reason -> "Read unavailable: " ^ reason in
-      update_detail_reading state
-        (Masc_tui_detail_reading.replace ~title:("Keeper relationships · " ^ keeper_name)
-          [{ heading = "Queued requests"; body }] reading);
-      state.keeper_peer_reading <- Some (keeper_name, None, state.workspace_read_authority);
+  match current_detail_reading state, state.keeper_peer_reading with
+  | Some reading, Some ({kpr_pending = Some pending; _} as peer)
+    when keeper_peer_read_current state ~keeper_name ~token ->
+      let position = pending.kpn_position in
+      let committed, failure, lines = match result with
+        | Ok page ->
+            Some (position, page), None,
+            Masc_tui_queue_inspection.peer_lines
+              ~page_number:(List.length position.kpp_previous + 1) page
+        | Error reason ->
+            let retained = match peer.kpr_committed with
+              | None -> ["No page has been received."]
+              | Some (old_position, page) ->
+                  Masc_tui_queue_inspection.peer_lines
+                    ~page_number:(List.length old_position.kpp_previous + 1) page in
+            let failure = {kpf_position = position; kpf_reason = reason} in
+            peer.kpr_committed, Some failure,
+            retained @ keeper_peer_failure_lines failure in
+      let updated =
+        Masc_tui_detail_reading.replace ~title:("Keeper relationships · " ^ keeper_name)
+          [{ heading = "Queued requests"; body = String.concat "\n" lines }] reading in
+      let changed_page = match peer.kpr_committed with
+        | Some (previous, _) -> previous <> position
+        | None -> true in
+      let updated =
+        if Result.is_ok result && changed_page && reading == pending.kpn_reading then
+          Masc_tui_detail_reading.move ~count:1 ~height:1 Masc_tui_detail_reading.First updated
+        else updated in
+      update_detail_reading state updated;
+      state.keeper_peer_reading <- Some {peer with kpr_committed = committed;
+        kpr_pending = None; kpr_failure = failure;
+        kpr_frame_owner = {peer.kpr_frame_owner with kpfo_page = pending.kpn_token}};
+      true
+  | (Some _ | None), (Some _ | None) -> false
+
+(* Receipt and presentation are separate. The response retains its original
+   token and workspace authority until the visible reader can be drawn. *)
+let stage_keeper_peer_reading state ~keeper_name ~token result =
+  match state.keeper_peer_reading with
+  | Some ({kpr_pending = Some ({kpn_result = None; _} as pending); _} as peer)
+    when keeper_peer_read_current state ~keeper_name ~token ->
+      state.keeper_peer_reading <- Some {peer with kpr_pending =
+        Some {pending with kpn_result = Some result}};
       true
   | Some _ | None -> false
+
+type keeper_peer_settlement = Peer_no_result | Peer_waiting_input | Peer_result_applied
+
+let settle_keeper_peer_reading state ~input_pending =
+  match state.keeper_peer_reading with
+  | Some {kpr_keeper; kpr_pending = Some {kpn_token; kpn_result = Some result; _}; _}
+    when keeper_peer_read_current state ~keeper_name:kpr_keeper ~token:kpn_token ->
+      if input_pending then Peer_waiting_input
+      else if finish_keeper_peer_reading state ~keeper_name:kpr_keeper ~token:kpn_token result
+      then Peer_result_applied else Peer_no_result
+  | Some _ | None -> Peer_no_result
+
+(* Each explicit page read owns one sequence boundary and the same reader.
+   Repeated requests for that boundary share the pending read. *)
+let request_keeper_peer_page state move =
+  match current_detail_reading state, state.keeper_peer_reading with
+  | Some reading, Some ({kpr_committed = None; kpr_pending = None; _} as peer)
+    when move = Peer_refresh || move = Peer_restart ->
+      let token = ref () in
+      let position = Option.value ~default:{kpp_after = None; kpp_previous = []}
+          (Option.map (fun failure -> failure.kpf_position) peer.kpr_failure) in
+      state.keeper_peer_reading <- Some {peer with kpr_pending = Some
+        {kpn_token = token; kpn_position = position; kpn_reading = reading;
+         kpn_result = None}};
+      Some (peer.kpr_keeper, token, position.kpp_after)
+  | Some reading, Some ({kpr_committed = Some (position, page); _} as peer) ->
+      let destination = match move with
+        | Peer_refresh -> Some (Option.value ~default:position
+            (Option.map (fun failure -> failure.kpf_position) peer.kpr_failure))
+        | Peer_restart -> Some {kpp_after = None; kpp_previous = []}
+        | Peer_previous ->
+            (match position.kpp_previous with
+             | after :: previous -> Some {kpp_after = after; kpp_previous = previous}
+             | [] -> None)
+        | Peer_next ->
+            Option.map (fun after ->
+              {kpp_after = Some after; kpp_previous = position.kpp_after :: position.kpp_previous})
+              page.next_sequence in
+      (match destination with
+       | None -> None
+       | Some destination when Option.exists (fun pending -> pending.kpn_position = destination) peer.kpr_pending -> None
+       | Some destination ->
+           let token = ref () in
+           state.keeper_peer_reading <- Some {peer with kpr_pending = Some
+             {kpn_token = token; kpn_position = destination; kpn_reading = reading;
+              kpn_result = None}};
+           Some (peer.kpr_keeper, token, destination.kpp_after))
+  | (Some _ | None), (Some _ | None) -> None
 
 let modal_owns_keys (state : state) =
   Option.is_some (current_board_reader state)

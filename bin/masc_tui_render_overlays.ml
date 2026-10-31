@@ -261,19 +261,48 @@ let detail_reading_width cols = max 1 (framed_inner_width cols - 2)
 let detail_reading_document reading ~cols =
   Masc_tui_detail_reading.rows ~width:(detail_reading_width cols) reading
 
+(* The relationship page is an independently refreshed observation. Keep its
+   read status outside the document window so End/G cannot hide a failed or
+   pending replacement while the old page remains on screen. *)
+let detail_peer_status state reading =
+  let retained = function
+    | Some page -> Printf.sprintf " · page %d retained" page
+    | None -> "" in
+  let retry = function
+    | Some page -> Printf.sprintf " · r retries page %d" page
+    | None -> "" in
+  match keeper_peer_status_for_reading state reading with
+  | Some (Keeper_peer_loading {page; retained = previous; retry = failed}) ->
+      Some (Theme.info (), Printf.sprintf "  Loading page %d%s%s"
+        page (retained previous) (retry failed))
+  | Some (Keeper_peer_arrived {page; retained = previous; retry = failed}) ->
+      Some (Theme.info (), Printf.sprintf "  Page %d response received%s%s · awaiting frame"
+        page (retained previous) (retry failed))
+  | Some (Keeper_peer_failed {page; retained = previous; reason}) ->
+      Some (Theme.warn (), keeper_peer_failure_status ~page ~retained:previous ~reason)
+  | Some (Keeper_peer_current page) ->
+      Some (Theme.recede (), Printf.sprintf "  Page %d · queued relationships" page)
+  | Some Keeper_peer_unread -> Some (Theme.warn (), "  Relationship page unavailable · r retry")
+  | None -> None
+
+let detail_reading_height state reading ~terminal_rows ~count =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  match detail_peer_status state reading with
+  | None -> overlay_window_height ~rows ~count
+  | Some _ when surface_chrome_budget state ~terminal_rows <= 1 -> 0
+  | Some _ -> overlay_window_height ~rows:(rows - 1) ~count
+
 let detail_reading_viewport (state : state) reading =
   let terminal_rows, cols = get_terminal_size () in
   let count = List.length (detail_reading_document reading ~cols) in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  count, overlay_window_height ~rows ~count
+  count, detail_reading_height state reading ~terminal_rows ~count
 
 let render_detail_reading (state : state) reading =
   let terminal_rows, cols = get_terminal_size () in
   let document = Masc_tui_detail_reading.rows_with_search
       ~width:(detail_reading_width cols) reading in
   let count = List.length document in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let height = overlay_window_height ~rows ~count in
+  let height = detail_reading_height state reading ~terminal_rows ~count in
   let scroll = Masc_tui_detail_reading.scroll ~count ~height reading in
   let source_title = Terminal_text.single_line (Masc_tui_detail_reading.title reading) in
   let title, search_hint = match Masc_tui_detail_reading.search_query reading with
@@ -299,6 +328,7 @@ let render_detail_reading (state : state) reading =
     ~title:(screen_title (" " ^ title))
     ~hints:(search_hint ^ "  " ^ hints)
     ~body:(fun ~budget:_ c ->
+      Option.iter (fun (style, text) -> c.push_styled ~style text) (detail_peer_status state reading);
       List.iteri (fun index (row,mark) ->
         if index >= scroll && index < scroll + height then
           let text = match row with
@@ -313,7 +343,7 @@ let render_detail_reading (state : state) reading =
               | Masc_tui_detail_reading.Heading text -> c.push_styled ~style:Ansi.bold ("  " ^ text)
               | Content text -> c.push ("  " ^ text)
               | Note text -> c.push_styled ~style:(Theme.recede ()) ("  " ^ text)) document;
-      Option.iter c.push (overlay_window_row ~scroll ~height count))
+      if height > 0 then Option.iter c.push (overlay_window_row ~scroll ~height count))
 
 (* The sheet's rows and the viewport that shows them, at this width. One
    answer for the two readers -- the keypress that bounds the scroll and the
@@ -955,10 +985,10 @@ let render_queue_panel (state : state) (panel : queue_panel) =
     | (Queue_current | Queue_unavailable), Some (Queue_info text | Queue_error text) -> Terminal_text.single_line text
     | Queue_current, None ->
       (match panel.qp_observation with
-       | Some {waiting=Ok _; operations=Ok _} -> "Queue read · r refreshes"
-       | Some {waiting=Ok _; operations=Error _} -> "Inventory read · server messages unavailable"
-       | Some {waiting=Error _; operations=Ok _} -> "Server messages read · inventory unavailable"
-       | Some {waiting=Error _; operations=Error _} -> "Both server reads unavailable · r retries"
+       | Some {waiting=Ok _; operations=Ok _; _} -> "Queue read · r refreshes"
+       | Some {waiting=Ok _; operations=Error _; _} -> "Inventory read · server messages unavailable"
+       | Some {waiting=Error _; operations=Ok _; _} -> "Server messages read · inventory unavailable"
+       | Some {waiting=Error _; operations=Error _; _} -> "Both server reads unavailable · r retries"
        | None -> "Queue observation unavailable · r retries")
     | Queue_unavailable, None -> "Snapshot unavailable · r retries" in
   let hints = Masc_tui_keys.footer_hints_queue state panel in

@@ -2941,9 +2941,21 @@ example is one last-observed item rather than a promise that it is the next due.
 An inventory with a source read error is marked partial.
 `K` opens a read-only relationship view for the selected Keeper: each arrow
 comes from the recorded Keeper sender of a request queued for that recipient.
-The view reads the first server page; more queued requests may exist. It does
-not list running or completed requests, and an unrecognized sender is not
-guessed from the submitter's name. Esc closes the view.
+Use `<` and `>` to read earlier or later server pages, and `r` to refresh the
+current page, or retry the failed page after an error; `R` starts again from
+the first page. Each page is a separate observation of a changing queue; a
+nonempty page offers a further read and an empty page reports only that no
+requests followed its cursor in that read. The cursor does not identify a
+Keeper's storage generation; restart if that Keeper was deleted and recreated.
+The current page and pending or failed read stay visible above the scrollable
+document. If a read fails, the previous page remains available. A new page
+opens at its beginning unless you changed the reader position during the read.
+The complete failure reason follows the retained page and remains readable
+while a retry is pending.
+While another page is loading, `r` still targets the last failed page; the
+status identifies that retry target until the new read settles. The view does not list
+running or completed requests, and an unrecognized sender is not guessed from
+the submitter's name. Esc closes the view.
 A delegate-result mark represents a queued terminal result; its sentence may
 name the other Keeper and outcome, but it is not an inventory of active delegations.
 The recent and oldest orders use the observed turn or waiting-inventory time;

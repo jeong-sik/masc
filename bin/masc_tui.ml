@@ -10339,8 +10339,8 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   let module Inbox = Masc_tui_queue_inspection in
   let panel_notice ~failure text =
     match action with
-    | Inbox.Inspect_peers token ->
-      ignore (finish_keeper_peer_reading state ~keeper_name ~token (Error text))
+    | Inbox.Inspect_peers (token, _) ->
+      ignore (stage_keeper_peer_reading state ~keeper_name ~token (Error text))
     | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
     | Cancel_event _ | Prioritize_event _ ->
       (match state.queue_panel with
@@ -10363,7 +10363,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   let check_authority () =
     if authority = state.workspace_authority && server_authority_ready state
        && (match action with
-           | Inbox.Inspect_peers token -> reading == state.workspace_read_authority
+           | Inbox.Inspect_peers (token, _) -> reading == state.workspace_read_authority
                && keeper_peer_read_current state ~keeper_name ~token
            | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
            | Cancel_event _ | Prioritize_event _ -> true) then Ok ()
@@ -10584,15 +10584,21 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       | None, _ ->
         let operations = List.concat (List.rev (rows :: reversed_pages)) in
         Ok ({Inbox.id=None; text=Printf.sprintf "Server queued messages · %d" (List.length operations)} :: operations) in
-    let operations = match action with
-      | Inbox.Inspect_peers _ ->
-          Inbox.read_peer_page ~keeper_name ~read_page:(fun () ->
-            get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued"))
-          |> Result.map (fun snapshot ->
-            List.map (fun text -> {Inbox.id=None; text}) (Inbox.peer_lines snapshot))
+    let peer_result = match action with
+      | Inbox.Inspect_peers (_, after_sequence) ->
+          let suffix = Option.fold ~none:"" ~some:(fun value ->
+            "&after_sequence=" ^ Masc_tui_http.percent_encode_query_value value) after_sequence in
+          Some (Inbox.read_peer_page ~keeper_name ~after_sequence ~read_page:(fun () ->
+            get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued" ^ suffix)))
       | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-      | Cancel_event _ | Prioritize_event _ -> read_messages None Operation_ids.empty [] in
-    Ok {Inbox.waiting; operations} in
+      | Cancel_event _ | Prioritize_event _ -> None in
+    let operations = match action, peer_result with
+      | Inbox.Inspect_peers _, Some result -> Result.map (fun _ -> []) result
+      | Inbox.Inspect_peers _, None -> Error "Keeper relationship page was not read"
+      | (Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
+        | Cancel_event _ | Prioritize_event _), _ -> read_messages None Operation_ids.empty [] in
+    let peer_page = Option.bind peer_result Result.to_option in
+    Ok {Inbox.waiting; operations; peer_page} in
     let observation = try observe () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn) in
@@ -19475,14 +19481,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
          if receipt <> [] then chat_notice state ~keeper_name:(Some keeper_name)
            ~kind:Notice_reply (String.concat " · " receipt));
       dispatch_ready_run_next state ~mailbox keeper_name
-  | Keeper_queue_loaded (keeper_name, _, Masc_tui_queue_inspection.Inspect_peers token, result) ->
+  | Keeper_queue_loaded (keeper_name, _, Masc_tui_queue_inspection.Inspect_peers (token, _), result) ->
       let observation = match result with
         | Error reason -> Error reason
         | Ok (_, Error reason) -> Error reason
         | Ok (_, Ok observation) ->
-            Result.map (List.map (fun (item : Masc_tui_queue_inspection.item) -> item.text))
-              observation.operations in
-      ignore (finish_keeper_peer_reading state ~keeper_name ~token observation)
+            (match observation.operations, observation.peer_page with
+             | Error reason, _ -> Error reason
+             | Ok _, Some page -> Ok page
+             | Ok _, None -> Error "Keeper relationship page is unavailable") in
+      ignore (stage_keeper_peer_reading state ~keeper_name ~token observation)
   | Keeper_queue_loaded (keeper_name, control_generation,
       ((Masc_tui_queue_inspection.Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _
        | Run_next _ | Edit _ | Cancel_event _ | Prioritize_event _) as action), result) ->
@@ -24664,6 +24672,7 @@ let main
   let presented = ref (Presented.initial ~approval:None
       ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
       ~reader:None ~panel_owner:None) in
+  let presented_peer_owner = ref None in
   let presented_chat_row_actions :
       (workspace_authority * unit ref) Masc_tui_chat_row_actions.t ref =
     ref Masc_tui_chat_row_actions.empty
@@ -25002,12 +25011,21 @@ let main
     Presented.panel_owner_matches !presented ~current_owner
       ~context_search_owner:(context_search_owner ())
   in
+  let peer_frame_owner_on_screen ~terminal_rows =
+    match Masc_tui_render.frame_choice state ~terminal_rows with
+    | `Detail_reading reading -> keeper_peer_frame_owner state reading
+    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+    | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
+    | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None
+  in
   let present_frame frame approval presses panes acting_pane chat_row_actions change_authority
-      ~input_pending ~write ~flush reader =
+      ~drawn_detail_reading ~input_pending ~write ~flush reader =
     (* Read once: each call copies the whole screen into a fresh list. *)
     let presented_rows = Frame_presenter.presented_rows frame_presenter in
     let panel_owner = Masc_tui_render.panel_input_owner state
         ~terminal_rows:frame.Frame_presenter.terminal_rows in
+    let candidate_peer_owner = keeper_peer_drawn_owner state
+        ~compact:frame.Frame_presenter.compact_frame ~drawn_reading:drawn_detail_reading in
     let damaged = Terminal_write_repair.consume_damage () in
     let candidate_rejection = presented_input_rejection
         ~rows:(max 1 frame.Frame_presenter.terminal_rows)
@@ -25034,9 +25052,12 @@ let main
            || Option.is_some (queue_owner_of_reader reader)) && (!presented).panes <> panes)
       || play_owner_authority_changed ~presented:(play_card_of_reader (!presented).reader)
            ~candidate:(play_card_of_reader reader)
+      || keeper_peer_frame_owner_changed ~presented:!presented_peer_owner
+           ~candidate:candidate_peer_owner
       || Presented.panel_presentation_changed !presented ~current_owner:panel_owner
       || ((damaged || Option.is_none presented_rows)
           && (Option.is_some (!presented).panel_owner
+              || Option.is_some !presented_peer_owner || Option.is_some candidate_peer_owner
               || owned_reader (!presented).reader || owned_reader reader))
     in
     let frame =
@@ -25080,11 +25101,11 @@ let main
     let change_authority_changed =
       not (Option.equal Masc_tui_render_repositories.same_repository_change_authority
         !presented_change_authority change_authority) in
-    (* Approval identity, Help ownership, Queue ownership or selection, and the Play card can
-       change while clipped terminal text stays byte-identical. Those changes
-       force presentation. Activity, chat row action and repository change authority changes force a full
-       presentation only if a differential draw would otherwise do nothing;
-       ordinary async updates stay differential. *)
+    (* Approval, Help, Queue, Play and relationship page ownership can change
+       while clipped terminal text stays byte-identical. Those changes force
+       presentation. Activity, chat row action and repository change authority
+       changes force a full presentation only if a differential draw would
+       otherwise do nothing; ordinary async updates stay differential. *)
     match
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
@@ -25146,6 +25167,7 @@ let main
         let input_pending = input_pending () in
         presented := Presented.presented !presented ~approval ~presses ~panes ~reader
             ~panel_owner ~owner_changed ~input_pending;
+        presented_peer_owner := candidate_peer_owner;
         state.acting_pane_presented <- acting_pane;
         presented_chat_row_actions := chat_row_actions;
         presented_change_authority := change_authority;
@@ -27198,6 +27220,32 @@ and is loaded on demand through keeper_skill.
         | Presented.Reject_action | Presented.Reject_paste ->
             pointer_gesture := Masc_tui_pane_selection.Idle;
             None in
+      (* A reader can be opened or replaced before the next frame. Keys from
+         the previously presented owner cannot navigate that unseen reader. *)
+      let peer_owner_decision =
+        let terminal_rows, _ = get_terminal_size () in
+        let candidate = peer_frame_owner_on_screen ~terminal_rows in
+        match input with
+        | None -> Presented.Accept_input
+        | Some event ->
+            let kind = match event with
+              | Pasted _ -> Presented.Paste
+              | Graphics_reply _ -> Presented.Protocol
+              | Key _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _
+              | Mouse_wheel _ -> Presented.Action in
+            Presented.decide_unpresented_input
+              ~frame_presented:(not (keeper_peer_frame_owner_changed
+                ~presented:!presented_peer_owner ~candidate))
+              ~external_surface:(state.image_open || state.msx_open) kind in
+      (match peer_owner_decision with
+       | Presented.Reject_paste when Option.is_some interrupted_paste ->
+           presented := Presented.reject_recovery !presented
+       | Presented.Accept_input | Presented.Reject_action | Presented.Reject_paste -> ());
+      let input = match peer_owner_decision with
+        | Presented.Accept_input -> input
+        | Presented.Reject_action | Presented.Reject_paste ->
+            pointer_gesture := Masc_tui_pane_selection.Idle;
+            None in
       (* A Queue refresh can change its placement or page boundary before
          the replacement frame. Refuse that input before it can acknowledge
          an earlier rejection or begin a gesture against changing content. *)
@@ -27245,7 +27293,8 @@ and is loaded on demand through keeper_skill.
         | Presented.Accept_input -> false
         | Presented.Reject_action | Presented.Reject_paste -> true in
       let rejected_operator_input = rejected || decision_rejected unpresented_decision
-        || decision_rejected panel_decision || decision_rejected queue_viewport_decision
+        || decision_rejected panel_decision || decision_rejected peer_owner_decision
+        || decision_rejected queue_viewport_decision
         || orphan_pointer_tail in
       let panel_owns_input = Option.is_some current_panel
         && panel_owner_matches current_panel
@@ -27456,6 +27505,16 @@ and is loaded on demand through keeper_skill.
        | Presented.Reject_paste ->
            report_input_rejection state Masc_tui_action_notice.Paste_rejected
              "Paste was not applied on this screen; retry in a text field";
+           Render_schedule.request render_schedule Render_schedule.Background);
+      (match peer_owner_decision with
+       | Presented.Accept_input -> ()
+       | Presented.Reject_action ->
+           report_input_rejection state Masc_tui_action_notice.Input_rejected
+             "Relationship reader changed: input was not applied; review and retry";
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Presented.Reject_paste ->
+           report_input_rejection state Masc_tui_action_notice.Paste_rejected
+             "Relationship reader changed: paste was not applied; retry";
            Render_schedule.request render_schedule Render_schedule.Background);
       (match queue_viewport_decision with
        | Presented.Accept_input -> ()
@@ -30508,6 +30567,18 @@ and is loaded on demand through keeper_skill.
                 | Some reading -> update_detail_reading state reading
                 | None ->
                   if k="esc" || k="v" then close_detail_reading state
+                  else if Option.is_some state.keeper_peer_reading
+                          && (k="<" || k=">" || k="r" || k="R") then begin
+                    let move = match k with
+                      | "<" -> Peer_previous
+                      | ">" -> Peer_next
+                      | "R" -> Peer_restart
+                      | _ -> Peer_refresh in
+                    Option.iter (fun (keeper_name, token, after_sequence) ->
+                      launch_keeper_queue state ~mailbox:async_messages ~keeper_name
+                        (Masc_tui_queue_inspection.Inspect_peers (token, after_sequence)))
+                      (request_keeper_peer_page state move)
+                  end
                   else
                   let movement = match k with
                     | "j" | "down" | "wheel-down" -> Some (Masc_tui_detail_reading.By 1)
@@ -33524,7 +33595,7 @@ and is loaded on demand through keeper_skill.
             | Some keeper ->
                 let token = begin_keeper_peer_reading state ~keeper_name:keeper.k_name in
                 launch_keeper_queue state ~mailbox:async_messages ~keeper_name:keeper.k_name
-                  (Masc_tui_queue_inspection.Inspect_peers token))
+                  (Masc_tui_queue_inspection.Inspect_peers (token, None)))
        | Some "v" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
            cycle_item_browser state
        | Some " " when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
@@ -37052,9 +37123,23 @@ and is loaded on demand through keeper_skill.
        | Render_schedule.Render when defer_owned_frame ->
            Render_schedule.request render_schedule Render_schedule.Background
        | Render_schedule.Render ->
+           (* A response may arrive before a key that still belongs to the
+              displayed reader. Settle only when this exact reader is about to
+              be drawn and unfinished terminal input has been handled. *)
+           (match frame_choice, current_detail_reading state with
+            | `Detail_reading shown, Some current when shown == current ->
+                (match settle_keeper_peer_reading state
+                         ~input_pending:(asynchronous_input_pending ()) with
+                 | Peer_waiting_input -> Render_schedule.request render_schedule Render_schedule.Background
+                 | Peer_no_result | Peer_result_applied -> ())
+            | (`Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+              | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
+              | `Help | `Agenda | `Answering | `Queue _ | `Patch | `Link | `Client_detail _
+              | `Surface), (Some _ | None) -> ());
            (* Keys and async updates can change the pane reservation after
               the interaction snapshot. Store the focus the next frame shows. *)
            reconcile_chat_focus ();
+           let drawn_detail_reading = ref None in
            let frame, clamped, approval, presses, panes, acting_pane, chat_row_actions =
              Masc_tui_frame_timing.time_tagged Masc_tui_frame_timing.Build
                ~tag:(fun (frame, _, _, _, _, _, _) -> frame.Frame_presenter.surface_key)
@@ -37107,6 +37192,14 @@ and is loaded on demand through keeper_skill.
                    if input_holds_incomplete_sequence input_reader then
                      Some "Terminal sequence incomplete; Ctrl-C cancels it"
                    else None in
+                 (* This is the renderer's typed choice at its content height;
+                    the emitted frame later decides whether it is compact. *)
+                 let content_rows, _ = Masc_tui_render_prim.get_terminal_size () in
+                 drawn_detail_reading := (match Masc_tui_render.frame_choice state ~terminal_rows:content_rows with
+                   | `Detail_reading reading -> Some reading
+                   | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+                   | `Lane_addons _ | `About | `Context | `Keeper_deletions | `Help | `Agenda
+                   | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ | `Surface -> None);
                  render ~home ~compact_recovery_notice state)
            in
            let terminal_rows, cols = get_terminal_size () in
@@ -37125,7 +37218,9 @@ and is loaded on demand through keeper_skill.
            Masc_tui_frame_timing.time_present
              ~tag:frame.Frame_presenter.surface_key
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
-             (present_frame frame approval presses panes acting_pane chat_row_actions change_authority ~input_pending:input_unsettled clamped)
+             (present_frame frame approval presses panes acting_pane chat_row_actions change_authority
+                ~drawn_detail_reading:!drawn_detail_reading
+                ~input_pending:asynchronous_input_pending clamped)
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

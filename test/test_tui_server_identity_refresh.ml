@@ -5253,7 +5253,7 @@ let test_queue_presented_selection_authority () =
   state.workspace_identity <- Workspace_identity_match;
   let id = Inbox.Server_message "message-a" in
   let row = {Inbox.id=Some id; text="visible prefix\noriginal content"} in
-  let observation = {Inbox.waiting=Ok []; operations=Ok [row]} in
+  let observation = {Inbox.waiting=Ok []; operations=Ok [row]; peer_page=None} in
   let panel = {qp_keeper="keeper-a"; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_current;
     qp_observation=Some observation; qp_notice=None; qp_receipt=None;
     qp_selected=Some id; qp_scroll=0; qp_detail=None; qp_detail_scroll=0;
@@ -5327,7 +5327,7 @@ let test_queue_detail_respects_source_reading () =
   let server_row = {Inbox.id=Some server; text="previous server"} in
   let event_row = {Inbox.id=Some event; text="current event"} in
   let items = [local_row; server_row; event_row] in
-  let observation = {Inbox.waiting=Ok [event_row]; operations=Ok [server_row]} in
+  let observation = {Inbox.waiting=Ok [event_row]; operations=Ok [server_row]; peer_page=None} in
   let receipt = Some (Queue_action_receipt (Queue_info "action accepted")) in
   let panel = {qp_keeper="keeper"; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_unavailable;
     qp_observation=Some observation; qp_notice=Some (Queue_error "read failed");

@@ -189,9 +189,35 @@ pair, so those differences do not certify a server fix. The installed runtime
 and these isolated source-pinned native pairs are separate evidence scopes.
 
 Same-draw reuse removes a redundant model construction. Remaining row preparation
-still joins roster lists repeatedly. Measure immutable keyed projection within
-one preparation before considering retained mutable caches or broader producer
-snapshots; preserve duplicates, partial/invalid roster readings and ordering.
+still joins roster lists repeatedly. The next component experiment below rejects
+eager indexing of every whole source during each preparation.
+
+## Rejected eager projection preparation
+
+The [rejected index bundle](../evidence/extreme-performance-20261030/keeper-projection-rejected/README.md)
+preserves a pure local-map candidate and both component executions. At 300
+queried Keepers and 300 rows in each main side list, median per-call batch wall
+time falls from 3,368.778 to 732.782 us but allocation rises about 8.8 times.
+With two queried Keepers and those same per-list sizes, the second execution
+records 11.092 to 318.154 us and 1,313 to 1,586,745 allocated bytes per call.
+Question and async list sizes are larger multiples of the side parameter; these
+are synthetic dense configurations, not measured production distributions.
+
+The reduced-record component excludes real activity/date work and sorting and
+does not establish full-product compile or TUI speed. Its metadata decisions
+match in 1,920 cases per execution. Functional source review found no new P0–P2,
+but the measured preparation/allocation cost rejects the candidate. Its product
+files were restored; the patch, input hashes, exact fragments and negative
+batches remain. No native candidate build was requested for this rejected path.
+
+The [OCaml 5.5 Map contract](https://ocaml.org/manual/5.5/api/Map.html) describes
+immutable balanced-tree maps with logarithmic lookup/insertion. That complexity
+does not make per-draw bulk construction free. Two alternatives remain research:
+index only names requested by this preparation, or prepare immutable source
+readings once in their producer-owned fetch result. The latter needs explicit
+source/revision and workspace ownership, replacement and failure/reset handling;
+an index must not survive as independent lifecycle authority. Compare cold
+preparation/fetch, memory and actual native frames together before selecting one.
 
 ## Measurement matrix still required for completion
 

@@ -1,0 +1,156 @@
+{
+  "read_at_unix": 1793352598.4907331,
+  "scope": "Exact selected bytes read after the two component executions. Retained source fragments and rejection patch, not a full-product compile receipt or a capture-time manifest. Full working-tree candidate source snapshots remain in ignored artifacts.",
+  "pairs": [
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/prepare.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/prepare.py",
+      "sha256": "e310e161b1955fdd2f215bd3a10d177bac3379a34ee4c137c052f74146b75bb0",
+      "bytes": 5077
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/fixture_types.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/fixture_types.ml",
+      "sha256": "8ec90e805205e9802f4c0e50a589df266fdd3b6dd7b300dd727dbd240cd30eee",
+      "bytes": 4007
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/control_baseline.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/control_baseline.ml",
+      "sha256": "fc05671cc22995812e9c59f256b296782e495c209fe0408166c8a78120f22332",
+      "bytes": 958
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/control_candidate.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/control_candidate.ml",
+      "sha256": "be0fdf5222edb903db4b2cd0e29980fe1ae3b029449547d38d259de2fa543121",
+      "bytes": 2074
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/projection_baseline.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/projection_baseline.ml",
+      "sha256": "b1a4a185aaa0db365b3dcb06999694621540183ea100f3c9260dcb2c5085f735",
+      "bytes": 3311
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/projection_candidate.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/projection_candidate.ml",
+      "sha256": "031cbb9466c9ece1162876ce963a8c97eeb40319265d29e9a7f6a59ae2f60d00",
+      "bytes": 5326
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/benchmark.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/benchmark.ml",
+      "sha256": "555aee462b724aade149d91305126a784ae55725e45c6ec9aa09974b25b83099",
+      "bytes": 6883
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/source-identity.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/source-identity.json",
+      "sha256": "f9e0eb3a2e5688aca7abadcba03494e68bb55661747619fbbc25266293204ba7",
+      "bytes": 1465
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/compile-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/compile-v1.json",
+      "sha256": "ed01e7e4b3db49845e9973c4726738e348c202416efd43698ab24c44d942aaa8",
+      "bytes": 1153
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/link-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/link-v1.json",
+      "sha256": "3be448bba4d93793a503b99ec01997a6483961f692d17d53ddd4704657819ac3",
+      "bytes": 501
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/samples-v1.jsonl",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/samples-v1.jsonl",
+      "sha256": "02ed3360a1b04be13e4218767facf8c1f2fceceba5ef4f23fba40f61e83a1b2b",
+      "bytes": 13841
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/execution-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/execution-v1.json",
+      "sha256": "7ff8c8d8dc47fdacb6607f378f7b23eb0c2b9b6fe8df5f7f25b26a9942e0dca9",
+      "bytes": 285
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/decision-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/decision-v1.json",
+      "sha256": "cbc90503d390d9720e97e93b5f12feb0801fb338d1251d8b2cb1375467e3924a",
+      "bytes": 1600
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/rejected-product-candidate.diff",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/rejected-product-candidate.diff",
+      "sha256": "ebef7f813599439e61fc6286be73d09028a100880d126f01852447cf44c7ee82",
+      "bytes": 9865
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/analyze.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/analyze.py",
+      "sha256": "874346b637b2dd6fde7ce81ddde5a285ced323a71168d35b4d930899cf223363",
+      "bytes": 1842
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/analysis-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/analysis-v1.json",
+      "sha256": "b8805d965192a315726d05be8c158e2bd7880ccee22c1394b46727beb5fba216",
+      "bytes": 9798
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/benchmark_v2.ml",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/benchmark_v2.ml",
+      "sha256": "413ed90ba6f5c1f8ff33aa1621df7278fd0fc02541e35f5ed8568cb320af5734",
+      "bytes": 6586
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/link-v2.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/link-v2.json",
+      "sha256": "847115ea013d6103bc35501a81b195fa2afbd2c0bf3db2e037d1ade078c17a9a",
+      "bytes": 507
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/samples-v2.jsonl",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/samples-v2.jsonl",
+      "sha256": "572cb5064f8001676204a283efe7df52c4fed4804e788703218e253c2200b438",
+      "bytes": 3282
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/execution-v2.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/execution-v2.json",
+      "sha256": "20bb464f08d7174d61fd9d5d727ac279de97dcd49c6c3ff3a710ec304d88e04f",
+      "bytes": 458
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/analyze-v2.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/analyze-v2.py",
+      "sha256": "89142addc5898f586bc4e1b8fafb25ce525fa84f755a0f836420c3da1cb19bb7",
+      "bytes": 2083
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/analysis-v2.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/analysis-v2.json",
+      "sha256": "6d88f2659d2b8c8c8e74b5262c8573a8db23906e76ca6ab1087d9cd64695aa9d",
+      "bytes": 11971
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/analyze-v3.py",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/analyze-v3.py",
+      "sha256": "a5e1ac1458402d44b9439afbcbb5efecaa98c21bf6a25d28e3cb4e0de493dac7",
+      "bytes": 2163
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/analysis-v3.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/analysis-v3.json",
+      "sha256": "537cadef57ede932c5719d4714d9f7fd9b8d9de7452ba521d09dfad37239f927",
+      "bytes": 12247
+    },
+    {
+      "source": "artifacts/extreme-perf-20261030/keeper-projection-component-v1/patch-reconstruction-v1.json",
+      "retained": "docs/evidence/extreme-performance-20261030/keeper-projection-rejected/patch-reconstruction-v1.json",
+      "sha256": "4cfd0a1391489702628d29c73ea69fbf5a0852c88e08b4f7c9555a2ef398dcf1",
+      "bytes": 923
+    }
+  ]
+}

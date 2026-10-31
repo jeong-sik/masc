@@ -1,0 +1,9 @@
+{
+  "scope": "Additional small-query cases with 300 side entries, after the 3000-side regression; original v1 unchanged. Same reduced source modules, new driver cases only.",
+  "started_unix": 1793352279.217778,
+  "ended_unix": 1793352280.0203059,
+  "returncode": 0,
+  "stderr": "",
+  "binary_sha256": "0f70c7dac4d4b5d8750f79b4214aca79e18f719cd803cd93baf3e8e0da4b337f",
+  "source_sha256": "413ed90ba6f5c1f8ff33aa1621df7278fd0fc02541e35f5ed8568cb320af5734"
+}

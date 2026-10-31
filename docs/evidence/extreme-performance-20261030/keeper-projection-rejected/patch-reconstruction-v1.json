@@ -1,0 +1,23 @@
+{
+  "read_at_unix": 1793352598.488035,
+  "scope": "Apply retained patch to historical base in an isolated temporary Git index; no working-tree/ref changes and no product build.",
+  "base": "d0a4db845644cf946f419b47687223700c7e79ce",
+  "patch_sha256": "ebef7f813599439e61fc6286be73d09028a100880d126f01852447cf44c7ee82",
+  "files": [
+    {
+      "file": "bin/masc_tui_keeper_control.ml",
+      "reconstructed_sha256": "1cf2b816b045dc347354605a8c90eb9e9a45c40bcf7d01b2b3afd3bf1bb4a537",
+      "matches_frozen_candidate": true
+    },
+    {
+      "file": "bin/masc_tui_keeper_control.mli",
+      "reconstructed_sha256": "1f62ea6d0a6557ab5feffef96d0070ad9fb44a167059d83bd954e5151d4a7a7e",
+      "matches_frozen_candidate": true
+    },
+    {
+      "file": "bin/masc_tui_types.ml",
+      "reconstructed_sha256": "64b62a12bcb24c73d8ae2ed6b059be57245afc832b9f7310ae40176ad0b6db70",
+      "matches_frozen_candidate": true
+    }
+  ]
+}

@@ -519,6 +519,13 @@ let test_native_context_receipt_flags () =
       (Shared.refuses_input_capacity evidence);
     Alcotest.(check bool) "unsafe native context cannot permit a smaller range" (not expected)
       evidence.size_independent_execution_failure;
+    Alcotest.(check bool) "unsettled native execution is rederived from the retained flags" (not expected)
+      evidence.unsettled_native_execution;
+    List.iter (fun combined ->
+      Alcotest.(check bool) "native veto survives another slot's named capacity in either order"
+        (not expected) combined.Shared.unsettled_native_execution)
+      [Shared.combine evidence Shared.input_capacity_refusal;
+       Shared.combine Shared.input_capacity_refusal evidence];
     Alcotest.(check bool) "context refusal is not a measured character limit" false
       (Shared.shows_range_size evidence);
     Alcotest.(check bool) "original typed context flags and reason survive roundtrip" true

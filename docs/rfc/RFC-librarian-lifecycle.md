@@ -3,12 +3,12 @@ rfc: "librarian-lifecycle"
 title: "Librarian 생명주기 — 끝난 턴을 빠짐없이 순서대로 읽고, 읽은 위치를 남긴다"
 status: Draft
 created: 2026-09-18
-updated: 2026-09-28
+updated: 2026-10-30
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["keeper-context-window-in-tokens", "memory-os-bounded-context-and-librarian-curator", "0456", "0363"]
-implementation_prs: ["#37020", "#37024", "#37027", "#37030", "#37028", "#37031", "#37208", "#37653", "#38477"]
+implementation_prs: ["#37020", "#37024", "#37027", "#37030", "#37028", "#37031", "#37208", "#37653", "#38477", "#46926"]
 ---
 
 # RFC: Librarian 생명주기
@@ -658,6 +658,23 @@ TUI Memory 헤더, health JSON, 대시보드에 밀린 턴 수, 마지막 성공
 8. 빚이 남은 Keeper 가 없으면 사다리를 지운다.
 
 **검증.** 하네스: 한 구간의 Librarian 렌더링 크기가 그 구간을 닫은 턴의 마지막 요청 크기를 넘지 않는다. 비교값은 `turn-records` 의 `request_body_bytes` 인데, 그 값은 agent-core HTTP 요청에만 남고 system·tools·facts 까지 포함한 느슨한 상한이다. 그래서 이 하네스는 agent-core HTTP 턴만 덮는다. 라이브: 재시작 뒤 첫 회차가 한 구간만 읽고 커밋한다. #38477 의 재구축은 새 스냅숏에 `catch_up_end_atom` 을 보존하며, `end_atom` 이 그 위치에 닿기 전에는 이전 작업 상태로 요청 이력을 대신하지 않는다. 설정 검사가 작은 후보를 가진 레인을 거절한다. 커밋 뒤 스냅숏 끝이 앞으로 간다.
+
+### 4.12 완료된 범위를 묶어 이어 쓰기 (2026-10-30 개정)
+
+사용자의 Keeper별 연속성 설계와 구현 요청에 따라 §4.3·§4.11의 한 턴 폭 규칙을 아래와 같이 바꾼다. I1–I9, 원본 판단·영수증 우선권, 기존 레인과 게시 권한은 유지한다. 호출 주기나 중요도 분류기를 추가하지 않는다.
+
+- **기록·신호·판단은 별개다.** 완료 턴의 원문과 끝 줄을 먼저 저장하고 기존 Keeper별 레인에 신호를 보낸다. 겹친 신호를 합쳐도 원문은 없어지지 않는다. 레인이 실행될 때 실제 읽지 않은 범위를 계산한다. 레인이 매 턴 사이에 비면 매번 판단할 수 있으며, 호출 감소를 보장하지 않는다.
+- **한 작업의 완료 끝 E를 고정한다.** continuity가 처음 선택한 원문의 trace·이력 세대·최신 완료 끝을 이번 작업의 범위로 잡는다. 아직 끝나지 않은 atom은 포함하지 않는다. 커밋 뒤 저장소를 다시 읽더라도 실행 중 새로 완료된 턴까지 따라가지 않는다. 새 범위는 다음 신호의 작업이 맡는다. 이력 세대가 바뀌면 이번 작업은 정지한다.
+- **여러 완료 턴을 연속된 한 범위로 읽을 수 있다.** 이전의 검증된 `working_state`와 아직 접지 않은 원문을 E까지 보낸다. 새 턴을 모으려고 기다리거나 고정된 턴 수로 자르지 않는다. Task·Goal 관측·발화자·원문 순서는 각 구간의 것을 유지한다. 현재 Task를 옛 턴에 넣지 않는다. 대화 원문·counterpart 캡처와 게시 전 prefix 검증은 기존 경로를 쓴다.
+- **Memory 반영 범위의 경계에서 먼저 나눈다.** ordinary 소비자가 실제로 읽었다고 증명하는 구간을 `[B,F)`라 하자. B는 이력의 처음 또는 실제 baseline이며, 최신 receipt의 `start_atom`으로 B를 바꾸지 않는다. W가 B보다 앞서면 먼저 B까지, `[B,F)` 안에 있으면 먼저 F까지 접는다. 이미 반영된 구간은 `Context_only`, 미반영 구간은 기존 Memory 판단을 거친다. Memory 성공과 W 성공은 서로의 위치를 옮기지 않는다. 정확한 continuity 회복 receipt가 있으면 그 원본 범위가 분할보다 우선한다.
+- **확인된 입력 크기 거절 뒤 실제 완료 턴으로 내려간다.** 이 continuity 경로는 `Input_capacity_refused`와 전체 walk의 `may_descend_messages` 허가를 함께 요구한다. timeout·일반 `Invalid_request`·빈 응답·본문 미수신만으로 입력 크기를 추정하지 않는다. 허가된 배치는 다음 신호에서 가장 오래된 실제 완료 턴으로 선택한다. 그 턴도 거절되면 해당 원본을 기존 메시지 바닥 절차로 처리한다. 거절된 범위의 좌표와 메시지 digest를 결속하며, 캐시된 CLI 한도로 잘린 원본 prefix도 다음 신호에서 정확히 복원한다. 이전 턴의 atom 개수를 다음 턴의 폭으로 재사용하지 않는다. 원본 범위가 커밋되면 메시지 모드는 풀고 다음 턴은 통째로 시도한다.
+- **효과 권한을 보존하고 불명 근거를 잃지 않는다.** 일반 축소는 다음 신호를 기다린다. CLI가 실제 한도를 알려 준 기존 fitting과 더 나눌 수 없는 원본의 기존 내부 메시지 절차는 유지한다. native의 도구 효과·응답 발생 또는 불명 실패는 host의 typed 관측에서 `unsettled_native_execution`으로 도출하고, 여러 slot을 결합하거나 retained 원본을 복원해도 보존한다. `Unsettled_native_blocks_descent`와 invalid-output veto는 다른 slot의 입력 크기 거절보다 우선한다. `Pending`·효과 불명은 새 작은 요청의 허가가 아니다. 실제 한도를 모르는 임의 사전 계수나 자동 재시도 타이머를 추가하지 않는다. 프로그램 소유 완료 검토의 전체 증거는 잘라 내지 않는다.
+
+이 절의 named input 조건은 Queue continuity의 강화다. 다른 소비자를 위한 공통 historical range 분류표까지 전면 개정하지 않는다. 실제 CLI `max_chars`를 아는 fitting에는 기존 atom 이분 탐색이 남는다. 각 후보의 실제 렌더링 크기를 검증하는 탐색이며, 중요도·호출 주기를 정하는 상한이 아니다.
+- **커밋 사이에 양보한다.** 대기 작업이 있으면 커밋 뒤 반복을 끝내 그 작업의 durable이 먼저 돌도록 한다(RFC-0467). 진행 중 모델을 새 턴 때문에 취소하지 않으며 Keeper foreground도 Librarian을 기다리지 않는다.
+- **공식 실패 종료도 신호에 연결한다.** `record_errored_official_turn_boundary`는 끝 줄 append가 실제 성공한 경우에만 기존 enabled 신호를 보낸다. append 실패·disabled 설정을 성공으로 바꾸지 않는다. 공식 fragment의 durable 지원과 Agent Core checkpoint를 읽는 W 지원은 별개이며, 이 개정이 공식 native 세션을 Agent Core로 옮기지는 않는다.
+
+Librarian의 의미 판단은 기존 `facts`, `working_state`, `working_contexts`에 둔다. 새 출력 스키마·조절값·추가 Librarian 실행 줄·내구 정본을 만들지 않는다. 핵심 제약과 미완료 일이 다음 Keeper까지 이어졌는지는 커버리지와 별도로 여러 턴의 행동으로 평가한다. 완료 턴을 한 번에 보내도 항상 입력 창에 들어간다는 보장은 없으며, 실제 거절에 근거한 기존 바닥 절차가 필요하다.
 
 ## 5. 하지 않는 것
 

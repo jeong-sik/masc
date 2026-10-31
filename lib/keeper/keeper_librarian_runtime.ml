@@ -52,6 +52,7 @@ type message_descent =
   | No_descent_evidence
   | Smaller_input_may_help
   | Invalid_output_blocks_descent
+  | Unsettled_native_blocks_descent
 
 type exact_execution_error =
   { outward_effect : outward_effect
@@ -724,7 +725,8 @@ let input_capacity_of_failure evidence =
 ;;
 
 let message_descent_of_failure (evidence : Failure_evidence.t) =
-  if evidence.invalid_output then Invalid_output_blocks_descent
+  if evidence.unsettled_native_execution then Unsettled_native_blocks_descent
+  else if evidence.invalid_output then Invalid_output_blocks_descent
   else if evidence.historical_range_size || evidence.named_input_capacity then Smaller_input_may_help
   else No_descent_evidence
 ;;
@@ -741,13 +743,13 @@ type not_committed =
   }
 
 let merge_message_descent earlier later =
-  match earlier with
-  | Invalid_output_blocks_descent -> Invalid_output_blocks_descent
-  | No_descent_evidence -> later
-  | Smaller_input_may_help ->
-    (match later with
-     | Invalid_output_blocks_descent -> Invalid_output_blocks_descent
-     | No_descent_evidence | Smaller_input_may_help -> Smaller_input_may_help)
+  match earlier,later with
+  | Unsettled_native_blocks_descent,_ | _,Unsettled_native_blocks_descent ->
+    Unsettled_native_blocks_descent
+  | Invalid_output_blocks_descent,_ | _,Invalid_output_blocks_descent ->
+    Invalid_output_blocks_descent
+  | Smaller_input_may_help,_ | _,Smaller_input_may_help -> Smaller_input_may_help
+  | No_descent_evidence,No_descent_evidence -> No_descent_evidence
 ;;
 
 let may_descend_messages reports =
@@ -755,7 +757,7 @@ let may_descend_messages reports =
     merge_message_descent policy report.message_descent) No_descent_evidence reports in
   match policy with
   | Smaller_input_may_help -> true
-  | No_descent_evidence | Invalid_output_blocks_descent -> false
+  | No_descent_evidence | Invalid_output_blocks_descent | Unsettled_native_blocks_descent -> false
 ;;
 
 let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =

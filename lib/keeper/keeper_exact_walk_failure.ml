@@ -7,6 +7,7 @@ type t =
   { historical_range_size : bool
   ; named_input_capacity : bool
   ; invalid_output : bool
+  ; unsettled_native_execution : bool
   ; size_independent_execution_failure : bool
   ; measured_cli_capacity : Keeper_lane_cli_oneshot.input_capacity option
   ; provider_input_refusals : Input_refusal.t list
@@ -16,6 +17,7 @@ let empty =
   { historical_range_size = false
   ; named_input_capacity = false
   ; invalid_output = false
+  ; unsettled_native_execution = false
   ; size_independent_execution_failure = false
   ; measured_cli_capacity = None
   ; provider_input_refusals = []
@@ -43,6 +45,7 @@ let combine left right =
   { historical_range_size = left.historical_range_size || right.historical_range_size
   ; named_input_capacity = left.named_input_capacity || right.named_input_capacity
   ; invalid_output = left.invalid_output || right.invalid_output
+  ; unsettled_native_execution = left.unsettled_native_execution || right.unsettled_native_execution
   ; size_independent_execution_failure =
       left.size_independent_execution_failure || right.size_independent_execution_failure
   ; measured_cli_capacity = larger_capacity left.measured_cli_capacity right.measured_cli_capacity
@@ -316,7 +319,7 @@ let of_cli_observation observation = match observation.cause with
   | Claude_context_refused {tool_effect_attempted=true;response_emitted=_;message=_}
   | Claude_context_refused {tool_effect_attempted=false;response_emitted=true;message=_}
   | Native_failed (Codex | Claude | Claude_admission | Antigravity | Muse | Host) ->
-    {empty with size_independent_execution_failure=true}
+    {empty with size_independent_execution_failure=true;unsettled_native_execution=true}
 
 let of_cli_failure failure = of_cli_observation (cli_observation failure)
 let cli_observation_of_yojson json =

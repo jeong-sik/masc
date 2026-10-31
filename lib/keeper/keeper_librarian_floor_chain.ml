@@ -46,7 +46,8 @@ let owner_error = Step_owner.error_to_string
 let hole_reasons report =
   match report.Memory_runtime.message_descent, report.provider_input_refusals with
   | Memory_runtime.Smaller_input_may_help, (_ :: _ as reasons) -> Some reasons
-  | (Memory_runtime.Smaller_input_may_help | Invalid_output_blocks_descent | No_descent_evidence), _ -> None
+  | (Memory_runtime.Smaller_input_may_help | Invalid_output_blocks_descent
+    | Unsettled_native_blocks_descent | No_descent_evidence), _ -> None
 
 let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~unread_message =
   let keeper_name = Durable.keeper_id owner in

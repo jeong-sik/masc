@@ -120,6 +120,11 @@ and proposed requests. Changed-head CRs return to each actual account owner;
 same-head CRs wait for author action unless an explicit rereview request exists.
 Shared logins count once. COMMENT/PENDING does not establish approval. Existing
 approval evidence uses the complete-diff/scope guard before being admitted.
+Formal review order uses submission time, with unknown times or an ambiguous
+latest decision refusing planning. Each unresolved CR remains owned until its
+explicit, strictly later replacement or dismissal; multiple CRs on one account
+are grouped into one request. A current-head CR waits for author action even
+when that account also has an older CR.
 Proposed reviewers must have a different GitHub user ID from the PR author and
 every linked author or committer in the comparison. The tool resolves reviewer
 logins to IDs, repeats that lookup immediately before a request, and checks the

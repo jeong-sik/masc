@@ -10,12 +10,17 @@ let default_max_rows = 8
    masc_keeper_delegate_status would indent every other row behind it. *)
 let name_pad_max = 16
 
+type call_view =
+  { name : string
+  ; args_base : string
+  ; args_rev : string list
+  }
+
 type call =
-  { mutable name : string
+  { mutable view : call_view
   ; provider_name : string
   ; provider_call_id : string option
   ; provider_message_id : string option
-  ; mutable args : string
   }
 
 module Occurrence = struct
@@ -38,14 +43,22 @@ let occurrence_key (occurrence : Keeper_chat_events.tool_stream_occurrence) =
   occurrence.stream_scope, occurrence.block_index
 ;;
 
+(* Keep each streamed fragment once. A snapshot replaces the earlier pieces. *)
+let args_text view =
+  match view.args_rev with
+  | [] -> view.args_base
+  | [delta] when String.equal view.args_base "" -> delta
+  | reversed -> String.concat "" (view.args_base :: List.rev reversed)
+
 let on_event t (event : Keeper_chat_events.keeper_chat_event) =
   match event with
   | Tool_call_start { occurrence; tool_call_name; tool_call_id } ->
     let key = occurrence_key occurrence in
     if not (Occurrence_table.mem t.by_occurrence key)
     then begin
-      let call = { name = tool_call_name; provider_name = tool_call_name;
-        provider_call_id = tool_call_id; provider_message_id = occurrence.provider_message_id; args = "" } in
+      let call = { view = {name = tool_call_name; args_base = ""; args_rev = []};
+        provider_name = tool_call_name; provider_call_id = tool_call_id;
+        provider_message_id = occurrence.provider_message_id } in
       Occurrence_table.replace t.by_occurrence key call;
       t.rev_order <- call :: t.rev_order
     end
@@ -53,22 +66,38 @@ let on_event t (event : Keeper_chat_events.keeper_chat_event) =
     (match Occurrence_table.find_opt t.by_occurrence (occurrence_key occurrence) with
      | None -> ()
      | Some call ->
+       let view = call.view in
        let correlation_matches expected received = match expected, received with
          | Some expected, Some received -> String.equal expected received
          | Some _, None | None, Some _ | None, None -> true in
        if correlation_matches call.provider_call_id tool_call_id
           && correlation_matches call.provider_message_id occurrence.provider_message_id
           && String.equal call.provider_name provider_tool_name
-          && (String.equal call.name call.provider_name || String.equal call.name tool_call_name)
-       then call.name <- tool_call_name)
+          && (String.equal view.name call.provider_name || String.equal view.name tool_call_name)
+       then call.view <- {view with name = tool_call_name})
   | Tool_call_args { occurrence; delta; _ } ->
     (match Occurrence_table.find_opt t.by_occurrence (occurrence_key occurrence) with
      | None -> ()
-     | Some call -> call.args <- call.args ^ delta)
+     | Some _ when String.equal delta "" -> ()
+     | Some call ->
+       let view = call.view in
+       call.view <- {view with args_rev = delta :: view.args_rev})
   | Tool_call_args_snapshot { occurrence; snapshot; _ } ->
     (match Occurrence_table.find_opt t.by_occurrence (occurrence_key occurrence) with
      | None -> ()
-     | Some call -> call.args <- snapshot)
+     | Some call ->
+       let view = call.view in
+       call.view <- {view with args_base = snapshot; args_rev = []})
+  | Tool_call_end { occurrence; _ } ->
+    (* Release fragment cells after the provider ends a call. This is only a
+       storage change: later events still follow the existing rules. *)
+    (match Occurrence_table.find_opt t.by_occurrence (occurrence_key occurrence) with
+     | None -> ()
+     | Some call ->
+       let view = call.view in
+       (match view.args_rev with
+        | [] -> ()
+        | _ -> call.view <- {view with args_base = args_text view; args_rev = []}))
   | Keeper_chat_events.Text_message_end | Keeper_chat_events.Agent_core_stream_connected
   | Keeper_chat_events.Agent_core_stream_ping | Keeper_chat_events.Run_started _
   | Keeper_chat_events.Batch_bound _ | Keeper_chat_events.Text_message_start _
@@ -85,7 +114,7 @@ let on_event t (event : Keeper_chat_events.keeper_chat_event) =
   | (Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _)
   | Keeper_chat_events.Agent_core_thinking_signature_delta _
   | Keeper_chat_events.Agent_core_media_delta _
-  | Keeper_chat_events.Agent_core_stream_protocol_error _ | Keeper_chat_events.Tool_call_end _
+  | Keeper_chat_events.Agent_core_stream_protocol_error _
   | Keeper_chat_events.Native_tool_start _ | Keeper_chat_events.Native_tool_end (_, _)
   | Keeper_chat_events.Native_tool_progress (_, _) | Keeper_chat_events.Tool_approval_requested _
   | Keeper_chat_events.Tool_approval_settled _ | Keeper_chat_events.Tool_result_ready _
@@ -326,19 +355,20 @@ let render ?(max_rows = default_max_rows) t =
     let shown = if total <= max_rows then all else List.filteri (fun i _ -> i < max_rows) all in
     let hidden = total - List.length shown in
     let name_width =
-      List.fold_left (fun acc call -> max acc (String.length call.name)) 0 shown
+      List.fold_left (fun acc call -> max acc (String.length call.view.name)) 0 shown
       |> min name_pad_max
     in
     let last_row = List.length shown - 1 in
     let row index call =
       let branch = if index = last_row && hidden = 0 then "└" else "├" in
-      match tool_subject ~name:call.name ~args:call.args with
-      | None -> Printf.sprintf "%s %s" branch call.name
+      let view = call.view in
+      match tool_subject ~name:view.name ~args:(args_text view) with
+      | None -> Printf.sprintf "%s %s" branch view.name
       | Some subject ->
         Printf.sprintf
           "%s %s %s"
           branch
-          (pad_to name_width call.name)
+          (pad_to name_width view.name)
           (Observability_redact.redact_text subject)
     in
     let rows = List.mapi row shown in

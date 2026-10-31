@@ -190,6 +190,10 @@ let tool_snapshot id snapshot =
     { occurrence = occurrence id; tool_call_id = Some id; snapshot }
 ;;
 
+let tool_end id =
+  Events.Tool_call_end { occurrence = occurrence id; tool_call_id = Some id }
+;;
+
 let test_no_tools_renders_nothing () =
   let t = trail_of [ Events.Text_delta {text="answered from memory"; response=Unobserved_scope (None)} ] in
   Alcotest.(check int) "no calls" 0 (Trail.call_count t);
@@ -222,6 +226,63 @@ let test_snapshot_replaces_deltas () =
     "the snapshot wins"
     (Some "└ Read lib/right.ml")
     (Trail.render t)
+;;
+
+let test_interleaved_fragments_and_replacements () =
+  let t = Trail.create () in
+  let emit event = Trail.on_event t event in
+  let korean = "한글" in
+  emit (tool_start "c1" "Read");
+  emit (tool_start "c2" "Execute");
+  emit (tool_args "c1" {|{"file_path":"lib/|});
+  (* Split a UTF-8 scalar across events, as a byte stream may do. *)
+  emit (tool_args "c1" (String.sub korean 0 1));
+  emit (tool_end "c1");
+  emit (tool_end "c1");
+  emit (tool_snapshot "c2" {|{"argv":["pwd"]}|});
+  emit (tool_args "c1" (String.sub korean 1 (String.length korean - 1)));
+  emit (tool_args "c1" {|.ml"}|});
+  emit (tool_end "c1");
+  emit (tool_args "c1" "");
+  let check expected =
+    Alcotest.(check (option string)) "each occurrence keeps its own arguments"
+      (Some expected) (Trail.render t)
+  in
+  check "├ Read    lib/한글.ml\n└ Execute pwd";
+  (* A snapshot discards every earlier fragment, and later deltas extend it. *)
+  emit (tool_snapshot "c1" {|{"file_path":"lib/|});
+  emit (tool_start "c1" "Read");
+  emit (tool_args "c1" {|after.ml"}|});
+  check "├ Read    lib/after.ml\n└ Execute pwd";
+  emit (tool_snapshot "c1" "");
+  check "├ Read\n└ Execute pwd";
+  emit (tool_args "c1" {|{"file_path":"lib/final.ml"}|});
+  check "├ Read    lib/final.ml\n└ Execute pwd"
+;;
+
+let test_admission_keeps_occurrence_correlation () =
+  let t = Trail.create () in
+  let occurrence =
+    { Events.stream_scope = 4; provider_message_id = Some "message-a"; block_index = 7 }
+  in
+  let admit occurrence tool_call_id tool_call_name =
+    Trail.on_event t
+      (Events.Tool_call_admitted
+         { occurrence; tool_call_id; provider_tool_name = "Read"; tool_call_name })
+  in
+  Trail.on_event t
+    (Events.Tool_call_start { occurrence; tool_call_id = Some "call-a"; tool_call_name = "Read" });
+  Trail.on_event t
+    (Events.Tool_call_args { occurrence; tool_call_id = Some "call-a";
+                             delta = {|{"file_path":"lib/a.ml"}|} });
+  admit occurrence (Some "other-call") "Wrong";
+  admit {occurrence with provider_message_id = Some "other-message"} (Some "call-a") "Wrong";
+  Alcotest.(check (option string)) "conflicting correlation cannot rename the call"
+    (Some "└ Read lib/a.ml") (Trail.render t);
+  admit occurrence (Some "call-a") "Resolved";
+  admit occurrence (Some "call-a") "Other";
+  Alcotest.(check (option string)) "the admitted name and arguments stay together"
+    (Some "└ Resolved lib/a.ml") (Trail.render t)
 ;;
 
 let test_fragment_for_unknown_id_is_dropped () =
@@ -402,6 +463,10 @@ let () =
       , [ Alcotest.test_case "no tools" `Quick test_no_tools_renders_nothing
         ; Alcotest.test_case "deltas accumulate" `Quick test_argument_deltas_accumulate
         ; Alcotest.test_case "snapshot replaces" `Quick test_snapshot_replaces_deltas
+        ; Alcotest.test_case "interleaved fragments and replacements" `Quick
+            test_interleaved_fragments_and_replacements
+        ; Alcotest.test_case "admission keeps occurrence correlation" `Quick
+            test_admission_keeps_occurrence_correlation
         ; Alcotest.test_case "unknown id dropped" `Quick test_fragment_for_unknown_id_is_dropped
         ; Alcotest.test_case "repeated start" `Quick test_repeated_start_is_one_call
         ; Alcotest.test_case "order and branch" `Quick test_rows_keep_call_order_and_branch

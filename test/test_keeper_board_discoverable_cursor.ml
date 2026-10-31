@@ -25,7 +25,7 @@ let rec remove_tree path =
     else Sys.remove path
 ;;
 
-let with_temp_workspace f =
+let with_temp_workspace ?(recipient_lookup = every_name_declared) f =
   let base_path = Filename.temp_dir "keeper-board-cursor" "" in
   let config = Workspace.default_config base_path in
   Fun.protect
@@ -38,11 +38,11 @@ let with_temp_workspace f =
        ignore (Workspace.init config ~agent_name:None : string);
        Board_dispatch.reset_for_test ();
        Board.reset_global_for_test ();
-       Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+       Board_dispatch.init_jsonl ~recipient_lookup ();
        f config)
 ;;
 
-let keeper_meta ?(board_interests = []) config name =
+let keeper_meta ?(board_interests = []) ?(mention_targets = []) config name =
   let meta =
     match Masc_test_deps.meta_of_json_fixture
       (`Assoc [ "name", `String name; "trace_id", `String ("trace-" ^ name) ])
@@ -56,8 +56,9 @@ let keeper_meta ?(board_interests = []) config name =
   Fs_compat.mkdir_p keepers_dir;
   Out_channel.with_open_text (Filename.concat keepers_dir (name ^ ".toml"))
     (fun oc -> Printf.fprintf oc
-      "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nboard_interests = [%s]\n"
-      (String.concat ", " (List.map (Printf.sprintf "%S") board_interests)));
+      "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nboard_interests = [%s]\nmention_targets = [%s]\n"
+      (String.concat ", " (List.map (Printf.sprintf "%S") board_interests))
+      (String.concat ", " (List.map (Printf.sprintf "%S") mention_targets)));
   (match Keeper_meta_store.replace_snapshot config meta with
    | Ok () -> ()
    | Error detail -> fail detail);
@@ -216,6 +217,94 @@ let test_no_interests_skips_producer_and_owner_judgment () =
   publish "after-first-cursor"
 ;;
 
+let test_replayed_comment_discovery_respects_parent_visibility () =
+  Eio_main.run @@ fun _env ->
+  List.iter
+    (fun (label, visibility, expected_candidates) ->
+       let alias_declared = ref false in
+       let recipient_lookup =
+         Recipient_lookup.make (fun candidate ->
+           let name = Recipient_lookup.Candidate.to_string candidate in
+           if String.equal name "latealias" && not !alias_declared
+           then Ok None
+           else Ok (Result.to_option (Board.Agent_id.parse name))) in
+       with_temp_workspace ~recipient_lookup @@ fun config ->
+       let meta = keeper_meta ~board_interests:[ "research" ] config "replaylane" in
+       register config meta;
+       let poster = keeper_meta config "thread-author" in
+       register config poster;
+       Keeper_registry.set_board_cursor ~base_path:config.base_path meta.name 1.0 None;
+       Keeper_registry.set_board_cursor ~base_path:config.base_path poster.name 1.0 None;
+       (* All posts have a different explicit recipient, so only the unaddressed
+          comment can produce a candidate for this lane. *)
+       let post =
+         match Board_dispatch.create_post
+                 ~author:"thread-author" ~title:"thread"
+                 ~content:"@thread-owner discussion" ~visibility
+                 ~post_kind:Board.Human_post () with
+         | Ok post -> post
+         | Error error -> fail (Board.show_board_error error) in
+       let post_id = Board.Post_id.to_string post.id in
+       let comment =
+         match Board_dispatch.add_comment ~post_id ~author:"comment-author"
+                 ~content:"@latealias new research" () with
+         | Ok comment -> comment
+         | Error error -> fail (Board.show_board_error error) in
+       check bool (label ^ ": unresolved name stored as thread audience") true
+         (comment.audience = Some Board.Thread_participants);
+       alias_declared := true;
+       let meta = keeper_meta ~board_interests:[ "research" ]
+           ~mention_targets:[ "latealias" ] config "replaylane" in
+       check (list string) (label ^ ": alias registered before replay")
+         [ "latealias" ] meta.mention_targets;
+       let count_comment () =
+         match KBAC.load_candidates ~base_path:config.base_path ~keeper_name:meta.name with
+         | Error detail -> fail detail
+         | Ok candidates ->
+           List.filter (fun (candidate : KBAC.candidate) ->
+             match candidate.signal.kind with
+             | Board_dispatch.Board_comment_added identity ->
+               String.equal (Board.Comment_id.to_string identity.comment_id)
+                 (Board.Comment_id.to_string comment.id)
+             | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _
+             | Board_dispatch.Board_reaction_changed _ | Board_dispatch.Board_vote_cast _ -> false)
+             candidates
+           |> List.length in
+       let count_poster_reply () =
+         match Keeper_registry_event_queue.snapshot_result
+                 ~base_path:config.base_path poster.name with
+         | Error detail -> fail detail
+         | Ok queue ->
+           Keeper_event_queue.to_list queue
+           |> List.filter (fun (entry : Keeper_event_queue.stimulus) ->
+             match entry.payload with
+             | Keeper_event_queue.Board_signal
+                 { kind = Keeper_event_queue.Comment_added identity; _ } ->
+               String.equal identity.comment_id (Board.Comment_id.to_string comment.id)
+             | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
+             | Fusion_completed _ | Schedule_due _ | Connector_attention _
+             | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
+             | Task_cancelled _ | Workspace_message _ | Delegate_completed _
+             | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _
+             | Addon_operation_changed _ | Task_outcome _ -> false)
+           |> List.length in
+       ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
+       check int (label ^ ": replayed comment candidates") expected_candidates (count_comment ());
+       check int (label ^ ": later alias does not directly receive replayed comment") 0
+         (queue_length config meta.name);
+       ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta:poster);
+       check int (label ^ ": replayed comment reaches post author") 1 (count_poster_reply ());
+       ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta);
+       ignore (Keeper_world_observation.collect_board_events ~base_path:config.base_path ~meta:poster);
+       check int (label ^ ": replay does not duplicate the candidate") expected_candidates (count_comment ());
+       check int (label ^ ": replay does not duplicate the delivery") 1 (count_poster_reply ()))
+    [ "public", Board.Public, 1
+    ; "internal", Board.Internal, 1
+    ; "unlisted", Board.Unlisted, 0
+    ; "direct", Board.Direct, 0
+    ]
+;;
+
 let test_initialized_cursor_receives_each_discoverable_edit () =
   Eio_main.run @@ fun _env ->
   with_temp_workspace @@ fun config ->
@@ -319,6 +408,8 @@ let () =
             test_live_comment_and_catchup_share_identity_after_title_edit
         ; test_case "initialized cursor receives each discoverable edit" `Quick
             test_initialized_cursor_receives_each_discoverable_edit
+        ; test_case "replayed comment discovery follows parent visibility" `Quick
+            test_replayed_comment_discovery_respects_parent_visibility
         ; test_case "queued edits preserve captured content before consumption" `Quick
             test_queued_edits_keep_their_captured_content
         ; test_case

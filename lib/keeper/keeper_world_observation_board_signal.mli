@@ -136,11 +136,19 @@ val board_signal_stimulus :
 val wake_reason_label : wake_reason -> string
 (** Stable string label for logs/metrics. *)
 
+type wake_assessment =
+  | Wake of wake_reason
+  | Unaddressed_comment of Board.visibility
+  | Not_addressed
+(** An unaddressed comment carries its parent post's visibility from the same
+    read used to check authorship. The caller decides whether it is discoverable. *)
+
 val wake_reason
   :  meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
-  -> wake_reason option board_read
-(** [Available None] means the structural reactive pipeline found no
-    deterministic address for this keeper. [Unavailable _] names the Board read
-    that answered no row (the post was swept or an id does not parse); reading
-    again gives the same answer, so callers consume the source. *)
+  -> wake_assessment board_read
+(** Assess a recorded [Thread_participants] audience without reinterpreting the
+    signal text as an address. [Not_addressed] and [Unaddressed_comment _] mean
+    the structural reactive pipeline found no deterministic address for this keeper. [Unavailable _]
+    names the Board read that answered no row (the post was swept or an id does
+    not parse); reading again gives the same answer, so callers consume the source. *)

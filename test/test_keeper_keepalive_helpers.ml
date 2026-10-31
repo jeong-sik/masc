@@ -41,9 +41,9 @@ let with_temp_workspace f =
 
 (* The Board tests below write through the dispatcher inside an Eio run, so the
    backend gets its recipient lookup before the first write. *)
-let with_board_workspace f =
+let with_board_workspace ?(recipient_lookup = every_name_declared) f =
   with_temp_workspace (fun config ->
-    Board_dispatch.init_jsonl ~recipient_lookup:every_name_declared ();
+    Board_dispatch.init_jsonl ~recipient_lookup ();
     f config)
 
 let make_keepalive_meta ~name =
@@ -432,9 +432,11 @@ let test_board_goal_keyword_overlap_is_not_wake_reason () =
     }
   in
   match KWOBS.wake_reason ~meta ~signal with
-  | KWOBS.Available None -> ()
-  | KWOBS.Available (Some reason) ->
+  | KWOBS.Available KWOBS.Not_addressed -> ()
+  | KWOBS.Available (KWOBS.Wake reason) ->
     failf "goal keyword overlap woke as %s" (KWOBS.wake_reason_label reason)
+  | KWOBS.Available (KWOBS.Unaddressed_comment _) ->
+    fail "a post was classified as an unaddressed comment"
   | KWOBS.Unavailable unavailable ->
     failf "Board fixture unavailable: %s" (KWOBS.unavailable_to_string unavailable)
 
@@ -701,8 +703,9 @@ let write_board_lane_config config (meta : Keeper_meta_contract.keeper_meta) =
   Fs_compat.mkdir_p keepers_dir;
   Out_channel.with_open_text (Filename.concat keepers_dir (meta.name ^ ".toml"))
     (fun oc -> Printf.fprintf oc
-      "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nboard_interests = [%s]\n"
-      (String.concat ", " (List.map (Printf.sprintf "%S") meta.board_interests)))
+      "[keeper]\ninstructions = \"Review Board evidence.\"\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\nboard_interests = [%s]\nmention_targets = [%s]\n"
+      (String.concat ", " (List.map (Printf.sprintf "%S") meta.board_interests))
+      (String.concat ", " (List.map (Printf.sprintf "%S") meta.mention_targets)))
 ;;
 
 let persist_and_register_board_lane config meta =
@@ -1020,6 +1023,11 @@ let test_thread_signal_for_a_swept_post_delivers_nothing () =
         | Ok Board.Durable_deletion -> ()
         | Ok (Board.Deletion_persistence_pending detail) -> fail detail
         | Error error -> fail (Board.show_board_error error));
+       check bool "missing parent post is unavailable" true
+         (match KBA.route_for_keeper ~audience:KBA.Thread_participants ~meta
+                  ~signal:signal.signal with
+          | KWOBS.Unavailable { operation = KWOBS.Get_post; _ } -> true
+          | KWOBS.Available _ | KWOBS.Unavailable _ -> false);
        KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
        check int "lane queue stays empty" 0 (board_queue_length config meta.name);
        match Keeper_registry.get ~base_path:config.base_path meta.name with
@@ -1249,13 +1257,13 @@ let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
        | votes -> failf "expected one vote stimulus, got %d" (List.length votes))
 ;;
 
-(* #27329 regression: a comment signal classifies as [Thread_participants],
+(* #27329 regression: a comment on an internal thread classifies as [Thread_participants],
    and a lane that never touched the thread has no deterministic address —
-   [wake_reason] answers [Available None] for it. That folded to [Ignore]
+   [wake_reason] reports an unaddressed comment. That used to fold to [Ignore]
    for every non-participant lane, so a comment could never reach attention
    judgment: [Judge_discoverable] was produced only for the [Discoverable]
-   audience. Now the [None] fold escalates to
-   [Judge_discoverable] for comment signals and the push path records the
+   audience. Now an unaddressed comment escalates to [Judge_discoverable] on
+   a discoverable thread and the push path records the
    attention candidate, while the participant lane keeps its direct
    delivery. *)
 let test_comment_routes_bystander_lane_to_attention_judgment () =
@@ -1312,6 +1320,122 @@ let test_comment_routes_bystander_lane_to_attention_judgment () =
          (board_attention_count config bystander.Keeper_meta_contract.name);
        check int "participant lane holds no attention candidate" 0
          (board_attention_count config meta.Keeper_meta_contract.name))
+;;
+
+let test_comment_discovery_respects_parent_visibility () =
+  Eio_main.run @@ fun _env ->
+  List.iter
+    (fun (label, visibility, expected_candidates) ->
+       with_board_workspace @@ fun config ->
+       Fun.protect
+         ~finally:Keeper_registry.For_testing.clear
+         (fun () ->
+            let poster = make_board_resume_meta "posterlane" in
+            let parent_author = make_board_resume_meta "threadlane" in
+            let bystander =
+              { (make_board_resume_meta "bystanderlane") with
+                board_interests = [ "thread review" ] } in
+            List.iter (persist_and_register_board_lane config) [ poster; parent_author; bystander ];
+            let content = match visibility with
+              | Board.Direct -> "@threadlane thread topic"
+              | Board.Public | Board.Internal | Board.Unlisted -> "thread topic" in
+            let get = function
+              | Ok value -> value
+              | Error error -> fail (Board.show_board_error error) in
+            let post = get (Board_dispatch.create_post ~author:poster.name
+              ~content ~title:"thread" ~post_kind:Board.Human_post ~visibility ()) in
+            let post_id = Board.Post_id.to_string post.id in
+            let parent = get (Board_dispatch.add_comment ~post_id ~author:parent_author.name
+              ~content:"keeper was here" ()) in
+            Board_dispatch.set_board_signal_hook (KKS.wakeup_relevant_keeper_for_board_signal ~config);
+            ignore (get (Board_dispatch.add_comment ~post_id ~author:"external-author"
+              ~parent_id:(Board.Comment_id.to_string parent.id) ~content:"follow up" ()));
+            check int (label ^ ": direct parent receives its reply") 1
+              (board_queue_length config parent_author.name);
+            check int (label ^ ": post author receives its reply") 1
+              (board_queue_length config poster.name);
+            check int (label ^ ": bystander is not directly woken") 0
+              (board_queue_length config bystander.name);
+            check int (label ^ ": bystander attention candidates") expected_candidates
+              (board_attention_count config bystander.name)))
+    [ "public", Board.Public, 1
+    ; "internal", Board.Internal, 1
+    ; "unlisted", Board.Unlisted, 0
+    ; "direct", Board.Direct, 0
+    ]
+;;
+
+let test_unresolved_comment_name_cannot_become_a_recipient () =
+  Eio_main.run @@ fun _env ->
+  List.iter
+    (fun (label, visibility, expected_candidates) ->
+       let alias_declared = ref false in
+       let recipient_lookup =
+         Recipient_lookup.make (fun candidate ->
+           let name = Recipient_lookup.Candidate.to_string candidate in
+           if String.equal name "latealias" && not !alias_declared
+           then Ok None
+           else Ok (Result.to_option (Board.Agent_id.parse name))) in
+       with_board_workspace ~recipient_lookup @@ fun config ->
+       Fun.protect
+         ~finally:(fun () ->
+           Board_dispatch.set_board_signal_hook (fun _ -> ());
+           Keeper_registry.For_testing.clear ())
+         (fun () ->
+            let poster = make_board_resume_meta "posterlane" in
+            let parent_author = make_board_resume_meta "threadlane" in
+            let bystander =
+              { (make_board_resume_meta "bystanderlane") with
+                board_interests = [ "thread review" ] } in
+            List.iter (persist_and_register_board_lane config) [ poster; parent_author; bystander ];
+            let get = function
+              | Ok value -> value
+              | Error error -> fail (Board.show_board_error error) in
+            let post = get (Board_dispatch.create_post ~author:poster.name
+              ~content:"@threadlane thread topic" ~title:"thread"
+              ~post_kind:Board.Human_post ~visibility ()) in
+            let post_id = Board.Post_id.to_string post.id in
+            let parent = get (Board_dispatch.add_comment ~post_id ~author:parent_author.name
+              ~content:"keeper was here" ()) in
+            let last_signal = ref None in
+            Board_dispatch.set_board_signal_hook (fun addressed -> last_signal := Some addressed);
+            let comment = get (Board_dispatch.add_comment ~post_id ~author:"external-author"
+              ~parent_id:(Board.Comment_id.to_string parent.id)
+              ~content:"@latealias research" ()) in
+            check bool (label ^ ": unresolved name was stored as thread audience") true
+              (comment.audience = Some Board.Thread_participants);
+            let addressed = Option.get !last_signal in
+            alias_declared := true;
+            let bystander = { bystander with mention_targets = [ "latealias" ] } in
+            write_board_lane_config config bystander;
+            (match Keeper_meta_store.read_effective_meta config bystander.name with
+             | Ok (Some meta) ->
+               check (list string) (label ^ ": later alias is active")
+                 [ "latealias" ] meta.mention_targets
+             | Ok None -> fail "configured bystander metadata missing"
+             | Error detail -> fail detail);
+            KKS.wakeup_relevant_keeper_for_board_signal ~config addressed;
+            check int (label ^ ": post author receives the comment") 1
+              (board_queue_length config poster.name);
+            check int (label ^ ": parent author receives the reply") 1
+              (board_queue_length config parent_author.name);
+            check int (label ^ ": later alias does not directly receive old text") 0
+              (board_queue_length config bystander.name);
+            check int (label ^ ": discovery still follows visibility") expected_candidates
+              (board_attention_count config bystander.name);
+            ignore (get (Board_dispatch.add_comment ~post_id ~author:"external-author"
+              ~content:"@latealias explicit target" ()));
+            let addressed_target = Option.get !last_signal in
+            check bool (label ^ ": newly resolved name is a stored target") true
+              (match addressed_target.audience with Board.Targets _ -> true | _ -> false);
+            KKS.wakeup_relevant_keeper_for_board_signal ~config addressed_target;
+            check int (label ^ ": stored target still receives a direct comment") 1
+              (board_queue_length config bystander.name)))
+    [ "public", Board.Public, 1
+    ; "internal", Board.Internal, 1
+    ; "unlisted", Board.Unlisted, 0
+    ; "direct", Board.Direct, 0
+    ]
 ;;
 
 (* RFC-provider-path-rest §3.3: a path's rest comes from the provider's answer
@@ -1505,6 +1629,10 @@ let () =
             test_thread_signal_for_a_swept_post_delivers_nothing
         ; test_case "comment routes bystander lane to attention judgment" `Quick
             test_comment_routes_bystander_lane_to_attention_judgment
+        ; test_case "comment discovery follows parent visibility" `Quick
+            test_comment_discovery_respects_parent_visibility
+        ; test_case "later alias does not readdress stored thread comment" `Quick
+            test_unresolved_comment_name_cannot_become_a_recipient
         ; test_case "comment on own post wakes the author" `Quick
             test_comment_on_own_post_wakes_the_author
         ; test_case "vote on own post wakes the author once" `Quick

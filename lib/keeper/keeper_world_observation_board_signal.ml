@@ -385,11 +385,9 @@ let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
     {!wake_reason} are the only producers, so a reason no matcher emits — e.g.
     the previously dead ["board_activity"] generic bucket the consumer used to
     match — is now unrepresentable rather than a string the consumer guesses
-    at. [None] stays an [option] at the call site: it means the structural
-    reactive pipeline examined the signal and found no deterministic address for
-    this keeper. Semantic relatedness is intentionally not represented here: it
-    requires an LLM/Judge attention boundary, not goal-keyword matching in the
-    board publish hook. *)
+    at. Semantic relatedness is intentionally not represented here: it requires
+    an LLM/Judge attention boundary, not goal-keyword matching in the board
+    publish hook. *)
 type wake_reason =
   | Explicit_mention
       (** The signal mentions one of the keeper's identity targets. *)
@@ -494,42 +492,39 @@ let vote_targets_self_writing ~self_ids (vote : Board_dispatch.board_vote_change
   else None
 ;;
 
+type wake_assessment =
+  | Wake of wake_reason
+  | Unaddressed_comment of Board.visibility
+  | Not_addressed
+
 let wake_reason
       ~(meta : keeper_meta)
       ~(signal : Board_dispatch.board_signal)
-  : wake_reason option board_read
+  : wake_assessment board_read
   =
-  (* A post is read for an address once, when its audience is classified: a
-     post that names anyone is [Targets] and never reaches this function. The
-     text of a post that reaches it carries no address, so reading it again
-     would only turn evidence text in a system post into a wake. *)
-  let matched =
-    match signal.kind with
-    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
-      { explicit_mention = false; matched_targets = [] }
-    | Board_dispatch.Board_comment_added _
-    | Board_dispatch.Board_reaction_changed _
-    | Board_dispatch.Board_vote_cast _ -> match_signal ~meta ~signal
-  in
-  if matched.explicit_mention
-  then Available (Some Explicit_mention)
-  else (
-    let self_ids = Message_scope.self_ids meta in
-    match signal.kind with
+  (* This is the [Thread_participants] route. Explicit recipients were fixed
+     in the audience at write time and are handled by [Targets]; re-reading
+     text here could turn a formerly unresolved name into a new recipient. *)
+  let self_ids = Message_scope.self_ids meta in
+  match signal.kind with
     | Board_dispatch.Board_reaction_changed _ ->
       (match reaction_touches_self_activity ~self_ids ~signal with
        | Unavailable _ as unavailable -> unavailable
-       | Available true -> Available (Some Reaction_after_self_activity)
-       | Available false -> Available None)
+       | Available true -> Available (Wake Reaction_after_self_activity)
+       | Available false -> Available Not_addressed)
     | Board_dispatch.Board_vote_cast vote ->
-      Available (vote_targets_self_writing ~self_ids vote)
+      (match vote_targets_self_writing ~self_ids vote with
+       | Some reason -> Available (Wake reason)
+       | None -> Available Not_addressed)
     | Board_dispatch.Board_comment_added identity ->
-      (match self_authored_post ~self_ids ~post_id:signal.post_id with
-       | Unavailable _ as unavailable -> unavailable
-       | Available true -> Available (Some Comment_on_self_post)
-       | Available false ->
+      (match Board_dispatch.read_post ~post_id:signal.post_id with
+       | Error error -> Unavailable { operation = Get_post; post_id = signal.post_id; error }
+       | Ok post ->
+         if Message_scope.is_self_author ~self_ids (Board.Agent_id.to_string post.author)
+         then Available (Wake Comment_on_self_post)
+         else
          match identity.parent_id with
-         | None -> Available None
+         | None -> Available (Unaddressed_comment post.visibility)
          | Some parent_id ->
            match Board_dispatch.read_comments ~post_id:signal.post_id with
            | Error error -> Unavailable { operation = Get_comments; post_id = signal.post_id; error }
@@ -545,6 +540,8 @@ let wake_reason
                Available
                  (if Message_scope.is_self_author ~self_ids
                        (Board.Agent_id.to_string parent.author)
-                  then Some Reply_to_self_comment else None))
-    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ -> Available None)
+                  then Wake Reply_to_self_comment
+                  else Unaddressed_comment post.visibility))
+    | Board_dispatch.Board_post_created | Board_dispatch.Board_post_updated _ ->
+      Available Not_addressed
 ;;

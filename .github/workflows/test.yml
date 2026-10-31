@@ -31,6 +31,10 @@ on:
       eio_backend:
         type: string
         default: ''
+      suite_timeout_sec:
+        description: 'Per-suite budget on the targeted path, seconds; default 600'
+        type: string
+        default: '600'
   workflow_call:
     inputs:
       candidate_sha:
@@ -48,6 +52,10 @@ on:
       eio_backend:
         type: string
         default: ""
+      suite_timeout_sec:
+        description: "Per-suite budget on the targeted path, seconds; default 600"
+        type: string
+        default: "600"
 
 permissions:
   contents: read
@@ -258,7 +266,7 @@ jobs:
           # needs more than ten minutes alone is the finding, not a run to
           # wait out. TERM first, KILL after the grace, in case the suite
           # handles TERM itself.
-          TARGET_SUITE_TIMEOUT_SEC: "600"
+          TARGET_SUITE_TIMEOUT_SEC: ${{ inputs.suite_timeout_sec || '600' }}
           TARGET_SUITE_KILL_GRACE_SEC: "30"
         # Run the complete root @runtest alias once. The suite wrapper keeps
         # Dune's exit status and full log; the observer emits progress and

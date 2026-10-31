@@ -334,11 +334,14 @@ let unlink_if_exists path =
   | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 ;;
 
-let install_real_masc_binary prefix =
-  let dest = Filename.concat prefix "masc" in
-  ignore (Sys.command ("mkdir -p " ^ Filename.quote prefix));
-  unlink_if_exists dest;
-  Unix.symlink (Unix.realpath (real_masc_binary ())) dest
+(* install.sh only accepts an existing ~/.local/masc without --force when it is
+   a managed release pointer: a symlink into $PREFIX/.masc-releases/<64-hex>/masc
+   whose bytes match the staged release checksum (PR #46314). Plant the fixture
+   binary in that exact layout — a real file in the release slot, checksummed
+   like the staged mirror checksums it — so wizard/config scenarios exercise the
+   real no-force same-release path instead of tripping the pointer guard. *)
+let managed_release_dir prefix id =
+  Filename.concat (Filename.concat prefix ".masc-releases") id
 ;;
 
 let assert_contains label text needle =
@@ -347,6 +350,27 @@ let assert_contains label text needle =
 
 let assert_not_contains label text needle =
   check bool label false (string_contains text needle)
+;;
+
+(* Alcotest renders the label on failure, so keep it short and attach only the
+   last lines of the installer output — enough to name the failing stage without
+   blowing up the summary block the 600s timeout can truncate. *)
+let expect_install_exit0 ~label:(label : string) (output : string)
+    (status : Unix.process_status) : unit =
+  let exit0 = status = Unix.WEXITED 0 in
+  if exit0 then check bool label true exit0
+  else begin
+    (* Alcotest truncates labels around 40 chars, so the installer tail goes to
+       stderr instead: the CI job log keeps it right above the failure line. *)
+    let tail =
+      output |> String.split_on_char '\n'
+      |> List.filter (fun l -> l <> "")
+      |> List.rev |> List.filteri (fun i _ -> i < 8) |> List.rev
+      |> String.concat "\n"
+    in
+    Printf.eprintf "[installer tail] %s\n%s\n%!" label tail;
+    check bool label false exit0
+  end
 ;;
 
 (* Mirror install.sh's detect_asset so the staged release names the asset the
@@ -522,11 +546,176 @@ lines = [hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name
   "file://" ^ Filename.concat base_path ".release"
 ;;
 
+let masc_dashboard_archive () =
+  let name = platform_release_asset () in
+  let suffix = String.sub name 5 (String.length name - 5) in
+  "masc-dashboard-" ^ suffix ^ ".tar.gz"
+;;
+let install_real_masc_binary prefix mirror_dir =
+  (* The installer's no-force path only accepts a dest that points into the
+     release identity the mirrored bundle actually installs: the receipt
+     digest directory that release-dashboard-bundle.py creates under
+     $PREFIX/.masc-releases. Plant exactly that layout by running the same
+     bundle helper install step the installer runs, then pointing dest at
+     the installed identity. A hand-made 64-'0' slot never matches because
+     the digest is computed from the staged receipt bytes. *)
+  ignore (Sys.command ("mkdir -p " ^ Filename.quote prefix));
+  let canonical_prefix = Unix.realpath prefix in
+  (* The mirror stages the dashboard tarball under <base>/.release/<tag>/
+     next to the binary asset; the helper --archive wants that exact path. *)
+  let archive =
+    Filename.concat
+      (Filename.concat mirror_dir (release_tag ()))
+      (masc_dashboard_archive ())
+  in
+  let suffix =
+    let name = platform_release_asset () in
+    String.sub name 5 (String.length name - 5)
+  in
+  (* The receipt inside the staged archive records exactly the companion set
+     the mirror packaged (stage_release_mirror): the installer passes those
+     same names to the helper, so the fixture must too or the helper rejects
+     the install with "provided companions differ from receipt". Reuse the
+     mirror's own asset files so the digests match as well. *)
+  let mirror_tag_dir = Filename.concat mirror_dir (release_tag ()) in
+  let companion_spec =
+    [ "masc-tui", "masc-tui-" ^ suffix
+    ; "masc-browser-host", "masc-browser-host-" ^ suffix
+    ; "masc-deployment-preflight-helper",
+      "masc-deployment-preflight-helper-" ^ suffix
+    ; "masc-check-runtime-deployment-preflight",
+      "masc-check-runtime-deployment-preflight-" ^ suffix
+    ; "masc-exec-ssh-bootstrap", "masc-exec-ssh-bootstrap-" ^ suffix ]
+    |> List.map (fun (name, asset) -> (name, Filename.concat mirror_tag_dir asset))
+  in
+  let companion_args =
+    List.concat_map
+      (fun (name, path) -> [ "--companion"; name; path ])
+      companion_spec
+  in
+  let runtime_archive = Filename.concat mirror_tag_dir ("masc-runtime-" ^ suffix ^ ".tar.gz") in
+  let runtime_args =
+    if Sys.file_exists runtime_archive then
+      [ "--runtime-archive"; runtime_archive ]
+    else []
+  in
+  let bundle_helper =
+    Filename.concat (source_root ()) "scripts/release-dashboard-bundle.py"
+  in
+  let install_command =
+    String.concat " "
+      (List.map Filename.quote
+         ([ "python3"; bundle_helper; "install"; "--binary"; real_masc_binary ()
+          ; "--archive"; archive; "--prefix"; canonical_prefix
+          ; "--binary-asset"; platform_release_asset () ]
+            @ companion_args @ runtime_args ))
+  in
+  let commit_command =
+    String.concat " "
+      (List.map Filename.quote
+         [ "python3"; bundle_helper; "commit"; "--prefix"; canonical_prefix ])
+  in
+  (* install leaves the transaction journal behind on purpose; commit is what
+     publishes it, and a second installer run would otherwise refuse to start
+     with "unfinished install transaction". *)
+  check int "fixture installs the managed release identity" 0
+    (Sys.command install_command);
+  check int "fixture commits the install transaction" 0
+    (Sys.command commit_command)
+;;
+
+
+let release_identity_cache =
+  (* Packaging the mirror and running the bundle-helper install + commit costs
+     seconds per case, and the suite runs dozens of cases, which pushes the
+     targeted run past its 600s budget. The staged release and the installed
+     identity are byte-identical for every case, so build them once in a
+     suite-wide cache and copy the tree per case; upgrade scenarios keep their
+     own identity via existing_version, which rewrites dest afterwards. *)
+  let cache = lazy (
+    (* Per-process cache dir: a fixed global path would reuse a stale identity
+       across builds and races when suites run concurrently. *)
+    let base =
+      Filename.concat (Filename.get_temp_dir_name ())
+        (Printf.sprintf "masc-install-identity-%d" (Unix.getpid ()))
+    in
+    ignore (Sys.command ("rm -rf " ^ Filename.quote base));
+    ignore (Sys.command ("mkdir -p " ^ Filename.quote base));
+    ignore (stage_release_mirror base);
+    install_real_masc_binary
+      (Filename.concat base ".local")
+      (Filename.concat base ".release");
+    base)
+  in
+  fun () -> Lazy.force cache
+;;
+
 let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_version args base_path =
   let root = source_root () in
   let script = Filename.concat root "scripts/install.sh" in
   let prefix = Filename.concat base_path ".local" in
-  install_real_masc_binary prefix;
+  let cache = release_identity_cache () in
+  (* The cache already holds a packaged mirror (tarballs, checksums, receipt).
+     Copying it wholesale removes the per-case python packaging cost that
+     pushed the suite past its 601s deadline. *)
+  (* The bundle helper's verify_tree compares each installed dashboard
+     file's mtime against the receipt (release-dashboard-bundle.py), so the
+     copy must preserve the identity tree's timestamps: plain cp -R stamps
+     every copied file with now() and install.sh then rejects the case tree
+     with "installed dashboard digest or build mtime differs". -p also keeps
+     the mode the runtime-file checks in the receipt expect. *)
+  check int "fixture copies the cached release mirror"
+    (Sys.command (Printf.sprintf "cp -R -p %s %s"
+       (Filename.quote (Filename.concat cache ".release"))
+       (Filename.quote base_path))) 0;
+  let release_base_url = "file://" ^ Filename.concat base_path ".release" in
+  let cached_releases =
+    Filename.concat (Filename.concat cache ".local") ".masc-releases"
+  in
+  if not (Sys.file_exists cached_releases) then
+    Alcotest.failf
+      "release identity cache incomplete: %s does not exist (the cache's \
+       bundle-helper install failed; see the 'fixture installs/commits the \
+       managed release identity' assertions in the first failing case)"
+      cached_releases;
+  check int "fixture copies the installed release identities"
+    (Sys.command (Printf.sprintf "mkdir -p %s && cp -R -p %s %s"
+       (Filename.quote prefix)
+       (Filename.quote cached_releases)
+       (Filename.quote prefix))) 0;
+  (* install.sh reads one symlink level and compares it against
+     <canonical prefix>/.masc-releases/<digest>/masc, so the copied
+     identity tree needs a case-local pointer: recreate it here. *)
+  let identity_dir =
+    let releases = Filename.concat prefix ".masc-releases" in
+    if not (Sys.file_exists releases) then
+      Alcotest.failf
+        "cached release identities missing: %s does not exist (the \
+         suite-wide cache failed to publish .masc-releases; check the \
+         'fixture installs/commits the managed release identity' \
+         assertions above)"
+        releases;
+    let entries = Array.to_list (Sys.readdir releases) in
+    match entries with
+    | [ digest ] -> Filename.concat releases digest
+    | _ ->
+        Alcotest.failf "expected exactly one cached release identity, got %d"
+          (List.length entries)
+  in
+  check int "fixture links the case-local release pointer"
+    (Sys.command (Printf.sprintf "ln -sfn %s %s"
+       (Filename.quote (Filename.concat identity_dir "masc"))
+       (Filename.quote (Filename.concat prefix "masc")))) 0;
+  let canonical_prefix = Unix.realpath prefix in
+  let expected_link = Filename.concat canonical_prefix
+      (Filename.concat ".masc-releases"
+         (Filename.concat (Filename.basename identity_dir) "masc")) in
+  let actual_link =
+    try Unix.readlink (Filename.concat prefix "masc")
+    with _ -> "<missing pointer>"
+  in
+  check string "fixture pointer matches install.sh readlink contract"
+    expected_link actual_link;
   Option.iter (fun version ->
     let installed = Filename.concat prefix "masc" in
     unlink_if_exists installed;
@@ -534,7 +723,6 @@ let run_install_status ?(extra_env = "") ?(seed_config = false) ?existing_versio
       (Printf.sprintf "#!/bin/sh\nif [ \"$1\" = --version ]; then printf '%%s\\n' %s; else exec %s \"$@\"; fi\n"
          (Filename.quote version) (Filename.quote (Unix.realpath (real_masc_binary ()))));
     Unix.chmod installed 0o755) existing_version;
-  let release_base_url = stage_release_mirror base_path in
   let quoted_args = String.concat " " (List.map Filename.quote args) in
   let cmd =
     Printf.sprintf
@@ -586,8 +774,8 @@ let test_config_seed_skips_each_existing_file_without_force () =
     write_file runtime edited;
     let omitted = Filename.concat config "prompts/keeper.md" in
     Sys.remove omitted;
-    let output, status = run_install_status ~seed_config:true ["--no-wizard"; "--no-guest-shim"] base_path in
-    check bool output true (status = Unix.WEXITED 0);
+    let output, status = run_install_status ~seed_config:true [ "--no-wizard"; "--no-guest-shim" ] base_path in
+    expect_install_exit0 ~label:"upgrade keeps config" output status;
     let body = Filename.concat base_path ".masc/skills/browser-lanes/SKILL.md" in
     check bool "upgrade installs builtin Skill" true (Sys.file_exists body);
     check bool "upgrade installs reference" true
@@ -596,7 +784,7 @@ let test_config_seed_skips_each_existing_file_without_force () =
     check bool "omitted prompt stays absent" false (Sys.file_exists omitted);
     write_file body "operator's browser skill";
     let output, status = run_install_status ~seed_config:true ["--no-wizard"; "--no-guest-shim"] base_path in
-    check bool output true (status = Unix.WEXITED 0);
+    expect_install_exit0 ~label:"reinstall keeps config" output status;
     check string "reinstall preserves Skill edit" "operator's browser skill" (read_file body))
 ;;
 
@@ -691,7 +879,7 @@ let test_force_refreshes_same_version_existing_binary () =
        assert_contains
          "force refreshes same-version binary"
          output
-         "refreshing because --force is set";
+         "overwriting because --force is set";
        assert_contains
          "force reaches download path"
          output
@@ -700,6 +888,11 @@ let test_force_refreshes_same_version_existing_binary () =
 ;;
 
 let test_existing_release_upgrade_preserves_workspace () =
+  (* Two distinct rounds, both explicit about what they prove:
+     - dry-run: the plan refuses to touch an unrelated existing binary and
+       leaves the operator's runtime.toml byte-identical;
+     - force: the real replacement runs and still preserves the operator's
+       marker appended to runtime.toml. *)
   List.iter (fun force ->
     let dir = Filename.temp_file "masc-install-upgrade-" "" in
     Sys.remove dir;
@@ -713,14 +906,47 @@ let test_existing_release_upgrade_preserves_workspace () =
         let marker = Filename.concat dir ".masc/config/runtime.toml" in
         let original = read_file marker ^ "\n# operator-owned config\n" in
         write_file marker original;
-        let args = [ "--no-wizard" ] @ (if force then [ "--force" ] else []) in
-        let output, status = run_install_status ~seed_config:true ~existing_version:"0.34.0" args dir in
-        check bool "existing release installs successfully" true (status = Unix.WEXITED 0);
-        assert_contains "verified replacement completed" output "installed verified binary/dashboard";
-        assert_contains "upgrade mode is explicit" output
-          (if force then "overwriting because --force is set" else "upgrading");
-        check string "operator runtime configuration preserved" original
-          (read_file marker)))
+        if force then begin
+          let output, status = run_install_status ~seed_config:true ~existing_version:"0.34.0"
+            [ "--no-wizard"; "--force" ] dir in
+          check bool "forced replacement over an unrelated binary succeeds" true (status = Unix.WEXITED 0);
+          assert_contains "verified replacement completed" output "installed verified binary/dashboard";
+          assert_contains "replacement is explicit" output "overwriting because --force is set";
+          check string "operator runtime configuration preserved" original
+            (read_file marker)
+        end else begin
+          let output, status = run_install_status ~seed_config:true ~existing_version:"0.34.0"
+            [ "--no-wizard"; "--dry-run" ] dir in
+          check bool "dry-run does not replace an unrelated binary" true (status <> Unix.WEXITED 0);
+          assert_contains "dry-run refusal names the pointer rule" output
+            "is not a managed release pointer; pass --force to replace it";
+          check string "dry-run leaves operator runtime configuration untouched" original
+            (read_file marker)
+        end))
+    [ false; true ]
+;;
+
+let test_unrelated_existing_binary_requires_force () =
+  (* Post-#46314 an existing ~/.local/masc that is not a managed release
+     pointer is never replaced without an explicit --force, and its bytes are
+     never executed to establish identity. *)
+  List.iter (fun force ->
+    let dir = Filename.temp_file "masc-install-unrelated-" "" in
+    Sys.remove dir;
+    Unix.mkdir dir 0o700;
+    Fun.protect
+      ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote dir)))
+      (fun () ->
+         let output, status = run_install_status ~existing_version:"0.34.0"
+           ([ "--dry-run"; "--no-wizard" ] @ (if force then [ "--force" ] else [])) dir in
+         if force then begin
+           check bool "forced install over unrelated binary succeeds" true (status = Unix.WEXITED 0);
+           assert_contains "force path is explicit" output "overwriting because --force is set"
+         end else begin
+           check bool "unrelated binary is refused without force" true (status <> Unix.WEXITED 0);
+           assert_contains "refusal names the pointer rule" output
+             "is not a managed release pointer; pass --force to replace it"
+         end))
     [ false; true ]
 ;;
 
@@ -732,7 +958,7 @@ let test_downgrade_and_unknown_version_require_force () =
         [ "--dry-run"; "--no-wizard" ] dir in
       check bool "unrecognized version or downgrade is refused" true
         (status <> Unix.WEXITED 0);
-      assert_contains "explicit overwrite instruction" output "pass --force to overwrite"))
+      assert_contains "explicit overwrite instruction" output "pass --force to replace it"))
     [ "999.0.0"; "development-build" ]
 ;;
 
@@ -1380,8 +1606,9 @@ let () =
         ; test_case "unknown provider aborts" `Quick test_unknown_provider_aborts
         ; test_case "unknown default provider aborts" `Quick test_unknown_default_provider_aborts
         ; test_case "dry-run + no-seed skips wizard when catalog is absent" `Quick test_wizard_dry_run_no_seed_skips
-        ; test_case "older release upgrades with and without force" `Quick test_existing_release_upgrade_preserves_workspace
+        ; test_case "dry-run preserves and force replaces an older unrelated install" `Quick test_existing_release_upgrade_preserves_workspace
         ; test_case "downgrades and unrecognized versions need force" `Quick test_downgrade_and_unknown_version_require_force
+        ; test_case "unrelated existing binary is only replaced with force" `Quick test_unrelated_existing_binary_requires_force
         ; test_case "forced wizard without catalog errors" `Quick test_wizard_forced_without_catalog_errors
         ; test_case "invalid provider key env name errors" `Quick test_invalid_provider_key_env_name_errors
         ; test_case "wizard offers a subscription runtime with no api key" `Quick test_wizard_offers_subscription_runtime

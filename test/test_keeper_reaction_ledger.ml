@@ -482,6 +482,10 @@ let test_summary_marks_unreacted_and_reacted_stimuli () =
    just been rendered into, with a string comparison behind it that nothing
    could reach (#27560). This is the path that carries a degraded keeper up
    with no durable-queue signal involved. *)
+let owner_not_observed ~keeper_name:_ =
+  Keeper_event_queue_persistence.Lifecycle_unknown "owner not observed in this fixture"
+;;
+
 let test_fleet_summary_follows_a_degraded_keeper () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "fleet-degraded-keeper" in
@@ -495,6 +499,7 @@ let test_fleet_summary_follows_a_degraded_keeper () =
   check_member_string "the keeper itself is degraded" "degraded" "status" summary;
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
@@ -510,7 +515,346 @@ let test_fleet_summary_follows_a_degraded_keeper () =
     fleet
 ;;
 
- let test_fleet_summary_surfaces_durable_event_queue_backlog () =
+let test_fleet_pending_uses_owner_and_exact_durable_queue () =
+  let module Queue = Keeper_event_queue_persistence in
+  List.iter
+    (fun (lifecycle, needs_attention) ->
+      with_temp_base @@ fun base_path ->
+      let keeper_name = "classified-pending" in
+      let stimulus = schedule_due_stimulus () in
+      let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+      Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+      Keeper_registry_event_queue.enqueue ~base_path keeper_name stimulus;
+      let path = event_queue_snapshot_path ~base_path ~keeper_name in
+      let before = In_channel.with_open_bin path In_channel.input_all in
+      let fleet = Keeper_reaction_ledger.fleet_summary_json
+        ~base_path ~keeper_names:[keeper_name]
+        ~owner_lifecycle:(fun ~keeper_name:_ -> lifecycle) ~limit_per_keeper:10 in
+      check bool "owner and exact pending queue decide operator attention" needs_attention
+        (fleet |> member "operator_action_required" |> to_bool);
+      check int "an expected pending stimulus is not marked reacted" 1
+        (fleet |> member "pending_stimulus_count" |> to_int);
+      check int "attention count is separate from pending count"
+        (if needs_attention then 1 else 0)
+        (fleet |> member "attention_required_stimulus_count" |> to_int);
+      let summary = fleet |> member "keepers" |> to_list |> List.hd in
+      check (list string) "the exact pending identity remains visible" [stimulus_id]
+        (summary |> member "pending_stimulus_ids" |> to_list |> List.map to_string);
+      check_member_string "keeper and fleet verdicts agree"
+        (if needs_attention then "degraded" else "ok") "status" summary;
+      check int "no synthetic turn receipt is added" 0
+        (summary |> member "reaction_count" |> to_int);
+      check string "health never changes the durable queue" before
+        (In_channel.with_open_bin path In_channel.input_all);
+      let raw = Keeper_reaction_ledger.summary_for_keeper
+        ~base_path ~keeper_name ~limit:10 in
+      check_member_string "ledger-only observation remains conservative"
+        "degraded" "status" raw)
+    [ Queue.Runnable, false
+    ; Queue.Retained_disabled, false
+    ; Queue.Paused_dead, false
+    ; Queue.Recoverable, true
+    ; Queue.Shutdown_fenced, true
+    ; Queue.Lifecycle_unknown "owner not found", true
+    ]
+;;
+
+let test_fleet_paused_missing_queue_still_requires_attention () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "paused-without-queue-witness" in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name
+    (schedule_due_stimulus ());
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Paused_dead)
+    ~limit_per_keeper:10 in
+  check bool "pause does not explain an absent durable queue witness" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "unwitnessed pending remains visible" 1
+    (fleet |> member "pending_stimulus_count" |> to_int);
+  check int "unwitnessed pending needs attention" 1
+    (fleet |> member "attention_required_stimulus_count" |> to_int)
+;;
+
+let test_fleet_other_queued_payload_does_not_explain_pending () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "different-payload-identity" in
+  let pending = board_stimulus ~post_id:"shared-post-id" () in
+  let other = { (fusion_completed_stimulus ()) with post_id = pending.post_id } in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name pending;
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name other;
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Paused_dead)
+    ~limit_per_keeper:10 in
+  check int "the other queued payload remains counted" 1
+    (fleet |> member "durable_event_queue_pending_count" |> to_int);
+  check int "a shared post id does not certify the stimulus identity" 1
+    (fleet |> member "attention_required_stimulus_count" |> to_int);
+  check bool "a different queued payload cannot suppress operator attention" true
+    (fleet |> member "operator_action_required" |> to_bool)
+;;
+
+let test_fleet_board_pending_is_not_certified_by_same_post () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "board-identity-is-not-queue-identity" in
+  let comment id =
+    let stimulus = board_stimulus ~post_id:"shared-post" () in
+    match stimulus.payload with
+    | Keeper_event_queue.Board_signal board ->
+      { stimulus with payload = Board_signal
+          { board with kind = Comment_added { comment_id = id; parent_id = None } } }
+    | Board_attention _ | Bootstrap | Fusion_completed _ | Schedule_due _
+    | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+    | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+    | Workspace_message _ | Delegate_completed _ | Composition_completed _
+    | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+      fail "board fixture has a non-board payload" in
+  let original = comment "comment-a" and other = comment "comment-b" in
+  check bool "different comments are different queue identities" false
+    (Keeper_event_queue.stimulus_identity_equal original other);
+  check string "the ledger still groups them under the same post"
+    (Keeper_reaction_ledger.stimulus_id_of_event_queue original)
+    (Keeper_reaction_ledger.stimulus_id_of_event_queue other);
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name original;
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name other;
+  let attention () =
+    let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~base_path ~keeper_names:[keeper_name]
+      ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+      ~limit_per_keeper:10 in
+    fleet |> member "attention_required_stimulus_count" |> to_int in
+  check int "another comment cannot explain the pending record" 1 (attention ());
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name original;
+  check int "even the same post remains conservative for Board events" 1 (attention ())
+;;
+
+let test_fleet_other_kind_cannot_certify_scheduled_occurrence () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "schedule-queue-kind-is-required" in
+  let schedule = { (schedule_due_stimulus ()) with post_id = "board:shared-post" } in
+  let board = board_stimulus ~post_id:"shared-post" () in
+  check string "fixture IDs collide across different kinds"
+    (Keeper_reaction_ledger.stimulus_id_of_event_queue schedule)
+    (Keeper_reaction_ledger.stimulus_id_of_event_queue board);
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name schedule;
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name board;
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+    ~limit_per_keeper:10 in
+  check int "a Board entry cannot certify a scheduled occurrence" 1
+    (fleet |> member "attention_required_stimulus_count" |> to_int)
+;;
+
+let test_fleet_schedule_occurrence_payload_identity () =
+  List.iter (fun (queued_occurrence, expected_attention) ->
+    with_temp_base @@ fun base_path ->
+    let keeper_name = "schedule-payload-identity" in
+    let original = schedule_due_stimulus () in
+    let queued = match original.payload with
+      | Keeper_event_queue.Schedule_due wake ->
+        { original with payload = Schedule_due { wake with occurrence_id = queued_occurrence } }
+      | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+      | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+      | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+      | Workspace_message _ | Delegate_completed _ | Composition_completed _
+      | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+        fail "schedule fixture has a non-schedule payload" in
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name original;
+    Keeper_registry_event_queue.enqueue ~base_path keeper_name queued;
+    let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~base_path ~keeper_names:[keeper_name]
+      ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+      ~limit_per_keeper:10 in
+    check int "legacy blank is accepted, a mismatched occurrence is not"
+      expected_attention (fleet |> member "attention_required_stimulus_count" |> to_int))
+    [ "", 0; "different-occurrence", 1 ]
+;;
+
+let test_fleet_schedule_reprioritized_occurrence () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "reprioritized-scheduled-occurrence" in
+  let original = schedule_due_stimulus () in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name original;
+  Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+    ~base_path ~keeper_name original |> require_ok "enqueue schedule" |> ignore;
+  let pending () =
+    Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
+    |> require_ok "load pending selections" in
+  let selected = match pending () with
+    | [selected] -> selected
+    | _ -> fail "expected one scheduled selection" in
+  Keeper_event_queue_persistence.reprioritize_pending_result
+    ~base_path ~keeper_name ~selection:selected ~urgency:Keeper_event_queue.Low ()
+    |> require_ok "reprioritize schedule" |> ignore;
+  let updated = match pending () with
+    | [selected] -> selected
+    | _ -> fail "reprioritization must retain one selection" in
+  check bool "priority changed" true (updated.source.urgency = Keeper_event_queue.Low);
+  check bool "arrival is preserved" true (updated.arrival = selected.arrival);
+  let fleet () = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+    ~limit_per_keeper:10 in
+  check int "reprioritization does not make one occurrence actionable" 0
+    (fleet () |> member "attention_required_stimulus_count" |> to_int);
+  (* The bounded ledger is keyed by occurrence, not by queue incarnation. *)
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name updated.source;
+  check int "two urgency observations still describe one queued occurrence" 0
+    (fleet () |> member "attention_required_stimulus_count" |> to_int)
+;;
+
+let test_fleet_duplicate_scheduled_queue_entries_require_attention () =
+  let original = schedule_due_stimulus () in
+  let other = { original with urgency = Keeper_event_queue.Low } in
+  let malformed_occurrence (stimulus : Keeper_event_queue.stimulus) = match stimulus.payload with
+    | Keeper_event_queue.Schedule_due wake ->
+      { stimulus with payload = Schedule_due { wake with occurrence_id = "different-occurrence" } }
+    | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+    | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+    | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+    | Workspace_message _ | Delegate_completed _ | Composition_completed _
+    | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+      fail "schedule fixture has a non-schedule payload" in
+  let malformed_immediate = malformed_occurrence original in
+  let malformed_low = malformed_occurrence other in
+  List.iter (fun (label, entries, expected_order) ->
+    with_temp_base @@ fun base_path ->
+    let keeper_name = "duplicate-scheduled-queue-entries" in
+    Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name original;
+    List.iter (fun entry ->
+      match Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+              ~base_path ~keeper_name entry |> require_ok "enqueue selection" with
+      | Keeper_event_queue_persistence.Enqueued -> ()
+      | Already_present -> fail "different priorities must be separate queue entries") entries;
+    let pending = Keeper_event_queue_persistence.pending_selections_result ~base_path ~keeper_name
+      |> require_ok "load pending selections" in
+    check int "both durable entries were observed" 2 (List.length pending);
+    let observed_order = List.map
+      (fun (selection : Keeper_event_queue_state.pending_selection) -> selection.source)
+      pending in
+    check bool (label ^ ": pending selections in urgency order") true
+      (observed_order = expected_order);
+    let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~base_path ~keeper_names:[keeper_name]
+      ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+      ~limit_per_keeper:10 in
+    check int label 1 (fleet |> member "attention_required_stimulus_count" |> to_int))
+    [ "different priorities", [original; other], [original; other]
+    ; "different priorities inserted reversed", [other; original], [original; other]
+    ; "valid immediate then invalid low", [original; malformed_low], [original; malformed_low]
+    ; "invalid low inserted first", [malformed_low; original], [original; malformed_low]
+    ; "invalid immediate then valid low", [malformed_immediate; other], [malformed_immediate; other]
+    ; "valid low inserted first", [other; malformed_immediate], [malformed_immediate; other]
+    ]
+;;
+
+let test_fleet_ambiguous_ledger_id_requires_attention () =
+  let initial = schedule_due_stimulus () in
+  let schedule = match initial.payload with
+    | Keeper_event_queue.Schedule_due wake ->
+      { initial with post_id = "board:shared-post";
+        payload = Schedule_due { wake with occurrence_id = "board:shared-post" } }
+    | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+    | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+    | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+    | Workspace_message _ | Delegate_completed _ | Composition_completed _
+    | Tool_result_ready _ | Owned_job_completed _ | Addon_operation_changed _ ->
+      fail "schedule fixture has a non-schedule payload" in
+  let board = board_stimulus ~post_id:"shared-post" () in
+  List.iter (fun (label, stimuli, expected_attention) ->
+    with_temp_base @@ fun base_path ->
+    let keeper_name = "ambiguous-ledger-id" in
+    List.iter (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
+      stimuli;
+    Keeper_registry_event_queue.enqueue ~base_path keeper_name schedule;
+    let rows = read_recent_rows ~base_path ~keeper_name ~limit:10 in
+    let event_ids = List.map (fun row -> row |> member "event_id" |> to_string) rows in
+    check int "all fixture rows were read" (List.length stimuli) (List.length event_ids);
+    check int "the canonical event ID is shared" 1
+      (List.length (List.sort_uniq String.compare event_ids));
+    let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~base_path ~keeper_names:[keeper_name]
+      ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Runnable)
+      ~limit_per_keeper:10 in
+    check int label expected_attention
+      (fleet |> member "attention_required_stimulus_count" |> to_int))
+    [ "repeated same schedule stays explained", [schedule; schedule], 0
+    ; "schedule then Board is ambiguous", [schedule; board], 1
+    ; "Board then schedule is ambiguous", [board; schedule], 1
+    ; "schedule, Board, schedule stays ambiguous", [schedule; board; schedule], 1
+    ; "Board, schedule, Board stays ambiguous", [board; schedule; board], 1
+    ]
+;;
+
+let test_fleet_pending_mismatch_beyond_display_cap () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "pending-outside-display-cap" in
+  let stimuli = List.init 9 (fun index ->
+    schedule_due_stimulus ~schedule_id:(Printf.sprintf "pending-%d" index) ()) in
+  List.iter (Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name)
+    stimuli;
+  List.iter (Keeper_registry_event_queue.enqueue ~base_path keeper_name)
+    (List.take 8 stimuli);
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Paused_dead)
+    ~limit_per_keeper:20 in
+  check int "all nine pending identities contribute to the verdict" 9
+    (fleet |> member "pending_stimulus_count" |> to_int);
+  check int "the ninth identity is the unmatched one" 1
+    (fleet |> member "attention_required_stimulus_count" |> to_int);
+  check bool "the mismatch beyond the displayed list requires attention" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  let summary = fleet |> member "keepers" |> to_list |> List.hd in
+  check int "the presentation cap remains eight" 8
+    (summary |> member "pending_stimulus_ids" |> to_list |> List.length)
+;;
+
+let test_fleet_paused_pending_damaged_queue_requires_attention () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "paused-unread-queue" in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name
+    (schedule_due_stimulus ());
+  let path = event_queue_snapshot_path ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname path);
+  write_file path "{not-json";
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Paused_dead)
+    ~limit_per_keeper:10 in
+  check_member_string "unread queue leaves health unknown" "unknown" "status" fleet;
+  check bool "pause cannot suppress storage uncertainty" true
+    (fleet |> member "operator_action_required" |> to_bool);
+  check int "unread queue does not clear the pending observation" 1
+    (fleet |> member "pending_stimulus_count" |> to_int);
+  check int "the unverified pending observation needs attention" 1
+    (fleet |> member "attention_required_stimulus_count" |> to_int)
+;;
+
+let test_fleet_expected_pending_does_not_suppress_quarantine () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "paused-pending-with-quarantine" in
+  let stimulus = schedule_due_stimulus () in
+  Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name stimulus;
+  Keeper_registry_event_queue.enqueue ~base_path keeper_name stimulus;
+  Dated_jsonl.append (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc ["schema", `String "invalid-ledger-schema"]);
+  let fleet = Keeper_reaction_ledger.fleet_summary_json
+    ~base_path ~keeper_names:[keeper_name]
+    ~owner_lifecycle:(fun ~keeper_name:_ -> Keeper_event_queue_persistence.Paused_dead)
+    ~limit_per_keeper:10 in
+  check int "expected pending itself does not need operator attention" 0
+    (fleet |> member "attention_required_stimulus_count" |> to_int);
+  check int "quarantine is preserved" 1
+    (fleet |> member "quarantined_row_count" |> to_int);
+  check_member_string "quarantine still degrades health" "degraded" "status" fleet;
+  check bool "quarantine still requires operator attention" true
+    (fleet |> member "operator_action_required" |> to_bool)
+;;
+
+let test_fleet_summary_surfaces_durable_event_queue_backlog () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "durable-backlog-keeper" in
   Keeper_registry_event_queue.enqueue
@@ -527,6 +871,7 @@ let test_fleet_summary_follows_a_degraded_keeper () =
     (fusion_completed_stimulus ());
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
@@ -588,6 +933,7 @@ let test_fleet_summary_discovers_durable_event_queue_backlog_without_meta_name (
     (board_stimulus ~post_id:"post-durable-only" ());
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[]
       ~limit_per_keeper:10
@@ -641,6 +987,7 @@ let test_fleet_summary_surfaces_durable_event_queue_discovery_error () =
     (Yojson.Safe.to_string (Keeper_event_queue.queue_to_yojson Keeper_event_queue.empty));
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[]
       ~limit_per_keeper:10
@@ -676,6 +1023,7 @@ let test_fleet_summary_source_age_never_supplies_residence () =
     let snapshot_path = event_queue_snapshot_path ~base_path ~keeper_name in
     let before = Yojson.Safe.from_file snapshot_path in
     let fleet = Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path ~keeper_names:[keeper_name] ~limit_per_keeper:10 in
     check bool "reaction health leaves durable state semantics unchanged" true
       (Yojson.Safe.from_file snapshot_path = before);
@@ -707,6 +1055,7 @@ let test_fleet_summary_surfaces_durable_event_queue_read_error () =
   write_file path "{not-json";
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
@@ -753,6 +1102,7 @@ let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
   write_file path {|{"schema":"unexpected.event.queue.schema","items":{}}|};
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
@@ -1109,6 +1459,7 @@ let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
     (unexpected_reason |> member "count" |> to_int);
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
@@ -1180,6 +1531,7 @@ let test_quarantine_is_keeper_local () =
             error));
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
+      ~owner_lifecycle:owner_not_observed
       ~base_path
       ~keeper_names:[ quarantined_keeper; healthy_keeper ]
       ~limit_per_keeper:10
@@ -2091,6 +2443,42 @@ let () =
             "fleet summary surfaces durable event queue backlog"
             `Quick
             test_fleet_summary_surfaces_durable_event_queue_backlog
+        ; test_case
+            "fleet pending uses owner and exact durable queue"
+            `Quick test_fleet_pending_uses_owner_and_exact_durable_queue
+        ; test_case
+            "paused pending without a queue witness requires attention"
+            `Quick test_fleet_paused_missing_queue_still_requires_attention
+        ; test_case
+            "other queued payload does not explain pending"
+            `Quick test_fleet_other_queued_payload_does_not_explain_pending
+        ; test_case
+            "board pending is not certified by the same post"
+            `Quick test_fleet_board_pending_is_not_certified_by_same_post
+        ; test_case
+            "other queue kind cannot certify a scheduled occurrence"
+            `Quick test_fleet_other_kind_cannot_certify_scheduled_occurrence
+        ; test_case
+            "schedule payload occurrence identity"
+            `Quick test_fleet_schedule_occurrence_payload_identity
+        ; test_case
+            "reprioritized schedule remains one occurrence"
+            `Quick test_fleet_schedule_reprioritized_occurrence
+        ; test_case
+            "duplicate scheduled queue entries require attention"
+            `Quick test_fleet_duplicate_scheduled_queue_entries_require_attention
+        ; test_case
+            "ambiguous ledger identity requires attention"
+            `Quick test_fleet_ambiguous_ledger_id_requires_attention
+        ; test_case
+            "pending mismatch beyond display cap requires attention"
+            `Quick test_fleet_pending_mismatch_beyond_display_cap
+        ; test_case
+            "paused pending with damaged queue requires attention"
+            `Quick test_fleet_paused_pending_damaged_queue_requires_attention
+        ; test_case
+            "expected pending does not suppress quarantine"
+            `Quick test_fleet_expected_pending_does_not_suppress_quarantine
         ; test_case
             "fleet summary discovers durable event queue backlog without meta name"
             `Quick

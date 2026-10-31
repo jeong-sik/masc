@@ -4,9 +4,13 @@
     Contains keeper reaction ledger, FD accountant, fleet resolution,
     runtime truth, and contract-verification health JSON renderers. *)
 
-val keeper_reaction_ledger_health_json : unit -> Yojson.Safe.t
+val keeper_reaction_ledger_health_json :
+  execution_snapshot:Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot ->
+  unit -> Yojson.Safe.t
 (** An unread Keeper census produces [status=unavailable], an unknown
-    [keeper_count], and [keepers_listing=unreadable] with the read error. *)
+    [keeper_count], and [keepers_listing=unreadable] with the read error.
+    Uses the same canonical execution snapshot as the queue-health projection
+    to distinguish ordinary retained pending work from operator faults. *)
 
 val keeper_owner_health_json : unit -> Yojson.Safe.t
 (** Preserves an unread census as unavailable rather than a healthy empty fleet. *)

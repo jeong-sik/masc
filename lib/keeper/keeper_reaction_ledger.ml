@@ -1437,7 +1437,36 @@ let keeper_summary_status_to_string = function
   | Summary_unavailable -> "unavailable"
 ;;
 
-let summarize_rows ~keeper_name rows =
+type pending_queue_observation =
+  | Queue_unobserved
+  | Queue_observed of
+      { owner_lifecycle : Keeper_event_queue_persistence.owner_lifecycle
+      ; stimulus_ids : Event_id_set.t
+      }
+
+let pending_needs_attention observation stimulus_id =
+  match observation with
+  | Queue_unobserved -> true
+  | Queue_observed { owner_lifecycle; stimulus_ids } ->
+    if not (Event_id_set.mem stimulus_id stimulus_ids)
+    then true
+    else
+      match owner_lifecycle with
+      | Keeper_event_queue_persistence.Runnable
+      | Retained_disabled
+      | Paused_dead -> false
+      | Recoverable
+      | Shutdown_fenced
+      | Lifecycle_unknown _ -> true
+;;
+
+type keeper_summary =
+  { status : keeper_summary_status
+  ; pending_attention_count : int
+  ; json : Yojson.Safe.t
+  }
+
+let summarize_rows ~keeper_name ~pending_queue rows =
   let scanned_row_count = List.length rows in
   let current_event_ids = ref Event_id_set.empty in
   let row_count = ref 0 in
@@ -1452,6 +1481,7 @@ let summarize_rows ~keeper_name rows =
   let latest_recorded_at = ref None in
   let latest_stimulus_id = ref None in
   let stimulus_seen = Hashtbl.create 16 in
+  let scheduled_occurrence_ids = ref Event_id_set.empty in
   let reacted_stimulus_ids = ref Event_id_set.empty in
   let board_stimulus_tokens = Hashtbl.create 16 in
   let stimulus_order = ref [] in
@@ -1461,10 +1491,29 @@ let summarize_rows ~keeper_name rows =
     incr quarantined_row_count;
     increment_count quarantine_reason_counts (row_quarantine_reason_to_string reason)
   in
-  let remember_stimulus stimulus_id =
+  (* Only schedule occurrences use [post_id] itself as the ledger identity.
+     For other kinds an ID can name more than one queue entry (for example,
+     separate comments on the same Board post). Do not let one such entry
+     certify another. *)
+  let is_scheduled_occurrence (metadata : current_row_metadata) stimulus_kind =
+    match stimulus_kind with
+       | Schedule_due ->
+         (match nested_string_field "stimulus" "post_id" metadata.raw with
+          | Some post_id -> String.equal post_id metadata.stimulus_id
+          | None -> false)
+       | Board_signal | Bootstrap | Fusion_completed | Connector_attention
+       | Hitl_resolved | Ask_answered | Completion_authority_rejected
+       | Task_outcome | Task_cancelled | Workspace_message | Delegate_completed
+       | Composition_completed | Tool_result_ready | Owned_job_completed
+       | Addon_operation_changed -> false
+  in
+  let remember_stimulus (metadata : current_row_metadata) stimulus_kind =
+    let stimulus_id = metadata.stimulus_id in
     if not (Hashtbl.mem stimulus_seen stimulus_id) then begin
       Hashtbl.add stimulus_seen stimulus_id
         (Event_id_set.mem stimulus_id !reacted_stimulus_ids);
+      if is_scheduled_occurrence metadata stimulus_kind then
+        scheduled_occurrence_ids := Event_id_set.add stimulus_id !scheduled_occurrence_ids;
       stimulus_order := stimulus_id :: !stimulus_order
     end
   in
@@ -1513,7 +1562,14 @@ let summarize_rows ~keeper_name rows =
       | Current_reaction { metadata; _ } -> metadata
     in
     if Event_id_set.mem metadata.event_id !current_event_ids
-    then ()
+    then
+      (match current_row with
+       | Current_stimulus { metadata; stimulus_kind }
+         when not (is_scheduled_occurrence metadata stimulus_kind) ->
+         (* Two distinct rows can share the ledger event ID. The previous
+            schedule witness is no longer unambiguous in this window. *)
+         scheduled_occurrence_ids := Event_id_set.remove metadata.stimulus_id !scheduled_occurrence_ids
+       | Current_stimulus _ | Current_reaction _ -> ())
     else begin
       current_event_ids := Event_id_set.add metadata.event_id !current_event_ids;
       incr row_count;
@@ -1522,7 +1578,7 @@ let summarize_rows ~keeper_name rows =
       match current_row with
       | Current_stimulus { metadata; stimulus_kind } ->
         incr stimulus_count;
-        remember_stimulus metadata.stimulus_id;
+        remember_stimulus metadata stimulus_kind;
         remember_board_stimulus metadata stimulus_kind
       | Current_reaction { metadata; reaction_kind; transition_receipt } ->
         incr reaction_count;
@@ -1547,14 +1603,24 @@ let summarize_rows ~keeper_name rows =
       | Some true | None -> false)
   in
   let pending_stimulus_count = List.length pending_stimulus_ids in
-  let degraded_signal_count = pending_stimulus_count + !quarantined_row_count in
+  let pending_attention_count =
+    List.fold_left
+      (fun count stimulus_id ->
+        if not (Event_id_set.mem stimulus_id !scheduled_occurrence_ids)
+           || pending_needs_attention pending_queue stimulus_id
+        then count + 1 else count)
+      0
+      pending_stimulus_ids
+  in
+  let degraded_signal_count = pending_attention_count + !quarantined_row_count in
   let status =
     if !row_count = 0 && !quarantined_row_count = 0 then Summary_empty
     else if degraded_signal_count = 0 then Summary_ok
     else Summary_degraded
   in
-  ( status
-  , `Assoc
+  { status
+  ; pending_attention_count
+  ; json = `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
     ; "status", `String (keeper_summary_status_to_string status)
@@ -1572,6 +1638,7 @@ let summarize_rows ~keeper_name rows =
       , string_count_table_json ~field:"reason" quarantine_reason_counts )
     ; "cursor_swept_stimulus_count", `Int !cursor_swept_stimulus_count
     ; "pending_stimulus_count", `Int pending_stimulus_count
+    ; "attention_required_stimulus_count", `Int pending_attention_count
     ; ( "pending_stimulus_ids"
       , `List
           (List.map
@@ -1580,12 +1647,13 @@ let summarize_rows ~keeper_name rows =
     ; "latest_recorded_at_unix", Json_util.float_opt_to_json !latest_recorded_at
     ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
     ; "read_error", `Null
-    ] )
+    ] }
 ;;
 
 let error_summary ~keeper_name error =
-  ( Summary_unknown
-  , `Assoc
+  { status = Summary_unknown
+  ; pending_attention_count = 0
+  ; json = `Assoc
     [ "schema", `String summary_schema
     ; "keeper_name", `String keeper_name
     ; "status", `String (keeper_summary_status_to_string Summary_unknown)
@@ -1602,23 +1670,24 @@ let error_summary ~keeper_name error =
     ; "quarantine_reason_counts", `List []
     ; "cursor_swept_stimulus_count", `Int 0
     ; "pending_stimulus_count", `Int 0
+    ; "attention_required_stimulus_count", `Int 0
     ; "pending_stimulus_ids", `List []
     ; "latest_recorded_at_unix", `Null
     ; "latest_stimulus_id", `Null
     ; "read_error", `String error
-    ] )
+    ] }
 ;;
 
 (* The status travels with the JSON so the fleet roll-up can read it without
    parsing what this module just wrote. *)
-let summary_with_status ~base_path ~keeper_name ~limit =
+let summary_with_status ~base_path ~keeper_name ~pending_queue ~limit =
   try
     match
       Dated_jsonl.read_recent_result
         (store_for_base_path ~base_path ~keeper_name)
         limit
     with
-    | Ok rows -> summarize_rows ~keeper_name rows
+    | Ok rows -> summarize_rows ~keeper_name ~pending_queue rows
     | Error error ->
       error_summary
         ~keeper_name
@@ -1629,7 +1698,7 @@ let summary_with_status ~base_path ~keeper_name ~limit =
 ;;
 
 let summary_for_keeper ~base_path ~keeper_name ~limit =
-  snd (summary_with_status ~base_path ~keeper_name ~limit)
+  (summary_with_status ~base_path ~keeper_name ~pending_queue:Queue_unobserved ~limit).json
 ;;
 
 let summary_read_error_count json =
@@ -1667,6 +1736,7 @@ let unavailable_fleet_summary_json () =
     ; "quarantined_rows_by_keeper", `List []
     ; "cursor_swept_stimulus_count", `Int 0
     ; "pending_stimulus_count", `Int 0
+    ; "attention_required_stimulus_count", `Int 0
     ; "durable_event_queue_count", `Int 0
     ; "durable_event_queue_pending_count", `Int 0
     ; "durable_event_queue_discovered_keeper_count", `Int 0
@@ -1685,7 +1755,7 @@ let unavailable_fleet_summary_json () =
     ]
 ;;
 
-let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
+let fleet_summary_json ~base_path ~keeper_names ~owner_lifecycle ~limit_per_keeper =
   let durable_event_queue_discovery =
     Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
       ~base_path
@@ -1698,15 +1768,55 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
   (* NDT-OK: fleet summary health renders source-age telemetry at the read
      boundary; keeper control flow never branches on this timestamp. *)
   let now = Unix.gettimeofday () in
-  let summaries_with_status =
-    List.map
-      (fun keeper_name ->
-        summary_with_status ~base_path ~keeper_name ~limit:limit_per_keeper)
-      keeper_names
-  in
-  let summaries = List.map snd summaries_with_status in
   let durable_event_queue_summaries =
     List.map (fun keeper_name -> durable_event_queue_health ~base_path ~keeper_name) keeper_names
+  in
+  let summaries_with_status =
+    List.map
+      (fun health ->
+        let pending_queue =
+          if health.read_errors <> []
+          then Queue_unobserved
+          else
+            let stimulus_ids, _, ambiguous_ids =
+              List.fold_left
+                (fun (ids, seen, ambiguous) (selection : Keeper_event_queue_state.pending_selection) ->
+                  match selection.source.payload with
+                  | Keeper_event_queue.Schedule_due wake ->
+                    let id = stimulus_id_of_event_queue selection.source in
+                    let valid = String.equal wake.occurrence_id ""
+                      || String.equal wake.occurrence_id selection.source.post_id in
+                    let ambiguous =
+                      if not valid || Event_id_set.mem id seen
+                      then Event_id_set.add id ambiguous
+                      else ambiguous in
+                    let ids = if valid then Event_id_set.add id ids else ids in
+                    ids, Event_id_set.add id seen, ambiguous
+                  | Board_signal _ | Board_attention _ | Bootstrap
+                  | Fusion_completed _ | Connector_attention _ | Hitl_resolved _
+                  | Ask_answered _ | Completion_authority_rejected _ | Task_outcome _
+                  | Task_cancelled _ | Workspace_message _ | Delegate_completed _
+                  | Composition_completed _ | Tool_result_ready _ | Owned_job_completed _
+                  | Addon_operation_changed _ -> ids, seen, ambiguous)
+                (Event_id_set.empty, Event_id_set.empty, Event_id_set.empty)
+                health.selections
+            in
+            Queue_observed
+              { owner_lifecycle = owner_lifecycle ~keeper_name:health.keeper_name
+              ; stimulus_ids = Event_id_set.diff stimulus_ids ambiguous_ids
+              }
+        in
+        summary_with_status
+          ~base_path
+          ~keeper_name:health.keeper_name
+          ~pending_queue
+          ~limit:limit_per_keeper)
+      durable_event_queue_summaries
+  in
+  let summaries = List.map (fun summary -> summary.json) summaries_with_status in
+  let pending_attention_count =
+    List.fold_left (fun count summary -> count + summary.pending_attention_count)
+      0 summaries_with_status
   in
   let total_int name =
     List.fold_left (fun acc summary -> acc + int_field name summary) 0 summaries
@@ -1840,7 +1950,9 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
       then "durable_event_queue_read_error" :: reasons
       else reasons)
     |> (fun reasons ->
-      if pending_count > 0 then "reaction_ledger_pending_stimulus" :: reasons else reasons)
+      if pending_attention_count > 0
+      then "reaction_ledger_pending_stimulus" :: reasons
+      else reasons)
     |> (fun reasons ->
       if quarantined_row_count > 0
       then "reaction_ledger_quarantined_row" :: reasons
@@ -1855,7 +1967,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     then Summary_unknown
     else if
       List.exists
-        (fun (status, _) -> status = Summary_degraded)
+        (fun summary -> summary.status = Summary_degraded)
         summaries_with_status
     then Summary_degraded
     else if row_count = 0 && durable_event_queue_count = 0 then Summary_empty
@@ -1884,6 +1996,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
     ; "quarantined_rows_by_keeper", `List quarantined_rows_by_keeper
     ; "cursor_swept_stimulus_count", `Int (total_int "cursor_swept_stimulus_count")
     ; "pending_stimulus_count", `Int pending_count
+    ; "attention_required_stimulus_count", `Int pending_attention_count
     ; "durable_event_queue_count", `Int durable_event_queue_count
     ; "durable_event_queue_pending_count", `Int durable_event_queue_pending_count
     ; ( "durable_event_queue_discovered_keeper_count"

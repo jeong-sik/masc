@@ -185,7 +185,23 @@ let test_live_paused_offers_resume () =
     [ Control.Resume; Control.Wakeup; Control.Shutdown; Control.Delete ]
     (Control.available r);
   Alcotest.(check (option action_testable))
-    "primary is resume" (Some Control.Resume) (Control.primary r)
+    "primary is resume" (Some Control.Resume) (Control.primary r);
+  (* On the live roster, Paused publishes keepalive_running = false because
+     can_execute_turn is false while the fiber sleeps on its condition. *)
+  let server_paused =
+    reading ~paused:true
+      ~liveness:
+        (Control.Present
+           (runtime ~keepalive_running:false ~paused:true
+              ~phase:(phase "paused") ~health:(health "offline") "analyst"))
+      "analyst"
+  in
+  check_actions "server paused phase still offers resume, not boot"
+    [ Control.Resume; Control.Wakeup; Control.Shutdown; Control.Delete ]
+    (Control.available server_paused);
+  Alcotest.(check (option action_testable))
+    "primary stays resume in paused phase" (Some Control.Resume)
+    (Control.primary server_paused)
 
 (* Pause is a person's decision and health is an observation, so neither
    replaces the other: a paused keeper whose keepalive is gone reads offline
@@ -226,7 +242,22 @@ let test_runs_follows_the_roster_and_not_the_pause () =
   check "a fiber runs it" (Some true)
     (reading ~liveness:(Control.Present (runtime "analyst")) "analyst");
   check "paused, and its fiber runs" (Some true)
-    (reading ~paused:true ~liveness:(Control.Present (runtime "analyst")) "analyst")
+    (reading ~paused:true ~liveness:(Control.Present (runtime "analyst")) "analyst");
+  check "paused phase keeps its sleeping fiber even with keepalive_running false"
+    (Some true)
+    (reading ~paused:true
+       ~liveness:
+         (Control.Present
+            (runtime ~keepalive_running:false ~paused:true
+               ~phase:(phase "paused") ~health:(health "offline") "analyst"))
+       "analyst");
+  check "paused metadata with offline phase has no fiber" (Some false)
+    (reading ~paused:true
+       ~liveness:
+         (Control.Present
+            (runtime ~keepalive_running:false ~paused:true
+               ~phase:(phase "offline") ~health:(health "offline") "analyst"))
+       "analyst")
 
 let test_only_shutdown_confirms () =
   List.iter
@@ -434,6 +465,20 @@ let test_purge_body_carries_keeper_and_workspace () =
         (List.assoc_opt "agent_name" fields = Some (`String "analyst"))
   | _ -> Alcotest.fail "purge body must be a JSON object"
 
+let test_deletion_retry_body_carries_keeper_operation_and_workspace () =
+  let body =
+    Control.deletion_retry_body ~expected_workspace:directive_workspace
+      ~keeper_name:"analyst" ~operation_id:"op-123"
+  in
+  match Yojson.Safe.from_string body with
+  | `Assoc fields ->
+      check_directive_workspace fields;
+      Alcotest.(check bool) "the retry names its keeper" true
+        (List.assoc_opt "keeper_name" fields = Some (`String "analyst"));
+      Alcotest.(check bool) "the retry names its operation" true
+        (List.assoc_opt "operation_id" fields = Some (`String "op-123"))
+  | _ -> Alcotest.fail "deletion retry body must be a JSON object"
+
 let test_resume_body_carries_the_operation_id () =
   let operation_id = Control.mint_operation_id () in
   let body =
@@ -631,7 +676,10 @@ let test_success_is_accepted () =
   with
   | Control.Accepted { already_live } ->
       Alcotest.(check bool) "not already live" false already_live
-  | Control.Purge_accepted _ | Control.Paused_owner_conflict _ | Control.Rejected _ ->
+  | Control.Purge_accepted _
+  | Control.Committed_followup_failed _
+  | Control.Paused_owner_conflict _
+  | Control.Rejected _ ->
       Alcotest.fail "200 must be accepted"
 
 let test_already_live_is_carried () =
@@ -641,8 +689,28 @@ let test_already_live_is_carried () =
   with
   | Control.Accepted { already_live } ->
       Alcotest.(check bool) "already live" true already_live
-  | Control.Purge_accepted _ | Control.Paused_owner_conflict _ | Control.Rejected _ ->
+  | Control.Purge_accepted _
+  | Control.Committed_followup_failed _
+  | Control.Paused_owner_conflict _
+  | Control.Rejected _ ->
       Alcotest.fail "200 must be accepted"
+
+let test_committed_followup_failed_is_distinguished_from_accepted () =
+  match
+    Control.classify_response ~status:202
+      ~body:
+        {|{"ok":false,"action":"resume","operation":"resume_owner","name":"analyst","committed":true,"commit_status":"committed","projection":"committed_followup_failed","error":"live Keeper registry entry is missing"}|}
+  with
+  | Control.Committed_followup_failed detail ->
+      Alcotest.(check string)
+        "carries the server's followup failure detail"
+        "live Keeper registry entry is missing"
+        detail
+  | Control.Accepted _
+  | Control.Purge_accepted _
+  | Control.Paused_owner_conflict _
+  | Control.Rejected _ ->
+      Alcotest.fail "202 committed_followup_failed must not be classified as Accepted"
 
 let test_conflict_is_its_own_outcome () =
   match
@@ -655,8 +723,25 @@ let test_conflict_is_its_own_outcome () =
         "detail is the server's" true
         (String.length detail > 0
         && not (String.equal detail "HTTP 409"))
-  | Control.Accepted _ | Control.Purge_accepted _ -> Alcotest.fail "409 is not an acceptance"
+  | Control.Accepted _ | Control.Purge_accepted _
+  | Control.Committed_followup_failed _ ->
+      Alcotest.fail "409 is not an acceptance"
   | Control.Rejected _ -> Alcotest.fail "409 has its own outcome"
+
+let test_workspace_conflict_is_rejected_not_paused_owner () =
+  match
+    Control.classify_response ~status:409
+      ~body:
+        {|{"ok":false,"code":"workspace_precondition_failed","error":"workspace precondition failed"}|}
+  with
+  | Control.Rejected { status; detail } ->
+      Alcotest.(check int) "status" 409 status;
+      Alcotest.(check string) "detail" "workspace precondition failed" detail
+  | Control.Accepted _
+  | Control.Purge_accepted _
+  | Control.Committed_followup_failed _
+  | Control.Paused_owner_conflict _ ->
+      Alcotest.fail "workspace mismatch 409 must not trigger paused-owner recovery"
 
 (* A 400 whose prose mentions pausing must stay a rejection. Routing on the
    words instead of the status is how a rejected request gets retried as a
@@ -671,7 +756,10 @@ let test_rejection_prose_does_not_become_a_conflict () =
       Alcotest.(check bool)
         "detail is the server's error" true
         (String.length detail > 0 && not (String.equal detail "HTTP 400"))
-  | Control.Accepted _ | Control.Purge_accepted _ | Control.Paused_owner_conflict _ ->
+  | Control.Accepted _
+  | Control.Purge_accepted _
+  | Control.Committed_followup_failed _
+  | Control.Paused_owner_conflict _ ->
       Alcotest.fail "400 is a rejection"
 
 let test_non_json_error_keeps_its_text () =
@@ -682,14 +770,20 @@ let test_non_json_error_keeps_its_text () =
       Alcotest.(check int) "status" 502 status;
       Alcotest.(check string)
         "text survives" "upstream closed the connection" detail
-  | Control.Accepted _ | Control.Purge_accepted _ | Control.Paused_owner_conflict _ ->
+  | Control.Accepted _
+  | Control.Purge_accepted _
+  | Control.Committed_followup_failed _
+  | Control.Paused_owner_conflict _ ->
       Alcotest.fail "502 is a rejection"
 
 let test_empty_error_body_names_the_status () =
   match Control.classify_response ~status:503 ~body:"" with
   | Control.Rejected { detail; _ } ->
       Alcotest.(check string) "status stands in" "HTTP 503" detail
-  | Control.Accepted _ | Control.Purge_accepted _ | Control.Paused_owner_conflict _ ->
+  | Control.Accepted _
+  | Control.Purge_accepted _
+  | Control.Committed_followup_failed _
+  | Control.Paused_owner_conflict _ ->
       Alcotest.fail "503 is a rejection"
 
 (* {1 Roster decode} *)
@@ -1354,6 +1448,8 @@ let () =
             test_delete_is_confirmed_and_irreversible
         ; Alcotest.test_case "purge body carries the observed workspace" `Quick
             test_purge_body_carries_keeper_and_workspace
+        ; Alcotest.test_case "deletion retry body carries the observed workspace" `Quick
+            test_deletion_retry_body_carries_keeper_operation_and_workspace
         ; Alcotest.test_case "delete is not offered to a live fiber" `Quick
             test_delete_is_offered_with_shutdown_confirmation
         ; Alcotest.test_case "boot recovers a paused owner" `Quick
@@ -1387,8 +1483,12 @@ let () =
             test_success_is_accepted
         ; Alcotest.test_case "already-live is carried" `Quick
             test_already_live_is_carried
+        ; Alcotest.test_case "202 committed_followup_failed is not accepted" `Quick
+            test_committed_followup_failed_is_distinguished_from_accepted
         ; Alcotest.test_case "409 is its own outcome" `Quick
             test_conflict_is_its_own_outcome
+        ; Alcotest.test_case "workspace 409 is rejected, not paused-owner conflict" `Quick
+            test_workspace_conflict_is_rejected_not_paused_owner
         ; Alcotest.test_case "rejection prose stays a rejection" `Quick
             test_rejection_prose_does_not_become_a_conflict
         ; Alcotest.test_case "non-JSON error keeps its text" `Quick

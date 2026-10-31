@@ -1716,8 +1716,13 @@ let respond_directive_request_error ~request reqd = function
   | Invalid_directive_request detail ->
     respond_error ~status:`Bad_request ~request ~ok:false reqd detail
   | Directive_workspace_changed ->
-    respond_error ~status:`Conflict ~request ~ok:false reqd
-      "workspace changed since identity probe; Keeper directive was not applied"
+    let refusal = Request_workspace_precondition.Workspace_mismatch in
+    Http.Response.json_value ~status:`Conflict ~request
+      (Server_refusal.json
+         ~code:(Request_workspace_precondition.refusal_code refusal)
+         ~fields:[ "ok", `Bool false ]
+         "workspace changed since identity probe; Keeper directive was not applied")
+      reqd
 
 let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_str =
   let req_path = Http.Request.path req in

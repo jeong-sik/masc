@@ -4398,20 +4398,25 @@ let launch_keeper_deletions state ~mailbox ?retry () =
             | Some (row : Keeper_control.deletion_row) ->
               let keeper_name = Keeper_control.deletion_keeper_name row in
               let operation_id = Masc.Keeper_shutdown_types.Operation_id.to_string (Keeper_control.deletion_operation_id row) in
-              let body = Yojson.Safe.to_string (`Assoc ["keeper_name", `String keeper_name;
-                "operation_id", `String operation_id]) in
               let path = match row.operation with
                 | Keeper_control.Runtime_shutdown _ -> "/api/v1/dashboard/keepers/deletions/retry"
                 | Configuration_removal _ -> "/api/v1/dashboard/keepers/configuration-deletions/retry" in
               let* () = check_authority () in
               let receipt =
                 try
-                  let* status, body = Masc_tui_http.http_post ~headers:(Masc_tui_http.auth_headers ())
-                    ~host ~port ~path ~body in
-                  (match Keeper_control.classify_purge_response ~keeper_name ~status ~body with
-                   | Purge_accepted { operation_id = returned } when String.equal returned operation_id -> Ok ()
-                   | Rejected { detail; _ } | Paused_owner_conflict detail -> Error detail
-                   | Accepted _ | Purge_accepted _ -> Error "deletion retry response did not identify the requested operation")
+                  match identity with
+                  | None ->
+                    Error "Workspace identity is unavailable; Keeper deletion retry was not sent"
+                  | Some expected_workspace ->
+                    let* status, body =
+                      Masc_tui_http.post_keeper_deletion_retry ~host ~port ~path
+                        ~keeper_name ~operation_id ~expected_workspace
+                    in
+                    (match Keeper_control.classify_purge_response ~keeper_name ~status ~body with
+                     | Purge_accepted { operation_id = returned } when String.equal returned operation_id -> Ok ()
+                     | Rejected { detail; _ } | Paused_owner_conflict detail
+                     | Committed_followup_failed detail -> Error detail
+                     | Accepted _ | Purge_accepted _ -> Error "deletion retry response did not identify the requested operation")
                 with Eio.Cancel.Cancelled _ as exn -> raise exn
                    | exn -> Error (Printexc.to_string exn)
               in
@@ -10449,7 +10454,9 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
           ~action:verb ~operator_operation_id ~expected_workspace in
         (match Keeper_control.classify_response ~status ~body with
          | Keeper_control.Accepted _ -> confirm Owner_resumed; Ok ["Server confirmed queue " ^ verb]
-         | Keeper_control.Rejected {detail;_} | Keeper_control.Paused_owner_conflict detail -> Error detail
+         | Keeper_control.Committed_followup_failed detail
+         | Keeper_control.Rejected {detail;_}
+         | Keeper_control.Paused_owner_conflict detail -> Error detail
          | Keeper_control.Purge_accepted _ -> Error "Unexpected purge response to queue directive")
       | Inbox.Cancel_event (reference, incarnation, _) | Inbox.Prioritize_event (reference, incarnation, _) ->
         let fields = ["schema", `String "keeper_event_queue.operator.request.v2";
@@ -17790,8 +17797,11 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
     ~expected_workspace action =
   let perform = function
     | Keeper_control.Lifecycle lifecycle_action ->
-        Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
-          ~action:lifecycle_action
+        (match expected_workspace with
+         | None -> Error "Workspace identity is unavailable; Keeper lifecycle action was not sent"
+         | Some expected_workspace ->
+           Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
+             ~action:lifecycle_action ~expected_workspace)
     | Keeper_control.Directive directive_action ->
         (match expected_workspace with
          | None -> Error "Workspace identity is unavailable; Keeper directive was not sent"
@@ -17825,6 +17835,14 @@ let run_keeper_action_steps ~check_request ~host ~port ~keeper_name ~operator_op
             match outcome with
             | (Keeper_control.Accepted _ | Keeper_control.Purge_accepted _) as outcome ->
                 walk ~recovery_available (Some outcome) rest
+            | Keeper_control.Committed_followup_failed detail as outcome -> (
+                match rest with
+                | _ :: _ -> walk ~recovery_available (Some outcome) rest
+                | [] ->
+                    Error
+                      (Printf.sprintf
+                         "durable pause cleared, but live resume failed: %s"
+                         detail))
             | Keeper_control.Paused_owner_conflict detail -> (
                 match
                   ( recovery_available
@@ -17854,6 +17872,7 @@ let apply_keeper_action_result state ~base_path ~mailbox keeper_name action resu
          (Printf.sprintf "%s %s accepted" keeper_name
             (Keeper_control.action_label action))
    | Ok (Keeper_control.Paused_owner_conflict detail)
+   | Ok (Keeper_control.Committed_followup_failed detail)
    | Ok (Keeper_control.Rejected { detail; _ }) ->
        (* [run_keeper_action_steps] returns these as [Error]; keeping the
           branch exhaustive rather than wildcarded means a future outcome
@@ -20628,12 +20647,22 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
        | (Keeper_control.Pause | Keeper_control.Shutdown),
          (Ok
             ( Keeper_control.Purge_accepted _
+            | Keeper_control.Committed_followup_failed _
+            | Keeper_control.Paused_owner_conflict _
+            | Keeper_control.Rejected _ )
+         | Error _) ->
+           ()
+       | (Keeper_control.Resume | Keeper_control.Boot),
+         Ok (Keeper_control.Accepted _) ->
+           Masc_tui_types.acknowledge_keeper_surface_resume state keeper_name
+       | (Keeper_control.Resume | Keeper_control.Boot),
+         (Ok
+            ( Keeper_control.Purge_accepted _
+            | Keeper_control.Committed_followup_failed _
             | Keeper_control.Paused_owner_conflict _
             | Keeper_control.Rejected _ )
          | Error _)
-       | ( ( Keeper_control.Resume | Keeper_control.Boot
-           | Keeper_control.Wakeup | Keeper_control.Delete ),
-           _ ) ->
+       | (Keeper_control.Wakeup | Keeper_control.Delete), _ ->
            ());
       (* The roster is the half of the row this refresh cannot read from disk,
          and it is what decides which action the row offers next. Asking for it

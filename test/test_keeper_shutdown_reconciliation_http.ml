@@ -284,6 +284,31 @@ let test_purge_workspace_admission_and_retry () =
     assert_existing status response;
     let status, response = post existing_name [] in
     assert_existing status response;
+    let post_retry path fields =
+      http ~router ~token:admin ~meth:"POST" ~path
+        ~body:(Yojson.Safe.to_string (`Assoc
+          (("keeper_name", `String existing_name)
+           :: ("operation_id", `String (Operation_id.to_string existing.operation_id))
+           :: fields))) ()
+    in
+    List.iter (fun retry_path ->
+      List.iter (fun expected_workspace ->
+        let status, response = post_retry retry_path [ "expected_workspace", expected_workspace ] in
+        check int "foreign workspace is refused on deletion retry" 409 status;
+        check string "retry refusal identifies workspace mismatch" "workspace_precondition_failed"
+          Yojson.Safe.Util.(response |> member "code" |> to_string);
+        assert_unchanged ())
+        [ expected (base ^ "-other") root; expected base (root ^ "-other") ];
+      List.iter (fun fields ->
+        let status, _ = post_retry retry_path fields in
+        check int "malformed workspace is refused on deletion retry" 400 status;
+        assert_unchanged ())
+        [ [ "expected_workspace", `Null ]
+        ; [ "expected_workspace", `Assoc [ "base_path", `String base ] ]
+        ; [ "expected_workspace", expected "" root ]
+        ; [ "expected_workspace", expected base root; "expected_workspace", expected base root ] ])
+      [ "/api/v1/dashboard/keepers/deletions/retry"
+      ; "/api/v1/dashboard/keepers/configuration-deletions/retry" ];
     let status, _ = post agent_name [ "expected_workspace", expected base root ] in
     check int "matching workspace can delete the fixture agent" 200 status;
     check bool "matching purge removed its agent artifact" false (Sys.file_exists agent_path);

@@ -233,21 +233,37 @@ let requires_confirmation = function
   | Pause | Resume | Boot | Wakeup -> false
 
 (* A row the roster has but whose keepalive is not running is registered
-   without a fiber: nothing runs it, the same as a keeper the roster lacks. *)
+   without a fiber: nothing runs it, the same as a keeper the roster lacks.
+   [keepalive_running] on the server is [Keeper_state_machine.can_execute_turn],
+   which is [false] in the [Paused] phase even though the keepalive fiber is
+   still alive and sleeping on its condition, so [Paused] counts as a live
+   fiber too. *)
 let runs reading =
   match reading.liveness with
   | Unobserved | Invalid _ -> None
   | Absent -> Some false
-  | Present runtime -> Some runtime.Decode.kr_keepalive_running
+  | Present runtime ->
+      Some
+        (runtime.Decode.kr_keepalive_running
+         || Decode.keeper_phase_is_paused runtime.Decode.kr_phase)
 
-(* Confirmed deletion uses the server's durable shutdown operation, which
+(* Confirmed deletion uses the durable server shutdown operation, which
    stops and joins the exact lane before removing its artifacts. *)
 let available reading =
   match runs reading with
   | None -> [ Delete ]
   | Some false -> [ Boot; Delete ]
   | Some true ->
-      if reading.paused then [ Resume; Wakeup; Shutdown; Delete ]
+      let paused =
+        reading.paused
+        ||
+        match reading.liveness with
+        | Present runtime ->
+            runtime.Decode.kr_paused
+            || Decode.keeper_phase_is_paused runtime.Decode.kr_phase
+        | Unobserved | Invalid _ | Absent -> false
+      in
+      if paused then [ Resume; Wakeup; Shutdown; Delete ]
       else [ Pause; Wakeup; Shutdown; Delete ]
 
 let primary reading =
@@ -276,22 +292,49 @@ let recovers_from_conflict = function
 type outcome =
   | Accepted of { already_live : bool }
   | Purge_accepted of { operation_id : string }
+  | Committed_followup_failed of string
   | Paused_owner_conflict of string
   | Rejected of { status : int; detail : string }
 
-let already_live_of_body body =
+let classify_2xx_response ~status body =
   match Yojson.Safe.from_string body with
   | `Assoc fields -> (
-      match List.assoc_opt "already_live" fields with
-      | Some (`Bool value) -> value
+      let already_live =
+        match List.assoc_opt "already_live" fields with
+        | Some (`Bool value) -> value
+        | Some _ | None -> false
+      in
+      match List.assoc_opt "ok" fields with
+      | Some (`Bool false) ->
+          let committed =
+            List.assoc_opt "committed" fields = Some (`Bool true)
+            || List.assoc_opt "projection" fields
+               = Some (`String "committed_followup_failed")
+          in
+          let detail = response_detail ~status body in
+          if committed then Committed_followup_failed detail
+          else Rejected { status; detail }
+      | Some _ | None -> Accepted { already_live })
+  | _ -> Accepted { already_live = false }
+  | exception Yojson.Json_error _ -> Accepted { already_live = false }
+
+let is_workspace_conflict body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields -> (
+      match List.assoc_opt "code" fields with
+      | Some (`String code) ->
+          String.equal code
+            (Masc.Request_workspace_precondition.refusal_code
+               Masc.Request_workspace_precondition.Workspace_mismatch)
       | Some _ | None -> false)
   | _ -> false
   | exception Yojson.Json_error _ -> false
 
 let classify_response ~status ~body =
   if status >= 200 && status < 300 then
-    Accepted { already_live = already_live_of_body body }
-  else if status = 409 then Paused_owner_conflict (response_detail ~status body)
+    classify_2xx_response ~status body
+  else if status = 409 && not (is_workspace_conflict body) then
+    Paused_owner_conflict (response_detail ~status body)
   else Rejected { status; detail = response_detail ~status body }
 
 let classify_purge_response ~keeper_name ~status ~body =
@@ -346,6 +389,14 @@ let workspace_field (expected_workspace : Decode.server_identity) =
 let purge_body ~expected_workspace keeper_name =
   Yojson.Safe.to_string (`Assoc
     [ "agent_name", `String keeper_name; workspace_field expected_workspace ])
+
+let deletion_retry_body ~expected_workspace ~keeper_name ~operation_id =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ "keeper_name", `String keeper_name
+      ; "operation_id", `String operation_id
+      ; workspace_field expected_workspace
+      ])
 
 let directive_body ~(expected_workspace : Decode.server_identity) ~operator_operation_id action =
   let fields =

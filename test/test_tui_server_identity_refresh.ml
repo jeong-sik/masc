@@ -20,17 +20,23 @@ let identity base_path : Tui_decode.server_identity =
 let test_keeper_purge_header_and_body_share_workspace () =
   let workspace = identity "/workspace/a" in
   let headers = Masc_tui_http.keeper_workspace_headers workspace in
-  let body = Masc_tui_keeper_control.purge_body ~expected_workspace:workspace "alpha"
-    |> Yojson.Safe.from_string in
   let open Yojson.Safe.Util in
-  let expected = body |> member "expected_workspace" in
   let header name = List.assoc_opt name headers in
-  Alcotest.(check (option string)) "header base matches body"
-    (Some (expected |> member "base_path" |> to_string))
-    (header Masc.Request_workspace_precondition.expected_base_path_header);
-  Alcotest.(check (option string)) "header root matches body"
-    (Some (expected |> member "masc_root" |> to_string))
-    (header Masc.Request_workspace_precondition.expected_masc_root_header)
+  List.iter
+    (fun (label, raw_body) ->
+       let body = Yojson.Safe.from_string raw_body in
+       let expected = body |> member "expected_workspace" in
+       Alcotest.(check (option string)) (label ^ " header base matches body")
+         (Some (expected |> member "base_path" |> to_string))
+         (header Masc.Request_workspace_precondition.expected_base_path_header);
+       Alcotest.(check (option string)) (label ^ " header root matches body")
+         (Some (expected |> member "masc_root" |> to_string))
+         (header Masc.Request_workspace_precondition.expected_masc_root_header))
+    [ "purge", Masc_tui_keeper_control.purge_body ~expected_workspace:workspace "alpha"
+    ; ( "deletion retry"
+      , Masc_tui_keeper_control.deletion_retry_body
+          ~expected_workspace:workspace ~keeper_name:"alpha" ~operation_id:"op-1" )
+    ]
 
 let test_chat_file_observation_retains_its_read_epoch () =
   let open Masc_tui_types in

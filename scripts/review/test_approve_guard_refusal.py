@@ -21,7 +21,8 @@ FAKE_GH = r"""#!/usr/bin/env bash
 set -o pipefail
 shift
 [ "$1" != --paginate ] || shift
-[ "$1" != --slurp ] || shift
+slurp=0
+if [ "$1" = --slurp ]; then slurp=1; shift; fi
 path="$1"; shift
 printf '%s\n' "$path" >> "$FAKE_DIR/calls.log"
 expr="."
@@ -35,15 +36,20 @@ case "$path" in
     count=$((count + 1)); printf '%s' "$count" > "$count_file"
     f="$FAKE_DIR/compare-$count.json"; [ -f "$f" ] || f="$FAKE_DIR/compare.json";;
   repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review.json";;
-  repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json";;
+  repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json"; reviews_collection=1;;
   repos/*/issues/*/comments*) f="$FAKE_DIR/comments.json";;
   repos/*/actions/runs/*/jobs*) f="$FAKE_DIR/jobs.json";;
   repos/*/actions/runs*) f="$FAKE_DIR/runs.json";;
   repos/*/pulls/*) f="$FAKE_DIR/pr.json";;
   *) echo "fake gh: unexpected $path" >&2; exit 9;;
 esac
-jq 'def uid: if .login == "author-keeper" then 10 elif .login == "reviewer-account" then 20 elif .login == "reviewer-keeper" then 30 elif .login == "second-reviewer" then 40 else 50 end;
-    walk(if type == "object" and (.login | type) == "string" and (has("id") | not) then .id = uid else . end)' "$f" | jq -r "$expr"
+if [ "$slurp" = 1 ] && [ "${reviews_collection:-0}" = 1 ]; then
+  jq 'def uid: if .login == "author-keeper" then 10 elif .login == "reviewer-account" then 20 elif .login == "reviewer-keeper" then 30 elif .login == "second-reviewer" then 40 else 50 end;
+      [walk(if type == "object" and (.login | type) == "string" and (has("id") | not) then .id = uid else . end)]' "$f"
+else
+  jq 'def uid: if .login == "author-keeper" then 10 elif .login == "reviewer-account" then 20 elif .login == "reviewer-keeper" then 30 elif .login == "second-reviewer" then 40 else 50 end;
+      walk(if type == "object" and (.login | type) == "string" and (has("id") | not) then .id = uid else . end)' "$f" | jq -r "$expr"
+fi
 """
 
 
@@ -71,7 +77,8 @@ class GuardHarness(unittest.TestCase):
         self.scripts.mkdir()
         for name in ("approve-guard.sh", "ci-checks.sh", "review-verdict.sh", "review-decisions.py",
                      "review-scope.py", "review-refusal.py", "_gh_merge_base.py",
-                     "prepare-approved-batch.py", "review-commit-accounts.py"):
+                     "prepare-approved-batch.py", "review-commit-accounts.py", "review-cr-ownership.py",
+                     "review-formal-order.py"):
             shutil.copy(HERE / name, self.scripts / name)
         # The real review-diff.py needs Git objects; the diff identity is a fixed fixture here.
         (self.scripts / "review-diff.py").write_text(f"#!/usr/bin/env python3\nprint('{DIFF}')\n")
@@ -610,6 +617,112 @@ class VerdictWithdrawalCase(GuardHarness):
         self.assertEqual(r.returncode, 2)
         self.assertIn("open CHANGES_REQUESTED", r.stderr)
 
+    def test_same_account_different_keeper_cannot_replace_request(self):
+        request = self.negative_review()
+        request["body"] = f"verdict: FAIL head: {HEAD} by: other-keeper\nsource findings"
+        self.reviews(request)
+        result = self.replacement_check()
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("signer is unknown or differs", result.stderr)
+
+    def test_unsigned_request_cannot_be_claimed_by_same_account(self):
+        request = self.negative_review()
+        request["body"] = "Please fix the issue."
+        self.reviews(request)
+        result = self.replacement_check()
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("signer is unknown or differs", result.stderr)
+
+    def test_shared_account_approval_does_not_clear_other_keeper_request(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        approval.update(id=89, submitted_at="2026-10-08T04:00:00Z")
+        approval["user"]["login"] = "reviewer-account"
+        (self.data / "review.json").write_text(json.dumps(approval))
+        request = self.negative_review()
+        request["body"] = f"verdict: FAIL head: {HEAD} by: other-keeper\nsource findings"
+        self.reviews(request, approval)
+        for mode in ("--source-receipt", "--merge-check"):
+            result = self.run_guard(mode)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("unresolved change requests", result.stderr)
+
+    def test_source_receipt_uses_submission_order_when_review_ids_are_reversed(self):
+        footer = footer_line().replace(" · reviewed base", " · replaces own CHANGES_REQUESTED 90 · reviewed base")
+        self.review(footer)
+        approval = json.loads((self.data / "review.json").read_text())
+        approval.update(id=77, submitted_at="2026-10-10T03:45:54Z")
+        approval["user"]["login"] = "reviewer-account"
+        (self.data / "review.json").write_text(json.dumps(approval))
+        request = self.negative_review(rid=90, submitted="2026-10-08T03:45:54Z")
+        request["body"] = f"verdict: FAIL head: {'a' * 40} by: reviewer-keeper\nold-head finding"
+        self.reviews(request, approval)
+        result = self.run_guard("--source-receipt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        request["submitted_at"] = "2026-10-11T03:45:54Z"
+        self.reviews(request, approval)
+        result = self.run_guard("--source-receipt")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("open CHANGES_REQUESTED", result.stderr)
+
+    def test_old_tied_approvals_do_not_block_a_unique_latest_approval(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        old1 = dict(approval, id=77, submitted_at="2026-10-07T03:45:54Z")
+        old2 = dict(approval, id=78, submitted_at="2026-10-07T03:45:54Z")
+        latest = dict(approval, id=79, submitted_at="2026-10-08T03:45:54Z")
+        self.reviews(old1, old2, latest)
+        (self.data / "review.json").write_text(json.dumps(latest))
+        for mode in ("--check", "--source-receipt", "--merge-check"):
+            with self.subTest(mode=mode):
+                result = self.run_guard(mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_tied_latest_request_and_approval_still_refuse(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        older = dict(approval, id=77, submitted_at="2026-10-07T03:45:54Z")
+        latest = dict(approval, id=79, submitted_at="2026-10-08T03:45:54Z")
+        request = self.negative_review(rid=78, login="reviewer-keeper")
+        self.reviews(older, request, latest)
+        (self.data / "review.json").write_text(json.dumps(latest))
+        for mode in ("--check", "--source-receipt"):
+            with self.subTest(mode=mode):
+                result = self.run_guard(mode)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("ambiguous submission times", result.stderr)
+
+    def test_old_tied_request_stays_open_until_later_explicit_replacement(self):
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        request = self.negative_review(rid=88, login="reviewer-keeper",
+                                       submitted="2026-10-07T03:45:54Z")
+        tied = dict(approval, id=77, submitted_at="2026-10-07T03:45:54Z")
+        tied["body"] = tied["body"].replace(
+            " · reviewed base", " · replaces own CHANGES_REQUESTED 88 · reviewed base")
+        latest = dict(approval, id=79, submitted_at="2026-10-08T03:45:54Z")
+        self.reviews(request, tied, latest)
+        (self.data / "review.json").write_text(json.dumps(latest))
+        publication = self.run_guard("--check")
+        self.assertEqual(publication.returncode, 0, publication.stderr)
+        for mode in ("--source-receipt", "--merge-check"):
+            with self.subTest(mode=mode):
+                result = self.run_guard(mode)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("unresolved change requests (review IDs 88)", result.stderr)
+        latest["body"] = latest["body"].replace(
+            " · reviewed base", " · replaces own CHANGES_REQUESTED 88 · reviewed base")
+        self.reviews(request, tied, latest)
+        (self.data / "review.json").write_text(json.dumps(latest))
+        result = self.run_guard("--source-receipt")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_replacement_requires_the_signed_body_in_check_mode(self):
+        self.reviews(self.negative_review())
+        result = self.run_guard("--check", "--replace-own-cr", "88")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("signed review body", result.stderr)
+
     def test_foreign_or_missing_replacement_id_is_refused(self):
         for request in (self.negative_review(login="another-reviewer"),
                         self.negative_review(rid=89)):
@@ -662,9 +775,9 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
             'repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review.json";;',
             'repos/*/pulls/*/reviews/*) f="$FAKE_DIR/review-${path##*/}.json";;'))
 
-    def publish(self, *replace_ids):
+    def publish(self, *replace_ids, keeper="reviewer-keeper"):
         body = self.tmp / "replacement.md"
-        body.write_text(f"verdict: PASS head: {HEAD} by: reviewer-keeper\nindependent source review\n")
+        body.write_text(f"verdict: PASS head: {HEAD} by: {keeper}\nindependent source review\n")
         args = ["--review-base", BASE, "--review-diff", DIFF, "--body", str(body)]
         for rid in replace_ids:
             args += ["--replace-own-cr", str(rid)]
@@ -807,6 +920,100 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
         self.assertEqual(calls.count("POST repos/o/r/pulls/41487/reviews"), 2)
         self.assertNotIn("dismiss", calls)
 
+    def test_shared_account_keepers_replace_their_requests_separately(self):
+        first_request = self.negative_review()
+        second_request = self.negative_review(rid=89, submitted="2026-10-09T03:45:54Z")
+        second_request["body"] = second_request["body"].replace(
+            "by: reviewer-keeper", "by: other-keeper")
+        self.reviews(first_request, second_request)
+        self.install_publication_fake()
+
+        first = self.publish(88)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertIn("APPROVED #41487", first.stdout)
+        for mode in ("--source-receipt", "--merge-check"):
+            blocked = self.run_guard(mode)
+            self.assertEqual(blocked.returncode, 2, blocked.stderr)
+            # A later stack layer may reject the same current-head review first
+            # as a structured FAIL; either diagnostic must identify request 89.
+            self.assertTrue(
+                "unresolved change requests (review IDs 89)" in blocked.stderr
+                or "unresolved FAIL by reviewer-account at review:89" in blocked.stderr,
+                blocked.stderr,
+            )
+
+        second = self.publish(89, keeper="other-keeper")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("APPROVED #41487", second.stdout)
+        self.assertNotIn("SKIP", second.stdout)
+        for mode in ("--source-receipt", "--merge-check"):
+            admitted = self.run_guard(mode)
+            self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        reviews = json.loads((self.data / "reviews.json").read_text())
+        self.assertEqual([r["state"] for r in reviews],
+                         ["CHANGES_REQUESTED", "CHANGES_REQUESTED", "APPROVED", "APPROVED"])
+        self.assertIn("replaces own CHANGES_REQUESTED 88", reviews[2]["body"])
+        self.assertIn("replaces own CHANGES_REQUESTED 89", reviews[3]["body"])
+        calls = (self.data / "calls.log").read_text()
+        self.assertEqual(calls.count("POST repos/o/r/pulls/41487/reviews"), 2)
+        self.assertNotIn("dismiss", calls)
+
+    def test_shared_account_stale_request_remains_until_its_owner_replaces_it(self):
+        stale = self.negative_review(rid=89, submitted="2026-10-09T03:45:54Z")
+        stale["commit_id"] = "a" * 40
+        stale["body"] = (f"verdict: FAIL head: {'a' * 40} by: other-keeper\nsource findings")
+        self.reviews(self.negative_review(), stale)
+        self.install_publication_fake()
+
+        first = self.publish(88)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 2, receipt.stderr)
+        self.assertIn("unresolved change requests (review IDs 89)", receipt.stderr)
+        wrong_owner = self.publish(89)
+        self.assertEqual(wrong_owner.returncode, 2, wrong_owner.stderr)
+        self.assertIn("signer is unknown or differs", wrong_owner.stderr)
+        second = self.publish(89, keeper="other-keeper")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("APPROVED #41487", second.stdout)
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 0, receipt.stderr)
+
+    def test_older_request_is_replaced_after_same_account_approval(self):
+        request = self.negative_review()
+        self.review(footer_line())
+        approval = json.loads((self.data / "review.json").read_text())
+        approval.update(id=89, submitted_at="2026-10-09T03:45:54Z")
+        approval["user"]["login"] = "reviewer-account"
+        approval["body"] = approval["body"].replace("by: reviewer-keeper", "by: other-keeper")
+        self.reviews(request, approval)
+        (self.data / "review-89.json").write_text(json.dumps(approval))
+        self.install_publication_fake()
+
+        result = self.publish(88)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("APPROVED #41487", result.stdout)
+        self.assertNotIn("SKIP", result.stdout)
+        reviews = json.loads((self.data / "reviews.json").read_text())
+        self.assertIn("replaces own CHANGES_REQUESTED 88", reviews[-1]["body"])
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 0, receipt.stderr)
+
+    def test_unsigned_same_account_request_stays_blocked_after_owned_replacement(self):
+        unsigned = self.negative_review(rid=89, submitted="2026-10-09T03:45:54Z")
+        unsigned["body"] = "Please fix this"
+        self.reviews(self.negative_review(), unsigned)
+        self.install_publication_fake()
+
+        first = self.publish(88)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        receipt = self.run_guard("--source-receipt")
+        self.assertEqual(receipt.returncode, 2, receipt.stderr)
+        self.assertIn("unresolved change requests (review IDs 89)", receipt.stderr)
+        claim = self.publish(89)
+        self.assertEqual(claim.returncode, 2, claim.stderr)
+        self.assertIn("signer is unknown or differs", claim.stderr)
+
     def test_recording_a_new_review_does_not_clear_a_different_reviewers_findings(self):
         for login in ("reviewer-account", "another-reviewer"):
             with self.subTest(login=login):
@@ -841,6 +1048,10 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
                 self.reviews(self.negative_review(), self.negative_review(
                     rid=89, submitted="2026-10-09T03:45:54Z"))
                 published = self.publish(*ids)
+                if len(ids) == 1:
+                    self.assertEqual(published.returncode, 2, published.stderr)
+                    self.assertIn("unresolved change requests", published.stderr)
+                    continue
                 self.assertEqual(published.returncode, 0, published.stderr)
                 for mode in ("--merge-check", "--source-receipt"):
                     result = self.run_guard(mode)
@@ -961,11 +1172,11 @@ print(f'{rid}\\tAPPROVED\\t{review["commit_id"]}')
         self.reviews(self.negative_review())
         gh = self.tmp / "gh"
         gh.write_text(gh.read_text().replace(
-            '  repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json";;',
+            '  repos/*/pulls/*/reviews*) f="$FAKE_DIR/reviews.json"; reviews_collection=1;;',
             '''  repos/*/pulls/*/reviews*)
     [ ! -f "$FAKE_DIR/reviews-already-read" ] || exit 7
     touch "$FAKE_DIR/reviews-already-read"
-    f="$FAKE_DIR/reviews.json";;'''))
+    f="$FAKE_DIR/reviews.json"; reviews_collection=1;;'''))
         r = self.replacement_check()
         self.assertEqual(r.returncode, 1, r.stderr)
         self.assertIn("approve-guard: verdict read failed", r.stderr)
@@ -977,7 +1188,8 @@ class QueueAdmissionDiagnosticCase(GuardHarness):
         shutil.copy(HERE / "queue-ledger.sh", self.scripts / "queue-ledger.sh")
         request = {"id": 88, "state": "CHANGES_REQUESTED",
                    "body": "Please fix the unresolved finding.",
-                   "user": {"login": "blocked-reviewer"}}
+                   "user": {"login": "blocked-reviewer"},
+                   "submitted_at": "2026-10-08T03:45:54Z"}
         (self.data / "reviews.json").write_text(json.dumps([request]))
         gh = self.tmp / "gh"
         gh.write_text(gh.read_text().replace('shift\n',

@@ -204,7 +204,7 @@ let carried_model_input_projection ~input_source
          Some
            (Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
               ~capacity:capacity_bytes));
-    Host.project_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent
+    Host.project_source ~input_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection sent
   in
   let* sent =
     Host.start_range_projection
@@ -830,12 +830,9 @@ let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
    change; a note about which tool to reach for would then be wrong. *)
 let native_posture_note = function
   | Runtime_native_tools.Native_read ->
-    [ "Your built-in file edits run under a read-only sandbox in this session, \
-       so apply_patch and every other built-in write is refused. File changes \
-       go through the Write and Edit tools, which are not sandboxed that way. \
-       A refused built-in write does not mean the workspace is read-only."
-    ]
-  | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []
+    Prompt_registry.render_prompt_template Prompt_names.keeper_codex_native_read []
+    |> Result.map (fun note -> [ String.trim note ])
+  | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> Ok []
 ;;
 
 (* A dispatched turn may have effects even if no tool/text notification made
@@ -946,6 +943,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
         ~default:Runtime_native_tools.codex_default
         ~none_supported:(Runtime_execution.supports_native_none (Codex_app_server config))
     in
+    let* posture_notes =
+      native_posture_note native_posture
+      |> Result.map_error (Keeper_internal_error.guidance_preparation_unavailable
+          ~field:Prompt_names.keeper_codex_native_read)
+    in
     let* () = on_guidance_prepared () in
     let tool_surface_sha256 =
       Keeper_official_client_session_store.tool_surface_sha256
@@ -1011,7 +1013,6 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
                 })
               images )
     in
-    let posture_notes = native_posture_note native_posture in
     let composed_context = prepared.composed_context in
     let compose_developer_instructions developer_messages =
       (List.map Keeper_context_submission_link.literal (prepared.system_prompt :: posture_notes)) @ developer_messages

@@ -7971,7 +7971,9 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
        in
        let posture_note =
          Keeper_codex_runtime.For_testing.native_posture_note
-           Runtime_native_tools.Native_read |> String.concat "\n\n"
+           Runtime_native_tools.Native_read
+         |> (function Ok notes -> notes | Error detail -> fail detail)
+         |> String.concat "\n\n"
        in
        let envelope context =
          { (Agent_core.Types.system_msg context) with origin = Llm_provider.Types.System_context;

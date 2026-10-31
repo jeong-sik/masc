@@ -1558,13 +1558,19 @@ let render_schedule_list (state : state) =
                 ((Theme.bad ()) ^ "  (schedule store unreadable)" ^ Ansi.reset))
        end else begin
          let count_text =
-           match snapshot.scs_request_count with
-           | Some total when snapshot.scs_truncated ->
-               Printf.sprintf "  Requests: %d  (page shows first %d)" total
+           match snapshot.scs_request_count, snapshot.scs_paging with
+           | Some total, Schedule_paging_unavailable when snapshot.scs_truncated ->
+               Printf.sprintf "  Requests: %d  (first %d; server paging unavailable)" total
                  (List.length snapshot.scs_rows)
-           | Some total ->
+           | Some total, Schedule_paging _
+             when snapshot.scs_truncated || Option.is_some state.schedules_page.sp_cursor ->
+               Printf.sprintf "  Requests: %d  · page %d (%d shown; pages may change)"
+                 total (List.length state.schedules_page.sp_previous + 1)
+                 (List.length snapshot.scs_rows)
+           | Some total, (Schedule_paging_unavailable | Schedule_paging _) ->
                Printf.sprintf "  Requests: %d" total
-           | None -> "  Requests: " ^ Masc_tui_theme.Glyph.no_value
+           | None, (Schedule_paging_unavailable | Schedule_paging _) ->
+               "  Requests: " ^ Masc_tui_theme.Glyph.no_value
          in
          (* One row, not two. The count and the next wake are a phrase each,
             and with nothing due the second row was drawn blank -- a row of
@@ -1576,7 +1582,11 @@ let render_schedule_list (state : state) =
                  (Terminal_text.short_timestamp iso) Ansi.reset
            | None -> ""
          in
-         c.push (Ansi.bold ^ count_text ^ Ansi.reset ^ next_due_text);
+         let page_read_text = match state.schedules_navigation with
+           | Some (ticket, page, _) when Snapshot_read.is_current state.schedules_read ticket ->
+               Printf.sprintf "  · loading page %d" (List.length page.sp_previous + 1)
+           | Some _ | None -> "" in
+         c.push (Ansi.bold ^ count_text ^ Ansi.reset ^ next_due_text ^ page_read_text);
          c.push_divider ();
 
          let count = List.length snapshot.scs_rows in
@@ -1588,10 +1598,15 @@ let render_schedule_list (state : state) =
               them. An operator looking at an empty Schedules screen then has
               nowhere on it saying a schedule can be made at all. Same move
               [page_unread_note] made for [r]. *)
-           c.push
-             (Ansi.dim
-             ^ "  (no scheduled automation \xe2\x80\x94 press n to create one)"
-             ^ Ansi.reset)
+           let empty = match snapshot.scs_request_count, state.schedules_page.sp_previous with
+             | Some total, _ :: _ when total > 0 ->
+                 "  (no schedules on this page; < returns to the previous page)"
+             | Some total, [] when total > 0 ->
+                 "  (no schedules on this page; refresh to read again)"
+             | (Some _ | None), (_ :: _ | []) ->
+                 "  (no scheduled automation \xe2\x80\x94 press n to create one)"
+           in
+           c.push (Ansi.dim ^ empty ^ Ansi.reset)
          end else begin
            (* Keep two factual rows below the list for delivery state. Without
               it the list says when a wake is due but not whether the dispatch,

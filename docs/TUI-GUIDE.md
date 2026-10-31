@@ -2211,11 +2211,16 @@ The scheduled-automation list: every wake the runtime has queued, active rows
 first by due time. This is the surface that answers "why is this keeper about
 to wake up". Open it through the `go Schedules` palette entry. The selected
 Keeper also exposes its automation in the Automation detail tab.
+Use `<` and `>` on the list, or on a Keeper's Automation tab, to read the
+previous or next server page. Each page is a separate observation: schedules
+created or changed between reads can move across the cursor boundary. Refresh
+the first page to begin a new traversal. A server without this paging contract
+still shows its first page and marks it as limited when appropriate.
 
 ```
  MASC Keepers / Schedules  10:44:57  HTTP [connected]
  ─────────────────────────────────────────────────────────────────────────────
-   Requests: 34  (page shows first 20)  ·  Next due: 2026-08-24 09:57:00
+   Requests: 34  · page 1 (20 shown; pages may change)  ·  Next due: 2026-08-24 09:57:00
  ─────────────────────────────────────────────────────────────────────────────
    STATUS       DUE                 TARGET  WAKE      DELIVERY     RECURRENCE
  ─────────────────────────────────────────────────────────────────────────────
@@ -2230,9 +2235,12 @@ still reads `succeeded` under the first. Both used to be labelled inside the
 row — `wake:succeeded · consumed_ack` — while the four columns around them had
 no names at all.
 
-The header count and the page are different things: the server sorts the whole
-store active-first and serves the first twenty rows, so `(page shows first
-20)` names what is held back. A store that could not be read is
+The header count and the page are different things: on each successful read,
+the server counts all matching requests and orders them active-first by due
+time; the page shows only the rows returned for its cursor. Pages are separate
+observations. When a server lacks paging, the TUI marks a truncated first
+page as limited.
+A store that could not be read is
 `data unreliable` with the failing call, not an empty list - "the ledger is
 unreadable" and "nothing is scheduled" are different facts.
 

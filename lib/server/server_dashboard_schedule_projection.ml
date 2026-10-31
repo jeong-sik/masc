@@ -1154,8 +1154,97 @@ let schedule_request_rows_dashboard_json ~config ~now ~runner_status state reque
    target. *)
 let schedule_projection_target_request_limit = 200
 
-let scheduled_automation_dashboard_json
+(* A cursor records the actual ordering key and selector, not a list offset.
+   The store may change between requests; the cursor preserves the boundary but
+   does not turn independently read pages into a point-in-time snapshot. *)
+type schedule_page_key =
+  { page_active : bool
+  ; page_due_at : float
+  ; page_schedule_id : string
+  }
+
+let schedule_page_key (request : Schedule_domain.schedule_request) =
+  { page_active = schedule_request_active request
+  ; page_due_at = request.due_at
+  ; page_schedule_id = request.schedule_id
+  }
+
+let compare_schedule_order ~left_active ~left_due_at ~left_id
+    ~right_active ~right_due_at ~right_id =
+  match Bool.compare right_active left_active with
+  | 0 ->
+    (match Float.compare left_due_at right_due_at with
+     | 0 -> String.compare left_id right_id
+     | order -> order)
+  | order -> order
+;;
+
+let compare_schedule_requests (left : Schedule_domain.schedule_request)
+    (right : Schedule_domain.schedule_request) =
+  compare_schedule_order
+    ~left_active:(schedule_request_active left) ~left_due_at:left.due_at
+    ~left_id:left.schedule_id ~right_active:(schedule_request_active right)
+    ~right_due_at:right.due_at ~right_id:right.schedule_id
+;;
+
+let compare_schedule_request_to_key (request : Schedule_domain.schedule_request) key =
+  compare_schedule_order
+    ~left_active:(schedule_request_active request) ~left_due_at:request.due_at
+    ~left_id:request.schedule_id ~right_active:key.page_active
+    ~right_due_at:key.page_due_at ~right_id:key.page_schedule_id
+;;
+
+let schedule_page_cursor ~payload_target key =
+  `Assoc
+    [ "version", `Int 1
+    ; "target", (match payload_target with None -> `Null | Some target -> `String target)
+    ; "active", `Bool key.page_active
+    ; "due_at", `Float key.page_due_at
+    ; "schedule_id", `String key.page_schedule_id
+    ]
+  |> Yojson.Safe.to_string
+  |> Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+;;
+
+let schedule_page_key_of_cursor ~payload_target raw =
+  let invalid = Error "invalid schedule page cursor; start again from the first page" in
+  match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet raw with
+  | Error (`Msg _) -> invalid
+  | Ok decoded ->
+    (match Yojson.Safe.from_string decoded with
+     | `Assoc fields ->
+       let target =
+         match List.assoc_opt "target" fields with
+         | Some `Null -> Some None
+         | Some (`String target) -> Some (Some target)
+         | None | Some (`Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _) -> None
+       in
+       let due_at =
+         match List.assoc_opt "due_at" fields with
+         | Some (`Float due) -> Some due
+         | Some (`Int due) -> Some (float_of_int due)
+         | None | Some (`Null | `Bool _ | `Intlit _ | `String _ | `Assoc _ | `List _) -> None
+       in
+       (match List.assoc_opt "version" fields, target,
+              List.assoc_opt "active" fields, due_at,
+              List.assoc_opt "schedule_id" fields with
+        | Some (`Int 1), Some target, Some (`Bool active), Some due,
+          Some (`String schedule_id)
+          when Option.equal String.equal target payload_target && schedule_id <> "" ->
+          (match classify_float due with
+           | FP_normal | FP_subnormal | FP_zero ->
+             Ok { page_active = active; page_due_at = due; page_schedule_id = schedule_id }
+           | FP_infinite | FP_nan -> invalid)
+        | (Some _ | None), (Some _ | None), (Some _ | None), (Some _ | None),
+          (Some _ | None) -> invalid)
+     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> invalid
+     | exception Yojson.Json_error _ -> invalid)
+;;
+
+let scheduled_automation_dashboard_page_json
   ?(payload_target : string option)
+  ?(cursor : string option)
+  ?(after : schedule_page_key option)
   (config : Workspace.config)
   : Yojson.Safe.t
   =
@@ -1228,8 +1317,10 @@ let scheduled_automation_dashboard_json
          ; "schedule_store_known", `Bool false
          ; "schedule_store_read_error", `String read_error
          ; "request_count", `Null
-         ; "request_limit", `Int schedule_projection_request_limit
+         ; "request_limit", `Int request_limit
          ; "truncated", `Bool false
+         ; "page_cursor", (match cursor with None -> `Null | Some value -> `String value)
+         ; "next_cursor", `Null
          ; "counts", `Null
          ; "wake_counts", `Null
          ; "payload_support", `Null
@@ -1255,18 +1346,24 @@ let scheduled_automation_dashboard_json
     let payload_support = schedule_payload_support_json schedules in
     let sorted =
       schedules
-      |> List.sort (fun left right ->
-        match
-          ( schedule_request_active left
-          , schedule_request_active right
-          , compare left.due_at right.due_at )
-        with
-        | true, false, _ -> -1
-        | false, true, _ -> 1
-        | _, _, due_cmp when due_cmp <> 0 -> due_cmp
-        | _ -> String.compare left.schedule_id right.schedule_id)
+      |> List.sort compare_schedule_requests
     in
-    let request_rows = take request_limit sorted in
+    let remaining =
+      match after with
+      | None -> sorted
+      | Some key ->
+        List.filter
+          (fun request -> compare_schedule_request_to_key request key > 0)
+          sorted
+    in
+    let request_rows = take request_limit remaining in
+    let next_cursor =
+      if List.length remaining <= request_limit then None
+      else
+        match List.rev request_rows with
+        | [] -> None
+        | last :: _ -> Some (schedule_page_cursor ~payload_target (schedule_page_key last))
+    in
     let request_jsons =
       schedule_request_rows_dashboard_json
         ~config
@@ -1282,7 +1379,9 @@ let scheduled_automation_dashboard_json
          ; "schedule_store_read_error", `Null
          ; "request_count", `Int (List.length schedules)
          ; "request_limit", `Int request_limit
-         ; "truncated", `Bool (List.length schedules > request_limit)
+         ; "truncated", `Bool (List.length schedules > List.length request_rows)
+         ; "page_cursor", (match cursor with None -> `Null | Some value -> `String value)
+         ; "next_cursor", (match next_cursor with None -> `Null | Some value -> `String value)
          ; "counts", schedule_counts_json schedules
          ; "wake_counts", schedule_wake_counts_json schedules state
          ; "payload_support", payload_support
@@ -1296,6 +1395,21 @@ let scheduled_automation_dashboard_json
                ; "next_due_at", unix_iso_option_json (schedule_next_due_at schedules)
                ] )
          ; "requests", `List request_jsons
+         ])
+;;
+
+let scheduled_automation_dashboard_json ?payload_target ?cursor config =
+  match cursor with
+  | None -> scheduled_automation_dashboard_page_json ?payload_target config
+  | Some raw ->
+    (match schedule_page_key_of_cursor ~payload_target raw with
+     | Ok after ->
+       scheduled_automation_dashboard_page_json ?payload_target ~cursor:raw ~after config
+     | Error message ->
+       `Assoc
+         [ "schema", `String "masc.dashboard.scheduled_automation.v1"
+         ; "status", `String "invalid_cursor"
+         ; "cursor_error", `String message
          ])
 ;;
 

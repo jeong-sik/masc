@@ -193,7 +193,8 @@ let test_schedule_responses_follow_keeper_and_generation () =
   in
   let snapshot count : Types.schedule_snapshot =
     { scs_status = "ok"; scs_read_error = None; scs_request_count = Some count
-    ; scs_truncated = false; scs_next_due_iso = None; scs_counts = None
+    ; scs_truncated = false; scs_payload_target = None
+    ; scs_paging = Schedule_paging_unavailable; scs_next_due_iso = None; scs_counts = None
     ; scs_rows = []; scs_observed_at_iso = "2026-10-26T08:59:00Z"
          ; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok }
   in
@@ -210,11 +211,15 @@ let test_schedule_responses_follow_keeper_and_generation () =
   state.keepers <- [keeper "alpha"; keeper "beta"];
   let ask name = Types.mark_detail_read_started state
     ~tab:Types.Detail_automation ~keeper:name ~now_ns:(ns 10) in
+  let apply detail result =
+    Types.apply_keeper_schedules_read state
+      { kspr_detail = detail; kspr_page = Types.schedule_first_page;
+        kspr_navigation = false; kspr_scroll = 0 } result in
   let alpha = ask "alpha" in
   state.keeper_cursor <- 1;
   let beta = ask "beta" in
-  Types.apply_keeper_schedules_read state beta (Ok (snapshot 2));
-  Types.apply_keeper_schedules_read state alpha (Error "late alpha failure");
+  apply beta (Ok (snapshot 2));
+  apply alpha (Error "late alpha failure");
   check (option string) "late A cannot replace B's page" (Some "beta")
     (Option.map fst state.keeper_schedules);
   check (option (pair string string)) "late A error is not B's error" None
@@ -223,16 +228,55 @@ let test_schedule_responses_follow_keeper_and_generation () =
     (Types.detail_read_waiting state ~tab:Types.Detail_automation ~keeper:"alpha");
   let old_beta = ask "beta" in
   let new_beta = ask "beta" in
-  Types.apply_keeper_schedules_read state new_beta (Ok (snapshot 3));
-  Types.apply_keeper_schedules_read state old_beta (Ok (snapshot 1));
+  apply new_beta (Ok (snapshot 3));
+  apply old_beta (Ok (snapshot 1));
   check (option int) "older generation cannot regress the current page" (Some 3)
     (Option.bind state.keeper_schedules (fun (_, page) -> page.scs_request_count));
   let failed = ask "beta" in
-  Types.apply_keeper_schedules_read state failed (Error "beta offline");
+  apply failed (Error "beta offline");
   check (option int) "failed refresh retains the last read" (Some 3)
     (Option.bind state.keeper_schedules (fun (_, page) -> page.scs_request_count));
   check (option (pair string string)) "failed refresh is attributed to B"
     (Some ("beta", "beta offline")) state.keeper_schedules_error;
+  let first =
+    { (snapshot 25) with
+      scs_paging = Types.Schedule_paging { page_cursor = None; next_cursor = Some "next" } }
+  in
+  let page2 = match Types.schedule_next_page Types.schedule_first_page first with
+    | Some page -> page
+    | None -> fail "the issued next cursor was not offered" in
+  check (option string) "next page uses the issued cursor" (Some "next") page2.sp_cursor;
+  (match Types.schedule_previous_page page2 with
+   | None -> fail "the previous page was lost"
+   | Some page -> check (option string) "previous page keeps its original cursor" None page.sp_cursor);
+  check bool "a first-page snapshot cannot advance a different page" true
+    (Option.is_none (Types.schedule_next_page page2 first));
+  let failed_page = ask "beta" in
+  Types.apply_keeper_schedules_read state
+    { kspr_detail = failed_page; kspr_page = page2;
+      kspr_navigation = false; kspr_scroll = 0 } (Error "page failed");
+  check (option string) "a failed page read retains the current page" None
+    (Option.bind state.keeper_schedules_page (fun (_, page) -> page.sp_cursor));
+  let superseded = ask "beta" in
+  let newest = ask "beta" in
+  Types.apply_keeper_schedules_read state
+    { kspr_detail = newest; kspr_page = page2;
+      kspr_navigation = false; kspr_scroll = 0 } (Ok (snapshot 25));
+  apply superseded (Ok (snapshot 3));
+  check (option string) "a late response cannot replace the accepted page" (Some "next")
+    (Option.bind state.keeper_schedules_page (fun (_, page) -> page.sp_cursor));
+  let read, old_agenda = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Poll state.schedules_agenda_read in
+  state.schedules_agenda_read <- read;
+  let read, new_agenda = Types.Snapshot_read.start ~intent:Types.Snapshot_read.Refresh state.schedules_agenda_read in
+  state.schedules_agenda_read <- read;
+  let ticket = function Some ticket -> ticket | None -> fail "agenda request was not started" in
+  state.schedules <- Some (snapshot 25);
+  Types.apply_schedule_agenda_read state (ticket new_agenda) (Ok (snapshot 3));
+  Types.apply_schedule_agenda_read state (ticket old_agenda) (Ok (snapshot 1));
+  check (option int) "agenda keeps its own newest first-page observation" (Some 3)
+    (Option.bind state.schedules_agenda (fun page -> page.scs_request_count));
+  check (option int) "agenda refresh does not replace the browsed page" (Some 25)
+    (Option.bind state.schedules (fun page -> page.scs_request_count));
   check bool "A's identity action cannot mutate B's view" false
     (Types.keeper_detail_target_matches state "alpha");
   check bool "B's identity action can refresh its own view" true
@@ -240,15 +284,87 @@ let test_schedule_responses_follow_keeper_and_generation () =
   state.view <- Types.Keepers Types.Keeper_message;
   state.msg_target_keeper_name <- Some "alpha";
   let chat_alpha = ask "alpha" in
-  Types.apply_keeper_schedules_read state chat_alpha (Ok (snapshot 4));
+  apply chat_alpha (Ok (snapshot 4));
   check (option string) "chat target owns its schedules even while roster selects B" (Some "alpha")
     (Option.map fst state.keeper_schedules);
   let off_target = ask "beta" in
-  Types.apply_keeper_schedules_read state off_target (Error "off-target failure");
+  apply off_target (Error "off-target failure");
   check (option string) "another Keeper cannot replace chat observation" (Some "alpha")
     (Option.map fst state.keeper_schedules);
   check (option (pair string string)) "another Keeper cannot set chat read error" None
-    state.keeper_schedules_error
+    state.keeper_schedules_error;
+  state.view <- Types.Keepers Types.Keeper_detail;
+  state.detail_tab <- Types.Detail_automation;
+  state.keeper_cursor <- 1;
+  state.detail_scroll <- 0;
+  let pending_page = ask "beta" in
+  state.keeper_schedules_pending <- Some (pending_page, page2, 0);
+  check bool "repeated request for the same Keeper page shares the pending read" true
+    (Types.keeper_schedule_page_pending state ~keeper_name:"beta" page2);
+  check bool "the first page cannot share a pending second page" false
+    (Types.keeper_schedule_page_pending state ~keeper_name:"beta" Types.schedule_first_page);
+  state.detail_scroll <- 1;
+  check bool "a new navigation after scrolling does not share the old request" false
+    (Types.keeper_schedule_navigation_pending state ~keeper_name:"beta" page2);
+  Types.apply_keeper_schedules_read state
+    { kspr_detail = pending_page; kspr_page = page2;
+      kspr_navigation = true; kspr_scroll = 0 } (Ok (snapshot 77));
+  check (option string) "scroll after page request keeps the previous observation" (Some "alpha")
+    (Option.map fst state.keeper_schedules);
+  let page_for_chat = ask "beta" in
+  state.keeper_schedules_pending <- Some (page_for_chat, page2, 0);
+  state.view <- Types.Keepers Types.Keeper_message;
+  state.msg_target_keeper_name <- Some "beta";
+  let chat_first = ask "beta" in
+  state.keeper_schedules_pending <- Some (chat_first, Types.schedule_first_page, 0);
+  Types.apply_keeper_schedules_read state
+    { kspr_detail = page_for_chat; kspr_page = page2;
+      kspr_navigation = true; kspr_scroll = 0 } (Ok (snapshot 77));
+  check bool "entering chat replaces the pending Automation page" true
+    (Types.keeper_schedule_page_pending state ~keeper_name:"beta" Types.schedule_first_page);
+  apply chat_first (Ok (snapshot 4));
+  check bool "chat accepts the selected Keeper's first page" true
+    (Types.keeper_schedule_first_page_available state "beta");
+  let first_nav = ask "beta" in
+  state.keeper_schedules_pending <- Some (first_nav, Types.schedule_first_page, 0);
+  Types.apply_keeper_schedules_read state
+    { kspr_detail = first_nav; kspr_page = Types.schedule_first_page;
+      kspr_navigation = true; kspr_scroll = 0 } (Ok (snapshot 5));
+  check (option int) "chat may accept a shared navigation to the first page" (Some 5)
+    (Option.bind state.keeper_schedules (fun (_, page) -> page.scs_request_count));
+  state.view <- Types.Schedules;
+  state.schedules <- Some first;
+  state.schedules_page <- Types.schedule_first_page;
+  state.schedule_detail_id <- None;
+  let started read intent =
+    let read, ticket = Types.Snapshot_read.start ~intent read in
+    state.schedules_read <- read;
+    match ticket with Some ticket -> ticket | None -> fail "schedule read did not start" in
+  let old_poll = started state.schedules_read Types.Snapshot_read.Poll in
+  let nav = started state.schedules_read Types.Snapshot_read.Refresh in
+  state.schedules_navigation <- Some (nav, page2, None);
+  check bool "repeated fleet navigation shares the pending destination" true
+    (Types.schedule_navigation_pending state page2);
+  state.schedules_navigation <- Some (nav, page2, Some "different-selection");
+  check bool "navigation after changing selection does not share the old request" false
+    (Types.schedule_navigation_pending state page2);
+  state.schedules_navigation <- Some (nav, page2, None);
+  let fleet_request ticket navigating =
+    { Types.spr_ticket = ticket; spr_page = page2; spr_agenda_ticket = None;
+      spr_navigation = navigating; spr_selected_id = None } in
+  Types.apply_schedule_page_read state (fleet_request old_poll false) (Ok (snapshot 99));
+  check bool "the poll cannot replace its newer page request" true
+    (Types.schedule_navigation_pending state page2);
+  state.schedule_detail_id <- Some "opened-after-navigation";
+  Types.apply_schedule_page_read state (fleet_request nav true) (Ok (snapshot 77));
+  check (option string) "opening details beats a late page response"
+    (Some "opened-after-navigation") state.schedule_detail_id;
+  check (option string) "discarded navigation leaves the first page" None state.schedules_page.sp_cursor;
+  state.schedule_detail_id <- None;
+  let next = started state.schedules_read Types.Snapshot_read.Refresh in
+  Types.apply_schedule_page_read state (fleet_request next true) (Ok (snapshot 77));
+  check (option string) "uninterrupted page navigation applies its destination" (Some "next")
+    state.schedules_page.sp_cursor
 
 let () =
   run "tui loading notice"

@@ -4026,13 +4026,26 @@ let launch_schedule_wake_history_load state ~mailbox ~schedule_id =
                 (schedule_id, Error "Eio switch is unavailable")))
   end
 
-let launch_keeper_schedules_load state ~mailbox ~keeper_name =
+let launch_keeper_schedules_load ?page state ~mailbox ~keeper_name =
   if server_authority_ready state then
   let enqueue_async = workspace_enqueue state in
+  let navigating = Option.is_some page in
+  let page = match page with
+    | Some page -> page
+    | None ->
+        if state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation then
+          (match state.keeper_schedules_page with
+           | Some (name, page) when String.equal name keeper_name -> page
+           | Some _ | None -> schedule_first_page)
+        else schedule_first_page
+  in
   (* Tab entry is an explicit read. Reopening supersedes a pending answer,
      while the request ledger retains the original elapsed interval. *)
-  let request = Masc_tui_types.mark_detail_read_started state
+  let detail = Masc_tui_types.mark_detail_read_started state
     ~tab:Detail_automation ~keeper:keeper_name ~now_ns:(Mtime_clock.elapsed_ns ()) in
+  state.keeper_schedules_pending <- Some (detail, page, state.detail_scroll);
+  let request = { kspr_detail = detail; kspr_page = page;
+                  kspr_navigation = navigating; kspr_scroll = state.detail_scroll } in
   let host = server_peer_host in
   let port = state.port in
   let payload_target = "keeper:" ^ keeper_name in
@@ -4041,31 +4054,62 @@ let launch_keeper_schedules_load state ~mailbox ~keeper_name =
     ~deliver:(fun result ->
       enqueue_async mailbox (Keeper_schedules_loaded (request, result)))
     (fun () ->
-      Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target)
+      Masc_tui_loader.load_schedules_for_target ~host ~port ~payload_target
+        ~cursor:page.sp_cursor)
 
 (* Chat shares the exact target read with Automation. Cadence and entry share
    an in-flight ticket instead of superseding a slow response every tick. *)
 let launch_keeper_chat_schedules_load state ~mailbox ~keeper_name =
   if state.view = Keepers Keeper_message
      && state.msg_target_keeper_name = Some keeper_name
-     && not (detail_read_waiting state ~tab:Detail_automation ~keeper:keeper_name) then
+     && not (keeper_schedule_page_pending state ~keeper_name schedule_first_page) then
     launch_keeper_schedules_load state ~mailbox ~keeper_name
 
-let launch_schedules_load ?(intent = Snapshot_read.Poll) state ~mailbox =
+let launch_schedules_load ?(intent = Snapshot_read.Poll) ?page state ~mailbox =
   if server_authority_ready state then begin
   let enqueue_async = workspace_enqueue state in
+  let navigating = Option.is_some page in
+  let page = Option.value ~default:state.schedules_page page in
   let read, request = Snapshot_read.start ~intent state.schedules_read in
   state.schedules_read <- read;
   match request with
   | None -> ()
-  | Some request ->
+  | Some ticket ->
+  let selected_id = selected_schedule_id state in
+  state.schedules_navigation <- if navigating then Some (ticket, page, selected_id) else None;
+  let agenda_ticket =
+    if Option.is_some page.sp_cursor then None
+    else
+      let read, ticket = Snapshot_read.start ~intent state.schedules_agenda_read in
+      state.schedules_agenda_read <- read;
+      ticket
+  in
+  let request = Schedule_page_read
+      { spr_ticket = ticket; spr_page = page; spr_agenda_ticket = agenda_ticket;
+        spr_navigation = navigating; spr_selected_id = selected_id } in
   let host = server_peer_host in
   let port = state.port in
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (Schedules_loaded (request, result)))
-    (fun () -> Masc_tui_loader.load_schedules ~host ~port)
+    (fun () -> Masc_tui_loader.load_schedules ~host ~port ~cursor:page.sp_cursor)
 
+  end
+
+let launch_schedule_agenda_load state ~mailbox =
+  if server_authority_ready state then begin
+    let enqueue_async = workspace_enqueue state in
+    let read, request = Snapshot_read.start ~intent:Snapshot_read.Poll state.schedules_agenda_read in
+    state.schedules_agenda_read <- read;
+    match request with
+    | None -> ()
+    | Some ticket ->
+        let host = server_peer_host in
+        let port = state.port in
+        Masc_tui_async_read.launch
+          ~deliver:(fun result ->
+            enqueue_async mailbox (Schedules_loaded (Schedule_agenda_read ticket, result)))
+          (fun () -> Masc_tui_loader.load_schedules ~host ~port ~cursor:None)
   end
 
 (* The durable call log of one keeper, over HTTP. The row the answer is
@@ -8043,9 +8087,13 @@ let launch_keeper_child_content_load ?(mode=Masc_tui_child_content.Poll) state ~
 
 let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) state ~mailbox
     ~keeper_name =
-  (match state.keeper_schedules with
-   | Some (name, _) when String.equal name keeper_name && not force -> ()
-   | Some _ | None -> launch_keeper_chat_schedules_load state ~mailbox ~keeper_name);
+  let other_page_pending = match state.keeper_schedules_pending with
+    | Some (request, page, _) when String.equal request.drr_keeper keeper_name
+                                && Option.is_some page.sp_cursor ->
+        keeper_schedule_page_pending state ~keeper_name page
+    | Some _ | None -> false in
+  if force || other_page_pending || not (keeper_schedule_first_page_available state keeper_name) then
+    launch_keeper_chat_schedules_load state ~mailbox ~keeper_name;
   if force then state.msg_preparation_details <-
     Masc_tui_preparation_details.refresh ~keeper_name state.msg_preparation_details;
   launch_keeper_child_content_load
@@ -8144,8 +8192,8 @@ let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
   if keeper_available_for_new_message state keeper_name then begin
     open_message_for_keeper ~return_to state keeper_name ~drain_queue;
-    launch_keeper_history_load state ~mailbox ~keeper_name;
-    state.view <- Keepers Keeper_message
+    state.view <- Keepers Keeper_message;
+    launch_keeper_history_load state ~mailbox ~keeper_name
   end else
     report_action state "error"
       "Chat requires a matching workspace and a current Keeper roster"
@@ -12326,8 +12374,8 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
       | Activity_keeper_already_selected ->
           open_message_for_keeper ~return_to:state.msg_return state keeper_name
             ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
-          launch_keeper_history_load state ~mailbox ~keeper_name;
-          state.view <- Keepers Keeper_message)
+          state.view <- Keepers Keeper_message;
+          launch_keeper_history_load state ~mailbox ~keeper_name)
   | Masc_tui_acting_pane.Target_file _ | Masc_tui_acting_pane.Target_call _
   | Masc_tui_acting_pane.Target_calls _ | Masc_tui_acting_pane.Target_keeper _ -> ()
 
@@ -12863,8 +12911,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
           Masc_tui_message_input.clear state.msg_input;
           open_message_for_keeper ~return_to:state.msg_return state keeper_name
             ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
-          launch_keeper_history_load state ~mailbox ~keeper_name;
-          state.view <- Keepers Keeper_message
+          state.view <- Keepers Keeper_message;
+          launch_keeper_history_load state ~mailbox ~keeper_name
       | Masc_tui_command.Keeper_ambiguous candidates ->
           notice ~kind:Notice_failure
             (Printf.sprintf "%S names more than one keeper: %s" name
@@ -14305,6 +14353,8 @@ let revoke_detail_readings state =
   Masc_tui_types.withdraw_identity_readings state;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
+  state.keeper_schedules_page <- None;
+  state.keeper_schedules_pending <- None;
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs
 
 let same_currency_workspace source current =
@@ -14608,6 +14658,11 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
   state.schedules <- None;
   state.schedules_error <- None;
+  state.schedules_page <- schedule_first_page;
+  state.schedules_navigation <- None;
+  state.schedules_agenda <- None;
+  state.schedules_agenda_error <- None;
+  state.schedules_agenda_read <- Snapshot_read.invalidate state.schedules_agenda_read;
   state.schedule_detail_id <- None;
   state.schedule_cancel_armed <- None;
   state.schedule_cancel_error <- None;
@@ -14696,6 +14751,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.keeper_config_view_error <- None;
   state.keeper_schedules <- None;
   state.keeper_schedules_error <- None;
+  state.keeper_schedules_page <- None;
+  state.keeper_schedules_pending <- None;
   (* A refusal receipt answers one workspace's create or modify form; the
      next workspace's forms must not inherit it. Losing the reading, or
      reading the same workspace again, is not the next workspace: the guard's
@@ -15824,7 +15881,11 @@ let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs
      to serve, against a two-second cadence. The projection sorts the active
      rows ahead of the settled ones and cuts at twenty, so the earliest wake
      is in the payload whether or not the tail is. *)
-  launch_schedules_load state ~mailbox
+  (if state.view = Schedules then begin
+     launch_schedules_load state ~mailbox;
+     if Option.is_some state.schedules_page.sp_cursor then
+       launch_schedule_agenda_load state ~mailbox
+   end else launch_schedule_agenda_load state ~mailbox)
   end
 ;;
 
@@ -16372,8 +16433,8 @@ let resolve_opening_chat state ~base_path ~mailbox =
             open_message_for_keeper ~remember_home_chat:false
               ~return_to:Keeper_chat_return_list state keeper_name
               ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
-            launch_keeper_history_load state ~mailbox ~keeper_name;
-            state.view <- Keepers Keeper_message
+            state.view <- Keepers Keeper_message;
+            launch_keeper_history_load state ~mailbox ~keeper_name
           end
   end
 
@@ -21786,31 +21847,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
           (Surface_read_order.request_id request) (Surface_read_order.started_ns request)
           (Mtime_clock.elapsed_ns ()) (Result.is_ok result)
       end
-  | Schedules_loaded (request, result) -> (
-      match Snapshot_read.settle state.schedules_read request with
-      | None -> ()
-      | Some read ->
-      state.schedules_read <- read;
-      match result with
-      | Ok snapshot ->
-          state.schedules <- Some snapshot;
-          state.schedules_error <- None;
-          (* The cursor can outlive a list whose rows changed underneath it;
-             clamping to the new tail keeps the cancel key pointing at a row
-             that exists. *)
-          let count = List.length snapshot.scs_rows in
-          if state.schedule_cursor >= count then
-            state.schedule_cursor <- max 0 (count - 1);
-          (match state.schedule_detail_id with
-           | Some schedule_id
-             when not
-                    (List.exists
-                       (fun row -> String.equal row.sch_schedule_id schedule_id)
-                       snapshot.scs_rows) ->
-               state.schedule_detail_id <- None;
-               state.schedule_scroll <- 0
-           | Some _ | None -> ())
-      | Error err -> state.schedules_error <- Some err)
+  | Schedules_loaded (Schedule_agenda_read ticket, result) ->
+      apply_schedule_agenda_read state ticket result
+  | Schedules_loaded (Schedule_page_read request, result) ->
+      apply_schedule_page_read state request result
   | Schedule_wake_history_loaded (schedule_id, result) ->
       (* A history that arrived for a row the reader has left is not this
          pane's answer; dropping it is what keeps one schedule's attempts from
@@ -32684,9 +32724,9 @@ and is loaded on demand through keeper_skill.
                        ~drain_queue:(fun () -> drain_queued_message state
                          ~base_path ~mailbox:async_messages);
                      set_msg_scroll state 0;
+                     state.view <- Keepers Keeper_message;
                      launch_keeper_history_load state ~mailbox:async_messages
-                       ~keeper_name:keeper.k_name;
-                     state.view <- Keepers Keeper_message)
+                       ~keeper_name:keeper.k_name)
             (* The row this overlay draws names the door on Overview, and
                the chat's minimal rows name it too -- while navigation is
                open this arm owns the key, so both rows need it to answer
@@ -32772,14 +32812,14 @@ and is loaded on demand through keeper_skill.
                 open_message_for_keeper ~return_to:Keeper_chat_return_home state
                   keeper_name ~drain_queue:(fun () ->
                     drain_queued_message state ~base_path ~mailbox:async_messages);
-                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name;
-                state.view <- Keepers Keeper_message
+                state.view <- Keepers Keeper_message;
+                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name
             | Home_read_last keeper_name ->
                 open_message_for_keeper ~remember_home_chat:false
                   ~return_to:Keeper_chat_return_home state keeper_name
                   ~drain_queue:(fun () -> ());
-                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name;
-                state.view <- Keepers Keeper_message
+                state.view <- Keepers Keeper_message;
+                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name
             | Home_choose_keeper ->
                 goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
             | Home_create_keeper -> handle_keeper_create ~return_to:Keeper_chat_return_home ()))
@@ -36015,6 +36055,42 @@ and is loaded on demand through keeper_skill.
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_verification_reject ()
+       | Some (("<" | ">") as key)
+         when state.view = Schedules && Option.is_none state.schedule_detail_id
+              ->
+           let page =
+             if String.equal key "<" then schedule_previous_page state.schedules_page
+             else Option.bind state.schedules (schedule_next_page state.schedules_page)
+           in
+           (match page with
+            | None -> ()
+            | Some page when not (schedule_navigation_pending state page) ->
+                state.schedule_cancel_armed <- None;
+                launch_schedules_load ~intent:Snapshot_read.Refresh ~page state
+                  ~mailbox:async_messages
+            | Some _ -> ())
+       | Some (("<" | ">") as key)
+         when state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation
+              && (terminal_columns < keeper_split_threshold_cols
+                  || state.keeper_detail_focus = Right_pane) ->
+           (match selected_keeper state with
+            | None -> ()
+            | Some keeper ->
+                (match state.keeper_schedules_page, state.keeper_schedules with
+                 | Some (page_keeper, page), Some (snapshot_keeper, snapshot)
+                   when String.equal page_keeper keeper.k_name
+                        && String.equal snapshot_keeper keeper.k_name ->
+                     let destination =
+                       if String.equal key "<" then schedule_previous_page page
+                       else schedule_next_page page snapshot
+                     in
+                     Option.iter
+                       (fun page ->
+                          if not (keeper_schedule_navigation_pending state ~keeper_name:keeper.k_name page) then
+                            launch_keeper_schedules_load ~page state ~mailbox:async_messages
+                              ~keeper_name:keeper.k_name)
+                       destination
+                 | (Some _ | None), (Some _ | None) -> ()))
        (* Refused while a load is in flight rather than changing the state
           without sending a request: [launch_verification_load] returns early
           when one is already out, so the view and the page would move while
@@ -36138,9 +36214,9 @@ and is loaded on demand through keeper_skill.
                        keeper.k_name ~drain_queue:(fun () ->
                          drain_queued_message state ~base_path
                            ~mailbox:async_messages);
+                     state.view <- Keepers Keeper_message;
                      launch_keeper_history_load state ~mailbox:async_messages
-                       ~keeper_name:keeper.k_name;
-                     state.view <- Keepers Keeper_message
+                       ~keeper_name:keeper.k_name
                  | None -> ())
             | Keepers Keeper_detail
               when Option.fold ~none:false
@@ -36153,9 +36229,9 @@ and is loaded on demand through keeper_skill.
                        state keeper.k_name ~drain_queue:(fun () ->
                          drain_queued_message state ~base_path
                            ~mailbox:async_messages);
+                     state.view <- Keepers Keeper_message;
                      launch_keeper_history_load state ~mailbox:async_messages
-                       ~keeper_name:keeper.k_name;
-                     state.view <- Keepers Keeper_message
+                       ~keeper_name:keeper.k_name
                  | None -> ())
             | Keepers Keeper_detail | Keepers Keeper_list
             | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls

@@ -301,12 +301,13 @@ let dashboard_scheduled_automation_query_http_json
     (* A target selector is already narrowed by its target, so it bypasses the
        aggregate's shared cache the same way the exact lookup does: a
        client-controlled selector in a cache key is a key per caller. *)
-    (match Server_utils.query_param request "payload_target" with
-     | None -> dashboard_scheduled_automation_http_json ~config
-     | Some payload_target ->
+    (match Server_utils.query_param request "payload_target",
+           Server_utils.query_param request "cursor" with
+     | None, None -> dashboard_scheduled_automation_http_json ~config
+     | payload_target, cursor ->
        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
          Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
-           ~payload_target
+           ?payload_target ?cursor
            config))
   | Some schedule_id ->
     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->

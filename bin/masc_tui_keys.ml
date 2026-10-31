@@ -827,6 +827,8 @@ let for_surface = function
   | Schedules ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
       ; b Navigate "PgUp/PgDn" "page"
+      ; b Navigate "< / >" "schedule pages" ~detail:List_only
+          ~help:"previous / next server page; pages are separate observations"
       ; b Act "Right / Enter" "details" ~detail:List_only
           ~help:"open schedule details"
       ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
@@ -2199,7 +2201,10 @@ let keeper_detail_tab_bindings (tab : Masc_tui_types.keeper_detail_tab) =
           ~help:"Home goes to the oldest output kept; End goes back to the \
                  bottom and follows new output again"
       ]
-  | Detail_secrets | Detail_automation | Detail_runs -> []
+  | Detail_automation ->
+      [ b Navigate "< / >" "schedule pages"
+          ~help:"previous / next page for this Keeper; pages are separate observations" ]
+  | Detail_secrets | Detail_runs -> []
 
 (* The single keys a binding's key names, in this table's own notation:
    alternatives apart with "/" ("d/m/s", "Left / Esc"), a key pressed twice

@@ -2904,6 +2904,10 @@ let schedule_create_form_json () =
     ]
   |> Yojson.Safe.pretty_to_string
 
+type schedule_paging =
+  | Schedule_paging_unavailable
+  | Schedule_paging of { page_cursor : string option; next_cursor : string option }
+
 (** Schedule list snapshot. [scs_request_count] is [None] exactly when the
     store read failed -- the server reports that as [status = "unknown"]
     rather than an empty list, and the pane keeps the two facts apart the
@@ -2914,6 +2918,8 @@ type schedule_snapshot = {
   scs_read_error: string option;
   scs_request_count: int option;
   scs_truncated: bool;
+  scs_payload_target: string option;
+  scs_paging: schedule_paging;
   scs_next_due_iso: string option;
   (** Every status the store holds for this target, not only the page the
       server sent, so the count stays right when the page is capped. [None]
@@ -2928,6 +2934,40 @@ type schedule_snapshot = {
       the runner is healthy, so only then is the hold drawn as the present
       (#38411). *)
 }
+
+(* The stack keeps the exact cursors the server issued. A page change is only
+   committed when its owning read succeeds. *)
+type schedule_page = {
+  sp_cursor : string option;
+  sp_previous : string option list;
+}
+
+let schedule_first_page = { sp_cursor = None; sp_previous = [] }
+
+let schedule_next_page page snapshot =
+  match snapshot.scs_paging with
+  | Schedule_paging { page_cursor; next_cursor = Some next }
+    when Option.equal String.equal page_cursor page.sp_cursor
+         && not (Option.equal String.equal page_cursor (Some next)) ->
+      Some { sp_cursor = Some next; sp_previous = page.sp_cursor :: page.sp_previous }
+  | Schedule_paging_unavailable | Schedule_paging _ -> None
+
+let schedule_previous_page page =
+  match page.sp_previous with
+  | previous :: rest -> Some { sp_cursor = previous; sp_previous = rest }
+  | [] -> None
+
+type schedule_page_read = {
+      spr_ticket : Snapshot_read.request;
+      spr_page : schedule_page;
+      spr_agenda_ticket : Snapshot_read.request option;
+      spr_navigation : bool;
+      spr_selected_id : string option;
+    }
+
+type schedule_page_request =
+  | Schedule_page_read of schedule_page_read
+  | Schedule_agenda_read of Snapshot_read.request
 
 let chat_schedule_toggle_key = "f9"
 let chat_schedule_toggle_label = "F9"
@@ -8201,6 +8241,13 @@ type detail_read_request = {
   drr_started_ns: int64;
 }
 
+type keeper_schedule_page_request = {
+  kspr_detail : detail_read_request;
+  kspr_page : schedule_page;
+  kspr_navigation : bool;
+  kspr_scroll : int;
+}
+
 type observed_interrupt_status =
   | Interrupt_sending
   | Interrupt_signalled
@@ -9975,6 +10022,13 @@ type state = {
   mutable schedules: schedule_snapshot option;
   mutable schedules_error: string option;
   mutable schedules_read: Snapshot_read.t;
+  mutable schedules_page: schedule_page;
+  mutable schedules_navigation: (Snapshot_read.request * schedule_page * string option) option;
+  (* The agenda always reads the first fleet page, independently of a page
+     being inspected on the Schedules surface. *)
+  mutable schedules_agenda: schedule_snapshot option;
+  mutable schedules_agenda_error: string option;
+  mutable schedules_agenda_read: Snapshot_read.t;
   mutable schedule_cursor: int;
   mutable schedule_scroll: int;
   mutable schedule_detail_id: string option;
@@ -9990,6 +10044,8 @@ type state = {
      read as having none. *)
   mutable keeper_schedules: (string * schedule_snapshot) option;
   mutable keeper_schedules_error: (string * string) option;
+  mutable keeper_schedules_page: (string * schedule_page) option;
+  mutable keeper_schedules_pending: (detail_read_request * schedule_page * int) option;
   mutable msg_schedules_expanded: bool;
   (* A cancel armed for a second keypress: which schedule. The cursor can move
      between the two presses, so the schedule id is captured at arm time and a
@@ -13848,6 +13904,9 @@ let suspend_workspace_readings state =
   invalidate_local_source_read state Local_keepers;
   state.gate_snapshot_read <- Snapshot_read.invalidate state.gate_snapshot_read;
   state.schedules_read <- Snapshot_read.invalidate state.schedules_read;
+  state.schedules_navigation <- None;
+  state.keeper_schedules_pending <- None;
+  state.schedules_agenda_read <- Snapshot_read.invalidate state.schedules_agenda_read;
   state.keeper_sandbox_logs_inflight <- None;
   (* A reread queued behind the retired read is satisfied by the replacement
      read that reconfirmation launches; keep only its demand. *)
@@ -16187,20 +16246,138 @@ let keeper_detail_target_matches state keeper_name =
   | Some keeper -> String.equal keeper.k_name keeper_name
   | None -> false
 
+let apply_schedule_agenda_read state ticket result =
+  match Snapshot_read.settle state.schedules_agenda_read ticket with
+  | None -> ()
+  | Some read ->
+      state.schedules_agenda_read <- read;
+      (match result with
+       | Ok snapshot ->
+           state.schedules_agenda <- Some snapshot;
+           state.schedules_agenda_error <- None
+       | Error error -> state.schedules_agenda_error <- Some error)
+
+let selected_schedule_id state =
+  Option.bind state.schedules (fun snapshot ->
+    Option.map (fun row -> row.sch_schedule_id)
+      (List.nth_opt snapshot.scs_rows state.schedule_cursor))
+
+let schedule_navigation_pending state page =
+  match state.schedules_navigation with
+  | Some (ticket, pending, selected_id) ->
+      Snapshot_read.is_current state.schedules_read ticket
+      && Option.equal String.equal pending.sp_cursor page.sp_cursor
+      && Option.equal String.equal selected_id (selected_schedule_id state)
+  | None -> false
+
+(* A late page answer cannot take focus back from a newer user selection. *)
+let apply_schedule_page_read state request result =
+  Option.iter (fun ticket -> apply_schedule_agenda_read state ticket result)
+    request.spr_agenda_ticket;
+  match Snapshot_read.settle state.schedules_read request.spr_ticket with
+  | None -> ()
+  | Some read ->
+      state.schedules_read <- read;
+      (match state.schedules_navigation with
+       | Some (ticket, _, _) when Snapshot_read.request_id ticket = Snapshot_read.request_id request.spr_ticket ->
+           state.schedules_navigation <- None
+       | Some _ | None -> ());
+      if not request.spr_navigation
+         || (state.view = Schedules && Option.is_none state.schedule_detail_id
+             && Option.equal String.equal request.spr_selected_id (selected_schedule_id state)) then
+        match result with
+        | Error err -> state.schedules_error <- Some err
+        | Ok snapshot ->
+            let same_page =
+              Option.equal String.equal state.schedules_page.sp_cursor request.spr_page.sp_cursor
+            in
+            let selected_id = if same_page then selected_schedule_id state else None in
+            state.schedules <- Some snapshot;
+            state.schedules_error <- None;
+            state.schedules_page <- request.spr_page;
+            state.schedule_cursor <-
+              (match selected_id with
+               | Some id ->
+                   (match List.find_index (fun row -> String.equal row.sch_schedule_id id)
+                            snapshot.scs_rows with
+                    | Some index -> index
+                    | None -> 0)
+               | None -> 0);
+            if not same_page then begin
+              state.schedule_detail_id <- None;
+              state.schedule_scroll <- 0;
+              state.schedule_cancel_armed <- None
+            end;
+            let count = List.length snapshot.scs_rows in
+            if state.schedule_cursor >= count then
+              state.schedule_cursor <- max 0 (count - 1);
+            (match state.schedule_detail_id with
+             | Some schedule_id
+               when not (List.exists (fun row -> String.equal row.sch_schedule_id schedule_id)
+                           snapshot.scs_rows) ->
+                 state.schedule_detail_id <- None;
+                 state.schedule_scroll <- 0
+             | Some _ | None -> ())
+      else if request.spr_navigation && state.view = Schedules then
+        set_last_action state
+          (Some ("Schedule page not opened; selection changed", Unix.gettimeofday ()))
+
+let keeper_schedule_page_pending state ~keeper_name page =
+  match state.keeper_schedules_pending with
+  | Some (request, pending, _)
+    when String.equal request.drr_keeper keeper_name
+         && Option.equal String.equal pending.sp_cursor page.sp_cursor ->
+      (match pending_detail_read state ~tab:Detail_automation ~keeper:keeper_name with
+       | Some current -> current.drr_generation = request.drr_generation
+       | None -> false)
+  | Some _ | None -> false
+
+let keeper_schedule_navigation_pending state ~keeper_name page =
+  match state.keeper_schedules_pending with
+  | Some (_, _, scroll) ->
+      scroll = state.detail_scroll && keeper_schedule_page_pending state ~keeper_name page
+  | None -> false
+
+let keeper_schedule_first_page_available state keeper_name =
+  match state.keeper_schedules with
+  | Some (name, snapshot) when String.equal name keeper_name ->
+      (match snapshot.scs_paging with
+       | Schedule_paging_unavailable | Schedule_paging { page_cursor = None; _ } -> true
+       | Schedule_paging { page_cursor = Some _; _ } -> false)
+  | Some _ | None -> false
+
 (* Retirement belongs to the request even off screen; presentation belongs
    only to the currently selected Keeper and the newest request generation. *)
 let apply_keeper_schedules_read state request result =
-  let current = finish_detail_read state request in
+  let detail = request.kspr_detail in
+  let current = finish_detail_read state detail in
+  (match state.keeper_schedules_pending with
+   | Some (pending, _, _) when pending.drr_generation = detail.drr_generation ->
+       state.keeper_schedules_pending <- None
+   | Some _ | None -> ());
   if current && server_authority_ready state
      && (if view_is_chat state.view then
-         state.msg_target_keeper_name = Some request.drr_keeper
-       else keeper_detail_target_matches state request.drr_keeper) then
+         state.msg_target_keeper_name = Some detail.drr_keeper
+         && Option.is_none request.kspr_page.sp_cursor
+       else keeper_detail_target_matches state detail.drr_keeper)
+     && (not request.kspr_navigation
+         || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation
+             && state.detail_scroll = request.kspr_scroll)
+         || (view_is_chat state.view && Option.is_none request.kspr_page.sp_cursor)) then
     match result with
     | Ok snapshot ->
-        state.keeper_schedules <- Some (request.drr_keeper, snapshot);
-        state.keeper_schedules_error <- None
+        let same_page = match state.keeper_schedules_page with
+          | Some (name, page) ->
+              String.equal name detail.drr_keeper
+              && Option.equal String.equal page.sp_cursor request.kspr_page.sp_cursor
+          | None -> false in
+        state.keeper_schedules <- Some (detail.drr_keeper, snapshot);
+        state.keeper_schedules_page <- Some (detail.drr_keeper, request.kspr_page);
+        state.keeper_schedules_error <- None;
+        if not same_page && state.view = Keepers Keeper_detail
+           && state.detail_tab = Detail_automation then state.detail_scroll <- 0
     | Error err ->
-        state.keeper_schedules_error <- Some (request.drr_keeper, err)
+        state.keeper_schedules_error <- Some (detail.drr_keeper, err)
 
 
 (** The standalone lane row under the cursor, when the cursor is in the
@@ -18017,6 +18194,11 @@ let create_state
   schedules = None;
   schedules_error = None;
   schedules_read = Snapshot_read.idle;
+  schedules_page = schedule_first_page;
+  schedules_navigation = None;
+  schedules_agenda = None;
+  schedules_agenda_error = None;
+  schedules_agenda_read = Snapshot_read.idle;
   schedule_cursor = 0;
   schedule_scroll = 0;
   schedule_detail_id = None;
@@ -18025,6 +18207,8 @@ let create_state
   schedule_wake_history_inflight = None;
   keeper_schedules = None;
   keeper_schedules_error = None;
+  keeper_schedules_page = None;
+  keeper_schedules_pending = None;
   msg_schedules_expanded = false;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
@@ -19592,7 +19776,7 @@ let task_documents_pending state =
    time for. *)
 let agenda (state : state) : Masc_tui_agenda.t =
   let scheduled =
-    match state.schedules, state.schedules_error with
+    match state.schedules_agenda, state.schedules_agenda_error with
     (* A store the server could not read answers with a status other than
        "ok" and no rows; that is a failed read, not an empty schedule. *)
     | Some snapshot, _ when not (String.equal snapshot.scs_status "ok") ->
@@ -19600,7 +19784,7 @@ let agenda (state : state) : Masc_tui_agenda.t =
         (match snapshot.scs_read_error with
          | Some reason -> reason
          | None -> "schedule store unreadable")
-    | None, Some error ->
+    | (Some _ | None), Some error ->
       Masc_tui_agenda.Read_failed error
     | None, None -> Masc_tui_agenda.Not_read
     | Some snapshot, _ ->
@@ -23127,7 +23311,10 @@ let keeper_message_schedule_rows state ~now ~max_rows =
   | None -> []
   | Some keeper_name ->
       let snapshot = match state.keeper_schedules with
-        | Some (name, value) when String.equal name keeper_name -> Some value
+        | Some (name, value) when String.equal name keeper_name ->
+            (match value.scs_paging with
+             | Schedule_paging_unavailable | Schedule_paging { page_cursor = None; _ } -> Some value
+             | Schedule_paging { page_cursor = Some _; _ } -> None)
         | Some _ | None -> None in
       let failed = match state.keeper_schedules_error with
         | Some (name, _) -> String.equal name keeper_name

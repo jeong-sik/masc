@@ -19,6 +19,9 @@ val scope_hash : scope_identity -> string
     opaque identity grants no authority; restore always compares the full owner,
     including the original epoch and generation, before any effect. *)
 val owner_to_json : owner -> Yojson.Safe.t
+val owner_of_json : Yojson.Safe.t -> (owner, string) result
+(** Decode captured physical identity only. This pure operation neither
+    observes today's roots/epoch nor establishes execution authority. *)
 val owner_matches_json : owner -> Yojson.Safe.t -> (unit, string) result
 val observe_record_owner : base_path:string -> keepers_dir:string ->
   Lane_addon_tool_request_owner.retained -> (owner, string) result
@@ -39,6 +42,9 @@ type destination = {
 }
 type t
 val scope : owner -> string
+val is_scope : string -> bool
+(** Recognize this producer's wire namespace only; full decoding still checks
+    the exact captured owner and request identity. *)
 val fresh_request_id : owner -> string
 val scope_of_request_id : string -> (string, string) result
 (** Host-minted canonical tagged JSON binds the original physical Keeper and
@@ -52,7 +58,8 @@ val create : request_id:string -> parent_part_id:string -> owner:owner ->
   input:Keeper_librarian.input -> expected_revision:int option -> now:float ->
   retirement:Keeper_memory_admission_judgment.retirement_evidence ->
   preparation:Keeper_librarian_runtime.admission_preparation -> (t, string) result
-(** Original input and complete prompt preparation are checked together.
+(** Original input and complete prompt preparation, including both managed
+    admission and retirement policies, are checked together.
     This purpose requires the actual pending-candidate input: no conversation,
     historical spans, tools, counterparts or working-context sources. Those
     fields are retained explicitly and nonempty values refuse; another pass's

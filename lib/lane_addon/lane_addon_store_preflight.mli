@@ -5,10 +5,10 @@
     A Lane Add-on record the new build cannot decode is refused by its reader
     long after the deploy: a native claim whose cleanup descriptor no longer
     decodes kept its installation [failed] and refused every new start
-    (#45106), and old-shape bindings failed a declaration (#44651). Every one
-    is a file the operator moves aside between stopping the old server and
-    starting the new build, so the report names each file rather than the
-    first, and the fresh-state step for it.
+    (#45106), and old-shape bindings failed a declaration (#44651). Reports
+    name every refused file and its store-specific fresh-state requirements.
+    Generic records can name individual move scopes; a Librarian original
+    requires review of its complete linked bundle.
 
     The scan only lists directories and reads files. It takes no slot gate or
     store lock, syncs nothing, and creates, moves or writes nothing, so it can
@@ -39,6 +39,15 @@ type decoder =
   | Exact_record  (** {!Lane_addon_exact.check_retained_record} *)
   | Tool_request_inventory  (** {!Lane_addon_store.tool_request_owner_entry} *)
   | Tool_request_owner  (** {!Lane_addon_tool_request_owner.check_published} *)
+  | Tool_request_payload (** The consumer's current pure payload decoder. *)
+
+type tool_request_reader = scope:string -> request_id:string ->
+  (Lane_addon_tool_request_owner.retained option, string) result
+type request_body_reader = scope:string -> request_digest:string -> (Yojson.Safe.t, string) result
+type payload_validator = read:tool_request_reader -> read_body:request_body_reader ->
+  Lane_addon_tool_request_owner.retained -> (unit, string) result
+(** Explicit read-only parent/body ports. Every returned original passes the
+    same record identity, canonical body and digest checks as the scanned one. *)
 
 val decoder_name : decoder -> string
 
@@ -49,11 +58,12 @@ type refusal =
   ; decoder : decoder
   ; detail : string  (** The decoder's own message. *)
   ; aside : string list
-        (** What the operator moves aside with the server stopped. For a record
+        (** Generic stopped-writer move scope. For a record
             it is that file. For a native claim it is the slot directory, then
             the binding and observations of the instance the slot names, when
             that could be read and they exist; recovering #45106 moved all
-            three. *)
+            three. For [Tool_request_payload] these are diagnostic locators,
+            not a complete cut list: linked original bundles require review. *)
   }
 
 type report =
@@ -69,10 +79,11 @@ val on_refusal : Store.t -> string
     decode. *)
 
 val fresh_state_step : refusal -> string
-(** The step for one refused record: stop the server, move [aside] away, start
-    the new build. *)
+(** Store-specific fresh-state guidance. Generic records name their stopped-
+    writer move scope; consumer payload refusals require reconciliation and
+    backup of the complete linked bundle before any reviewed cut. *)
 
-val scan : Store.t -> base_path:string -> (report, string) result
+val scan : ?validate_tool_request:payload_validator -> Store.t -> base_path:string -> (report, string) result
 (** Read every record of the store under [base_path] with this build's
     decoders. A missing store directory is an empty store. [Error] means a
     directory exists and cannot be listed. The scan runs beside a live server
@@ -81,7 +92,8 @@ val scan : Store.t -> base_path:string -> (report, string) result
     then the body its check reads. *)
 
 module For_testing : sig
-  val scan : after_read:(string -> unit) -> Store.t -> base_path:string -> (report, string) result
+  val scan : ?validate_tool_request:payload_validator -> after_read:(string -> unit) ->
+    Store.t -> base_path:string -> (report, string) result
   (** The same scan, calling [after_read] with each record's path once its
       bytes are read and before they are decoded, so a test can move a file
       at the point a running server could. *)

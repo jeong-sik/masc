@@ -840,6 +840,100 @@ let retain_judgment fixture record final = io (fun () ->
   | Ok (Owner.Stored next | Already_stored next) -> next
   | Ok (Unconfirmed detail) -> fail detail
   | Error error -> fail (Owner.update_error_to_string error))
+let with_policy_overrides keys f =
+  let originals=List.map (fun key -> key,(Prompt_registry.resolve_prompt key).override_value) keys in
+  Fun.protect ~finally:(fun () -> List.iter (fun (key,value) -> match value with
+    | None -> Prompt_registry.clear_prompt_override key
+    | Some value -> Prompt_registry.set_override key value |> get) originals) f
+let with_missing_librarian_fragment marker f =
+  let original=Prompt_registry.get_markdown_dir () |> Option.to_result ~none:"prompts not pinned" |> get in
+  let directory=io (fun () ->
+    let directory=Filename.temp_dir "librarian-policy-missing-" "" in
+    let text=Fs_compat.load_file (Filename.concat original "librarian.md") in
+    let _,lines=List.fold_left (fun (skipping,lines) line ->
+      if line="### " ^ marker then true,lines
+      else if skipping && not (String.starts_with ~prefix:"### " line) then true,lines
+      else false,line::lines) (false,[]) (String.split_on_char '\n' text) in
+    write (Filename.concat directory "librarian.md") (String.concat "\n" (List.rev lines));
+    directory) in
+  Fun.protect ~finally:(fun () -> Prompt_registry.set_markdown_dir original;
+    io (fun () -> Fs_compat.remove_tree directory)) (fun () ->
+    Prompt_registry.set_markdown_dir directory;f ())
+
+let test_admission_capture_keeps_original_policy ()=with_fixture (fun ~sw:_ fixture ->
+  let admission=Prompt_names.librarian_admission_policy and retirement=Prompt_names.librarian_retirement_policy in
+  with_policy_overrides [admission;retirement] (fun () ->
+    Prompt_registry.set_override admission "Original admission policy" |> get;
+    Prompt_registry.set_override retirement "Original retirement policy" |> get;
+    let record,capture,_=retained_answer_before_gate fixture in
+    let original=Capture.request capture |> get in
+    let prepared=member "preparation" (Capture.to_json capture) in
+    check json "admission policy is captured with the original request" (`String "Original admission policy")
+      (member "effective" (member "admission_prompt" prepared));
+    check json "retirement policy is captured even when no matching archive exists" (`String "Original retirement policy")
+      (member "effective" (member "retirement_prompt" prepared));
+    Prompt_registry.set_override admission "Changed admission policy" |> get;
+    Prompt_registry.set_override retirement "Changed retirement policy" |> get;
+    let restored=match observed_originals fixture with [_,capture] -> capture
+      | [] | _::_::_ -> fail "one original capture expected" in
+    check json "overrides cannot rewrite a captured host request"
+      (Lane_addon_exact.request_to_json original) (Lane_addon_exact.request_to_json (Capture.request restored |> get));
+    let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+    let inventory=io (fun () -> Parts.discover ~store:fixture.store ~owner
+      ~restore_gate:(Gate.restore_size_evidence ~store:fixture.store ~owner) |> get) in
+    let refuse name expected request=
+      let restored=io (fun () ->
+        let store=Store.create ~root:(Filename.concat fixture.base_path name) in
+        Owner.retain ~store ~scope:record.scope ~request_id:record.request_id
+          ~installation_id:record.installation_id ~package_id:record.package_id
+          ~tool:record.tool ~summary:record.summary ~request |> owned;
+        let retained=match Owner.load ~store ~scope:record.scope ~request_id:record.request_id |> owned with
+          | Some retained -> retained | None -> fail "the malformed capture was not retained" in
+        Capture.restore ~owner ~load_parent:(Parts.load_parent inventory) retained) in
+      match restored with
+      | Error detail -> check string "an absent policy is never reconstructed from current defaults" expected detail
+      | Ok _ -> fail "an invalid original policy capture was restored" in
+    let fields=Yojson.Safe.Util.to_assoc record.request in
+    let prepared_fields=Yojson.Safe.Util.to_assoc prepared in
+    refuse "capture-without-admission-policy" "Original Librarian capture has unknown, missing or repeated fields"
+      (`Assoc (("preparation",`Assoc (List.remove_assoc "admission_prompt" prepared_fields))::
+      List.remove_assoc "preparation" fields));
+    refuse "capture-with-old-schema" "Unknown original Librarian execution schema/kind"
+      (`Assoc (("schema",`Int 1)::List.remove_assoc "schema" fields))))
+
+let test_missing_admission_policy_refuses_before_capture ()=with_fixture (fun ~sw:_ fixture ->
+  with_missing_librarian_fragment "admission_policy" (fun () ->
+    let posts=F.post_count fixture.server in
+    run_worker fixture |> assert_unavailable;
+    check int "missing policy sends no provider request" posts (F.post_count fixture.server);
+    check int "missing policy retains no original execution capture" 0 (List.length (observed_originals fixture));
+    check int "every pending candidate remains available" 2 (io (fun () -> List.length (pending_rows fixture.keepers_dir)))))
+
+let test_missing_absorb_policy_refuses_before_preparation ()=with_fixture (fun ~sw:_ fixture ->
+  let record,capture,final=retained_answer_before_gate fixture in
+  let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
+  let record=memory_action fixture (fun () -> retain_judgment fixture record final) in
+  with_missing_librarian_fragment "absorb_forward" (fun () ->
+    let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
+    check bool "missing policy stays an explicit setup error" true
+      (Keeper_librarian_absorb_gate.guidance_of_authority authority |> Result.is_error);
+    let posts=F.post_count fixture.server in
+    check bool "missing policy cannot publish the first gate intent" true
+      (memory_action fixture (fun () -> Commit.begin_gate ~store:fixture.store ~owner ~capture ~record
+        ~gate_root_id:(Random_id.uuid_v7 ()) ~authority |> Result.is_error));
+    let parent=io (fun () -> Owner.load ~store:fixture.store ~scope:record.scope ~request_id:record.request_id |> owned) in
+    let parent=Option.to_result ~none:"original parent missing" parent |> get in
+    check bool "the parent still has no gate preparation" true (Progress.preparation parent.progress=None);
+    check int "missing policy publishes no child request" 0
+      (io (fun () -> Owner.load_scope ~store:fixture.store ~scope:(Gate.scope owner) |> owned |> List.length));
+    let gate=Keeper_librarian_absorb_gate.run_captured authority ~new_observations:[]
+      ~facts:[] ~new_claims:[] ~superseding:[]
+      ~absorbed:[{Types.absorbed="source";into="target"}]
+      ~before_evaluate:(fun ~direction:_ ~destinations:_ ~state:_ ~questions:_ -> fail "missing policy must not dispatch") () in
+    check bool "missing guidance cannot be reported as a disabled gate" true
+      (Keeper_librarian_absorb_gate.failure_kind gate=Some Keeper_librarian_absorb_gate.Evaluation_failed);
+    check int "the already answered parent is never sent again" posts (F.post_count fixture.server)))
+
 let test_mismatched_retained_judgment_cannot_borrow_host_proof ()=with_fixture (fun ~sw:_ fixture ->
   let record,capture,final=retained_answer_before_gate fixture in
   let mismatched=match final with
@@ -1108,6 +1202,9 @@ let () =
   if Sys.getenv_opt "MASC_TEST_46252_WAKE" = Some "1" then (
     test_configuration_wake_completes_before_concurrent_settle (); exit 0);
   run "Actual Addon Librarian explicit-candidate owner" ["production",[
+  test_case "captured admission and retirement policy survive override changes" `Quick test_admission_capture_keeps_original_policy;
+  test_case "missing admission policy refuses before capture or dispatch" `Quick test_missing_admission_policy_refuses_before_capture;
+  test_case "missing absorb policy refuses before root publication" `Quick test_missing_absorb_policy_refuses_before_preparation;
   test_case "actual Memory lane, worker, HTTP, domain validation and receipt-backed ACK" `Quick test_actual_happy_path;
   test_case "unchanged semantic deferral preserves the same original" `Quick test_unchanged_deferred_does_not_remint;
   test_case "new tail rejudges the complete old sparse gap against current Memory" `Quick test_gap_and_new_tail_are_rejudged_together;

@@ -7,6 +7,7 @@ module type Capture = sig
   type owner
   type t
   val gate_scope : owner -> string
+  val gate_scope_prefix : string
   val gate_kind : string
   (** Host constants/addressing for this purpose; never worker-supplied aliases.
       Stable addressing must not hide old records after a missing/replaced epoch. *)
@@ -30,14 +31,33 @@ module Make (Capture : Capture) : sig
   (** Original absorption evaluations for one restored purpose-bound answer.
       Caller holds the existing Memory-lane/purge fence and serializes this owner. *)
   val scope : Capture.owner -> string
+  val is_scope : string -> bool
   val parent_execution_id : Lane_addon_tool_request_owner.retained -> (string, string) result
   (** Strict header read for discovery joining only; follow with full validation. *)
+  val validate_payload :
+    read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+    read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
+    owner:Capture.owner -> capture:Capture.t ->
+    parent:Lane_addon_tool_request_owner.retained -> record:Lane_addon_tool_request_owner.retained ->
+    (unit, string) result
+  val validate_preparation_payload :
+    read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+    read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
+    owner:Capture.owner -> capture:Capture.t ->
+    parent:Lane_addon_tool_request_owner.retained -> (unit, string) result
+  (** Pure current-version payload, captured guidance, source proposal and
+      parent/destination, root/predecessor and pending-publication binding
+      checks. The supplied originals must already
+      pass their strict body decoders. Does not observe live ownership, read
+      host proofs, recover a chain or grant dispatch/commit authority. *)
   val prepare_root : store:Lane_addon_store.t -> owner:Capture.owner ->
     capture:Capture.t -> parent:Lane_addon_tool_request_owner.retained ->
     proposal:Yojson.Safe.t -> request_id:string -> authority:Keeper_librarian_absorb_gate.live_authority ->
     (Lane_addon_request_progress.preparation_intent, string) result
   (** Build and validate the full immutable first gate request before retaining
-      its parent preparation intent. Does not publish or evaluate anything. *)
+      its parent preparation intent. The live handle's complete guidance bundle is
+      required and persisted here; missing policy refuses before publication.
+      Does not publish or evaluate anything. *)
   val recover_root : store:Lane_addon_store.t -> owner:Capture.owner ->
     capture:Capture.t ->
     (Lane_addon_tool_request_owner.retained, string) result
@@ -69,7 +89,9 @@ module Make (Capture : Capture) : sig
   (** Strictly rejoin parent judgment and original physical capture. Replay every
       completed request through the common gate derivation. Only the first next
       question without an intent can execute, using a live handle whose captured
-      authority is exactly the original one. Pending/aborted requests remain
+      Keeper/destination authority is exactly the original one. All questions,
+      size checks and replay use the retained guidance, independent of current
+      prompt edits. Pending/aborted requests remain
       unknown. Complete replay and terminal publication require no live config.
       No Memory save, candidate ACK, partition or automatic new attempt occurs. *)
   val validate : store:Lane_addon_store.t -> owner:Capture.owner ->

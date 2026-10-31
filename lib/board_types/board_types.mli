@@ -479,6 +479,29 @@ end
 
 type vote_direction = Up | Down
 
+(** {1 Incremental Hot-Post & Recent-Post Indexes} *)
+
+type hot_post_key =
+  { net_vote : int
+  ; created_at : float
+  ; post_id : string
+  }
+
+val hot_post_key_of_post : post -> hot_post_key
+val compare_hot_post_key : hot_post_key -> hot_post_key -> int
+
+module Hot_post_set : Set.S with type elt = hot_post_key
+
+type recent_post_key =
+  { recent_created_at : float
+  ; recent_post_id : string
+  }
+
+val recent_post_key_of_post : post -> recent_post_key
+val compare_recent_post_key : recent_post_key -> recent_post_key -> int
+
+module Recent_post_set : Set.S with type elt = recent_post_key
+
 (** {1 In-Memory Store} *)
 
 type flusher_msg =
@@ -510,8 +533,10 @@ type store = {
   origin_create_mutex : Eio.Mutex.t;
   mutable karma_cache : (string * int) list option;
   (** [None] = stale. *)
-  mutable sorted_posts_cache : post list option;
-  (** [None] = stale. *)
+  mutable hot_post_index : Hot_post_set.t;
+  (** Incremental immutable Hot-ordered index ([net_vote DESC, created_at DESC, post_id ASC]). *)
+  mutable recent_post_index : Recent_post_set.t;
+  (** Incremental immutable Recent-ordered index ([created_at DESC, post_id ASC]). *)
   comments_by_post : (string, string list) Hashtbl.t;
   (** post_id -> comment_id list. *)
   reactions : (string, reaction) Hashtbl.t;

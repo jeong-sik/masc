@@ -58,48 +58,11 @@ let agent_current_task_matches_assignments active_task_assignees ~agent_name tas
   | None -> false
 ;;
 
-let reconcile_agent_current_task_record
-      config
-      ?(touch_last_seen = true)
-      ~agent_file
-      ~(agent : Masc_domain.agent)
-      active_task_assignees
-  =
-  match agent.current_task with
-  | Some task_id
-    when not
-           (agent_current_task_matches_assignments
-              active_task_assignees
-              ~agent_name:agent.name
-              task_id) ->
-    let updated_status =
-      match agent.status with
-      | Inactive -> Inactive
-      | Active | Busy | Listening -> Active
-    in
-    let updated =
-      { agent with
-        status = updated_status
-      ; current_task = None
-      ; last_seen = (if touch_last_seen then now_iso () else agent.last_seen)
-      }
-    in
-    write_json config agent_file (agent_to_yojson updated);
-    log_event
-      config
-      (`Assoc
-          [ "type", `String "agent_current_task_reconciled"
-          ; "agent", `String agent.name
-          ; "ts", `String (now_iso ())
-          ])
-  | Some _ | None -> ()
-;;
-
-let reconcile_agent_current_task_with_assignments
+let reconcile_agent_current_task_with_prepared_backlog
       config
       ?(touch_last_seen = true)
       ~agent_name
-      active_task_assignees
+      (prepared : prepared_backlog)
   =
   let agent_file =
     Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
@@ -109,27 +72,81 @@ let reconcile_agent_current_task_with_assignments
     with_file_lock config agent_file (fun () ->
       match read_agent config agent_file with
       | Ok agent ->
-        reconcile_agent_current_task_record
-          config
-          ~touch_last_seen
-          ~agent_file
-          ~agent
-          active_task_assignees
+        (match agent.current_task with
+         | Some task_id
+           when not
+                  (match
+                     Task_id_map.find_opt
+                       task_id
+                       prepared.active_assignees_by_task_id
+                   with
+                   | Some assignee -> String.equal assignee agent.name
+                   | None -> false) ->
+           let updated_status =
+             match agent.status with
+             | Inactive -> Inactive
+             | Active | Busy | Listening -> Active
+           in
+           let updated =
+             { agent with
+               status = updated_status
+             ; current_task = None
+             ; last_seen = (if touch_last_seen then now_iso () else agent.last_seen)
+             }
+           in
+           write_json config agent_file (agent_to_yojson updated);
+           log_event
+             config
+             (`Assoc
+                 [ "type", `String "agent_current_task_reconciled"
+                 ; "agent", `String agent.name
+                 ; "ts", `String (now_iso ())
+                 ])
+         | Some _ | None -> ())
       | Error msg -> Log.Misc.error "agent state reconcile failed: %s" msg)
 ;;
 
-let reconcile_agent_current_task_with_backlog
+let emit_auto_start_for_schedule config ~agent_name ~task_id ~from_status ~to_status =
+  let _ =
+    Workspace_broadcast.broadcast
+      ~audience:Workspace_broadcast.System_record
       config
-      ?(touch_last_seen = true)
-      ~agent_name
-      backlog
-  =
-  let active_task_assignees = active_task_assignees_by_task_id backlog in
-  reconcile_agent_current_task_with_assignments
+      ~from_agent:agent_name
+      ~content:(Printf.sprintf "Started %s" task_id)
+  in
+  Workspace_task.emit_task_activity
     config
-    ~touch_last_seen
     ~agent_name
-    active_task_assignees
+    ~task_id
+    ~kind:(Event_kind.Task.to_string Event_kind.Task.Started)
+    ~payload:(`Assoc [ "task_id", `String task_id ]);
+  Workspace_task.observe_task_transition
+    config
+    ~agent_name
+    ~task_id
+    ~transition:Masc_domain.Start
+    ~details:
+      (Workspace_task.task_transition_details
+         ~from_status
+         ~to_status
+         ());
+  (Atomic.get Workspace_hooks.push_task_event_fn)
+    ~event_type:"masc/task_transition"
+    ~details:
+      [ "task_id", `String task_id
+      ; "action", `String "start"
+      ; "agent_name", `String agent_name
+      ];
+  log_event
+    config
+    (Workspace_task.transition_log_event
+       ~agent_name
+       ~task_id
+       ~from_status
+       ~to_status
+       ~action:(Masc_domain.task_action_to_string Masc_domain.Start)
+       ~assignee:agent_name
+       ())
 ;;
 
 (** Claim next highest priority unclaimed task.
@@ -149,6 +166,7 @@ let claim_next_r
       ?(task_filter : Masc_domain.task -> bool = fun _ -> true)
       ?(hard_filter : Masc_domain.task -> bool = fun _ -> true)
       ?(allow_scope_fallback = false)
+      ?(auto_start = false)
       ()
   =
   let exception Existing_claim of claim_next_result in
@@ -156,10 +174,11 @@ let claim_next_r
   let lock_path = backlog_lock_path config in
   let claim_under_lock () =
     try
-      match read_backlog_r config with
+      match read_prepared_backlog_r config with
       | Error msg -> Claim_next_error msg, None
-      | Ok backlog ->
-        reconcile_agent_current_task_with_backlog config ~agent_name backlog;
+      | Ok prepared ->
+        let backlog = prepared.backlog in
+        reconcile_agent_current_task_with_prepared_backlog config ~agent_name prepared;
         (* #10421: If this agent already holds a Claimed or InProgress task,
          return that task instead of implicitly releasing it.  Automatic
          release caused keeper hot-potato loops: a repeated claim_next call
@@ -196,12 +215,51 @@ let claim_next_r
              agent_name
              prev.id
              from_status;
+           (match auto_start, prev.task_status with
+            | true, (Masc_domain.Claimed _ as prior_status) ->
+              let started_status =
+                Masc_domain.InProgress { assignee = agent_name; started_at = now_iso () }
+              in
+              let new_tasks =
+                List.map
+                  (fun (t : Masc_domain.task) ->
+                     if String.equal t.id prev.id
+                     then { t with task_status = started_status }
+                     else t)
+                  backlog.tasks
+              in
+              write_backlog
+                ~after_commit:(fun () ->
+                  Task_cache_invariant.clear_stale_agent_task config
+                    ~cause:Task_cache_invariant.After_commit
+                    ~agent_name ~task_id:prev.id ~status:started_status
+                    ~module_name:"claim_next_r.existing_auto_start")
+                config
+                { backlog with tasks = new_tasks };
+              emit_auto_start_for_schedule
+                config
+                ~agent_name
+                ~task_id:prev.id
+                ~from_status:prior_status
+                ~to_status:started_status
+            | (true | false),
+              ( Masc_domain.Claimed _
+              | Masc_domain.InProgress _
+              | Masc_domain.Todo
+              | Masc_domain.AwaitingVerification _
+              | Masc_domain.Done _
+              | Masc_domain.Cancelled _ ) -> ());
            Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some prev.id });
-           let message =
+           let base_message =
              (* Shared with the claim-by-task_id refusal, which used to say only
                 that a task was held. One constraint, one sentence. *)
              Workspace_task.held_tasks_refusal_message ~agent_name [ prev ]
+           in
+           let message =
+             if auto_start
+             then base_message ^ " Task auto-started — begin work now."
+             else base_message
            in
            raise
              (Existing_claim
@@ -213,28 +271,18 @@ let claim_next_r
                    ; scope_widened = false
                    })));
         let working_tasks = backlog.tasks in
-        (* Explicit task priority is the scheduling input. Waiting time is
-           observable through [created_at], but never rewrites that priority. *)
-        let sorted =
-          List.sort
-            (fun (a : Masc_domain.task) (b : Masc_domain.task) ->
-               let priority_cmp = compare a.priority b.priority in
-               if priority_cmp <> 0
-               then priority_cmp
-               else
-                 let created_cmp = compare a.created_at b.created_at in
-                 if created_cmp <> 0 then created_cmp else compare a.id b.id)
-            working_tasks
-        in
         (* Eligibility and the claim outcome are one decision
            ([Workspace_task_lifecycle.resolve_claim]).
-           [task_claim_next_action_is_claimable] still owns the Todo reclaim
-           gate. *)
+           [prepared.claimable_ordered_tasks] is pre-sorted by
+           [(priority, created_at, id)] and pre-filtered by
+           [task_claim_next_action_is_claimable] once per decoded backlog
+           snapshot. *)
+        let now = now_iso () in
         let same_actor a = Workspace_task_classify.same_task_actor config a agent_name in
         let resolves_claimable (t : Masc_domain.task) =
           match
             Workspace_task_lifecycle.resolve_claim
-              ~same_actor ~agent_name ~now:(now_iso ()) t
+              ~same_actor ~agent_name ~now t
           with
           | Workspace_task_lifecycle.Worker_claim _ -> true
           | Workspace_task_lifecycle.Self_owned
@@ -243,8 +291,7 @@ let claim_next_r
           | Workspace_task_lifecycle.Held_pending_verdict _ -> false
         in
         let unclaimed =
-          sorted
-          |> List.filter Masc_domain.task_claim_next_action_is_claimable
+          prepared.claimable_ordered_tasks
           |> List.filter resolves_claimable
           (* [hard_filter] is a hard exclusion (e.g. self-author ownership): unlike
              [task_filter] it survives the [allow_scope_fallback] widening below,
@@ -310,14 +357,19 @@ let claim_next_r
            let claimed_status =
              match
                Workspace_task_lifecycle.resolve_claim
-                 ~same_actor ~agent_name ~now:(now_iso ()) task
+                 ~same_actor ~agent_name ~now task
              with
              | Workspace_task_lifecycle.Worker_claim s -> s
              | Workspace_task_lifecycle.Self_owned
              | Workspace_task_lifecycle.Held_by_other _
              | Workspace_task_lifecycle.Held_terminal _
              | Workspace_task_lifecycle.Held_pending_verdict _ ->
-               Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () }
+               Masc_domain.Claimed { assignee = agent_name; claimed_at = now }
+           in
+           let final_status =
+             if auto_start
+             then Masc_domain.InProgress { assignee = agent_name; started_at = now }
+             else claimed_status
            in
            let new_tasks =
              List.map
@@ -325,7 +377,7 @@ let claim_next_r
                   if t.id = task.id
                   then (
                     let t = Workspace_task.clear_reclaim_decision t in
-                    { t with task_status = claimed_status })
+                    { t with task_status = final_status })
                   else t)
                working_tasks
            in
@@ -335,7 +387,7 @@ let claim_next_r
              ~after_commit:(fun () ->
                Task_cache_invariant.clear_stale_agent_task config
                  ~cause:Task_cache_invariant.After_commit
-                 ~agent_name ~task_id:task.id ~status:claimed_status
+                 ~agent_name ~task_id:task.id ~status:final_status
                  ~module_name:"claim_next_r.claim")
              config new_backlog;
            (* Update agent status — takes [with_file_lock] on the
@@ -363,7 +415,7 @@ let claim_next_r
                  ; "agent", `String agent_name
                  ; "task", `String task.id
                  ; "priority", `Int task.priority
-                 ; "ts", `String (now_iso ())
+                 ; "ts", `String now
                  ]);
            Workspace_task.observe_task_transition
              config
@@ -375,14 +427,27 @@ let claim_next_r
                   ~from_status:task.task_status
                   ~to_status:claimed_status
                   ());
-          let message =
+           if auto_start
+           then
+             emit_auto_start_for_schedule
+               config
+               ~agent_name
+               ~task_id:task.id
+               ~from_status:claimed_status
+               ~to_status:final_status;
+          let base_message =
             Printf.sprintf
               "%s auto-claimed [P%d] %s: %s"
               agent_name
               task.priority
               task.id
               task.title
-           in
+          in
+          let message =
+            if auto_start
+            then base_message ^ " Task auto-started — begin work now."
+            else base_message
+          in
           ( Claim_next_claimed
               { task_id = task.id
               ; title = task.title

@@ -1,0 +1,38 @@
+{
+  "population": 2,
+  "variant": "control",
+  "source_expected": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-only-probe-v1/keeper_scale_session.py",
+    "--binary",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-frame-native-v1/masc",
+    "--tui-binary",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-list-frame-native-v1/masc-tui",
+    "--repo",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030",
+    "--output",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-2-control",
+    "--keepers",
+    "2",
+    "--messages-per-keeper",
+    "2"
+  ],
+  "started_unix": 1793357593.8208902,
+  "loadavg_before": [
+    33.64794921875,
+    28.6533203125,
+    27.90966796875
+  ],
+  "cpu_count": 16,
+  "source_actual": "5de2eb7684f0e4fecee1c48caef50010c2f951fa",
+  "ended_unix": 1793357635.680876,
+  "returncode": 0,
+  "stdout": "{\n  \"keepers\": 2,\n  \"messages\": 4,\n  \"succeeded_operations\": 4,\n  \"actual_model_calls\": 4,\n  \"max_provider_requests_in_flight\": 2,\n  \"latency_samples\": 155,\n  \"valid_latency_samples\": 155,\n  \"scope\": \"Pinned-native-source real Keeper turns with a loopback scripted text-only model, durable queued operations and offline SQLite reread. No guest/tool execution, browser/TUI or production throughput proof.\",\n  \"latency_by_phase\": {\n    \"submitting_model_held\": {\n      \"samples\": 7,\n      \"valid\": 7,\n      \"failures\": 0,\n      \"p50_ms\": 3.891084,\n      \"p95_ms\": 15.822208,\n      \"max_ms\": 15.822208\n    },\n    \"model_held_queue_observation\": {\n      \"samples\": 103,\n      \"valid\": 103,\n      \"failures\": 0,\n      \"p50_ms\": 2.313541,\n      \"p95_ms\": 9.385083,\n      \"max_ms\": 33.48675\n    },\n    \"running_model_released\": {\n      \"samples\": 35,\n      \"valid\": 35,\n      \"failures\": 0,\n      \"p50_ms\": 2.801584,\n      \"p95_ms\": 17.168833,\n      \"max_ms\": 41.233209\n    },\n    \"settled\": {\n      \"samples\": 10,\n      \"valid\": 10,\n      \"failures\": 0,\n      \"p50_ms\": 3.233458,\n      \"p95_ms\": 13.472334,\n      \"max_ms\": 13.472334\n    }\n  },\n  \"rejected_429_count\": 0,\n  \"rate_limit_wait_s\": 0,\n  \"rate_limit_wait_by_source_s\": {},\n  \"denied_read_only_inventory_attempts\": 2,\n  \"unexpected_guest_command_attempts\": 0\n}\n",
+  "stderr": "",
+  "loadavg_after": [
+    47.09619140625,
+    32.859375,
+    29.4931640625
+  ]
+}

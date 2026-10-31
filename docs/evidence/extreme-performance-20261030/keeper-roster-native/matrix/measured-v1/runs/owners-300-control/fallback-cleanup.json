@@ -1,0 +1,9 @@
+{
+  "fallback_cleanup": true,
+  "server_reaped": true,
+  "server_returncode": 0,
+  "model_server_stopped": true,
+  "base_retained": true,
+  "base_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-300-control/owned-base",
+  "cleanup_errors": []
+}

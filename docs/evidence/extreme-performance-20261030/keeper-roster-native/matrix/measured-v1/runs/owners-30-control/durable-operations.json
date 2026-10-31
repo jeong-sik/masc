@@ -1,0 +1,3212 @@
+[
+  {
+    "keeper": "scale-keeper-0000",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0000/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-7dccf66201a1d9b264d03ac91c9d9240",
+        "state": "succeeded",
+        "started_at": 1793357700.123179,
+        "completed_at": 1793357715.332946,
+        "outcome_ref": "trace-1793357698554-00000#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-6172b49dd4381684f03c864bb96795c8",
+        "state": "succeeded",
+        "started_at": 1793357715.340097,
+        "completed_at": 1793357716.464866,
+        "outcome_ref": "trace-1793357698554-00000#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0000/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "1ee1d531257fd6f6b5a36a5b5985356c4c58ec0bf39bd659cf3407587b216d9d"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-7dccf66201a1d9b264d03ac91c9d9240",
+            "admission_digest": "f5cdd98a48bbc1e7f5a8a742c6a0aabc38a94b9b32b6fcc70985ece3de304ad7",
+            "execution_digest": "98acdbf9954a805559be725ab3b38c83d4d7e9be68648cafd7bdb504e673212f",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0000\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0000\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.121664,
+            "started_at": 1793357700.123179,
+            "completed_at": 1793357715.332946,
+            "outcome_ref": "trace-1793357698554-00000#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-6172b49dd4381684f03c864bb96795c8",
+            "admission_digest": "56d57754ea59e12249700c41f1235964a7913d232d145b73446d69584b6dfa5c",
+            "execution_digest": "8b10e3fbd1bbee4f6a74c5f816a10cdffbab851a9c1104ebe65b3c1bf55adb8f",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0000\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0000\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.203937,
+            "started_at": 1793357715.340097,
+            "completed_at": 1793357716.464866,
+            "outcome_ref": "trace-1793357698554-00000#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0001",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0001/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-b8b25552c5358c5cf091bdaa596a1208",
+        "state": "succeeded",
+        "started_at": 1793357700.133608,
+        "completed_at": 1793357717.244965,
+        "outcome_ref": "trace-1793357698596-00001#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-4229a85735357f8171877670b7ca885b",
+        "state": "succeeded",
+        "started_at": 1793357717.294319,
+        "completed_at": 1793357719.12574,
+        "outcome_ref": "trace-1793357698596-00001#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0001/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "a2c971e0922a83a8e56bda4119edc52e206f8b2db5c383e087f58fb4906626e2"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-b8b25552c5358c5cf091bdaa596a1208",
+            "admission_digest": "52bed03768b3ee94ff4c52f689bbd286389465f8df59a49ad7f0f0d9a496ca03",
+            "execution_digest": "f79595c6ae5b51df94b11e0b4de79ce3ff8d21966247987ae517a757ddc34a8a",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0001\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0001\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.131971,
+            "started_at": 1793357700.133608,
+            "completed_at": 1793357717.244965,
+            "outcome_ref": "trace-1793357698596-00001#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-4229a85735357f8171877670b7ca885b",
+            "admission_digest": "e5ef4641f5854e4cc96704a41783799987e73fd9017024fe6c3ffbc88e01ed13",
+            "execution_digest": "362350b4628e767ca446e713e3d9b42f727136f0a0e41fde6eccd0c699a37875",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0001\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0001\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.304465,
+            "started_at": 1793357717.294319,
+            "completed_at": 1793357719.12574,
+            "outcome_ref": "trace-1793357698596-00001#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0002",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0002/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-bbba31b84fa6378437e7a4a953d4aa7d",
+        "state": "succeeded",
+        "started_at": 1793357700.173446,
+        "completed_at": 1793357716.30916,
+        "outcome_ref": "trace-1793357698625-00002#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-1d2d148ab9619d6239b1b01c2448d739",
+        "state": "succeeded",
+        "started_at": 1793357716.357214,
+        "completed_at": 1793357718.108664,
+        "outcome_ref": "trace-1793357698625-00002#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0002/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "06fa865a920d170ec466d59c5b5a52e6d9eb1f3f585d287767d7b5a73d40d505"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-bbba31b84fa6378437e7a4a953d4aa7d",
+            "admission_digest": "ab019a3d7d3d7556e5c37cf14fc39aec81fedd9f9ed3fbd6cebfda661c405ea7",
+            "execution_digest": "b02da98470e789e53cc1304e301ceaf2f9a41f9ef46f5d42631565abe74211c6",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0002\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0002\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.170608,
+            "started_at": 1793357700.173446,
+            "completed_at": 1793357716.30916,
+            "outcome_ref": "trace-1793357698625-00002#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-1d2d148ab9619d6239b1b01c2448d739",
+            "admission_digest": "6d3e152cf4a77401c73ae46dbc49fd1a4e494dcd5834c1e6a6e3abfefac507c0",
+            "execution_digest": "c563bc0e165cbab86daa0dc87eb5cc3f57837604107e4659a26769cc4dc11845",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0002\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0002\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.35725,
+            "started_at": 1793357716.357214,
+            "completed_at": 1793357718.108664,
+            "outcome_ref": "trace-1793357698625-00002#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0003",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0003/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-dc50a6b36e573b68c5f5934d3e5c3d81",
+        "state": "succeeded",
+        "started_at": 1793357700.195884,
+        "completed_at": 1793357718.258506,
+        "outcome_ref": "trace-1793357698656-00003#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-b8a5abbab32057a63d97e3f8abba79f7",
+        "state": "succeeded",
+        "started_at": 1793357718.302483,
+        "completed_at": 1793357719.053848,
+        "outcome_ref": "trace-1793357698656-00003#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0003/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "da1e4f5869cb1aeae35d56861a5815e1d7443a1f0d711f91ab16d044e3879997"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-dc50a6b36e573b68c5f5934d3e5c3d81",
+            "admission_digest": "20eade911b4612808f291a51e6531ff063fe8063d420a5cdfcb5f78052d5f68e",
+            "execution_digest": "7ccf207f6ccbd9b0d9093098026de477d6eff19b232274cd48d040f68ef5f93b",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0003\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0003\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.19351,
+            "started_at": 1793357700.195884,
+            "completed_at": 1793357718.258506,
+            "outcome_ref": "trace-1793357698656-00003#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-b8a5abbab32057a63d97e3f8abba79f7",
+            "admission_digest": "de8dacbe2eca77e43a2ddfd32f04c78a4bdf74d52b10e9e189278e40aefda8a4",
+            "execution_digest": "cfb64bdba4e83b4c59b29862343096878a97cbe83bf2c4481e49b8b4f3ea30b9",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0003\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0003\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.37176,
+            "started_at": 1793357718.302483,
+            "completed_at": 1793357719.053848,
+            "outcome_ref": "trace-1793357698656-00003#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0004",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0004/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-a3b9139b783b542d48cf998af463d32d",
+        "state": "succeeded",
+        "started_at": 1793357700.220803,
+        "completed_at": 1793357717.297166,
+        "outcome_ref": "trace-1793357698685-00004#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-c5d899c160467534793bdbb5619c21d5",
+        "state": "succeeded",
+        "started_at": 1793357717.351539,
+        "completed_at": 1793357718.779005,
+        "outcome_ref": "trace-1793357698685-00004#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0004/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "36e66cc88a772e85f212704753305ac92f6d25dfd757ce80bc1f54919205f713"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-a3b9139b783b542d48cf998af463d32d",
+            "admission_digest": "54e74e1f7b2d2c37df054148c73d02de9aa4446b04cb7127505030320a0111c2",
+            "execution_digest": "e97aa222b0559d779216e8b820b315044237fade6564669bc5f21e8806bcaa04",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0004\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0004\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.217187,
+            "started_at": 1793357700.220803,
+            "completed_at": 1793357717.297166,
+            "outcome_ref": "trace-1793357698685-00004#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-c5d899c160467534793bdbb5619c21d5",
+            "admission_digest": "dd712277c68ec9fd37392704e36eb7dff0b9fc0c1fe8c4c615df8096daabc099",
+            "execution_digest": "bf12e8c242731c3f7cb78f6564193a35b301bb24d6438703078ad8ef02281dca",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0004\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0004\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.384294,
+            "started_at": 1793357717.351539,
+            "completed_at": 1793357718.779005,
+            "outcome_ref": "trace-1793357698685-00004#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0005",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0005/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-3b54247c0902fa19361a0850b8166529",
+        "state": "succeeded",
+        "started_at": 1793357700.277255,
+        "completed_at": 1793357715.371435,
+        "outcome_ref": "trace-1793357698713-00005#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-611ce52287c1c998c715077634bf6ff3",
+        "state": "succeeded",
+        "started_at": 1793357715.395006,
+        "completed_at": 1793357716.850002,
+        "outcome_ref": "trace-1793357698713-00005#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0005/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "fe8d3698840ae1cdcc33b1a25c9100bb80072f14174b6f295eecb7d656f5e463"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-3b54247c0902fa19361a0850b8166529",
+            "admission_digest": "094d276ca07a97ece2cae2109ea344e5aad6d2094a22aa3221251b40ac625825",
+            "execution_digest": "170a298968d94b71673e2458a77bb2dcf883745b9e6e839acec914dd72850df6",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0005\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0005\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.274948,
+            "started_at": 1793357700.277255,
+            "completed_at": 1793357715.371435,
+            "outcome_ref": "trace-1793357698713-00005#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-611ce52287c1c998c715077634bf6ff3",
+            "admission_digest": "38f6bc7812a71ce7e7fdd9ad7dee6be9d7e7f190dad2a990cc02b05512bd79b5",
+            "execution_digest": "71afb114f0a136275944efe320d6eb16f5ec301787aab3c267c6284961493599",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0005\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0005\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.391992,
+            "started_at": 1793357715.395006,
+            "completed_at": 1793357716.850002,
+            "outcome_ref": "trace-1793357698713-00005#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0006",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0006/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-71678cb49bb60fedc2c811b3d73ce8ce",
+        "state": "succeeded",
+        "started_at": 1793357700.311427,
+        "completed_at": 1793357716.424194,
+        "outcome_ref": "trace-1793357698733-00006#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-4ca35e1c9fbc996778b0a5070ccd88e7",
+        "state": "succeeded",
+        "started_at": 1793357716.452524,
+        "completed_at": 1793357717.965576,
+        "outcome_ref": "trace-1793357698733-00006#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0006/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "79ab9fff1cf268be72bb9899e14ea5106c79d622babcfde35ee44f83db2be914"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-71678cb49bb60fedc2c811b3d73ce8ce",
+            "admission_digest": "f7763081012426d1dcdc47f49850334e3cb4302fa0bb5c21bda0327187b35364",
+            "execution_digest": "6edb6fd1e52a65fbadde81de6b02f0663442930e1c8feb131837dc734877bda1",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0006\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0006\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.305758,
+            "started_at": 1793357700.311427,
+            "completed_at": 1793357716.424194,
+            "outcome_ref": "trace-1793357698733-00006#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-4ca35e1c9fbc996778b0a5070ccd88e7",
+            "admission_digest": "0299417f7a6418baa9fa84ddae0c46c3ff767557a4443d06b02bc088878c004c",
+            "execution_digest": "3e0275f5fef299f8a2a0a83adb4662a2b3a2424f31dd5f9988024b78e1249329",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0006\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0006\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.422314,
+            "started_at": 1793357716.452524,
+            "completed_at": 1793357717.965576,
+            "outcome_ref": "trace-1793357698733-00006#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0007",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0007/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-e9d12e8ed0d7f2dd6cda9d92a4593061",
+        "state": "succeeded",
+        "started_at": 1793357700.363658,
+        "completed_at": 1793357717.605677,
+        "outcome_ref": "trace-1793357698755-00007#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-7f8d0fcc2df97e4fd1be9be81d4d2321",
+        "state": "succeeded",
+        "started_at": 1793357717.675605,
+        "completed_at": 1793357718.837642,
+        "outcome_ref": "trace-1793357698755-00007#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0007/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "c06981dfb53a54e7fdbb309027e6fc4111446a329983a0051b2fd6f0bb0fbf38"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-e9d12e8ed0d7f2dd6cda9d92a4593061",
+            "admission_digest": "21064e9a156064a97da4f17384b45a53ad3e8259335dedadf65414c1146de3c7",
+            "execution_digest": "bf2a11119385cc7cf73b1b31a42b812e69b33ab5d27c26b8de36a61346b6ee72",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0007\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0007\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.361791,
+            "started_at": 1793357700.363658,
+            "completed_at": 1793357717.605677,
+            "outcome_ref": "trace-1793357698755-00007#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-7f8d0fcc2df97e4fd1be9be81d4d2321",
+            "admission_digest": "6389122d311f373e5529284fa1cfd3f4949d20dab5ed346cabb0261c04224a5b",
+            "execution_digest": "07ae19a91c177ee1dd80fa176785c6e4a4869c1c93e27f2721c975641560716e",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0007\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0007\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.468983,
+            "started_at": 1793357717.675605,
+            "completed_at": 1793357718.837642,
+            "outcome_ref": "trace-1793357698755-00007#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0008",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0008/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-640dd121e4b3f3d857880e161431f25c",
+        "state": "succeeded",
+        "started_at": 1793357700.389877,
+        "completed_at": 1793357715.582836,
+        "outcome_ref": "trace-1793357698778-00008#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-b55e15e11c8261c5435df61c068c87d9",
+        "state": "succeeded",
+        "started_at": 1793357715.614941,
+        "completed_at": 1793357717.038171,
+        "outcome_ref": "trace-1793357698778-00008#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0008/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "531608492fdb1b457fb16217a174862150eecc036bffac86457100e7b607e497"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-640dd121e4b3f3d857880e161431f25c",
+            "admission_digest": "902ffdc4f4bf70e2d020beb87b58f7d490471a1d62b49b568e0084197d6627c7",
+            "execution_digest": "655d13e0dd8a529e03b4b48f18abf1322b0e7ad71fd1774138e1d2a235cd889a",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0008\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0008\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.387884,
+            "started_at": 1793357700.389877,
+            "completed_at": 1793357715.582836,
+            "outcome_ref": "trace-1793357698778-00008#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-b55e15e11c8261c5435df61c068c87d9",
+            "admission_digest": "299a8a431f03f5dc6a1f0ce5a7aa42c28d450448f83ab4afe8d6651647574b0d",
+            "execution_digest": "6b418afec6926585b2770f0883daf700ae934f57ac2e5f4e49dd046194659d11",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0008\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0008\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.54645,
+            "started_at": 1793357715.614941,
+            "completed_at": 1793357717.038171,
+            "outcome_ref": "trace-1793357698778-00008#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0009",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0009/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-d045a792e2998d1eec017246a11ba206",
+        "state": "succeeded",
+        "started_at": 1793357700.415245,
+        "completed_at": 1793357717.866513,
+        "outcome_ref": "trace-1793357698802-00009#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-829c42835e32694cf9ea69841103a3ff",
+        "state": "succeeded",
+        "started_at": 1793357717.955398,
+        "completed_at": 1793357718.884148,
+        "outcome_ref": "trace-1793357698802-00009#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0009/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "3d430ff74ee68687107c4e257b6963b35b9f4d7588953cf2942a69e14d18d9bf"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-d045a792e2998d1eec017246a11ba206",
+            "admission_digest": "38f30eefaf0ff822c27d556adfffb49e3c07a6bee8efe12b869cef9086db8e1a",
+            "execution_digest": "ca997339509563d5870d59b5733e2431014dfee72d5254048815af17ab63ea87",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0009\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0009\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.41379,
+            "started_at": 1793357700.415245,
+            "completed_at": 1793357717.866513,
+            "outcome_ref": "trace-1793357698802-00009#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-829c42835e32694cf9ea69841103a3ff",
+            "admission_digest": "019a3ac81c01805217dddd0b1d1ab83f7e1828f09f461b8e7287ff7a5e6302e2",
+            "execution_digest": "586e218e9d7a28bbb569b29582468e76e1c8e9efcde8ef4288760eeb6dcda840",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0009\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0009\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.586485,
+            "started_at": 1793357717.955398,
+            "completed_at": 1793357718.884148,
+            "outcome_ref": "trace-1793357698802-00009#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0010",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0010/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-da42fc7edb44c79ec0d015a5fb88d424",
+        "state": "succeeded",
+        "started_at": 1793357700.439756,
+        "completed_at": 1793357715.545001,
+        "outcome_ref": "trace-1793357698823-0000a#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-2ad3a8a743dfa972fea23ca410fce073",
+        "state": "succeeded",
+        "started_at": 1793357715.562497,
+        "completed_at": 1793357718.181712,
+        "outcome_ref": "trace-1793357698823-0000a#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0010/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "d28ec238a25fb222e39d94d15c6eaac32a74f47ea57b81c9207c3afcf9d2b001"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-da42fc7edb44c79ec0d015a5fb88d424",
+            "admission_digest": "baf3024a3b70dd8c9512b9b28b66a8c281a4402288fc36f420effb01335286fb",
+            "execution_digest": "2818f91a6e7bf4ae647148e3554d8bb87ea6be6863ffda45a94b08921d3f816a",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0010\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0010\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.43821,
+            "started_at": 1793357700.439756,
+            "completed_at": 1793357715.545001,
+            "outcome_ref": "trace-1793357698823-0000a#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-2ad3a8a743dfa972fea23ca410fce073",
+            "admission_digest": "373e61683c023bfb2b376ae1ed8fff13131e36cae6ef26b0acdfdd0a776afbf3",
+            "execution_digest": "4cda4b773b5a05a6f994e8a4511b7244b31c77e59c3a9c60465be7d7935dea5d",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0010\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0010\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.611107,
+            "started_at": 1793357715.562497,
+            "completed_at": 1793357718.181712,
+            "outcome_ref": "trace-1793357698823-0000a#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0011",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0011/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-77c833795f103208907e1f36ff83892d",
+        "state": "succeeded",
+        "started_at": 1793357700.465708,
+        "completed_at": 1793357716.656452,
+        "outcome_ref": "trace-1793357698842-0000b#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-bb239d129759617164184af0a4cecdb0",
+        "state": "succeeded",
+        "started_at": 1793357716.694372,
+        "completed_at": 1793357718.568586,
+        "outcome_ref": "trace-1793357698842-0000b#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0011/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "5df062d2358e6a7322f76fb125983b0fe9fe36e860453d7257413535dc46cf6e"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-77c833795f103208907e1f36ff83892d",
+            "admission_digest": "55a1ae486c0fbb5f88cc8c92e3a3cd68facad4490051f27393b047fb308d78e0",
+            "execution_digest": "e13ea26628bf142b636fd59cf564bc4d55bd80f739d10bbf59d5164c6f32967d",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0011\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0011\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.46434,
+            "started_at": 1793357700.465708,
+            "completed_at": 1793357716.656452,
+            "outcome_ref": "trace-1793357698842-0000b#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-bb239d129759617164184af0a4cecdb0",
+            "admission_digest": "4850eae0a58eef0d50e5316e2b3af9fc79d878a103475664eb3ec54fee2c7e23",
+            "execution_digest": "31468bb1ee7383dd7cfdb9c4530334c3f99a4f02319f830ba464b69e951e37f2",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0011\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0011\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.719258,
+            "started_at": 1793357716.694372,
+            "completed_at": 1793357718.568586,
+            "outcome_ref": "trace-1793357698842-0000b#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0012",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0012/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-a38ba0a4daf71e6bd7290f78a014199d",
+        "state": "succeeded",
+        "started_at": 1793357700.497595,
+        "completed_at": 1793357715.638536,
+        "outcome_ref": "trace-1793357698865-0000c#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-bb85d5278ef0836d3a4576231f2c0312",
+        "state": "succeeded",
+        "started_at": 1793357715.67811,
+        "completed_at": 1793357717.338096,
+        "outcome_ref": "trace-1793357698865-0000c#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0012/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "449dfd055ffbea6c77aab5c07d48445f4f1a4bab8f601c0fcaf78663aa6d20fd"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-a38ba0a4daf71e6bd7290f78a014199d",
+            "admission_digest": "67d243f6185463d173ac130810631d283117eac79c93a91314504957646878b3",
+            "execution_digest": "1495c389eb0c830fe59b2397f677d71c64b622e24a233653ea38bbc32a0513b7",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0012\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0012\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.494272,
+            "started_at": 1793357700.497595,
+            "completed_at": 1793357715.638536,
+            "outcome_ref": "trace-1793357698865-0000c#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-bb85d5278ef0836d3a4576231f2c0312",
+            "admission_digest": "3b4ecefe068ced8309d4dd39b87982991755a789d66cd3b8dafb3b0737467cdc",
+            "execution_digest": "faad4e82c4c41af4d1a2e6a410019c4a29583c4aed5ed1dada39737f6afee26f",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0012\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0012\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.77631,
+            "started_at": 1793357715.67811,
+            "completed_at": 1793357717.338096,
+            "outcome_ref": "trace-1793357698865-0000c#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0013",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0013/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-8567b020e9a8335e5b6f76981dfac7ef",
+        "state": "succeeded",
+        "started_at": 1793357700.532984,
+        "completed_at": 1793357716.95741,
+        "outcome_ref": "trace-1793357698886-0000d#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-b9f2be5249c1566a68583ca7e8288507",
+        "state": "succeeded",
+        "started_at": 1793357716.981109,
+        "completed_at": 1793357718.304793,
+        "outcome_ref": "trace-1793357698886-0000d#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0013/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "803c1bcbdf8f87edc44cdb65ce648e148e0bb1fd8d12b89079ec0fa6589bf7ba"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-8567b020e9a8335e5b6f76981dfac7ef",
+            "admission_digest": "4b5647d878661626780d41e1ab51eaef8dcf3de511b182d515e076f85ded7f79",
+            "execution_digest": "5a2b83473a38d4557c33d0b5966ebf350662f126e9a0e24e39a2cb1196134a7d",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0013\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0013\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.52905,
+            "started_at": 1793357700.532984,
+            "completed_at": 1793357716.95741,
+            "outcome_ref": "trace-1793357698886-0000d#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-b9f2be5249c1566a68583ca7e8288507",
+            "admission_digest": "52b87752afbfc8831a8aabfc30a4e2f48ddeea6e636847704daadd8b9e4def8e",
+            "execution_digest": "75f3bc7477d0220617a2448b5369e2358a84d575c5fc8c6993ff0d2272efbe50",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0013\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0013\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.815107,
+            "started_at": 1793357716.981109,
+            "completed_at": 1793357718.304793,
+            "outcome_ref": "trace-1793357698886-0000d#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0014",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0014/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-99c3af51a56473dd91467535f9470ac5",
+        "state": "succeeded",
+        "started_at": 1793357700.57078,
+        "completed_at": 1793357715.717085,
+        "outcome_ref": "trace-1793357698911-0000e#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-19977cbcbcad2d32802bb113a0a9f10f",
+        "state": "succeeded",
+        "started_at": 1793357715.75271,
+        "completed_at": 1793357717.096349,
+        "outcome_ref": "trace-1793357698911-0000e#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0014/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "e8a116ec9c1f6ac3c799838ff0fe5f07e72eeb830cfbc4a371efb57f7f974672"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-99c3af51a56473dd91467535f9470ac5",
+            "admission_digest": "74b64fc6897c5a3ab5375fcdb6e3a00416b223284a6cdad7f582c1d7b097f9d3",
+            "execution_digest": "e054bd67af41a66712ab11c0380cfc515c1d443e07736f7df9abc17ddd790007",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0014\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0014\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.567722,
+            "started_at": 1793357700.57078,
+            "completed_at": 1793357715.717085,
+            "outcome_ref": "trace-1793357698911-0000e#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-19977cbcbcad2d32802bb113a0a9f10f",
+            "admission_digest": "2d60dfc9ab7af48a260a212aa04892fae288b92ba53137c5a0d0664ce0225fe9",
+            "execution_digest": "9f7092bf47385ee454863186c05cb90a236c4e3ed54312e9159182b43c86be13",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0014\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0014\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.828025,
+            "started_at": 1793357715.75271,
+            "completed_at": 1793357717.096349,
+            "outcome_ref": "trace-1793357698911-0000e#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0015",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0015/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-c469e5b72cc0e744a42953f2c93b9b93",
+        "state": "succeeded",
+        "started_at": 1793357700.601791,
+        "completed_at": 1793357716.533985,
+        "outcome_ref": "trace-1793357698935-0000f#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-f2a7cc602f46ebac0ea00c0bdcff42a5",
+        "state": "succeeded",
+        "started_at": 1793357716.559889,
+        "completed_at": 1793357718.140193,
+        "outcome_ref": "trace-1793357698935-0000f#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0015/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "8f8987f9d54656e3762482ad94b5b27a4a2205e1768774d460ffa2a5b9107862"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-c469e5b72cc0e744a42953f2c93b9b93",
+            "admission_digest": "0b14862979ec5400e1ff2e15ad550cf53a874fe5c17ff12912d8c530c36b4218",
+            "execution_digest": "bcada96c7bb0d0324b28147cfa1119bceb05c9e8affc75acedb1c7186db7100f",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0015\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0015\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.59906,
+            "started_at": 1793357700.601791,
+            "completed_at": 1793357716.533985,
+            "outcome_ref": "trace-1793357698935-0000f#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-f2a7cc602f46ebac0ea00c0bdcff42a5",
+            "admission_digest": "a7f18b4835df74adde6ee17b800bb1034ed1b3824dc71b66ec7472fd21fb63bc",
+            "execution_digest": "dbcea81b8eafdb466e9b554436681bc149700cd883e4bd73221e5e4b89af174c",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0015\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0015\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.842299,
+            "started_at": 1793357716.559889,
+            "completed_at": 1793357718.140193,
+            "outcome_ref": "trace-1793357698935-0000f#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0016",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0016/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-df61c3f8b17aabf49adc4d1bfa63d399",
+        "state": "succeeded",
+        "started_at": 1793357700.637306,
+        "completed_at": 1793357715.568262,
+        "outcome_ref": "trace-1793357698959-00010#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-fc5435a2e4956c62f61c50e7fbd01e7b",
+        "state": "succeeded",
+        "started_at": 1793357715.582845,
+        "completed_at": 1793357716.991231,
+        "outcome_ref": "trace-1793357698959-00010#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0016/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "0c1275d4eac47b51dd7a6579255cc9415abae710f022060817caa494172d5bc5"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-df61c3f8b17aabf49adc4d1bfa63d399",
+            "admission_digest": "7f94798ef5b465b1e2ea2516e0e43121b35caba3f80c0aeb822dde2f8d71105c",
+            "execution_digest": "67b2924bab9fd94f0b9691822a0d744abc1b06ea4aff944cdf3807ed9cc2bc05",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0016\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0016\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.634206,
+            "started_at": 1793357700.637306,
+            "completed_at": 1793357715.568262,
+            "outcome_ref": "trace-1793357698959-00010#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-fc5435a2e4956c62f61c50e7fbd01e7b",
+            "admission_digest": "7bdf5fcaec85694de5f7929c4944b0756e1f7fbb9c376d26cbf40b083acb7171",
+            "execution_digest": "dfff2eb2ae1d5f38d30d38d5196648370b117066f6c47e7e16bdf8e955630833",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0016\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0016\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.860035,
+            "started_at": 1793357715.582845,
+            "completed_at": 1793357716.991231,
+            "outcome_ref": "trace-1793357698959-00010#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0017",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0017/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-f21a852cdaf4f304d375785e8262033d",
+        "state": "succeeded",
+        "started_at": 1793357700.662415,
+        "completed_at": 1793357716.202561,
+        "outcome_ref": "trace-1793357699028-00011#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-7bad9e4b6ef1d99b600eec9393402888",
+        "state": "succeeded",
+        "started_at": 1793357716.231612,
+        "completed_at": 1793357717.467167,
+        "outcome_ref": "trace-1793357699028-00011#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0017/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "c4d9366d726cc048e51ecef214ada760b659c4c0452ef7fb0f77e36d8dbd8f94"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-f21a852cdaf4f304d375785e8262033d",
+            "admission_digest": "a570d190b4a5f7156532fdbf822b76c5389a227a502a285eed9b8643350d428c",
+            "execution_digest": "d985a03bcd7666fb34a6b00f2e9308ae7632d0c38782d904204d07da5cc57929",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0017\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0017\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.660654,
+            "started_at": 1793357700.662415,
+            "completed_at": 1793357716.202561,
+            "outcome_ref": "trace-1793357699028-00011#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-7bad9e4b6ef1d99b600eec9393402888",
+            "admission_digest": "3d69a31b8bef24fb19fe65d69ab8ee8c0f7cb0c2094914c53b41bacef434d5fa",
+            "execution_digest": "41cba69dc007eea673088398ae7a909b120910bed5ee2c9e64a359ea3e265747",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0017\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0017\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.874746,
+            "started_at": 1793357716.231612,
+            "completed_at": 1793357717.467167,
+            "outcome_ref": "trace-1793357699028-00011#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0018",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0018/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-0578ba256a57396890d4a483665dac5e",
+        "state": "succeeded",
+        "started_at": 1793357700.692821,
+        "completed_at": 1793357717.072212,
+        "outcome_ref": "trace-1793357699051-00012#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-ec6c4b75ac2df4afcf9ea093adf6fc59",
+        "state": "succeeded",
+        "started_at": 1793357717.097763,
+        "completed_at": 1793357718.630385,
+        "outcome_ref": "trace-1793357699051-00012#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0018/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "db8afc5789d7b79505888a9352eef663ec2f51e2ed545394ea97af095d4725c4"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-0578ba256a57396890d4a483665dac5e",
+            "admission_digest": "6f910bbbf5b3f4f57d7bbfb37df2308bbe6890b0eaa48291e021492546f4ecac",
+            "execution_digest": "27516b78990b5549fe57d72a1350585e51e3634887af50dc1d254a6545f679f0",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0018\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0018\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.689916,
+            "started_at": 1793357700.692821,
+            "completed_at": 1793357717.072212,
+            "outcome_ref": "trace-1793357699051-00012#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-ec6c4b75ac2df4afcf9ea093adf6fc59",
+            "admission_digest": "30919181dca0eea0b6963a8391f89ca60aca6bd13079713f86f5603bfc179c6b",
+            "execution_digest": "b68387e91a1ecdb99ca6b5b533da7662d3a5463d983008ecb13135b158ba3fd8",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0018\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0018\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.888864,
+            "started_at": 1793357717.097763,
+            "completed_at": 1793357718.630385,
+            "outcome_ref": "trace-1793357699051-00012#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0019",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0019/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-52a816aebfb628ba796941e62153a99e",
+        "state": "succeeded",
+        "started_at": 1793357700.717171,
+        "completed_at": 1793357715.524196,
+        "outcome_ref": "trace-1793357699081-00013#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-17a059cf6236f04819c58efe053b07a0",
+        "state": "succeeded",
+        "started_at": 1793357715.540195,
+        "completed_at": 1793357716.893337,
+        "outcome_ref": "trace-1793357699081-00013#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0019/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "1e0f3085ccfb7dfe74a04ca49f887ccb1e0d4a09bffabcfee10a754a5fbe451f"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-52a816aebfb628ba796941e62153a99e",
+            "admission_digest": "624130a806f2df2cd104f6957b443f80ead12dad7fa50b5546dc743494a5630d",
+            "execution_digest": "398569d711106c37135b21b67468f7cd74e707dbf050358197a6679339aa3e33",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0019\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0019\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.715198,
+            "started_at": 1793357700.717171,
+            "completed_at": 1793357715.524196,
+            "outcome_ref": "trace-1793357699081-00013#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-17a059cf6236f04819c58efe053b07a0",
+            "admission_digest": "0ad828eed7f45fe5b6ea8a6880209423663576fbf1115b070756cc7f4670e2f4",
+            "execution_digest": "767838e077d989c3f5f88f595fdd253b9d61076307a9ddefb97881e8c8bf2797",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0019\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0019\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.907676,
+            "started_at": 1793357715.540195,
+            "completed_at": 1793357716.893337,
+            "outcome_ref": "trace-1793357699081-00013#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0020",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0020/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-18580e5324ceb79dd99a5d84cdde2a2d",
+        "state": "succeeded",
+        "started_at": 1793357700.745803,
+        "completed_at": 1793357715.802225,
+        "outcome_ref": "trace-1793357699156-00014#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-20af5d2ec9188ddbec59b8ee8958af93",
+        "state": "succeeded",
+        "started_at": 1793357715.838098,
+        "completed_at": 1793357717.13988,
+        "outcome_ref": "trace-1793357699156-00014#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0020/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "35412ead2e72e76dcac0c43dfdb7046340e7ce6c6b6a1f7555729bbe3729bcae"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-18580e5324ceb79dd99a5d84cdde2a2d",
+            "admission_digest": "42bc6694ba9bf4aef931100bac453b53fa5ffc90af74d1f02f48435838ca4344",
+            "execution_digest": "b1d40fdfe927276bea91e330fc50e628f1e349411dbbaecf33434ac6249b7ebb",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0020\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0020\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.740017,
+            "started_at": 1793357700.745803,
+            "completed_at": 1793357715.802225,
+            "outcome_ref": "trace-1793357699156-00014#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-20af5d2ec9188ddbec59b8ee8958af93",
+            "admission_digest": "50b36d22cc8c0bc38a94ad05d1c4f1d1267623b9905bef5caf3bea5bdd2bcfa4",
+            "execution_digest": "7259507c1123b3bc5310d0888965d81b09235bf60057f552608f6bd77e9ec1e9",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0020\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0020\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.922683,
+            "started_at": 1793357715.838098,
+            "completed_at": 1793357717.13988,
+            "outcome_ref": "trace-1793357699156-00014#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0021",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0021/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-2c1bfbb127162a5322b536ccd7682d2a",
+        "state": "succeeded",
+        "started_at": 1793357700.771472,
+        "completed_at": 1793357715.848145,
+        "outcome_ref": "trace-1793357699360-00015#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-37906f957ab1a2e37de549f7bdbbc48c",
+        "state": "succeeded",
+        "started_at": 1793357715.920747,
+        "completed_at": 1793357717.164457,
+        "outcome_ref": "trace-1793357699360-00015#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0021/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "137771ca3406d287350fc9ff931a61ab05ba1d78a301ab1c143a05eabbaa0eae"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-2c1bfbb127162a5322b536ccd7682d2a",
+            "admission_digest": "8f031e42cfc8bb474bbed62d24045091ed39694a44c5c9512d4c77b262b77416",
+            "execution_digest": "e717c7a8be8f97c0b04d05c1db3b56576b636acc9331f533ebeefe72b9438953",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0021\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0021\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.769455,
+            "started_at": 1793357700.771472,
+            "completed_at": 1793357715.848145,
+            "outcome_ref": "trace-1793357699360-00015#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-37906f957ab1a2e37de549f7bdbbc48c",
+            "admission_digest": "9fbc0ec8af7f01337058d3b2b46753c0d64b02746bc2e5a1dd0a2ac7784e06cc",
+            "execution_digest": "f92ff6634af3594c976f0efb3667ce00194b6aec1dc3ffe62ce5e0d8adb5b5dd",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0021\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0021\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.932057,
+            "started_at": 1793357715.920747,
+            "completed_at": 1793357717.164457,
+            "outcome_ref": "trace-1793357699360-00015#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0022",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0022/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-6bc10091400e3bd7376918dac8618e10",
+        "state": "succeeded",
+        "started_at": 1793357700.798653,
+        "completed_at": 1793357716.494272,
+        "outcome_ref": "trace-1793357699464-00016#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-0eb59cf8c7c7a2a67bb37f1ea017523f",
+        "state": "succeeded",
+        "started_at": 1793357716.524764,
+        "completed_at": 1793357718.658365,
+        "outcome_ref": "trace-1793357699464-00016#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0022/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "c83653a861afdef1a119c7c897db8c9976c8cbba7fb5f56228cf2aba0c009d90"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-6bc10091400e3bd7376918dac8618e10",
+            "admission_digest": "0a108aa9f46d79e5df5620af99793729195e6c4870d55c33f205c2535d719c3f",
+            "execution_digest": "295d1df6f12e8127020b742897710c3ec8a265e532a405433449717cbcdd8821",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0022\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0022\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.795086,
+            "started_at": 1793357700.798653,
+            "completed_at": 1793357716.494272,
+            "outcome_ref": "trace-1793357699464-00016#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-0eb59cf8c7c7a2a67bb37f1ea017523f",
+            "admission_digest": "feaf745be655223fe2b268e7e38b47de1c32f7457cfa04e163ee9409548cfe4c",
+            "execution_digest": "5c0c784f7f8505a52b92492c60af3f88dabeb297820d11f97c3f9bf24ea9d6c3",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0022\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0022\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.942779,
+            "started_at": 1793357716.524764,
+            "completed_at": 1793357718.658365,
+            "outcome_ref": "trace-1793357699464-00016#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0023",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0023/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-6b7e35b244dbdee28ff2421339225bd2",
+        "state": "succeeded",
+        "started_at": 1793357700.821799,
+        "completed_at": 1793357716.708193,
+        "outcome_ref": "trace-1793357699620-00017#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-2813726064e8b2897e4449ed8b38bedb",
+        "state": "succeeded",
+        "started_at": 1793357716.749287,
+        "completed_at": 1793357718.213162,
+        "outcome_ref": "trace-1793357699620-00017#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0023/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "ceb6b210e0eeaa98585be944aa6a05e986478e371a7f33752a1d45248463141d"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-6b7e35b244dbdee28ff2421339225bd2",
+            "admission_digest": "e0b0d4071e99d58d9bbf7671e07dc2a9cf003ed939c8a1b4ab947ad6f7fc29e6",
+            "execution_digest": "460e317da11306d6fbeeaae987baa9e00246d9c2e934aee34aa6bf97a81a2ec9",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0023\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0023\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.819787,
+            "started_at": 1793357700.821799,
+            "completed_at": 1793357716.708193,
+            "outcome_ref": "trace-1793357699620-00017#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-2813726064e8b2897e4449ed8b38bedb",
+            "admission_digest": "4c21d6b29d009e17c872dfa915ccb6bb4955fa29cd77992d3bd43f66ca45fd43",
+            "execution_digest": "94301cdb6f45137e3f052edadcf108e057f712afdd1491ff74fd9f469ca89540",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0023\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0023\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.951273,
+            "started_at": 1793357716.749287,
+            "completed_at": 1793357718.213162,
+            "outcome_ref": "trace-1793357699620-00017#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0024",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0024/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-ef6781beacdd343ac2869d832392be60",
+        "state": "succeeded",
+        "started_at": 1793357700.851805,
+        "completed_at": 1793357715.949883,
+        "outcome_ref": "trace-1793357699712-00018#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-a4ffc658e417eab2bd2595e56e631b3e",
+        "state": "succeeded",
+        "started_at": 1793357715.983387,
+        "completed_at": 1793357717.202362,
+        "outcome_ref": "trace-1793357699712-00018#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0024/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "a0e1684ded059a15a869e248da8f73fc47314088a8f28bbb8af8fabdb979209c"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-ef6781beacdd343ac2869d832392be60",
+            "admission_digest": "d268027231ffbc817d1c63089d68d215fe4c5125b1b7ce6547d1ee48220eb9b1",
+            "execution_digest": "e80960b294ab395556081cd0ba10a58e6bbd7709aa70a8e4282a39fadc5fd6f2",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0024\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0024\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.849083,
+            "started_at": 1793357700.851805,
+            "completed_at": 1793357715.949883,
+            "outcome_ref": "trace-1793357699712-00018#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-a4ffc658e417eab2bd2595e56e631b3e",
+            "admission_digest": "bfed4757307a4cbf1fab5e7a61b87e32b0ecf1e04a618be4429dbb268b49859f",
+            "execution_digest": "c5c61179971ecaa211b91aba0e4e253d3185ff510e43018809b5362790a909dd",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0024\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0024\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.960805,
+            "started_at": 1793357715.983387,
+            "completed_at": 1793357717.202362,
+            "outcome_ref": "trace-1793357699712-00018#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0025",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0025/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-00133608e484cb5b8daad9690a26bf52",
+        "state": "succeeded",
+        "started_at": 1793357700.881491,
+        "completed_at": 1793357715.67812,
+        "outcome_ref": "trace-1793357699740-00019#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-a025529d34b83a3c877f1813569b4165",
+        "state": "succeeded",
+        "started_at": 1793357715.71795,
+        "completed_at": 1793357717.12587,
+        "outcome_ref": "trace-1793357699740-00019#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0025/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "4d8233443ac9a8ecf1dbd8335b1924cbc48d3d22596c59e2f4df9270126f7e55"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-00133608e484cb5b8daad9690a26bf52",
+            "admission_digest": "f71eeebd67a7c1a88e87ba7d18205ef345d04034d4cc593cd5ee114bcd636c5c",
+            "execution_digest": "aa07a5e3ea4d4d0cf2a568d166ee5f1954f6e35044bd8b568924bf32e1b5c21a",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0025\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0025\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.879887,
+            "started_at": 1793357700.881491,
+            "completed_at": 1793357715.67812,
+            "outcome_ref": "trace-1793357699740-00019#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-a025529d34b83a3c877f1813569b4165",
+            "admission_digest": "8f88d470b495844e4b999a170baa84520918f8405ecd5b7455008ca9c65bd500",
+            "execution_digest": "0daec3460dcb4fe155c69087e6e9a87435d6e6728edbb704402e41f9d8a89213",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0025\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0025\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.999623,
+            "started_at": 1793357715.71795,
+            "completed_at": 1793357717.12587,
+            "outcome_ref": "trace-1793357699740-00019#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0026",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0026/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-41222f1a3c53b16c34974239de2a3831",
+        "state": "succeeded",
+        "started_at": 1793357700.906078,
+        "completed_at": 1793357715.414722,
+        "outcome_ref": "trace-1793357699771-0001a#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-5defc666c0e68a7e67b180cb543d3b45",
+        "state": "succeeded",
+        "started_at": 1793357715.419988,
+        "completed_at": 1793357716.569513,
+        "outcome_ref": "trace-1793357699771-0001a#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0026/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "c38364c942d6534de725e5e031a218c7a821b8bf69e05382e42f21d8ef16206e"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-41222f1a3c53b16c34974239de2a3831",
+            "admission_digest": "c57fcc71957b55e5965f0ff42e57a521269bd35cf7b3bb54101f42c9b1c01888",
+            "execution_digest": "c59653d60b14f71a05cf6b516606d634b0f06e6680be0efea1cc4cbfd7d3362e",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0026\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0026\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.904398,
+            "started_at": 1793357700.906078,
+            "completed_at": 1793357715.414722,
+            "outcome_ref": "trace-1793357699771-0001a#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-5defc666c0e68a7e67b180cb543d3b45",
+            "admission_digest": "2fdbadd0b4bbd6fefbd9620c73a30529700d56eb5296886e7c33c3da79bed40a",
+            "execution_digest": "4fb753d58430ea132008f778e995a88ed4ac54069da3d8f1a3d6054f6a3aa5f0",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0026\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0026\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357702.030133,
+            "started_at": 1793357715.419988,
+            "completed_at": 1793357716.569513,
+            "outcome_ref": "trace-1793357699771-0001a#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0027",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0027/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-133ba73a7dbb9f694a5d47b770de0fcf",
+        "state": "succeeded",
+        "started_at": 1793357700.945225,
+        "completed_at": 1793357716.114527,
+        "outcome_ref": "trace-1793357699804-0001b#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-e3ecc85cb1e46f73db342a90b29b53b0",
+        "state": "succeeded",
+        "started_at": 1793357716.190798,
+        "completed_at": 1793357718.733548,
+        "outcome_ref": "trace-1793357699804-0001b#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0027/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "dd8ae7968a694d9584527f514ab8604a290e4c279f984554b4d6003593566bb4"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-133ba73a7dbb9f694a5d47b770de0fcf",
+            "admission_digest": "fa1baca53c4799e2f67c8b70b70f4c2b72faf3138f38631c9ebc51ca458bd083",
+            "execution_digest": "6a27913a7c5ea3d5ed55e658cd3a272a499341b8655aea8f4b4cf62a58ff5967",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0027\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0027\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357700.942945,
+            "started_at": 1793357700.945225,
+            "completed_at": 1793357716.114527,
+            "outcome_ref": "trace-1793357699804-0001b#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-e3ecc85cb1e46f73db342a90b29b53b0",
+            "admission_digest": "71c2e24869b1c72dc00790a5efaa0c92229b5c406f6ac75bd0540152e665a59a",
+            "execution_digest": "48288b4704498d3cd84fd58d4ca789bac4081f562650cfb79d3e1221798f8573",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0027\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0027\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357702.046969,
+            "started_at": 1793357716.190798,
+            "completed_at": 1793357718.733548,
+            "outcome_ref": "trace-1793357699804-0001b#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0028",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0028/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-000f3937a1cfce6de093c783becb953b",
+        "state": "succeeded",
+        "started_at": 1793357701.027031,
+        "completed_at": 1793357716.766127,
+        "outcome_ref": "trace-1793357699837-0001c#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-cfcd0d5386c31300dd5581aee6aee03f",
+        "state": "succeeded",
+        "started_at": 1793357716.790085,
+        "completed_at": 1793357718.79781,
+        "outcome_ref": "trace-1793357699837-0001c#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0028/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "ab41777730a5ff2c44161e0ff08a7c8769c0efcb3f0bb5133e360827f6e9d3a1"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-000f3937a1cfce6de093c783becb953b",
+            "admission_digest": "8282c157faed22f093eebe49a7f291e942b0fce0c1cf3cbd68bd772416d2dafb",
+            "execution_digest": "707a4ddeacd4751200f8741cd2d59b490f652ada68682f683f4b1c0e836e4f98",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0028\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0028\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.001813,
+            "started_at": 1793357701.027031,
+            "completed_at": 1793357716.766127,
+            "outcome_ref": "trace-1793357699837-0001c#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-cfcd0d5386c31300dd5581aee6aee03f",
+            "admission_digest": "fa926d7848dd1f47c03391f1395b84610d5d216abd82e63439381eabf4e760f4",
+            "execution_digest": "9555cb1564717f51b18de41c417ab0a8b34053fa508ee3996e8104b425d9e005",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0028\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0028\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357702.057683,
+            "started_at": 1793357716.790085,
+            "completed_at": 1793357718.79781,
+            "outcome_ref": "trace-1793357699837-0001c#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  },
+  {
+    "keeper": "scale-keeper-0029",
+    "source_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/owned-base/.masc/keepers/scale-keeper-0029/chat-operations.sqlite3",
+    "rows": [
+      {
+        "operation_id": "kmsg-5bcfaf694af9b64f7b2d6f5956401ec7",
+        "state": "succeeded",
+        "started_at": 1793357701.136051,
+        "completed_at": 1793357717.797234,
+        "outcome_ref": "trace-1793357699873-0001d#1",
+        "failure_kind": null
+      },
+      {
+        "operation_id": "kmsg-b76e11f36676894e87e6b97f813be538",
+        "state": "succeeded",
+        "started_at": 1793357717.853568,
+        "completed_at": 1793357718.895651,
+        "outcome_ref": "trace-1793357699873-0001d#2",
+        "failure_kind": null
+      }
+    ],
+    "backup_validation": {
+      "backup_path": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/keeper-roster-matched-v1/measured-v1/runs/owners-30-control/durable/scale-keeper-0029/chat-operations.sqlite3",
+      "integrity_check": "ok",
+      "read_only_reopened": true,
+      "source_connection_closed": true,
+      "exact_typed_rows_equal": true,
+      "columns": [
+        "operation_id",
+        "admission_digest",
+        "execution_digest",
+        "sequence",
+        "source_json",
+        "input_json",
+        "state",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "outcome_ref",
+        "failure_kind",
+        "failure_detail"
+      ],
+      "row_count": 2,
+      "typed_rows_sha256": "c8221a038dcda6880fb03d62cd3fc5058d79cebfb8db42ebb3d30eff4765be14"
+    },
+    "snapshot": {
+      "operations": {
+        "columns": [
+          "operation_id",
+          "admission_digest",
+          "execution_digest",
+          "sequence",
+          "source_json",
+          "input_json",
+          "state",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "outcome_ref",
+          "failure_kind",
+          "failure_detail"
+        ],
+        "rows": [
+          {
+            "operation_id": "kmsg-5bcfaf694af9b64f7b2d6f5956401ec7",
+            "admission_digest": "7ba2f6e3f3420e8fc5f22cda92d3ad892bdbe61ed8e803694cb28b3216c360ad",
+            "execution_digest": "157afa1ee61ac04f585098a2121817fcf5fdbc49244f8b589b2b90fee5d1b55d",
+            "sequence": 0,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0029\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0029\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357701.128161,
+            "started_at": 1793357701.136051,
+            "completed_at": 1793357717.797234,
+            "outcome_ref": "trace-1793357699873-0001d#1",
+            "failure_kind": null,
+            "failure_detail": null
+          },
+          {
+            "operation_id": "kmsg-b76e11f36676894e87e6b97f813be538",
+            "admission_digest": "1ab6731a7998fad262ac8d75a5c4ee8c08baac33e7284acda9c52af639db7a57",
+            "execution_digest": "c5c4582f918c57a7359451db5293ebff69e2c9024e0e0aafffe4107f58df3f04",
+            "sequence": 1,
+            "source_json": "{\"channel\":\"agent\",\"channel_user_id\":\"\",\"channel_user_name\":\"\",\"channel_workspace_id\":\"\",\"continuation_channel\":{\"kind\":\"dashboard\",\"thread_id\":\"keeper:scale-keeper-0029\"},\"conversation_id\":null,\"external_message_id\":null,\"extra_mentions\":[],\"schema\":\"masc.keeper_chat_operation.source.v2\",\"sender_keeper\":null,\"submitted_by\":\"dashboard\",\"surface\":{\"kind\":\"agent\"},\"thread_id\":\"keeper:scale-keeper-0029\",\"user_row_origin\":\"needs_append\",\"workspace_id\":null}",
+            "input_json": null,
+            "state": "succeeded",
+            "created_at": 1793357702.070633,
+            "started_at": 1793357717.853568,
+            "completed_at": 1793357718.895651,
+            "outcome_ref": "trace-1793357699873-0001d#2",
+            "failure_kind": null,
+            "failure_detail": null
+          }
+        ]
+      },
+      "operation_batch_members": {
+        "columns": [
+          "operation_id",
+          "execution_id",
+          "position",
+          "admitted_digest",
+          "admitted_input_json"
+        ],
+        "rows": []
+      }
+    }
+  }
+]

@@ -1,0 +1,31 @@
+{
+  "read_at_unix": 1793357122.3770292,
+  "runs": [
+    {
+      "id": 41041914326,
+      "name": "Minimal manual checks",
+      "path": ".github/workflows/pr-check.yml",
+      "head_sha": "50011c4550cb49153c189586f60bee6438b2f232",
+      "head_branch": "main",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-30T10:35:56Z",
+      "updated_at": "2026-10-30T10:45:03Z",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/41041914326"
+    },
+    {
+      "id": 41041918389,
+      "name": "Test",
+      "path": ".github/workflows/test.yml",
+      "head_sha": "c275c5e18bdf0977ec3cfdd33e16bd65d3367236",
+      "head_branch": "perf/tui-roster-prepared-reading-20261030",
+      "event": "workflow_dispatch",
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-30T10:35:58Z",
+      "updated_at": "2026-10-30T10:39:57Z",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/41041918389"
+    }
+  ]
+}

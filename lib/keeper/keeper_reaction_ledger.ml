@@ -702,35 +702,37 @@ let note_event_queue_reaction_evidence_row ~keeper_name accumulator row =
       | Current_stimulus { metadata; _ }
       | Current_reaction { metadata; _ } -> metadata
     in
-    if Event_id_set.mem metadata.event_id accumulator.seen_event_ids
-    then ()
-    else (
+    let is_first_observation =
+      not (Event_id_set.mem metadata.event_id accumulator.seen_event_ids)
+    in
+    if is_first_observation
+    then (
       (* Only a decoded record owns an event identity. A damaged append must
          remain visible without shadowing a later valid replay of that event. *)
       accumulator.seen_event_ids
         <- Event_id_set.add metadata.event_id accumulator.seen_event_ids;
-      accumulator.matched_record_count <- accumulator.matched_record_count + 1;
-      let recorded_at = Some metadata.recorded_at in
-      accumulator.latest_recorded_at
-        <- max_recorded_at accumulator.latest_recorded_at recorded_at;
-      (match current_row with
-       | Current_stimulus _ ->
-         accumulator.stimulus_recorded_at
-           <- max_recorded_at accumulator.stimulus_recorded_at recorded_at
-       | Current_reaction { reaction_kind = Turn_started; _ } ->
-         accumulator.turn_started_recorded_at
-           <- max_recorded_at accumulator.turn_started_recorded_at recorded_at
-       | Current_reaction { reaction_kind = Turn_finished; _ } ->
-         accumulator.turn_finished_recorded_at
-           <- max_recorded_at accumulator.turn_finished_recorded_at recorded_at
-       | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
-         accumulator.event_queue_ack_recorded_at
-           <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at
-       | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
-         accumulator.event_queue_cancelled_recorded_at
-           <- max_recorded_at
-                accumulator.event_queue_cancelled_recorded_at
-                recorded_at))
+      accumulator.matched_record_count <- accumulator.matched_record_count + 1);
+    let recorded_at = Some metadata.recorded_at in
+    accumulator.latest_recorded_at
+      <- max_recorded_at accumulator.latest_recorded_at recorded_at;
+    (match current_row with
+     | Current_stimulus _ ->
+       accumulator.stimulus_recorded_at
+         <- max_recorded_at accumulator.stimulus_recorded_at recorded_at
+     | Current_reaction { reaction_kind = Turn_started; _ } ->
+       accumulator.turn_started_recorded_at
+         <- max_recorded_at accumulator.turn_started_recorded_at recorded_at
+     | Current_reaction { reaction_kind = Turn_finished; _ } ->
+       accumulator.turn_finished_recorded_at
+         <- max_recorded_at accumulator.turn_finished_recorded_at recorded_at
+     | Current_reaction { reaction_kind = Event_queue_ack; _ } ->
+       accumulator.event_queue_ack_recorded_at
+         <- max_recorded_at accumulator.event_queue_ack_recorded_at recorded_at
+     | Current_reaction { reaction_kind = Event_queue_cancelled; _ } ->
+       accumulator.event_queue_cancelled_recorded_at
+         <- max_recorded_at
+              accumulator.event_queue_cancelled_recorded_at
+              recorded_at)
 ;;
 
 let event_queue_reaction_evidence_of_accumulator
@@ -1512,12 +1514,15 @@ let summarize_rows ~keeper_name rows =
       | Current_stimulus { metadata; _ }
       | Current_reaction { metadata; _ } -> metadata
     in
-    if Event_id_set.mem metadata.event_id !current_event_ids
-    then ()
-    else begin
+    let is_first_observation =
+      not (Event_id_set.mem metadata.event_id !current_event_ids)
+    in
+    latest_recorded_at
+      := max_recorded_at !latest_recorded_at (Some metadata.recorded_at);
+    if is_first_observation
+    then begin
       current_event_ids := Event_id_set.add metadata.event_id !current_event_ids;
       incr row_count;
-      latest_recorded_at := Some metadata.recorded_at;
       latest_stimulus_id := Some metadata.stimulus_id;
       match current_row with
       | Current_stimulus { metadata; stimulus_kind } ->

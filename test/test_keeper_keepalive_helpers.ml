@@ -926,6 +926,43 @@ let test_restarting_exact_mention_is_durable_with_deferred_wake () =
        | None -> fail "Restarting registry entry missing")
 ;;
 
+let test_unregistered_persisted_exact_mention_is_durable_across_registration () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.For_testing.clear
+    (fun () ->
+       let meta = make_board_resume_meta "unregisteredlane" in
+       write_board_lane_config config meta;
+       (match Keeper_meta_store.replace_snapshot config meta with
+        | Ok () -> ()
+        | Error detail -> fail ("write_meta failed: " ^ detail));
+       check bool "fixture starts unregistered" false
+         (Keeper_registry.is_registered ~base_path:config.base_path meta.name);
+       let signal : Board_dispatch.addressed_board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-unregistered-lane"
+         ; author = "external-author"
+         ; title = "addressed"
+         ; content = "@unregisteredlane retain this before boot"
+         ; hearth = None
+         ; updated_at = Some 124.75
+         }
+         |> persist_board_signal
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "unregistered persisted keeper receives durable signal" 1
+         (board_queue_length config meta.name);
+       let entry =
+         Keeper_registry.For_testing.register
+           ~base_path:config.base_path
+           meta.name
+           meta
+       in
+       check int "registered keeper inherits durable queue" 1
+         (Keeper_event_queue.length (Atomic.get entry.event_queue)))
+;;
+
 let test_lane_meta_failure_does_not_block_next_durable_delivery () =
   Eio_main.run @@ fun _env ->
   with_board_workspace @@ fun config ->
@@ -1499,6 +1536,8 @@ let () =
             test_paused_exact_mention_is_durable_without_wake
         ; test_case "Restarting exact mention is durable with deferred wake" `Quick
             test_restarting_exact_mention_is_durable_with_deferred_wake
+        ; test_case "unregistered persisted exact mention is durable across registration" `Quick
+            test_unregistered_persisted_exact_mention_is_durable_across_registration
         ; test_case "lane metadata failure does not block next durable delivery" `Quick
             test_lane_meta_failure_does_not_block_next_durable_delivery
         ; test_case "thread signal for a swept post delivers nothing" `Quick

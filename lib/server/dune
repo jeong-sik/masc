@@ -164,6 +164,7 @@
   masc.discovery_cache
   masc.local_runtime_pool
   masc.keeper_contract
+  masc.keeper_efficiency
   masc.bounded_event_dedupe
   masc.tool_catalog_surfaces
   masc.config_dir_resolver

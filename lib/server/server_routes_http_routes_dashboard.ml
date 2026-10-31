@@ -3612,6 +3612,14 @@ let add_routes ~sw ~clock router =
 
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/keepers/turn/run-next" (fun state actor req reqd -> handle_keeper_run_next state ~actor req reqd)
 
+  (* Fleet Keeper efficiency month view, same read authority as the
+     per-keeper [/metrics] tail: month aggregates over the cost and
+     tool-call ledgers through the RFC-0162 boundary cache. *)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanReadState)
+       Server_dashboard_http_keeper_efficiency.route_path
+       (fun state _agent_name req reqd ->
+          Server_dashboard_http_keeper_efficiency.handle_get state req reqd)
+
   |> Server_route.post (Server_route.Tool_actor { tool_name = Keeper_tool_name.(to_string Keeper_delegate_cancel) }) "/api/v1/keepers/turn/interrupt" (fun state actor request reqd ->
          handle_keeper_turn_interrupt ~actor state request reqd)
 

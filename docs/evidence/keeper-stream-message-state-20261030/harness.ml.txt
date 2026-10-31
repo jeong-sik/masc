@@ -1,0 +1,75 @@
+let usage = [| None; Some {Agent_core.Types.token_count=12;charge=0.5};
+               Some {Agent_core.Types.token_count=0;charge=Float.nan} |]
+let ids = [| ""; " \t\n"; "id"; "  id \t"; "\000"; "other" |]
+let models = [| ""; "model-a"; "model-b" |]
+
+let snapshot_old t = Marshal.to_bytes (Old_state.observation t) []
+let snapshot_new t = Marshal.to_bytes (New_state.observation t) []
+let verify old fresh =
+  if snapshot_old old <> snapshot_new fresh || Old_state.provider_id old <> New_state.provider_id fresh then
+    failwith "different message scope observation"
+
+let differential () =
+  let random = Random.State.make [|2026;10;30;3|] in
+  for _ = 1 to 2000 do
+    let old = Old_state.make () and fresh = New_state.make () in
+    for _ = 1 to 100 do
+      (match Random.State.int random 8 with
+       | 0 | 1 | 2 ->
+           let id=ids.(Random.State.int random (Array.length ids)) in
+           let model=models.(Random.State.int random (Array.length models)) in
+           let usage=usage.(Random.State.int random (Array.length usage)) in
+           Old_state.prepare_message_start old ~id ~model ~usage;
+           New_state.prepare_message_start fresh ~id ~model ~usage;
+           Old_state.start_message_scope old ~id ~model ~usage;
+           New_state.start_message_scope fresh ~id ~model ~usage
+       | 3 -> Old_state.ensure_message_scope old; New_state.ensure_message_scope fresh
+       | 4 -> let value=Random.State.bool random in
+           Old_state.set_progress old value; New_state.set_progress fresh value
+       | 5 -> let value=Random.State.bool random in
+           Old_state.set_tool old value; New_state.set_tool fresh value
+       | 6 -> let value=Random.State.int random 3 in
+           Old_state.set_phase old value; New_state.set_phase fresh value
+       | _ -> Old_state.advance_to_empty_scope old; New_state.advance_to_empty_scope fresh);
+      verify old fresh
+    done
+  done;
+  print_endline "differential: 200000 synthetic scope actions passed"
+
+let sink = ref 0
+let bench path =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc "case,variant,n,cpu_seconds,wall_seconds,allocated_bytes\n";
+    List.iter (fun case ->
+      for round=0 to 6 do
+        let old=Old_state.make () and fresh=New_state.make () in
+        Old_state.start_message_scope old ~id:"id" ~model:"model-a" ~usage:None;
+        New_state.start_message_scope fresh ~id:"id" ~model:"model-a" ~usage:None;
+        let old_run,new_run = match case with
+          | "open_replay" ->
+              (fun () -> Old_state.prepare_message_start old ~id:"id" ~model:"model-a" ~usage:None;
+                Old_state.start_message_scope old ~id:"id" ~model:"model-a" ~usage:None),
+              (fun () -> New_state.prepare_message_start fresh ~id:"id" ~model:"model-a" ~usage:None;
+                New_state.start_message_scope fresh ~id:"id" ~model:"model-a" ~usage:None)
+          | "fresh_scope" ->
+              (fun () -> Old_state.advance_to_empty_scope old;
+                Old_state.start_message_scope old ~id:"id" ~model:"model-a" ~usage:None),
+              (fun () -> New_state.advance_to_empty_scope fresh;
+                New_state.start_message_scope fresh ~id:"id" ~model:"model-a" ~usage:None)
+          | "provider_id" ->
+              (fun () -> if Option.is_some (Old_state.provider_id old) then incr sink),
+              (fun () -> if Option.is_some (New_state.provider_id fresh) then incr sink)
+          | _ -> assert false in
+        let sample variant f =
+          Gc.full_major ();
+          let bytes=Gc.allocated_bytes () and cpu=Sys.time () and wall=Unix.gettimeofday () in
+          for _=1 to 500_000 do f () done;
+          Printf.fprintf oc "%s,%s,500000,%.9f,%.9f,%.0f\n%!" case variant
+            (Sys.time()-.cpu) (Unix.gettimeofday()-.wall) (Gc.allocated_bytes()-.bytes) in
+        let old_sample () = sample "old" old_run and new_sample () = sample "new" new_run in
+        if round mod 2 = 0 then (old_sample ();new_sample ()) else (new_sample ();old_sample ())
+      done) ["open_replay";"fresh_scope";"provider_id"]);
+  Printf.printf "benchmark sink %d\n%!" !sink
+
+let () = differential ();bench Sys.argv.(1)

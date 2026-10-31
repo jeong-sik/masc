@@ -45,6 +45,13 @@ type stream_phase =
   | Stop_reason_seen of Agent_core.Types.stop_reason
   | Message_stopped
 
+type message_start =
+  { raw_id : string
+  ; model : string
+  ; usage : Agent_core.Types.api_usage option
+  ; provider_message_id : string option
+  }
+
 type t = {
   mutable blocks : (int * open_block) list;
   (* A conflicting start makes the whole provider block untrustworthy.  Keep
@@ -59,9 +66,7 @@ type t = {
       * string )
       list;
   mutable current_stream_scope : int;
-  mutable current_message_id : string option;
-  mutable current_message_start :
-    (string * string * Agent_core.Types.api_usage option) option;
+  mutable current_message_start : message_start option;
   mutable message_open : bool;
   mutable message_seen : bool;
   mutable current_scope_progress_seen : bool;
@@ -85,7 +90,6 @@ let create () =
   ; quarantined = []
   ; protocol_errors = []
   ; current_stream_scope = 0
-  ; current_message_id = None
   ; current_message_start = None
   ; message_open = false
   ; message_seen = false
@@ -143,7 +147,6 @@ let current_scope_is_invalid t =
 let advance_to_empty_scope t =
   discard_open_scope t t.current_stream_scope;
   t.current_stream_scope <- t.current_stream_scope + 1;
-  t.current_message_id <- None;
   t.current_message_start <- None;
   t.message_open <- false;
   t.message_seen <- false;
@@ -216,12 +219,13 @@ let quarantine_open_scope t ~kind ~detail =
          detail block.stream_scope index))
 ;;
 
-let message_start_equal
-    (left_id, left_model, left_usage)
-    (right_id, right_model, right_usage) =
-  String.equal left_id right_id
-  && String.equal left_model right_model
-  && Option.equal ( = ) left_usage right_usage
+let current_message_start_equal t ~id ~model ~usage =
+  match t.current_message_start with
+  | None -> false
+  | Some start ->
+    String.equal start.raw_id id
+    && String.equal start.model model
+    && Option.equal ( = ) start.usage usage
 ;;
 
 let current_scope_has_tool_occurrence t =
@@ -236,11 +240,9 @@ let current_scope_has_tool_occurrence t =
 ;;
 
 let prepare_message_start t ~id ~model ~usage =
-  let incoming_start = id, model, usage in
   let exact_open_replay =
     t.stream_phase = Accepting_content
-    && Option.equal message_start_equal
-         (Some incoming_start) t.current_message_start
+    && current_message_start_equal t ~id ~model ~usage
   in
   if
     t.message_seen
@@ -260,22 +262,17 @@ let prepare_message_start t ~id ~model ~usage =
 ;;
 
 let start_message_scope t ~id ~model ~usage =
-  let incoming_start = id, model, usage in
-  let message_id =
-    if String.trim id = "" then None else Some id
-  in
   if
     t.stream_phase = Accepting_content
     && t.message_seen
-    && Option.equal message_start_equal
-         (Some incoming_start) t.current_message_start
+    && current_message_start_equal t ~id ~model ~usage
   then
     (* Exact prelude replay within one still-open producer call. *)
     t.message_open <- true
   else if not t.message_seen
   then (
-    t.current_message_id <- message_id;
-    t.current_message_start <- Some incoming_start;
+    let provider_message_id = if String.trim id = "" then None else Some id in
+    t.current_message_start <- Some {raw_id=id;model;usage;provider_message_id};
     t.message_open <- true;
     t.message_seen <- true)
   else
@@ -917,7 +914,9 @@ let on_event t (evt : Agent_core.Types.sse_event) =
         let call_id = raw_call_id in
         let call_name = String.trim raw_call_name in
         let stream_scope = t.current_stream_scope in
-        let provider_message_id = t.current_message_id in
+        let provider_message_id = match t.current_message_start with
+          | None -> None
+          | Some start -> start.provider_message_id in
         let finalized_at_index =
           List.filter
             (fun (_, (finalized : finalized_block)) ->

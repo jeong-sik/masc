@@ -1,0 +1,22 @@
+{
+  "command": [
+    "python3",
+    "artifacts/extreme-perf-20261030/tui-owner-probe-v2/keeper_scale_session.py",
+    "--binary",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc",
+    "--tui-binary",
+    "artifacts/extreme-perf-20261030/tui-prefix-native-v1/masc-tui",
+    "--repo",
+    ".",
+    "--output",
+    "artifacts/extreme-perf-20261030/native-tui-owner30-v2",
+    "--keepers",
+    "30",
+    "--messages-per-keeper",
+    "2"
+  ],
+  "started_at_unix": 1793343676.148302,
+  "ended_at_unix": 1793343701.610511,
+  "returncode": 0,
+  "scope": "Same immutable v2 observer/native pair after 2-owner qualification. Scripted loopback provider with real Keeper owners; separate durable workload, UI transport/phase capture and target verdict. Empty autostart log is only a read-time lower-bound observation, not proof of zero attempted/delayed shim processes. Sibling/PATH shim blocks real server execution. Native Mtime elapsed and Python perf_counter are separate clocks; no input-to-frame acknowledgement is inferred."
+}

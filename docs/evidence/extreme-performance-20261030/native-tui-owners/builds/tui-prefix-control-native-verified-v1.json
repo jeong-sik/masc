@@ -1,0 +1,29 @@
+{
+  "checked_at_unix": 1793345493.930272,
+  "receipt": "/Users/dancer/me/workspace/yousleepwhen/masc-extreme-perf-20261030/artifacts/extreme-perf-20261030/tui-prefix-control-native-v1/receipt.json",
+  "native_source": "b004188be0805f5deb37127bdd7c70943691cb22",
+  "expected_sha256": "9e093205967016c0d71e9018e017ab5f3f253e035572769ac9bed6469dd62cc0",
+  "actual_sha256": "9e093205967016c0d71e9018e017ab5f3f253e035572769ac9bed6469dd62cc0",
+  "build_commit_returncode": 0,
+  "build_commit_stdout": "b004188be0805f5deb37127bdd7c70943691cb22",
+  "build_commit_stderr": "",
+  "native_server_provided": false,
+  "suite_results": [
+    {
+      "suite": "test_tui_detail_reading",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_board_successor",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    },
+    {
+      "suite": "test_tui_usage_scope",
+      "suite_exit_code": 0,
+      "log_exit_code": 0
+    }
+  ],
+  "verified": true
+}

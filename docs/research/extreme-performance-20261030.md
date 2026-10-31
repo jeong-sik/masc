@@ -113,6 +113,34 @@ presentation experiment must preserve terminal policy, recovery and child-view
 ownership; source markers alone will not prove a visible improvement. DAW
 edit/navigation, audio/MIDI timing and redraw costs require separate observations.
 
+## Actual native TUI under owned Keeper load
+
+The [native TUI owner-scale bundle](../evidence/extreme-performance-20261030/native-tui-owners/README.md)
+adds exact-source 5297349 native TUI/server runs at 2/30/300 real owner counts
+with a scripted local provider, 4/60/600 durable outcomes, 85/93/109 Build and
+Present samples, and raw stage/clock/omission checks. The shared runtime was
+not restarted or loaded. This is a candidate observation, not before/after
+improvement or external-provider/peer/physical-display proof.
+
+The 300-owner keeper-list Build cohort has p50 4.800 ms and p95 5.608 ms
+(14 samples); chat Build has p50 0.253 and p95 0.579 ms (58 samples). The
+released health cohort retains p95 47.815 ms and maximum 8.269 seconds. Thirty-
+owner Present has a separate 13.863 ms outlier mostly outside write/flush;
+300-owner Present's worst is instead mostly flush. No single causal explanation
+follows from those different outliers.
+
+The visible Keeper window is already bounded in source. Next profiling should
+inspect repeated fleet-wide `keeper_reading`/model preparation and joins, rather
+than assuming all offscreen rows are rendered. UI loader/application cardinality
+and actual scroll state remain unobserved. The native residual diagnostic also
+subtracts nested stages twice; retained analysis uses interval unions and keeps
+the product diagnostic repair open. Union-uncovered wall is not exclusive CPU.
+Native elapsed and Python perf-counter clocks remain separate, so input writes
+are not mapped to frames. The control native build at direct parent b004188
+completed and its downloaded TUI digest/embedded source were verified. That
+artifact provides no server; a performance execution/comparison remains future
+evidence.
+
 ## Measurement matrix still required for completion
 
 Use 100 us as the explicit target for every relevant boundary below. Report
@@ -122,7 +150,7 @@ stale/partial/failed results and controlled 30/300 owner populations.
 
 | Boundary | Current evidence | Remaining proof |
 | --- | --- | --- |
-| TUI input decision, decode, state application, build, present | Last retained TUI self-report f06ab8f; no native TUI timing in this investigation | Real native requests/state decisions and phase timings, physical display scope separate |
+| TUI input decision, decode, state application, build, present | Candidate 5297349 native 2/30/300 owner phase samples; input application/scroll position unobserved | Real native requests/state decisions and phase timings, physical display scope separate |
 | DAW edit/navigation, piano roll, playback and presentation | Paired extracted-loop wall/CPU; 4 existing style and 63 controller/editor checks | Real input/state timing, allocation, audio/MIDI deadlines and physical flicker |
 | HTTP and MCP | Limited live wire baseline; isolated health/status | Route-specific semantic/freshness predicates, aligned server stages, tails under controlled load |
 | Markdown/HTML/file I/O | Original-record allocation clues | Read/hash/parse/commit attribution, growth and replacement, durable before/after |

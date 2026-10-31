@@ -1,0 +1,21 @@
+{
+  "command": [
+    "gh",
+    "workflow",
+    "run",
+    "pr-check.yml",
+    "--ref",
+    "main",
+    "-f",
+    "native-tui-source-sha=b004188be0805f5deb37127bdd7c70943691cb22",
+    "-f",
+    "native-tui-scenario=detail-ownership"
+  ],
+  "requested_source_head": "b004188be0805f5deb37127bdd7c70943691cb22",
+  "started_at_unix": 1793341953.5902631,
+  "ended_at_unix": 1793341958.255167,
+  "returncode": 0,
+  "stdout": "https://github.com/jeong-sik/masc/actions/runs/41014690379\n",
+  "stderr": "",
+  "scope": "Focused native TUI control for before/after actual frame comparison at the direct pre-prefix parent; no matching server requested because the candidate server contract is unchanged. Dispatch only."
+}

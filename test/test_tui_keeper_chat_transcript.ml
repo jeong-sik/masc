@@ -234,6 +234,10 @@ let test_interleaved_updates_keep_each_tool_occurrence () =
   List.iter (fun index ->
     feed t [tool_started ~block_index:index "reused" (Printf.sprintf "tool-%d" index)])
     (List.init 24 Fun.id);
+  feed t
+    [ tool_started ~block_index:12 "reused" "tool-12"
+    ; tool_started ~scope:1 ~block_index:0 "reused" "next-response"
+    ];
   let before = Transcript.drawn t in
   feed t
     [ tool_args_snapshot ~block_index:0 "reused" {|{"path":"old"}|}
@@ -243,15 +247,21 @@ let test_interleaved_updates_keep_each_tool_occurrence () =
     ; tool_ended ~block_index:23 "reused"
     ; tool_result ~block_index:0 "reused" "exec-old"
     ; tool_result ~block_index:23 "reused" "exec-new"
+    ; tool_args_snapshot ~scope:1 ~block_index:0 "reused" {|{"path":"next-response"}|}
+    ; tool_ended ~scope:1 ~block_index:0 "reused"
+    ; tool_result ~scope:1 ~block_index:0 "reused" "exec-next-response"
     ];
   let calls = Array.of_list (Transcript.tool_calls t) in
-  check int "all opened calls remain" 24 (Array.length calls);
+  check int "replay adds no call while the next scope remains distinct" 25 (Array.length calls);
   check (list string) "old, middle and newest keep their own arguments"
     [ {|{"path":"old"}|}; {|{"path":"middle"}|}; {|{"path":"new"}|} ]
     [ calls.(0).args; calls.(12).args; calls.(23).args ];
   check (list (option string)) "late results stay on the matching occurrences"
-    [Some "exec-old"; None; Some "exec-new"]
-    [calls.(0).execution_id; calls.(12).execution_id; calls.(23).execution_id];
+    [Some "exec-old"; None; Some "exec-new"; Some "exec-next-response"]
+    [calls.(0).execution_id; calls.(12).execution_id; calls.(23).execution_id;
+     calls.(24).execution_id];
+  check string "the same provider and block ID in another scope keeps its arguments"
+    {|{"path":"next-response"}|} calls.(24).args;
   check string "an untouched row keeps its name" "tool-11" calls.(11).tool_name;
   check bool "the drawn cache follows the updates" true (Transcript.drawn t != before)
 ;;

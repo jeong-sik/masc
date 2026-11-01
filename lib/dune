@@ -4,7 +4,6 @@
  (flags :standard)
  (public_name masc)
  (private_modules
-  server_full_health_refresh_state
   keeper_composition_child_exports
   keeper_librarian_message_floor
   keeper_librarian_unread_ledger

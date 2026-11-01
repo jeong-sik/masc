@@ -11,7 +11,13 @@ val prepare : config:Workspace.config -> keeper_id:string -> purpose:Yojson.Safe
 val render_prepared : prepared -> string
 (** Revalidate selected source records before reusing the prepared projection.
     A change detected before publishing returns an explicit message without
-    selected records. This does not bind the result to later dispatch. *)
+    selected records. This does not bind the result to later dispatch.
+
+    A [Sys_error] or [Unix.Unix_error] while the prompt registry renders this
+    projection returns the existing unknown-availability message and logs the
+    I/O detail. Other exceptions, including cancellation, propagate. This
+    rendering boundary does not change source validation, retention or the
+    proposed-projection receipt into evidence of dispatch. *)
 val defer_for_capacity : prepared -> Keeper_memory_delivery_reprojection.t
 (** Called only after a runtime authorizes an effect-safe retry for an explicit
     input capacity refusal. Persist and remove whole selected records only when

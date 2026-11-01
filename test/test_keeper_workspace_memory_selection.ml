@@ -612,6 +612,119 @@ let test_revalidation_receipt_cannot_overwrite_newer_reduction () =
     (String_util.contains_substring next "row-c")
 ;;
 
+(* A present Unix socket cannot be read as a prompt, including by uid 0.
+   A short socket name and relative symlink avoid AF_UNIX's path limit. *)
+let with_host_prompt_io f =
+  Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  let previous = Option.get (Prompt_registry.get_markdown_dir ()) in
+  let dir = Filename.temp_dir "host-io-" "" in
+  let socket = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Fun.protect
+    ~finally:(fun () ->
+      Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir)
+        (fun () ->
+          Fun.protect ~finally:(fun () -> Prompt_registry.set_markdown_dir previous)
+            (fun () -> Unix.close socket)))
+    (fun () ->
+      Prompt_registry.set_markdown_dir dir;
+      let path =
+        match (Prompt_registry.resolve_prompt
+          Prompt_names.keeper_context_workspace_memory_host_selected).file_path with
+        | Some path -> path
+        | None -> Alcotest.fail "the pinned host prompt has no source path" in
+      let write () = Out_channel.with_open_text path (fun out -> output_string out "{{payload}}") in
+      let refuse () =
+        if Sys.file_exists path then Sys.remove path;
+        Unix.bind socket (Unix.ADDR_UNIX (Filename.concat dir "socket"));
+        Unix.symlink "socket" path;
+        Alcotest.(check bool) "prompt is present and not a directory" true
+          (Sys.file_exists path && not (Sys.is_directory path));
+        let refused = match In_channel.with_open_text path In_channel.input_all with
+          | _ -> false
+          | exception (Sys_error _ | Unix.Unix_error _) -> true in
+        Alcotest.(check bool) "the OS refuses to read the prompt" true refused in
+      f ~path ~write ~refuse)
+;;
+
+let host_io_payload =
+  `Assoc ["status", `String "selected"; "selection_id", `String "host-io-fixture";
+    "selected", `List [`Assoc ["id", `String "private-host-source"]]]
+;;
+
+let test_host_prompt_io_during_initial_projection () =
+  let module Host = Masc.Keeper_workspace_memory_host_recall in
+  with_host_prompt_io (fun ~path ~write:_ ~refuse ->
+    let seen = ref [] and receipts = ref 0 in
+    let validate payload = seen := payload :: !seen; Ok () in
+    let retain ~reason:_ ~payload:_ = incr receipts; Ok () in
+    let missing = Host.For_testing.prepare_projection ~payload:host_io_payload ~validate ~retain
+      |> Host.render_prepared in
+    refuse ();
+    let prepared = Host.For_testing.prepare_projection ~payload:host_io_payload ~validate ~retain in
+    let actual = Host.render_prepared prepared in
+    Alcotest.(check string) "I/O failure uses the existing missing-prompt fallback" missing actual;
+    Alcotest.(check bool) "private records and raw path are absent" true
+      (not (String_util.contains_substring actual "private-host-source")
+       && not (String_util.contains_substring actual path));
+    Alcotest.(check bool) "rendering does not change selection authority" true
+      (List.for_all ((=) host_io_payload) !seen);
+    Alcotest.(check int) "initial rendering invents no receipt" 0 !receipts)
+;;
+
+let test_host_prompt_io_after_retained_revalidation () =
+  let module Host = Masc.Keeper_workspace_memory_host_recall in
+  with_host_prompt_io (fun ~path ~write ~refuse ->
+    let changed = ref false and seen = ref [] and receipts = ref [] in
+    let validate payload =
+      seen := payload :: !seen;
+      if !changed && Yojson.Safe.Util.member "status" payload = `String "selected"
+      then Error "source changed" else Ok () in
+    let retain ~reason ~payload = receipts := (reason, payload) :: !receipts; Ok () in
+    let missing = Host.For_testing.prepare_projection ~payload:host_io_payload ~validate ~retain
+      |> Host.render_prepared in
+    write ();
+    let prepared = Host.For_testing.prepare_projection ~payload:host_io_payload ~validate ~retain in
+    Alcotest.(check bool) "the original selected source was rendered" true
+      (String_util.contains_substring (Host.render_prepared prepared) "private-host-source");
+    refuse ();
+    changed := true;
+    let actual = Host.render_prepared prepared in
+    Alcotest.(check string) "a replaced cached prompt uses the same fallback" missing actual;
+    Alcotest.(check bool) "the raw prompt path stays out of model text" false
+      (String_util.contains_substring actual path);
+    Alcotest.(check string) "next render retains the unavailable pair" actual (Host.render_prepared prepared);
+    (match !receipts, !seen with
+     | [("source_revalidation_failed", proposed)], current :: _ ->
+       Alcotest.(check bool) "the proposed receipt is the current unavailable payload" true
+         (current = proposed
+          && Yojson.Safe.Util.member "status" current = `String "unavailable"
+          && Yojson.Safe.Util.member "selection_id" current = `String "host-io-fixture"
+          && Yojson.Safe.Util.member "selected" current = `Null)
+     | _ -> Alcotest.fail "revalidation changed receipt identity or repeated publication"))
+;;
+
+let test_host_prompt_io_does_not_publish_an_unretained_reduction () =
+  let module Host = Masc.Keeper_workspace_memory_host_recall in
+  with_host_prompt_io (fun ~path:_ ~write ~refuse ->
+    write ();
+    let receipts = ref [] and seen = ref [] in
+    let validate payload = seen := payload :: !seen; Ok () in
+    let retain ~reason:_ ~payload = receipts := payload :: !receipts; Error "receipt unavailable" in
+    let payload = overlapping_projection_fixture () in
+    let prepared = Host.For_testing.prepare_projection ~payload ~validate ~retain in
+    let original = Host.render_prepared prepared in
+    refuse ();
+    let refusal = Agent_core.Error.Api (ContextOverflow {message="fixture";limit=None}) in
+    (match Host.defer_for_capacity prepared ~refusal with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "an unretained reduction authorized a retry");
+    Alcotest.(check int) "one smaller proposal attempted its receipt" 1 (List.length !receipts);
+    Alcotest.(check string) "failed receipt preserves the prior complete pair" original
+      (Host.render_prepared prepared);
+    Alcotest.(check bool) "the original payload still owns that pair" true
+      (List.hd !seen = payload))
+;;
+
 let () = Alcotest.run "purpose-specific workspace memory selection"
   ["selection",[
     Alcotest.test_case "resolved first assessment sees full lineage" `Quick
@@ -652,4 +765,10 @@ let () = Alcotest.run "purpose-specific workspace memory selection"
     Alcotest.test_case "revalidation does not publish a changed projection" `Quick
       test_revalidation_does_not_publish_a_changed_projection;
     Alcotest.test_case "revalidation receipt cannot overwrite newer reduction" `Quick
-      test_revalidation_receipt_cannot_overwrite_newer_reduction]]
+      test_revalidation_receipt_cannot_overwrite_newer_reduction;
+    Alcotest.test_case "host initial projection survives real prompt I/O failure" `Quick
+      test_host_prompt_io_during_initial_projection;
+    Alcotest.test_case "host revalidation survives replaced cached prompt" `Quick
+      test_host_prompt_io_after_retained_revalidation;
+    Alcotest.test_case "host I/O fallback cannot publish an unretained reduction" `Quick
+      test_host_prompt_io_does_not_publish_an_unretained_reduction]]

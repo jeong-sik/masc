@@ -118,6 +118,17 @@ let test_case ~base_path ~registry scenario () =
     let json = Yojson.Safe.from_string raw in
     requests := json :: !requests;
     let is_context = member "meaning_preservation" (member "questions" json) <> `Null in
+    if is_context then
+      Alcotest.(check string) "managed preservation policy reaches the actual request"
+        (Prompt_registry.render_prompt_template Prompt_names.librarian_context_review [] |> require)
+        (member "instructions" (member "meaning_preservation" (member "questions" json)) |> text);
+    if is_context then List.iter (fun (label, key) ->
+      Alcotest.(check string) "managed preservation meaning reaches the exact criterion"
+        (Prompt_registry.render_prompt_template key [] |> require)
+        (member label (member "criteria" (member "meaning_preservation" (member "questions" json))) |> text))
+      ["faithful", Prompt_names.librarian_context_review_faithful;
+       "needs_revision", Prompt_names.librarian_context_review_needs_revision;
+       "insufficient_evidence", Prompt_names.librarian_context_review_insufficient_evidence];
     if (not is_context && scenario = Cancel_absorb)
        || (is_context && scenario = Cancel_review) then (
       Eio.Promise.resolve signal_blocked ();
@@ -267,6 +278,24 @@ let test_case ~base_path ~registry scenario () =
     check_json "judge receives exact prior raw source, not just summary" sa.content (member "content" prior_source);
     let selected = member "selected_sources" state |> Yojson.Safe.Util.to_list |> List.hd in
     check_json "judge receives current raw request" sc.content (member "content" selected));
+  if scenario = Faithful then (
+    let dir = Filename.concat base_path "missing-review-prompts" in
+    Fs_compat.mkdir_p dir;
+    let original = Prompt_registry.get_markdown_dir () |> Option.get in
+    let count = List.length !requests in
+    Fun.protect ~finally:(fun () ->
+      Prompt_registry.clear (); Prompt_registry.set_markdown_dir original;
+      Prompt_registry.set_override Prompt_names.librarian_context_review "managed-preservation-policy-fixture" |> require)
+      (fun () ->
+        Prompt_registry.clear (); Prompt_registry.set_markdown_dir dir;
+        let observation = Keeper_librarian_context_review.run ~clock ~keeper_id
+          ~input:input.working_context ~proposed:[pocket [sc.reference] "proposal"] () in
+        let json = Keeper_librarian_context_review.observation_to_yojson observation in
+        Alcotest.(check string) "missing review policy is a typed skip" "skipped" (member "status" json |> text);
+        Alcotest.(check bool) "missing policy records a render reason" true (member "reason" json <> `Null);
+        Alcotest.(check bool) "a skipped review preserves the existing publication decision" true
+          (Keeper_librarian_context_review.permits_publication observation);
+        Alcotest.(check int) "missing policy makes no review request" count (List.length !requests)));
   let replayed = Runs.replay (Filename.concat base_path Runs.storage_filename) in
   let replayed_run = Runs.get replayed ~run_id:run.run_id |> Option.get in
   check_json "Context review and write survive durable registry replay"
@@ -283,6 +312,7 @@ let () =
   let prompts_dir = Filename.concat root "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
   Prompt_defaults.init ();
+  Prompt_registry.set_override Prompt_names.librarian_context_review "managed-preservation-policy-fixture" |> require;
   (* The runtime renders these prompts before it sends a request, and
      [run_best_effort] logs a render failure instead of raising it. Without
      them every case waits out its budget and then reports zero Librarian

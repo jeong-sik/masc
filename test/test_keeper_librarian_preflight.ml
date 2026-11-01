@@ -93,7 +93,17 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
   let port = match Eio.Net.listening_addr socket with
     | `Tcp (_, port) -> port | _ -> Alcotest.fail "no loopback port" in
   let handler _ _ incoming =
-    ignore (Eio.Buf_read.(of_flow ~max_size:max_int incoming |> take_all));
+    let request = Eio.Buf_read.(of_flow ~max_size:max_int incoming |> take_all) |> Yojson.Safe.from_string in
+    Alcotest.(check string) "managed preflight question reaches the actual request"
+      (Prompt_registry.render_prompt_template Prompt_names.librarian_preflight [] |> Result.get_ok)
+      Yojson.Safe.Util.(request |> member "questions" |> member "memory_change" |> member "instructions" |> to_string);
+    List.iter (fun (label, key) ->
+      Alcotest.(check string) "managed preflight meaning reaches the exact criterion"
+        (Prompt_registry.render_prompt_template key [] |> Result.get_ok)
+        Yojson.Safe.Util.(request |> member "questions" |> member "memory_change" |> member "criteria" |> member label |> to_string))
+      ["keep_current", Prompt_names.librarian_preflight_keep_current;
+       "needs_generation", Prompt_names.librarian_preflight_needs_generation;
+       "uncertain", Prompt_names.librarian_preflight_uncertain];
     incr jev_calls;
     (* The runtime's source record must exist before this effect. *)
     Alcotest.(check bool) "source persisted before JEV"
@@ -264,6 +274,31 @@ let run_case ~base_path ~registry ?(enabled = true) ?(excluded = false)
      | (No_context | Live_nothing_pending), true | (Pending_source | Unavailable_source), _ -> ())
   | _ -> Alcotest.fail "expected one successful terminal run"
 
+let test_missing_preflight_policy ~base_path () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  let server = Fixture.start_server ~sw ~clock ~net:(Eio.Stdenv.net env) (Fixture.Reply (answer "keep_current")) in
+  let dir = Filename.concat base_path "missing-preflight-prompts" in
+  Fs_compat.mkdir_p dir;
+  let original = Prompt_registry.get_markdown_dir () |> Option.get in
+  Fun.protect ~finally:(fun () ->
+    Prompt_registry.clear (); Prompt_registry.set_markdown_dir original;
+    match Prompt_registry.set_override Prompt_names.librarian_preflight "managed-preflight-policy-fixture" with
+    | Ok () -> () | Error detail -> Alcotest.fail detail) @@ fun () ->
+  Prompt_registry.clear (); Prompt_registry.set_markdown_dir dir;
+  Masc_test_deps.with_process_env "TYPESAFEAI_API_KEY" (Some "fixture-key") @@ fun () ->
+  Masc_test_deps.with_typesafeai_policy {Runtime_schema.default_typesafeai with
+    librarian_preflight=true; destinations=({Runtime_schema.typesafe_destination with endpoint=server.base_url}, [])} @@ fun () ->
+  let assessment = Typesafeai_librarian_preflight.assess ~clock ~keeper_id:"fixture"
+      ~eligible:(fun () -> true) ~prompt:"librarian request" () in
+  (match assessment.outcome with
+   | Typesafeai_librarian_preflight.Question_unavailable _ -> ()
+   | _ -> Alcotest.fail "missing policy did not return Question_unavailable");
+  Alcotest.(check bool) "an unavailable question cannot skip generation" false
+    (Typesafeai_librarian_preflight.keeps_current assessment);
+  Alcotest.(check int) "missing policy makes no System One request" 0 (Fixture.post_count server)
+
 let () =
   let base_path = Filename.temp_dir "librarian-preflight-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
@@ -273,6 +308,8 @@ let () =
   let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Prompt_defaults.init ();
+  (match Prompt_registry.set_override Prompt_names.librarian_preflight "managed-preflight-policy-fixture" with
+   | Ok () -> () | Error detail -> Alcotest.fail detail);
   let case ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight ?maintenance ?budget name status body jev llm =
     Alcotest.test_case name `Quick
       (run_case ~base_path ~registry ?enabled ?excluded ?context_only ?context ?lane_enabled ?disable_during_preflight ?maintenance ?budget
@@ -299,6 +336,7 @@ let () =
       prompt_shape "unavailable source"
         {Keeper_librarian_context.empty with unavailable=["events: fixture"]} false];
      "real dispatch and commit", [
+      Alcotest.test_case "missing policy cannot skip generation" `Quick (test_missing_preflight_policy ~base_path);
       case ~maintenance:true "maintenance-reviews-excess-without-no-change-shortcut"
         `OK (answer "keep_current") 0 1;
       case ~budget:Ordinary_fact_over_budget "over-budget-memory-skips-the-no-change-shortcut"

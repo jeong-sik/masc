@@ -161,9 +161,15 @@ selector-to-selector `drag_to` without `via` and with `durationMs=0`, and workfl
 A pre-effect refusal preserves previous input readiness; it does not reset an
 existing uncertain command. Already dispatched receipt-less holding input from
 an older session remains uncertain. Keep that original command and inspect the
-page rather than typing it again. The original installation's private operator input-reset confirmation
+page rather than typing it again. Managed workers persist known holding intent
+before dispatch and restore it for the same numeric native Space after worker
+replacement. Use the current installation's private operator input-reset confirmation;
+old client/worker forms remain invalid. The confirmation
 permits a new distinct command after the operator has checked/reset that Space;
-it does not prove SDK cleanup. Automatic, fully settled `keyboard.type` workflows
+it does not prove SDK cleanup. Retention cannot recover an older worker's
+uncertainty that was never recorded: installing/restarting is not an input reset.
+A missing record means no retained MASC intent, not proven native freshness.
+Automatic, fully settled `keyboard.type` workflows
 require an SDK contract that distinguishes the original input's completion from
 interruption. Observed action receipts still report immediate popup/dialog data,
 and do not verify application success. See the

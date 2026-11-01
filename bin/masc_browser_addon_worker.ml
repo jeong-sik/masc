@@ -1,12 +1,14 @@
 let () =
   let socket = ref None and incarnation = ref None and bound = ref None and backend = ref None and models = ref false
-    and live_ego_command = ref None and live_ego_space = ref None and live_ego_space_id = ref None in
+    and live_ego_command = ref None and live_ego_space = ref None and live_ego_space_id = ref None
+    and ego_input_store = ref None in
   Arg.parse [
     "--backend",Arg.String (fun value -> backend:=Some value),
       "The one browser source this worker serves: " ^ Browser_lane.Backend.expected;
     "--live-ego-command",Arg.String (fun value -> live_ego_command:=Some value),"Serve an ego lite task space with this ego-browser";
     "--live-ego-space",Arg.String (fun value -> live_ego_space:=Some value),"The ego lite task space to serve";
     "--live-ego-space-id",Arg.Int (fun value -> live_ego_space_id:=Some value),"An existing ego lite Space ID to resume exactly";
+    "--ego-input-store",Arg.String (fun value -> ego_input_store:=Some value),"Host-selected retained input authority directory";
     "--models",Arg.Set models,"Attach the host-selected model request broker";
     "--socket",Arg.String (fun value -> socket:=Some value),"Host-selected private Unix socket";
     "--incarnation",Arg.String (fun value -> incarnation:=Some value),"Host-selected worker UUID";
@@ -29,6 +31,11 @@ let () =
     | Browser_lane.Backend.(Automation|Stagehand|Owned_firefox|External_host),None,None -> None
     | Browser_lane.Backend.(Automation|Stagehand|Owned_firefox|External_host),_,_ ->
       raise (Arg.Bad "--live-ego-command and the Space reference belong to the ego source") in
+  let input_store=match backend,!ego_input_store with
+    | Browser_lane.Backend.Ego,Some root when not (Filename.is_relative root) -> Some (Masc.Lane_addon_store.create ~root)
+    | Browser_lane.Backend.Ego,_ -> raise (Arg.Bad "the ego source requires an absolute host-selected --ego-input-store")
+    | Browser_lane.Backend.(Automation|Stagehand|Owned_firefox|External_host),None -> None
+    | Browser_lane.Backend.(Automation|Stagehand|Owned_firefox|External_host),Some _ -> raise (Arg.Bad "--ego-input-store belongs to the ego source") in
   (* The browsers that read upload copies and write downloads are the owned
      Gecko and ego lite; the other sources get neither broker. *)
   let transfers = match backend with
@@ -97,7 +104,8 @@ let () =
     | Browser_lane.Backend.Stagehand,_ -> Masc.Browser_addon_stagehand.run ~env ~owner ~directory serve
     | Browser_lane.Backend.Owned_firefox,_ -> Masc.Browser_addon_live_bidi.run ~env ~owner ~directory serve
     | Browser_lane.Backend.Ego,Some configuration ->
-      Masc.Browser_addon_live_ego.run ~env ~owner
+      let input_store=match input_store with Some store->store|None->raise (Arg.Bad "missing retained Ego input authority") in
+      Masc.Browser_addon_live_ego.run ~env ~owner ~input_store
         ~downloads:(Masc.Browser_addon_downloads.downloads_directory ~directory) configuration serve
     | Browser_lane.Backend.Ego,None -> raise (Arg.Bad "the ego source needs its task space")
     | Browser_lane.Backend.External_host,_ -> serve ()))

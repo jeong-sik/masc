@@ -52,6 +52,41 @@ let write_with ~sync_parent t relative bytes = protect (fun () ->
   durable_directory t ~sync_parent (Filename.dirname path);
   Fs_compat.save_file_atomic_strict path bytes)
 let write = write_with ~sync_parent:sync_parent_directory
+(* This namespace survives worker allocations. The permanent private lock inode
+   is never replaced or removed; the existing liveness-lock boundary validates
+   no-follow inode identity before the cross-process transaction. *)
+let with_ego_input t ~space_id work = protect (fun () ->
+  if space_id<=0 then Error "invalid native Ego Space identity" else
+  let directory=Filename.concat t.root "ego-input" in
+  durable_directory t ~sync_parent:sync_parent_directory directory;
+  let* _=Fs_compat.inspect_owned_directory_chain ~ownership_root:t.root directory
+    |> Result.map_error Fs_compat.owned_directory_chain_rejection_to_string in
+  let stem=Filename.concat directory (string_of_int space_id) in
+  let lock_path=stem ^ ".lock" in
+  (try
+     let fd=Unix.openfile lock_path [Unix.O_CREAT;Unix.O_EXCL;Unix.O_WRONLY;Unix.O_CLOEXEC] 0o600 in
+     Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd)
+   with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
+  sync_parent_directory directory;
+  match File_lock_eio.try_with_liveness_lock_observed ~lock_path (fun () ->
+    let body ()=work (stem ^ ".json") in
+    match Fs_compat.execution_context () with
+    | Fs_compat.Non_eio -> body ()
+    | Fs_compat.Eio_fiber -> Eio.Cancel.protect body) with
+  | File_lock_eio.Lock_held_elsewhere -> Error "native Ego input state is being updated by another writer"
+  | Lock_attempted (Lock_not_acquired error) -> Error (File_lock_eio.durable_lock_error_to_string error)
+  | Lock_attempted (Body_completed {value;release_error=None}) -> value
+  | Lock_attempted (Body_completed {release_error=Some error;_}) ->
+      Error (File_lock_eio.durable_lock_error_to_string error))
+let read_ego_input t path =
+  let* bytes=Fs_compat.load_owned_regular_file ~ownership_root:t.root path
+    |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
+  match bytes with None->Ok None|Some bytes->protect (fun () -> Ok (Some (Yojson.Safe.from_string bytes)))
+let load_ego_input t ~space_id = with_ego_input t ~space_id (read_ego_input t)
+let compare_and_set_ego_input t ~space_id ~expected ~replacement = with_ego_input t ~space_id (fun path ->
+  let* current=read_ego_input t path in
+  if current<>expected then Error "native Ego input writer/state changed; update refused" else
+  Fs_compat.save_file_atomic_strict path (Yojson.Safe.to_string replacement))
 let blob_path hash = Filename.concat "evidence" (hash ^ ".json")
 let canonical_blob_kind t hash = protect (fun () ->
   let* _ = Fs_compat.inspect_owned_directory_chain

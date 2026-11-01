@@ -76,6 +76,15 @@
  (libraries masc masc.browser_lane masc.browser_configuration masc.time_compat
   masc.fs_compat masc.string_util masc_process alcotest base64 otoml eio eio_main yojson unix))
 
+(rule
+ (alias runtest-test_browser_ego_worker_cli)
+ (deps test_browser_ego_worker_cli.py ../bin/masc_browser_addon_worker.exe)
+ (action (run python3 %{dep:test_browser_ego_worker_cli.py} %{dep:../bin/masc_browser_addon_worker.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_browser_ego_worker_cli)))
+
 (test
  (name test_browser_addon_live_bidi)
  (modules test_browser_addon_live_bidi)

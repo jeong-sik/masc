@@ -237,10 +237,10 @@ binding is no takeover authorization or proof of visible UI/login completion.
 
 The browser installation advertises a private `lane_operator` form using the
 existing Add-on operator controls. A pending input records a fresh generation,
-original issued command ID, tab number, Page label and operation in its original
-Ego peer. The form binds that generation to the currently connected client and
+original issued command ID, historical tab number, Page label and operation.
+The form binds that generation to the currently connected client and
 numeric Space ID; the host's existing private operator endpoint additionally
-requires an operator credential and the original worker incarnation. The port
+requires an operator credential and that current worker incarnation. The port
 cannot be exported as a model tool.
 
 After checking and resetting keys/buttons in that same Space, the operator may
@@ -255,11 +255,32 @@ confirmation cannot unlock it. The form refuses active commands, foreign
 clients/Spaces and stale generations;
 a duplicate confirmation for the same still-current assertion is idempotent.
 Stale form submissions return a `not_applied` view rather than an MCP error
-that could unnecessarily retire the worker. After a lost reply, inspect the original installation and read its form only
-if that same worker is still available; do not replay browser input. The
-existing generic private-operator transport may retire a worker on an unknown
-reply. This extension does not change that transport or persist pending input
-across worker replacement, and never applies an old assertion to a replacement.
+that could unnecessarily retire the worker. After a lost reply, inspect the
+current installation and read its current form; do not replay browser input or
+reuse the old client/worker form. The generic private-operator transport may
+retire a worker on an unknown reply; this does not clear input uncertainty.
+
+Managed Ego workers retain the Input state in the workspace's existing
+`lane-addons/ego-input` store, keyed by numeric native Space identity rather than
+the declaration, client UUID or name. A holding intent must be durably published
+before its native effect. Attachment restores that complete state and claims a
+new immutable writer epoch. Full-record compare-and-set under a private
+cross-process lock fences replaced writers; settlement, proven-before-effect
+rollback and checked reset also require the exact pending generation. A retired
+owner refuses new transitions. This is not an atomic retirement fence: an
+already admitted genuine settlement can complete before a replacement claims
+its epoch if its exact record still matches.
+
+Unreadable/malformed records refuse attachment. Failed or unconfirmed intent
+publication never permits the SDK effect; failed settlement publication leaves
+that peer blocked. Exit, revoke, dialog answers, control handoff and Space finish
+never erase the retained input record. Historical tab numbers and Page labels
+describe the original command and grant no current Page authority. A missing
+record retains the previous no-known-MASC-pending baseline, not a native
+freshness/release attestation. This cannot recover uncertainty from workers
+that predate retention: preserve such a live uncertain peer until the operator
+has actually checked/reset its Space. Installing this source alone does not
+authorize a reset, replacement, migration or inferred cleanup.
 
 Dialog answers, handoff, takeover and generic “go” do not create this assertion.
 It does not establish original SDK cleanup, visible UI or successful login. The

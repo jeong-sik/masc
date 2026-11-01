@@ -571,7 +571,8 @@ let scenario mode =
           check bool "explicit completion ran" true (finished ());
           check bool "retirement cleans a confirmed closed Space" true (dispatch W.Retire = W.Receipt));
         check bool "no client is left" true (B.connected_clients () = []))) in
-      let failure = try Ego.run ~env ~owner ~downloads:(Broker.downloads_directory ~directory:root) {command; space=Browser_configuration.Named_space "masc"} work; None with
+      let input_store=Masc.Lane_addon_store.create ~root:(Filename.concat root "retained-lane-addons") in
+      let failure = try Ego.run ~env ~owner ~input_store ~downloads:(Broker.downloads_directory ~directory:root) {command; space=Browser_configuration.Named_space "masc"} work; None with
         | Invalid_argument detail | Sys_error detail -> Some detail in
       (match mode, failure with
        | ("normal" | "retained" | "late" | "retire" | "recovery" | "user-owned"), None -> ()

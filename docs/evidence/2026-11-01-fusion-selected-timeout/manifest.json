@@ -185,8 +185,8 @@
   "source_pair": "source-comparison.json",
   "retained": {
     "README.md": {
-      "bytes": 4958,
-      "sha256": "6fac11193fe8c6fb77f44fa6225546087af8b200b0bce9a40ad3bdaf538b72b6"
+      "bytes": 5478,
+      "sha256": "e87afb8300595ffdc1929e731ae861a0aa1367c662b1df39b147043514b85a62"
     },
     "baseline.txt": {
       "bytes": 606,
@@ -217,8 +217,8 @@
       "sha256": "b3134bb88225fb42bbf463066b3bf8c326487d44257278d4178b8fbbe3552fe4"
     },
     "source-comparison.json": {
-      "bytes": 1511,
-      "sha256": "da7f8b85c3830de20e874ed8dee8f8d9427bc23571fbe5c83d05c44cb6f608a0"
+      "bytes": 2517,
+      "sha256": "046b9d64e360ad520373995f54f3d6d2cb641a4c4fa768e863820638006f6fd4"
     },
     "source-sha256.json": {
       "bytes": 2464,

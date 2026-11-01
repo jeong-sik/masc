@@ -13870,6 +13870,7 @@ let suspend_workspace_readings state =
     state.account_login_readings;
   state.account_login_readings <- [];
   state.tools_evidence_request <- None;
+  state.tools_evidence_run_id <- None;
   state.browser_history_generation <- state.browser_history_generation + 1;
   state.browser_history <- Option.map Browser_history.suspend state.browser_history;
   state.browser_lane <- Option.map (fun (view : Browser_lane_view.t) ->

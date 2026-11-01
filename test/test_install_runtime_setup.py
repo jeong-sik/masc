@@ -2550,6 +2550,23 @@ class WorkspaceChildEnvironment(unittest.TestCase):
             SETUP.onboarding_status('/bin/masc')
         self.assertIsNone(run.call_args.kwargs['env'])
 
+    def test_named_render_validates_booleans_and_rejects_dual_credentials(self):
+        base = named_spec('openai/gpt-5')
+        for field, bad_value in [
+            ('provider_declared', None),
+            ('provider_declared', 'false'),
+            ('provider_declared', 0),
+            ('wizard_default', 'true'),
+            ('wizard_default', 1),
+        ]:
+            with self.subTest(field=field, bad_value=bad_value):
+                invalid = dict(base, **{field: bad_value})
+                with self.assertRaises(SETUP.SetupError):
+                    SETUP.render(invalid)
+        dual_creds = dict(base, credential_file='/private/owned-api-key')
+        with self.assertRaisesRegex(SETUP.SetupError, 'cannot declare both'):
+            SETUP.render(dual_creds)
+
 
 if __name__ == '__main__':
     unittest.main()

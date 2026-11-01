@@ -18679,7 +18679,34 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
             true
           end else begin
             state.board_compose_armed <- false;
-            Masc_tui_board_requests.start_board_comment state ~host:server_peer_host ~report:(report_action state) ~launch:(launch_workspace_request state ~mailbox ~boundary_error:Fun.id) ~post_id ~content;
+            let sent_draft = Buffer.contents state.board_draft in
+            let cancelled =
+              Board_comment_done
+                { post_id
+                ; sent_draft
+                ; result = Error "Board comment interrupted"
+                }
+            in
+            let on_not_run () =
+              match state.board_write with
+              | Board_commenting ->
+                  state.board_write <- Board_idle;
+                  state.board_compose_armed <- false;
+                  state.board_post_error <- Some "Board comment did not start"
+              | Board_idle | Board_posting _ -> ()
+            in
+            Masc_tui_board_requests.start_board_comment state ~host:server_peer_host
+              ~report:(report_action state)
+              ~launch:(fun ~deliver read ->
+                let authority = state.workspace_authority in
+                let identity = state.server_identity in
+                let host = server_peer_host and port = state.port in
+                launch_workspace_result ~cancelled ~on_not_run state ~mailbox
+                  ~boundary_error:Fun.id ~deliver (fun () ->
+                    match check_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
+                    | Error detail -> Error detail
+                    | Ok () -> read ()))
+              ~post_id ~content;
             true
           end
       | None ->

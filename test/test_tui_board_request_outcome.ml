@@ -432,6 +432,25 @@ let test_workspace_return_cannot_revive_original_request_authority () = with_fix
          (Publication.same_request original (Publication.outcome_request archived))
      | _ -> fail "workspace withdrawal lost the original terminal result"))
 
+let test_closed_results_settle_board_post_without_hanging_inflight () = with_fixture
+  (fun ~env:_ ~sw:_ ~base_path ~port ~posts ->
+    let results = Results.create () in
+    Results.close results;
+    let state = state base_path port in
+    let reports = ref [] in
+    Requests.start_board_post state ~host:"127.0.0.1" ~results
+      ~admit:(fun _ -> Ok ())
+      ~report:(fun kind text -> reports := (kind, text) :: !reports)
+      ~title:"published fixture" ~body:"original body" ();
+    check bool "closed results release the board write lock" true
+      (state.board_write = Types.Board_idle);
+    check (list (pair string string)) "no posting notice is emitted when launch does not start"
+      [] !reports;
+    check int "no Board POST was sent" 0 !posts;
+    (match Publication.entries state.board_publications with
+     | [Publication.Finished (Publication.Not_attempted _)] -> ()
+     | _ -> fail "expected unstarted publication to be recorded as Not_attempted"))
+
 let () = run "TUI Board request outcomes" ["actual request and registered routes", [
   test_case "committed HTTP400 preserves payload and late input" `Quick
     test_real_committed_error_keeps_payload_and_late_input;
@@ -444,5 +463,7 @@ let () = run "TUI Board request outcomes" ["actual request and registered routes
   test_case "old outcomes archive without settling a successor" `Quick
     test_old_outcome_archives_without_settling_successor;
   test_case "returning to workspace A cannot revive old request authority" `Quick
-    test_workspace_return_cannot_revive_original_request_authority
+    test_workspace_return_cannot_revive_original_request_authority;
+  test_case "closed results settle board post without hanging in flight" `Quick
+    test_closed_results_settle_board_post_without_hanging_inflight
 ]]

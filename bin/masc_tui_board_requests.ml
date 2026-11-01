@@ -54,7 +54,23 @@ let start_board_post state ~host ~results ~admit ~report
       Publication.returned prepared (Publication.unanswered detail)
     | Observed outcome -> outcome
   in
+  let started = ref true in
+  let settle_not_run () =
+    started := false;
+    let outcome = boundary_error "Board publication did not start" in
+    (match Publication.record state.board_publications outcome with
+     | Publication.Already_recorded | Publication.Not_registered -> ()
+     | Publication.Recorded history -> state.board_publications <- history);
+    (match state.board_write with
+     | Board_posting current when Publication.same_request current request ->
+       state.board_write <- Board_idle;
+       state.board_compose_armed <- false;
+       state.board_post_error <-
+         Some "Board publication did not start: Board publication did not start"
+     | Board_posting _ | Board_idle | Board_commenting -> ())
+  in
   Masc_tui_workspace_result.launch state ~results ~boundary_error
+    ~on_not_run:settle_not_run
     ~cancelled_by:(fun () ->
       Board_publication_done (boundary_error "Board publication interrupted"))
     ~deliver:(function
@@ -93,7 +109,7 @@ let start_board_post state ~host ~results ~admit ~report
       let outcome = Publication.returned prepared response in
       phase := Observed outcome;
       Ok outcome);
-  report "system" "posting to Board"
+  if !started then report "system" "posting to Board"
   end
 
 

@@ -247,9 +247,11 @@ def render(spec, binary=None, base_path=None):
         context = spec.get('max_context')
         if type(context) is not int or context <= 0:
             raise SetupError('max_context must be a positive integer supplied by the operator')
-        for key in ('tools', 'streaming'):
+        for key in ('tools', 'streaming', 'provider_declared'):
             if type(spec.get(key)) is not bool:
                 raise SetupError(key + ' must be an explicitly declared boolean')
+        if 'wizard_default' in spec and type(spec['wizard_default']) is not bool:
+            raise SetupError('wizard_default must be a boolean when declared')
         if 'supports_image_input' in spec and type(spec['supports_image_input']) is not bool:
             raise SetupError('supports_image_input must be a boolean when declared')
         endpoint = text(spec, 'endpoint')
@@ -263,6 +265,8 @@ def render(spec, binary=None, base_path=None):
             raise SetupError('endpoint must be an HTTP(S) URL without embedded credentials, query or fragment')
         key = spec.get('api_key_env', '')
         credential_file = spec.get('credential_file', '')
+        if 'api_key_env' in spec and 'credential_file' in spec:
+            raise SetupError('a named catalog provider cannot declare both api_key_env and credential_file')
         if key:
             if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', key):
                 raise SetupError('api_key_env must name an environment variable, not a credential value')

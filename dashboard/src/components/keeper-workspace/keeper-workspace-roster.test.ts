@@ -80,6 +80,46 @@ describe('rosterEmptyText', () => {
 })
 
 describe('KeeperWorkspaceRoster', () => {
+  const queueUnavailable = {
+    state: 'unavailable' as const,
+    code: 'reset_required' as const,
+    title: 'fixture queue unavailable',
+    operator_detail: 'fixture pending entry could not be read',
+    severity: 'bad' as const,
+    icon: '!' as const,
+  }
+  const queueObservationError = {
+    ...queueUnavailable,
+    state: 'observation_error' as const,
+    code: 'observation_failed' as const,
+  }
+  const gateCases = [
+    { name: 'ready', state: { state: 'ready' as const }, gate: null, problem: null, tone: 'ok' },
+    { name: 'pending', state: { state: 'ready' as const },
+      gate: { kind: 'approval_required' as const, tool: 'fixture' }, problem: null, tone: 'bad' },
+    { name: 'unavailable', state: queueUnavailable, gate: null, problem: queueUnavailable, tone: 'bad' },
+    { name: 'observation-error', state: queueObservationError, gate: null, problem: queueObservationError, tone: 'bad' },
+  ]
+
+  for (const mini of [false, true]) {
+    for (const value of gateCases) {
+      it(`preserves queue authority ${value.name} with mini=${mini}`, () => {
+        keepers.value = [mk({ name: 'queue-authority', status: 'running', lifecycle_phase: 'Running',
+          current_gate: value.gate, approval_queue_state: value.state })]
+        render(html`<${KeeperWorkspaceRoster} activeName="queue-authority" mini=${mini} />`, host)
+        const row = host.querySelector(mini ? '.kw-kp-mini' : '.kw-kp-row') as HTMLElement
+        expect(row.querySelector('.kw-dot')?.classList.contains(value.tone)).toBe(true)
+        if (value.problem) {
+          const descriptions = Array.from(row.querySelectorAll('[title]')).map(el => el.getAttribute('title'))
+          if (mini) descriptions.push(row.getAttribute('title'))
+          expect(descriptions.some(detail => detail?.includes(value.problem!.operator_detail))).toBe(true)
+          const status = mini ? row.getAttribute('aria-label') : row.textContent
+          expect(status).toContain(value.problem.title)
+        }
+      })
+    }
+  }
+
   // Status grouping is the keeper-v2 default; helper remains for tests that
   // explicitly switch away and back.
   const selectStatusSort = () =>

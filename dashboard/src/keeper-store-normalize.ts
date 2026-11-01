@@ -4,6 +4,7 @@ import { readRuntimeLaneObservation } from './lib/keeper-runtime-walk'
 import { readKeeperPortrait } from './lib/keeper-portrait'
 import { readCandleAccountRevision, readCandleBalance } from './lib/candle-observation'
 import { parseKeeperActivationMode } from './lib/keeper-activation-mode'
+import { decodeKeeperApprovalQueueState, gateObservationErrorState } from './lib/gate-observation-state'
 import type {
   CtxAttribution,
   CtxCompositionTelemetry,
@@ -785,6 +786,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_activity_source: normalizeKeeperLiveActivitySource(row.last_activity_source),
         live_activity: normalizeKeeperLiveActivity(row.live_activity),
         current_gate: normalizeKeeperCurrentGate(row.current_gate),
+        approval_queue_state: row.approval_queue_state === undefined
+          ? undefined
+          : decodeKeeperApprovalQueueState(row.approval_queue_state)
+            ?? gateObservationErrorState('Keeper approval queue state is not a current closed variant'),
         last_proactive_preview: asString(row.last_proactive_preview) ?? null,
         runtime_warning_ctx_ratio: asNumber(row.runtime_warning_ctx_ratio) ?? null,
         context_ratio: contextRatio,

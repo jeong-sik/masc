@@ -11,6 +11,8 @@ import {
 } from './board'
 import { normalizeKeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
 import { normalizeKeeperApprovalAuditReceipt } from '../lib/keeper-approval-audit'
+import { decodeKeeperApprovalQueueState } from '../lib/gate-observation-state'
+export { decodeKeeperApprovalQueueState }
 import type {
   KeeperApprovalRule,
   DashboardGateResponse,
@@ -45,36 +47,6 @@ function gateSnapshotProtocolDrift(detail: string): never {
     detail: `invalid Dashboard Gate response: ${detail}`,
     errorCode: 'protocol_drift',
   })
-}
-
-export function decodeKeeperApprovalQueueState(
-  raw: unknown,
-): Exclude<KeeperApprovalQueueState, { state: 'observation_error' }> | null {
-  if (!isRecord(raw)) return null
-  if (raw.state === 'ready' && Object.keys(raw).length === 1) {
-    return { state: 'ready' }
-  }
-  if (
-    raw.state === 'unavailable'
-    && raw.code === 'reset_required'
-    && typeof raw.title === 'string'
-    && raw.title.trim() !== ''
-    && typeof raw.operator_detail === 'string'
-    && raw.operator_detail.trim() !== ''
-    && raw.severity === 'bad'
-    && raw.icon === '!'
-    && Object.keys(raw).length === 6
-  ) {
-    return {
-      state: 'unavailable',
-      code: 'reset_required',
-      title: raw.title.trim(),
-      operator_detail: raw.operator_detail.trim(),
-      severity: 'bad',
-      icon: '!',
-    }
-  }
-  return null
 }
 
 function normalizeApprovalQueueState(raw: unknown): KeeperApprovalQueueState {

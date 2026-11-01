@@ -242,54 +242,35 @@ let latest_keeper_tool_activity keeper_name =
         keeper_name (Printexc.to_string exn);
       None
 
-let approval_row_newer left right =
-  match positive_json_float_opt "ts" left, positive_json_float_opt "ts" right with
-  | Some left_ts, Some right_ts -> left_ts > right_ts
-  | Some _, None -> true
-  | None, Some _
-  | None, None -> false
-
-let latest_rows_by_approval_id rows =
-  let table = Hashtbl.create 16 in
-  List.iter
-    (fun row ->
-      match nonempty_json_string_opt "id" row with
-      | None -> ()
-      | Some id ->
-          let should_replace =
-            match Hashtbl.find_opt table id with
-            | None -> true
-            | Some existing -> approval_row_newer row existing
-          in
-          if should_replace then Hashtbl.replace table id row)
-    rows;
-  Hashtbl.fold (fun _ row acc -> row :: acc) table []
-
-let unresolved_pending_approval row =
-  match nonempty_json_string_opt "event" row with
-  | Some "pending" ->
-      (match nonempty_json_string_opt "decision" row with
-       | None -> true
-       | Some _ -> false)
-  | _ -> false
-
-let latest_pending_approval ~base_path ~keeper_name =
-  match
-    Keeper_approval.Audit.read_recent
-      ~base_path ~keeper_name ~n:128 ()
-  with
+let latest_pending_approval ~keeper_name snapshot =
+  match snapshot with
   | Error _ as error -> error
-  | Ok rows ->
-    Ok
-      (latest_rows_by_approval_id rows
-       |> List.filter unresolved_pending_approval
-       |> List.fold_left
-            (fun acc row ->
-              match acc with
-              | None -> Some row
-              | Some existing when approval_row_newer row existing -> Some row
-              | Some _ -> acc)
-            None)
+  | Ok (snapshot : Keeper_approval_queue.pending_entries_snapshot) ->
+    (match snapshot.read_errors with
+     | error :: _ -> Error error
+     | [] ->
+       let latest =
+         List.fold_left
+           (fun (latest : Keeper_approval_queue_rules_types.pending_approval option)
+                (entry : Keeper_approval_queue_rules_types.pending_approval) ->
+              if not (String.equal entry.keeper_name keeper_name) then latest
+              else
+                match latest with
+                | Some existing when entry.sequence <= existing.sequence -> latest
+                | Some _ | None -> Some entry)
+           None snapshot.entries
+       in
+       Ok
+         (Option.map
+            (fun (entry : Keeper_approval_queue_rules_types.pending_approval) ->
+               `Assoc
+                 [ "id", `String entry.id
+                 ; "keeper", `String entry.keeper_name
+                 ; "tool", `String entry.tool_name
+                 ; "ts", `Float entry.requested_at
+                 ; "turn_id", Json_util.int_opt_to_json entry.turn_id
+                 ])
+            latest))
 
 let freshest_activity_source ~meta_ts ~latest_tool ~pending_approval =
   let candidates =
@@ -346,7 +327,7 @@ let pending_approval_gate_json ~now_ts row =
   in
   `Assoc [
     ("kind", `String "approval_required");
-    ("source", `String "audit_approvals");
+    ("source", `String "approval_queue");
     ("id", Json_util.string_opt_to_json (nonempty_json_string_opt "id" row));
     ("tool", Json_util.string_opt_to_json (activity_source_tool_opt (Approval_pending row)));
     ("turn_id", Json_util.int_opt_to_json (Safe_ops.json_int_opt "turn_id" row));
@@ -356,6 +337,22 @@ let pending_approval_gate_json ~now_ts row =
     ("disposition_reason",
       Json_util.string_opt_to_json (nonempty_json_string_opt "disposition_reason" row));
   ]
+
+let current_gate_fields ~now_ts pending_approval =
+  match pending_approval with
+  | Ok pending ->
+      [ "current_gate", Option.fold ~none:`Null ~some:(pending_approval_gate_json ~now_ts) pending
+      ; "approval_queue_state", Keeper_approval_queue_result.approval_queue_ready_state_json
+      ]
+  | Error error ->
+      [ "current_gate", `Null
+      ; "approval_queue_state", Keeper_approval_queue_result.approval_queue_unavailable_state_json error
+      ]
+
+let current_gate_fields_for_workspace ~base_path ~keeper_name ~now_ts =
+  Keeper_approval_queue.pending_entries_snapshot_for_workspace ~base_path
+  |> latest_pending_approval ~keeper_name
+  |> current_gate_fields ~now_ts
 
 let pending_approval_summary row =
   let tool =
@@ -411,6 +408,10 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
     |> List.sort_uniq String.compare
   in
   let now_ts = Time_compat.now () in
+  let pending_snapshot =
+    Keeper_approval_queue.pending_entries_snapshot_for_workspace
+      ~base_path:config.base_path
+  in
   (* #10710: fiber-batched keeper I/O. Each keeper's metadata + metrics reads
      run concurrently across a bounded fiber pool ([dashboard_keeper_max_fibers])
      instead of an unbounded [Eio.Fiber.all] fan-out. The enrich body has no
@@ -454,22 +455,25 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 created_ts ]
           in
           let latest_tool_activity = latest_keeper_tool_activity m.name in
-          let pending_approval, approval_audit_state =
+          let current_pending = latest_pending_approval ~keeper_name:m.name pending_snapshot in
+          let pending_approval =
+            match current_pending with Ok pending -> pending | Error _ -> None
+          in
+          let approval_audit_state =
             match
-              latest_pending_approval
+              Keeper_approval.Audit.read_recent
                 ~base_path:config.base_path
-                ~keeper_name:m.name
+                ~keeper_name:m.name ~n:128 ()
             with
-            | Ok pending -> pending, `Assoc [ "state", `String "ready" ]
+            | Ok _ -> `Assoc [ "state", `String "ready" ]
             | Error error ->
-              ( None
-              , `Assoc
+               `Assoc
                   [ "state", `String "unavailable"
                   ; ( "stage"
                     , `String
                         (Keeper_approval.Audit.read_stage_to_string error.stage) )
                   ; "error", `String error.detail
-                  ] )
+                   ]
           in
           let activity_source =
             freshest_activity_source
@@ -496,18 +500,13 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               | Some source -> live_activity_json ~now_ts ~meta_ts:meta_activity_ts source
               | None -> `Null
             in
-            let gate_json =
-              match pending_approval with
-              | Some row -> pending_approval_gate_json ~now_ts row
-              | None -> `Null
-            in
             [
               ("last_activity_source", source_json);
               ("last_activity_at", activity_at_json last_activity_ts);
               ("live_activity", activity_json);
-              ("current_gate", gate_json);
               ("approval_audit_state", approval_audit_state);
             ]
+            @ current_gate_fields ~now_ts current_pending
             @
             (match pending_approval with
              | Some row -> [ ("runtime_blocker_summary", `String (pending_approval_summary row)) ]
@@ -1149,5 +1148,6 @@ let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
 include Dashboard_http_keeper_snapshot
 
 module For_test = struct
+  let current_gate_fields_for_workspace = current_gate_fields_for_workspace
   let keeper_row_after_worker_failure = keeper_row_after_worker_failure
 end

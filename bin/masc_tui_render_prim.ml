@@ -756,7 +756,10 @@ let composer_row state ~rows ~cols =
     let draft = Terminal_text.single_line composer.Composer.draft in
     (* Editing stops at whole grapheme boundaries, so this prefix cannot end
        inside a ZWJ/variation-selector sequence whose escaping needs its suffix. *)
-    let before = Terminal_text.single_line (Masc_tui_message_input.before_cursor state.msg_input) in
+    let before = match composer.Composer.focus with
+      | Composer.Focused ->
+          Terminal_text.single_line (Masc_tui_message_input.before_cursor state.msg_input)
+      | Composer.Unfocused -> draft in
     Message_layout.input_window ~max_cells:(max 0 (cols - prompt_cells))
       ~cursor:(String.length before) draft
   in

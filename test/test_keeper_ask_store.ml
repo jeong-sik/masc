@@ -313,6 +313,53 @@ let same_size_external_mutation_cannot_reuse_a_cached_answer () =
       Alcotest.(check string) "owned current bytes determine the answer" "b" chosen
   | Ok _ | Error _ -> Alcotest.fail "external mutation was not read canonically"
 
+let ask_status base_path arguments =
+  let ctx : Mcp_tool_runtime_ask.context =
+    { config = Workspace.default_config base_path; agent_name = keeper; arguments } in
+  match Mcp_tool_runtime_ask.handle_ask_status ~tool_name:"masc_ask_status"
+      ~start_time:(Tool_timing.start ()) ctx with
+  | Some result -> result
+  | None -> Alcotest.fail "Ask status did not handle its operation"
+
+let ask_status_distinguishes_missing_questions_from_unreadable_history () =
+  let base_path = temp_dir () in
+  let missing = ask_status base_path (`Assoc []) in
+  Alcotest.(check bool) "a missing log is a successful empty reading" true
+    (Tool_result.is_success missing);
+  let json = Yojson.Safe.from_string (Tool_result.message missing) in
+  Alcotest.(check int) "no stored questions" 0
+    Yojson.Safe.Util.(json |> member "open_count" |> to_int);
+  record base_path "ask-1";
+  append_raw base_path "{broken middle row}\n";
+  record base_path "ask-2";
+  let unreadable = ask_status base_path (`Assoc []) in
+  Alcotest.(check bool) "damaged history cannot report an empty queue" false
+    (Tool_result.is_success unreadable);
+  Alcotest.(check bool) "the failure belongs to storage, not the request" true
+    (Tool_result.failure_class unreadable = Some Tool_result.Runtime_failure)
+
+let ask_status_counts_the_same_snapshot_it_filters () =
+  let base_path = temp_dir () in
+  record base_path "answered";
+  record base_path "pending";
+  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"answered"
+      ~submissions:["q1", Keeper_ask.Chose {choice_ids=["a"]}] ~responder ~now:1100. with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error));
+  let result = ask_status base_path
+      (`Assoc ["ask_id", `String "answered"; "include_resolved", `Bool true]) in
+  Alcotest.(check bool) "resolved selection is readable" true (Tool_result.is_success result);
+  let json = Yojson.Safe.from_string (Tool_result.message result) in
+  Alcotest.(check int) "open count covers the Keeper's whole snapshot" 1
+    Yojson.Safe.Util.(json |> member "open_count" |> to_int);
+  match Yojson.Safe.Util.(json |> member "asks" |> to_list) with
+  | [row] ->
+      Alcotest.(check string) "the requested resolved Ask remains selected" "answered"
+        Yojson.Safe.Util.(row |> member "ask_id" |> to_string);
+      Alcotest.(check string) "the canonical answer is reported" "answered"
+        Yojson.Safe.Util.(row |> member "resolution" |> member "state" |> to_string)
+  | _ -> Alcotest.fail "Ask status lost its requested canonical row"
+
 let () =
   Alcotest.run "keeper_ask_store"
     [
@@ -353,5 +400,12 @@ let () =
             strict_reads_distinguish_missing_empty_and_damage;
           Alcotest.test_case "same-size external mutation changes the cached answer" `Quick
             same_size_external_mutation_cannot_reuse_a_cached_answer;
+        ] );
+      ( "Keeper status",
+        [
+          Alcotest.test_case "missing questions and unreadable history differ" `Quick
+            ask_status_distinguishes_missing_questions_from_unreadable_history;
+          Alcotest.test_case "the filter and count describe one snapshot" `Quick
+            ask_status_counts_the_same_snapshot_it_filters;
         ] );
     ]

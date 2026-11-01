@@ -237,17 +237,13 @@ let test_superseded_resource_diagram_worker () =
   let decide ~frame snapshot = Diagrams.admission request ~frame snapshot in
   check bool "current frame may start" true
     (decide ~frame:(Some frame) (Some old) = Diagrams.Admit);
-  check bool "leaving before the first source retires its request" true
+  check bool "leaving before the first source prevents admission" true
     (decide ~frame:None (Some old) = Diagrams.Retire);
-  check bool "the retired request can be recreated on return" true
-    (Option.is_none (Diagrams.retire request (Some old)));
   let partially_done=Diagrams.settle request ~source (Error "first source finished") old in
   check bool "first completion still owns the request" true
     (Diagrams.progress partially_done = (1,2));
-  check bool "leaving between sources retires the remaining work" true
+  check bool "leaving between sources prevents further admission" true
     (decide ~frame:None (Some partially_done) = Diagrams.Retire);
-  check bool "the partially completed request is removed" true
-    (Option.is_none (Diagrams.retire request (Some partially_done)));
   let first,first_claim,first_preparing = match Diagrams.claim_next old with
     | Some claim -> claim | None -> fail "first diagram claim" in
   check bool "the first source is exclusively claimed" true
@@ -281,8 +277,8 @@ let test_superseded_resource_diagram_worker () =
       {frame with frame_contents=List.map Fun.id contents} ];
   check bool "a replaced owner is ignored" true
     (decide ~frame:(Some frame) (Some next) = Diagrams.Ignore);
-  check bool "retiring the old request preserves its replacement" true
-    (Diagrams.retire request (Some next) = Some next);
+  check bool "old claim cleanup preserves the replacement request" true
+    (Diagrams.abandon request ~source:second old_claim next == next);
   let worker=Work.create () in
   let old_ticket=match Work.reserve worker with Some ticket -> ticket | None -> fail "old dispatch" in
   if decide ~frame:None (Some old) = Diagrams.Retire then

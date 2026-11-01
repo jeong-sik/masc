@@ -23,8 +23,7 @@ val matches : mime_type:string option -> contents:Masc_tui_mcp.resource_content 
 val matches_frame : frame -> t -> bool
 val admission : request -> frame:frame option -> t option -> admission
 (** Check the current owner and all frame inputs before starting a physical
-    renderer. A retired owner may be removed; a replaced owner is untouched. *)
-val retire : request -> t option -> t option
+    renderer. A replaced owner is untouched. *)
 val claim_next : t -> (string * claim * t) option
 (** Claim one unfinished source. Only one source may be preparing per request. *)
 val abandon : request -> source:string -> claim -> t -> t

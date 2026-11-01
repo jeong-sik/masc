@@ -11132,6 +11132,7 @@ let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
    Collab's [g] action and the palette's "go MSX" both open this media picker.
    [&] opens Collab, whose watch actions go directly to observation. *)
 let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
+  withdraw_resource_diagram_pending state;
   invalidate_msx_poll ();
   state.machine_interaction <- Observe_machine;
   (* The spectator takes ownership from any image preview. A pending async
@@ -11155,6 +11156,7 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
 (* An inventory row names the shared machine itself. Opening it observes the
    current screen; Collab's [g] action opens the separate media selection menu. *)
 let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
+  withdraw_resource_diagram_pending state;
   invalidate_msx_poll ();
   state.machine_interaction <- Observe_machine;
   state.image_request_generation <- state.image_request_generation + 1;
@@ -11181,6 +11183,7 @@ let open_msx_spectator (state : Masc_tui_types.state) ~mailbox =
    MSX media picker is only for choosing MSX media. No key from this view is
    forwarded to DOS, whose input and controller remain server-owned. *)
 let open_dos_screen (state : Masc_tui_types.state) ~mailbox =
+  withdraw_resource_diagram_pending state;
   invalidate_msx_poll ();
   state.image_request_generation <- state.image_request_generation + 1;
   state.browser_viewport <- None;
@@ -11389,6 +11392,7 @@ let inspection_window ~cell_pixels viewport =
     ~columns:(max 1 (columns-2)) ~rows:(max 1 (rows-3)) viewport
 
 let draw_inspected_image ?(fresh=true) state inspected =
+  withdraw_resource_diagram_pending state;
   match !active_graphics_protocol, !image_cell_pixels with
   | Masc_tui_graphics.Kitty_protocol, Some cell_pixels ->
     let rows,columns = Masc_tui_ansi.get_terminal_size () in
@@ -11432,6 +11436,7 @@ let draw_inspected_image ?(fresh=true) state inspected =
     (Some _ | None) -> ()
 
 let draw_image state ?(inspect=false) ?scene ?origin ?(caption = []) ?(footer = "  any key: back") ~refuse ~title data =
+  withdraw_resource_diagram_pending state;
   if state.msx_open then refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
   else begin
   state.browser_viewport <- None;
@@ -11526,6 +11531,7 @@ let character_images_available () =
 let draw_prepared_image ?scene ?origin state ~refuse ~title = function
   | Masc_tui_image_cache.Png png -> draw_image state ~inspect:true ?scene ?origin ~refuse ~title png
   | Rgba {columns=image_columns;pixel_rows;bytes} ->
+    withdraw_resource_diagram_pending state;
     let rows, columns = Masc_tui_ansi.get_terminal_size () in
     if state.msx_open then
       refuse "MSX currently owns the terminal; reopen the image after leaving MSX"
@@ -12066,11 +12072,21 @@ let step_resource_image (state : state) ~delta =
   let count = List.length (current_resource_images state) in
   state.resource_image_cursor <- max 0 (min (count - 1) (state.resource_image_cursor + delta))
 
+let resource_surface_visible state =
+  if state.image_open || state.msx_open then false
+  else
+    let terminal_rows,_ = get_terminal_size () in
+    match Masc_tui_render.frame_choice state ~terminal_rows with
+    | `Surface -> true
+    | `Too_small _ | `Play_card _ | `Account_login _ | `Palette | `Collab _
+    | `Lane_addons _ | `Detail_reading _ | `About | `Context | `Keeper_deletions
+    | `Help | `Agenda | `Answering | `Queue _ | `Patch | `Link | `Client_detail _ -> false
+
 let resource_diagram_frame state ~geometry_stable =
   match state.view, state.resource_focus, server_authority_ready state,
       Masc_tui_portrait_view.current_display () with
   | Resources, Right_pane, true, Masc_tui_portrait_view.Pixels {cell_width;cell_height}
-      when geometry_stable () ->
+      when resource_surface_visible state && geometry_stable () ->
       (match Masc_tui_resource_document.current state with
        | Some reading when not reading.requested && Option.is_none reading.error
            && reading.presentation = Masc_tui_resource_catalog.Document ->
@@ -21726,6 +21742,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
                 ~expires_at:invite.pii_expires_at ~link:invite.pii_link
             with
             | Ok card ->
+                withdraw_resource_diagram_pending state;
                 let stored = Masc_tui_types.play_invite_store state.play_invite card in
                 state.play_invite <- stored;
                 state.play_invite_scroll <- 0;

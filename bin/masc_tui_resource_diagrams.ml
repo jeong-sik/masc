@@ -57,10 +57,6 @@ let admission request ~frame snapshot =
        | Some _ | None -> Retire)
   | Some _ | None -> Ignore
 
-let retire request = function
-  | Some t when t.request == request -> None
-  | snapshot -> snapshot
-
 let claim_next t =
   if List.exists (function _, Preparing _ -> true | _, (Pending | Ready _ | Failed _) -> false) t.entries
   then None

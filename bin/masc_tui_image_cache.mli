@@ -29,9 +29,9 @@ val verdict_of_bytes : string -> verdict
     {!Masc.Keeper_vision_tool.sniff_image_media_type}, so the cache and the
     composer name the same signatures. *)
 
-val has_png_header : string -> bool
-(** Check the complete PNG signature, IHDR and positive dimensions. This is
-    a header check, not a full image decode. *)
+val has_png_structure : string -> bool
+(** Check signature, positive IHDR dimensions, bounded chunks and required
+    IDAT/IEND chunks. This does not validate checksums or decode pixels. *)
 
 (** {1 The fetch} *)
 
@@ -105,6 +105,9 @@ val run_bounded : deadline_seconds:float -> string -> Unix.process_status
     one simple command, run by [sh] with the null device for input and
     output, and killed with SIGKILL when it has not exited after
     [deadline_seconds]; the status is then [WSIGNALED Sys.sigkill]. *)
+
+val wait_bounded : deadline_seconds:float -> int -> Unix.process_status
+(** Reap an already-started child, killing it at the same deadline. *)
 
 val run_decoder :
   run:(string -> Unix.process_status) -> output_path:string -> string ->

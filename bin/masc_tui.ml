@@ -4339,12 +4339,12 @@ let ensure_img_cache_dir () =
    terminal to read and is killed at the deadline: a decompression bomb costs
    that image, not the evidence pane. A converter that cannot start is that
    image's failure, not the bundle's. *)
-let evidence_converter_deadline_seconds = 10.
+let image_process_deadline_seconds = 10.
 
 let convert_evidence_image bytes =
   match
     Masc_tui_image_cache.prepare_payload
-      ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:evidence_converter_deadline_seconds)
+      ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
       ~cache_dir:(ensure_img_cache_dir ()) bytes
   with
   | result -> result
@@ -11855,7 +11855,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       | Board_image_read _ -> Some board_preview_worker
       | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
     let run = match board_worker with
-      | Some _ -> Masc_tui_image_cache.run_bounded ~deadline_seconds:evidence_converter_deadline_seconds
+      | Some _ -> Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds
       | None -> Unix.system in
     let load () =
       Masc_tui_image_requests.load ~host:server_peer_host ~port
@@ -11921,7 +11921,11 @@ let prepare_inspected_frame state ~mailbox =
            let result = Eio_guard.run_in_systhread ~label:"tui-vector-window" (fun () ->
              let render () =
              let open Result.Syntax in
-             let* png = Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~raster scene in
+             let runner = match pending.sir_owner with
+               | Board_image_read _ -> Some (Masc_tui_pele.command_runner
+                   ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds))
+               | Local_file_image_read _ | Draft_image_read _ | Peer_image_read _ -> None in
+             let* png = Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~raster ?runner scene in
              let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Unix.system
                ~cache_dir:(ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
              Ok (prepared,Some scene) in
@@ -21028,8 +21032,31 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
            if Option.is_some (current_board_reader state)
               && Masc_tui_board_reader.owns state.board_reader request
               && (match state.board_reader_owner with Some (_,_,Ak_image) -> true | _ -> false) then
-             let outcome=Masc_tui_attachment_action.perform prepared ~midi_soundfont:None in
-             report_action state "system" (Masc_tui_attachment_action.describe_outcome outcome)
+             (match Masc_tui_attachment_action.external_file prepared, Eio_context.get_switch_opt () with
+              | Some (name,path), Some sw ->
+                  (match Masc_tui_browser.spawn_url path with
+                   | Error _ -> report_action state "system" (Printf.sprintf "saved %s · %s" name path)
+                   | Ok (_opener,pid) ->
+                       let deliver=workspace_enqueue state in
+                       (try Eio.Fiber.fork_daemon ~sw (fun () ->
+                          let status=Eio_guard.run_in_systhread ~label:"tui-board-image-open" (fun () ->
+                            Masc_tui_image_cache.wait_bounded ~deadline_seconds:image_process_deadline_seconds pid) in
+                          let description=match status with
+                            | Unix.WEXITED 0 -> "opened " ^ name
+                            | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+                                Printf.sprintf "saved %s · %s" name path in
+                          deliver mailbox (Board_attachment_saved (request,Ok (Board_saved_original description)));
+                          `Stop_daemon)
+                        with exn ->
+                          (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH,_,_) -> ());
+                          ignore (Unix.waitpid [] pid);
+                          report_action state "error" (Printexc.to_string exn)))
+              | Some (name,path), None ->
+                  report_action state "system" (Printf.sprintf "saved %s · %s" name path)
+              | None, (Some _ | None) ->
+                  let outcome=Masc_tui_attachment_action.perform
+                    ~open_url:(fun _ -> Error "external opening is unavailable") prepared ~midi_soundfont:None in
+                  report_action state "system" (Masc_tui_attachment_action.describe_outcome outcome))
        | Error error -> report_action state "error" error)
   | Chat_call_loaded (request, result) ->
       ignore (complete_chat_call_read state request result)

@@ -10,11 +10,28 @@ let verdict_of_bytes bytes =
     | Ok media_type -> Known_image { media_type }
     | Error _ -> Unknown_signature
 
-let has_png_header bytes =
-  String.starts_with ~prefix:"\137PNG\r\n\026\n\000\000\000\rIHDR" bytes
-  && match Masc.Keeper_image_dimensions.image_dimensions bytes with
-     | Some (width,height) -> width > 0 && height > 0
-     | None -> false
+let has_png_structure bytes =
+  let length = String.length bytes in
+  let be32 offset =
+    (Char.code bytes.[offset] lsl 24) lor (Char.code bytes.[offset+1] lsl 16)
+    lor (Char.code bytes.[offset+2] lsl 8) lor Char.code bytes.[offset+3] in
+  let rec chunks offset first has_data =
+    if offset > length - 12 then false else
+    let size=be32 offset in
+    if size < 0 || size > length - offset - 12 then false else
+    let kind=String.sub bytes (offset+4) 4 in
+    let next=offset+12+size in
+    if first then kind="IHDR" && size=13 && chunks next false false
+    else match kind with
+      | "IHDR" -> false
+      | "IDAT" -> chunks next false (has_data || size > 0)
+      | "IEND" -> size=0 && has_data && next=length
+      | _ -> chunks next false has_data in
+  String.starts_with ~prefix:"\137PNG\r\n\026\n" bytes
+  && (match Masc.Keeper_image_dimensions.image_dimensions bytes with
+      | Some (width,height) -> width > 0 && height > 0
+      | None -> false)
+  && chunks 8 true false
 
 (* Exit statuses with a documented meaning. curl(1) "EXIT CODES"; sh(1):
    a command that is not found exits 127. *)
@@ -104,6 +121,24 @@ let decode_failure_text = function
    the caller is a loader thread with nothing else to do. *)
 let run_poll_interval_seconds = 0.02
 
+let wait_bounded ~deadline_seconds pid =
+  let deadline = Unix.gettimeofday () +. deadline_seconds in
+  let rec wait () =
+    match Unix.waitpid [ Unix.WNOHANG ] pid with
+    | 0, _ ->
+      if Unix.gettimeofday () >= deadline
+      then begin
+        (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+        snd (Unix.waitpid [] pid)
+      end
+      else begin
+        Unix.sleepf run_poll_interval_seconds;
+        wait ()
+      end
+    | _, status -> status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait () in
+  wait ()
+
 let run_bounded ~deadline_seconds command =
   (* Standard input, output and error are the null device: a decoder that
      reads a terminal would take the keys the operator is typing, and one that
@@ -116,23 +151,7 @@ let run_bounded ~deadline_seconds command =
        let pid =
          Unix.create_process "/bin/sh" [| "sh"; "-c"; "exec " ^ command |] null null null
        in
-       let deadline = Unix.gettimeofday () +. deadline_seconds in
-       let rec wait () =
-         match Unix.waitpid [ Unix.WNOHANG ] pid with
-         | 0, _ ->
-           if Unix.gettimeofday () >= deadline
-           then begin
-             (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-             snd (Unix.waitpid [] pid)
-           end
-           else begin
-             Unix.sleepf run_poll_interval_seconds;
-             wait ()
-           end
-         | _, status -> status
-         | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
-       in
-       wait ())
+       wait_bounded ~deadline_seconds pid)
 
 let discard path = try Sys.remove path with Sys_error _ -> ()
 

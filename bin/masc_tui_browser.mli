@@ -22,6 +22,12 @@ val open_url : string -> (string, string) result
     because "the browser did not open" with no list is not something an
     operator can act on. *)
 
+val open_url_with_run : run:(string -> Unix.process_status) -> string -> (string, string) result
+(** Use a caller-owned process runner, for example one with a deadline. *)
+
+val spawn_url : string -> (string * int, string) result
+(** Start an available opener without waiting; the caller must reap the pid. *)
+
 type undrawn_image = { title : string; page_url : string; image_url : string }
 (** A web image the TUI could not, or does not, draw inline. [title] is the
     display line, indented for the screen, and is never a location.

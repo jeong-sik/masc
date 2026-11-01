@@ -228,7 +228,8 @@ let test_superseded_resource_diagram_worker () =
   let module Work=Masc_tui_board_preview_work in
   let contents = [{Mcp.rc_uri=None;rc_mime_type=Some "text/markdown";
     rc_kind=Resource_text "```mermaid\ngraph TD; A-->B\n```\n\n```mermaid\ngraph TD; C-->D\n```\n"}] in
-  let frame = Diagrams.{mime_type=None;contents;width=640;cell_pixels=(8,16);colors=None} in
+  let frame = Diagrams.{frame_mime_type=None;frame_contents=contents;frame_width=640;
+    frame_cell_pixels=(8,16);frame_colors=None} in
   let old=Diagrams.create ~mime_type:None ~contents ~width:640 ~cell_pixels:(8,16) ~colors:None in
   let next=Diagrams.create ~mime_type:None ~contents ~width:320 ~cell_pixels:(8,16) ~colors:None in
   let request=Diagrams.request old in
@@ -250,10 +251,10 @@ let test_superseded_resource_diagram_worker () =
   List.iter (fun changed ->
     check bool "changed frame is not admitted" true
       (decide ~frame:(Some changed) (Some old) = Diagrams.Retire))
-    [ {frame with width=320}; {frame with cell_pixels=(9,16)};
-      {frame with colors=Some ("#ffffff", "#000000")};
-      {frame with mime_type=Some "text/plain"};
-      {frame with contents=List.map Fun.id contents} ];
+    [ {frame with frame_width=320}; {frame with frame_cell_pixels=(9,16)};
+      {frame with frame_colors=Some ("#ffffff", "#000000")};
+      {frame with frame_mime_type=Some "text/plain"};
+      {frame with frame_contents=List.map Fun.id contents} ];
   check bool "a replaced owner is ignored" true
     (decide ~frame:(Some frame) (Some next) = Diagrams.Ignore);
   check bool "retiring the old request preserves its replacement" true

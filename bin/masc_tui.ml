@@ -12084,8 +12084,9 @@ let resource_diagram_frame state ~geometry_stable =
                hex (Masc_tui_terminal_palette.background palette))
                (Masc_tui_terminal_palette.snapshot_palette palette) in
              Masc_tui_resource_diagrams.{
-               mime_type=(Masc_tui_resource_catalog.metadata reading.entry).mime_type;
-               contents; width=columns*cell_width; cell_pixels=(cell_width,cell_height); colors
+               frame_mime_type=(Masc_tui_resource_catalog.metadata reading.entry).mime_type;
+               frame_contents=contents; frame_width=columns*cell_width;
+               frame_cell_pixels=(cell_width,cell_height); frame_colors=colors
              }) reading.contents
        | Some _ | None -> None)
   | (Overview | Keepers _ | Planning | Board | Acting | Metrics | Lanes | Clients | Schedules | Harness | Fusion
@@ -12104,8 +12105,8 @@ let prepare_resource_diagrams state ~mailbox ~geometry_stable =
         (* A withdrawn projection does not free a physical renderer. *)
         state.resource_diagrams <- None;
         if not (Work.is_busy resource_diagram_worker) then begin
-          let diagrams = Diagrams.create ~mime_type:frame.mime_type ~contents:frame.contents
-            ~width:frame.width ~cell_pixels:frame.cell_pixels ~colors:frame.colors in
+          let diagrams = Diagrams.create ~mime_type:frame.frame_mime_type ~contents:frame.frame_contents
+            ~width:frame.frame_width ~cell_pixels:frame.frame_cell_pixels ~colors:frame.frame_colors in
           state.resource_diagrams <- Some diagrams;
           let request = Diagrams.request diagrams in
           let deliver = workspace_enqueue state in
@@ -12127,7 +12128,7 @@ let prepare_resource_diagrams state ~mailbox ~geometry_stable =
                               ~finally:(fun () -> Work.withdraw resource_diagram_worker admission)
                               (fun () -> Eio_guard.run_in_systhread ~label:"tui-artifact-diagram" (fun () ->
                                 Work.run_reserved resource_diagram_worker admission (fun () ->
-                                  let cell_width,_ = frame.cell_pixels in
+                                  let cell_width,_ = frame.frame_cell_pixels in
                                   let scene = Masc_tui_pele.scene ~format:Mermaid
                                     ~max_width:(Diagrams.width request)
                                     ~font_size:(max 1 (cell_width*2))

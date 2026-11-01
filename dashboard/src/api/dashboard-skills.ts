@@ -182,8 +182,8 @@ export interface SkillProfile {
 export type SkillSurfaceProfile = Omit<SkillProfile, 'reference' | 'kind'>
 
 export interface SkillEvidenceCoverage {
-  composition_scope: 'exact_reference_latest_completed' | 'unavailable'
-  composition_records_read: number
+  composition_scope: 'exact_reference_retained_runs' | 'unavailable'
+  composition_runs_observed: number
   composition_unavailable: readonly string[]
   coverage_complete: false
   activation_scope:
@@ -243,8 +243,17 @@ export interface SkillCompositionEvidence {
   recorded_at: number
 }
 
+export interface SkillDurationStatistics {
+  samples: number
+  mean_ms: number | null
+  min_ms: number | null
+  p50_ms: number | null
+  p95_ms: number | null
+  max_ms: number | null
+}
+
 export interface SkillEvidenceResponse {
-  schema: 'masc.skill-evidence/v7'
+  schema: 'masc.skill-evidence/v8'
   status: 'observed' | 'not_observed_in_retained_coverage'
   reference: SkillReference
   activation: SkillActivationSelection | null
@@ -252,9 +261,11 @@ export interface SkillEvidenceResponse {
   composition_statistics: {
     scope: 'exact_reference_retained_runs'
     duration_scope: 'stored_executor_result'
+    percentile_method: 'nearest_rank'
+    recorded_window: { first_recorded_at: number | null; last_recorded_at: number | null }
     records: number
-    completed: { samples: number; mean_ms: number | null }
-    failed: { samples: number; mean_ms: number | null }
+    completed: SkillDurationStatistics
+    failed: SkillDurationStatistics
     deferred: number
   } | null
   coverage: SkillEvidenceCoverage
@@ -600,8 +611,17 @@ const SkillActivationPayloadSchema = Schema.Struct({
   activated_at: Schema.NonEmptyString,
 })
 
+const SkillDurationStatisticsSchema = Schema.Struct({
+  samples: NonNegativeSafeIntegerSchema,
+  mean_ms: Schema.NullOr(Schema.Number),
+  min_ms: Schema.NullOr(Schema.Number),
+  p50_ms: Schema.NullOr(Schema.Number),
+  p95_ms: Schema.NullOr(Schema.Number),
+  max_ms: Schema.NullOr(Schema.Number),
+})
+
 const SkillEvidenceResponseSchema = Schema.Struct({
-  schema: Schema.Literal('masc.skill-evidence/v7'),
+  schema: Schema.Literal('masc.skill-evidence/v8'),
   status: Schema.Literal('observed', 'not_observed_in_retained_coverage'),
   reference: SkillReferenceSchema,
   activation: Schema.NullOr(Schema.Union(
@@ -670,17 +690,22 @@ const SkillEvidenceResponseSchema = Schema.Struct({
   composition_statistics: Schema.NullOr(Schema.Struct({
     scope: Schema.Literal('exact_reference_retained_runs'),
     duration_scope: Schema.Literal('stored_executor_result'),
+    percentile_method: Schema.Literal('nearest_rank'),
+    recorded_window: Schema.Struct({
+      first_recorded_at: Schema.NullOr(Schema.Number),
+      last_recorded_at: Schema.NullOr(Schema.Number),
+    }),
     records: NonNegativeSafeIntegerSchema,
-    completed: Schema.Struct({ samples: NonNegativeSafeIntegerSchema, mean_ms: Schema.NullOr(Schema.Number) }),
-    failed: Schema.Struct({ samples: NonNegativeSafeIntegerSchema, mean_ms: Schema.NullOr(Schema.Number) }),
+    completed: SkillDurationStatisticsSchema,
+    failed: SkillDurationStatisticsSchema,
     deferred: NonNegativeSafeIntegerSchema,
   })),
   coverage: Schema.Struct({
     composition_scope: Schema.Literal(
-      'exact_reference_latest_completed',
+      'exact_reference_retained_runs',
       'unavailable',
     ),
-    composition_records_read: NonNegativeSafeIntegerSchema,
+    composition_runs_observed: NonNegativeSafeIntegerSchema,
     composition_unavailable: Schema.Array(Schema.String),
     coverage_complete: Schema.Literal(false),
     activation_scope: Schema.Literal(
@@ -1472,21 +1497,32 @@ export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse
   }
   const statistics = decoded.composition_statistics
   if (statistics !== null) {
-    const validDuration = (row: { samples: number; mean_ms: number | null }) =>
-      row.samples === 0 ? row.mean_ms === null
-        : row.mean_ms !== null && Number.isFinite(row.mean_ms) && row.mean_ms >= 0
+    const validDuration = (row: SkillDurationStatistics) => {
+      const values = [row.mean_ms, row.min_ms, row.p50_ms, row.p95_ms, row.max_ms]
+      if (row.samples === 0) return values.every(value => value === null)
+      return row.mean_ms !== null && row.min_ms !== null && row.p50_ms !== null
+        && row.p95_ms !== null && row.max_ms !== null
+        && values.every(value => value !== null && Number.isFinite(value) && value >= 0)
+        && row.min_ms <= row.mean_ms && row.mean_ms <= row.max_ms
+        && row.min_ms <= row.p50_ms && row.p50_ms <= row.p95_ms && row.p95_ms <= row.max_ms
+    }
     if (decoded.coverage.composition_scope === 'unavailable'
-      || (statistics.records > 0) !== (decoded.composition !== null)) {
+      || statistics.records !== decoded.coverage.composition_runs_observed) {
       contractError('invalid_response', 'composition statistics disagree with retained evidence coverage')
     }
     if (!validDuration(statistics.completed) || !validDuration(statistics.failed)
       || statistics.completed.samples + statistics.failed.samples + statistics.deferred !== statistics.records) {
       contractError('invalid_response', 'composition duration statistics violate sample invariants')
     }
+    const { first_recorded_at: first, last_recorded_at: last } = statistics.recorded_window
+    const validWindow = statistics.records === 0 ? first === null && last === null
+      : first !== null && last !== null && Number.isFinite(first) && Number.isFinite(last)
+        && first >= 0 && first <= last && last === decoded.composition?.recorded_at
+    if (!validWindow) contractError('invalid_response', 'composition recorded window disagrees with retained evidence')
   }
-  const { composition_scope: scope, composition_records_read: read } = decoded.coverage
-  const coverageAgrees = scope === 'exact_reference_latest_completed'
-    ? (decoded.composition === null ? read === 0 : read === 1)
+  const { composition_scope: scope, composition_runs_observed: read } = decoded.coverage
+  const coverageAgrees = scope === 'exact_reference_retained_runs'
+    ? (decoded.composition === null ? read === 0 : read > 0)
       && decoded.coverage.composition_unavailable.length === 0
     : decoded.composition === null
       && read === 0

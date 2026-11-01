@@ -147,7 +147,8 @@ export function contextLabel(surface: SkillSurface | null, bodyBytes: number): s
 
 export function usageLabel(surface: SkillSurface | null): string {
   const usage = surface?.usage ?? []
-  if (usage.length === 0) return 'unused in current sessions'
+  if (surface?.usage === undefined) return 'Usage observation unavailable'
+  if (usage.length === 0) return 'No invocation observed in retained sessions'
   return usage
     .map(row => `${row.keeper} ${row.invocations}×/${row.deliveries} delivered/${row.actions} actions · last ${row.last_used_at}`)
     .join(' · ')
@@ -206,6 +207,12 @@ function SkillIoView({ profile }: { profile: SkillSurfaceProfile }) {
   `
 }
 
+function recordedTimestamp(value: number | null): string {
+  if (value === null) return 'unobserved'
+  const date = new Date(value * 1000)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : `${value} Unix seconds`
+}
+
 function SkillPerformanceView({ statistics, io }: {
   statistics: SkillEvidenceResponse['composition_statistics']
   io: SkillSurfaceProfile['io'] | null
@@ -224,7 +231,6 @@ function SkillPerformanceView({ statistics, io }: {
     { label: 'Completed', ...statistics.completed, color: 'var(--color-status-ok)' },
     { label: 'Failed', ...statistics.failed, color: 'var(--color-status-err)' },
   ]
-  const peak = Math.max(0, ...durations.map(row => row.mean_ms ?? 0))
   const outcomes = [
     { label: 'Completed', count: statistics.completed.samples, color: 'var(--color-status-ok)' },
     { label: 'Failed', count: statistics.failed.samples, color: 'var(--color-status-err)' },
@@ -234,23 +240,32 @@ function SkillPerformanceView({ statistics, io }: {
     <section class="space-y-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3" aria-label="Skill performance">
       <div class="flex flex-wrap justify-between gap-2"><strong>Executor performance</strong><span>${statistics.records} retained runs</span></div>
       ${applicability}
-      <div class="ss-muted text-3xs">Mean executor duration · same revision · all Keepers · shared 0 → ${peak.toFixed(1)}ms axis</div>
-      ${durations.map(row => html`
-        <div class="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-2" key=${row.label}>
-          <span>${row.label}</span>
-          <div class="h-2 overflow-hidden rounded bg-[var(--color-border-default)]" aria-hidden="true"><div class="h-full rounded" style=${{ width: `${row.mean_ms !== null && peak > 0 ? row.mean_ms / peak * 100 : 0}%`, backgroundColor: row.color }} /></div>
-          <span class="mono text-3xs">${row.mean_ms === null ? 'unobserved' : `${row.mean_ms.toFixed(1)}ms`} · n=${row.samples}</span>
-        </div>
-      `)}
+      <div class="ss-muted text-3xs">Same revision · all Keepers · one result per original run</div>
+      <div class="ss-muted text-3xs">${statistics.recorded_window.first_recorded_at === null
+        ? 'Recorded result window: unobserved'
+        : `Recorded result window (UTC): ${recordedTimestamp(statistics.recorded_window.first_recorded_at)} → ${recordedTimestamp(statistics.recorded_window.last_recorded_at)}`}</div>
+      <div class="overflow-x-auto"><table class="ss-table" aria-label="Executor duration distribution">
+        <thead><tr><th>Outcome</th><th>Mean · samples</th><th>P50</th><th>P95</th><th>Min → max</th></tr></thead>
+        <tbody>${durations.map(row => html`
+          <tr key=${row.label}>
+            <th scope="row">${row.label}</th>
+            <td class="mono text-3xs">${row.mean_ms === null ? 'unobserved' : `${row.mean_ms.toFixed(1)}ms`} · n=${row.samples}</td>
+            <td class="mono text-3xs">${row.p50_ms === null ? '—' : `${row.p50_ms.toFixed(1)}ms`}</td>
+            <td class="mono text-3xs">${row.p95_ms === null ? '—' : `${row.p95_ms.toFixed(1)}ms`}</td>
+            <td class="mono text-3xs">${row.min_ms === null ? '—' : `${row.min_ms.toFixed(1)} → ${row.max_ms?.toFixed(1)}ms`}</td>
+          </tr>
+        `)}</tbody>
+      </table></div>
+      <div class="ss-muted text-3xs">P50/P95: nearest rank of observed samples; recorded timestamps describe stored results, not execution start/end.</div>
       <div class="ss-muted text-3xs">Outcome distribution · retained runs</div>
       ${outcomes.map(row => html`
         <div class="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-2" key=${row.label}>
           <span>${row.label}</span>
           <div class="h-2 overflow-hidden rounded bg-[var(--color-border-default)]" aria-hidden="true"><div class="h-full rounded" style=${{ width: `${statistics.records > 0 ? row.count / statistics.records * 100 : 0}%`, backgroundColor: row.color }} /></div>
-          <span class="mono text-3xs">${row.count} · ${statistics.records > 0 ? (row.count / statistics.records * 100).toFixed(1) : '0'}%</span>
+          <span class="mono text-3xs">${row.count} · ${statistics.records > 0 ? (row.count / statistics.records * 100).toFixed(1) : '—'}${statistics.records > 0 ? '%' : ''}</span>
         </div>
       `)}
-      <div class="ss-muted text-3xs">Stored executor results; deferred excluded from means. Queue/dependency waits and model latency are separate.</div>
+      <div class="ss-muted text-3xs">Executor outcome is not business verification. Deferred excluded from durations. Queue/dependency waits and model latency are separate.</div>
     </section>
   `
 }
@@ -317,17 +332,17 @@ function runOutput(value: unknown): string {
 
 function compositionCoverageLabel(scope: SkillEvidenceResponse['coverage']['composition_scope']): string {
   switch (scope) {
-    case 'exact_reference_latest_completed':
-      return 'composition exact-reference latest completed authority'
+    case 'exact_reference_retained_runs':
+      return 'composition exact-reference retained runs'
     case 'unavailable':
-      return 'composition exact-reference latest-completed authority unavailable'
+      return 'composition exact-reference retained runs unavailable'
   }
 }
 
 function SkillEvidenceView({ result, io }: { result: SkillEvidenceResponse | null; io: SkillSurfaceProfile['io'] | null }) {
   if (!result) return html`<div class="ss-muted">Load retained exact-revision evidence.</div>`
   const activationGapCount = result.coverage.activation_gaps.length
-  const coverageSummary = html`${result.coverage.activation_sessions_inspected} retained sessions inspected · ${result.coverage.activation_ledgers_loaded} activation ledgers loaded · ${activationGapCount} activation gaps · ${result.coverage.activation_owner_gap_count} owner gaps · ${result.coverage.composition_records_read} composition records read · ${compositionCoverageLabel(result.coverage.composition_scope)}`
+  const coverageSummary = html`${result.coverage.activation_sessions_inspected} retained sessions inspected · ${result.coverage.activation_ledgers_loaded} activation ledgers loaded · ${activationGapCount} activation gaps · ${result.coverage.activation_owner_gap_count} owner gaps · ${result.coverage.composition_runs_observed} original composition runs observed · ${compositionCoverageLabel(result.coverage.composition_scope)}`
   if (result.status === 'not_observed_in_retained_coverage') {
     return html`
       <${SkillPerformanceView} statistics=${result.composition_statistics} io=${io} />

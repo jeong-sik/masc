@@ -3,8 +3,7 @@
     own [composition_run_id], so concurrent runs never overwrite each other
     and [load_latest] selects the record with the greatest [recorded_at].
     The producer writes the typed executor settlement directly; readers never
-    scan the fleet tool-call log. Records written by the pre-append layout
-    (a single file per reference) remain readable load candidates. *)
+    scan the fleet tool-call log or obsolete single-file layouts. *)
 
 type t
 
@@ -44,20 +43,32 @@ val make :
     duplicated and unknown origin values are refused by both make and load. *)
 
 val save_latest : Workspace.config -> t -> (save_outcome, error) result
-type duration_statistics = private { samples : int; mean_ms : float option }
+type duration_statistics = private
+  { samples : int
+  ; mean_ms : float option
+  ; min_ms : float option
+  ; p50_ms : float option
+  ; p95_ms : float option
+  ; max_ms : float option
+  }
 type statistics = private
   { records : int
   ; completed : duration_statistics
   ; failed : duration_statistics
   ; deferred : int
+  ; first_recorded_at : float option
+  ; last_recorded_at : float option
   }
 type observation = private { latest : t option; statistics : statistics }
 
 val statistics : t list -> statistics
 (** One sample per original run id, selecting its most recently recorded
-    result. Append records win timestamp ties against the pre-append file. Means describe the stored executor result duration, not
+    result. Means describe the stored executor result duration, not
     end-to-end asynchronous queue, dependency wait or model latency. Deferred
-    results are counted separately and never enter a terminal mean. *)
+    results are counted separately and never enter terminal duration statistics.
+    Percentiles use the nearest-rank method on each outcome's exact samples.
+    The window bounds describe when the selected results were recorded, not
+    when executions started. Empty observations have null bounds and durations. *)
 val statistics_to_yojson : statistics -> Yojson.Safe.t
 val load_observation : Workspace.config -> Skill_reference.t -> (observation, error) result
 (** Read the exact-reference partition once, sharing the same validated records

@@ -8484,8 +8484,8 @@ let test_skill_evidence_joins_activation_and_composition () =
     Server_skill_evidence.For_testing.to_yojson
       ~reference
       ~composition:(Some composition)
-      ~composition_records_read:1
-      ~composition_scope:`Exact_reference_latest_completed
+      ~composition_runs_observed:1
+      ~composition_scope:`Exact_reference_retained_runs
       ~composition_unavailable:[]
       ~activation:(Some activation)
       ~activation_scope:Incomplete_retained_trace_snapshot
@@ -8495,7 +8495,7 @@ let test_skill_evidence_joins_activation_and_composition () =
       ~activation_owner_gap_count:0
   in
   let open Yojson.Safe.Util in
-  check string "evidence schema" "masc.skill-evidence/v7"
+  check string "evidence schema" "masc.skill-evidence/v8"
     (json |> member "schema" |> to_string);
   check string "observed status" "observed" (json |> member "status" |> to_string);
   check string "activation keeper" "delta"
@@ -8510,7 +8510,7 @@ let test_skill_evidence_joins_activation_and_composition () =
     (json |> member "coverage" |> member "coverage_complete" |> to_bool);
   check string
     "composition scan covers the exact-reference index"
-    "exact_reference_latest_completed"
+    "exact_reference_retained_runs"
     (json |> member "coverage" |> member "composition_scope" |> to_string);
   check int "activation sessions inspected" 187
     (json |> member "coverage" |> member "activation_sessions_inspected"
@@ -8519,8 +8519,8 @@ let test_skill_evidence_joins_activation_and_composition () =
     Server_skill_evidence.For_testing.to_yojson
       ~reference
       ~composition:None
-      ~composition_records_read:0
-      ~composition_scope:`Exact_reference_latest_completed
+      ~composition_runs_observed:0
+      ~composition_scope:`Exact_reference_retained_runs
       ~composition_unavailable:[]
       ~activation:None
       ~activation_scope:Complete_retained_trace_snapshot
@@ -8531,7 +8531,34 @@ let test_skill_evidence_joins_activation_and_composition () =
   in
   check string "bounded absence is not proof of never"
     "not_observed_in_retained_coverage"
-    (not_observed |> member "status" |> to_string)
+    (not_observed |> member "status" |> to_string);
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let save recorded_at result =
+    let fields = to_assoc composition in
+    let fields = List.filter (fun (name, _) ->
+      not (List.mem name ["composition_run_id"; "recorded_at"; "result"])) fields in
+    let value = `Assoc
+      (("composition_run_id", `String (Lib.Keeper_tool_plan.Composition_run_id.fresh ()
+          |> Lib.Keeper_tool_plan.Composition_run_id.to_string))
+       :: ("recorded_at", `Float recorded_at) :: ("result", Tool_result.to_json result) :: fields)
+      |> Composition.of_yojson |> Result.get_ok in
+    Composition.save_latest config value |> Result.get_ok |> ignore in
+  let tool_name = "keeper_compose_release-checklist" in
+  save 100. (completed tool_name (`Assoc []));
+  save 200. (Tool_result.make_deferred ~tool_name ~start_time:(Tool_timing.start ()) ());
+  save 300. (Tool_result.make_err ~tool_name ~class_:Runtime_failure
+    ~start_time:(Tool_timing.start ()) "result publication failed");
+  let observed = Server_skill_evidence.project ~config reference in
+  check int "coverage counts all original retained runs" 3
+    (observed |> member "coverage" |> member "composition_runs_observed" |> to_int);
+  check int "coverage and statistics share the same observation" 3
+    (observed |> member "composition_statistics" |> member "records" |> to_int);
+  check int "failed results are included in the retained population" 1
+    (observed |> member "composition_statistics" |> member "failed" |> member "samples" |> to_int);
+  check int "deferred results remain separate" 1
+    (observed |> member "composition_statistics" |> member "deferred" |> to_int);
+  check string "latest authority includes actual failure, not only completed runs" "failed"
+    (observed |> member "composition" |> member "result" |> member "disposition" |> to_string)
 ;;
 
 let () =

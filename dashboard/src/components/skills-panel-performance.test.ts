@@ -18,11 +18,13 @@ const profile: SkillSurfaceProfile = { activation_tool: 'keeper_skill', executio
   plan: { node_count: 0, batch_count: 0, parallel_batch_count: 0, max_parallelism: 0, statically_read_only: null }, declaration: null, flow: null }
 const snapshot: Extract<SkillsResponse, { state: 'ready' }>['snapshot'] = { snapshot_revision: 'snapshot', catalog_revision: 'catalog', config: { kind: 'unreadable' }, sources: [],
   skills: [{ ...reference, description: 'Proof Skill', body_bytes: 100 }], effective_skills: [reference.identity], shadows: [], rejections: [] }
-const coverage = { composition_scope: 'exact_reference_latest_completed', composition_records_read: 0, composition_unavailable: [], coverage_complete: false,
+const coverage = { composition_scope: 'exact_reference_retained_runs', composition_runs_observed: 0, composition_unavailable: [], coverage_complete: false,
   activation_scope: 'complete_retained_trace_snapshot', activation_sessions_inspected: 0, activation_ledgers_loaded: 0, activation_gaps: [], activation_owner_gap_count: 0 }
-const emptyStats = { scope: 'exact_reference_retained_runs', duration_scope: 'stored_executor_result', records: 0,
-  completed: { samples: 0, mean_ms: null }, failed: { samples: 0, mean_ms: null }, deferred: 0 }
-const evidence = { schema: 'masc.skill-evidence/v7', status: 'not_observed_in_retained_coverage', reference,
+const duration = (samples: number, value: number | null) =>
+  ({ samples, mean_ms: value, min_ms: value, p50_ms: value, p95_ms: value, max_ms: value })
+const emptyStats = { percentile_method: 'nearest_rank', recorded_window: { first_recorded_at: null, last_recorded_at: null }, scope: 'exact_reference_retained_runs', duration_scope: 'stored_executor_result', records: 0,
+  completed: duration(0, null), failed: duration(0, null), deferred: 0 }
+const evidence = { schema: 'masc.skill-evidence/v8', status: 'not_observed_in_retained_coverage', reference,
   activation: null, composition: null, composition_statistics: emptyStats, coverage }
 const composition = { schema: 'masc.skill-composition-evidence/v1', reference,
   composition_run_id: '01a045f2-cd8b-7000-a3f7-1d718a712204', parent_tool_use_id: '', parent_turn: 7, parent_planned_index: 0,
@@ -71,8 +73,8 @@ it('preserves Composition empty means as unobserved', async () => {
 it('preserves a real zero-duration Composition result and retained evidence', async () => {
   api.fetchSkills.mockResolvedValue(catalog('composition'))
   api.fetchSkillEvidence.mockResolvedValue(decodeSkillEvidenceResponse({ ...evidence, status: 'observed', composition,
-    coverage: { ...coverage, composition_records_read: 1 },
-    composition_statistics: { ...emptyStats, records: 1, completed: { samples: 1, mean_ms: 0 } } }))
+    coverage: { ...coverage, composition_runs_observed: 1 },
+    composition_statistics: { ...emptyStats, records: 1, recorded_window: { first_recorded_at: 1, last_recorded_at: 1 }, completed: duration(1, 0) } }))
   await loadEvidence()
   expect(screen.getByText('0.0ms · n=1')).toBeTruthy()
   expect(screen.getByText(composition.composition_run_id, { exact: false })).toBeTruthy()
@@ -80,8 +82,8 @@ it('preserves a real zero-duration Composition result and retained evidence', as
 })
 it('keeps retained executor results even if the selected declaration is model-orchestrated', async () => {
   api.fetchSkillEvidence.mockResolvedValue(decodeSkillEvidenceResponse({ ...evidence, status: 'observed', composition,
-    coverage: { ...coverage, composition_records_read: 1 },
-    composition_statistics: { ...emptyStats, records: 1, completed: { samples: 1, mean_ms: 0 } } }))
+    coverage: { ...coverage, composition_runs_observed: 1 },
+    composition_statistics: { ...emptyStats, records: 1, recorded_window: { first_recorded_at: 1, last_recorded_at: 1 }, completed: duration(1, 0) } }))
   await loadEvidence()
   expect(screen.getByText(/N\/A/)).toBeTruthy()
   expect(screen.getByText('0.0ms · n=1')).toBeTruthy()

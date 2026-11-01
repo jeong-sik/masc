@@ -2085,6 +2085,7 @@
   masc
   masc.agent_core
   masc.runtime
+  masc.time_codec
   masc_types
   masc_tui_ansi
   masc_tui_chart
@@ -2098,6 +2099,7 @@
   masc_tui_tool_table
   masc_tui_tool_tree
   masc_tui_types
+  unix
   yojson))
 
 (library

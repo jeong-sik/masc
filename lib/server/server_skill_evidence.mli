@@ -7,8 +7,8 @@ module For_testing : sig
   val to_yojson :
     reference:Skill_reference.t ->
     composition:Yojson.Safe.t option ->
-    composition_records_read:int ->
-    composition_scope:[ `Exact_reference_latest_completed | `Unavailable ] ->
+    composition_runs_observed:int ->
+    composition_scope:[ `Exact_reference_retained_runs | `Unavailable ] ->
     composition_unavailable:string list ->
     activation:Yojson.Safe.t option ->
     activation_scope:Keeper_skill_activation_discovery.scope ->

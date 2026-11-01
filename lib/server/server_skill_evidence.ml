@@ -1,10 +1,10 @@
 type composition_coverage =
-  { scope : [ `Exact_reference_latest_completed | `Unavailable ]
-  ; records_read : int
+  { scope : [ `Exact_reference_retained_runs | `Unavailable ]
+  ; runs_observed : int
   }
 
 let composition_scope_to_string = function
-  | `Exact_reference_latest_completed -> "exact_reference_latest_completed"
+  | `Exact_reference_retained_runs -> "exact_reference_retained_runs"
   | `Unavailable -> "unavailable"
 ;;
 
@@ -12,13 +12,13 @@ let composition_evidence ~config reference =
   match Keeper_skill_composition_evidence.load_observation config reference with
   | Error error ->
     ( None, None
-    , { scope = `Unavailable; records_read = 0 }
+    , { scope = `Unavailable; runs_observed = 0 }
     , [ Keeper_skill_composition_evidence.error_to_string error ] )
   | Ok observation ->
     ( Option.map Keeper_skill_composition_evidence.to_yojson observation.latest
     , Some (Keeper_skill_composition_evidence.statistics_to_yojson observation.statistics)
-    , { scope = `Exact_reference_latest_completed;
-        records_read = (if Option.is_some observation.latest then 1 else 0) }
+    , { scope = `Exact_reference_retained_runs;
+        runs_observed = observation.statistics.records }
     , [] )
 ;;
 
@@ -256,7 +256,7 @@ let to_yojson
       ~activation_owner_gap_count =
   let observed = Option.is_some activation || Option.is_some composition in
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v7"
+    [ "schema", `String "masc.skill-evidence/v8"
     ; ( "status"
       , `String
           (if observed then "observed" else "not_observed_in_retained_coverage") )
@@ -268,7 +268,7 @@ let to_yojson
       , `Assoc
           [ ( "composition_scope"
             , `String (composition_scope_to_string composition_coverage.scope) )
-          ; "composition_records_read", `Int composition_coverage.records_read
+          ; "composition_runs_observed", `Int composition_coverage.runs_observed
           ; ( "composition_unavailable"
             , `List
                 (List.map
@@ -311,7 +311,7 @@ module For_testing = struct
   let to_yojson
         ~reference
         ~composition
-        ~composition_records_read
+        ~composition_runs_observed
         ~composition_scope
         ~composition_unavailable
         ~activation
@@ -333,7 +333,7 @@ module For_testing = struct
             Some (Keeper_skill_composition_evidence.statistics [evidence]
               |> Keeper_skill_composition_evidence.statistics_to_yojson))
       ~composition_coverage:
-        { scope = composition_scope; records_read = composition_records_read }
+        { scope = composition_scope; runs_observed = composition_runs_observed }
       ~composition_unavailable
       ~activation
       ~activation_scope

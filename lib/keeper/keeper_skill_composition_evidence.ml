@@ -358,20 +358,14 @@ let store_dir config =
 
 (* Layout: one append-only directory per exact reference, holding one file per
    composition run. Runs never overwrite each other, so a run that started
-   earlier but finished later cannot clobber a newer record. The pre-append
-   layout kept a single [<partition>.json] per reference; that file is still
-   honoured as a load candidate so evidence written before this layout remains
-   readable. *)
+   earlier but finished later cannot clobber a newer record. Only this
+   partition is authoritative; obsolete single-file layouts are not read. *)
 let reference_dir config reference =
   Filename.concat (store_dir config) (partition reference)
 ;;
 
 let run_path config reference composition_run_id =
   Filename.concat (reference_dir config reference) (composition_run_id ^ ".json")
-;;
-
-let legacy_path config reference =
-  Filename.concat (store_dir config) (partition reference ^ ".json")
 ;;
 
 let load_file config expected_reference path =
@@ -426,12 +420,21 @@ let newest_order a b =
   | order -> order
 ;;
 
-type duration_statistics = { samples : int; mean_ms : float option }
+type duration_statistics =
+  { samples : int
+  ; mean_ms : float option
+  ; min_ms : float option
+  ; p50_ms : float option
+  ; p95_ms : float option
+  ; max_ms : float option
+  }
 type statistics =
   { records : int
   ; completed : duration_statistics
   ; failed : duration_statistics
   ; deferred : int
+  ; first_recorded_at : float option
+  ; last_recorded_at : float option
   }
 type observation = { latest : t option; statistics : statistics }
 
@@ -446,35 +449,57 @@ let unique_runs runs =
 ;;
 
 let statistics runs =
-  let empty = { samples = 0; mean_ms = None } in
-  let add duration row =
-    let samples = row.samples + 1 in
-    let mean_ms = match row.mean_ms with
-      | None -> duration
-      | Some mean -> mean *. (float_of_int row.samples /. float_of_int samples)
-                     +. duration /. float_of_int samples in
-    { samples; mean_ms = Some mean_ms }
+  let runs = unique_runs runs in
+  let durations values =
+    let sorted = Array.of_list values in
+    Array.sort Float.compare sorted;
+    let samples = Array.length sorted in
+    if samples = 0 then
+      { samples; mean_ms = None; min_ms = None; p50_ms = None
+      ; p95_ms = None; max_ms = None }
+    else
+      let _, mean = Array.fold_left (fun (count, mean) value ->
+        let next = count + 1 in
+        next, mean +. (value -. mean) /. float_of_int next) (0, 0.) sorted in
+      let percentile fraction =
+        Some sorted.(int_of_float (ceil (fraction *. float_of_int samples)) - 1)
+      in
+      { samples; mean_ms = Some mean; min_ms = Some sorted.(0)
+      ; p50_ms = percentile 0.50; p95_ms = percentile 0.95
+      ; max_ms = Some sorted.(samples - 1) }
   in
-  List.fold_left (fun totals run ->
+  let completed, failed, deferred = List.fold_left (fun (completed, failed, deferred) run ->
     let fields = match run.result with `Assoc fields -> fields | _ -> [] in
     (* [t] is private and validates the canonical result before construction. *)
     match List.assoc_opt "disposition" fields, List.assoc_opt "duration_ms" fields with
     | Some (`String "completed"), Some (`Float duration) ->
-        { totals with records = totals.records + 1; completed = add duration totals.completed }
+        duration :: completed, failed, deferred
     | Some (`String "failed"), Some (`Float duration) ->
-        { totals with records = totals.records + 1; failed = add duration totals.failed }
+        completed, duration :: failed, deferred
     | Some (`String "deferred"), Some (`Float _) ->
-        { totals with records = totals.records + 1; deferred = totals.deferred + 1 }
+        completed, failed, deferred + 1
     | _ -> invalid_arg "validated composition result lost its disposition or duration")
-    { records = 0; completed = empty; failed = empty; deferred = 0 }
-    (unique_runs runs)
+    ([], [], 0) runs in
+  let first_recorded_at, last_recorded_at = List.fold_left
+    (fun (first, last) run ->
+      Some (Option.fold ~none:run.recorded_at ~some:(min run.recorded_at) first),
+      Some (Option.fold ~none:run.recorded_at ~some:(max run.recorded_at) last))
+    (None, None) runs in
+  { records = List.length runs; completed = durations completed
+  ; failed = durations failed; deferred; first_recorded_at; last_recorded_at }
 ;;
 
 let statistics_to_yojson stats =
+  let optional value = Option.fold ~none:`Null ~some:(fun value -> `Float value) value in
   let duration row = `Assoc ["samples", `Int row.samples;
-    "mean_ms", Option.fold ~none:`Null ~some:(fun value -> `Float value) row.mean_ms] in
+    "mean_ms", optional row.mean_ms; "min_ms", optional row.min_ms;
+    "p50_ms", optional row.p50_ms; "p95_ms", optional row.p95_ms;
+    "max_ms", optional row.max_ms] in
   `Assoc ["scope", `String "exact_reference_retained_runs";
     "duration_scope", `String "stored_executor_result";
+    "percentile_method", `String "nearest_rank";
+    "recorded_window", `Assoc ["first_recorded_at", optional stats.first_recorded_at;
+      "last_recorded_at", optional stats.last_recorded_at];
     "records", `Int stats.records; "completed", duration stats.completed;
     "failed", duration stats.failed; "deferred", `Int stats.deferred]
 ;;
@@ -482,9 +507,7 @@ let statistics_to_yojson stats =
 let load_observation config reference =
   let open Result.Syntax in
   let* runs = scan_runs config reference in
-  let* legacy = load_file config reference (legacy_path config reference) in
-  (* Append records supersede a duplicate legacy run, including timestamp ties. *)
-  let runs = unique_runs (Option.to_list legacy @ runs) in
+  let runs = unique_runs runs in
   let latest = List.fold_left (fun newest candidate -> match newest with
     | None -> Some candidate
     | Some newest -> Some (if newest_order candidate newest > 0 then candidate else newest))

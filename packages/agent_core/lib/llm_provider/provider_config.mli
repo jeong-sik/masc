@@ -418,6 +418,7 @@ val selected_provider_identity : t -> provider_identity option
     [provider_id] or [kind] invalidates that selection. Model or endpoint
     overrides do not change provider identity. An unselected config never
     acquires attribution facts from a later global catalog. *)
+
 val freeze_for_request : t -> t
 (** Capture the catalog resolution for this request without changing explicit
     overrides. Idempotent while provider/model identity is unchanged. *)

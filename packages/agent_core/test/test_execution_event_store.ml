@@ -1855,6 +1855,8 @@ let test_released_codec_fails_before_store_mutation () =
 ;;
 
 let test_batch_validation_enforces_header_capacity_and_completion_bounds () =
+  Eio_main.run
+  @@ fun _env ->
   let module Validation = Internal.Execution_batch_validation in
   let correlation_id = fresh Event.Correlation_id.fresh in
   let events = make_four_events correlation_id in

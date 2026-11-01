@@ -3845,6 +3845,7 @@ let test_terminal_stop_reason_owns_tool_content
     | Types.ContextWindowExceeded -> true in
   let effect_count = ref 0 and provider_calls = ref 0 and after_turns = ref 0 and on_stops = ref 0 in
   let on_stop_responses = ref [] in
+  let after_turn_responses = ref [] in
   let tool = Tool.create ~name:"must_not_execute" ~description:"Observe an unintended terminal effect"
       ~parameters:[] (fun _ -> incr effect_count;
         Ok {Types.content="unintended effect";content_blocks=None;_meta=None}) in
@@ -3873,7 +3874,6 @@ let test_terminal_stop_reason_owns_tool_content
     content=raw_content;
     usage=Some {Types.input_tokens=17;output_tokens=23;cache_creation_input_tokens=5;
       cache_read_input_tokens=7;cost_usd=Some 0.125}} in
-  let admitted_response = {response with content=admitted_content} in
   let next () = incr provider_calls; Ok response in
   let transport = Llm_provider.Llm_transport.custom
     {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
@@ -3890,13 +3890,16 @@ let test_terminal_stop_reason_owns_tool_content
         | Hooks.OnStop {response=stop_response;_} ->
           incr on_stops; on_stop_responses := stop_response :: !on_stop_responses; Hooks.Continue
         | _ -> Hooks.Continue);
-      after_turn=Some (fun _->
-        incr after_turns;
-        (match surface_change, !active_agent with
-         | Extend_terminal_surface, Some agent -> Agent.extend_tools agent extra_tools
-         | Extend_terminal_surface, None -> Alcotest.fail "AfterTurn lost its agent"
-         | (Keep_terminal_surface | Remove_terminal_surface), (Some _ | None) -> ());
-        Hooks.Continue)}} in
+      after_turn=Some (function
+        | Hooks.AfterTurn {response=actual;_} ->
+          incr after_turns;
+          after_turn_responses := actual :: !after_turn_responses;
+          (match surface_change, !active_agent with
+           | Extend_terminal_surface, Some agent -> Agent.extend_tools agent extra_tools
+           | Extend_terminal_surface, None -> Alcotest.fail "AfterTurn lost its agent"
+           | (Keep_terminal_surface | Remove_terminal_surface), (Some _ | None) -> ());
+          Hooks.Continue
+        | _ -> Hooks.Continue)}} in
   let media_store = Agent_core.History.Memory_store.create () in
   let create () =
     let agent = Agent.create ~media_store ~net:env#net ~tools ~config ~options () in
@@ -3909,7 +3912,21 @@ let test_terminal_stop_reason_owns_tool_content
   let fresh_locator = ref None in
   let fresh_store = Agent.execution_store ~runtime ~dir:fresh_dir
       ~on_scope_ready:(fun value -> fresh_locator:=Some value;Ok ()) () in
-  (match Agent.run ~sw ~execution_store:fresh_store fresh "finish this request" with
+  let fresh_result = Agent.run ~sw ~execution_store:fresh_store fresh "finish this request" in
+  let admitted_response = match !after_turn_responses with
+    | [actual] -> actual
+    | _ -> Alcotest.fail "fresh execution did not observe one collected response" in
+  (* Public completion adds telemetry to the transport result. Independently
+     check the expected admission, then keep that actual complete response as
+     the exact authority for hooks, persistence and restart. *)
+  Alcotest.(check string) "fresh collection preserves response identity" response.id admitted_response.id;
+  Alcotest.(check bool) "fresh collection preserves stop reason" true
+    (admitted_response.stop_reason=stop_reason);
+  Alcotest.(check bool) "fresh collection applies the expected name admission" true
+    (admitted_response.content=admitted_content);
+  Alcotest.(check bool) "fresh collection preserves reported usage" true
+    (admitted_response.usage=response.usage);
+  (match fresh_result with
    | Ok actual when accepted ->
      Alcotest.(check bool) "fresh output keeps terminal stop and admitted tool content" true
        (actual=admitted_response);
@@ -3942,10 +3959,10 @@ let test_terminal_stop_reason_owns_tool_content
              Checkpoint_snapshot.stage snapshot=After_assistant_collected && response_seq<event.seq
            | _ -> false) page.events)
     | _ -> Alcotest.fail "fresh execution did not persist one provider response");
-  provider_calls:=0;after_turns:=0;on_stops:=0;on_stop_responses:=[];
-  let usage = Types.add_usage Types.empty_usage (Option.get response.usage) in
-  Agent.set_state fresh {provider_binding=None;config;turn_count=8;usage;
-    messages=(Agent.state fresh).messages};
+  provider_calls:=0;after_turns:=0;on_stops:=0;on_stop_responses:=[];after_turn_responses:=[];
+  let collected_state = Agent.state fresh in
+  let usage = collected_state.usage in
+  Agent.set_state fresh {collected_state with turn_count=8};
   let checkpoint = Agent.checkpoint fresh in
   let writer_runtime = match Internal_runtime.create ~sw ~domain_mgr:env#domain_mgr ~domain_count:1 with
     | Ok value -> value | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error) in

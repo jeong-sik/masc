@@ -11,6 +11,10 @@ in history. Its current-palette re-admission and invalid `-1` fixture suffix
 were found by two independent source reviews; no execution at that head is
 claimed here. The follow-up uses the valid numeric suffix and adds actual
 durable producer checks plus tool-removal/AfterTurn-addition recovery cases.
+Its full response comparisons use the actual public AfterTurn response after
+independently checking identity, stop, admitted content and reported usage.
+This keeps completion telemetry in the canonical snapshot and replay instead
+of treating the transport mock as the completed response.
 
 PR [#47059](https://github.com/jeong-sik/masc/pull/47059) now uses the persisted
 stop reason at both active and successfully settled recovery boundaries.

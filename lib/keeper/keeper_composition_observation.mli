@@ -35,5 +35,6 @@ val of_content : string -> reading
 (** Complete original ToolResult bytes, never a ledger preview. A manifest
     marker stays [Stored] until its exact bytes have been retrieved. *)
 val of_blob_response : Tool_output.artifact_ref -> Yojson.Safe.t -> reading
-(** Validate response identity, media type, byte count, SHA256 and the existing
-    manifest grammar before projecting its structured content. *)
+(** Validate the existing text blob transport, reference's manifest media type,
+    byte count, SHA256 and manifest grammar before projecting structured content.
+    The blob store owns bytes; its HTTP DTO always reports [text/plain]. *)

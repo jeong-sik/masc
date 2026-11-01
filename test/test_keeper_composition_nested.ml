@@ -779,11 +779,10 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
         (match export.value with Available _ -> true | Unavailable _ -> false)) child.exports) child_scopes observed;
   let complete_reading = match Observation.of_content result_content with
     | Stored reference ->
-        let content = match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
-            ~sha256:reference.sha256 with
-          | Ok (Some content) -> content | _ -> fail "actual result manifest was not retained" in
-        Observation.of_blob_response reference (`Assoc ["sha256",`String reference.sha256;
-          "bytes",`Int reference.bytes;"mime",`String reference.mime;"content",`String content])
+        let response,status = Masc.Server_routes_http_routes_artifacts.blob_response
+            ~base_path ~sha256:reference.sha256 in
+        check bool "actual original manifest HTTP response succeeds" true (status=`OK);
+        Observation.of_blob_response reference response
     | reading -> reading in
   check bool "actual provider result bytes project the same retained children" true
     (complete_reading = Observation.Observed observed);
@@ -791,12 +790,16 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
       ~structured_content:result |> Yojson.Safe.to_string in
   let manifest_reference = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
       ~bytes:manifest_content ~mime:Tool_output.artifact_manifest_mime in
-  let manifest_response content = `Assoc ["sha256",`String manifest_reference.sha256;
-    "bytes",`Int manifest_reference.bytes;"mime",`String manifest_reference.mime;"content",`String content] in
+  let manifest_response,status = Masc.Server_routes_http_routes_artifacts.blob_response
+      ~base_path ~sha256:manifest_reference.sha256 in
+  check bool "actual retained manifest HTTP response succeeds" true (status=`OK);
   check bool "retained manifest preserves the actual execution observation" true
-    (Observation.of_blob_response manifest_reference (manifest_response manifest_content) = Observed observed);
+    (Observation.of_blob_response manifest_reference manifest_response = Observed observed);
+  let altered_response = match manifest_response with `Assoc fields ->
+    `Assoc (("content",`String (manifest_content ^ " ")) :: List.remove_assoc "content" fields)
+    | _ -> fail "actual blob DTO is not an object" in
   check bool "retained manifest refuses altered bytes" true
-    (match Observation.of_blob_response manifest_reference (manifest_response (manifest_content ^ " ")) with
+    (match Observation.of_blob_response manifest_reference altered_response with
      | Invalid _ -> true | _ -> false);
   let envelope_fields = ["artifact_manifest",Tool_output.normalized_artifact_ref_to_json manifest_reference;
     "structured_content",result] in

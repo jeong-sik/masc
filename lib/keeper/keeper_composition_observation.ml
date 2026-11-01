@@ -192,7 +192,7 @@ let of_blob_response (reference : Tool_output.artifact_ref) json =
     let* content = string (List.assoc "content" f) in
     if List.assoc "sha256" f <> `String reference.sha256
        || List.assoc "bytes" f <> `Int reference.bytes
-       || List.assoc "mime" f <> `String Tool_output.artifact_manifest_mime
+       || List.assoc "mime" f <> `String "text/plain"
        || reference.mime <> Tool_output.artifact_manifest_mime
        || String.length content <> reference.bytes
        || Agent_core_sha256.(to_hex (digest_string content)) <> reference.sha256

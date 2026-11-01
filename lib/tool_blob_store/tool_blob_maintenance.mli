@@ -12,9 +12,10 @@
     no children. No other blob content is parsed or treated as an ownership
     edge.
     The arbitrary input of a decoded History ToolUse, the JSON payload of
-    decoded History/Keeper tool results, a tool-call receipt's input, and a
-    complete official-client outbox receipt's arguments/response are opaque
-    to history-media recognition, including inside nested lists. Outbox
+    decoded History/Keeper tool results, a tool-call receipt's input,
+    execution_evidence, and route_evidence, and a complete official-client
+    outbox receipt's arguments/response are opaque to history-media recognition,
+    including inside nested lists. Outbox
     receipts require the shared strict codec, exact filename digest and the
     shared official-client storage path authority. Only a whole JSON document
     at that source qualifies; nested envelopes and JSONL rows cannot acquire

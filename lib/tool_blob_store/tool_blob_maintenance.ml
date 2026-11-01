@@ -274,8 +274,9 @@ let history_tool_payload_fields fields =
 
 let tool_receipt_payload_fields fields =
   (* Keeper_tool_call_log.log_call writes this input/output projection beside
-     typed outcomes and evidence. Its arbitrary input owns no history media,
-     regardless of the call's execution or wire outcome. *)
+     typed outcomes and evidence. Its arbitrary input, execution_evidence, and
+     route_evidence status projections own no history media, regardless of the
+     call's execution or wire outcome. *)
   let number name = match List.assoc_opt name fields with
     | Some (`Float _ | `Int _) -> true | _ -> false in
   let output_valid = match List.assoc_opt "output" fields with
@@ -293,7 +294,7 @@ let tool_receipt_payload_fields fields =
      && (match string_field "record_kind" fields with
          | Some ("tool_call" | "composition_run" | "lifecycle_event") -> true
          | Some _ | None -> false)
-  then ["input"] else []
+  then ["input"; "execution_evidence"; "route_evidence"] else []
 ;;
 
 let official_envelope fields =

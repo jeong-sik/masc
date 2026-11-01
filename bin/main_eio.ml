@@ -1106,7 +1106,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
                | Unix.Unix_error (error, _, _) when error = Unix.EINTR ->
                    log_other report_failure;
                    Printexc.raise_with_backtrace primary primary_backtrace
-               | _ ->
+               | other_primary ->
                    preserve_reserved report_failure primary_failure;
                    let combined, backtrace =
                      Eio.Exn.combine primary_failure report_failure

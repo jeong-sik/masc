@@ -5551,6 +5551,12 @@ type task_document_slot =
   { tds_reading : (task_document_key,string list) Masc_tui_fetched.t
   ; tds_request : task_document_request option
   ; tds_previous : (task_document_key * string list) option }
+type task_detail_owner = { tdo_task_id : string; tdo_reading : unit ref }
+type task_detail_presented =
+  { tdp_owner : task_detail_owner
+  ; tdp_count : int
+  ; tdp_height : int
+  ; tdp_waiting : bool }
 let initial_task_document_slot = {tds_reading=Masc_tui_fetched.initial;tds_request=None;tds_previous=None}
 let equal_task_document_target a b = match a,b with
    | Work_task_document a,Work_task_document b -> a=b
@@ -9605,6 +9611,8 @@ type state = {
   mutable identity_disconnect_armed: (string * string) option;
   mutable task_detail_id: string option;
   mutable task_detail_scroll: int;
+  mutable task_detail_presented: task_detail_presented option;
+  mutable task_detail_follow_end: task_detail_owner option;
   mutable tasks_error: string option;
   mutable events: event list;
   mutable keepers: keeper list;
@@ -18315,6 +18323,8 @@ let create_state
   github_identity_view_error = None;
   task_detail_id = None;
   task_detail_scroll = 0;
+  task_detail_presented = None;
+  task_detail_follow_end = None;
   tasks_error = None;
   events = [];
   keepers = [];
@@ -19721,7 +19731,7 @@ let composer_extra_rows (state : state) =
     drawing reaching back into the state it is drawing from: the drawing is a
     function of the state again, and every write lives on one side of it. *)
 type clamped_scroll =
-  | Task_detail of int
+  | Task_detail of int * (int * int) option
   | Board_read of (int * int)
   | Message_scroll of chat_scroll_position
   | Schedule_detail_scroll of int
@@ -19881,7 +19891,7 @@ let scroll_down_from scroll ~by =
   if scroll > max_int - by then max_int else scroll + by
 
 let apply_clamped_scroll (state : state) = function
-  | Task_detail value -> state.task_detail_scroll <- value
+  | Task_detail (value, _) -> state.task_detail_scroll <- value
   | Board_read (body, comments) ->
       state.board_scroll <- body;
       state.board_comment_scroll <- comments;
@@ -20111,6 +20121,107 @@ let task_document_lines state ~cols part =
 let task_documents_pending state =
   Masc_tui_fetched.in_flight state.task_document_body.tds_reading
   || Masc_tui_fetched.in_flight state.task_document_history.tds_reading
+
+(* The last emitted Task viewport is the authority for a key pressed while a
+   newer history or document is waiting to be drawn. *)
+let task_detail_owner state =
+  match state.view, state.planning_mode, state.task_detail_id with
+  | Planning, Planning_list, Some id
+    when Masc_tui_overview_tasks.is_focused state.task_focus
+         && List.exists (fun (task : Masc_domain.task) -> task.id = id)
+              (task_domain_values state) ->
+      Some { tdo_task_id = id; tdo_reading = state.workspace_read_authority }
+  | _ -> None
+
+let same_task_detail_owner a b =
+  a.tdo_task_id = b.tdo_task_id && a.tdo_reading == b.tdo_reading
+
+let task_detail_owner_current state owner =
+  Option.exists (same_task_detail_owner owner) (task_detail_owner state)
+
+let task_detail_following_end state =
+  Option.exists (task_detail_owner_current state) state.task_detail_follow_end
+
+let current_task_detail_presented state =
+  match state.task_detail_presented with
+  | Some shown when task_detail_owner_current state shown.tdp_owner -> Some shown
+  | Some _ | None -> None
+
+let reconcile_task_detail_scroll state =
+  if not (task_detail_following_end state) then state.task_detail_follow_end <- None;
+  if Option.is_none (current_task_detail_presented state) then
+    state.task_detail_presented <- None
+
+let task_detail_waiting state ~task_id ~cols =
+  let history =
+    Masc_tui_fetched.in_flight state.task_history
+    && Option.equal String.equal (Masc_tui_fetched.current_key state.task_history)
+         (Some task_id) in
+  let body, history_document = task_document_inputs state ~cols in
+  let preparing part key = match key with
+    | None -> false
+    | Some key ->
+      let slot = task_document_slot state part in
+      match Masc_tui_fetched.view_for ~equal:equal_task_document_key slot.tds_reading ~key with
+      | Masc_tui_fetched.Absent | Loading -> true
+      | Ready _ | Stale _ | Failed _ ->
+        Masc_tui_fetched.in_flight slot.tds_reading
+        && Option.exists (equal_task_document_key key)
+             (Masc_tui_fetched.current_key slot.tds_reading) in
+  history || preparing Masc_tui_task_document.Body body
+  || preparing Masc_tui_task_document.History history_document
+
+let task_detail_select_end state ~cols =
+  match current_task_detail_presented state with
+  | None ->
+    (* Enter and End can arrive before the first Task frame is emitted. *)
+    state.task_detail_follow_end <- task_detail_owner state
+  | Some shown ->
+    state.task_detail_scroll <-
+      Masc_tui_scroll.maximum ~count:shown.tdp_count ~height:shown.tdp_height;
+    state.task_detail_follow_end <-
+      if shown.tdp_waiting || task_detail_waiting state ~task_id:shown.tdp_owner.tdo_task_id ~cols
+      then Some shown.tdp_owner else None
+
+let task_detail_cancel_follow_end state = state.task_detail_follow_end <- None
+
+let task_detail_user_scroll state offset =
+  task_detail_cancel_follow_end state;
+  state.task_detail_scroll <- offset
+
+let task_detail_relative_scroll state offset =
+  if task_detail_following_end state
+     && Option.is_none (current_task_detail_presented state) then false
+  else begin task_detail_user_scroll state offset; true end
+
+let task_detail_presented_viewport state ~fallback =
+  match current_task_detail_presented state with
+  | Some shown -> shown.tdp_count, shown.tdp_height
+  | None -> fallback ()
+
+let task_detail_render_scroll state =
+  if task_detail_following_end state then clamped_scroll_end else state.task_detail_scroll
+
+let task_detail_presented_frame state ~task_id ~count ~height ~offset ~cols =
+  match task_detail_owner state with
+  | Some owner when owner.tdo_task_id = task_id ->
+    let waiting = task_detail_waiting state ~task_id ~cols in
+    state.task_detail_presented <- Some
+      { tdp_owner = owner; tdp_count = count; tdp_height = height; tdp_waiting = waiting };
+    if task_detail_following_end state then begin
+      state.task_detail_scroll <- offset;
+      if not waiting then state.task_detail_follow_end <- None
+    end
+  | Some _ | None ->
+    state.task_detail_presented <- None;
+    state.task_detail_follow_end <- None
+
+let task_detail_forget_frame state = state.task_detail_presented <- None
+
+let reset_task_detail_scroll state =
+  state.task_detail_scroll <- 0;
+  state.task_detail_follow_end <- None;
+  task_detail_forget_frame state
 
 (* The strip above the composer: what fires next, and who is blocked on the
    operator. Both are already in the state and neither was readable from the

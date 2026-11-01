@@ -7574,7 +7574,7 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
        | Planning_list
          when Masc_tui_overview_tasks.is_focused state.task_focus
               && Option.is_some (task_detail_on_screen state) ->
-           pane (fun v -> Task_detail v)
+           pane (fun v -> Task_detail (v, None))
        | Planning_list -> None)
   | Fusion ->
       (match state.fusion_mode with
@@ -7922,7 +7922,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
           or by a jump to one task, which sets it after this returns.
           Inheriting it made every later Tab into Work show only Tasks. *)
        state.task_detail_id <- None;
-       state.task_detail_scroll <- 0;
+       reset_task_detail_scroll state;
        state.task_focus <- Masc_tui_overview_tasks.No_task_focus
    | Changes -> (
        (* The surface follows whoever is selected on Keepers. Arriving with a
@@ -14439,7 +14439,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_health_cursor <- 0;
   state.memory_health_scroll <- 0;
   state.task_detail_id <- None;
-  state.task_detail_scroll <- 0;
+  reset_task_detail_scroll state;
   withdraw_detail_histories state;
   state.task_focus <- Masc_tui_overview_tasks.No_task_focus;
   state.exact_activity_open <- None;
@@ -24737,6 +24737,9 @@ let main
   let presented = ref (Presented.initial ~approval:None
       ~presses:Masc_tui_hit.no_zones ~panes:Masc_tui_pane_selection.no_panes
       ~reader:None ~panel_owner:None) in
+  let move_task_detail offset =
+    if not (task_detail_relative_scroll state offset) then
+      report_action state "system" "Wait for the Task to appear before scrolling" in
   let presented_peer_owner = ref None in
   let presented_peer_target = ref None in
   let presented_chat_row_actions :
@@ -25191,6 +25194,16 @@ let main
     let change_authority_changed =
       not (Option.equal Masc_tui_render_repositories.same_repository_change_authority
         !presented_change_authority change_authority) in
+    let task_detail_needs_present =
+      String.equal frame.Frame_presenter.surface_key "task-detail"
+      && (Option.is_none (current_task_detail_presented state)
+          || (task_detail_following_end state
+              && match state.task_detail_id with
+                 | None -> false
+                 | Some task_id ->
+                   let _, terminal_cols = Masc_tui_render_prim.get_terminal_size () in
+                   let cols = task_document_columns state ~terminal_cols in
+                   not (task_detail_waiting state ~task_id ~cols))) in
     (* Approval, Help, Queue, Play and relationship page ownership can change
        while clipped terminal text stays byte-identical. Those changes force
        presentation. Activity, chat row action and repository change authority
@@ -25199,11 +25212,20 @@ let main
     match
       Frame_presenter.present frame_presenter
         ~invalidate_before:(damaged || authority_changed || preset_confirmation_changed)
-        ~force_present:(activity_authority_changed || chat_actions_changed || change_authority_changed)
+        ~force_present:(activity_authority_changed || chat_actions_changed || change_authority_changed
+                        || task_detail_needs_present)
         ~write ~flush frame
     with
     | Frame_presenter.Presented _ as frame_result ->
         state.frames_presented <- state.frames_presented + 1;
+        (match reader, state.task_detail_id with
+         | Some (Task_detail (offset, Some (count, height))), Some task_id
+           when String.equal frame.surface_key "task-detail"
+                && not frame.compact_frame ->
+           let _, terminal_cols = Masc_tui_render_prim.get_terminal_size () in
+           let cols = task_document_columns state ~terminal_cols in
+           task_detail_presented_frame state ~task_id ~count ~height ~offset ~cols
+         | _ -> task_detail_forget_frame state);
         (match Option.bind reader resource_scroll_position, state.resource_share_recovery_prompt with
          | Some position, Some prompt
            when not frame.Frame_presenter.compact_frame
@@ -28058,6 +28080,12 @@ Use relative paths for resources already held in the package. -->
       let play_wheel_available =
         if not play_was_presented then true
         else play_card_matches ~presented:presented_play ~current:(play_card_shown state) in
+      let task_detail_wheel_withdrawn =
+        match input, (!presented).reader with
+        | Some (Mouse_wheel (_, row, column)), Some (Task_detail _) ->
+          acting_pane_hit state ~row ~column = Pane_miss
+          && Option.is_none (current_task_detail_presented state)
+        | _ -> false in
       (* Where a notch leaves the reader on screen, when it is the reader's:
          not over the Activity pane, which keeps the wheel it had. The frame
          names the reader; the notch moves it from where it is now. *)
@@ -28068,6 +28096,7 @@ Use relative paths for resources already held in the package. -->
                && (not state.image_open) && (not state.msx_open)
                && Option.is_none msx_key
                && (not compact_viewport)
+               && not task_detail_wheel_withdrawn
                && play_wheel_available
                && acting_pane_hit state ~row ~column = Pane_miss ->
             Option.bind (!presented).reader (fun reader ->
@@ -28094,6 +28123,7 @@ Use relative paths for resources already held in the package. -->
         else
           match input with
           | Some (Key name) -> Some name
+          | Some (Mouse_wheel _) when task_detail_wheel_withdrawn -> None
           | Some (Mouse_wheel (direction, _, _)) when help_owns_input ->
               Some (match direction with
                 | Masc.Tui_mouse_protocol.Wheel_up -> "up"
@@ -28553,7 +28583,11 @@ Use relative paths for resources already held in the package. -->
              (press_marked_target state ~base_path ~mailbox:async_messages)
              pressed
        | Some (Mouse_wheel _) when Option.is_some wheel_reader ->
-           Option.iter (apply_clamped_scroll state) wheel_reader
+           Option.iter (fun reader ->
+             match reader with
+             | Task_detail (offset, _) -> move_task_detail offset
+             | _ -> apply_clamped_scroll state reader) wheel_reader
+       | Some (Mouse_wheel _) when task_detail_wheel_withdrawn -> ()
        | Some (Mouse_wheel _) when queue_play_owner = Wait_for_frame -> ()
        (* Marked panel controls and its reader wheel were handled above.
           Unmarked gestures cannot use stale geometry from a covered view. *)
@@ -29398,7 +29432,7 @@ Use relative paths for resources already held in the package. -->
                      goto_surface state ~mailbox:async_messages Planning;
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
-                     state.task_detail_scroll <- 0;
+                     reset_task_detail_scroll state;
                      state.task_history <- Masc_tui_fetched.clear state.task_history;
                      state.task_focus <-
                        Masc_tui_overview_tasks.land_on state.tasks ~task_id;
@@ -31125,14 +31159,14 @@ Use relative paths for resources already held in the package. -->
               (match change_ctx.Masc_tui_render_prim.ctx_task_id with
                | Some tid ->
                    state.task_detail_id <- Some tid;
-                   state.task_detail_scroll <- 0;
+                   reset_task_detail_scroll state;
                    state.task_history <- Masc_tui_fetched.clear state.task_history;
                    launch_task_history_load state ~mailbox:async_messages tid;
                    state.task_focus <-
                      Masc_tui_overview_tasks.land_on state.tasks ~task_id:tid
                | None ->
                    state.task_detail_id <- None;
-                   state.task_detail_scroll <- 0;
+                   reset_task_detail_scroll state;
                    state.task_focus <-
                      Masc_tui_overview_tasks.focus_list state.tasks)
               end
@@ -31446,7 +31480,7 @@ Use relative paths for resources already held in the package. -->
                      goto_surface state ~mailbox:async_messages Planning;
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
-                     state.task_detail_scroll <- 0;
+                     reset_task_detail_scroll state;
                      state.task_history <- Masc_tui_fetched.clear state.task_history;
                      launch_task_history_load state ~mailbox:async_messages
                        task_id;
@@ -32995,7 +33029,7 @@ Use relative paths for resources already held in the package. -->
                      navigate Planning;
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
-                     state.task_detail_scroll <- 0;
+                     reset_task_detail_scroll state;
                      state.task_history <- Masc_tui_fetched.clear state.task_history;
                      state.task_focus <- Masc_tui_overview_tasks.land_on state.tasks ~task_id;
                      launch_task_history_load state ~mailbox:async_messages task_id)
@@ -33550,7 +33584,7 @@ Use relative paths for resources already held in the package. -->
                                  ~mailbox:async_messages Planning;
                                state.planning_mode <- Planning_list;
                                state.task_detail_id <- Some task_id;
-                               state.task_detail_scroll <- 0;
+                               reset_task_detail_scroll state;
                                state.task_history <- Masc_tui_fetched.clear state.task_history;
                                state.task_focus <-
                                  Masc_tui_overview_tasks.land_on state.tasks ~task_id;
@@ -33808,7 +33842,7 @@ Use relative paths for resources already held in the package. -->
                  | Link.Task, Planning, Some task_id ->
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;
-                     state.task_detail_scroll <- 0;
+                     reset_task_detail_scroll state;
                      state.task_history <- Masc_tui_fetched.clear state.task_history;
                      state.task_focus <-
                        Masc_tui_overview_tasks.land_on state.tasks ~task_id;
@@ -34005,10 +34039,15 @@ Use relative paths for resources already held in the package. -->
          when Option.is_some (reading_pane state ~cols:terminal_columns) ->
            Option.iter
              (fun clamped ->
-               apply_clamped_scroll state
-                 (clamped
-                    (if key = Some "end" then Masc_tui_types.clamped_scroll_end
-                     else 0)))
+               match clamped 0 with
+               | Task_detail _ when key = Some "end" ->
+                   let cols = task_document_columns state ~terminal_cols:terminal_columns in
+                   task_detail_select_end state ~cols
+               | Task_detail _ ->
+                   task_detail_user_scroll state 0
+               | _ ->
+                   apply_clamped_scroll state
+                     (clamped (if key = Some "end" then clamped_scroll_end else 0)))
              (reading_pane state ~cols:terminal_columns)
        (* Every other list. The two surfaces above answer first because their
           rows are drawn newest first, so their Home is the live end rather
@@ -34034,9 +34073,10 @@ Use relative paths for resources already held in the package. -->
             | Planning when state.planning_mode = Planning_list
                             && Masc_tui_overview_tasks.is_focused state.task_focus
                             && Option.is_some (task_detail_on_screen state) ->
-                let count, height = Masc_tui_render.task_detail_viewport state in
+                let count, height = task_detail_presented_viewport state
+                    ~fallback:(fun () -> Masc_tui_render.task_detail_viewport state) in
                 let move = if direction > 0 then Masc_tui_scroll.page_down else Masc_tui_scroll.page_up in
-                state.task_detail_scroll <- move ~count ~height state.task_detail_scroll
+                move_task_detail (move ~count ~height state.task_detail_scroll)
             (* Applying a scheme used to live on the page keys, where the
                footer never said it was and where PageDown is a scroll
                everywhere else; it answers to Enter. Emptying the arm left the
@@ -34653,7 +34693,7 @@ Use relative paths for resources already held in the package. -->
                      state.planning_scroll <- 0
                  | Planning_list when Option.is_some state.task_detail_id ->
                      state.task_detail_id <- None;
-                     state.task_detail_scroll <- 0
+                     reset_task_detail_scroll state
                  | Planning_list
                    when Masc_tui_overview_tasks.is_focused state.task_focus ->
                      state.task_focus <- Masc_tui_overview_tasks.No_task_focus
@@ -35064,10 +35104,10 @@ Use relative paths for resources already held in the package. -->
                 (match state.planning_mode with
                  | Planning_list
                    when Masc_tui_overview_tasks.is_focused state.task_focus ->
-                     if Option.is_some (task_detail_on_screen state) then
-                       state.task_detail_scroll <-
-                         Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1
-                     else
+                     if Option.is_some (task_detail_on_screen state) then begin
+                       move_task_detail
+                         (Masc_tui_types.scroll_down_from state.task_detail_scroll ~by:1)
+                     end else
                        state.task_focus <-
                          Masc_tui_overview_tasks.move state.tasks state.task_focus
                            Masc_tui_overview_tasks.Next
@@ -35398,9 +35438,9 @@ Use relative paths for resources already held in the package. -->
                 (match state.planning_mode with
                  | Planning_list
                    when Masc_tui_overview_tasks.is_focused state.task_focus ->
-                     if Option.is_some (task_detail_on_screen state) then
-                       state.task_detail_scroll <- max 0 (state.task_detail_scroll - 1)
-                     else
+                     if Option.is_some (task_detail_on_screen state) then begin
+                       move_task_detail (max 0 (state.task_detail_scroll - 1))
+                     end else
                        state.task_focus <-
                          Masc_tui_overview_tasks.move state.tasks state.task_focus
                            Masc_tui_overview_tasks.Previous
@@ -35760,7 +35800,7 @@ Use relative paths for resources already held in the package. -->
                       with
                       | Some (Masc_tui_overview_tasks.Open task) ->
                           state.task_detail_id <- Some task.id;
-                          state.task_detail_scroll <- 0;
+                          reset_task_detail_scroll state;
                           state.task_history <- Masc_tui_fetched.clear state.task_history;
                           launch_task_history_load state
                             ~mailbox:async_messages task.id
@@ -37206,6 +37246,7 @@ Use relative paths for resources already held in the package. -->
          recovery instructions to be presented. *)
       let transition_input_pending = ready_input || Option.is_some interrupted_paste
         || granted_search_paste in
+      reconcile_task_detail_scroll state;
       let terminal_rows, _ = get_terminal_size () in
       let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows in
       let owned_frame = match frame_choice with
@@ -37332,7 +37373,9 @@ Use relative paths for resources already held in the package. -->
               here rather than inside the drawing: a surface whose row count
               only exists once the frame is built cannot be bounded before it,
               but the drawing does not have to be the thing that stores it. *)
-           Option.iter (apply_clamped_scroll state) clamped;
+           Option.iter (function
+             | Task_detail _ when task_detail_following_end state -> ()
+             | value -> apply_clamped_scroll state value) clamped;
            if Terminal_profile.dynamic_title terminal_profile then
              Terminal_title.present terminal_title ~write:(output_string stdout)
                ~flush:(fun () -> flush stdout)

@@ -170,7 +170,7 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let lines = task_detail_lines state ~cols task in
   let count = List.length lines in
   let height = task_detail_height ~rows ~count in
-  let scroll = Masc_tui_scroll.normalize ~count ~height state.task_detail_scroll in
+  let scroll = Masc_tui_scroll.normalize ~count ~height (task_detail_render_scroll state) in
   let window = Rows.of_list ~first:scroll ~height lines in
   for offset = 0 to height - 1 do
     match Rows.at window (scroll + offset) with
@@ -180,7 +180,7 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
     (Masc_tui_scroll.position_row ~scroll ~height count);
   box_bottom buf cols;
-  scroll
+  scroll, count, height
 ;;
 
 (* The task list stays beside the task. Overview's rows are the queue
@@ -190,7 +190,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let offset =
+  let offset, count, height =
     if cols < keeper_split_threshold_cols then
       task_detail_pane state ~rows ~cols task buf
     else begin
@@ -229,8 +229,11 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
        ~hints:"j/k:scroll  PgUp/PgDn:page  Home/End  x:cancel  Left / Esc:back  r:refresh");
 
-  let offset=if task_documents_pending state then state.task_detail_scroll else offset in
-  finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
+  let offset =
+    if task_documents_pending state && not (task_detail_following_end state)
+    then state.task_detail_scroll else offset in
+  finish_surface state ~clamped:(Task_detail (offset, Some (count, height)))
+    ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
 let render_work_tasks (state : state) =
   let terminal_rows, cols = get_terminal_size () in

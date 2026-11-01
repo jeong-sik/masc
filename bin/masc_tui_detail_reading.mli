@@ -28,6 +28,11 @@ val rows_with_search : width:int -> t -> (row * search_mark) list
     Preparation notices at a different width never become matches. Original
     row text and styles are unchanged; presentation of a mark belongs outside. *)
 val scroll : count:int -> height:int -> t -> int
+val section_fully_visible : width:int -> height:int -> index:int -> t -> bool
+(** Whether the whole source section fits in the current document viewport,
+    both vertically and in display cells. [width] must be the actual framed
+    content space after indentation, not a layout width clamped to one cell.
+    Nonpositive dimensions and prepared documents return [false]. *)
 val move : count:int -> height:int -> movement -> t -> t
 (** [Last] retains an end anchor across reflow and replacement of the same
     captured observation, including temporary preparation rows. [First] starts

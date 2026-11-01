@@ -6,6 +6,12 @@
 val detail_reading_width : int -> int
 (** Content width in terminal cells for a detail reader, given the terminal's
     column count. Async preparation and the overlay renderer share this value. *)
+val detail_reading_action_width : int -> int
+(** Actual cells left after the reader's two-cell row prefix. Unlike the
+    layout width, this can be zero on a very narrow terminal. *)
+
+val detail_reading_viewport_at :
+  Masc_tui_types.state -> Masc_tui_detail_reading.t -> terminal_rows:int -> cols:int -> int * int
 
 val detail_reading_viewport :
   Masc_tui_types.state -> Masc_tui_detail_reading.t -> int * int

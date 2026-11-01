@@ -104,10 +104,52 @@ let test_local_search_and_replacement () =
   check (option string) "cancel clears only the query" None (Reading.search_query cancelled);
   check string "cancel keeps the capture" "original" (Reading.title cancelled)
 
+let test_section_authority_requires_complete_visibility () =
+  let held = Reading.create_observation ~title:"relationships"
+      [{heading="Selected"; body="sender and operation"};
+       {heading="Other"; body="one\ntwo\nthree\nfour\nfive"}] in
+  let visible = Reading.section_fully_visible ~width:80 ~height:4 ~index:0 in
+  check bool "a complete section can supply a target" true (visible held);
+  check bool "a partly visible section supplies no target" false
+    (Reading.section_fully_visible ~width:80 ~height:2 ~index:0 held);
+  let count = List.length (Reading.rows ~width:80 held) in
+  let scrolled = Reading.move ~count ~height:4 Reading.Last held in
+  check bool "a section outside the viewport supplies no target" false (visible scrolled);
+  let prepared = Reading.replace_prepared ~title:"prepared" ~hints:"" ~width:80
+      [Reading.Content "sender"] held in
+  check bool "prepared text has no source-section authority" false (visible prepared);
+  check bool "an absent section supplies no target" false
+    (Reading.section_fully_visible ~width:80 ~height:4 ~index:2 held);
+  check bool "zero content width supplies no target" false
+    (Reading.section_fully_visible ~width:0 ~height:80 ~index:0 held);
+  check bool "negative content width supplies no target" false
+    (Reading.section_fully_visible ~width:(-1) ~height:80 ~index:0 held);
+  let empty = Reading.create_observation ~title:"relationships"
+      [{heading=""; body=""}] in
+  check bool "even blank rows cannot supply a target at zero width" false
+    (Reading.section_fully_visible ~width:0 ~height:4 ~index:0 empty);
+  check bool "zero height supplies no target" false
+    (Reading.section_fully_visible ~width:80 ~height:0 ~index:0 held);
+  let narrow = Reading.create_observation ~title:"relationships"
+      [{heading="A"; body="B"}; {heading="C"; body="밤"}] in
+  check bool "another section's wide glyph does not revoke this section" true
+    (Reading.section_fully_visible ~width:1 ~height:8 ~index:0 narrow);
+  check bool "a wide body glyph clipped to one cell supplies no target" false
+    (Reading.section_fully_visible ~width:1 ~height:8 ~index:1 narrow);
+  check bool "the same glyph fits when two cells are available" true
+    (Reading.section_fully_visible ~width:2 ~height:8 ~index:1 narrow);
+  let emoji = Reading.create_observation ~title:"relationships"
+      [{heading="👩‍💻"; body="x"}] in
+  check bool "a clipped multi-scalar heading supplies no target" false
+    (Reading.section_fully_visible ~width:1 ~height:8 ~index:0 emoji);
+  check bool "a complete multi-scalar heading can supply a target" true
+    (Reading.section_fully_visible ~width:2 ~height:8 ~index:0 emoji)
+
 let () = run "detail reading ownership"
   [ "capture", [test_case "selection stays read-only" `Quick test_selection_does_not_retarget_capture;
                  test_case "workspace revoke" `Quick test_workspace_revoke_cannot_resurrect_capture;
                  test_case "surface revoke" `Quick test_surface_change_releases_capture];
     "navigation", [test_case "resize and edges" `Quick test_navigation_normalizes_before_moving;
                    test_case "end intent survives re-preparation" `Quick test_end_intent_survives_repreparation;
-                   test_case "local search and replacement" `Quick test_local_search_and_replacement] ]
+                   test_case "local search and replacement" `Quick test_local_search_and_replacement;
+                   test_case "section visibility authority" `Quick test_section_authority_requires_complete_visibility] ]

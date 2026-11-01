@@ -232,7 +232,22 @@ let test_peer_relations_use_the_recorded_keeper_identity () =
     (Result.is_error (read None [sequenced "11" moved; sequenced "9"
       (operation "peer-2" (source ~sender_keeper:sender ~continuation_channel:back))]));
   let empty = get (read (Some "10") []) in
-  Alcotest.(check (option string)) "an empty later page has no continuation" None empty.next_sequence
+  Alcotest.(check (option string)) "an empty later page has no continuation" None empty.next_sequence;
+  let second = operation "peer-2" (source ~sender_keeper:sender ~continuation_channel:back) in
+  let peers = get (read None [sequenced "10" moved; sequenced "11" second]) in
+  let selected move selected_operation page =
+    Option.map (fun (relation : Inbox.peer_relation) -> relation.operation_id)
+      (Inbox.select_peer ~move ~selected_operation page) in
+  Alcotest.(check (option string)) "selection starts with a verified peer" (Some "peer-1")
+    (selected Inbox.Next_peer None peers);
+  Alcotest.(check (option string)) "selection moves by operation identity" (Some "peer-2")
+    (selected Inbox.Next_peer (Some "peer-1") peers);
+  Alcotest.(check (option string)) "selection wraps within the current page" (Some "peer-2")
+    (selected Inbox.Previous_peer (Some "peer-1") peers);
+  Alcotest.(check (option string)) "an unavailable old selection starts on this page" (Some "peer-1")
+    (selected Inbox.Next_peer (Some "old-page") peers);
+  Alcotest.(check (option string)) "an empty page has no target" None
+    (selected Inbox.Next_peer None empty)
 
 let item_ids items = List.filter_map (fun (item : Inbox.item) -> item.id) items
 

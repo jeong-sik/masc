@@ -43,6 +43,34 @@ let rows ~width reading = match reading.prepared with
 let scroll ~count ~height reading =
   Position.offset ~count ~height reading.position
 
+(* Use the same wrapping as the actual document; a target is actionable only
+   if its entire source section fitted in the frame, not just its first row. *)
+let section_fully_visible ~width ~height ~index reading =
+  let rec split index previous = function
+    | [] -> None
+    | section :: _ when index = 0 -> Some (List.rev previous, section)
+    | section :: rest -> split (index - 1) (section :: previous) rest in
+  match reading.prepared with
+  | Some _ -> false
+  | None when index < 0 || width <= 0 || height <= 0 -> false
+  | None ->
+      (match split index [] reading.sections with
+       | None -> false
+       | Some (previous, selected) ->
+           let count sections = List.length (rows ~width {reading with sections}) in
+           let first = count previous in
+           let after = count (previous @ [selected]) in
+           let document = rows ~width reading in
+           let total = List.length document in
+           let offset = scroll ~count:total ~height reading in
+           let fits = function
+             | Heading text | Content text | Note text ->
+                 Masc_tui_message_layout.display_width text <= width in
+           first < after && first >= offset && after - offset <= height
+           && (document
+               |> List.filteri (fun position _ -> position >= first && position < after)
+               |> List.for_all fits))
+
 let move ~count ~height movement reading =
   let movement = match movement with
     | First -> Position.First

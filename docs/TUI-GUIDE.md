@@ -2944,6 +2944,9 @@ comes from the recorded Keeper sender of a request queued for that recipient.
 The server must attest that the source survived redaction intact before the
 reader names an edge. Redacted sources and older servers without that
 attestation are counted as unknown rather than guessed as Keeper identities.
+On a settled page, `[` and `]` choose a verified sender and Enter opens that
+Keeper's Info view. The complete selected relationship must be visible, and the
+current workspace roster must identify that sender unambiguously.
 Use `<` and `>` to read earlier or later server pages, and `r` to refresh the
 current page, or retry the failed page after an error; `R` starts again from
 the first page. Each page is a separate observation of a changing queue; a

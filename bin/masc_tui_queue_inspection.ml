@@ -16,6 +16,7 @@ type peer_snapshot = {
   source_unverified_count : int;
 }
 type peer_page = { snapshot : peer_snapshot; next_sequence : string option }
+type peer_selection_move = Previous_peer | Next_peer
 
 type item_id =
   | Local_message of string | Server_message of string | Running_message of string
@@ -171,6 +172,26 @@ let read_peer_page ~keeper_name ~after_sequence ~read_page =
   let* next_sequence = next_sequence_after ~after_sequence page in
   Ok { snapshot; next_sequence }
 
+let select_peer ~move ~selected_operation {snapshot; _} =
+  let relations = snapshot.relations in
+  match relations with
+  | [] -> None
+  | first :: _ ->
+      (match Option.bind selected_operation (fun selected ->
+        List.find_index (fun relation -> String.equal relation.operation_id selected) relations) with
+       | None -> Some first
+       | Some index ->
+           let count = List.length relations in
+           let index = match move with
+             | Previous_peer -> if index = 0 then count - 1 else index - 1
+             | Next_peer -> if index + 1 = count then 0 else index + 1 in
+           List.nth_opt relations index)
+
+let peer_relation_line relation =
+  Printf.sprintf "%s → %s · queued · %s%s"
+    (safe relation.sender) (safe relation.recipient) (safe relation.operation_id)
+    (Option.fold ~none:"" ~some:(fun keeper -> " · reply route " ^ safe keeper) relation.reply_to)
+
 let peer_lines ~page_number { snapshot; next_sequence } =
   let scope = Printf.sprintf "Page %d · observed %d queued requests; %d from Keepers"
       page_number
@@ -179,11 +200,7 @@ let peer_lines ~page_number { snapshot; next_sequence } =
     if snapshot.source_redacted_count = 0 && snapshot.source_unverified_count = 0 then []
     else [Printf.sprintf "%d source(s) redacted · %d unverified; relationships unknown"
             snapshot.source_redacted_count snapshot.source_unverified_count] in
-  let lines = List.map (fun relation ->
-    Printf.sprintf "%s → %s · queued · %s%s"
-      (safe relation.sender) (safe relation.recipient) (safe relation.operation_id)
-      (Option.fold ~none:"" ~some:(fun keeper -> " · reply route " ^ safe keeper) relation.reply_to))
-    snapshot.relations in
+  let lines = List.map peer_relation_line snapshot.relations in
   let next = match next_sequence with
     | Some _ -> "> reads later queued requests"
     | None when page_number = 1 -> "No queued requests in this read"

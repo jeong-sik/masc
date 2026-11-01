@@ -1510,6 +1510,90 @@ let test_keeper_peer_presented_owner_barrier () =
   Alcotest.(check bool) "reopening the same Keeper creates a different reader owner" true
     (keeper_peer_frame_owner_changed ~presented:new_owner ~candidate:(owner ()))
 
+let test_keeper_peer_selection_owns_its_observation () =
+  let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
+  let module D = Masc.Tui_decode in
+  state.view <- Keepers Keeper_list;
+  state.workspace_identity <- Workspace_identity_match;
+  state.local_keepers <- Local_workspace_read;
+  state.server_identity <- Some {
+    D.sid_version = "test"; sid_binary_commit = "test"; sid_binary_commit_age_s = None;
+    sid_base_path = D.Canonical_path.of_path "/owned-workspace";
+    sid_masc_root = D.Canonical_path.of_path "/owned-workspace/.masc";
+    sid_executable_in_worktree = None; sid_state_ready = Some true; sid_uptime = None;
+    sid_sse_clients = None; sid_gc = None; sid_scheduler = None };
+  state.keepers <- [roster_keeper "Alice"; roster_keeper "Bob"];
+  let relation operation_id sender : Masc_tui_queue_inspection.peer_relation =
+    {operation_id; sender; recipient = "receiver"; reply_to = None} in
+  let page : Masc_tui_queue_inspection.peer_page =
+    {snapshot = {queued_count = 2; relations = [relation "one" "alice"; relation "two" "bob"];
+                 source_redacted_count = 0; source_unverified_count = 0};
+     next_sequence = Some "10"} in
+  let reading () = match current_detail_reading state with
+    | Some reading -> reading | None -> Alcotest.fail "relationship reader absent" in
+  let target () = keeper_peer_target state (reading ()) ~terminal_rows:30 ~terminal_cols:80 in
+  let require_target () = match target () with
+    | Some target -> target | None -> Alcotest.fail "verified peer target absent" in
+  let initial = begin_keeper_peer_reading state ~keeper_name:"receiver" in
+  Alcotest.(check bool) "loading page has no sender target" true (Option.is_none (target ()));
+  ignore (finish_keeper_peer_reading state ~keeper_name:"receiver" ~token:initial (Ok page));
+  let first = require_target () in
+  Alcotest.(check string) "first verified operation owns selection" "one" first.kpt_relation.operation_id;
+  Alcotest.(check bool) "canonical sender resolves to one roster member" true
+    (match keeper_peer_sender_target state first with Ok keeper -> keeper.k_name = "Alice" | Error _ -> false);
+  state.keepers <- [];
+  Alcotest.(check bool) "a missing sender cannot open" true
+    (Result.is_error (keeper_peer_sender_target state first));
+  state.keepers <- [roster_keeper "Alice"; roster_keeper "alice"; roster_keeper "Bob"];
+  Alcotest.(check bool) "ambiguous canonical sender cannot open" true
+    (Result.is_error (keeper_peer_sender_target state first));
+  state.keepers <- [roster_keeper "Alice"; roster_keeper "Bob"];
+  state.workspace_identity <- Workspace_identity_unread;
+  Alcotest.(check bool) "an unconfirmed workspace cannot open a sender" true
+    (Result.is_error (keeper_peer_sender_target state first));
+  state.workspace_identity <- Workspace_identity_match;
+  ignore (move_keeper_peer_selection state ~move:Masc_tui_queue_inspection.Next_peer);
+  let second = require_target () in
+  Alcotest.(check string) "selection names the next operation" "two" second.kpt_relation.operation_id;
+  Alcotest.(check bool) "unpresented selection does not equal the prior target" false
+    (same_keeper_peer_target first second);
+  Alcotest.(check bool) "a stale target cannot open after selection changes" true
+    (Result.is_error (keeper_peer_sender_target state first));
+  Alcotest.(check bool) "a resize changes target authority" false
+    (same_keeper_peer_target second {second with kpt_cols = 79});
+  let next = match request_keeper_peer_page state Peer_next with
+    | Some ("receiver", token, Some "10") -> token
+    | Some _ | None -> Alcotest.fail "next page did not start" in
+  Alcotest.(check bool) "a pending page exposes no sender target" true (Option.is_none (target ()));
+  Alcotest.(check bool) "selection cannot move during a page read" true
+    (Result.is_error (move_keeper_peer_selection state ~move:Masc_tui_queue_inspection.Next_peer));
+  ignore (finish_keeper_peer_reading state ~keeper_name:"receiver" ~token:next (Ok page));
+  let next_page = require_target () in
+  Alcotest.(check bool) "the same operation on a new page has a new owner" false
+    (same_keeper_peer_target first next_page);
+  let single : Masc_tui_queue_inspection.peer_page = {snapshot = {page.snapshot with queued_count = 1;
+    relations = [relation "one" "alice"]}; next_sequence = None} in
+  let single_token = begin_keeper_peer_reading state ~keeper_name:"receiver" in
+  ignore (finish_keeper_peer_reading state ~keeper_name:"receiver" ~token:single_token (Ok single));
+  let count = List.length (Masc_tui_detail_reading.rows ~width:40 (reading ())) in
+  update_detail_reading state
+    (Masc_tui_detail_reading.move ~count ~height:3 Masc_tui_detail_reading.Last (reading ()));
+  Alcotest.(check bool) "the sole selected relation can be scrolled away" true
+    (Masc_tui_detail_reading.scroll ~count ~height:3 (reading ()) > 0);
+  ignore (move_keeper_peer_selection state ~move:Masc_tui_queue_inspection.Next_peer);
+  Alcotest.(check int) "choosing the same peer returns to the selection" 0
+    (Masc_tui_detail_reading.scroll ~count ~height:3 (reading ()));
+  update_detail_reading state
+    (Masc_tui_detail_reading.move ~count ~height:3 Masc_tui_detail_reading.Last (reading ()));
+  ignore (move_keeper_peer_selection state ~move:Masc_tui_queue_inspection.Previous_peer);
+  Alcotest.(check int) "choosing the same peer backwards also reveals it" 0
+    (Masc_tui_detail_reading.scroll ~count ~height:3 (reading ()));
+  Alcotest.(check string) "revealing the same peer retains its operation" "one"
+    (require_target ()).kpt_relation.operation_id;
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "workspace revocation removes the sender target" true
+    (Option.is_none (current_detail_reading state))
+
 let test_keeper_list_search_and_mouse_share_order () =
   let state = create_state ~workspace:"" ~port:0 ~refresh_interval:0. () in
   state.view <- Keepers Keeper_list;
@@ -2346,6 +2430,8 @@ let () =
             test_keeper_peer_retry_is_readable_on_narrow_failures
         ; Alcotest.test_case "Keeper frame ownership quarantines input during output" `Quick
             test_keeper_peer_presented_owner_barrier
+        ; Alcotest.test_case "Keeper peer selection belongs to its observation" `Quick
+            test_keeper_peer_selection_owns_its_observation
         ; Alcotest.test_case "Keepers search and mouse share the ordered projection" `Quick
             test_keeper_list_search_and_mouse_share_order
         ; Alcotest.test_case "Keepers observation updates preserve the selected name" `Quick

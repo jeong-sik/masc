@@ -502,6 +502,87 @@ let test_concurrent_tool_does_not_block_status () =
           (List.rev !order))
 ;;
 
+let test_concurrent_tool_stops_keep_authoritative_outcome ~first ~second
+    ~(expected : Runtime_codex_app_server.host_stop option) () =
+  let second_started, signal_second_started = Eio.Promise.create () in
+  let first_written, signal_first_written = Eio.Promise.create () in
+  let effects = ref [] and responses = ref [] in
+  let tool = dispatch_tool
+    ~execution_mode:(fun _ -> Agent_core.Tool_contract.Concurrent)
+    ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+    (fun ~call_id _ ->
+      let stop =
+        if call_id = "call-1" then begin
+          Eio.Promise.await second_started;
+          first
+        end else begin
+          Eio.Promise.resolve signal_second_started ();
+          Eio.Promise.await first_written;
+          second
+        end
+      in
+      effects := call_id :: !effects;
+      { (tool_response call_id) with
+        success = not (Option.exists Runtime_official_client_tool.host_stop_failed stop);
+        abort_turn = stop;
+        on_response_sent = Some (fun () ->
+          responses := call_id :: !responses;
+          if call_id = "call-1" then Eio.Promise.resolve signal_first_written ()) }) in
+  with_fixture ~await_dynamic_tools:false
+    [init_result; account_chatgpt; thread_result; turn_result;
+     dispatch_request 1 1; dispatch_request 2 2; item_completed; turn_completed]
+    (fun path ->
+      before_fixture_terminal path 2;
+      let actual = run_fixture ~dynamic_tools:[tool] path in
+      check (list string) "both admitted effects execute once" ["call-1"; "call-2"]
+        (List.rev !effects);
+      check (list string) "both original responses are written once" ["call-1"; "call-2"]
+        (List.rev !responses);
+      match expected, actual with
+      | None, Ok result -> check int "normal provider completion remains available" 2 result.dynamic_tool_calls
+      | Some expected, Error (Runtime_codex_app_server.Stopped_by_host actual) ->
+        (* This is the same consumer used by Keeper_codex_runtime's settled
+           host-stop branch, rather than a test-only outcome projection. *)
+        let consumed = Keeper_official_client_host.host_stop_result
+          ~runtime_id:"codex.fixture" ~model:"fixture" ~session_id:"thread-1"
+          ~turn_id:"turn-1" ~provider_turn_ordinal:1 ~turns_used:1
+          ~latency_ms:None ~request_context:None actual in
+        (match expected, consumed with
+         | Terminal_tool_boundary {outcome = Terminal_failed _; _}, Error _ -> ()
+         | Terminal_tool_boundary {outcome = Terminal_completed; _},
+           Ok {Runtime_agent.stop_reason = Completed _; _} -> ()
+         | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _},
+           Ok {Runtime_agent.stop_reason = Yielded_to_durable_stimulus _; _} -> ()
+         | Repeated_tool_call _, Ok {Runtime_agent.stop_reason = Yielded_after_repeated_tool_call _; _} -> ()
+         | _ -> fail "the actual Keeper consumer received the wrong authoritative outcome");
+        check bool "the exact authoritative stop is preserved" true (actual = expected)
+      | _, Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Some _, Ok _ -> fail "the provider completed instead of preserving the host outcome")
+;;
+
+let test_concurrent_tool_stop_orderings () =
+  let deferred : Runtime_codex_app_server.host_stop =
+    Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred} in
+  let completed : Runtime_codex_app_server.host_stop =
+    Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed} in
+  List.iter (fun effect_disposition ->
+    let failed : Runtime_codex_app_server.host_stop =
+      Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_failed
+        {failure_class=Tool_result.Runtime_failure;effect_disposition;
+         detail=Keeper_terminal_effect_detail.Tool_failed
+           {internal_tool_name="masc_probe";message="original peer failure"}}} in
+    List.iter (fun (first,second) ->
+      test_concurrent_tool_stops_keep_authoritative_outcome
+        ~first:(Some first) ~second:(Some second) ~expected:(Some failed) ())
+      [deferred,failed; failed,deferred; completed,failed; failed,completed])
+    [Tool_result.Proven_pre_effect; Proven_post_effect; Effect_outcome_unknown];
+  List.iter (fun (first,second,expected) ->
+    test_concurrent_tool_stops_keep_authoritative_outcome
+      ~first:(Some first) ~second:(Some second) ~expected:(Some expected) ())
+    [deferred,completed,completed; completed,deferred,completed; deferred,deferred,deferred];
+  test_concurrent_tool_stops_keep_authoritative_outcome ~first:None ~second:None ~expected:None ()
+;;
+
 let test_serial_tool_fences_concurrent_calls () =
   let started, signal_started = Eio.Promise.create () in
   let release, signal_release = Eio.Promise.create () in
@@ -9850,6 +9931,8 @@ let () =
             (fun () -> test_dynamic_tool_callback ())
         ; test_case "concurrent status releases a pending read" `Quick
             test_concurrent_tool_does_not_block_status
+        ; test_case "concurrent peer stops preserve authoritative Keeper outcomes" `Quick
+            test_concurrent_tool_stop_orderings
         ; test_case "serial tool fences concurrent calls" `Quick
             test_serial_tool_fences_concurrent_calls
         ; test_case "completed vendor turn retains pending tool receipt" `Quick

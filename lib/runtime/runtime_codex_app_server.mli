@@ -555,4 +555,10 @@ val run_turn :
 (** [config.admission_timeout_s] finitely bounds initialization, account
     admission, thread preparation, and the complete [turn/start] write. The
     model's [config.timeout_s] takes authority only after that dispatch
-    succeeds. *)
+    succeeds.
+
+    Already admitted dynamic tools settle before the turn returns. A peer
+    failure cannot be hidden by an earlier completed or deferred host stop.
+    Among host stops, failure takes priority over completion, then checkpoint
+    yield; an earlier non-host failure remains authoritative. No tool effect
+    is replayed to make this decision. *)

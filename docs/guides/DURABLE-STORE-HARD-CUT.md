@@ -104,6 +104,11 @@ require version 3 with captured guidance when evaluation is needed. Unavailable
 authority or a validated original proposal with no absorptions may explicitly
 capture `guidance: null`; neither needs unused prompt assets. Available
 authority with actual absorptions still requires the complete captured bundle.
+Guidance version 2 captures the common policies and only the forward context
+selected by the original observations: pair-only for empty observations and
+with-observations otherwise. Its context must match the strictly restored
+original input; the unused context's missing or empty asset does not block it.
+Guidance version 1, which captured both contexts, has no reader or conversion.
 Non-null captured guidance always goes through the strict decoder, including
 for an empty proposal. Execution schema 1 and gate version
 2 have no reader or automatic conversion in this build.

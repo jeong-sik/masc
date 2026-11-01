@@ -116,10 +116,17 @@ type evaluate =
   -> questions:(string * Typesafeai_types.question) list
   -> (Typesafeai_types.eval_response, string) result
 
+type forward_context = Pair_only | With_observations
+
+let forward_context = function [] -> Pair_only | _ :: _ -> With_observations
+let context_key = function
+  | Pair_only -> Prompt_names.librarian_absorb_pair
+  | With_observations -> Prompt_names.librarian_absorb_observations
+
 type guidance = {
   forward : Prompt_registry.prompt_resolution;
-  pair : Prompt_registry.prompt_resolution;
-  observations : Prompt_registry.prompt_resolution;
+  context : forward_context;
+  context_prompt : Prompt_registry.prompt_resolution;
   reverse : Prompt_registry.prompt_resolution;
   reverse_yes : Prompt_registry.prompt_resolution;
   reverse_no : Prompt_registry.prompt_resolution;
@@ -131,8 +138,7 @@ type guidance = {
 
 let guidance_members guidance = [
   "forward", Prompt_names.librarian_absorb_forward, guidance.forward;
-  "pair", Prompt_names.librarian_absorb_pair, guidance.pair;
-  "observations", Prompt_names.librarian_absorb_observations, guidance.observations;
+  "context", context_key guidance.context, guidance.context_prompt;
   "reverse", Prompt_names.librarian_absorb_reverse, guidance.reverse;
   "reverse_yes", Prompt_names.librarian_absorb_reverse_yes, guidance.reverse_yes;
   "reverse_no", Prompt_names.librarian_absorb_reverse_no, guidance.reverse_no;
@@ -155,27 +161,47 @@ let validate_guidance guidance =
       then Ok () else Error ("Inconsistent captured absorption guidance: " ^ key) in
     let* _ = Prompt_registry.render_resolved_prompt_template key resolution [] in
     Ok ()) (Ok ()) (guidance_members guidance)
-let resolve_guidance () =
+let validate_guidance_for_input ~new_observations guidance =
   let open Result.Syntax in
+  let* () = validate_guidance guidance in
+  if guidance.context=forward_context new_observations then Ok ()
+  else Error "Captured absorption guidance context differs from original observations"
+let resolve_guidance_choices () =
+  let open Result.Syntax in
+  (* Both context resolutions happen on the caller fiber. Their independent
+     failures remain data until the original input selects the context. *)
+  let pair = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_pair [] in
+  let observations = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_observations [] in
+  let common =
   let* forward,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_forward [] in
-  let* pair,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_pair [] in
-  let* observations,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_observations [] in
   let* reverse,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_reverse [] in
   let* reverse_yes,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_reverse_yes [] in
   let* reverse_no,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_reverse_no [] in
   let* mergeable,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_mergeable [] in
   let* different_context,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_different_context [] in
   let* loses_knowledge,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_loses_knowledge [] in
-  let* uncertain,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_uncertain [] in
-  let guidance = {forward;pair;observations;reverse;reverse_yes;reverse_no;mergeable;different_context;loses_knowledge;uncertain} in
-  let+ () = validate_guidance guidance in guidance
+  let+ uncertain,_ = Prompt_registry.resolve_and_render_prompt_template Prompt_names.librarian_absorb_uncertain [] in
+  fun context context_prompt ->
+    {forward;context;context_prompt;reverse;reverse_yes;reverse_no;mergeable;different_context;loses_knowledge;uncertain} in
+  let capture context resolved =
+    let* make = common in
+    let* context_prompt,_ = resolved in
+    let guidance = make context context_prompt in
+    let+ () = validate_guidance guidance in guidance in
+  capture Pair_only pair, capture With_observations observations
+let select_guidance ~new_observations (pair,observations) =
+  match forward_context new_observations with Pair_only -> pair | With_observations -> observations
+let resolve_guidance ~new_observations () =
+  select_guidance ~new_observations (resolve_guidance_choices ())
 let guidance_to_yojson guidance =
   let optional = function None -> `Null | Some value -> `String value in
   let resolution (p : Prompt_registry.prompt_resolution) = `Assoc [
     "effective",`String p.effective; "source",`String (Prompt_registry.prompt_source_to_string p.source);
     "file_value",optional p.file_value; "override_value",optional p.override_value;
     "file_path",optional p.file_path; "file_exists",`Bool p.file_exists; "has_override",`Bool p.has_override] in
-  `Assoc ["version",`Int 1; "prompts",`Assoc (List.map (fun (name,_,prompt) -> name,resolution prompt)
+  `Assoc ["version",`Int 2;
+    "context",`String (match guidance.context with Pair_only -> "pair_only" | With_observations -> "with_observations");
+    "prompts",`Assoc (List.map (fun (name,_,prompt) -> name,resolution prompt)
     (guidance_members guidance))]
 let guidance_of_yojson json =
   let open Result.Syntax in
@@ -198,12 +224,15 @@ let guidance_of_yojson json =
     let* file_exists=boolean (get "file_exists") in
     let+ has_override=boolean (get "has_override") in
     {Prompt_registry.effective;source;file_value;override_value;file_path;file_exists;has_override} in
-  let* members=fields ["version";"prompts"] json in
-  let* ()=if List.assoc "version" members=`Int 1 then Ok () else Error "Unknown captured absorption guidance version" in
-  let* members=fields ["forward";"pair";"observations";"reverse";"reverse_yes";"reverse_no";"mergeable";"different_context";"loses_knowledge";"uncertain"] (List.assoc "prompts" members) in
+  let* members=fields ["version";"context";"prompts"] json in
+  let* ()=if List.assoc "version" members=`Int 2 then Ok () else Error "Unknown captured absorption guidance version" in
+  let* context=match List.assoc "context" members with
+    | `String "pair_only" -> Ok Pair_only
+    | `String "with_observations" -> Ok With_observations
+    | _ -> Error "Unknown captured absorption guidance context" in
+  let* members=fields ["forward";"context";"reverse";"reverse_yes";"reverse_no";"mergeable";"different_context";"loses_knowledge";"uncertain"] (List.assoc "prompts" members) in
   let* forward=resolution (List.assoc "forward" members) in
-  let* pair=resolution (List.assoc "pair" members) in
-  let* observations=resolution (List.assoc "observations" members) in
+  let* context_prompt=resolution (List.assoc "context" members) in
   let* reverse=resolution (List.assoc "reverse" members) in
   let* reverse_yes=resolution (List.assoc "reverse_yes" members) in
   let* reverse_no=resolution (List.assoc "reverse_no" members) in
@@ -211,7 +240,7 @@ let guidance_of_yojson json =
   let* different_context=resolution (List.assoc "different_context" members) in
   let* loses_knowledge=resolution (List.assoc "loses_knowledge" members) in
   let* uncertain=resolution (List.assoc "uncertain" members) in
-  let guidance={forward;pair;observations;reverse;reverse_yes;reverse_no;mergeable;different_context;loses_knowledge;uncertain} in
+  let guidance={forward;context;context_prompt;reverse;reverse_yes;reverse_no;mergeable;different_context;loses_knowledge;uncertain} in
   let+ ()=validate_guidance guidance in guidance
 let guidance_text (resolution : Prompt_registry.prompt_resolution) = String.trim resolution.effective
 
@@ -309,23 +338,15 @@ let direction_to_string = function
   | Reverse -> "reverse"
 ;;
 
-type forward_context = Pair_only | With_observations
-
-let forward_context = function
-  | [] -> Pair_only
-  | _ :: _ -> With_observations
-;;
-
-let instructions_prefix ~guidance ?(context = Pair_only) = function
-  | Forward -> guidance_text guidance.forward ^ " " ^ guidance_text
-      (match context with Pair_only -> guidance.pair | With_observations -> guidance.observations)
+let instructions_prefix ~guidance = function
+  | Forward -> guidance_text guidance.forward ^ " " ^ guidance_text guidance.context_prompt
   | Reverse -> guidance_text guidance.reverse ^ "\n"
 ;;
 
-let question ~guidance ?(context = Pair_only) direction statement =
+let question ~guidance direction statement =
   match direction with
   | Forward -> Typesafeai_types.Choice
-      { instructions = instructions_prefix ~guidance ~context Forward
+      { instructions = instructions_prefix ~guidance Forward
       ; criteria = List.map (fun option -> consolidation_label option,
           Some (consolidation_description guidance option)) consolidation_options }
   | Reverse -> Typesafeai_types.Noul
@@ -335,9 +356,9 @@ let question ~guidance ?(context = Pair_only) direction statement =
 ;;
 
 (* Measure the same captured text used by question creation. *)
-let question_bytes ~guidance ?(context = Pair_only) direction statement =
+let question_bytes ~guidance direction statement =
   String.length (Yojson.Safe.to_string
-    (Typesafeai_types.question_to_yojson (question ~guidance ~context direction statement)))
+    (Typesafeai_types.question_to_yojson (question ~guidance direction statement)))
 ;;
 
 (* [numbered] cut into requests of at most [questions_per_request] questions
@@ -414,7 +435,7 @@ let ask_sources ~guidance ~evaluate ~new_observations ~claim numbered =
   let rec go table requests = function
     | [] -> table, requests, None
     | (id, source) :: rest ->
-      let questions = [id, question ~guidance ~context:(forward_context new_observations) Forward source] in
+      let questions = [id, question ~guidance Forward source] in
       match evaluate ~state:(forward_state ~new_observations ~claim ~source) ~questions with
       | Error reason -> table, requests, Some reason
       | Ok response ->
@@ -486,7 +507,7 @@ let classify ~guidance ~new_observations ~facts ~new_claims ~absorbed =
            List.partition
              (fun (_, source) ->
                 String.length (Yojson.Safe.to_string (forward_state ~new_observations ~claim ~source))
-                + question_bytes ~guidance ~context:(forward_context new_observations) Forward source
+                + question_bytes ~guidance Forward source
                   <= request_bytes_limit)
              judgeable
          in
@@ -495,6 +516,10 @@ let classify ~guidance ~new_observations ~facts ~new_claims ~absorbed =
 ;;
 
 let judge ~guidance ~evaluate ~new_observations ~facts ~new_claims ~absorbed =
+  match validate_guidance_for_input ~new_observations guidance with
+  | Error reason -> Failed {reason;kind=Evaluation_failed;absorbed=[];left=[];conveyed=[];
+      unjudged=absorbed;unjudgeable=[]}
+  | Ok () ->
   let groups = classify ~guidance ~new_observations ~facts ~new_claims ~absorbed in
   let same
         (a : Keeper_memory_os_types.absorbed_statement)
@@ -950,20 +975,23 @@ type replay_authority =
 
 type live_authority =
   { keeper_id : string
-  ; guidance : (guidance option, string) result
+  ; guidance : ((guidance, string) result * (guidance, string) result) option
   ; armed_destinations : (Typesafeai_config.destinations, Typesafeai_config.unavailable_reason) result
   }
 
 let resolve ~keeper_id : live_authority =
   let armed_destinations = Typesafeai_config.absorb_gate_destinations ~keeper_id in
   let guidance = match armed_destinations with
-    | Error _ -> Ok None
-    | Ok _ -> Result.map Option.some (resolve_guidance ()) in
+    | Error _ -> None
+    | Ok _ -> Some (resolve_guidance_choices ()) in
   { keeper_id; guidance; armed_destinations }
 ;;
 
 let keeper_of_authority (authority : live_authority) = authority.keeper_id
-let guidance_of_authority (authority : live_authority) = authority.guidance
+let guidance_of_authority ~new_observations (authority : live_authority) =
+  match authority.guidance with
+  | None -> Ok None
+  | Some choices -> Result.map Option.some (select_guidance ~new_observations choices)
 
 let replay_authority (authority : live_authority) =
   match authority.armed_destinations with
@@ -1223,7 +1251,7 @@ let restore_with ~missing ~guidance ~authority ~new_observations ~facts ~new_cla
       let guidance = match guidance with
         | Some guidance -> guidance
         | None -> Replay.reject 0 "Available absorption gate has no captured guidance" in
-      (match validate_guidance guidance with
+      (match validate_guidance_for_input ~new_observations guidance with
        | Ok () -> ()
        | Error detail -> Replay.reject 0 detail);
       let destinations = first :: rest in
@@ -1500,7 +1528,7 @@ let run_resolved
           the safe direction is the same as above. *)
        complete (Skipped { reason = Unavailable reason; absorbed = [] })
      | Ok ((first, rest) as armed) ->
-       (match authority.guidance with
+       (match guidance_of_authority ~new_observations authority with
         | Error reason -> guidance_failed reason
         | Ok None -> guidance_failed "Available absorption gate has no captured guidance"
         | Ok (Some guidance) ->

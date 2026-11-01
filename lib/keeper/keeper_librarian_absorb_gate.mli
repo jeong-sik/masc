@@ -53,12 +53,16 @@ type evaluate =
     a test installs a function that answers from a table. *)
 
 type guidance
-(** Immutable resolved policy fragments from the managed Librarian prompt. *)
-val resolve_guidance : unit -> (guidance, string) result
+(** Immutable common policies and the one forward context selected by the
+    original observations from the managed Librarian prompt. *)
+val resolve_guidance : new_observations:Yojson.Safe.t list -> unit -> (guidance, string) result
 val guidance_to_yojson : guidance -> Yojson.Safe.t
 val guidance_of_yojson : Yojson.Safe.t -> (guidance, string) result
-(** Strict versioned codec. Requires every nonempty captured resolution and
+(** Strict version 2 codec. Requires every nonempty captured resolution and
     renders them without consulting current prompt metadata or overrides. *)
+val validate_guidance_for_input : new_observations:Yojson.Safe.t list -> guidance -> (unit, string) result
+(** Pure check that the captured context matches the original observation
+    presence; a wire context tag alone supplies no input authority. *)
 
 type consolidation = Mergeable | Different_context | Loses_knowledge | Uncertain
 
@@ -270,8 +274,8 @@ type replay_authority =
 
 type live_authority
 (** An original Keeper identity and the once-resolved gate availability and
-    armed destinations, plus the enabled gate's resolved guidance or its
-    explicit setup error. Unavailable authority captures no guidance.
+    armed destinations, plus independent resolved guidance results for both
+    forward contexts. Unavailable authority captures no guidance.
     Credentials remain private in memory; this handle
     has no decoder and cannot be reconstructed from replay evidence. *)
 
@@ -283,10 +287,11 @@ val resolve : keeper_id:string -> live_authority
 val keeper_of_authority : live_authority -> string
 (** The original Keeper bound to this live handle; exposes no credentials. *)
 
-val guidance_of_authority : live_authority -> (guidance option, string) result
-(** The once-resolved guidance, including explicit setup failure. Unavailable
+val guidance_of_authority : new_observations:Yojson.Safe.t list -> live_authority -> (guidance option, string) result
+(** Pure selection from once-resolved guidance, including the selected setup failure. Unavailable
     authority has [None] and performs no prompt lookup; an armed evaluation
-    requires [Some guidance] before publishing any request intent. *)
+    requires [Some guidance] before publishing any request intent. The unused
+    context's resolution failure never blocks this input. *)
 
 val replay_authority : live_authority -> replay_authority
 (** Credential-free availability and ordered destination identities from the

@@ -172,13 +172,16 @@ type restored = {proposal:Yojson.Safe.t;authority:Gate.replay_authority;guidance
 let guidance_for_input (input:inputs) authority =
   match input.absorbed with
   | [] -> Ok None
-  | _::_ -> Gate.guidance_of_authority authority
+  | _::_ -> Gate.guidance_of_authority ~new_observations:input.observations authority
 let captured_guidance ~(input:inputs) ~authority = function
   | `Null ->
     (match input.absorbed,authority with
      | [],_ | _::_,Gate.Gate_unavailable _ -> Ok None
      | _::_,Gate.Gate_available _ -> Error "Available absorption gate has no captured guidance")
-  | json -> Gate.guidance_of_yojson json |> Result.map Option.some
+  | json ->
+    let* guidance=Gate.guidance_of_yojson json in
+    let+ ()=Gate.validate_guidance_for_input ~new_observations:input.observations guidance in
+    Some guidance
 let gate_request ~owner ~capture ~parent ~proposal ~request_id ~authority ~guidance ~predecessor =
   `Assoc ["version",`Int request_version;"kind",`String Capture.gate_kind;"request_id",`String request_id;
     "owner",Capture.owner_to_json owner;"execution_id",`String (Capture.request_id capture);

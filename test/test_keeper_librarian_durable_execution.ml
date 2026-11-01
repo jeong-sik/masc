@@ -464,7 +464,7 @@ let test_history_guidance_is_required_only_for_actual_absorptions () =
       let parent,capture=only_original fixture in
       let owner=Capture.physical_owner capture in
       let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
-      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority authority with
+      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority ~new_observations:[] authority with
         | Error detail -> detail | Ok _ -> fail "enabled guidance must remain explicitly unavailable" in
       if absorbing then (
         let proposal=answered_proposal parent (Capture.request capture |> get) in
@@ -1550,7 +1550,7 @@ let test_floor_guidance_is_required_only_for_actual_absorptions () =
       check int "each source message has exactly its original provider answer" (if absorbing then 1 else 2)
         (F.post_count fixture.server-posts);
       let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
-      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority authority with
+      let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority ~new_observations:[] authority with
         | Error detail -> detail | Ok _ -> fail "enabled floor guidance must remain explicitly unavailable" in
       List.iter (fun ((parent:Owner.retained),_) ->
         let step=io (fun () -> Step.restore ~owner parent) |> get in

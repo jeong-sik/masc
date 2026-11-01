@@ -552,7 +552,7 @@ let with_librarian_payload f = with_lane_store (fun base root ->
   let judgment=Lane_addon_exact.final_to_json (Lane_addon_exact.Call_final
     (Lane_addon_exact.Answered {output=checked;slot="fixture";usage=None})) in
   let parent=advance_original store parent [Progress.Dispatch_intended;Progress.Judgment_retained judgment] in
-  let guidance=Absorb.resolve_guidance () |> require in
+  let guidance=Absorb.resolve_guidance ~new_observations:[] () |> require in
   let gate_id="captured-gate" in
   let gate_request=`Assoc ["version",`Int 3;"kind",`String "librarian-admission-gate";
     "request_id",`String gate_id;"owner",Admission.owner_to_json owner;

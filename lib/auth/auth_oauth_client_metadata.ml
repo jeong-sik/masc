@@ -208,6 +208,7 @@ let redirect_uri_allowed document requested =
   is_plain_url_text requested
   && List.exists
     (fun listed ->
-      String.equal listed requested || same_loopback_target ~listed ~requested)
+      is_plain_url_text listed
+      && (String.equal listed requested || same_loopback_target ~listed ~requested))
     document.redirect_uris
 ;;

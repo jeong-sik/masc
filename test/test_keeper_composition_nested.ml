@@ -779,7 +779,7 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
         (match export.value with Available _ -> true | Unavailable _ -> false)) child.exports) child_scopes observed;
   let complete_reading = match Observation.of_content result_content with
     | Stored reference ->
-        let response,status = Masc.Server_routes_http_routes_artifacts.blob_response
+        let response,status = Server_routes_http_routes_artifacts.blob_response
             ~base_path ~sha256:reference.sha256 in
         check bool "actual original manifest HTTP response succeeds" true (status=`OK);
         Observation.of_blob_response reference response
@@ -790,7 +790,7 @@ let test_public_nested_prepare_run_records_only_admitted_children ?(execution=Ma
       ~structured_content:result |> Yojson.Safe.to_string in
   let manifest_reference = Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
       ~bytes:manifest_content ~mime:Tool_output.artifact_manifest_mime in
-  let manifest_response,status = Masc.Server_routes_http_routes_artifacts.blob_response
+  let manifest_response,status = Server_routes_http_routes_artifacts.blob_response
       ~base_path ~sha256:manifest_reference.sha256 in
   check bool "actual retained manifest HTTP response succeeds" true (status=`OK);
   check bool "retained manifest preserves the actual execution observation" true

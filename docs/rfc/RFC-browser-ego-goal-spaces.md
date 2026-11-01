@@ -145,36 +145,65 @@ durable 하게 기록되는 관측 결속 하나와 종착 전이에 결속된 �
   새 ID 만 알 수 있으므로 이전 ID 없이 「이전 ID 미확인」으로 보고한다.
   이전 ID·새 ID 영수증은 같은 호스트 프로세스가 둘 다 관측한 경우에만
   보장한다(best-effort).
-- 관측 ID 를 갱신하는 주체는 그 관측을 Goal 실행 주기와 함께 durable 하게
-  기록한다(관측 결속). 관측 결속이 종착 전이가 읽는 신원의 원천이다.
-  이전 ID·새 ID 영수증용 메모리 관측값은 호스트 재시작으로 사라져도 관측
-  결속 기록은 남는다. 재개(Reopen)는 여전히 이름 열기로 이어 붙는다. 관측
-  결속은 정리 대상 신원의 원천일 뿐 공간을 ID 로 되찾는 재개 수단이
-  아니다(§4 에서 거절한 길과 다르다).
+- 호스트는 Goal 실행 주기(`goal_cycle`)마다 공간 열기·관측 상태를
+  `Never_dispatched -> May_have_opened(goal_cycle) -> Observed(goal_cycle, target_space_id)`
+  의 닫힌 durable 상태 전이로 기록하며, 이를 Goal 종착·재개(`Reopen`) 전이와 같은
+  잠금 아래에서 직렬화한다.
+  - `Browser_ego_peer.script`(`lib/browser_ego_peer.ml:146–150`)는
+    `open_space`(`lib/browser_ego_peer.ml:257–275`)가 응답의 numeric ID·소유권을
+    검증하고 워커가 결속(`lib/browser_addon_live_ego.ml:319–336`)하기 전에 이미
+    `taskSpace(name)` 을 실행해 부재 공간을 생성한다. 따라서 관측 완료 뒤에만
+    기록을 남기면, 첫 `taskSpace(name)` 이 공간을 만든 직후 응답이 유실되거나
+    `Observed` 기록 커밋 전에 호스트가 죽었을 때 재시작 뒤 정상(readable) 저장소에
+    관측 결속이 비어 있는 상태가 되어 살아 있는 공간을 미관측으로 오판할 수 있다.
+  - 이를 막기 위해 워커는 이름 기반 `taskSpace("masc-<goal_id>")` 효과를 내보내기
+    **직전에** 같은 Goal 잠금 아래에서 현재 Goal 이 해당 `goal_cycle` 의
+    `Executing` 임을 확인하고 `May_have_opened(goal_cycle)` 를 먼저 durable 하게
+    기록한다.
+  - 이후 `open_space` 가 권위 있는 numeric `spaceId` 와 네이티브 `ownership` 을
+    검증한 뒤에만 durable 기록을 `Observed(goal_cycle, target_space_id)` 로
+    승격한다(소켓 전송 자체가 일어나지 않았음이 호출 전 단계에서 증명된 경우에만
+    `Never_dispatched` 로 되돌릴 수 있다).
+  - 이전 ID·새 ID 영수증용 메모리 관측값은 호스트 재시작으로 사라져도 이 durable
+    결속 상태는 남는다. 재개(`Reopen`)는 새 `goal_cycle` 을 열고 여전히 이름
+    열기로 이어 붙는다. 관측 결속은 정리 대상 신원의 원천일 뿐 공간을 ID 로
+    되찾는 재개 수단이 아니다(§4 에서 거절한 길과 다르다).
 
 ### 완료와 재개(Reopen) 경계
 
 - Goal 이 종착 상태(`completed` — 증명 판정과 운영자 `confirm_completion` 이
   끝난 상태 — 또는 `dropped`)로 전이하면, `Workspace_goals` 전이 경로는 단순
   이름이 아니라 **`(goal_id, terminal_transition_seq, target_space_id)` 에
-  결속된 durable 정리 의도(cleanup intent)** 를 기록한다.
+  결속된 durable 정리 의도(cleanup intent)** 를 같은 Goal 잠금 아래에서 기록한다.
   - `terminal_transition_seq` 는 해당 종착 전이의 단조 증가 revision/시각이다.
   - `target_space_id` 는 그 Goal 주기가 종착되기 직전까지 관측된 실제 numeric
-    `spaceId` 다. 전이 경로는 호스트 메모리 관측값이 아니라 관측 결속 기록에서
-    이 값을 읽고, 세 갈래로 정리 의도를 만든다.
-    1. 관측 결속이 있으면 그 `target_space_id` 로 정리 의도를 기록한다.
-       호스트가 재시작해도 결속 기록에서 읽는 한 기존 공간 신원은 유지된다.
-    2. 결속 기록이 온전히 읽히고 해당 주기의 결속이 없으면, 그 주기는
-       브라우저 공간을 한 번도 열지 않은 것이다(첫 관측 때 기록이 만들어지므로
-       기록 없음 = 미관측). 닫을 공간도 없으므로 정리 의도는 즉시
+    `spaceId` 다. 전이 경로는 호스트 메모리 관측값이 아니라 해당 `goal_cycle` 의
+    durable 결속 상태를 읽고, 네 갈래 전이 규칙을 세 가지 정리 결과로 닫는다.
+    ```text
+    Never_dispatched -> persist May_have_opened(cycle) -> taskSpace(name)
+    observed(id) -> durable Observed(cycle, id)
+    terminal(Observed(cycle, id)) -> persist_intent(goal, transition_seq, cycle, id)
+    terminal(May_have_opened(cycle) | unreadable) -> Pending_identity_reconciliation
+    terminal(Never_dispatched proven) -> No_space_observed
+    ```
+    1. **`Observed(goal_cycle, target_space_id)`**: 관측 결속이 확정되어 있으므로
+       그 `target_space_id` 로 정리 의도를 기록한다. 호스트가 재시작해도 결속
+       기록에서 읽는 한 기존 공간 신원은 유지된다.
+    2. **`Never_dispatched` 확정 (저장소가 정상 읽히고 해당 `goal_cycle` 에
+       `May_have_opened` 도 `Observed` 도 없음)**: 이름 기반 `taskSpace` 디스패치
+       직전에 `May_have_opened` 를 먼저 기록하므로, 정상 읽힌 저장소에 두 기록이
+       모두 없다는 것은 이번 주기에 `taskSpace` 효과가 한 번도 나가지 않았음에
+       대한 긍정적(positive) 증명이다. 닫을 공간이 없으므로 정리 의도는 즉시
        `No_space_observed` 로 종결되며, 정리를 위해
        `taskSpace("masc-<goal_id>")` 를 이름으로 열어 새 공간을 만드는 일은
        절대 하지 않는다.
-    3. 결속 기록을 읽지 못했거나 미관측임을 긍정적으로 확정할 수 없으면(관측
-       사실이 있는데 결속이 없는 경우 포함) 신원을 확정할 수 없다. 정리 의도를
-       `Pending_identity_reconciliation` 로 미해결로 남긴다. 이 상태는 이름으로
-       새 공간을 열지 않고, 이름 조회로 붙잡은 대체 공간을 닫지도 않는다. 다음
-       실행 주기의 첫 관측 또는 운영자 판정으로만 해소한다.
+    3. **`May_have_opened(goal_cycle)` 또는 저장소 읽기 실패/손상**: 첫
+       `taskSpace(name)` 이 이미 공간을 만들었을 수 있거나(응답 유실 또는
+       `Observed` 커밋 전 크래시) 관측 여부를 확정할 수 없는 상태다. 비어 있는
+       관측값만으로 `No_space_observed` 로 종결하는 것은 금지한다. 정리 의도를
+       `Pending_identity_reconciliation` 로 미해결로 남기며, 이름에서 ID 를
+       추론하거나 이름으로 새 공간을 열지 않고, 이름 조회로 붙잡은 대체 공간을
+       닫지도 않는다. 권위 있는 결속 신원 확인 또는 운영자 판정으로만 해소한다.
 - **권한·소유권·휴지(quiescence) 확인 (`RFC-browser-live-ego` §279–312 준수)**:
   - `finish_space` 는 살아 있는 관측 클라이언트(`clientId`)와 그 클라이언트에
     결속된 numeric `target_space_id` 가 있어야만 부를 수 있다.
@@ -203,8 +232,15 @@ durable 하게 기록되는 관측 결속 하나와 종착 전이에 결속된 �
     작업을 재개한 경우, 뒤늦게 살아난 reconciler 가 예전 종착 이벤트를 보고
     현재 작업 중인 공간을 닫으면 안 된다.
   - 이를 막기 위해 `Workspace_goals` 의 `Reopen` 전이는 같은 Goal 잠금 아래에서
+    새 `goal_cycle` 을 시작(`Never_dispatched` 초기화)하면서 이전 주기의 확정된
     미결 정리 의도를 즉시 `Superseded_by_reopen` 으로 무효화(폐기)하고 전이
-    revision 을 올린다.
+    revision 을 올린다. 이전 주기가 `May_have_opened` 상태에서 종착되어 만들어진
+    `Pending_identity_reconciliation` 기록은 새 주기가 덮어쓰지 않고 별도 미해결
+    항목으로 보존하되, 이름만으로 새 주기의 공간을 닫는 권한은 절대 부여하지 않는다.
+  - 또한 `taskSpace(name)` 응답이 뒤늦게 도착해 `Observed(cycle, id)` 를 커밋하려
+    할 때도 같은 잠금 아래에서 현재 `goal_cycle` 및 `Executing` 상태를 대조하므로,
+    이미 종착되었거나 `Reopen` 으로 넘어간 옛 주기의 지연 응답이 현재 주기의 결속을
+    오염시키지 못한다.
   - 설령 reconciler 가 큐에 있던 옛 이벤트를 늦게 읽더라도, 실행 직전
     `terminal_transition_seq` 및 현재 Goal phase(`Executing`) 재확인에서
     불일치가 감지되어 `finish_space` 호출이 거부된다.
@@ -227,7 +263,7 @@ durable 하게 기록되는 관측 결속 하나와 종착 전이에 결속된 �
 | 상황 | 결과 |
 |---|---|
 | ego 앱 재시작 | 모든 Goal 공간이 사라진다. 다음 명령 때 새 공간 + 소실 보고. 페이지 복구는 ego 한계 |
-| 호스트 재시작 뒤 재관측 전 종착 | 관측 결속의 기존 ID 만 정리한다. 미관측임을 확정하지 못하면 미해결로 남기고 대체 공간을 닫지 않는다 |
+| 호스트 재시작 뒤 재관측 전 종착 | `Observed` 결속의 기존 ID 만 정리한다. `May_have_opened`(응답 유실·`Observed` 커밋 전 크래시) 또는 읽기 실패는 `Pending_identity_reconciliation` 으로 남기고, `Never_dispatched` 가 증명된 주기만 `No_space_observed` 로 종결한다 |
 | 두 Goal 공간에 동시 명령 | 간섭 없음을 측정했다(2026-10-30 프로브). 프로세스 간 차단은 같은 공간에서만 성립한다 |
 | finish 불확실 | 기존 `finish_space` 규칙 상속. 재생 금지, 파일 보존 |
 | 관리 밖 탭이 남은 Goal 공간 | `finish` 가 닫지 못하고 소유가 `user` 로 넘어간다(프로브 관찰). Goal 완료 뒤에도 공간이 남을 수 있다 |
@@ -265,14 +301,22 @@ durable 하게 기록되는 관측 결속 하나와 종착 전이에 결속된 �
 7. 회수 주체와 성공 기준: agent 공간만 사라지는 근거를 분당 관찰자(프로브 README)로
    잡는다. 소실 보고 설계는 주체와 무관하게 들어가며, 구현 뒤에는 Goal 공간 간
    타 Keeper `close_tab` 간섭 0건과 공간 교체 시 영수증 보고 누락 0건을 확인한다.
-8. 호스트 재시작 뒤 종착: Goal 주기에서 공간을 관측한 뒤 호스트가 재시작하고,
-   재관측 명령이 오기 전에 Goal 이 종착에 도달하는 시나리오. 정리 의도가 관측
-   결속의 기존 ID 에만 결속되는지, 복구 뒤 정확히 그 ID 만 정리하고 이름으로
-   새 공간을 열지 않는지 확인한다.
-9. 신원 미확정 종착: 관측 결속 기록을 읽지 못하거나 미관측임을 긍정적으로
-   확정할 수 없는 채 종착에 도달하는 시나리오. 정리 의도가
-   `Pending_identity_reconciliation` 로 남고 이름 열기와 대체 공간 닫기가
-   모두 일어나지 않는지 확인한다.
+8. 호스트 재시작 뒤 종착 (`Observed` 결속): Goal 주기에서 공간을 관측해
+   `Observed(goal_cycle, id)` 가 커밋된 뒤 호스트가 재시작하고, 재관측 명령이 오기
+   전에 Goal 이 종착에 도달하는 시나리오. 정리 의도가 관측 결속의 기존 ID 에만
+   결속되는지, 복구 뒤 정확히 그 ID 만 정리하고 이름으로 새 공간을 열지 않는지
+   확인한다.
+9. 디스패치 직후 크래시·미확정 종착 및 무디스패치 증명:
+   - (a) `May_have_opened(goal_cycle)` 기록 후 `taskSpace(name)` 이 공간을 만든
+     직후 응답 수신 전에 연결/호스트가 끊긴 뒤 재시작·종착하는 시나리오,
+   - (b) `open_space` 가 응답을 받았으나 `Observed(goal_cycle, id)` 커밋 전에
+     호스트가 크래시한 뒤 재시작·종착하는 시나리오,
+   - (c) 저장소 읽기 실패 시나리오에서 모두 `No_space_observed` 로 오판하지 않고
+     `Pending_identity_reconciliation` 로 남으며 이름 열기와 대체 공간 닫기가
+     일어나지 않는지 확인한다.
+   - (d) 반대로 해당 주기에 `taskSpace` 디스패치가 한 번도 일어나지 않아
+     `Never_dispatched` 가 증명된 주기(재시작 및 동시 종착/`Reopen` 경합 포함)만
+     `No_space_observed` 로 종결되는지 확인한다.
 
 ## 9. 순서
 

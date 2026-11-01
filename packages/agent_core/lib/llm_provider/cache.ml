@@ -55,6 +55,7 @@ let request_fingerprint
                      ; disable_parallel_tool_use
                      ; response_format
                      ; cache_system_prompt
+                     ; system_prompt_cache_prefix
                      ; cache_extended_ttl
                      ; model_capabilities_override
                      ; model_anthropic_thinking_control_override
@@ -144,6 +145,7 @@ let request_fingerprint
       ; "disable_parallel_tool_use", `Bool disable_parallel_tool_use
       ; "response_format", Types.response_format_to_json response_format
       ; "cache_system_prompt", `Bool cache_system_prompt
+      ; "system_prompt_cache_prefix", opt_json (fun s -> `String s) system_prompt_cache_prefix
       ; "cache_extended_ttl", `Bool cache_extended_ttl
       ; "keep_alive", opt_json (fun s -> `String s) keep_alive
       ; "num_ctx", opt_json (fun n -> `Int n) num_ctx

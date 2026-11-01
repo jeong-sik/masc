@@ -604,7 +604,10 @@ if control.get("fail_model") == opened["params"]["modelId"]:
     control["error"] = {"kind": "modelError", "message": "paid candidate failure", "retryable": False}
 turn = read()
 assert turn["method"] == "turn/start", turn
-assert turn["params"]["reasoningEffort"] == "high", turn
+with open(os.path.join(HERE, "turn-params.json"), "w") as handle:
+    json.dump(turn["params"], handle)
+if not control.get("record_effort_only", False):
+    assert turn["params"]["reasoningEffort"] == "high", turn
 turn_id = turn["params"]["commandId"]
 text = [part["text"] for part in turn["params"]["input"] if part["type"] == "text"][0]
 with open(os.path.join(HERE, "panel-prompt.txt"), "w") as handle:
@@ -821,6 +824,41 @@ default = "reloaded.reloaded"
     check bool "Fusion provider reset expires" false
       (Runtime_quota_window.is_exhausted ~scope:selected.quota_scope ~now:500.);
     Runtime_quota_window.reset_for_testing ())
+;;
+
+let test_muse_panel_effort_ignores_http_catalog requested () =
+  with_muse_runtime ~muse_cli:muse_panel_launcher (fun ~base_dir ->
+    let selected = match Runtime.get_runtime_by_id muse_runtime_id with
+      | Some runtime -> { runtime with Runtime_instance.model =
+          {runtime.model with reasoning_effort=requested} }
+      | None -> fail "Muse fixture missing" in
+    write_file ~path:(Filename.concat base_dir "fixture-control.json") ~perm:0o600
+      {|{"record_effort_only":true}|};
+    let previous_catalog = Llm_provider.Model_catalog.global () in
+    Fun.protect ~finally:(fun () -> match previous_catalog with
+      | None -> Llm_provider.Model_catalog.clear_global ()
+      | Some catalog -> Llm_provider.Model_catalog.set_global catalog) @@ fun () ->
+    let source = {|[[models]]
+model_id = "muse-spark-1.3"
+accepted_reasoning_efforts = ["low"]
+|} in
+    (match Llm_provider.Model_catalog.of_toml_string ~source:"Muse Fusion effort collision" source with
+     | Error detail -> fail detail
+     | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
+    (match Llm_provider.Capabilities.for_model_id "muse-spark-1.3" with
+     | Some caps -> check bool "conflicting HTTP ladder is actually loaded" true
+         (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])
+     | None -> fail "the colliding bare catalog row is missing");
+    (match in_eio_context (fun () -> Masc.Fusion_official_client.run_with_images
+       ~images:[] ~base_dir ~runtime:selected ~system_prompt:"" ~prompt:"ping" ()) with
+     | Ok response -> check string "the actual panel turn completed" "MUSE_PANEL_ANSWER" response.text
+     | Error failure -> fail (Masc.Fusion_official_client.failure_detail ~runtime_id:muse_runtime_id failure));
+    let params = Yojson.Safe.from_file (Filename.concat base_dir "turn-params.json") in
+    let fields = match params with `Assoc fields -> fields | _ -> fail "turn params are not an object" in
+    check (option string) "MSP receives the selected tier, or no member"
+      (Option.map (fun effort -> Yojson.Safe.to_string
+        (`String (Llm_provider.Reasoning_effort.to_string effort))) requested)
+      (Option.map Yojson.Safe.to_string (List.assoc_opt "reasoningEffort" fields)))
 ;;
 
 (* A Muse Code panelist's session works in a fresh empty directory, not in
@@ -2019,7 +2057,15 @@ let test_sweep_retains_orphaned_antigravity_process_group () =
 let () =
   run
     "fusion official-client panel"
-    [ ( "panelist routing"
+    [ ( "MSP reasoning authority"
+      , List.map (fun requested ->
+          let label = match requested with
+            | None -> "omission"
+            | Some effort -> Llm_provider.Reasoning_effort.to_string effort in
+          test_case ("panel " ^ label ^ " ignores a colliding HTTP ladder") `Quick
+            (test_muse_panel_effort_ignores_http_catalog requested))
+          [None; Some Llm_provider.Reasoning_effort.None_; Some Low; Some Max] )
+    ; ( "panelist routing"
       , [ test_case "vendor token usage conventions" `Quick
             test_official_client_usage_preserves_vendor_cache_conventions
         ; test_case

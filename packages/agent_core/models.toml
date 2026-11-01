@@ -3791,6 +3791,10 @@ supports_parallel_tool_calls = true
 # 06:00-10:00, but the row declares the top-level price like every other row.
 # The disable rung is real: reasoning_effort "none" answered 200 with 0
 # reasoning tokens, and basic and tool_choice required (get_weather) answered 200.
+# GET https://openrouter.ai/api/v1/models reports supported_efforts
+# [max, high, low, none] for this exact id (checked 2026-11-01).
+# https://openrouter.ai/docs/guides/best-practices/reasoning-tokens defines
+# these as the model's accepted efforts; other depths are not declared here.
 [[models]]
 model_id = "deepseek/deepseek-v4.1-flash-1017"
 provider_name = "openrouter"
@@ -3802,7 +3806,7 @@ output_per_million = 1.2
 reasoning_output_format = "split_reasoning_fields"
 reasoning_streaming_format = "delta_details:reasoning"
 reasoning_replay = "drop_without_tool"
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+accepted_reasoning_efforts = ["none", "low", "high", "max"]
 thinking_control_format = "reasoning_effort"
 supports_seed = true
 supports_parallel_tool_calls = false
@@ -4133,6 +4137,10 @@ supports_image_input = false
 # get_weather answered 200, and effort "none" billed 0 reasoning tokens. The
 # gateway lists image input and no parallel_tool_calls, top_k or min_p, so the
 # row lowers those and keeps the image claim.
+# GET https://openrouter.ai/api/v1/models omits supported_efforts and
+# default_enabled for this id (checked 2026-11-01). The reasoning-token docs
+# define omitted supported_efforts as no effort selection. Retain only the
+# measured disable rung; absent effort still leaves the provider default alone.
 [[models]]
 model_id = "nvidia/nemotron-3.5-super-vl:free"
 provider_name = "openrouter"
@@ -4144,7 +4152,7 @@ output_per_million = 0.0
 reasoning_output_format = "split_reasoning_fields"
 reasoning_streaming_format = "delta_details:reasoning"
 reasoning_replay = "drop_without_tool"
-accepted_reasoning_efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+accepted_reasoning_efforts = ["none"]
 thinking_control_format = "reasoning_effort"
 supports_seed = true
 supports_parallel_tool_calls = false

@@ -1173,6 +1173,60 @@ let test_openrouter_rows_retain_measured_effort_evidence () =
     openrouter_disable_probe_rows
 ;;
 
+(* GET /api/v1/models, checked 2026-11-01: DeepSeek 1017 exposes four accepted
+   efforts. Nemotron exposes no depth selection; its retained 2026-10-28 probe
+   verifies only disable. Neither row needs a synthetic effort for omission. *)
+let test_openrouter_refreshed_efforts_reach_the_wire () =
+  let module Config = Llm_provider.Provider_config in
+  let module Effort = Llm_provider.Reasoning_effort in
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter effort wire"
+  in
+  with_clean_model_catalog_override (fun () ->
+    Model_catalog.set_global catalog;
+    List.iter
+      (fun (model_id, accepted) ->
+         let config ?enable_thinking ?reasoning_effort () =
+           Config.make ~kind:OpenAI_compat ~provider_id:"openrouter" ~model_id
+             ~base_url:"https://openrouter.ai/api/v1" ~max_tokens:1024
+             ?enable_thinking ?reasoning_effort ()
+         in
+         let body config =
+           check bool (model_id ^ " request is admitted") true
+             (Result.is_ok (Llm_provider.Complete_common.validate_all config));
+           Llm_provider.Backend_openai.build_request ~config ~messages:[] ()
+           |> Yojson.Safe.from_string
+         in
+         List.iter
+           (fun effort ->
+              let request = body (config ~reasoning_effort:effort ()) in
+              check string (model_id ^ " encodes its accepted effort")
+                (Effort.to_string effort)
+                Yojson.Safe.Util.(request |> member "reasoning_effort" |> to_string))
+           accepted;
+         List.iter
+           (fun effort ->
+              let config = config ~reasoning_effort:effort () in
+              (match Config.validate_reasoning_effort_request_typed config with
+               | Error (Config.Unsupported_reasoning_effort { accepted = actual; _ }) ->
+                   check (list string) (model_id ^ " refuses depth outside its contract")
+                     (List.map Effort.to_string accepted) (List.map Effort.to_string actual)
+               | Error rejection -> fail (Config.reasoning_effort_request_rejection_to_message rejection)
+               | Ok () -> failf "%s admitted unsupported %s" model_id (Effort.to_string effort));
+              check bool (model_id ^ " rejects before completion dispatch") true
+                (Result.is_error (Llm_provider.Complete_common.validate_all config)))
+           (List.filter (fun effort -> not (List.mem effort accepted)) Effort.all);
+         let omitted = body (config ()) in
+         check bool (model_id ^ " leaves omitted effort absent") false
+           (List.mem_assoc "reasoning_effort" (Yojson.Safe.Util.to_assoc omitted));
+         let disabled = body (config ~enable_thinking:false ~reasoning_effort:Effort.High ()) in
+         check string (model_id ^ " explicit disable overrides depth") "none"
+           Yojson.Safe.Util.(disabled |> member "reasoning_effort" |> to_string))
+      [ "deepseek/deepseek-v4.1-flash-1017", [Effort.None_; Effort.Low; Effort.High; Effort.Max]
+      ; "nvidia/nemotron-3.5-super-vl:free", [Effort.None_]
+      ])
+;;
+
 (* F422: the six single-value capability vocab parsers answered [""] with
    [Some <default>], so an empty string was the one unknown value that never
    failed closed. The [_of_string] assertions below fail on origin/main
@@ -1308,6 +1362,10 @@ let () =
             "OpenRouter rows retain measured effort evidence"
             `Quick
             test_openrouter_rows_retain_measured_effort_evidence
+        ; test_case
+            "OpenRouter refreshed efforts reach the wire"
+            `Quick
+            test_openrouter_refreshed_efforts_reach_the_wire
         ; test_case
             "empty capability vocab value is rejected"
             `Quick

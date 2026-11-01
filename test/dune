@@ -2165,9 +2165,14 @@
  (modules test_dashboard_goals_trust_reads)
  (libraries masc_test_deps))
 
+; Exercise the private immutable state with its production source and interface
+; without publishing it from masc.server.
+(copy_files ../lib/server/server_full_health_refresh_state.ml)
+(copy_files ../lib/server/server_full_health_refresh_state.mli)
+
 (test
  (name test_server_runtime_bootstrap)
- (modules test_server_runtime_bootstrap)
+ (modules test_server_runtime_bootstrap server_full_health_refresh_state)
  (libraries
   masc_test_deps
   masc_test_runtime

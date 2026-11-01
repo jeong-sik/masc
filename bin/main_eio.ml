@@ -4831,21 +4831,7 @@ let setup_cmd =
        ~doc:"Prepare imp's sandbox, start imp, and open its workspace.")
     Term.(ret (const run $ run_base_path $ port_argument $ no_tui $ sandbox_profile $ microvm_backend $ network_mode))
 
-let setup_gc () =
-  (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
-     main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
-     parsing and metric encoding, with many domains parked waiting for STW.
-     Bumping the per-domain minor heap reduces the frequency of those
-     parallel pauses.  We only override when the operator has not set
-     OCAMLRUNPARAM so existing tuning instructions remain authoritative. *)
-  match Sys.getenv_opt "OCAMLRUNPARAM" with
-  | Some _ -> ()
-  | None ->
-      let gc = Gc.get () in
-      let desired_minor_words = 4 * 1024 * 1024 in
-      (* 4M words ~= 32 MiB on 64-bit *)
-      if gc.minor_heap_size < desired_minor_words then
-        Gc.set { gc with minor_heap_size = desired_minor_words }
+let setup_gc () = Minor_heap.tune ()
 
 (* Internal elevation endpoint: no workspace, login, or model initialization. *)
 let sandbox_install_apple_verified_cmd =

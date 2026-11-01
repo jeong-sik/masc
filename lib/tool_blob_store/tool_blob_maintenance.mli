@@ -11,6 +11,14 @@
     live as history media; it names a blob but is not a manifest, so it adds
     no children. No other blob content is parsed or treated as an ownership
     edge.
+    The arbitrary input of a decoded History ToolUse, the JSON payload of
+    decoded History/Keeper tool results, and a tool-call receipt's input are
+    opaque to history-media recognition, including inside nested lists. Their
+    ordinary [type="stored"] data are not media ownership. Reserved artifact
+    markers and [_blob] references remain authoritative in those payloads.
+    Unrecognized envelopes retain the generic reference scan. A reference that
+    its existing codec recognizes as malformed still aborts before deletion;
+    this is not complete validation of every durable-owner schema.
     Trajectory previews, repository mirrors, build products, operator config,
     and unrelated observational logs are not blob consumers and are never
     traversed. A new durable consumer must be added to this registry in the

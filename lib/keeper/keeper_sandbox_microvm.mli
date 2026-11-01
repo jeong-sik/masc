@@ -791,14 +791,18 @@ val release_apple_work_volume_claim :
   -> claimant:string
   -> apple_volume_claim_release
 (** Release [claimant]'s claim, and delete both volumes only when that claim
-    was the last one and no container references the keeper. One helper
-    reads the marker, filters the claim out and rewrites it, so no other
-    helper can land a claim between the read and the write; the release
-    helper runs even when owner containers are present, so a dissolved
-    workspace never leaves its claim behind. When ours was the last claim
-    and owners are present, the helper's removal of the marker file stands
-    and the volumes stay with [Kept_for_containers]; when deletion is
-    decided the marker is not rewritten again -- it dies with the volume.
+    was the last one and a readable owner listing shows no container
+    referencing the keeper. One helper reads the marker, filters the claim
+    out and rewrites it, so no other helper can land a claim between the
+    read and the write; the release helper runs even when owner containers
+    are present and even when the owner listing itself fails, so a
+    dissolved workspace never leaves its claim behind. On an unreadable
+    listing the claim is still released but nothing is ever deleted -- the
+    outcome is [Skipped_unverified] naming both the listing failure and
+    what the claim's release did. When ours was the last claim and owners
+    are present, the helper's removal of the marker file stands and the
+    volumes stay with [Kept_for_containers]; when deletion is decided the
+    marker is not rewritten again -- it dies with the volume.
     [Kept_for_claimants] carries the claimants that remain, and every
     refusal or failure is [Skipped_unverified] with its detail; the volumes
     are kept in all of those cases. *)

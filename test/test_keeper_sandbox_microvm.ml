@@ -2261,6 +2261,41 @@ let test_release_releases_our_claim_but_keeps_volumes_for_containers () =
      Alcotest.failf "a shared claim is a keep, not a skip: %s" detail)
 ;;
 
+(* An unreadable owner listing still releases the claim -- dissolution is
+   one-shot, and this workspace will not come back to release it -- and
+   never deletes: the volumes are kept by not deleting, and the skip names
+   both the listing failure and what the release did. *)
+let test_release_releases_the_claim_when_the_owner_listing_fails () =
+  let outcome, sent =
+    run_claim_release
+      ~keeper_name:"unlisted"
+      ~containers:(Unix.WEXITED 1, "", "container system is not running")
+      ~helper:(Unix.WEXITED 0, "released-last\n", "")
+      ~volumes:(Unix.WEXITED 0, "[]", "")
+      ()
+  in
+  (match outcome with
+   | M.Skipped_unverified detail ->
+     Alcotest.(check bool) "the unreadable listing is named" true
+       (Astring.String.is_infix ~affix:"microvm_volume_claims_inventory_failed" detail);
+     Alcotest.(check bool) "the skip says owner evidence was unavailable" true
+       (Astring.String.is_infix ~affix:"microvm_volume_release_owner_unverified" detail)
+   | M.Removed -> Alcotest.fail "an unreadable owner listing must not delete"
+   | M.Kept_for_claimants claimants ->
+     Alcotest.failf "expected a skip naming the listing failure, got kept for %s"
+       (String.concat ", " claimants)
+   | M.Kept_for_containers owners ->
+     Alcotest.failf "expected a skip naming the listing failure, got kept for %s"
+       (String.concat ", " owners));
+  Alcotest.(check bool) "the release helper ran and released the claim" true
+    (List.exists
+       (fun argv ->
+          List.exists (String.equal "run") argv
+          && adjacent ~flag:"--env" ~value:"MASC_VOLUME_CLAIMANT=/ws/retiring" argv)
+       sent);
+  Alcotest.(check (list string)) "no volume delete is sent" [] (deleted_volume_names sent)
+;;
+
 let test_add_records_and_refuses_a_present_helper () =
   let sent = ref [] in
   let run_with_containers containers ~timeout_sec:_ argv =
@@ -5683,6 +5718,8 @@ let () =
             test_release_skips_on_legacy_absent_and_unreadable_and_foreign_markers
         ; Alcotest.test_case "release releases our claim but keeps volumes for containers" `Quick
             test_release_releases_our_claim_but_keeps_volumes_for_containers
+        ; Alcotest.test_case "release releases the claim when the owner listing fails" `Quick
+            test_release_releases_the_claim_when_the_owner_listing_fails
         ; Alcotest.test_case "add records a claim and refuses a present helper" `Quick
             test_add_records_and_refuses_a_present_helper
         ; Alcotest.test_case "recreate shares the work volume's commands" `Quick

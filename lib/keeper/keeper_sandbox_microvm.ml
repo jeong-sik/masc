@@ -2401,17 +2401,21 @@ type apple_volume_claim_release =
   | Skipped_unverified of string
 
 (* Release one workspace's claim; the volumes are deleted only when nothing
-   else wants them. The release helper always runs when the owner listing
-   is readable -- a dissolved workspace must not leave its claim behind
-   just because another workspace's guest still holds the volume, or the
-   marker would name a workspace that can never come back to release it.
-   One helper reads the marker, filters our claim out and rewrites it: the
-   read and the write are one container, so no other helper can land a
-   claim between them. Deletion needs both our claim being the last one
-   and no owner container; in that case the marker dies with the volume
-   and is not rewritten again. Other claimants, owner containers, a legacy
-   volume with no marker, an unreadable marker, or any helper failure all
-   keep the volumes, and the outcome says which.
+   else wants them. The release helper always runs -- with owner containers
+   present, and even when the owner listing itself fails. A dissolved
+   workspace must not leave its claim behind: dissolution is one-shot, and a
+   workspace that never comes back would keep the marker naming it forever.
+   The claim is only this workspace's expression of interest, so removing it
+   is safe; on an unreadable listing the volumes are kept by never deleting,
+   and a leftover with no claims is re-validated by the reclamation tool's
+   own listing. One helper reads the marker, filters our claim out and
+   rewrites it: the read and the write are one container, so no other helper
+   can land a claim between them. Deletion needs both our claim being the
+   last one and a readable owner listing with no owner container; in that
+   case the marker dies with the volume and is not rewritten again. Other
+   claimants, owner containers, a legacy volume with no marker, an
+   unreadable marker, or any helper failure all keep the volumes, and the
+   outcome says which.
 
    Residual window, documented rather than leased: between the owner
    listing and the helper or the deletes, another workspace can boot the
@@ -2431,50 +2435,92 @@ let release_apple_work_volume_claim ~run ~timeout_sec ~keeper_name ~volume_name 
          "microvm_volume_claimant_invalid: base path %S cannot be matched against claims"
          claimant)
   else
+    let status, stdout, stderr =
+      run ~timeout_sec
+        (apple_volume_claim_release_argv ~keeper_name ~volume_name ~image ~claimant)
+    in
+    let report = volume_claim_helper_report_of_output stdout in
     match apple_keeper_owner_containers ~run ~timeout_sec ~keeper_name with
-    | Error detail -> skipped detail
-    | Ok owners ->
-      let status, stdout, stderr =
-        run ~timeout_sec
-          (apple_volume_claim_release_argv ~keeper_name ~volume_name ~image ~claimant)
+    | Error listing_detail ->
+      let unverified detail =
+        skipped
+          (Printf.sprintf
+             "microvm_volume_release_owner_unverified: the owner listing failed (%s); %s"
+             listing_detail detail)
       in
-      match (status, volume_claim_helper_report_of_output stdout) with
-      | Unix.WEXITED 0, Claims_marker_absent ->
-        skipped
-          "microvm_volume_claims_absent: legacy volume without a claims marker; ownership \
-           is not provable"
-      | Unix.WEXITED 0, Claimant_not_present ->
-        skipped
-          (Printf.sprintf
-             "microvm_volume_claims_not_claimed: %s holds no recorded claim on %s"
-             claimant volume_name)
-      | Unix.WEXITED 0, Kept_with_claimants claimants -> Kept_for_claimants claimants
-      | Unix.WEXITED 0, Released_last_claim ->
-        (match owners with
-         | [] ->
-           (match remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name with
-            | Ok () -> Removed
-            | Error detail -> skipped ("microvm_volume_removal_unconfirmed: " ^ detail))
-         | _ :: _ -> Kept_for_containers owners)
-      | Unix.WEXITED 0, Report_unrecognized word ->
-        skipped
-          (Printf.sprintf
-             "microvm_volume_claims_unrecognized: claims helper %s reported %S (%s)"
-             (volume_claim_helper_name ~keeper_name)
-             word
-             (output_for_log ~stdout ~stderr))
-      | ( ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status)
-        , ( Claims_marker_absent
-          | Claimant_not_present
-          | Released_last_claim
-          | Kept_with_claimants _
-          | Report_unrecognized _ ) ) ->
-        skipped
-          (Printf.sprintf
-             "microvm_volume_claim_helper_failed: %s (%s; %s)"
-             (volume_claim_helper_name ~keeper_name)
-             (Keeper_sandbox_exec_failure.status_label status)
-             (output_for_log ~stdout ~stderr))
+      (match (status, report) with
+       | Unix.WEXITED 0, Claims_marker_absent ->
+         unverified "no claims marker, so no claim of this workspace remained anyway"
+       | Unix.WEXITED 0, Claimant_not_present ->
+         unverified
+           (Printf.sprintf
+              "%s held no recorded claim on the volume"
+              claimant)
+       | Unix.WEXITED 0, Kept_with_claimants claimants ->
+         unverified
+           (Printf.sprintf
+              "this workspace's claim was released; %d other claimant(s) remain: %s"
+              (List.length claimants)
+              (String.concat ", " claimants))
+       | Unix.WEXITED 0, Released_last_claim ->
+         unverified
+           "this workspace's claim was the last one and the marker was removed; the \
+            volumes are kept because no owner evidence could be read"
+       | Unix.WEXITED 0, Report_unrecognized word ->
+         unverified
+           (Printf.sprintf
+              "the claims helper reported %S, so the claim's release is unconfirmed (%s)"
+              word
+              (output_for_log ~stdout ~stderr))
+       | ( ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as failure_status)
+         , ( Claims_marker_absent
+           | Claimant_not_present
+           | Released_last_claim
+           | Kept_with_claimants _
+           | Report_unrecognized _ ) ) ->
+         unverified
+           (Printf.sprintf
+              "the claims helper failed (%s; %s), so the claim's release is unconfirmed"
+              (Keeper_sandbox_exec_failure.status_label failure_status)
+              (output_for_log ~stdout ~stderr)))
+    | Ok owners ->
+      (match (status, report) with
+       | Unix.WEXITED 0, Claims_marker_absent ->
+         skipped
+           "microvm_volume_claims_absent: legacy volume without a claims marker; ownership \
+            is not provable"
+       | Unix.WEXITED 0, Claimant_not_present ->
+         skipped
+           (Printf.sprintf
+              "microvm_volume_claims_not_claimed: %s holds no recorded claim on %s"
+              claimant volume_name)
+       | Unix.WEXITED 0, Kept_with_claimants claimants -> Kept_for_claimants claimants
+       | Unix.WEXITED 0, Released_last_claim ->
+         (match owners with
+          | [] ->
+            (match remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name with
+             | Ok () -> Removed
+             | Error detail -> skipped ("microvm_volume_removal_unconfirmed: " ^ detail))
+          | _ :: _ -> Kept_for_containers owners)
+       | Unix.WEXITED 0, Report_unrecognized word ->
+         skipped
+           (Printf.sprintf
+              "microvm_volume_claims_unrecognized: claims helper %s reported %S (%s)"
+              (volume_claim_helper_name ~keeper_name)
+              word
+              (output_for_log ~stdout ~stderr))
+       | ( ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status)
+         , ( Claims_marker_absent
+           | Claimant_not_present
+           | Released_last_claim
+           | Kept_with_claimants _
+           | Report_unrecognized _ ) ) ->
+         skipped
+           (Printf.sprintf
+              "microvm_volume_claim_helper_failed: %s (%s; %s)"
+              (volume_claim_helper_name ~keeper_name)
+              (Keeper_sandbox_exec_failure.status_label status)
+              (output_for_log ~stdout ~stderr)))
 ;;
 
 (** Recreate the build volume fresh on every boot rather than reusing one

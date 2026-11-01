@@ -938,9 +938,11 @@ been read.
 
 `keeper_image_read` supplies original image pixels to the current model, without
 invoking a second model. Provide exactly one `artifact` handle returned by a
-Keeper image/screenshot tool, or a `path` in the Keeper's own sandbox. Attachment
-IDs, tool-blob references and bare SHA-256 values are not these Keeper-local
-image handles; do not pass them as `artifact`. The tool uses
+Keeper image/screenshot tool, or a `path` in the Keeper's own sandbox. These
+image handles are 64-character lowercase SHA-256 content hashes. Reuse the exact
+returned `artifact` value; an attachment ID, tool-blob reference or unrelated
+digest alone does not establish that the image is present in this Keeper's image
+store. The tool uses
 the same path boundary as `Read`, verifies stored hashes and applies the existing
 image size and media-type limits. A successful read retains a rotating browser
 frame so its handle remains readable.

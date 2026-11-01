@@ -121,25 +121,9 @@ let decision_rows_of_state (state : state) =
     | Not_read -> [Home_agenda, "Goal confirmations not read · inspect sources"]
     | Read_failed _ -> [Home_agenda, "Goal confirmations unavailable · inspect sources"]
   in
-  let tasks = match state.operator_stalled with
-    | Masc_tui_agenda.Read_failed _ -> [Home_agenda, "Operator tasks unavailable · inspect sources"]
-    | Not_read -> [Home_agenda, "Operator tasks not read · inspect sources"]
-    | Read rows ->
-        List.map (fun (row : Masc_tui_agenda.stalled) ->
-          let id = clean row.task_id in
-          let what = clean row.what in
-          let detail =
-            if String.starts_with ~prefix:(id ^ ":") what
-               || String.starts_with ~prefix:(id ^ " · ") what
-            then what
-            else Printf.sprintf "%s · %s" id what
-          in
-          Home_request (Home_operator_task row.task_id),
-          Printf.sprintf "Operator task · %s" detail) rows
-  in
   (* Equality is kind plus authoritative request ID, never a Keeper/task
      grouping key. Distinct calls belonging to one Keeper remain distinct. *)
-  ordered_decision_rows (approval_rows @ questions @ goals @ tasks @ approvals)
+  ordered_decision_rows (approval_rows @ questions @ goals @ approvals)
 
 let clear_ask_answering state =
   state.ask_answer_mode <- Ask_browsing;
@@ -154,7 +138,7 @@ let reconcile_home_request_detail state =
   | Some request ->
       let expected_surface = match request with
         | Home_held_call _ | Home_gate_request _ | Home_operator_request _ | Home_question _ -> Approvals
-        | Home_goal_confirmation _ | Home_operator_task _ -> Planning
+        | Home_goal_confirmation _ -> Planning
       in
       if state.view <> expected_surface then begin
         state.home_opened_request <- None;
@@ -175,14 +159,14 @@ let reconcile_home_request_detail state =
                  | List_not_read _ -> true
                  | List_read -> false)
          | Home_held_call _ | Home_gate_request _ | Home_operator_request _
-         | Home_goal_confirmation _ | Home_operator_task _ -> false)
+         | Home_goal_confirmation _ -> false)
       then ()
       else if not (List.exists (fun (action, _) -> equal_home_action action (Home_request request))
                      (decision_rows_of_state state)) then begin
         (match request with
           | Home_question _ -> clear_ask_answering state
           | Home_held_call _ | Home_gate_request _ | Home_operator_request _
-          | Home_goal_confirmation _ | Home_operator_task _ -> ());
+          | Home_goal_confirmation _ -> ());
         state.home_opened_request <- None;
         state.approval_detail_open <- false;
         state.pending_approval_action <- None;
@@ -208,7 +192,6 @@ let reconcile_home_request_detail state =
                       (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id)
                       (planning_visible_goals ~filter:state.planning_filter
                          ~sort:state.planning_sort planning.pl_goals)))
-        | Home_operator_task task_id -> state.task_detail_id <- Some task_id
 
 let continue_rows_of_state (state : state) =
   let last =
@@ -292,7 +275,6 @@ let initial_reading_ready state selected =
   | Some Home_approvals -> approvals_reading_current state
   | Some (Home_choose_keeper | Home_create_keeper) ->
       approvals_reading_current state
-      && (match state.operator_stalled with Masc_tui_agenda.Read _ -> true | Not_read | Read_failed _ -> false)
       && (match state.goals_to_confirm with
         | Masc_tui_agenda.Read _ -> true
         | Masc_tui_agenda.Not_read | Read_failed _ -> false)

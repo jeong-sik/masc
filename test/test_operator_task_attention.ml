@@ -1,8 +1,5 @@
-(** The list of tasks whose only exit belongs to the operator.
-
-    Every row here is a task that cannot move on its own: work held by a name
-    that will never act again, or a producer whose Keeper record does not
-    decode. The fixtures build those states the way production reaches them. *)
+(** Task owner Keeper-route observations. A missing queue alone does not
+    establish that an external session is gone. *)
 module D = Masc_domain
 module W = Workspace_core
 module Attention = Masc.Operator_task_attention
@@ -123,30 +120,46 @@ let test_a_completion_is_not_the_operators_row () =
     Alcotest.(check int) "a completion is nobody's operator row" 0
       (List.length (project config)))
 
-(* The route is the same one the rejection delivery computes: a name with a
-   live registry entry or a Keeper meta file can still act, and a name with
-   neither cannot. *)
-let test_only_work_with_no_actor_is_listed () =
+(* The route is the same one rejection delivery computes: a name with a
+   registry entry or Keeper meta can receive delivery through a Keeper. *)
+let test_only_tasks_without_a_keeper_route_are_listed () =
   with_workspace (fun config ->
     persist_keeper config live_keeper;
     add_task config ~title:"held by a Keeper that is still there";
-    add_task config ~title:"held by a session that is gone";
+    add_task config ~title:"held by a session without a Keeper queue";
     set_status config ~task_id:"task-001"
       ~status:(in_progress ~assignee:live_keeper ~started_at:"2026-09-03T00:00:00Z");
     set_status config ~task_id:"task-002"
       ~status:(in_progress ~assignee:vanished ~started_at:"2026-09-04T00:00:00Z");
     match project config with
-    | [ Attention.Held_without_actor { task_id; title; assignee; since } as item ] ->
-      Alcotest.(check string) "the abandoned task is the row" "task-002" task_id;
-      Alcotest.(check string) "carries the task title" "held by a session that is gone" title;
+    | [ Attention.Held_without_keeper_route { task_id; title; assignee; since } as item ] ->
+      Alcotest.(check string) "the task without a route is the row" "task-002" task_id;
+      Alcotest.(check string) "carries the task title" "held by a session without a Keeper queue" title;
       Alcotest.(check string) "named by who holds it" vanished assignee;
       Alcotest.(check string) "waiting since it started" "2026-09-04T00:00:00Z" since;
       Alcotest.(check string) "summary names id, title, and holder"
-        "task-002 · held by a session that is gone: held by codex-mcp-client, which has no Keeper queue"
+        "task-002 · held by a session without a Keeper queue: held by codex-mcp-client, which has no Keeper queue"
         (Attention.summary item)
     | items ->
       Alcotest.failf "a live Keeper's task is not an operator row (got %d rows)"
         (List.length items))
+
+let test_an_active_session_without_a_keeper_queue_is_only_a_route_observation () =
+  with_workspace (fun config ->
+    let assignee = "codex-active-session" in
+    ignore (Workspace_lifecycle.bind_session config ~agent_name:assignee ~capabilities:[] ());
+    let agents, _ = Workspace_query.get_active_agents_observed config in
+    Alcotest.(check bool) "the external session is active" true
+      (List.exists (fun (agent : D.agent) -> String.equal agent.name assignee) agents);
+    add_task config ~title:"work held by an active external session";
+    set_status config ~task_id:"task-001"
+      ~status:(in_progress ~assignee ~started_at:"2026-09-03T00:00:00Z");
+    match project config with
+    | [ Attention.Held_without_keeper_route { assignee = observed; _ } as item ] ->
+      Alcotest.(check string) "the route observation retains the owner" assignee observed;
+      Alcotest.(check string) "suggest inspecting the owner before recovery"
+        "inspect the task owner before choosing recovery" (Attention.next_step item)
+    | items -> Alcotest.failf "expected one missing route, got %d" (List.length items))
 
 (* A file at the meta path this binary cannot decode is a Keeper whose record
    needs repair, not a Keeper that is gone. Folding the two together would put
@@ -167,8 +180,7 @@ let test_an_undecodable_keeper_record_is_its_own_row () =
     | items ->
       Alcotest.failf "an undecodable record is its own row, got %d" (List.length items))
 
-(* The longest wait is the row that has gone unanswered the longest, and a
-   surface that draws a few draws those. *)
+(* The earliest claim/start remains first. *)
 let test_rows_are_oldest_first () =
   with_workspace (fun config ->
     add_task config ~title:"abandoned later";
@@ -207,8 +219,10 @@ let () =
             test_a_holders_cancel_is_not_an_operator_row
         ; Alcotest.test_case "a completion is not an operator row" `Quick
             test_a_completion_is_not_the_operators_row
-        ; Alcotest.test_case "only work with no actor is listed" `Quick
-            test_only_work_with_no_actor_is_listed
+        ; Alcotest.test_case "only tasks without a Keeper route are listed" `Quick
+            test_only_tasks_without_a_keeper_route_are_listed
+        ; Alcotest.test_case "an active external session can lack a Keeper route" `Quick
+            test_an_active_session_without_a_keeper_queue_is_only_a_route_observation
         ; Alcotest.test_case "an undecodable keeper record is its own row" `Quick
             test_an_undecodable_keeper_record_is_its_own_row
         ; Alcotest.test_case "rows are oldest first" `Quick test_rows_are_oldest_first

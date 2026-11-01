@@ -1,5 +1,5 @@
 type item =
-  | Held_without_actor of
+  | Held_without_keeper_route of
       { task_id : string
       ; title : string
       ; assignee : string
@@ -14,17 +14,17 @@ type item =
       }
 
 let task_id = function
-  | Held_without_actor { task_id; _ }
+  | Held_without_keeper_route { task_id; _ }
   | Producer_record_unreadable { task_id; _ } -> task_id
 ;;
 
 let title = function
-  | Held_without_actor { title; _ }
+  | Held_without_keeper_route { title; _ }
   | Producer_record_unreadable { title; _ } -> title
 ;;
 
 let waiting_since = function
-  | Held_without_actor { since; _ } | Producer_record_unreadable { since; _ } -> since
+  | Held_without_keeper_route { since; _ } | Producer_record_unreadable { since; _ } -> since
 ;;
 
 let task_label ~task_id ~title =
@@ -35,7 +35,7 @@ let task_label ~task_id ~title =
 ;;
 
 let summary = function
-  | Held_without_actor { task_id; title; assignee; _ } ->
+  | Held_without_keeper_route { task_id; title; assignee; _ } ->
     Printf.sprintf
       "%s: held by %s, which has no Keeper queue"
       (task_label ~task_id ~title)
@@ -49,21 +49,18 @@ let summary = function
 ;;
 
 let next_step = function
-  | Held_without_actor _ -> "masc_operator_task_recovery_resolve"
+  | Held_without_keeper_route _ -> "inspect the task owner before choosing recovery"
   | Producer_record_unreadable _ -> "repair the Keeper record, then this resolves itself"
 ;;
 
-(* The route is resolved through the same computation the rejection delivery
-   uses, so a name this list calls actorless is exactly a name a verdict cannot
-   be delivered to. Asking a second way — comparing against the live registry
-   alone, say — would let the list and the delivery disagree about the same
-   agent, and the disagreement would show as a Task that the list says is fine
-   and delivery says is unreachable. *)
+(* Rejection delivery uses the same route. A missing Keeper queue means that
+   delivery cannot reach this name; it does not prove that a session holding
+   the Task has stopped or that an operator decision was requested. *)
 let classify_held ~config ~task_id ~title ~assignee ~since =
   match Keeper_producer_route.resolve ~config assignee with
   | Ok (Keeper_producer_route.Keeper _) -> None
   | Ok Keeper_producer_route.No_keeper ->
-    Some (Held_without_actor { task_id; title; assignee; since })
+    Some (Held_without_keeper_route { task_id; title; assignee; since })
   | Error detail ->
     Some (Producer_record_unreadable { task_id; title; producer = assignee; since; detail })
 ;;
@@ -81,10 +78,7 @@ let project ~(config : Workspace_utils_backend_setup.config) tasks =
          classify_held ~config ~task_id:task.id ~title:task.title ~assignee ~since
        | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None)
     tasks
-  (* Oldest first: the longest wait is the row that has gone unanswered the
-     longest, and a surface that shows only a few shows those. [stable_sort]
-     so two rows stamped the same second keep backlog order rather than
-     swapping between reads. *)
+  (* Keep the oldest claims first, with stable order for equal timestamps. *)
   |> List.stable_sort (fun left right ->
     String.compare (waiting_since left) (waiting_since right))
 ;;

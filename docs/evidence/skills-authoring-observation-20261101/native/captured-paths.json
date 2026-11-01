@@ -1,0 +1,7 @@
+{
+  "artifacts/skills-completion-audit-20261101/native-26e-testlog/ci-run-tests.log": "4faf0fbd29bfd5448519cc0a494b5eaa275a6d1bdf8c991fefcc35cfb88bbdf6",
+  "artifacts/skills-completion-audit-20261101/native-inline-completed.json": "1905d5e7132344d28af57c30ab800fb9cebed952f1e1c6b3a22b8142b66cb266",
+  "artifacts/skills-completion-audit-20261101/native-inline-admission-rejected.json": "39dffe56679e4bbfd6767ca1c47ae42f1813163d143b207582f71997b1ddf591",
+  "artifacts/skills-completion-audit-20261101/native-async-completed.json": "adf720b694b2c171cf656448daccc3cfad6c659646f3606fbf43bd17472f1c7b",
+  "artifacts/skills-completion-audit-20261101/native-producer-proof-index.json": "486fac1ecce9f3c21b2bc2471b888ccf62a2dc5022967a2b72c0326a682ad522"
+}

@@ -1,0 +1,361 @@
+{
+  "schema": "masc.nested-observation-proof/v1",
+  "execution": "inline",
+  "rejected_child": false,
+  "success": true,
+  "source": "---\nname: nested-read\ndescription: Inspect independent lane profiles with exact fixed bindings.\n---\n\n```toml composition\n[[compositions]]\nname = \"nested-read\"\nexecution = \"inline\"\nbranch_failure_policy = \"continue_independent\"\n[[compositions.nodes]]\nid = \"lane-a\"\ntool = \"keeper_lane_status\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n[[compositions.nodes]]\nid = \"lane-b\"\ntool = \"keeper_lane_status\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n[[compositions.exports]]\nname = \"profile\"\nnode = \"lane-a\"\npointer = \"/profile\"\n```\n",
+  "reference": {
+    "identity": {
+      "source_id": "fixture",
+      "package_id": "nested-read",
+      "name": "nested-read"
+    },
+    "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8"
+  },
+  "recipe": {
+    "nodes": [
+      {
+        "id": "left",
+        "skill_reference": {
+          "identity": {
+            "source_id": "fixture",
+            "package_id": "nested-read",
+            "name": "nested-read"
+          },
+          "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8"
+        },
+        "args": {}
+      },
+      {
+        "id": "right",
+        "skill_reference": {
+          "identity": {
+            "source_id": "fixture",
+            "package_id": "nested-read",
+            "name": "nested-read"
+          },
+          "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8"
+        },
+        "args": {}
+      }
+    ],
+    "branch_failure_policy": "continue_independent",
+    "exports": [
+      {
+        "name": "answer",
+        "node": "left",
+        "pointer": "/profile"
+      }
+    ]
+  },
+  "result": {
+    "composition_run_id": "01a1965c-779a-7000-9ccd-6fc6b6c917b1",
+    "run_artifact": {
+      "_blob": {
+        "sha256": "c7585f8b134fd9a895bfb734999770a16b00965dd5ae6a6c67970f888c76f51f",
+        "bytes": 1366,
+        "mime": "application/vnd.masc.tool-result-manifest+json",
+        "preview": ""
+      }
+    },
+    "draft": {
+      "_blob": {
+        "sha256": "c3608e0ab4edc97da476891e6107e93d0b39f4a17a51e19ea7cd186966781069",
+        "bytes": 12964,
+        "mime": "application/vnd.masc.tool-result-manifest+json",
+        "preview": ""
+      }
+    },
+    "composition_tool": "keeper_composition_run",
+    "tool_kind": "composition",
+    "nested_scopes": [
+      {
+        "scope": {
+          "alias": "left",
+          "reference": {
+            "identity": {
+              "source_id": "fixture",
+              "package_id": "nested-read",
+              "name": "nested-read"
+            },
+            "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8"
+          },
+          "arguments": {
+            "kind": "fixed",
+            "value": {}
+          },
+          "scope": {
+            "kind": "inline",
+            "node_mapping": [
+              {
+                "source": "lane-a",
+                "expanded": "[\"left\",\"lane-a\"]"
+              },
+              {
+                "source": "lane-b",
+                "expanded": "[\"left\",\"lane-b\"]"
+              }
+            ]
+          },
+          "exports": [
+            {
+              "name": "profile",
+              "node": "[\"left\",\"lane-a\"]",
+              "pointer": "/profile"
+            }
+          ]
+        },
+        "admission": {
+          "skill_tool_use_id": "composition-skill:[\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\",\"run-nested\",\"left\"]",
+          "activation": {
+            "identity": {
+              "source_id": "fixture",
+              "package_id": "nested-read",
+              "name": "nested-read"
+            },
+            "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8",
+            "snapshot_revision": "c9e0c2a33469ffc166ba4a5798135ea8f7c4214ce2b8399cbdb6234b85018ccc",
+            "turn_ref": "trace-nested-public#1",
+            "runtime_id": "fixture.runtime",
+            "skill_tool_use_id": "composition-skill:[\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\",\"run-nested\",\"left\"]",
+            "agent_core_turn": 1,
+            "invocation": {
+              "kind": "nested_composition",
+              "origin": {
+                "kind": "task_composition",
+                "task_ids": [
+                  "task-nested"
+                ]
+              },
+              "tool_name": "keeper_composition_run",
+              "scope": {
+                "parent_tool_use_id": "run-nested",
+                "composition_run_id": "01a1965c-779a-7000-9ccd-6fc6b6c917b1",
+                "alias": "left"
+              }
+            },
+            "delivery": null,
+            "actions": [],
+            "activated_at": "2026-11-01T09:06:44Z"
+          },
+          "activation_frame_sha256": "765bcdb195269bd35637fab65d474ae181298d90910aa2449238870aa99ccb69"
+        },
+        "disposition": "completed",
+        "cause": null,
+        "nodes": [
+          {
+            "source": "lane-a",
+            "node_id": "[\"left\",\"lane-a\"]",
+            "settled": true,
+            "disposition": "completed",
+            "tool_use_id": "composition:36:01a1965c-779a-7000-9ccd-6fc6b6c917b1:10:run-nested:17:[\"left\",\"lane-a\"]",
+            "failure_effect_disposition": null,
+            "output_validation_error": null
+          },
+          {
+            "source": "lane-b",
+            "node_id": "[\"left\",\"lane-b\"]",
+            "settled": true,
+            "disposition": "completed",
+            "tool_use_id": "composition:36:01a1965c-779a-7000-9ccd-6fc6b6c917b1:10:run-nested:17:[\"left\",\"lane-b\"]",
+            "failure_effect_disposition": null,
+            "output_validation_error": null
+          }
+        ],
+        "exports": {
+          "profile": {
+            "available": true,
+            "value": "docker"
+          }
+        }
+      },
+      {
+        "scope": {
+          "alias": "right",
+          "reference": {
+            "identity": {
+              "source_id": "fixture",
+              "package_id": "nested-read",
+              "name": "nested-read"
+            },
+            "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8"
+          },
+          "arguments": {
+            "kind": "fixed",
+            "value": {}
+          },
+          "scope": {
+            "kind": "inline",
+            "node_mapping": [
+              {
+                "source": "lane-a",
+                "expanded": "[\"right\",\"lane-a\"]"
+              },
+              {
+                "source": "lane-b",
+                "expanded": "[\"right\",\"lane-b\"]"
+              }
+            ]
+          },
+          "exports": [
+            {
+              "name": "profile",
+              "node": "[\"right\",\"lane-a\"]",
+              "pointer": "/profile"
+            }
+          ]
+        },
+        "admission": {
+          "skill_tool_use_id": "composition-skill:[\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\",\"run-nested\",\"right\"]",
+          "activation": {
+            "identity": {
+              "source_id": "fixture",
+              "package_id": "nested-read",
+              "name": "nested-read"
+            },
+            "content_revision": "45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8",
+            "snapshot_revision": "c9e0c2a33469ffc166ba4a5798135ea8f7c4214ce2b8399cbdb6234b85018ccc",
+            "turn_ref": "trace-nested-public#1",
+            "runtime_id": "fixture.runtime",
+            "skill_tool_use_id": "composition-skill:[\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\",\"run-nested\",\"right\"]",
+            "agent_core_turn": 1,
+            "invocation": {
+              "kind": "nested_composition",
+              "origin": {
+                "kind": "task_composition",
+                "task_ids": [
+                  "task-nested"
+                ]
+              },
+              "tool_name": "keeper_composition_run",
+              "scope": {
+                "parent_tool_use_id": "run-nested",
+                "composition_run_id": "01a1965c-779a-7000-9ccd-6fc6b6c917b1",
+                "alias": "right"
+              }
+            },
+            "delivery": null,
+            "actions": [],
+            "activated_at": "2026-11-01T09:06:44Z"
+          },
+          "activation_frame_sha256": "6a28b9b742e106761cca08e6acb8d5c81635e6e103b4608829a8be80eea96b00"
+        },
+        "disposition": "completed",
+        "cause": null,
+        "nodes": [
+          {
+            "source": "lane-a",
+            "node_id": "[\"right\",\"lane-a\"]",
+            "settled": true,
+            "disposition": "completed",
+            "tool_use_id": "composition:36:01a1965c-779a-7000-9ccd-6fc6b6c917b1:10:run-nested:18:[\"right\",\"lane-a\"]",
+            "failure_effect_disposition": null,
+            "output_validation_error": null
+          },
+          {
+            "source": "lane-b",
+            "node_id": "[\"right\",\"lane-b\"]",
+            "settled": true,
+            "disposition": "completed",
+            "tool_use_id": "composition:36:01a1965c-779a-7000-9ccd-6fc6b6c917b1:10:run-nested:18:[\"right\",\"lane-b\"]",
+            "failure_effect_disposition": null,
+            "output_validation_error": null
+          }
+        ],
+        "exports": {
+          "profile": {
+            "available": true,
+            "value": "docker"
+          }
+        }
+      }
+    ],
+    "exports": {
+      "answer": {
+        "available": true,
+        "value": "docker"
+      }
+    },
+    "nodes": [
+      {
+        "node_id": "[\"left\",\"lane-a\"]",
+        "execution_id": "exec-1793524004763-000d",
+        "execution_origin": "fresh_dispatch",
+        "tool_name": "keeper_lane_status",
+        "settled": true,
+        "disposition": "completed",
+        "schedule": {
+          "planned_index": 0,
+          "batch_index": 0,
+          "batch_size": 4,
+          "execution_mode": "concurrent"
+        },
+        "output_validation_error": null,
+        "failure_effect_disposition": null,
+        "deferred_kind": null
+      },
+      {
+        "node_id": "[\"left\",\"lane-b\"]",
+        "execution_id": "exec-1793524004763-000e",
+        "execution_origin": "fresh_dispatch",
+        "tool_name": "keeper_lane_status",
+        "settled": true,
+        "disposition": "completed",
+        "schedule": {
+          "planned_index": 1,
+          "batch_index": 0,
+          "batch_size": 4,
+          "execution_mode": "concurrent"
+        },
+        "output_validation_error": null,
+        "failure_effect_disposition": null,
+        "deferred_kind": null
+      },
+      {
+        "node_id": "[\"right\",\"lane-a\"]",
+        "execution_id": "exec-1793524004763-000f",
+        "execution_origin": "fresh_dispatch",
+        "tool_name": "keeper_lane_status",
+        "settled": true,
+        "disposition": "completed",
+        "schedule": {
+          "planned_index": 2,
+          "batch_index": 0,
+          "batch_size": 4,
+          "execution_mode": "concurrent"
+        },
+        "output_validation_error": null,
+        "failure_effect_disposition": null,
+        "deferred_kind": null
+      },
+      {
+        "node_id": "[\"right\",\"lane-b\"]",
+        "execution_id": "exec-1793524004763-0010",
+        "execution_origin": "fresh_dispatch",
+        "tool_name": "keeper_lane_status",
+        "settled": true,
+        "disposition": "completed",
+        "schedule": {
+          "planned_index": 3,
+          "batch_index": 0,
+          "batch_size": 4,
+          "execution_mode": "concurrent"
+        },
+        "output_validation_error": null,
+        "failure_effect_disposition": null,
+        "deferred_kind": null
+      }
+    ],
+    "execution_artifact": {
+      "_blob": {
+        "sha256": "56b58493252c2f023ff222322e663d6fe86ed6cd3106d4361b6e90872d36d9ba",
+        "bytes": 24010,
+        "mime": "application/vnd.masc.tool-result-manifest+json",
+        "preview": ""
+      }
+    }
+  },
+  "provider_content": "{\"structured_content\":{\"composition_run_id\":\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\",\"run_artifact\":{\"_blob\":{\"sha256\":\"c7585f8b134fd9a895bfb734999770a16b00965dd5ae6a6c67970f888c76f51f\",\"bytes\":1366,\"mime\":\"application/vnd.masc.tool-result-manifest+json\",\"preview\":\"\"}},\"draft\":{\"_blob\":{\"sha256\":\"c3608e0ab4edc97da476891e6107e93d0b39f4a17a51e19ea7cd186966781069\",\"bytes\":12964,\"mime\":\"application/vnd.masc.tool-result-manifest+json\",\"preview\":\"\"}},\"composition_tool\":\"keeper_composition_run\",\"tool_kind\":\"composition\",\"nested_scopes\":[{\"scope\":{\"alias\":\"left\",\"reference\":{\"identity\":{\"source_id\":\"fixture\",\"package_id\":\"nested-read\",\"name\":\"nested-read\"},\"content_revision\":\"45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8\"},\"arguments\":{\"kind\":\"fixed\",\"value\":{}},\"scope\":{\"kind\":\"inline\",\"node_mapping\":[{\"source\":\"lane-a\",\"expanded\":\"[\\\"left\\\",\\\"lane-a\\\"]\"},{\"source\":\"lane-b\",\"expanded\":\"[\\\"left\\\",\\\"lane-b\\\"]\"}]},\"exports\":[{\"name\":\"profile\",\"node\":\"[\\\"left\\\",\\\"lane-a\\\"]\",\"pointer\":\"/profile\"}]},\"admission\":{\"skill_tool_use_id\":\"composition-skill:[\\\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\\\",\\\"run-nested\\\",\\\"left\\\"]\",\"activation\":{\"identity\":{\"source_id\":\"fixture\",\"package_id\":\"nested-read\",\"name\":\"nested-read\"},\"content_revision\":\"45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8\",\"snapshot_revision\":\"c9e0c2a33469ffc166ba4a5798135ea8f7c4214ce2b8399cbdb6234b85018ccc\",\"turn_ref\":\"trace-nested-public#1\",\"runtime_id\":\"fixture.runtime\",\"skill_tool_use_id\":\"composition-skill:[\\\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\\\",\\\"run-nested\\\",\\\"left\\\"]\",\"agent_core_turn\":1,\"invocation\":{\"kind\":\"nested_composition\",\"origin\":{\"kind\":\"task_composition\",\"task_ids\":[\"task-nested\"]},\"tool_name\":\"keeper_composition_run\",\"scope\":{\"parent_tool_use_id\":\"run-nested\",\"composition_run_id\":\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\",\"alias\":\"left\"}},\"delivery\":null,\"actions\":[],\"activated_at\":\"2026-11-01T09:06:44Z\"},\"activation_frame_sha256\":\"765bcdb195269bd35637fab65d474ae181298d90910aa2449238870aa99ccb69\"},\"disposition\":\"completed\",\"cause\":null,\"nodes\":[{\"source\":\"lane-a\",\"node_id\":\"[\\\"left\\\",\\\"lane-a\\\"]\",\"settled\":true,\"disposition\":\"completed\",\"tool_use_id\":\"composition:36:01a1965c-779a-7000-9ccd-6fc6b6c917b1:10:run-nested:17:[\\\"left\\\",\\\"lane-a\\\"]\",\"failure_effect_disposition\":null,\"output_validation_error\":null},{\"source\":\"lane-b\",\"node_id\":\"[\\\"left\\\",\\\"lane-b\\\"]\",\"settled\":true,\"disposition\":\"completed\",\"tool_use_id\":\"composition:36:01a1965c-779a-7000-9ccd-6fc6b6c917b1:10:run-nested:17:[\\\"left\\\",\\\"lane-b\\\"]\",\"failure_effect_disposition\":null,\"output_validation_error\":null}],\"exports\":{\"profile\":{\"available\":true,\"value\":\"docker\"}}},{\"scope\":{\"alias\":\"right\",\"reference\":{\"identity\":{\"source_id\":\"fixture\",\"package_id\":\"nested-read\",\"name\":\"nested-read\"},\"content_revision\":\"45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8\"},\"arguments\":{\"kind\":\"fixed\",\"value\":{}},\"scope\":{\"kind\":\"inline\",\"node_mapping\":[{\"source\":\"lane-a\",\"expanded\":\"[\\\"right\\\",\\\"lane-a\\\"]\"},{\"source\":\"lane-b\",\"expanded\":\"[\\\"right\\\",\\\"lane-b\\\"]\"}]},\"exports\":[{\"name\":\"profile\",\"node\":\"[\\\"right\\\",\\\"lane-a\\\"]\",\"pointer\":\"/profile\"}]},\"admission\":{\"skill_tool_use_id\":\"composition-skill:[\\\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\\\",\\\"run-nested\\\",\\\"right\\\"]\",\"activation\":{\"identity\":{\"source_id\":\"fixture\",\"package_id\":\"nested-read\",\"name\":\"nested-read\"},\"content_revision\":\"45eb9509e7073bac18e4e997e9e5bf6288889364e6dc5103e53e3317b823dfe8\",\"snapshot_revision\":\"c9e0c2a33469ffc166ba4a5798135ea8f7c4214ce2b8399cbdb6234b85018ccc\",\"turn_ref\":\"trace-nested-public#1\",\"runtime_id\":\"fixture.runtime\",\"skill_tool_use_id\":\"composition-skill:[\\\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\\\",\\\"run-nested\\\",\\\"right\\\"]\",\"agent_core_turn\":1,\"invocation\":{\"kind\":\"nested_composition\",\"origin\":{\"kind\":\"task_composition\",\"task_ids\":[\"task-nested\"]},\"tool_name\":\"keeper_composition_run\",\"scope\":{\"parent_tool_use_id\":\"run-nested\",\"composition_run_id\":\"01a1965c-779a-7000-9ccd-6fc6b6c917b1\",\"alias\":\"right\"}},\"delivery\":null,\"actions\":[],\"activated_at\":\"2026-11-01T09:06:44Z\"},\"activation_frame_sha256\":\"6a28b9b742e106761cca08e6acb8d5c81635e6e103b4608829a8be80eea96b00\"},\"disposition\":\"completed\",\"cause\":null,\"nodes\":[{\"source\":\"lane-a\",\"node_id\":\"[\\\"right\\\",\\\"lane-a\\\"]\",\"settled\":true,\"disposition\":\"completed\",\"tool_use_id\":\"composition:36:01a1965c-779a-7000-9ccd-6fc6b6c917b1:10:run-nested:18:[\\\"right\\\",\\\"lane-a\\\"]\",\"failure_effect_disposition\":null,\"output_validation_error\":null},{\"source\":\"lane-b\",\"node_id\":\"[\\\"right\\\",\\\"lane-b\\\"]\",\"settled\":true,\"disposition\":\"completed\",\"tool_use_id\":\"composition:36:01a1965c-779a-7000-9ccd-6fc6b6c917b1:10:run-nested:18:[\\\"right\\\",\\\"lane-b\\\"]\",\"failure_effect_disposition\":null,\"output_validation_error\":null}],\"exports\":{\"profile\":{\"available\":true,\"value\":\"docker\"}}}],\"exports\":{\"answer\":{\"available\":true,\"value\":\"docker\"}},\"nodes\":[{\"node_id\":\"[\\\"left\\\",\\\"lane-a\\\"]\",\"execution_id\":\"exec-1793524004763-000d\",\"execution_origin\":\"fresh_dispatch\",\"tool_name\":\"keeper_lane_status\",\"settled\":true,\"disposition\":\"completed\",\"schedule\":{\"planned_index\":0,\"batch_index\":0,\"batch_size\":4,\"execution_mode\":\"concurrent\"},\"output_validation_error\":null,\"failure_effect_disposition\":null,\"deferred_kind\":null},{\"node_id\":\"[\\\"left\\\",\\\"lane-b\\\"]\",\"execution_id\":\"exec-1793524004763-000e\",\"execution_origin\":\"fresh_dispatch\",\"tool_name\":\"keeper_lane_status\",\"settled\":true,\"disposition\":\"completed\",\"schedule\":{\"planned_index\":1,\"batch_index\":0,\"batch_size\":4,\"execution_mode\":\"concurrent\"},\"output_validation_error\":null,\"failure_effect_disposition\":null,\"deferred_kind\":null},{\"node_id\":\"[\\\"right\\\",\\\"lane-a\\\"]\",\"execution_id\":\"exec-1793524004763-000f\",\"execution_origin\":\"fresh_dispatch\",\"tool_name\":\"keeper_lane_status\",\"settled\":true,\"disposition\":\"completed\",\"schedule\":{\"planned_index\":2,\"batch_index\":0,\"batch_size\":4,\"execution_mode\":\"concurrent\"},\"output_validation_error\":null,\"failure_effect_disposition\":null,\"deferred_kind\":null},{\"node_id\":\"[\\\"right\\\",\\\"lane-b\\\"]\",\"execution_id\":\"exec-1793524004763-0010\",\"execution_origin\":\"fresh_dispatch\",\"tool_name\":\"keeper_lane_status\",\"settled\":true,\"disposition\":\"completed\",\"schedule\":{\"planned_index\":3,\"batch_index\":0,\"batch_size\":4,\"execution_mode\":\"concurrent\"},\"output_validation_error\":null,\"failure_effect_disposition\":null,\"deferred_kind\":null}],\"execution_artifact\":{\"_blob\":{\"sha256\":\"56b58493252c2f023ff222322e663d6fe86ed6cd3106d4361b6e90872d36d9ba\",\"bytes\":24010,\"mime\":\"application/vnd.masc.tool-result-manifest+json\",\"preview\":\"\"}}},\"artifact_manifest\":{\"_blob\":{\"sha256\":\"31efb9bd35ae048e58c10f45c5dc78abb6b562404d0fd9204bc3df43af369076\",\"bytes\":13995,\"mime\":\"application/vnd.masc.tool-result-manifest+json\",\"preview\":\"\"}}}",
+  "request_record": null,
+  "status_response": null
+}

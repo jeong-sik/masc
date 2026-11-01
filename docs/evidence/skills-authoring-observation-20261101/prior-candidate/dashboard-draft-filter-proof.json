@@ -1,0 +1,10 @@
+{
+  "at": "2026-11-01T05:28:56.275Z",
+  "dashboard_source_commit": "3832592eea019048729fdd9422324144ee00744e",
+  "server_source_commit": "1d9a9eb21f0ce5491f2e50a1509ff65dd527e904",
+  "scope": "Actual Dashboard editor state through filter hide/restore; not candidate-server identity proof",
+  "draft_hidden_by_filter": true,
+  "draft_restored_exact": true,
+  "published_file_unchanged": true,
+  "draft_sha256": "7e1c2016399a7175cad8f92ad31ef1ae08767ca95fbb77788c5649bfdbd7d30a"
+}

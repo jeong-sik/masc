@@ -1,0 +1,65 @@
+{
+  "source_commit": "f41185329e3d9b8778b8053ef44a4ce37597fb8f",
+  "wire_authoring_source_commit": "3832592eea019048729fdd9422324144ee00744e",
+  "compiled_head": "fcfd8d6484401d34344454e6dc84fc6dc902c65c",
+  "integrated_commit": "e2492b345dc5f322868b15ec22c7e7b014df629f",
+  "manually_seeded_retained_fixture": true,
+  "real_model_execution": false,
+  "live_deployed_by_task": false,
+  "files": [
+    {
+      "path": "dashboard-f411-final-history-statistics.png",
+      "bytes": 244752,
+      "sha256": "f48c7a4efd16ec4196bf1b3f6fc73579bc5acf38f01f03e5366d23a1a71e5f80",
+      "original_index_match": true
+    },
+    {
+      "path": "dashboard-f411-final-node-input-output.png",
+      "bytes": 200290,
+      "sha256": "e5f64751687d7851caffc187552c263aec21e131bbc00e099070eaccb4174ef9",
+      "original_index_match": true
+    },
+    {
+      "path": "dashboard-f411-final-composition-preview.png",
+      "bytes": 237137,
+      "sha256": "70c372fdfc23fad9ca1b69d8ac9ca3f931fcd53e9e54d4cb1ff156145139aeb2",
+      "original_index_match": true
+    },
+    {
+      "path": "tui-f411-final-direct.png",
+      "bytes": 190795,
+      "sha256": "fcfdd7cf1a8d3cb61c28925b32706bbb0fd3852f92f3ca3dc4c79b510ee85e52",
+      "original_index_match": true
+    },
+    {
+      "path": "tui-f411-final-failure-node-evidence.png",
+      "bytes": 138738,
+      "sha256": "7a69bee63114e0d754593667a1ba8e9235e8f086f8da9ef15c5deb2800e5f0e0",
+      "original_index_match": true
+    },
+    {
+      "path": "dashboard-f411-authoring-preview-proof.json",
+      "bytes": 740,
+      "sha256": "f06b5c26f6f4bf3ccc0d54c0ebb6e50c35bc58c28c596dc4ea67ca742194f7c2",
+      "original_index_match": true
+    },
+    {
+      "path": "tui-authoring-roundtrip-proof.json",
+      "bytes": 1147,
+      "sha256": "c2d56ce76d2f6c53ab70745be12fa68b2eab7d35c300881eced77709b10115f8",
+      "original_index_match": true
+    },
+    {
+      "path": "wire-after-fix-proof.json",
+      "bytes": 3196,
+      "sha256": "a29c899d2c6fe98dbf67688353743db625ffe2ce6f2a0a9c719b90d2dafa7d87",
+      "original_index_match": true
+    },
+    {
+      "path": "dashboard-draft-filter-proof.json",
+      "bytes": 479,
+      "sha256": "e644c1fdbbf8710c68458f8913497af5173d8db039e35661217eac558bfc5892",
+      "original_index_match": true
+    }
+  ]
+}

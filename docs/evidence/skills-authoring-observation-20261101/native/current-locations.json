@@ -1,0 +1,37 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Retain actual controlled native Test41291355669 stdout and parsed proof derivatives. Original bytes and captured path meanings remain unchanged.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "captured-paths.json",
+    "sha256": "bbf85527a9872eed1b5df8719c9725220c7edde7a23ecb00ddcb141b732b9f90"
+  },
+  "files": {
+    "docs/evidence/skills-authoring-observation-20261101/native/ci-run-tests.log": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/native-26e-testlog/ci-run-tests.log",
+      "recorded_sha256": "4faf0fbd29bfd5448519cc0a494b5eaa275a6d1bdf8c991fefcc35cfb88bbdf6",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/native/native-inline-completed.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/native-inline-completed.json",
+      "recorded_sha256": "1905d5e7132344d28af57c30ab800fb9cebed952f1e1c6b3a22b8142b66cb266",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/native/native-inline-admission-rejected.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/native-inline-admission-rejected.json",
+      "recorded_sha256": "39dffe56679e4bbfd6767ca1c47ae42f1813163d143b207582f71997b1ddf591",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/native/native-async-completed.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/native-async-completed.json",
+      "recorded_sha256": "adf720b694b2c171cf656448daccc3cfad6c659646f3606fbf43bd17472f1c7b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/skills-authoring-observation-20261101/native/native-producer-proof-index.json": {
+      "recorded_path": "artifacts/skills-completion-audit-20261101/native-producer-proof-index.json",
+      "recorded_sha256": "486fac1ecce9f3c21b2bc2471b888ccf62a2dc5022967a2b72c0326a682ad522",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

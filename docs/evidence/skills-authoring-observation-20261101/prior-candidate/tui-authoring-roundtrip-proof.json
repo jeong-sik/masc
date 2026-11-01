@@ -1,0 +1,16 @@
+{
+  "source_commit": "3832592eea019048729fdd9422324144ee00744e",
+  "verified_at": "2026-11-01T05:40:00.990123+00:00",
+  "surface": "actual native TUI \u2192 explicit proof-second source choice \u2192 real system vi \u2192 create/publish/readback",
+  "package_id": "tui-proof-instruction",
+  "selected_source_id": "proof-second",
+  "published_path": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/skills-observability-20261101/artifacts/skills-observability-20261101/proof-base-164/second-skills/tui-proof-instruction/SKILL.md",
+  "pasted_source_file": "tui-proof-instruction-draft.md",
+  "editor_added_final_newline": true,
+  "exact_editor_result_matches_file": true,
+  "first_source_has_package": false,
+  "sha256": "7675b9b3596a0677cf31545817588619a6e9001770cc1c14495488caeab97b9e",
+  "catalog_read_http_status": 200,
+  "no_real_keeper_execution": true,
+  "transient_connection_note": "Workspace unconfirmed was observed on editor return through the QA recorder. Its cause was not isolated. A manual read r restored connected status and all three published profiles. The native created-and-published receipt is retained in raw PTY."
+}

@@ -1,0 +1,22 @@
+{
+  "verified_at": "2026-11-01T06:09:18.347166+00:00",
+  "candidate_source": "f41185329e3d9b8778b8053ef44a4ce37597fb8f",
+  "action": "Actual Dashboard read-only composition preview",
+  "execution": "async",
+  "branch_failure_policy": "continue_independent",
+  "ordered_nodes": [
+    "observe",
+    "confirm"
+  ],
+  "dependency": "confirm after observe",
+  "export": {
+    "name": "lane_profile",
+    "node": "confirm",
+    "pointer": "/profile"
+  },
+  "generated_source_receipt": "dashboard-f411-authoring-preview-source-details.json",
+  "screen": "dashboard-f411-final-composition-preview.png",
+  "package_absent_in_both_roots": true,
+  "keeper_turns": 0,
+  "scope": "No publish or model execution; manually configured isolated runtime"
+}

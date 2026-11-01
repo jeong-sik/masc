@@ -1,0 +1,170 @@
+{
+  "schema": "masc.tui-usage-seam-proof.v1",
+  "command": "python3 docs/evidence/2026-11-01-tui-usage-refresh-seam/run.py --output artifacts/p3-feature-detail-20261101/usage-seam-retained-run",
+  "source_head": "ea7f321488112e20f09edec5a229d817b320dd98",
+  "full_tui_top": "74756f56e61a92d8d64250e9ed7552ad165645c4",
+  "baseline": "61b4d5531d44cb780dff64158fdbf7d641f1658f",
+  "compiler": "5.5.1",
+  "helper_sha256": {
+    "run.py": "c3ae19547f60c40ef2d6b9343df43543dfd76e641b954cbd07de70068cb28038",
+    "types-prefix.ml": "358e819f0a111269baef737f0a6268ce9b4ca38f7eaa89fb4024d6358c1de5aa",
+    "state-adapter.ml": "8131eaff82abd772d52bca69f4588e627062ea89f78f98ccf44d74cd10e862ef",
+    "seam-adapters.ml": "ab143d340fb147a64f25921c7c8c14bf4607c0737b3b2a2e6c524bc81435f331",
+    "checks.ml": "e2dc205f98fcb19a7fbeedfd92f2d506b3165676b90c7d17b6a1645e105b4f79",
+    "README.md": "6cb7bd08a5a4f429d8d3ddae6821ee34a19412466e22c7907a60eee5746dce78"
+  },
+  "target_sources": [
+    {
+      "commit": "ea7f321488112e20f09edec5a229d817b320dd98",
+      "path": "bin/masc_tui.ml",
+      "lines": [
+        16956,
+        17063
+      ],
+      "sha256": "d12dd7b7c374b73fc1deace5d2af6f7b85ad99a85efe1d3974863efa7f499d07",
+      "start": "let start_http_scoped_refresh state",
+      "stop": "\nlet start_scoped_refresh_followup",
+      "identical_at_top": "74756f56e61a92d8d64250e9ed7552ad165645c4"
+    },
+    {
+      "commit": "ea7f321488112e20f09edec5a229d817b320dd98",
+      "path": "bin/masc_tui.ml",
+      "lines": [
+        32841,
+        32847
+      ],
+      "sha256": "41332cf22538abf4e3911e37b2dae3d4d9665cac9ea3ff39aefcefae35942487",
+      "start": "        | Some (\"w\" | \"W\")\n",
+      "stop": "       (* In chat, printable keys",
+      "identical_at_top": "74756f56e61a92d8d64250e9ed7552ad165645c4"
+    },
+    {
+      "commit": "ea7f321488112e20f09edec5a229d817b320dd98",
+      "path": "bin/masc_tui_types.ml",
+      "lines": [
+        276,
+        286
+      ],
+      "sha256": "cd8dfeaa1589edfb47fb142e63dcc767c95f43bea885b0ce4934348d7d190170",
+      "start": "module Surface_read_source = struct",
+      "stop": "\n(** Logical full-refresh readers",
+      "identical_at_top": "74756f56e61a92d8d64250e9ed7552ad165645c4"
+    },
+    {
+      "commit": "ea7f321488112e20f09edec5a229d817b320dd98",
+      "path": "bin/masc_tui_types.ml",
+      "lines": [
+        4251,
+        4281
+      ],
+      "sha256": "8db2722b2f986ab7ef7ee624df85794f234fde791521da3503c1b1113184f51e",
+      "start": "type surface_needs = {",
+      "stop": "\n(* Each datum is read",
+      "identical_at_top": "74756f56e61a92d8d64250e9ed7552ad165645c4"
+    },
+    {
+      "commit": "ea7f321488112e20f09edec5a229d817b320dd98",
+      "path": "bin/masc_tui_types.ml",
+      "lines": [
+        4391,
+        4391
+      ],
+      "sha256": "26ee222e6556295b5d7bf86a3323f3b5f00aa54477d245cb246a2a8289c75ed1",
+      "start": "let surface_needs_any needs",
+      "stop": "\n(* Full and navigation reads",
+      "identical_at_top": "74756f56e61a92d8d64250e9ed7552ad165645c4"
+    },
+    {
+      "commit": "ea7f321488112e20f09edec5a229d817b320dd98",
+      "path": "bin/masc_tui_types.ml",
+      "lines": [
+        4396,
+        4520
+      ],
+      "sha256": "1469d95091e5882ad5e5831179cc061bf9c2d04e2a29549d14f5b43397cdbd09",
+      "start": "module Surface_read_order : sig",
+      "stop": "\n(* Dispatch is intent",
+      "identical_at_top": "74756f56e61a92d8d64250e9ed7552ad165645c4"
+    },
+    {
+      "commit": "ea7f321488112e20f09edec5a229d817b320dd98",
+      "path": "bin/masc_tui_types.ml",
+      "lines": [
+        4563,
+        4572
+      ],
+      "sha256": "315026b5f8fc7cd73828028ce0a9b24afdbb73b3aa86cedc643b892133020d70",
+      "start": "module Http_refresh_order = struct",
+      "stop": "\n(** Display-only result",
+      "identical_at_top": "74756f56e61a92d8d64250e9ed7552ad165645c4"
+    },
+    {
+      "commit": "ea7f321488112e20f09edec5a229d817b320dd98",
+      "path": "bin/masc_tui_types.ml",
+      "lines": [
+        569,
+        574
+      ],
+      "sha256": "77044c7b56bd55c24796398be3399a3eea138f6cf1f4c5c9459493d2aba4e753",
+      "start": "let server_is_booting\n",
+      "stop": "\ntype workspace_authority",
+      "identical_at_top": "74756f56e61a92d8d64250e9ed7552ad165645c4"
+    },
+    {
+      "commit": "ea7f321488112e20f09edec5a229d817b320dd98",
+      "path": "bin/masc_tui_types.ml",
+      "lines": [
+        668,
+        677
+      ],
+      "sha256": "942844d4b9b8d8773615c93b296fe3ec2083ff7967a3df177ddc3ac0e0bc2a2e",
+      "start": "let server_workspace_matches ~expected",
+      "stop": "\n(* What the paths alone say",
+      "identical_at_top": "74756f56e61a92d8d64250e9ed7552ad165645c4"
+    },
+    {
+      "commit": "ea7f321488112e20f09edec5a229d817b320dd98",
+      "path": "bin/masc_tui_types.ml",
+      "lines": [
+        17260,
+        17269
+      ],
+      "sha256": "d514ac241b7ab1a0f89a07e6faf892c95f2ab7b4300dc558f61152606cf89c7a",
+      "start": "let cycle_usage_history_window",
+      "stop": "\nlet usage_history_reading",
+      "identical_at_top": "74756f56e61a92d8d64250e9ed7552ad165645c4"
+    }
+  ],
+  "artifact_run": "artifacts/p3-feature-detail-20261101/usage-seam-retained-run",
+  "output_sha256": {
+    "result.json": "f170316d8ab7242fc027fef9ba1c5a9f68f773ebce244687c8444e21dcb7edf9",
+    "source-manifest.json": "0a353574c41c42fe35f3625ebcc0ccf6a48755009ddc6c4a4db83edd808863b3",
+    "baseline/result.txt": "71857bf78223de5f6271259ce1513641d3c99d2078f1ce9ec691634cda40f4ab",
+    "candidate/result.txt": "97e0e24d82387aa2ee0fa9464e54a9894f5d559609b7ad906a5fc8db1f8b3743",
+    "miswired-needs/result.txt": "71857bf78223de5f6271259ce1513641d3c99d2078f1ce9ec691634cda40f4ab",
+    "baseline/compile.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "candidate/compile.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "miswired-needs/compile.txt": "6d8b46c2187b925b4a4a18c26524e2b5eac33aa8be05f78211c50f44ab2654bb"
+  },
+  "results": {
+    "base": "61b4d5531d44cb780dff64158fdbf7d641f1658f",
+    "head": "ea7f321488112e20f09edec5a229d817b320dd98",
+    "top": "74756f56e61a92d8d64250e9ed7552ad165645c4",
+    "exit_codes": {
+      "baseline": 1,
+      "candidate": 0,
+      "miswired-needs": 1
+    },
+    "expected": {
+      "baseline": 1,
+      "candidate": 0,
+      "miswired-needs": 1
+    }
+  },
+  "captured_output": {
+    "baseline": "FAIL actual lowercase w arm and HTTP launch: actual key arm must dispatch a scoped collector\nFAIL actual uppercase W arm and HTTP launch: actual key arm must dispatch a scoped collector\n",
+    "candidate": "PASS actual lowercase w arm and HTTP launch\nPASS actual uppercase W arm and HTTP launch\nPASS overlapping full/scoped generation and captured ABA periods\nPASS authority refusal 0\nPASS authority refusal 1\nPASS authority refusal 2\nPASS authority refusal 3\nPASS authority refusal 4\nPASS telemetry key guard\nPASS synchronous launch cleanup\n",
+    "miswired-needs": "FAIL actual lowercase w arm and HTTP launch: actual key arm must dispatch a scoped collector\nFAIL actual uppercase W arm and HTTP launch: actual key arm must dispatch a scoped collector\n"
+  },
+  "scope": "README.md"
+}

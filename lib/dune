@@ -4,7 +4,6 @@
  (flags :standard)
  (public_name masc)
  (private_modules
-  board_snapshot_batch
   keeper_composition_child_exports
   keeper_librarian_message_floor
   keeper_librarian_unread_ledger

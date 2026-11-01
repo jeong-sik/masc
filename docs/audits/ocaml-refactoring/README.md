@@ -999,7 +999,7 @@ failure, cancellation during flush, unreadable sources and competing edits.
 Current-source continuation (2026-11-01, parent
 `63b35d7bce645afa5b2edcd35873909ea6a6d634`):
 [#47083](https://github.com/jeong-sik/masc/pull/47083) gives private
-`Board_snapshot_batch` ownership of closed snapshot kinds, immutable selections,
+`Board_snapshot_batch` in `masc.board_handlers` ownership of closed snapshot kinds, immutable selections,
 captured contents, ordered write outcomes and retry classification. Opaque batches
 retain selected empty strings as work. Explicit caller-supplied read/write
 capabilities run each selected kind once in Posts, Comments, Votes, Reactions order;

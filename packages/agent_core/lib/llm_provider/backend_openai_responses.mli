@@ -56,11 +56,35 @@ val build_request
   -> unit
   -> string
 
-(** Parse a Responses API JSON response into AGENT_CORE canonical content blocks.
+(** The status field and error envelope observed in the same JSON parse as the
+    canonical response or parse failure. [Ambiguous_envelope] includes missing,
+    non-string or repeated status fields and any present non-null or repeated
+    error field. No observation alone proves that a remote execution terminated. *)
+type lifecycle_observation =
+  | Observed_status of Responses_stop_reason.status
+  | Ambiguous_envelope
+  | Unreadable_json
+
+type parsed_response = private
+  { response : Types.api_response
+  ; lifecycle : lifecycle_observation
+  }
+
+type parse_error = private
+  { detail : string
+  ; lifecycle : lifecycle_observation
+  }
+
+(** Parse a Responses API JSON response into AGENT_CORE canonical content blocks
+    and retain the original lifecycle observation separately from its stop
+    reason, which can be changed by a refusal item. Parsing failures also keep
+    the lifecycle observation when the JSON was readable; an unreadable JSON
+    body has [Unreadable_json]. These are provider observations, not proof of a
+    remote terminal or authority to dispatch another request.
 
     Full reasoning text becomes {!Types.Thinking}, with summary as fallback.
     Nonblank encrypted reasoning preserves the complete opaque item instead.
     Function call items become
     {!Types.ToolUse} with [ToolUse.id = call_id], so existing tool execution can
     correlate outputs via [function_call_output.call_id]. *)
-val parse_response_result : string -> (Types.api_response, string) result
+val parse_response_result : string -> (parsed_response, parse_error) result

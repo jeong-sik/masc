@@ -94,8 +94,8 @@ let parse_sync_response
               { code = 400; body = Http_client.Received message; retry_after_header = None }))
     | Provider_http_codec.Openai_responses ->
       (match Backend_openai_responses.parse_response_result body with
-       | Ok response -> Ok response
-       | Error message ->
+       | Ok { response; lifecycle = _ } -> Ok response
+       | Error { detail = message; lifecycle = _ } ->
          Error
            (Http_client.HttpError
               { code = 400; body = Http_client.Received message; retry_after_header = None }))

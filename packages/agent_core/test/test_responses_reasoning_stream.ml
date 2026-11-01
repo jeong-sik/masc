@@ -69,7 +69,9 @@ let persisted_input response =
 let full_history () =
   let s=start() in let output=[reasoning ~summary:[] ~full:["full thought"] "r";call] in
   terminal s output;check ["full thought"] s;
-  let sync=get(Backend_openai_responses.parse_response_result(Yojson.Safe.to_string(wire output))) in
+  let sync = match Backend_openai_responses.parse_response_result
+      (Yojson.Safe.to_string(wire output)) with
+    | Ok {response;_} -> response | Error {detail;_} -> Alcotest.fail detail in
   Alcotest.(check bool) "sync/SSE canonical parity" true (sync.content=(result s).content);
   let rows=persisted_input(result s)in
   Alcotest.(check(list string)) "reasoning/call/result/later-user after persistence"

@@ -187,8 +187,6 @@ let validate capture =
     "Original history source and preparation input differ" in
   let* ()=require (Keeper_identity.Keeper_id.to_string (Source.input capture.source).keeper_id=capture.owner.keeper_id)
     "Original history source belongs to another Keeper" in
-  let* ()=require (Source.runtime_keepers_dir capture.source=capture.owner.runtime.path)
-    "Original history source came from another captured runtime/output root" in
   let facts=match (Source.input capture.source).current with None -> [] | Some current -> current.facts in
   let ids=List.map Keeper_memory_os_types.memory_id facts in
   let* ()=require (List.length ids=List.length (List.sort_uniq String.compare ids))

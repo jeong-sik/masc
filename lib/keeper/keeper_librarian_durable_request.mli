@@ -56,7 +56,9 @@ val restore : owner:owner -> Lane_addon_tool_request_owner.retained -> (t, strin
 val restore_payload : owner:owner -> Lane_addon_tool_request_owner.retained -> (t, string) result
 (** Current strict source/preparation/host-binding decode, using only captured
     data. Unlike {!restore}, this does not inspect the live source root. It is
-    preflight evidence, never live execution or publication authority. *)
+    preflight evidence, never live execution or publication authority. Captured
+    source path aliases are preserved; {!restore} separately checks the actual
+    canonical path, device and inode against the captured physical owner. *)
 val confirm_record : t -> Lane_addon_tool_request_owner.retained -> (unit, string) result
 (** The record is this original's: same physical source root and host binding
     as {!restore} checks, and the digest of this request. Equal digests name

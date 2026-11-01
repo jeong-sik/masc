@@ -426,6 +426,51 @@ let assert_unattached = function
     check bool "attachment is a blocked original publication" true (Consumer.publication_unfinished error);
     check bool "attachment refusal has an actual diagnostic" true (String.length (Consumer.error_to_string error)>0)
   | Ok _ -> fail "missing Addon must not silently return Pending or an empty report"
+let test_retained_source_root_alias () = with_fixture ~history_kind:Official (fun ~sw:_ fixture ->
+  let alias=Filename.concat fixture.base_path "workspace-alias" in
+  io (fun () -> Unix.symlink fixture.base_path alias);
+  Fun.protect ~finally:(fun () -> io (fun () -> Unix.unlink alias)) (fun () ->
+    let config={fixture.config with Workspace.base_path=alias} in
+    let source=ref None in
+    (match memory_action fixture (fun () -> Consumer.consume_one ~config ~keeper_name
+      ~commit:(fun captured -> source:=Some captured;Consumer.Memory_refused [])) with
+     | Ok (Consumer.Memory_not_committed _) -> ()
+     | Ok (Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Pending) ->
+       fail "the aliased source was not captured"
+     | Error error -> fail (Consumer.error_to_string error));
+    let source=Option.to_result ~none:"the consumer retained no aliased source" !source |> get in
+    check string "the public source producer preserves its supplied path"
+      (Workspace.keepers_runtime_dir config) (Source.runtime_keepers_dir source);
+    let owner=io (fun () ->
+      ignore (Current.capture_program_anchor ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get);
+      Capture.observe_owner ~base_path:fixture.base_path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name |> get) in
+    check bool "the physical owner uses another spelling of the same root" false
+      (Source.runtime_keepers_dir source=Capture.runtime_keepers_dir owner);
+    let preparation=Keeper_librarian_runtime.prepare_durable ~now:(Time_compat.now ()) (Source.input source) |> get in
+    let destination=Keeper_librarian_durable_edge.with_destination ~config:fixture.config
+      ~reserved:(Keeper_librarian_durable_edge.reserved ()) (fun destination -> Ok destination) |> get in
+    let capture=io (fun () -> Capture.create ~request_id:(Capture.fresh_request_id owner)
+      ~owner ~destination ~source ~preparation ()) |> get in
+    let record=memory_action fixture (fun () -> Durable_owner.retain ~store:fixture.store capture)
+      |> Result.map_error Durable_owner.error_to_string |> get in
+    let preflight ()=io (fun () -> Lane_addon_store_preflight.scan
+      ~validate_tool_request:Keeper_librarian_store_preflight.validate
+      Lane_addon_store_preflight.Store.Tool_request_owners ~base_path:fixture.base_path) |> get in
+    check int "the retained alias passes current payload preflight" 0 (List.length (preflight ()).refusals);
+    let restored=io (fun () -> Capture.restore ~owner record) |> get in
+    check json "runtime restoration preserves the exact captured source spelling"
+      (Capture.to_json capture) (Capture.to_json restored);
+    let another_workspace=Filename.concat fixture.base_path "another-workspace" in
+    io (fun () ->
+      Fs_compat.mkdir_p (Common.keepers_runtime_dir_of_base ~base_path:another_workspace);
+      Unix.unlink alias;
+      Unix.symlink another_workspace alias);
+    check int "pure payload inspection grants no physical source authority" 0 (List.length (preflight ()).refusals);
+    (match io (fun () -> Capture.restore ~owner record) with
+     | Error detail -> check string "a retargeted alias is another physical source"
+         "Original history source came from another physical runtime/output root" detail
+     | Ok _ -> fail "a different physical source root was restored");
+    check int "source inspection and retention dispatch no provider request" 0 (F.post_count fixture.server)))
 let test_unattached_reports_without_consuming () = with_fixture (fun ~sw:_ fixture ->
   let before=progress fixture in
   set_enabled fixture false;
@@ -2100,6 +2145,7 @@ let test_settling_a_position_no_step_holds_is_an_error () = with_fixture (fun ~s
   check (list int) "and no step moved" [0;1] (sorted_positions fixture request))
 
 let () = Alcotest.run "keeper_librarian_durable_execution" ["actual configured completed-history",[
+  test_case "retained source aliases preserve runtime physical-root checks" `Quick test_retained_source_root_alias;
   test_case "missing attachment is reported without consuming source" `Quick test_unattached_reports_without_consuming;
   test_case "terminal refusal preserves reason and allows a fresh original" `Quick test_terminal_refusal_allows_fresh_original;
   test_case "a worker frame refusal ends the original instead of blocking publication" `Quick

@@ -47,19 +47,24 @@ let first_frames () =
    adds to them. The route keeps its connection alive and ends a stream only
    when the server stops; this one closes the connection after its frames, so a
    client reads to the end without waiting out its idle limit. *)
-let stream_response ~receipts frames reqd =
+let stream_response ?(status = `OK) ?(content_types = [ "text/event-stream" ])
+    ~receipts frames reqd =
   let headers =
     Httpun.Headers.of_list
-      ([ "content-type", "text/event-stream"
-       ; "cache-control", "private, no-store"
+      (List.map (fun value -> "content-type", value) content_types
+       @ [ "cache-control", "private, no-store"
        ; "connection", "close"
        ; "x-accel-buffering", "no"
        ]
        @ receipts)
   in
-  let body = Httpun.Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
-  List.iter (fun frame -> Httpun.Body.Writer.write_string body frame) frames;
-  Httpun.Body.Writer.close body
+  if status = `No_content then
+    Httpun.Reqd.respond_with_string reqd (Httpun.Response.create ~headers status) ""
+  else begin
+    let body = Httpun.Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers status) in
+    List.iter (fun frame -> Httpun.Body.Writer.write_string body frame) frames;
+    Httpun.Body.Writer.close body
+  end
 ;;
 
 let json_response ~status body reqd =
@@ -413,6 +418,67 @@ let test_observer_accepts_valid_and_unadvertised_live_streams env =
       [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "reset-cursor-ahead" ] ]
 ;;
 
+(* An HTTP success is not enough to establish an SSE stream. Both long-lived
+   readers must reject an invalid response before its bytes reach a decoder. *)
+let test_sse_status_and_content_type_gate env =
+  let cases =
+    [ "plain stream", `OK, [ "text/event-stream" ], true
+    ; "case and parameter", `OK, [ "Text/Event-Stream; charset=utf-8" ], true
+    ; "quoted comma", `OK, [ "text/event-stream; profile=\"a,b\"" ], true
+    ; "missing type", `OK, [], false
+    ; "JSON type", `OK, [ "application/json" ], false
+    ; "duplicate type", `OK, [ "text/event-stream"; "text/event-stream" ], false
+    ; "combined type", `OK, [ "text/event-stream, text/html" ], false
+    ; "combined after parameter", `OK, [ "text/event-stream; charset=utf-8, text/html" ], false
+    ; "unterminated quoted parameter", `OK, [ "text/event-stream; profile=\"broken" ], false
+    ; "created status", `Created, [ "text/event-stream" ], false
+    ; "no-content status", `No_content, [], false
+    ] in
+  List.iter (fun (label, status, content_types, expected_open) ->
+    let handler = stream_response ~status ~content_types ~receipts:[] [ "data: {}\n\n" ] in
+    with_server env ~handler (fun ~port ->
+      let opens = ref 0 and chunks = ref 0 in
+      let observer = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
+          ~host:"127.0.0.1" ~port ~session_id:"observer-media" ~cursor:None
+          ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
+      let check_outcome source outcome =
+        match expected_open, outcome with
+        | true, Ok () | false, Error (Http.Invalid_handshake _) -> ()
+        | _ -> Alcotest.failf "%s: %s returned the wrong result" label source in
+      check_outcome "observer" observer;
+      Alcotest.(check int) (label ^ ": observer open") (if expected_open then 1 else 0) !opens;
+      Alcotest.(check bool) (label ^ ": observer body") expected_open (!chunks > 0);
+      let fleet_chunks = ref 0 in
+      let fleet = Http.observe_fleet_stream ~clock:(Eio.Stdenv.clock env)
+          ~expected_workspace:identity ~host:"127.0.0.1" ~port
+          ~on_chunk:(fun _ -> incr fleet_chunks) in
+      check_outcome "fleet" fleet;
+      Alcotest.(check bool) (label ^ ": fleet body") expected_open (!fleet_chunks > 0))) cases
+;;
+
+let test_sse_http_refusals_keep_status_and_body env =
+  List.iter (fun (status, code) ->
+    let body = "fixture refusal" in
+    with_server env ~handler:(json_response ~status body) (fun ~port ->
+      let chunks = ref 0 and opens = ref 0 in
+      let observer = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
+          ~host:"127.0.0.1" ~port ~session_id:"observer-refused" ~cursor:None
+          ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
+      let fleet = Http.observe_fleet_stream ~clock:(Eio.Stdenv.clock env)
+          ~expected_workspace:identity ~host:"127.0.0.1" ~port
+          ~on_chunk:(fun _ -> incr chunks) in
+      let check_refusal source = function
+        | Error (Http.Http_refused { status; detail }) ->
+            Alcotest.(check int) (source ^ " status") code status;
+            Alcotest.(check string) (source ^ " body") body detail
+        | _ -> Alcotest.failf "%s did not return an HTTP refusal" source in
+      check_refusal "observer" observer;
+      check_refusal "fleet" fleet;
+      Alcotest.(check int) "no stream opened" 0 !opens;
+      Alcotest.(check int) "no refusal body reached a stream decoder" 0 !chunks))
+    [ `Unauthorized, 401; `Not_found, 404; `Conflict, 409; `Service_unavailable, 503 ]
+;;
+
 (* Exercise the real MCP GET handler over H1. Authentication is supplied by
    this fixture; the assertion is that ambiguous cursors stop before SSE
    registration. *)
@@ -563,5 +629,8 @@ let () =
         ; case "MCP rejects duplicate cursor headers" test_mcp_rejects_duplicate_cursors_before_registration
         ; case "MCP resets a future cursor and sends live events" test_mcp_future_cursor_resets_before_live_delivery
         ] )
+    ; ( "SSE response"
+      , [ case "both subscriptions validate status and media type" test_sse_status_and_content_type_gate
+        ; case "HTTP refusals keep status and body" test_sse_http_refusals_keep_status_and_body ] )
     ]
 ;;

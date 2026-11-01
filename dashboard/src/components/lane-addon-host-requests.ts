@@ -34,21 +34,31 @@ export function LaneAddonHostRequests({ instance }: { instance: LaneAddonInstanc
   const observation = instance.host_requests
   if (observation === undefined) return null
   const summary = observation.kind === 'unreadable' ? 'observation unreadable'
-    : `${observation.cycle.waiting.length} waiting${observation.cycle.issue === null ? '' : ' · issue reported'}`
+    : observation.cycle.issue !== null ? `${observation.cycle.waiting.length} waiting reported · issue reported`
+    : observation.cycle.cycles === 0 && observation.cycle.waiting.length === 0 ? 'no cycles reported'
+    : `${observation.cycle.waiting.length} waiting reported`
+  const heading = observation.kind === 'observed' && observation.cycle.cycles > 0
+    ? 'Last host cycle' : 'Host requests'
   return html`<details aria-label=${`Host requests for ${instance.instance_id} · incarnation ${instance.incarnation}`}>
-    <summary>Last host cycle · ${summary}</summary>
+    <summary>${heading} · ${summary}</summary>
     <p class="break-all">Worker: ${instance.instance_id} · incarnation ${instance.incarnation}</p>
     ${observation.kind === 'unreadable'
       ? html`<p role="status">Host request observation unreadable: ${observation.detail}</p>`
       : html`<div>
-        <p>Cycle passes: ${observation.cycle.cycles}</p>
+        <p>Host cycles observed: ${observation.cycle.cycles}</p>
+        ${observation.cycle.issue !== null
+          ? html`<p>Waiting status is incomplete because this cycle reported an issue.</p>` : null}
         ${observation.cycle.waiting.length === 0
-          ? html`<p>No waiting requests were reported in this cycle.</p>`
+          ? observation.cycle.issue !== null
+            ? null
+            : observation.cycle.cycles === 0
+              ? html`<p>No host cycles were reported for this worker.</p>`
+              : html`<p>No waiting requests were reported in this cycle.</p>`
           : html`<ul>${observation.cycle.waiting.map((request, index) => html`<li key=${index}>
             <span class="break-all">${request.request_id}</span>: ${waitText(request.reason)}
           </li>`)}</ul>`}
         ${observation.cycle.issue !== null && html`<p role="status">${issueText(observation.cycle.issue)}</p>`}
       </div>`}
-    <p>This is the last received cycle for this worker. Results, delivery receipts and cleanup are separate evidence.</p>
+    <p>This is the received host-request observation for this worker. Results, delivery receipts and cleanup are separate evidence.</p>
   </details>`
 }

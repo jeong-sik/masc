@@ -444,7 +444,7 @@ let test_pipeline_sends_exact_supplied_tools () =
     (Option.equal (List.equal Yojson.Safe.equal) (Some expected) !captured)
 ;;
 
-let test_effective_provider_config_drives_lifecycle_and_pricing () =
+let test_effective_provider_config_drives_lifecycle_without_inferred_cost () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -515,10 +515,11 @@ let test_effective_provider_config_drives_lifecycle_and_pricing () =
    | None -> Alcotest.fail "completed agent has no lifecycle snapshot");
   let usage = (Agent.state agent).usage in
   Alcotest.(check bool)
-    "effective model pricing applied"
+    "display-model fallback does not invent a charge"
     true
-    (usage.estimated_cost_usd > 0.0);
-  Alcotest.(check bool) "no pricing gap" true (Option.is_none usage.pricing_gap)
+    (usage.estimated_cost_usd = 0.0);
+  Alcotest.(check bool) "missing reported model preserves the pricing gap" true
+    (usage.pricing_gap = Some (Types.Pricing_unavailable effective_model))
 ;;
 
 let test_provider_turn_identity_is_shared_across_multiturn_tool_loop () =
@@ -1428,7 +1429,6 @@ let test_accumulate_usage_with_response () =
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:current
-      ~provider_config:None
       ~response_model:None
       ~response_usage:resp_usage
   in
@@ -1448,7 +1448,6 @@ let test_accumulate_usage_no_response () =
   let result =
     Agent_turn.accumulate_usage
       ~current_usage:current
-      ~provider_config:None
       ~response_model:None
       ~response_usage:None
   in
@@ -1479,14 +1478,12 @@ let test_accumulate_usage_cumulative () =
   let after1 =
     Agent_turn.accumulate_usage
       ~current_usage:Types.empty_usage
-      ~provider_config:None
       ~response_model:None
       ~response_usage:u1
   in
   let after2 =
     Agent_turn.accumulate_usage
       ~current_usage:after1
-      ~provider_config:None
       ~response_model:None
       ~response_usage:u2
   in
@@ -5440,9 +5437,9 @@ let () =
             `Quick
             test_provider_context_retention
         ; Alcotest.test_case
-            "effective provider config drives lifecycle and pricing"
+            "effective provider config drives lifecycle without inferred cost"
             `Quick
-            test_effective_provider_config_drives_lifecycle_and_pricing
+            test_effective_provider_config_drives_lifecycle_without_inferred_cost
         ; Alcotest.test_case
             "provider turn identity spans multiturn tool loop"
             `Quick

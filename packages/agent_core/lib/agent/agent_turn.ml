@@ -157,17 +157,6 @@ let provider_config_with_agent_config
 
 (* ── Usage accumulation ───────────────────────────────────────── *)
 
-let pricing_model ~provider_config ~response_model =
-  let configured_model =
-    match provider_config with
-    | Some config ->
-      Util.trim_non_empty_opt (Some config.Llm_provider.Provider_config.model_id)
-    | None -> None
-  in
-  let response_model = Util.trim_non_empty_opt response_model in
-  Util.first_some response_model configured_model
-;;
-
 let with_pricing_gap usage model_id =
   match usage.pricing_gap with
   | Some _ -> usage
@@ -181,35 +170,13 @@ let with_pricing_gap usage model_id =
     }
 ;;
 
-let accumulate_usage ~current_usage ~provider_config ~response_model ~response_usage =
+let accumulate_usage ~current_usage ~response_model ~response_usage =
   match response_usage with
   | Some u ->
     let base = add_usage current_usage u in
     (match u.cost_usd with
      | Some cost -> { base with estimated_cost_usd = base.estimated_cost_usd +. cost }
-     | None ->
-       let model_id = pricing_model ~provider_config ~response_model in
-       (match model_id with
-        | None -> with_pricing_gap base None
-        | Some model_id ->
-          let pricing = Option.bind provider_config (fun config ->
-            Llm_provider.Pricing.pricing_for_model
-              (Llm_provider.Provider_config.pricing_source config) model_id) in
-          (match pricing with
-           | None -> with_pricing_gap base (Some model_id)
-           | Some pricing ->
-             (match
-                Llm_provider.Pricing.estimate_cost
-                  ~pricing
-                  ~input_tokens:u.input_tokens
-                  ~output_tokens:u.output_tokens
-                  ~cache_creation_input_tokens:u.cache_creation_input_tokens
-                  ~cache_read_input_tokens:u.cache_read_input_tokens
-                  ()
-              with
-              | Llm_provider.Pricing.Estimated turn_cost ->
-                { base with estimated_cost_usd = base.estimated_cost_usd +. turn_cost }
-              | Llm_provider.Pricing.Incomplete _ -> with_pricing_gap base (Some model_id)))))
+     | None -> with_pricing_gap base response_model)
   | None -> add_missing_usage current_usage
 ;;
 

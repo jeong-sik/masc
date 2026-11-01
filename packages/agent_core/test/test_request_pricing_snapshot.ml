@@ -109,20 +109,19 @@ let test_absence_and_agent_usage () =
     let result = complete ~stream:false ~config:selected ~before_response:(fun () -> ()) (response ()) in
     check_cost None result;
     let usage = Agent_turn.accumulate_usage ~current_usage:Agent_core.Types.empty_usage
-      ~provider_config:(Some selected) ~response_model:(Some result.model) ~response_usage:result.usage in
+      ~response_model:(Some result.model) ~response_usage:result.usage in
     Alcotest.(check (float 1e-9)) "Agent does not acquire a late price" 0.0 usage.estimated_cost_usd;
     Alcotest.(check bool) "missing selected price remains an explicit gap" true
       (usage.pricing_gap = Some (Agent_core.Types.Pricing_unavailable "request-model")))
 
-let test_agent_fallback () =
-  let original = catalog 1.0 in
-  with_catalog original (fun () ->
-    let selected = config (binding original) in
-    Model_catalog.set_global (catalog 10.0);
+let test_agent_retains_unknown_cost () =
+  with_catalog (catalog 10.0) (fun () ->
     let response = response () in
     let usage = Agent_turn.accumulate_usage ~current_usage:Agent_core.Types.empty_usage
-      ~provider_config:(Some selected) ~response_model:(Some response.model) ~response_usage:response.usage in
-    Alcotest.(check (float 1e-9)) "Agent fallback uses selected rates" 3.0 usage.estimated_cost_usd)
+      ~response_model:(Some response.model) ~response_usage:response.usage in
+    Alcotest.(check (float 1e-9)) "Agent does not estimate an unannotated cost" 0.0 usage.estimated_cost_usd;
+    Alcotest.(check bool) "available rates do not erase the pricing gap" true
+      (usage.pricing_gap = Some (Agent_core.Types.Pricing_unavailable "request-model")))
 
 let test_provider_reported_cost () =
   with_catalog (catalog 1.0) (fun () ->
@@ -163,26 +162,29 @@ let test_missing_cache_price () =
       ~before_response:(fun () -> Model_catalog.set_global (catalog ~cache:(1.25, 0.1) 10.0))
       {response with usage = Some usage}))
 
-let test_agent_run_missing_price () =
-  let original = catalog ~priced:false 1.0 in
+let test_agent_run_price ?cost ~priced ~model expected () =
+  let original = catalog ~priced 1.0 in
   with_catalog original (fun () ->
     let provider_config = config (binding original) in
     Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
       let transport = transport ~before_response:(fun () -> Model_catalog.set_global (catalog 10.0))
-          (response ()) in
+          (response ?cost ~model ()) in
       let options = {Agent.default_options with provider_config = Some provider_config;
         transport = Some transport} in
       let agent = Agent.create ~net:env#net ~media_store:(History.Memory_store.create ())
           ~config:(Agent_core.Types.default_config ~model:"request-model") ~options () in
-      (match Agent.run ~sw agent "answer" with
-       | Ok response -> check_cost None response
-       | Error error -> Alcotest.fail (Agent_core.Error.to_string error));
+      let response = match Agent.run ~sw agent "answer" with
+        | Ok response -> response
+        | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+      check_cost expected response;
       let usage = (Agent.state agent).usage in
       Alcotest.(check int) "actual Agent counts the completed request" 1 usage.api_calls;
-      Alcotest.(check (float 1e-9)) "actual Agent keeps an unknown price out of its subtotal"
-        0.0 usage.estimated_cost_usd;
-      Alcotest.(check bool) "actual Agent retains the pricing gap" true
-        (usage.pricing_gap = Some (Agent_core.Types.Pricing_unavailable "request-model")))))
+      let subtotal, gap = match expected with
+        | Some cost -> cost, None
+        | None -> 0.0, Some (Agent_core.Types.Pricing_unavailable response.model) in
+      Alcotest.(check (float 1e-9)) "actual Agent accumulates only the annotated cost"
+        subtotal usage.estimated_cost_usd;
+      Alcotest.(check bool) "actual Agent preserves pricing coverage" true (usage.pricing_gap = gap))))
 
 let () = Alcotest.run "request pricing snapshot"
   ["price authority", List.map (fun (name, run) -> Alcotest.test_case name `Quick run)
@@ -192,9 +194,18 @@ let () = Alcotest.run "request pricing snapshot"
      "stream catalog replacement during call", test_during_call true;
      "exact returned model in captured catalog", test_returned_model;
      "absent rates remain absent in response and Agent", test_absence_and_agent_usage;
-     "Agent fallback uses selected authority", test_agent_fallback;
+     "Agent retains unknown cost despite available rates", test_agent_retains_unknown_cost;
      "provider charge and zero retain precedence", test_provider_reported_cost;
      "provider overlay cannot regain seed bare permission", test_overlay_permission;
      "fresh selection and endpoint rotation", test_fresh_selection;
      "cache rate absence remains unknown", test_missing_cache_price;
-     "actual Agent preserves missing selected pricing", test_agent_run_missing_price]]
+     "actual Agent preserves missing selected pricing",
+       test_agent_run_price ~priced:false ~model:"request-model" None;
+     "actual Agent sums captured producer price",
+       test_agent_run_price ~priced:true ~model:"request-model" (Some 3.0);
+     "actual Agent does not price missing reported model",
+       test_agent_run_price ~priced:true ~model:"" None;
+     "actual Agent does not trim a reported ID into a price",
+       test_agent_run_price ~priced:true ~model:" returned-model " None;
+     "actual Agent keeps reported zero with missing model",
+       test_agent_run_price ~cost:0.0 ~priced:true ~model:"" (Some 0.0)]]

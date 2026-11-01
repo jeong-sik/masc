@@ -10546,6 +10546,9 @@ type state = {
      why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
      could not be read drawing as an empty one. *)
   mutable fusion_runs: (unit, Masc.Tui_decode_fusion.fusion_snapshot) Masc_tui_fetched.t;
+  (* A change observed after the current list read started needs one later read. *)
+  mutable fusion_runs_reread_pending: bool;
+  mutable fusion_runs_open_at_start: string option;
   (* Why the launch form could not open. Not a reading of the run list, so it
      is not folded into that list's failure; the next list answer clears it. *)
   mutable fusion_launch_error: string option;
@@ -10561,8 +10564,10 @@ type state = {
      do not pile another GET on top of it; changing runs still starts a new
      request immediately, whose pair replaces this marker. *)
   mutable fusion_detail_inflight: (int * string) option;
+  mutable fusion_detail_reread_pending: bool;
   mutable fusion_historical_detail: Masc.Tui_decode_fusion.fusion_historical_detail option;
   mutable fusion_historical_inflight: (int * Masc.Tui_decode_fusion.fusion_historical_evidence) option;
+  mutable fusion_historical_reread_pending: bool;
   mutable fusion_launch: fusion_launch option;
   (* The read or the submit the form is waiting on. A key that closes the
      form bumps it, so the answer to a read the operator left cannot open
@@ -14019,6 +14024,8 @@ let suspend_workspace_readings state =
   state.code_lsp_query <- Masc_tui_fetched.suspend state.code_lsp_query;
   state.code_location_offer <- None;
   state.fusion_runs <- Masc_tui_fetched.suspend state.fusion_runs;
+  state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_open_at_start <- None;
   (match state.goal_confirmation with
    | Masc_tui_planning_detail.Inspecting reading ->
        state.goal_confirmation <- Masc_tui_planning_detail.Inspecting
@@ -14064,7 +14071,9 @@ let suspend_workspace_readings state =
   state.verification_inflight <- false;
   state.verification_refresh_after_inflight <- false;
   state.fusion_detail_inflight <- None;
+  state.fusion_detail_reread_pending <- false;
   state.fusion_historical_inflight <- None;
+  state.fusion_historical_reread_pending <- false;
   state.lane_runs_loading <- false;
   state.schedule_wake_history_inflight <- None;
   state.keeper_turns_inflight <- false;
@@ -14729,9 +14738,13 @@ let abandon_fusion_launch (state : state) =
 let withdraw_fusion_workspace (state : state) =
   ignore (abandon_fusion_launch state);
   state.fusion_runs <- Masc_tui_fetched.clear state.fusion_runs;
+  state.fusion_runs_reread_pending <- false;
+  state.fusion_runs_open_at_start <- None;
   state.fusion_detail_generation <- state.fusion_detail_generation + 1;
   state.fusion_detail_inflight <- None;
+  state.fusion_detail_reread_pending <- false;
   state.fusion_historical_inflight <- None;
+  state.fusion_historical_reread_pending <- false;
   state.fusion_detail <- None;
   state.fusion_historical_detail <- None;
   state.fusion_detail_error <- None;
@@ -19042,6 +19055,8 @@ let create_state
   harness_detail = None;
   harness_detail_scroll = 0;
   fusion_runs = Masc_tui_fetched.initial;
+  fusion_runs_reread_pending = false;
+  fusion_runs_open_at_start = None;
   fusion_launch_error = None;
   fusion_cursor = 0;
   fusion_scroll = 0;
@@ -19050,8 +19065,10 @@ let create_state
   fusion_detail_error = None;
   fusion_detail_generation = 0;
   fusion_detail_inflight = None;
+  fusion_detail_reread_pending = false;
   fusion_historical_detail = None;
   fusion_historical_inflight = None;
+  fusion_historical_reread_pending = false;
   fusion_launch = None;
   fusion_launch_generation = 0;
   observer = Observer_off;

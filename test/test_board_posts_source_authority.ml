@@ -149,6 +149,7 @@ let test_failed_root_capture_stays_refused base_path _workspace =
 let test_directory_replacement_stays_refused ~replace_root base_path workspace =
   let store = make_store base_path in
   load_posts store 0;
+  let original_post = require_post (create store "actual Present source before replacement") in
   let original = if replace_root then base_path else workspace in
   let backup = original ^ ".captured-backup" in
   Unix.rename original backup;
@@ -165,7 +166,9 @@ let test_directory_replacement_stays_refused ~replace_root base_path workspace =
         ~description:"must stay unwritten" ~owner:"source-writer" ());
       Alcotest.(check int) "refused reads and writers leave replacement empty" 0
         (Array.length (Sys.readdir original)));
-  load_posts store 0;
+  load_posts store 1;
+  Alcotest.(check string) "restored source retains the original actual post"
+    original_post.body (current store original_post).body;
   ignore (require_post (create store "restored physical identity remains usable"))
 
 let test_sub_board_only_retains_created_directory base_path workspace =

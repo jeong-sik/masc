@@ -79,8 +79,9 @@ val comments_path : store -> string
 val reactions_path : store -> string
 val sub_boards_path : store -> string
 val ensure_dir : string -> unit
-val ensure_masc_dir : store -> (unit, board_error) result
+val ensure_masc_dir : where:string -> store -> (unit, board_error) result
 (** Checked directory preparation inside a persistence-protected writer.
+    [where] retains the requested operation in its error/log diagnostic.
     A reserved precondition failure uses the existing deferred settlement carrier. *)
 
 type posts_snapshot

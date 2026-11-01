@@ -551,14 +551,12 @@ let comments_path = Board_paths.comments_path
 let reactions_path = Board_paths.reactions_path
 let sub_boards_path = Board_paths.sub_boards_path
 let ensure_dir = Board_paths.ensure_dir
-let ensure_masc_dir store =
+let ensure_masc_dir ~where store =
   match Board_paths.ensure_masc_dir store with
   | Ok () -> Ok ()
   | Error rejection ->
-    let error = Board_posts_source.failure_to_board_error
-        (Posts_workspace_binding_refused { rejection; prior_settlement = None }) in
-    record_persist_error ~where:"workspace binding" (show_board_error error);
-    let result = Error error in
+    let result = persist_io_error ~where
+        (Board_workspace_binding.rejection_to_string rejection) in
     Option.iter (fun (exception_, backtrace) ->
       Board_posts_source.defer_reserved ~result exception_ backtrace)
       (Board_workspace_binding.raised rejection);
@@ -666,7 +664,7 @@ let save_comments_snapshot store content =
   | Error _ as refused -> refused
   | Ok () ->
     (try
-       let* () = ensure_masc_dir store in
+       let* () = ensure_masc_dir ~where:"rewrite_comments" store in
        match Fs_compat.save_file_atomic (comments_path store) content with
        | Ok () -> Ok ()
        | Error msg -> persist_io_error ~where:"rewrite_comments" msg
@@ -699,7 +697,7 @@ let reactions_jsonl_unlocked store =
 ;;
 let save_reactions_jsonl_result store content =
   try
-    let* () = ensure_masc_dir store in
+    let* () = ensure_masc_dir ~where:"rewrite_reactions" store in
     let path = reactions_path store in
     match Fs_compat.save_file_atomic path content with
     | Ok () -> Ok ()
@@ -711,7 +709,7 @@ let save_reactions_jsonl_result store content =
 (** {1 Comments append helper. Posts use the stable source owner above.} *)
 let append_comment store (c : comment) =
   try
-    let* () = ensure_masc_dir store in
+    let* () = ensure_masc_dir ~where:"append_comment" store in
     let path = comments_path store in
     Fs_compat.append_file path (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
     Ok ()

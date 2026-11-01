@@ -114,7 +114,7 @@ val comments_path : store -> string
 val reactions_path : store -> string
 
 (** Checked directory preparation inside a persistence-protected writer. *)
-val ensure_masc_dir : store -> (unit, board_error) result
+val ensure_masc_dir : where:string -> store -> (unit, board_error) result
 
 (** {1 Append-only persistence} *)
 

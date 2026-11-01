@@ -26,7 +26,7 @@ let vote_log_path store = Board_paths.store_file_path store Board_paths.Votes
    to the caller instead of leaving the in-memory vote as the only copy. *)
 let append_vote_log store ~target ~voter ~direction ~ts : (unit, board_error) Result.t =
   try
-    let* () = ensure_masc_dir store in
+    let* () = ensure_masc_dir ~where:"append_vote_log" store in
     let path = vote_log_path store in
     let json = `Assoc [
       ("target", `String target);
@@ -73,7 +73,7 @@ let vote_log_jsonl store =
    file. *)
 let save_vote_log_jsonl store content : (unit, board_error) Result.t =
   try
-    let* () = ensure_masc_dir store in
+    let* () = ensure_masc_dir ~where:"save_vote_log_jsonl" store in
     let path = vote_log_path store in
     match Fs_compat.save_file_atomic path content with
     | Ok () -> Ok ()

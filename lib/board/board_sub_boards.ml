@@ -20,7 +20,7 @@ let sub_boards_jsonl_unlocked store =
 
 let save_sub_boards_jsonl store content =
   try
-    match ensure_masc_dir store with
+    match ensure_masc_dir ~where:"rewrite_sub_boards" store with
     | Error _ -> () (* The checked gate already recorded the ordinary refusal. *)
     | Ok () ->
       let path = sub_boards_path store in
@@ -33,7 +33,7 @@ let save_sub_boards_jsonl store content =
 
 let append_sub_board store (sb : sub_board) =
   try
-    let* () = ensure_masc_dir store in
+    let* () = ensure_masc_dir ~where:"append_sub_board" store in
     let path = sub_boards_path store in
     Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n");
     Ok ()

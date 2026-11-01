@@ -3860,14 +3860,14 @@ let test_terminal_stop_reason_owns_tool_content ~stop_reason ~window entry () =
   let create () = Agent.create ~media_store ~net:env#net ~tools ~config ~options () in
   (* Establish the fresh public pipeline behavior before constructing a crash. *)
   let fresh = create () in
-  Agent.set_state fresh {(Agent.state fresh) with messages=[Types.user_msg "finish this request"]};
-  (match run_pipeline_turn ~sw ~api_strategy:Internal_pipeline.Sync fresh with
-   | Ok (Internal_pipeline.Complete actual) when accepted ->
+  (match Agent.run ~sw fresh "finish this request" with
+   | Ok actual when accepted ->
      Alcotest.(check bool) "fresh output keeps terminal stop and admitted tool content" true
        (actual.stop_reason=response.stop_reason && actual.content=response.content)
    | Error (Error.Agent (UnrecognizedStopReason _)) when not accepted -> ()
    | Error error -> Alcotest.fail (Error.to_string error)
    | Ok _ -> Alcotest.fail "fresh output treated terminal content as a tool turn");
+  Alcotest.(check int) "fresh control dispatches exactly one provider call" 1 !provider_calls;
   Alcotest.(check int) "fresh terminal content never invokes the registered tool" 0 !effect_count;
   Alcotest.(check int) "fresh output invokes OnStop only for accepted terminal reasons"
     (if accepted then 1 else 0) !on_stops;

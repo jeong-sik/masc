@@ -1385,8 +1385,7 @@ type request_policy =
   ; pricing_source : Pricing.source
   }
 
-let resolve_request_policy ~wire ~provider ~model_id =
-  let catalog = Model_catalog.global () in
+let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
   let pricing_source = Pricing.of_catalog ~catalog ~provider in
   match Model_identifiers.Model_id.of_string model_id with
   | Error _ -> { model_capabilities = None; anthropic_thinking_control = None; pricing_source }
@@ -1404,11 +1403,16 @@ let resolve_request_policy ~wire ~provider ~model_id =
   { model_capabilities; anthropic_thinking_control; pricing_source }
 ;;
 
-let resolve_bound_request_policy ~catalog ~(provider : Model_catalog.provider_entry)
+let resolve_request_policy ~wire ~provider ~model_id =
+  resolve_request_policy_from_catalog ~catalog:(Model_catalog.global ())
+    ~wire ~provider ~model_id
+;;
+
+let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provider_entry)
     ~capabilities ~model_id =
   let pricing_source = Pricing.of_provider_entry ~catalog ~provider in
   let capabilities = match Option.bind
-      (List.assoc_opt provider.kind provider.capabilities_base_by_identity_kind)
+      (List.assoc_opt wire provider.capabilities_base_by_identity_kind)
       capabilities_for_provider_label with
     | Some capabilities -> capabilities
     | None -> capabilities in
@@ -1422,8 +1426,8 @@ let resolve_bound_request_policy ~catalog ~(provider : Model_catalog.provider_en
     let scoped_provider = match row.Model_catalog.provider_name with
       | None -> None | Some _ -> Some provider in
     let model_capabilities = Some (apply_catalog_entry ~base:capabilities
-        ~provider_entry:scoped_provider ~wire:(Some provider.kind) row) in
-    let anthropic_thinking_control = match provider.kind with
+        ~provider_entry:scoped_provider ~wire:(Some wire) row) in
+    let anthropic_thinking_control = match wire with
       | Provider_kind.Anthropic -> Option.map anthropic_thinking_control_of_vocab_value
           row.anthropic_thinking_control
       | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> None in

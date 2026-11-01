@@ -16,7 +16,7 @@
 
     @stability Internal *)
 
-module Runtime_binding = Agent_core.Provider_runtime_binding
+module Declarations = Llm_provider.Provider_declarations
 module Provider_binding = Runtime_provider_binding
 
 type provider_materialization =
@@ -118,45 +118,21 @@ let normalize_openai_compat_request_path ~base_url ~request_path =
 
 (* --- Provider resolution --- *)
 
-let runtime_binding_id label =
-  match Runtime_binding.find label with
-  | Some binding -> Some binding.Runtime_binding.id
-  | None -> None
-;;
-
-let resolve_provider_prefix (provider_id : string) : string option =
-  match runtime_binding_id provider_id with
-  | Some _ as found -> found
-  | None ->
-    let normalized = Provider_binding.normalize_provider_id provider_id in
-    runtime_binding_id normalized
-;;
-
-let find_registry_entry (provider_id : string)
-    : Llm_provider.Provider_registry.entry option =
-  let registry = Llm_provider.Provider_registry.default () in
-  match Llm_provider.Provider_registry.find registry provider_id with
-  | Some _ as found -> found
-  | None ->
-    (match resolve_provider_prefix provider_id with
-     | Some prefix -> Llm_provider.Provider_registry.find registry prefix
-     | None -> None)
-;;
-
-let materialize_credentials_from_registry ~provider_id ~registry_entry ~credential =
+let materialize_credentials_from_declaration ~provider_id ~declaration ~credential =
   let requires_api_key = Option.map
-    (fun (entry : Llm_provider.Provider_registry.entry) -> entry.defaults.requires_api_key)
-    registry_entry in
+    (fun (entry : Declarations.entry) -> Declarations.requires_api_key entry.authentication)
+    declaration in
   Runtime_credential_selection.materialize ~provider_id ~requires_api_key ~credential
 ;;
 
 let materialize_credentials ~provider_id ~credential =
-  materialize_credentials_from_registry ~provider_id
-    ~registry_entry:(find_registry_entry provider_id) ~credential
+  let declarations = Declarations.current () in
+  materialize_credentials_from_declaration ~provider_id
+    ~declaration:(Declarations.find declarations provider_id) ~credential
 ;;
 
-let registry_provider_kind = function
-  | Some entry -> Some entry.Llm_provider.Provider_registry.defaults.kind
+let declared_provider_kind = function
+  | Some entry -> Some entry.Declarations.kind
   | None -> None
 ;;
 
@@ -164,8 +140,8 @@ let registry_provider_kind = function
    answers only for an endpoint it does not. Preferring the registry keeps the
    catalog the single authority, so a restated kind is dead weight rather than
    a rival — and the loader refuses it outright. *)
-let effective_provider_kind ?registry_entry (provider : Runtime_schema.provider) =
-  match registry_provider_kind registry_entry with
+let effective_provider_kind ?declaration (provider : Runtime_schema.provider) =
+  match declared_provider_kind declaration with
   | Some _ as kind -> kind
   | None -> provider.Runtime_schema.wire_kind
 ;;
@@ -207,11 +183,11 @@ let refuse_unread_wire_kind ~reason (provider : Runtime_schema.provider) =
     ~reason
 ;;
 
-let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)
+let provider_kind_for_http_provider ?declaration (provider : Runtime_schema.provider)
     : (Llm_provider.Provider_config.provider_kind, string) result =
   let open Result.Syntax in
   let* () =
-    match provider.api_format, registry_provider_kind registry_entry with
+    match provider.api_format, declared_provider_kind declaration with
     | ( Codex_app_server_runtime
       | Claude_code_runtime
       | Antigravity_cli_runtime
@@ -246,7 +222,7 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
        registry metadata is absent. Messages API deliberately fails closed
        below because there is no safe Anthropic-style default. *)
     Ok
-      (match effective_provider_kind ?registry_entry provider with
+      (match effective_provider_kind ?declaration provider with
        | Some Llm_provider.Provider_config.Ollama ->
          Llm_provider.Provider_config.OpenAI_compat
        | Some
@@ -257,7 +233,7 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
             | Llm_provider.Provider_kind.Glm ) as kind) -> kind
        | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api ->
-    (match effective_provider_kind ?registry_entry provider with
+    (match effective_provider_kind ?declaration provider with
      | Some kind when messages_api_compatible_provider_kind kind -> Ok kind
      | Some kind ->
        Error
@@ -314,13 +290,11 @@ let default_http_request_path ~kind ~base_url =
       Llm_provider.Provider_config.request_path_default_for_kind kind in
   normalize_http_request_path ~kind ~base_url ~request_path
 
-let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~registry_entry ~kind
+let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~declaration ~kind
     ~base_url =
-  (* The registry carries the catalog [providers] rows verbatim — including
-     their request_path (provider_registry.default registers every
-     Model_catalog provider entry). A provider whose catalog row names a
+  (* The admitted declaration carries its request_path. A provider whose row names a
      different surface (deepseek-responses -> "/responses") must not have the
-     protocol default stamped over it, so a registry-declared path wins over
+     protocol default stamped over it, so a declared path wins over
      the Chat-completions default.
 
      It wins only for the kind that path belongs to. A catalog row can serve
@@ -339,16 +313,16 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
      before: no catalog row means no separate surface to name. *)
   let request_path = match provider.request_path with
     | Some path -> path
-    | None -> match registry_entry with
+    | None -> match declaration with
     | Some entry
       when same_provider_kind
-             entry.Llm_provider.Provider_registry.defaults.kind
+             entry.Declarations.kind
              kind
            && not
                 (String.equal
-                   entry.Llm_provider.Provider_registry.defaults.request_path
+                   entry.Declarations.request_path
                    "") ->
-      entry.Llm_provider.Provider_registry.defaults.request_path
+      entry.Declarations.request_path
     | _ ->
       (match provider.api_format, kind with
        | Runtime_schema.Chat_completions_api, Llm_provider.Provider_config.OpenAI_compat ->
@@ -373,8 +347,8 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~regist
            | Llm_provider.Provider_kind.Ollama
            | Llm_provider.Provider_kind.Gemini
            | Llm_provider.Provider_kind.Glm ) ) ->
-         (match registry_entry with
-          | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path
+         (match declaration with
+          | Some entry -> entry.Declarations.request_path
           | None -> Llm_provider.Provider_config.request_path_default_for_kind kind))
   in
   normalize_http_request_path ~kind ~base_url ~request_path
@@ -386,10 +360,11 @@ let http_protocol_metadata provider =
   match provider.Runtime_schema.transport with
   | Cli _ -> Error "An HTTP connection is required"
   | Http base_url ->
-    let registry_entry = find_registry_entry provider.id in
+    let declarations = Declarations.current () in
+    let declaration = Declarations.find declarations provider.id in
     Result.map (fun kind -> kind,
-      request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url)
-      (provider_kind_for_http_provider ?registry_entry provider)
+      request_path_for_http_provider ~provider ~declaration ~kind ~base_url)
+      (provider_kind_for_http_provider ?declaration provider)
 ;;
 
 let agent_core_thinking_control_format = function
@@ -420,15 +395,10 @@ let agent_core_thinking_control_format = function
     rejected later by the normal startup gate. *)
 let declared_capabilities_override_of_model_spec
       ~(wire : Llm_provider.Provider_kind.t)
-      ~(provider_id : string)
+      ~(catalog_capabilities : Llm_provider.Capabilities.capabilities option)
       (spec : Runtime_schema.model_spec)
   =
-  match
-    Llm_provider.Capabilities.for_provider_model_id
-      ~wire:(Some wire)
-      ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
-      ~model_id:spec.api_name
-  with
+  match catalog_capabilities with
   | Some catalog_caps ->
     (match spec.capabilities with
      | None -> None
@@ -520,8 +490,7 @@ let declared_capabilities_override_of_model_spec
    that states its own replay stays authoritative. *)
 let with_client_history_replay
       ~(wire : Llm_provider.Provider_kind.t)
-      ~(provider_id : string)
-      ~(api_name : string)
+      ~(catalog_capabilities : Llm_provider.Capabilities.capabilities option)
       (declared : Llm_provider.Capabilities.capabilities option)
   =
   match wire with
@@ -529,11 +498,7 @@ let with_client_history_replay
     let capabilities =
       match declared with
       | Some _ as found -> found
-      | None ->
-        Llm_provider.Capabilities.for_provider_model_id
-          ~wire:(Some wire)
-          ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
-          ~model_id:api_name
+      | None -> catalog_capabilities
     in
     (match capabilities with
      | Some
@@ -568,11 +533,11 @@ let with_client_history_replay
 
 let model_capabilities_override_of_model_spec
       ~(wire : Llm_provider.Provider_kind.t)
-      ~(provider_id : string)
+      ~(catalog_capabilities : Llm_provider.Capabilities.capabilities option)
       (spec : Runtime_schema.model_spec)
   =
-  declared_capabilities_override_of_model_spec ~wire ~provider_id spec
-  |> with_client_history_replay ~wire ~provider_id ~api_name:spec.api_name
+  declared_capabilities_override_of_model_spec ~wire ~catalog_capabilities spec
+  |> with_client_history_replay ~wire ~catalog_capabilities
 ;;
 
 (* A deployment-declared Anthropic thinking-control policy is read only where
@@ -581,13 +546,12 @@ let model_capabilities_override_of_model_spec
    either unread (a non-Anthropic wire never consults it) or a rival
    restatement of a catalog row, and the loader refuses it instead of ignoring
    it ([refuse_unread_declaration] above works the same way for [kind]). The
-   catalog check runs the request path's resolution against the load-time
-   catalog, so a declaration the loader admits is one the catalog provably
-   leaves unanswered at load; a post-load catalog swap is out of scope
-   (production fixes the catalog at boot). *)
+   catalog check uses the same immutable policy as the resulting request;
+   credential I/O cannot change which authority answered the declaration. *)
 let anthropic_thinking_control_override_of_model_spec
       ~(wire : Llm_provider.Provider_kind.t)
       ~(provider_id : string)
+      ~request_policy
       (spec : Runtime_schema.model_spec)
   : (Llm_provider.Capabilities.anthropic_thinking_control option, string) result
   =
@@ -601,9 +565,7 @@ let anthropic_thinking_control_override_of_model_spec
     (match wire with
      | Llm_provider.Provider_kind.Anthropic ->
        (match
-          Llm_provider.Capabilities.anthropic_thinking_control_for_provider_model_id
-            ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
-            ~model_id:spec.Runtime_schema.api_name
+          Llm_provider.Capabilities.request_policy_anthropic_thinking_control request_policy
         with
         | Some _ ->
           Error
@@ -642,8 +604,7 @@ let anthropic_thinking_control_override_of_model_spec
    built config: the computed override when present, otherwise the catalog
    row for the same wire/provider/model triple. *)
 let effective_max_context_of_model_spec
-      ~(wire : Llm_provider.Provider_kind.t)
-      ~(provider_id : string)
+      ~(catalog_capabilities : Llm_provider.Capabilities.capabilities option)
       ~(model_capabilities_override : Llm_provider.Capabilities.capabilities option)
       (spec : Runtime_schema.model_spec)
   =
@@ -654,11 +615,7 @@ let effective_max_context_of_model_spec
       let capabilities =
         match model_capabilities_override with
         | Some _ as found -> found
-        | None ->
-          Llm_provider.Capabilities.for_provider_model_id
-            ~wire:(Some wire)
-            ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
-            ~model_id:spec.api_name
+        | None -> catalog_capabilities
       in
       match capabilities with
       | Some caps ->
@@ -674,7 +631,7 @@ let effective_max_context_of_model_spec
 
 (* --- provider × model spec → Provider_config.t --- *)
 let validate_parallel_tool_policy (provider : Runtime_schema.provider)
-    ~(model_id : string) ~disable_parallel_tool_use =
+    ~(model_id : string) ~supports_parallel_tool_suppression ~disable_parallel_tool_use =
   match provider.api_format, disable_parallel_tool_use with
   | (Runtime_schema.Codex_app_server_runtime | Antigravity_cli_runtime
     | Claude_code_runtime | Muse_serve_runtime | Ollama_api | Gemini_api
@@ -685,14 +642,9 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
           protocol %s cannot carry that request policy"
          provider.id model_id provider.protocol)
   | (Messages_api | Chat_completions_api), true ->
-    let declared =
-      Option.bind (Llm_provider.Model_catalog.global ()) (fun catalog ->
-        Llm_provider.Model_catalog.provider_entry_for_reference catalog
-          (Llm_provider.Model_catalog.Declared_provider provider.id))
-    in
-    (match declared with
-     | Some entry when entry.supports_parallel_tool_suppression -> Ok ()
-     | Some _ | None ->
+    (match supports_parallel_tool_suppression with
+     | true -> Ok ()
+     | false ->
        Error
          (Printf.sprintf
             "binding %s.%s declares disable-parallel-tool-use = true, but provider %S has no catalog-declared parallel tool suppression contract"
@@ -706,6 +658,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
     ?max_tokens
     ?repeat_last_n ?return_progress
     ?max_concurrent_requests
+    ~declarations
     ~disable_parallel_tool_use
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
   : (provider_materialization, string) result =
@@ -726,8 +679,10 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
   in
   let open Result.Syntax in
   let* () = validate_parallel_tool_policy provider ~model_id:spec.id
+      ~supports_parallel_tool_suppression:(Declarations.supports_parallel_tool_suppression
+        declarations ~provider_id:provider.id)
       ~disable_parallel_tool_use in
-  let registry_entry = find_registry_entry provider.id in
+  let declaration = Declarations.find declarations provider.id in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
@@ -744,32 +699,36 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
       | Muse_serve_runtime ->
         Ok (Llm_provider.Provider_config.Provider_default, Llm_provider.Provider_config.Static_credential)
     in
-    (match provider_kind_for_http_provider ?registry_entry provider with
+    (match provider_kind_for_http_provider ?declaration provider with
      | Ok kind ->
+       let request_policy = Declarations.request_policy declarations ~wire:kind
+           ~provider_id:provider.id ~model_id:spec.api_name in
+       let catalog_capabilities =
+         Llm_provider.Capabilities.request_policy_capabilities request_policy in
        let model_capabilities_override =
          model_capabilities_override_of_model_spec
            ~wire:kind
-           ~provider_id:provider.id
+           ~catalog_capabilities
            spec
        in
        let* model_anthropic_thinking_control_override =
          anthropic_thinking_control_override_of_model_spec
            ~wire:kind
            ~provider_id:provider.id
+           ~request_policy
            spec
        in
        let max_context =
          effective_max_context_of_model_spec
-           ~wire:kind
-           ~provider_id:provider.id
+           ~catalog_capabilities
            ~model_capabilities_override
            spec
        in
        let request_path =
-         request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
+         request_path_for_http_provider ~provider ~declaration ~kind ~base_url
        in
-       let* credential = materialize_credentials_from_registry ~provider_id:provider.id
-           ~registry_entry ~credential:provider.credentials in
+       let* credential = materialize_credentials_from_declaration ~provider_id:provider.id
+           ~declaration ~credential:provider.credentials in
        let default_headers = Provider_binding.default_headers_for_kind kind in
        let custom_headers =
          match provider.headers with
@@ -837,6 +796,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
             ?admission_priority_run_limit
             ?max_tokens
             ()
+       |> Llm_provider.Provider_config.with_request_policy request_policy
        in
        Ok {provider_config;credential_admission=credential.admission}
      | Error reason -> Error reason)
@@ -855,12 +815,14 @@ let materialize_provider_binding (cfg : Runtime_schema.config) (binding : Runtim
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
+       let declarations = Declarations.current () in
        (* [provider_config_from_declared_provider] already returns the concrete
           reason (e.g. "provider ... uses protocol messages-http, which the
           runtime adapter cannot build a provider_config for ..."); propagate it
           verbatim instead of collapsing to a generic "resolution failed" that
           hid which provider/protocol was unmapped. *)
        provider_config_from_declared_provider
+         ~declarations
          ?binding_max_context:binding.max_context
          ?keep_alive:binding.keep_alive
          ?num_ctx:binding.num_ctx
@@ -871,10 +833,7 @@ let materialize_provider_binding (cfg : Runtime_schema.config) (binding : Runtim
          ~disable_parallel_tool_use:binding.disable_parallel_tool_use
          ?max_tokens:binding.max_tokens
          provider
-         spec
-       |> Result.map (fun (materialized : provider_materialization) ->
-           {materialized with provider_config=
-             Llm_provider.Provider_config.freeze_for_request materialized.provider_config}))
+         spec)
 ;;
 
 (* The official-client executions spawn the path
@@ -1105,8 +1064,12 @@ let materialize_execution (cfg : Runtime_schema.config) (binding : Runtime_schem
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
        let open Result.Syntax in
-       let* () = validate_parallel_tool_policy provider ~model_id:binding.model_id
-           ~disable_parallel_tool_use:binding.disable_parallel_tool_use in
+       let* () = match provider.api_format with
+         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api -> Ok ()
+         | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime | Muse_serve_runtime ->
+           validate_parallel_tool_policy provider ~model_id:binding.model_id
+             ~supports_parallel_tool_suppression:false
+             ~disable_parallel_tool_use:binding.disable_parallel_tool_use in
        let* () = refuse_anthropic_thinking_control_on_official_client provider spec in
        let official result = Result.map
          (fun execution -> {execution;credential_admission=None}) result in

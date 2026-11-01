@@ -339,11 +339,19 @@ val resolve_request_policy
   -> model_id:string
   -> request_policy
 
+val resolve_request_policy_from_catalog
+  :  catalog:Model_catalog.t option
+  -> wire:Provider_kind.t
+  -> provider:Model_catalog.provider_reference
+  -> model_id:string
+  -> request_policy
+(** Pure resolution, including missing facts, from the supplied catalog. *)
+
 val resolve_bound_request_policy :
-  catalog:Model_catalog.t option -> provider:Model_catalog.provider_entry ->
+  catalog:Model_catalog.t option -> wire:Provider_kind.t -> provider:Model_catalog.provider_entry ->
   capabilities:capabilities -> model_id:string -> request_policy
 (** Pure resolution from the selection-owned catalog and provider declaration.
-    A scoped row uses the selected wire base before its model base, then applies
+    A scoped row uses [wire]'s selected base before its model base, then applies
     explicit model fields; an absent base inherits selected provider defaults.
     A permitted bare row uses only its own preset/default and explicit fields.
     No global catalog is read; absent thinking controls remain absent. *)

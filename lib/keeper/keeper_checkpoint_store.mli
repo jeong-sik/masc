@@ -264,8 +264,11 @@ val forget_written_lineages : session_root:string -> keeper_name:string -> unit
 (** Message count of the canonical checkpoint for [session_id]. Answered
     without reading the file while the file on disk is the one the store's
     canonical summary was taken from (a parse or a write by this process);
-    otherwise the checkpoint is loaded and parsed once. [Ok None] when there
-    is no checkpoint. *)
+    otherwise its head is read and parsed. A successful parse fills that same
+    summary only if the canonical file's identity is unchanged across the
+    read. This does not validate the objects the head names. Full loads still
+    validate them, and saves still check their availability. Missing files and
+    read/decode failures are not retained. [Ok None] when there is no checkpoint. *)
 val canonical_message_count :
   session_dir:string ->
   session_id:string ->

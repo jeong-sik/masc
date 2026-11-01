@@ -631,6 +631,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   let records_by_goal_id =
     Goal_verification.load_records_by_goal_id_authoritative config
   in
+  let verifier_observations = Goal_verification_agent.capture_observations () in
   let goal_json (goal : Goal_store.goal) =
     let record =
       match records_by_goal_id with
@@ -653,7 +654,8 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
         (fields
          @ [ "verification", verification
            ; "verifier_unreconciled",
-             Goal_verification_agent.unreconciled_to_yojson ~config ~record goal
+             Goal_verification_agent.unreconciled_from_snapshot_to_yojson
+               verifier_observations ~config ~record goal
            ])
     | json -> json
   in

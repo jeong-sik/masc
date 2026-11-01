@@ -144,23 +144,6 @@ let collect_pending config : (scan, scan_failure) result =
     Ok { collected = List.rev collected; unreconciled = List.rev unreconciled }
 ;;
 
-(* Derived from the latest completed scan and replaced by the next one; never
-   written to a store. A scan the goal store refused leaves it as it was,
-   because that scan saw no goal to judge either way. *)
-let last_unreconciled : (string * reconcile_failure list) option Atomic.t = Atomic.make None
-
-let publish_unreconciled config failures =
-  Atomic.set last_unreconciled (Some (Workspace.masc_dir config, failures));
-  List.iter
-    (fun { failed_goal_id; step; failure } ->
-       Log.Misc.error
-         "goal verifier ledger %s failed goal_id=%s; its pending row stays undrained: %s"
-         (Goal_reconcile_step.to_string step)
-         failed_goal_id
-         (Goal_store.write_error_to_string failure))
-    failures
-;;
-
 (* RFC-0444 §2.3 row 7 and criterion 3: one WARN line per skipped scan, and
    one durable row in the verification-runs store carrying the value the scan
    saw. The line is written first because it is the evidence the criterion
@@ -212,7 +195,34 @@ type original_read_observation = {
   failure : Worker.error option;
 }
 
-let original_read_observations : original_read_observation list Atomic.t = Atomic.make []
+(* These observations are published together so one response can render the
+   same scan and original-read view for every Goal. They remain in-process
+   observations, not a snapshot of either durable ledger. *)
+type observation_snapshot = {
+  reconciliation : (string * reconcile_failure list) option;
+  original_reads : original_read_observation list;
+}
+
+let observations = Atomic.make { reconciliation=None; original_reads=[] }
+let capture_observations () = Atomic.get observations
+
+(* A refused scan keeps the previous completed scan's observation. *)
+let publish_unreconciled config failures =
+  let rec publish () =
+    let current = Atomic.get observations in
+    let next = {current with reconciliation=Some (Workspace.masc_dir config, failures)} in
+    if not (Atomic.compare_and_set observations current next) then publish ()
+  in
+  publish ();
+  List.iter
+    (fun { failed_goal_id; step; failure } ->
+       Log.Misc.error
+         "goal verifier ledger %s failed goal_id=%s; its pending row stays undrained: %s"
+         (Goal_reconcile_step.to_string step)
+         failed_goal_id
+         (Goal_store.write_error_to_string failure))
+    failures
+;;
 
 let same_original_goal left right =
   String.equal left.root right.root && String.equal left.goal_id right.goal_id
@@ -224,24 +234,26 @@ let same_original_binding left right =
 
 let begin_original_read binding =
   let rec replace () =
-    let current = Atomic.get original_read_observations in
-    let failure = match List.find_opt (fun observed -> same_original_binding observed.binding binding) current with
+    let current = Atomic.get observations in
+    let failure = match List.find_opt (fun observed -> same_original_binding observed.binding binding) current.original_reads with
       | Some observed -> observed.failure
       | None -> None in
     let observed = {binding; failure} in
-    let next = observed :: List.filter (fun previous -> not (same_original_goal previous.binding binding)) current in
-    if Atomic.compare_and_set original_read_observations current next then observed else replace ()
+    let original_reads = observed :: List.filter (fun previous -> not (same_original_goal previous.binding binding)) current.original_reads in
+    let next = {current with original_reads} in
+    if Atomic.compare_and_set observations current next then observed else replace ()
   in replace ()
 
 let finish_original_read observed failure =
   let rec replace () =
-    let current = Atomic.get original_read_observations in
-    if not (List.exists (fun candidate -> candidate == observed) current) then false
+    let current = Atomic.get observations in
+    if not (List.exists (fun candidate -> candidate == observed) current.original_reads) then false
     else
-      let next = List.filter_map (fun candidate ->
+      let original_reads = List.filter_map (fun candidate ->
         if candidate == observed then Option.map (fun failure -> {observed with failure=Some failure}) failure
-        else Some candidate) current in
-      if Atomic.compare_and_set original_read_observations current next then true else replace ()
+        else Some candidate) current.original_reads in
+      let next = {current with original_reads} in
+      if Atomic.compare_and_set observations current next then true else replace ()
   in replace ()
 
 let abandon_original_read observed =
@@ -249,21 +261,27 @@ let abandon_original_read observed =
      previously observed failure, if any, rather than clearing it as repaired. *)
   ignore (finish_original_read observed observed.failure)
 
-let retire_original_reads observations =
+let retire_observations snapshot ~root =
+  let retired_reads = List.filter (fun observed -> String.equal observed.binding.root root) snapshot.original_reads in
   let rec replace () =
-    let current = Atomic.get original_read_observations in
-    let next = List.filter (fun candidate ->
-      not (List.exists (fun observed -> candidate == observed) observations)) current in
-    if not (Atomic.compare_and_set original_read_observations current next) then replace ()
+    let current = Atomic.get observations in
+    let reconciliation = match snapshot.reconciliation with
+      | Some (observed_root, _) when String.equal observed_root root
+          && current.reconciliation == snapshot.reconciliation -> None
+      | Some _ | None -> current.reconciliation in
+    let original_reads = List.filter (fun candidate ->
+      not (List.exists (fun observed -> candidate == observed) retired_reads)) current.original_reads in
+    let next = {reconciliation; original_reads} in
+    if not (Atomic.compare_and_set observations current next) then replace ()
   in replace ()
 
-let unreconciled_to_yojson ~config ~record (goal : Goal_store.goal) =
+let unreconciled_from_snapshot_to_yojson snapshot ~config ~record (goal : Goal_store.goal) =
   let render step detail = `Assoc [
     "step", `String (Goal_reconcile_step.to_string step); "detail", `String detail] in
   if goal.phase <> Goal_phase.Verifying then `Null
   else
     let root = Workspace.masc_dir config in
-    let reconciliation = match Atomic.get last_unreconciled with
+    let reconciliation = match snapshot.reconciliation with
       | Some (observed_root, failures) when String.equal root observed_root ->
         List.find_opt (fun failure -> String.equal failure.failed_goal_id goal.id) failures
       | Some _ | None -> None in
@@ -276,11 +294,14 @@ let unreconciled_to_yojson ~config ~record (goal : Goal_store.goal) =
           && Goal_store.criterion_equal pending.criterion (Goal_store.criterion_of_goal goal) ->
         let binding = {root; goal_id; request_id=pending.request_id; criterion=pending.criterion} in
         (match List.find_opt (fun observed -> same_original_binding observed.binding binding)
-           (Atomic.get original_read_observations) with
+           snapshot.original_reads with
          | Some {failure=Some error; _} -> render Goal_reconcile_step.Read_original (worker_detail error)
          | Some {failure=None; _} | None -> `Null)
       | Some {completion=(Completion_idle | Proof_pending _ | Proof_proven _ | Proof_refuted _ | Human_confirmed _); _}
       | None -> `Null
+
+let unreconciled_to_yojson ~config ~record goal =
+  unreconciled_from_snapshot_to_yojson (capture_observations ()) ~config ~record goal
 
 let originals_for_goal store ~goal_id = Worker.inventory_for_goal ~store ~goal_id
   ~installation_id:Worker.host_installation_id
@@ -1010,18 +1031,12 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     in
     install_callback runtime;
     Eio.Switch.on_release sw (fun () ->
-      let reconciliation = Atomic.get last_unreconciled in
-      let originals = Atomic.get original_read_observations
-        |> List.filter (fun observed -> String.equal observed.binding.root (Workspace.masc_dir config)) in
+      let snapshot = capture_observations () in
       if Atomic.compare_and_set active_runtime owner None
       then (
         (* No scan runs after this, so its last list would read as current. *)
         Atomic.set runtime.scheduling {ready=[]; in_flight=[]; retries=[]};
-        (match reconciliation with
-         | Some (root, _) when String.equal root (Workspace.masc_dir config) ->
-           ignore (Atomic.compare_and_set last_unreconciled reconciliation None)
-         | Some _ | None -> ());
-        retire_original_reads originals;
+        retire_observations snapshot ~root:(Workspace.masc_dir config);
         Atomic.set
           Workspace_hooks.goal_verification_pending_fn
           previous_pending_hook;

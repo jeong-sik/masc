@@ -1131,6 +1131,8 @@
  ;; test_tool_blob_store clears the durable tool-call index between cases; the
  ;; index library is unwrapped, so its module is referenced bare.
  masc.keeper_tool_call_index
+  ;; Blob retention validates exact official-client outbox receipt identities.
+  masc.keeper_client_tool_outbox_codec
  ;; test_enum_mirror_sync names the connected Browser_lane backends in the
  ;; capability table it checks; the browser lane is its own library.
  masc.browser_lane

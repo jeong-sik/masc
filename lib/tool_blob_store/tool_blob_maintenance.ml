@@ -349,6 +349,12 @@ let child_reference_scan_context context fields payload_fields key =
   }
 ;;
 
+let outbox_payload_fields ~path json =
+  match Keeper_client_tool_outbox_codec.validate ~path json with
+  | Ok () -> ["arguments"; "response"]
+  | Error _ -> []
+;;
+
 let rec references_in_json
           ?(context = durable_context)
           ~path
@@ -382,6 +388,7 @@ let rec references_in_json
          if not context.history_media then []
          else history_tool_payload_fields fields @ captured_tool_payload_fields fields
               @ tool_receipt_payload_fields fields
+              @ outbox_payload_fields ~path json
               @ (match context.official with
                  | Official_blocks when official_tool_result fields -> ["structured_content"]
                  | Other_value | Official_message | Official_blocks -> []) in

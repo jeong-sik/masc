@@ -19,6 +19,7 @@
    masc.agent_core.digest
   ; History media sources are live blob references (RFC-0476).
   masc.agent_core.base
+  masc.keeper_client_tool_outbox_codec
   unix
   yojson
   fs_compat

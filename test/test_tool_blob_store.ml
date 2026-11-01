@@ -1293,6 +1293,123 @@ let test_maintenance_opaque_payloads_preserve_fail_closed_boundaries () =
      `Captured_media_sibling;`Official_media_sibling]
 ;;
 
+let outbox_vendor_receipt arguments response : Masc.Keeper_client_tool_outbox.receipt =
+  {thread_id="thread";turn_id="turn";call_id="call";tool_name="fixture";arguments;response}
+;;
+
+let test_maintenance_outbox_payloads_are_tool_data () =
+  with_temp_dir (fun base_path ->
+    let module Outbox = Masc.Keeper_client_tool_outbox in
+    let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+    let store = B.create ~base_path in
+    let media = media_put_ok (Tool_blob_media_store.create store)
+        ~media_type:"image/png" ~raw:"sole sibling media" in
+    let artifact = B.put_durable store ~bytes:"outbox structured artifact" ~mime:"application/json" in
+    let marker = B.put_durable store ~bytes:"outbox reserved marker" ~mime:"text/plain" in
+    let dead_raw = "outbox data does not own media" in
+    let dead = B.put_durable store ~bytes:dead_raw ~mime:"image/png" in
+    let partial = `Assoc ["type",`String "stored";"sha256",`String dead.sha256] in
+    let full = Agent_core.History.stored_source_to_json ~media_type:"image/png"
+        (Agent_core.History.stored_of_raw dead_raw) in
+    let payload = `List [`List [partial;full;
+      Agent_core.History.content_block_to_json
+        (Agent_core.Types.ToolUse {id="fake";name="nested data";input=partial});
+      `Assoc ["schema",`String "masc.official-client-context-message.v4";
+        "message",`Assoc ["content_blocks",`List [
+          `Assoc ["type",`String "image";"source",partial]]]];
+      O.normalized_artifact_ref_to_json artifact;
+      `String (O.encode_for_agent_core (O.Stored marker))]] in
+    require (Outbox.retain ~base_path ~keeper_name:"reviewer"
+      (outbox_vendor_receipt payload payload));
+    let producer = require (Outbox.host_producer ~base_path ~keeper_name:"reviewer"
+        ~runtime_label:"host fixture" ~turn_count:1) in
+    require (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
+      ~tool_name:"fixture" ~arguments:payload ~response:payload);
+    ignore (save_maintenance_source base_path "messages/outbox-media-owner.json"
+      (Agent_core.History.content_block_to_json
+        (Agent_core.Types.Image {media_type="image/png";source=Stored media})));
+    let first = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+    Alcotest.(check int) "only the data-named bytes become candidates" 1 first.candidates_recorded;
+    Alcotest.(check int) "the first scan does not delete" 0 first.deleted;
+    let second = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+    Alcotest.(check int) "both receipt kinds permit collection of data-named media" 1 second.deleted;
+    Alcotest.(check int) "media sibling and both reserved artifact forms remain owners" 3 second.live_references;
+    Alcotest.(check (option string)) "ordinary stored-looking data cannot pin a blob"
+      None (fetch_ok store ~sha256:dead.sha256);
+    List.iter (fun (sha256,bytes) ->
+      Alcotest.(check (option string)) "actual owned bytes survive" (Some bytes) (fetch_ok store ~sha256))
+      [media.sha256,"sole sibling media";artifact.sha256,"outbox structured artifact";
+       marker.sha256,"outbox reserved marker"])
+;;
+
+let test_maintenance_outbox_opacity_requires_complete_receipt_authority () =
+  let module Codec = Keeper_client_tool_outbox_codec in
+  List.iter (fun shape -> with_temp_dir (fun base_path ->
+    let store = B.create ~base_path in
+    let survivor = B.put_durable store ~bytes:"preserve unconfirmed outbox owner" ~mime:"text/plain" in
+    ignore (maintenance_ok ~base_path ~mode:M.Observe_only);
+    let snapshot_path = M.candidate_snapshot_path ~base_path in
+    let snapshot () = In_channel.with_open_bin snapshot_path In_channel.input_all in
+    let before = snapshot () in
+    let partial = `Assoc ["type",`String "stored";"sha256",`String survivor.sha256] in
+    let vendor = Codec.to_json {thread_id="thread";turn_id="turn";call_id="call";
+      tool_name="fixture";arguments=partial;response=`Null} in
+    let change f = match vendor with `Assoc fields -> `Assoc (f fields)
+      | _ -> Alcotest.fail "vendor encoder must return an object" in
+    let host ?(producer_id="019a0000-0000-7000-8000-000000000001")
+        ?(invocation_index=0) ?(turn_count=1) () =
+      Codec.host_to_json ~producer_id ~runtime_label:"host fixture" ~turn_count
+        ~invocation_index ~call_id:"host-call" ~tool_name:"fixture" ~arguments:partial ~response:`Null in
+    let json = match shape with
+      | `Missing_identity -> change (List.remove_assoc "thread_id")
+      | `Empty_identity -> change (fun fields -> ("thread_id",`String " ") :: List.remove_assoc "thread_id" fields)
+      | `Duplicate_identity -> change (fun fields -> ("thread_id",`String "other") :: fields)
+      | `Unknown_field -> change (fun fields -> ("unknown",`Null) :: fields)
+      | `Invalid_producer -> host ~producer_id:"not-a-uuid" ()
+      | `Negative_invocation -> host ~invocation_index:(-1) ()
+      | `Negative_turn -> host ~turn_count:(-1) ()
+      | `Wrong_filename -> vendor in
+    let filename = match shape with `Wrong_filename -> "unbound.json" | _ -> Codec.filename json in
+    ignore (save_maintenance_source base_path
+      ("keepers/reviewer/official-client-runtime/undelivered-tools/" ^ filename) json);
+    (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+     | Error (M.Malformed_structured_artifact_reference _) -> ()
+     | Error error -> Alcotest.fail (M.error_to_string error)
+     | Ok _ -> Alcotest.fail "an invalid receipt made its arbitrary payload opaque");
+    Alcotest.(check string) "failed scan preserves candidate snapshot" before (snapshot ());
+    Alcotest.(check (option string)) "invalid authority cannot delete a candidate"
+      (Some "preserve unconfirmed outbox owner") (fetch_ok store ~sha256:survivor.sha256)))
+    [`Missing_identity;`Empty_identity;`Duplicate_identity;`Unknown_field;`Invalid_producer;
+     `Negative_invocation;`Negative_turn;`Wrong_filename]
+;;
+
+let test_maintenance_outbox_payloads_preserve_reserved_reference_failures () =
+  List.iter (fun host -> with_temp_dir (fun base_path ->
+    let module Outbox = Masc.Keeper_client_tool_outbox in
+    let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+    let store = B.create ~base_path in
+    let survivor = B.put_durable store ~bytes:"retain until reserved refs are valid" ~mime:"text/plain" in
+    ignore (maintenance_ok ~base_path ~mode:M.Observe_only);
+    let snapshot_path = M.candidate_snapshot_path ~base_path in
+    let snapshot () = In_channel.with_open_bin snapshot_path In_channel.input_all in
+    let before = snapshot () in
+    let payload = `List [`List [`Assoc ["_blob",`Assoc ["sha256",`String survivor.sha256]]]] in
+    if host then (
+      let producer = require (Outbox.host_producer ~base_path ~keeper_name:"reviewer"
+          ~runtime_label:"host fixture" ~turn_count:1) in
+      require (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
+        ~tool_name:"fixture" ~arguments:`Null ~response:payload))
+    else require (Outbox.retain ~base_path ~keeper_name:"reviewer"
+      (outbox_vendor_receipt payload `Null));
+    (match M.run ~base_path ~board_posts_file ~mode:M.Delete_previous_candidates with
+     | Error (M.Malformed_structured_artifact_reference _) -> ()
+     | Error error -> Alcotest.fail (M.error_to_string error)
+     | Ok _ -> Alcotest.fail "opaque tool data swallowed a malformed reserved reference");
+    Alcotest.(check string) "reserved reference failure preserves candidates" before (snapshot ());
+    Alcotest.(check (option string)) "reserved reference failure preserves bytes"
+      (Some "retain until reserved refs are valid") (fetch_ok store ~sha256:survivor.sha256))) [false;true]
+;;
+
 let media_error =
   Alcotest.testable
     (fun fmt error -> Format.pp_print_string fmt (Agent_core.Error.to_string (Agent_core.Error.Media error)))
@@ -2635,6 +2752,12 @@ let () =
             test_maintenance_preserves_sole_snapshot_media_owner;
           Alcotest.test_case "maintenance opaque payloads keep malformed references fail-closed" `Quick
             test_maintenance_opaque_payloads_preserve_fail_closed_boundaries;
+          Alcotest.test_case "maintenance treats validated outbox payloads as tool data" `Quick
+            test_maintenance_outbox_payloads_are_tool_data;
+          Alcotest.test_case "maintenance outbox opacity requires complete receipt authority" `Quick
+            test_maintenance_outbox_opacity_requires_complete_receipt_authority;
+          Alcotest.test_case "maintenance opaque outbox payloads preserve reserved reference failures" `Quick
+            test_maintenance_outbox_payloads_preserve_reserved_reference_failures;
           Alcotest.test_case "media store reads back what it put" `Quick
             test_media_store_reads_back_what_it_put;
           Alcotest.test_case "media store reports missing and mismatched bytes" `Quick

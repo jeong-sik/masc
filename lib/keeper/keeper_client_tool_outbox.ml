@@ -4,7 +4,7 @@ type entry = { path : string; json : Yojson.Safe.t }
 type snapshot = { directory : string; entries : entry list }
 module Producer_map = Map.Make(String)
 
-type receipt =
+type receipt = Keeper_client_tool_outbox_codec.receipt =
   { thread_id : string
   ; turn_id : string
   ; call_id : string
@@ -58,14 +58,11 @@ let start_host_producer ~sw ~base_path ~keeper_name ~runtime_label ~turn_count =
     |> Result.map_error File_lock_eio.durable_lock_error_to_string in
   Ok producer
 
-let to_json (result : receipt) =
-  `Assoc ["thread_id", `String result.thread_id; "turn_id", `String result.turn_id;
-    "call_id", `String result.call_id; "tool_name", `String result.tool_name;
-    "arguments", result.arguments; "response", result.response]
+let to_json = Keeper_client_tool_outbox_codec.to_json
 
 let filename json =
   Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-    Agent_core_sha256.(digest_string (Yojson.Safe.to_string json) |> to_hex) ^ ".json")
+    Keeper_client_tool_outbox_codec.filename json)
 
 let decode path body = Safe_ops.parse_json_off_fiber ~context:path body
 
@@ -79,37 +76,8 @@ let read path =
     Ok (Some json)
 
 let validate path json =
-  match json with
-  | `Assoc fields ->
-    let names = List.map fst fields in
-    let names = List.sort String.compare names in
-    let vendor = ["arguments"; "call_id"; "response"; "thread_id"; "tool_name"; "turn_id"] in
-    let host = ["arguments"; "call_id"; "host_invocation_index"; "host_producer_id"; "host_turn_count";
-      "response"; "runtime_label"; "tool_name"] in
-    let strings_valid names = List.for_all (fun name -> match List.assoc_opt name fields with
-      | Some (`String value) -> String.trim value <> ""
-      | Some _ | None -> false) names in
-    let* () =
-      if names = vendor then
-        if strings_valid ["thread_id"; "turn_id"; "call_id"; "tool_name"] then Ok ()
-        else Error "invalid vendor tool outbox identity"
-      else if names = host then
-        if not (strings_valid ["host_producer_id"; "runtime_label"; "call_id"; "tool_name"])
-        then Error "invalid host tool outbox identity"
-        else
-          let* () = match List.assoc_opt "host_producer_id" fields with
-            | Some (`String value) -> Random_id.parse_uuid_v7 value |> Result.map (fun _ -> ())
-            | Some _ | None -> Error "invalid host tool result producer" in
-          let* () = match List.assoc_opt "host_invocation_index" fields with
-            | Some (`Int value) when value >= 0 -> Ok ()
-            | Some _ | None -> Error "invalid host tool invocation index" in
-          (match List.assoc_opt "host_turn_count" fields with
-           | Some (`Int value) when value >= 0 -> Ok ()
-           | Some _ | None -> Error "invalid host tool result turn count")
-      else Error "invalid tool outbox fields" in
-    if Filename.basename path <> filename json then Error "tool outbox digest mismatch"
-    else Ok ()
-  | _ -> Error "tool outbox receipt must be an object"
+  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+    Keeper_client_tool_outbox_codec.validate ~path json)
 
 let retain_json ~base_path ~keeper_name json =
   let* directory = directory ~base_path ~keeper_name in
@@ -134,10 +102,9 @@ let retain ~base_path ~keeper_name result =
   retain_json ~base_path ~keeper_name (to_json result) |> Result.map (fun _ -> ())
 
 let retain_host_result_with_delivery producer ~invocation_index ~call_id ~tool_name ~arguments ~response =
-  let json = `Assoc ["host_invocation_index",`Int invocation_index;
-    "host_producer_id",`String producer.producer_id;
-    "runtime_label",`String producer.runtime_label;"host_turn_count",`Int producer.turn_count;
-    "call_id",`String call_id;"tool_name",`String tool_name;"arguments",arguments;"response",response] in
+  let json = Keeper_client_tool_outbox_codec.host_to_json
+      ~producer_id:producer.producer_id ~runtime_label:producer.runtime_label
+      ~turn_count:producer.turn_count ~invocation_index ~call_id ~tool_name ~arguments ~response in
   let* entry = retain_json ~base_path:producer.base_path ~keeper_name:producer.keeper_name json in
   Ok {producer;entry}
 

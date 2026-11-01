@@ -19,9 +19,9 @@ let sections = function
             | Arguments -> "arguments" | Submission -> "submission" | Result -> "result"
             | Child_node source -> "child node " ^ source in
           Printf.sprintf "%s → %s · %s%s%s%s" origin node.node_id
-            (Option.fold ~none:"not settled" ~some:Masc.Tool_result.string_of_disposition node.disposition)
+            (Option.fold ~none:"not settled" ~some:Tool_result.string_of_disposition node.disposition)
             (Option.fold ~none:"" ~some:(fun id -> "\noccurrence: " ^ id) node.tool_use_id)
-            (Option.fold ~none:"" ~some:(fun value -> "\neffect: " ^ Masc.Tool_result.failure_effect_disposition_to_string value) node.effect_disposition)
+            (Option.fold ~none:"" ~some:(fun value -> "\neffect: " ^ Tool_result.failure_effect_disposition_to_string value) node.effect_disposition)
             (Option.fold ~none:"" ~some:(fun value -> "\nvalidation: " ^ json value) node.validation_error)) child.nodes in
         ["Child " ^ child.alias,
           Masc.Keeper_composition_nested_run.disposition_to_string child.disposition ^ " · "

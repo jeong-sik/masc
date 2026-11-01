@@ -1116,7 +1116,7 @@
  (name masc_tui_nested_result)
  (wrapped false)
  (modules masc_tui_nested_result)
- (libraries masc masc_skill_reference yojson))
+ (libraries masc masc.tool_types masc_skill_reference yojson))
 
 (library
  (name masc_tui_chat_call_reader)

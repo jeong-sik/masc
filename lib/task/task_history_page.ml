@@ -1414,16 +1414,17 @@ type cached_segment = {
 }
 
 let max_cached_files = 256
+(* Bound total retained row offsets across all cached segments in addition to
+   the file-count bound so a small number of dense files cannot retain an
+   unbounded offset map. *)
+let max_cached_segment_rows = 2_000_000
 let full_digest_max_bytes = 8 * io_block_bytes
 let cache_mutex = Stdlib.Mutex.create ()
 let cache_clock = ref 0
+let segment_cache_retained_rows = ref 0
 let segment_cache : (string * string, cached_segment) Hashtbl.t = Hashtbl.create 64
-let file_scan_locks : Stdlib.Mutex.t array =
-  Array.init 64 (fun _ -> Stdlib.Mutex.create ())
 
-let with_file_scan_lock ~root ~relative fn =
-  let idx = Hashtbl.hash (root, relative) land 63 in
-  Stdlib.Mutex.protect file_scan_locks.(idx) fn
+let segment_weight (seg : cached_segment) = max 1 seg.row_count
 
 let find_cached_segment ~root ~relative =
   Stdlib.Mutex.protect cache_mutex (fun () ->
@@ -1434,9 +1435,14 @@ let find_cached_segment ~root ~relative =
       seg.last_used <- !cache_clock;
       Some seg)
 
-let invalidate_cached_segment ~root ~relative =
+let invalidate_cached_segment_if_same ~root ~relative (stale : cached_segment) =
   Stdlib.Mutex.protect cache_mutex (fun () ->
-    Hashtbl.remove segment_cache (root, relative))
+    match Hashtbl.find_opt segment_cache (root, relative) with
+    | Some existing when existing == stale ->
+      segment_cache_retained_rows :=
+        max 0 (!segment_cache_retained_rows - segment_weight existing);
+      Hashtbl.remove segment_cache (root, relative)
+    | Some _ | None -> ())
 
 let evict_lru_locked () =
   let oldest_key = ref None in
@@ -1448,8 +1454,22 @@ let evict_lru_locked () =
         oldest_key := Some key))
     segment_cache;
   match !oldest_key with
-  | Some key -> Hashtbl.remove segment_cache key
+  | Some key ->
+    (match Hashtbl.find_opt segment_cache key with
+     | Some existing ->
+       segment_cache_retained_rows :=
+         max 0 (!segment_cache_retained_rows - segment_weight existing)
+     | None -> ());
+    Hashtbl.remove segment_cache key
   | None -> ()
+
+let evict_segment_cache_if_needed_locked () =
+  while Hashtbl.length segment_cache > 0
+        && (Hashtbl.length segment_cache > max_cached_files
+            || !segment_cache_retained_rows > max_cached_segment_rows)
+  do
+    evict_lru_locked ()
+  done
 
 let store_cached_segment ~root ~relative (seg : cached_segment) =
   Stdlib.Mutex.protect cache_mutex (fun () ->
@@ -1475,12 +1495,17 @@ let store_cached_segment ~root ~relative (seg : cached_segment) =
         || (snapshot_supersedes_or_matches && range_contains_existing)
     in
     if replace then (
-      if Hashtbl.length segment_cache >= max_cached_files
-         && not (Hashtbl.mem segment_cache (root, relative))
-      then evict_lru_locked ();
+      (match Hashtbl.find_opt segment_cache (root, relative) with
+       | Some existing ->
+         segment_cache_retained_rows :=
+           max 0 (!segment_cache_retained_rows - segment_weight existing)
+       | None -> ());
       incr cache_clock;
       seg.last_used <- !cache_clock;
-      Hashtbl.replace segment_cache (root, relative) seg))
+      Hashtbl.replace segment_cache (root, relative) seg;
+      segment_cache_retained_rows :=
+        !segment_cache_retained_rows + segment_weight seg;
+      evict_segment_cache_if_needed_locked ()))
 
 let block_digest_at reader ~limit offset =
   let from = offset - (offset mod io_block_bytes) in
@@ -1778,7 +1803,11 @@ let read ~config ~task_id ~max_events ?cursor () =
         let scan_one_file ~first ~file ~rest initial_collected initial_count =
           let ceiling_opt = List.find_opt (fun (c : ceiling) -> c.file = file.relative) ceilings in
           let is_ceiling = Option.is_some ceiling_opt in
-          with_file_scan_lock ~root ~relative:file.relative @@ fun () ->
+          (* Scans, block digests, and index construction run unlocked so a slow
+             cold scan never blocks another worker domain that would hash to the
+             same stripe. [store_cached_segment] serializes only publication and
+             enforces monotonic range/snapshot replacement; [invalidate_cached_segment_if_same]
+             removes only the exact stale entry observed by this fiber. *)
           with_reader ~root file (fun reader ->
             let* initial_before =
               match first, cursor with
@@ -1792,8 +1821,14 @@ let read ~config ~task_id ~max_events ?cursor () =
             in
             if initial_before = 0 then Ok (Step_next_file (initial_collected, initial_count))
             else
-              let scan_cold_from_initial () =
-                invalidate_cached_segment ~root ~relative:file.relative;
+              let raw_cached_opt = find_cached_segment ~root ~relative:file.relative in
+              let scan_cold_from_initial ?stale () =
+                Option.iter
+                  (invalidate_cached_segment_if_same ~root ~relative:file.relative)
+                  raw_cached_opt;
+                Option.iter
+                  (invalidate_cached_segment_if_same ~root ~relative:file.relative)
+                  stale;
                 reset_reader_block_memo reader;
                 let* outcome =
                   scan_range_raw ~task_id ~file ~reader ~start_before:initial_before
@@ -1817,13 +1852,13 @@ let read ~config ~task_id ~max_events ?cursor () =
                   Ok (Step_next_file (collected, count))
               in
               let* cached_opt =
-                match find_cached_segment ~root ~relative:file.relative with
+                match raw_cached_opt with
                 | None -> Ok None
                 | Some cached ->
                   let* ok = verify_cached_segment ~is_ceiling reader cached in
                   if ok then Ok (Some cached)
                   else (
-                    invalidate_cached_segment ~root ~relative:file.relative;
+                    invalidate_cached_segment_if_same ~root ~relative:file.relative cached;
                     Ok None)
               in
               (* Step 1: if initial_before > cached.scanned_to, scan the appended upper delta [cached.scanned_to, initial_before) *)
@@ -1960,7 +1995,7 @@ let read ~config ~task_id ~max_events ?cursor () =
                   | _ -> Ok (`Continue (before, collected, count, cached_opt))
                 in
                 match step2 with
-                | `Fallback_cold -> scan_cold_from_initial ()
+                | `Fallback_cold -> scan_cold_from_initial ?stale:cached_opt ()
                 | `Done done_step -> Ok done_step
                 | `Continue (before, collected, count, cached_opt) ->
                   (* Step 3: scan remaining prefix [0, before) *)

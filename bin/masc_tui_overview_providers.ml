@@ -37,35 +37,55 @@ let text_for_viewport ~columns ~rows text =
        parity before segmenting bounded suffix context, so the first retained
        flag has the same members as in the source. *)
     let is_regional_at offset =
-      let decoded = String.get_utf_8_uchar text offset in
-      Uchar.utf_decode_is_valid decoded
-      && Uucp.Func.is_regional_indicator (Uchar.utf_decode_uchar decoded)
+      offset >= 0 && offset + 4 <= String.length text
+      && text.[offset] = '\240' && text.[offset + 1] = '\159'
+      && text.[offset + 2] = '\135'
+      && text.[offset + 3] >= '\166' && text.[offset + 3] <= '\191'
     in
-    let previous_scalar_start offset =
-      if offset <= 0 then None
+    let rec regional_parity offset remaining odd =
+      if not (is_regional_at (offset - 4)) then Some odd
+      else if remaining < 4 then None
+      else regional_parity (offset - 4) (remaining - 4) (not odd)
+    in
+    let parity =
+      if is_regional_at suffix_offset then regional_parity suffix_offset bytes false
+      else Some false
+    in
+    (* If the run extends beyond the bounded context, its pairing is unknown.
+       Omit the rest of that run rather than scan unbounded input or redraw a
+       different flag. The omission mark still identifies the shortened name. *)
+    let rec after_regional_run offset =
+      if is_regional_at (suffix_offset + offset) then after_regional_run (offset + 4)
+      else offset
+    in
+    let regional_floor = match parity with None -> after_regional_run 0 | Some _ -> 0 in
+    (* An initial extender can belong to a cluster whose base is outside the
+       bounded context. ASCII resets the segmenter's emoji and Indic context;
+       omit up to that anchor if the missing base makes the suffix ambiguous. *)
+    let needs_anchor =
+      if String.length suffix = 0 then false
       else
-        let rec find i =
-          if i > 0 && (Char.code text.[i] land 0xC0) = 0x80 then find (i - 1)
-          else i
-        in
-        Some (find (offset - 1))
+        let decoded = String.get_utf_8_uchar suffix 0 in
+        Uchar.utf_decode_is_valid decoded
+        && (match Uucp.Break.grapheme_cluster (Uchar.utf_decode_uchar decoded) with
+            | `EX | `EM | `SM | `ZWJ -> true
+            | _ -> false)
     in
-    let rec regional_parity offset odd =
-      match previous_scalar_start offset with
-      | Some start when is_regional_at start -> regional_parity start (not odd)
-      | _ -> odd
+    let rec after_ascii_anchor offset =
+      if offset >= String.length suffix then String.length suffix
+      else if suffix.[offset] >= ' ' && suffix.[offset] <= '~' then offset + 1
+      else after_ascii_anchor (offset + 1)
     in
-    let regional_context =
-      if suffix_offset < String.length text && is_regional_at suffix_offset
-         && regional_parity suffix_offset false
-      then "🇦" else ""
-    in
+    let anchor_floor = if needs_anchor then after_ascii_anchor 0 else 0 in
+    let suffix_floor = max regional_floor anchor_floor in
+    let regional_context = match parity with Some true -> "🇦" | _ -> "" in
     let context_bytes = String.length regional_context in
     let target = String.length suffix - (bytes - left) in
     let suffix_start =
       Masc_tui_message_layout.input_boundaries (regional_context ^ suffix)
       |> List.map (fun boundary -> boundary - context_bytes)
-      |> List.find_opt (fun boundary -> boundary > 0 && boundary >= target)
+      |> List.find_opt (fun boundary ->
+           boundary > 0 && boundary >= target && boundary >= suffix_floor)
       |> Option.value ~default:(String.length suffix)
     in
     String.sub prefix 0 prefix_end ^ "…"

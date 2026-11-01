@@ -16,7 +16,7 @@
 #   ./scripts/analyze-tool-call-quality.sh . 3           # last 3 days
 #
 # Requires: jq
-# Data source: .masc/tool_calls/YYYY-MM/DD.jsonl (PR #5526)
+# Data source: .masc/tool_calls/YYYY-MM/DD.jsonl and DD.NNN.jsonl segments
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,7 +40,16 @@ fi
 FILES=()
 for i in $(seq 0 $((DAYS - 1))); do
   DATE=$(date -v-${i}d +%Y-%m/%d 2>/dev/null || date -d "-${i} days" +%Y-%m/%d 2>/dev/null)
-  F="${TOOL_CALLS_DIR}/${DATE}.jsonl"
+  STEM="${TOOL_CALLS_DIR}/${DATE}"
+  for F in "$STEM".*.jsonl; do
+    [ -f "$F" ] || continue
+    SEQUENCE="${F%.jsonl}"
+    SEQUENCE="${SEQUENCE##*.}"
+    if [[ "$SEQUENCE" =~ ^(00[1-9]|0[1-9][0-9]|[1-9][0-9]{2,})$ ]]; then
+      FILES+=("$F")
+    fi
+  done
+  F="${STEM}.jsonl"
   if [ -f "$F" ]; then
     FILES+=("$F")
   fi

@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 
 import masc_base_path  # noqa: E402
+from tool_call_log_paths import tool_call_log_paths  # noqa: E402
 from keeper_store_layout import (  # noqa: E402
     StoreLayoutUnavailable,
     load_store_layout,
@@ -255,23 +256,26 @@ def matching_tool_log_rows(
         links = row.get("links")
         if not isinstance(links, dict):
             continue
-        path = path_from_link(base_path, links.get("tool_call_log_path"))
-        if path is None or not path.is_file() or path in seen_paths:
+        linked_path = path_from_link(base_path, links.get("tool_call_log_path"))
+        if linked_path is None:
             continue
-        seen_paths.add(path)
-        for tool_row in iter_jsonl(path):
-            row_keeper = tool_row.get("keeper_name", tool_row.get("keeper"))
-            if keeper is not None and row_keeper != keeper:
+        for path in tool_call_log_paths(base_path, linked_path):
+            if path in seen_paths:
                 continue
-            if trace is not None and tool_row.get("trace_id") != trace:
-                continue
-            if not same_optional_value(generation, tool_row.get("generation")):
-                continue
-            tool_keeper_turn = tool_row.get("keeper_turn_id")
-            if isinstance(keeper_turn, int):
-                if tool_keeper_turn != keeper_turn:
+            seen_paths.add(path)
+            for tool_row in iter_jsonl(path):
+                row_keeper = tool_row.get("keeper_name", tool_row.get("keeper"))
+                if keeper is not None and row_keeper != keeper:
                     continue
-            matched.append(tool_row)
+                if trace is not None and tool_row.get("trace_id") != trace:
+                    continue
+                if not same_optional_value(generation, tool_row.get("generation")):
+                    continue
+                tool_keeper_turn = tool_row.get("keeper_turn_id")
+                if isinstance(keeper_turn, int):
+                    if tool_keeper_turn != keeper_turn:
+                        continue
+                matched.append(tool_row)
     return matched
 
 

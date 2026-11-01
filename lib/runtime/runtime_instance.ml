@@ -167,7 +167,7 @@ let quota_scope_of_materialized
    [models.qwen3."6-35b-uncensored"], and nothing reported the runtime's absence.
    Deciding fatality by matching the reason string would be the same defect one
    layer up, so the vocabulary is closed and {!Runtime.load_list} matches it. *)
-let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
+let materialize_binding ~construction (cfg : config) (b : binding) : (t, drop_reason) result =
   if not b.enabled
   then Error Binding_disabled
   else match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
@@ -175,7 +175,7 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
     if not provider.enabled
     then Error (Provider_disabled provider.id)
     else
-      (match Runtime_adapter.materialize_execution cfg b with
+      (match Runtime_adapter.materialize_execution ~construction cfg b with
        | Ok selected ->
          let execution = selected.Runtime_adapter.execution in
          let credential_admission = selected.credential_admission in
@@ -208,6 +208,10 @@ let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
   | Some _, None -> Error (Model_not_declared b.model_id)
 ;;
 
+let of_binding cfg binding =
+  materialize_binding ~construction:(Runtime_adapter.create_construction ()) cfg binding
+;;
+
 let is_local_provider (provider : provider) =
   match provider.transport, provider.credentials with
   | Cli _, _ -> true
@@ -230,10 +234,11 @@ let is_local_runtime (runtime : t) = is_local_provider runtime.provider
 let partition_bindings (cfg : config) (bindings : binding list)
   : t list * (string * drop_reason) list
   =
+  let construction = Runtime_adapter.create_construction () in
   let runtimes, dropped =
     List.fold_left
       (fun (runtimes, dropped) (b : binding) ->
-         match of_binding cfg b with
+         match materialize_binding ~construction cfg b with
          | Ok rt -> rt :: runtimes, dropped
          | Error reason -> runtimes, (id_of_binding b, reason) :: dropped)
       ([], [])

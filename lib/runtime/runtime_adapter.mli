@@ -32,6 +32,15 @@ val materialize_credentials : provider_id:string -> credential:Runtime_schema.cr
     to refuse them; runtime missing-auth projection may retain them. References
     and values are selected together. Errors never contain credential contents. *)
 
+type construction
+val create_construction : unit -> construction
+(** One construction lifetime for a single binding or a complete batch.
+    Its first HTTP binding captures admitted declarations before credential
+    I/O; all subsequent HTTP bindings share that immutable selection, including
+    missing policy. Creating an owner reads no catalog: native-only, empty,
+    disabled and unresolved bindings do not force unused HTTP declarations.
+    Create another owner when selecting from newly published catalogs. *)
+
 type provider_materialization = private
   { provider_config : Llm_provider.Provider_config.t
   ; credential_admission : Runtime_credential_selection.admission
@@ -45,15 +54,16 @@ type execution_materialization = private
     only to official clients, which own their credentials separately. *)
 
 val materialize_provider_binding
-  :  Runtime_schema.config
+  :  construction:construction
+  -> Runtime_schema.config
   -> Runtime_schema.binding
   -> (provider_materialization, string) result
 (** Materialize one binding into the hot-path {!Llm_provider.Provider_config.t}.
 
     Catalog-derived model policy, pricing authority and their absence are
-    captured from one immutable admitted declaration selection before any
-    credential I/O. A catalog replacement during that I/O affects
-    newly materialized bindings; existing configs retain their selected facts.
+    captured from the construction owner's immutable admitted selection before
+    credential I/O. Catalog replacement affects another construction owner;
+    it does not change later bindings using this owner.
 
     HTTP file credentials contain one raw API key at an absolute path. The
     process-owned regular file is read at materialization; whitespace is
@@ -84,7 +94,8 @@ val materialize_provider_binding
     concrete provider config. *)
 
 val materialize_execution
-  :  Runtime_schema.config
+  :  construction:construction
+  -> Runtime_schema.config
   -> Runtime_schema.binding
   -> (execution_materialization, string) result
 (** Materialize the owner of a complete turn. HTTP model APIs become

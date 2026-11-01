@@ -94,7 +94,8 @@ val of_binding : config -> binding -> (t, drop_reason) result
     validation can report a dropped target's materialize failure instead of a
     bare "not found among N runtimes" that points at a non-existent typo.
     HTTP execution retains its selected model policy and pricing catalog;
-    replacing the active catalog does not rebind an existing runtime. *)
+    replacing the active catalog does not rebind an existing runtime. This
+    standalone call starts a fresh construction lifetime. *)
 
 
 val is_local_runtime : t -> bool
@@ -119,6 +120,11 @@ val capabilities_for_runtime : t -> Llm_provider.Capabilities.capabilities optio
     absence. Official-client executions have no AGENT_CORE model policy. *)
 val is_local_provider : provider -> bool
 val partition_bindings : config -> binding list -> t list * (string * drop_reason) list
+(** All HTTP bindings share one immutable declaration selection, captured at
+    the first HTTP materialization before its credential I/O. Catalog replacement
+    during construction affects a fresh batch, not a later binding in this one.
+    Native-only, empty, disabled and unresolved batches do not read unused HTTP
+    declarations. Input order and typed drop reasons are preserved. *)
 
 val quota_scope_of_runtime : t -> Runtime_quota_window.scope
 (** Non-secret quota-scope identity derived from this resolved runtime

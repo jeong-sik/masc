@@ -1,0 +1,49 @@
+initial
+workflow: Test
+run: 41279025500
+head: 9c0d0b8097e1dbe97b6cea0eff1060d268b56968
+ref: fix/muse-reasoning-authority-20261101
+actual conclusion: failure
+actual full-log counts: 104 PASS / 17 FAIL
+invalid fixture iteration; representative failure only
+2026-11-01T06:00:20.3544550Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T06:00:20.3572049Z 9c0d0b8097e1dbe97b6cea0eff1060d268b56968
+2026-11-01T06:05:25.1381772Z FAIL conflicting HTTP ladder is actually loaded
+2026-11-01T06:05:25.1382123Z    Expected: `true'
+2026-11-01T06:05:25.1382356Z    Received: `false'
+2026-11-01T06:10:41.5617252Z 13 failures! in 316.427s. 84 tests run.
+2026-11-01T06:11:34.9695688Z 4 failures! in 53.234s. 37 tests run.
+
+baseline-second
+workflow: Test
+run: 41279161841
+head: ab72750ed048b6213b6fabd6ee17293a05d579f7
+ref: fix/muse-reasoning-authority-20261101
+actual conclusion: failure
+actual full-log counts: 104 PASS / 18 FAIL
+invalid fixture iteration; representative failure only
+2026-11-01T06:02:10.2258743Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T06:02:10.2278966Z ab72750ed048b6213b6fabd6ee17293a05d579f7
+2026-11-01T06:05:52.8438791Z FAIL conflicting HTTP ladder is actually loaded
+2026-11-01T06:05:52.8439012Z    Expected: `true'
+2026-11-01T06:05:52.8439184Z    Received: `false'
+2026-11-01T06:11:05.7080028Z 14 failures! in 312.866s. 85 tests run.
+2026-11-01T06:11:58.6713487Z 4 failures! in 52.853s. 37 tests run.
+
+candidate-first
+workflow: Test
+run: 41279490118
+head: db9cdea90b0d6c66a1b7feda4314f268f00ac0ac
+ref: fix/muse-reasoning-authority-20261101
+actual conclusion: failure
+actual full-log counts: 146 PASS / 20 FAIL
+invalid fixture iteration; representative failure only
+2026-11-01T06:07:09.9757493Z [command]/usr/bin/git log -1 --format=%H
+2026-11-01T06:07:09.9787925Z db9cdea90b0d6c66a1b7feda4314f268f00ac0ac
+2026-11-01T06:12:17.4082759Z FAIL conflicting HTTP ladder is actually loaded
+2026-11-01T06:12:17.4083615Z    Expected: `true'
+2026-11-01T06:12:17.4084189Z    Received: `false'
+2026-11-01T06:17:36.6004103Z 14 failures! in 319.195s. 86 tests run.
+2026-11-01T06:18:30.0426630Z 4 failures! in 53.267s. 37 tests run.
+2026-11-01T06:19:14.1230904Z 1 failure! in 43.893s. 22 tests run.
+2026-11-01T06:19:14.3635096Z 1 failure! in 0.039s. 21 tests run.

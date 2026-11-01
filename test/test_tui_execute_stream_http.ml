@@ -342,6 +342,112 @@ let test_cancelling_a_refusal_body_still_cancels_the_request env =
     wait_for_peer_close env closed)
 ;;
 
+let test_observer_rejects_bad_replay_before_delivering_bytes env =
+  let requested = Some Sse_wire.{ instance_id = "process-a"; event_id = 50 } in
+  let resumed = [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "resumed" ] in
+  let cases =
+    [ "duplicate instance", None,
+      [ "x-masc-sse-instance-id", "process-a"; "X-Masc-Sse-Instance-Id", "process-b"
+      ; "x-masc-sse-replay", "fresh" ]
+    ; "combined instances", None,
+      [ "x-masc-sse-instance-id", "process-a, process-b"; "x-masc-sse-replay", "fresh" ]
+    ; "resumed without cursor", None, resumed
+    ; "fresh with requested cursor", requested,
+      [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "fresh" ]
+    ; "reset with unchanged instance", requested,
+      [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "reset-instance-changed" ]
+    ; "reset without requested cursor", None,
+      [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "reset-instance-changed" ]
+    ; "scoped request reported unscoped", requested,
+      [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "reset-unscoped-cursor" ]
+    ; "resumed with another instance", requested,
+      [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "resumed" ]
+    ; "unadvertised replay after a cursor", requested, []
+    ; "gap does not pass cursor", requested,
+      [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "resumed-after-gap"
+      ; "x-masc-sse-replay-missed-through", "50" ]
+    ] in
+  List.iter (fun (label, cursor, headers) ->
+    with_server env ~handler:(stream_response ~receipts:headers [ "data: {}\n\n" ]) (fun ~port ->
+      let opens = ref 0 and chunks = ref 0 in
+      let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
+          ~host:"127.0.0.1" ~port ~session_id:"observer-test" ~cursor
+          ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
+      (match result with
+       | Error (Http.Invalid_handshake _) -> ()
+       | Error (Http.Transport_failed detail) -> Alcotest.failf "%s: transport: %s" label detail
+       | Error (Http.Http_refused { status; _ }) -> Alcotest.failf "%s: HTTP %d" label status
+       | Ok () -> Alcotest.failf "%s: accepted" label);
+      Alcotest.(check int) (label ^ ": no open callback") 0 !opens;
+      Alcotest.(check int) (label ^ ": no body callback") 0 !chunks)) cases
+;;
+
+let test_observer_accepts_valid_and_unadvertised_live_streams env =
+  let requested = Some Sse_wire.{ instance_id = "process-a"; event_id = 50 } in
+  List.iter (fun (label, cursor, headers) ->
+    with_server env ~handler:(stream_response ~receipts:headers [ "data: {}\n\n" ]) (fun ~port ->
+      let opens = ref 0 and chunks = ref 0 in
+      let result = Http.observe_runtime_events ~clock:(Eio.Stdenv.clock env)
+          ~host:"127.0.0.1" ~port ~session_id:"observer-test" ~cursor
+          ~on_open:(fun _ -> incr opens) ~on_chunk:(fun _ -> incr chunks) in
+      (match result with
+       | Ok () -> ()
+       | Error (Http.Invalid_handshake detail | Http.Transport_failed detail) ->
+           Alcotest.failf "%s: %s" label detail
+       | Error (Http.Http_refused { status; _ }) -> Alcotest.failf "%s: HTTP %d" label status);
+      Alcotest.(check int) (label ^ ": open callback") 1 !opens;
+      Alcotest.(check bool) (label ^ ": body delivered") true (!chunks > 0)))
+    [ "scoped fresh", None, [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "fresh" ]
+    ; "unadvertised live-only", None, []
+    ; "resumed", requested, [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "resumed" ]
+    ; "resumed after gap", requested,
+      [ "x-masc-sse-instance-id", "process-a"; "x-masc-sse-replay", "resumed-after-gap"
+      ; "x-masc-sse-replay-missed-through", "51" ]
+    ; "instance reset", requested,
+      [ "x-masc-sse-instance-id", "process-b"; "x-masc-sse-replay", "reset-instance-changed" ] ]
+;;
+
+(* Exercise the real MCP GET handler over H1. Authentication is supplied by
+   this fixture; the assertion is that ambiguous cursors stop before SSE
+   registration. *)
+let test_mcp_rejects_duplicate_cursors_before_registration env =
+  let module Transport = Server_mcp_transport_http in
+  let authority = match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+    | Ok authority -> authority | Error `Malformed -> Alcotest.fail "fixture authority" in
+  let admit ~base_path:_ _request = Ok () in
+  let deps : Transport.deps =
+    { get_origin = (fun _ -> "")
+    ; cors_headers = (fun _ -> [])
+    ; auth_token_from_request = (fun _ -> None)
+    ; is_ready = (fun () -> true)
+    ; get_runtime_result = (fun () -> Error "unused")
+    ; get_base_path = (fun () -> "/tmp/observer-test")
+    ; verify_mcp_auth = admit
+    ; verify_mcp_observer_stream_auth = admit
+    ; verify_operator_mcp_auth = admit
+    ; verify_seat_mcp_auth = admit
+    } in
+  let handler reqd =
+    let request = Httpun.Reqd.request reqd in
+    Server_request_authority.with_current authority (fun () ->
+      Transport.handle_get_mcp ~deps ~sse_kind:Masc.Sse.Observer request reqd) in
+  List.iter (fun cursors ->
+    with_server env ~handler (fun ~port ->
+      let before = Masc.Sse.client_count () in
+      let url = Printf.sprintf "http://127.0.0.1:%d/mcp?sse_kind=observer" port in
+      let headers = [ "Accept", "text/event-stream"; "Mcp-Session-Id", "observer-duplicate-test"
+                    ; "x-masc-sse-instance-id", "process-a" ] @ cursors in
+      match Masc_http_client.get_response_sync ~clock:(Eio.Stdenv.clock env) ~timeout_sec:3.
+              ~url ~headers () with
+      | Error detail -> Alcotest.failf "MCP request failed: %s" detail
+      | Ok response ->
+        Alcotest.(check int) "ambiguous request is rejected" 400 response.status;
+        Alcotest.(check int) "no observer was registered" before (Masc.Sse.client_count ())))
+    [ [ "Last-Event-ID", "20"; "last-event-id", "50" ]
+    ; [ "last-event-id", "50"; "Last-Event-ID", "20" ]
+    ; [ "last-event-id", "20"; "Last-Event-ID", "20" ] ]
+;;
+
 let () =
   let case name test = Alcotest.test_case name `Quick (with_env test) in
   Alcotest.run
@@ -367,6 +473,11 @@ let () =
             test_the_refusal_deadline_does_not_end_a_successful_stream
         ; case "cancelling a refusal body still cancels the request"
             test_cancelling_a_refusal_body_still_cancels_the_request
+        ] )
+    ; ( "observer replay"
+      , [ case "invalid handshake is not opened or read" test_observer_rejects_bad_replay_before_delivering_bytes
+        ; case "valid and unadvertised live streams still open" test_observer_accepts_valid_and_unadvertised_live_streams
+        ; case "MCP rejects duplicate cursor headers" test_mcp_rejects_duplicate_cursors_before_registration
         ] )
     ]
 ;;

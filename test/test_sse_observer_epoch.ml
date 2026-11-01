@@ -221,6 +221,11 @@ let () =
               [ "x-masc-sse-instance-id", "instance-old" ])
       ; test_case "unscoped cursor cannot suppress live IDs" `Quick
           (fun () -> test_unusable_epoch_cannot_suppress_new_live Wire.Unscoped_cursor [])
+      ; test_case "duplicate instance headers cannot scope a cursor" `Quick
+          (fun () ->
+            test_unusable_epoch_cannot_suppress_new_live Wire.Unscoped_cursor
+              [ "x-masc-sse-instance-id", "instance-new"
+              ; "X-Masc-Sse-Instance-Id", "instance-new" ])
       ; test_case "missing capability differs from invalid metadata" `Quick
           test_missing_or_malformed_response
       ]

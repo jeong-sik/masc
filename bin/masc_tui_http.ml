@@ -1666,6 +1666,7 @@ let open_mcp_session ~(host : string) ~(port : int) ~(client_version : string)
 type observer_error =
   | Transport_failed of string
   | Http_refused of { status : int; detail : string }
+  | Invalid_handshake of string
 
 type execute_output_stream_error =
   | Execute_transport_failed of string
@@ -1677,7 +1678,7 @@ type execute_output_stream_error =
     not invalidate an otherwise usable MCP session or scoped replay cursor. *)
 let observe_runtime_events ~clock ~(host : string) ~(port : int)
     ~(session_id : string) ~(cursor : Sse_wire.observer_cursor option)
-    ~on_response ~(on_chunk : string -> unit) : (unit, observer_error) result =
+    ~on_open ~(on_chunk : string -> unit) : (unit, observer_error) result =
   let url = url_of ~host ~port ~path:observer_stream_path in
   let headers =
     ("Accept", "text/event-stream")
@@ -1685,10 +1686,18 @@ let observe_runtime_events ~clock ~(host : string) ~(port : int)
     :: auth_headers ()
     @ Sse_wire.observer_cursor_headers cursor
   in
+  let exception Bad_observer_handshake of string in
+  let checked_response ~status ~headers =
+    if Masc.Tui_decode.is_success_http_status status then
+      (match Sse_wire.validate_observer_response ~cursor headers with
+       | Error detail -> raise (Bad_observer_handshake detail)
+       | Ok handshake -> on_open handshake)
+  in
   match
     Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
-      ~url ~headers ~on_response ~on_chunk ()
+      ~url ~headers ~on_response:checked_response ~on_chunk ()
   with
+  | exception Bad_observer_handshake detail -> Error (Invalid_handshake detail)
   | Error detail -> Error (Transport_failed (report_err "observer stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })

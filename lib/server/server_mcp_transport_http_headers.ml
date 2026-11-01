@@ -297,21 +297,25 @@ let sse_ping_interval_s = 30.0
 type last_event_id_error =
   | Malformed_last_event_id
   | Negative_last_event_id
+  | Duplicate_last_event_id
 
 let last_event_id_error_to_string = function
   | Malformed_last_event_id ->
       "Last-Event-ID must be a non-negative integer when supplied"
   | Negative_last_event_id ->
       "Last-Event-ID cannot be negative"
+  | Duplicate_last_event_id ->
+      "Last-Event-ID must not occur more than once"
 
 let get_last_event_id (request : Httpun.Request.t) =
-  match Httpun.Headers.get request.headers "last-event-id" with
-  | Some id -> (
+  match Httpun.Headers.get_multi request.headers "last-event-id" with
+  | [ id ] -> (
       match int_of_string_opt id with
       | Some event_id when event_id >= 0 -> Ok (Some event_id)
       | Some _ -> Error Negative_last_event_id
       | None -> Error Malformed_last_event_id)
-  | None -> Ok None
+  | [] -> Ok None
+  | _ :: _ :: _ -> Error Duplicate_last_event_id
 
 let mcp_headers session_id protocol_version =
   if Mcp_transport_protocol.is_stateless_protocol_version protocol_version then

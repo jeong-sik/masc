@@ -768,6 +768,7 @@ type async_msg =
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Github_token_saved of string * (Yojson.Safe.t, string) result
+  | Observer_session_ready of string
   | Observer_opened of {
       session_id : string;
       handshake : (Sse_wire.observer_handshake option, string) result;
@@ -1026,7 +1027,7 @@ let rec workspace_message_is_read = function
   | Resource_read _ | Resource_share_recovery_loaded _ | Resource_diagram_ready _
   | Github_identity_view_loaded _
   | Identity_providers_loaded _
-  | Observer_opened _
+  | Observer_session_ready _ | Observer_opened _
   | Observer_received _
   | Observer_closed _
   | Fleet_stream_view _
@@ -1195,7 +1196,7 @@ let rec message_matches_share_input ~resource_read ~recovery_loaded = function
   | Identity_login_started _ | Identity_refreshed _ | Identity_app_saved _
   | Identity_disconnected _ | Account_login_event _ | Account_login_json _
   | Account_login_removal _ | Github_login_lines _ | Github_login_finished _
-  | Github_token_saved _ | Observer_opened _ | Observer_received _ | Observer_closed _
+  | Github_token_saved _ | Observer_session_ready _ | Observer_opened _ | Observer_received _ | Observer_closed _
   | Fleet_stream_view _ | Fleet_stream_reader_ended _ | Original_task_read_done _
   | Original_task_history_done _ | Original_task_evidence_done _ | Task_dispatch_completed _
   | Task_creation_read_done _ | Keeper_queue_action_received _
@@ -1322,7 +1323,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
     | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
     | Github_login_finished (_, _) | Github_token_saved (_, _)
-    | Observer_opened _ | Observer_received (_, _) | Observer_closed _
+    | Observer_session_ready _ | Observer_opened _ | Observer_received (_, _) | Observer_closed _
     | Fleet_stream_view _ | Fleet_stream_reader_ended _
     | Task_dispatch_completed _ -> None in
   if workspace_reply_admitted state ~authority ~reading ~kind:Workspace_observation
@@ -1459,6 +1460,6 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Identity_disconnected (_, _, _)
   | Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
   | Account_login_removal (_, _, _, _, _) | Github_login_lines (_, _)
-  | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_opened _
+  | Github_login_finished (_, _) | Github_token_saved (_, _) | Observer_session_ready _ | Observer_opened _
   | Observer_received (_, _) | Observer_closed _ | Fleet_stream_view _
   | Fleet_stream_reader_ended _ | Task_dispatch_completed _ -> message

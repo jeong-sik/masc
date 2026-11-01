@@ -9,7 +9,11 @@
 5. CR은 실제 작성한 Keeper가 담당한다. 코드가 바뀌면 원작성 Keeper에게 재리뷰를 요청한다. 같은 GitHub 계정을 공유해도 다른 Keeper의 CR을 대신 대체하거나 해제하지 않는다. 리뷰 서명은 작성자에 대한 주장이므로 실제 작성자를 확인할 수 없다면 미확인으로 남긴다. 같은 head의 CR은 기본적으로 작성자의 수정/설명 대기이며, 명시적 재검토 요청이 있으면 다시 읽는다. 원작성 Keeper의 후속 판정이나 권한 있는 해제 결과를 재조회한다. 다른 계정의 PASS나 초록 CI로 CR이나 미해결 FAIL/HOLD가 해제됐다고 보지 않는다.
 6. 검토·게시 직전에 head/base/diff/stack을 다시 읽는다. 이전 검토는 같은 범위에서만 재사용한다. 요청이 목록에서 사라졌다고 완료로 세지 말고 실제 GitHub 리뷰를 확인한다. 승인·CR·COMMENT·미게시·조회 실패를 구분해 보고한다.
 
-라우팅 담당자는 `scripts/review/review-worklist.py --repo OWNER/REPO --reviewer LOGIN`을 사용한다. 여러 독립 GitHub 계정은 `--reviewer`를 반복한다. 이 목록은 렌즈별 리뷰 본문을 대신하지 않으므로 실제 리뷰 이력도 모든 페이지에서 읽는다. 기본은 읽기만 하고, `--request`를 붙인 명시적 실행만 누락된 GitHub 리뷰 요청을 게시하고 재확인한다. 사용자·팀의 기존 요청은 지우지 않는다. 새로운 타이머나 상시 실행기를 추가하지 않는다.
+MASC 리뷰 요청의 라우팅 담당자는 현재 코드 리뷰 전문 Keeper의 이름과 역할을 확인하고, 필요한 관점의 각 Keeper에게 MASC 내부 Board·Broadcast·Message로 요청을 전달한다. 요청에는 PR 링크, 현재 head/base와 Native Stack 범위, 맡길 관점, 검증 근거와 미검증 범위를 적는다. 공통 Board 게시물에 범위를 모아도 되지만, 대상 Keeper에게 전달됐는지 확인할 수 없다면 `masc_keeper_msg`로 각 Keeper에게 게시물 ID와 요청을 보낸다. 같은 게시물과 이를 가리키는 메시지는 하나의 요청으로 취급한다.
+
+게시 후 Board 본문이나 메시지 operation을 재조회하고 대상·게시물 ID 또는 operation ID·확인된 상태를 기록한다. 접수나 `queued`는 제출 사실이며, 검토 착수·완료·공식 승인과 구분한다. 결과가 불명확하면 기존 게시와 operation을 먼저 확인하고, 미전달이 확정되기 전에는 같은 요청을 무작정 재전송하지 않는다. GitHub 계정에 리뷰어를 배정하는 것만으로 Keeper 내부 전달을 마쳤다고 보고하지 않는다.
+
+GitHub 계정 배정에는 `scripts/review/review-worklist.py --repo OWNER/REPO --reviewer LOGIN`을 사용한다. 여러 독립 GitHub 계정은 `--reviewer`를 반복한다. 이 목록은 Keeper 내부 전달이나 렌즈별 리뷰 본문을 대신하지 않으므로 실제 리뷰 이력도 모든 페이지에서 읽는다. 기본은 읽기만 하고, `--request`를 붙인 명시적 실행만 누락된 GitHub 리뷰 요청을 게시하고 재확인한다. 사용자·팀의 기존 요청은 지우지 않는다. 새로운 타이머나 상시 실행기를 추가하지 않는다.
 
 ## 관점별 COMMENT와 판정
 

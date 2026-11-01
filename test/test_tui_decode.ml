@@ -4281,6 +4281,24 @@ let test_decode_connector_configured_but_unreachable () =
   | Ok _ -> Alcotest.fail "expected one connector"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+let test_decode_connector_reads_a_stale_state () =
+  (* Stale is accepted and still configured: the projection must keep it
+     available, not connected, and render its own status word. *)
+  match
+    Masc.Tui_decode_connectors.decode_connector_snapshot
+      (connector_snapshot_json ~active:1
+         [ connector_json ~connected:(`Bool false) ~status:"stale" () ])
+  with
+  | Ok { Masc.Tui_decode_connectors.cs_connectors = [ c ]; _ } ->
+    Alcotest.(check bool) "stale stays available" true
+      (Masc.Tui_decode_connectors.connector_available c);
+    Alcotest.(check bool) "stale is not connected" false
+      (Masc.Tui_decode_connectors.connector_connected c);
+    Alcotest.(check string) "stale status" "stale"
+      (Masc.Tui_decode_connectors.connector_status c)
+  | Ok _ -> Alcotest.fail "expected one connector"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
 let test_decode_connector_reads_a_poll_state () =
   match
     Masc.Tui_decode_connectors.decode_connector_snapshot
@@ -13626,6 +13644,8 @@ let () =
           test_decode_connector_snapshot_reads_the_live_shape;
         Alcotest.test_case "configured is not reachable" `Quick
           test_decode_connector_configured_but_unreachable;
+        Alcotest.test_case "connector stale keeps its own projection" `Quick
+          test_decode_connector_reads_a_stale_state;
         Alcotest.test_case "poll state is typed" `Quick
           test_decode_connector_reads_a_poll_state;
         Alcotest.test_case "Telegram bot ID accepts its native numeric form" `Quick

@@ -289,7 +289,18 @@ let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.resul
   let keeper_name = ctx.agent_name in
   let include_resolved = bool_field "include_resolved" ctx.arguments in
   let wanted_ask_id = string_option_field "ask_id" ctx.arguments in
-  let rows = Keeper_ask_store.rows ~base_path ~keeper_name in
+  match Keeper_ask_store.rows_result ~base_path ~keeper_name with
+  | Error error ->
+      Some
+        (Tool_result.error ~failure_class:Tool_result.Runtime_failure ~tool_name ~start_time
+           (Keeper_ask_store.read_error_to_string error))
+  | Ok snapshot ->
+  let rows = match snapshot with
+    | Keeper_ask_store.Missing_log -> []
+    | Keeper_ask_store.Stored_rows rows -> rows in
+  let open_count = List.fold_left
+      (fun count (_, (_, resolution)) -> if is_open resolution then count + 1 else count)
+      0 rows in
   let selected =
     List.filter
       (fun (ask_id, (_, resolution)) ->
@@ -305,7 +316,7 @@ let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.resul
           (`Assoc
             [
               ("keeper_name", `String keeper_name);
-              ("open_count", `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name));
+              ("open_count", `Int open_count);
               ("returned", `Int (List.length selected));
               ("asks", `List (List.map row_json selected));
             ])))

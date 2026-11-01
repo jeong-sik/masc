@@ -54,9 +54,23 @@ let connection_of_json = function
     let* credential_file = optional_reference fields "credential_file" in
     let* api_key_env = optional_reference fields "api_key_env" in
     let* provider_id = optional_reference fields "provider_id" in
-    let protocol = match string fields "choice", string fields "provider_kind" with
-      | Some ("openai_compatible" | "vllm" | "llama_cpp"), _ -> Some Openai
-      | Some "ollama", _ -> Some Ollama
+    let* raw_kind = optional_reference fields "provider_kind" in
+    let* raw_kind = match raw_kind, provider_id with
+      | Some _, _ | None, None -> Ok raw_kind
+      | None, Some id ->
+        (match Agent_core.Provider_runtime_binding.find id with
+         | Some provider ->
+           (match provider.kind with
+            | Llm_provider.Provider_kind.OpenAI_compat -> Ok (Some "openai_compat")
+            | Anthropic -> Ok (Some "anthropic")
+            | Kimi -> Ok (Some "kimi")
+            | Glm -> Ok (Some "glm")
+            | Ollama -> Ok (Some "ollama")
+            | Gemini -> Error Invalid_connection)
+         | None -> Ok None) in
+    let protocol = match string fields "choice", raw_kind with
+      | Some ("openai_compatible" | "vllm" | "llama_cpp"), (None | Some ("openai_compat" | "glm")) -> Some Openai
+      | Some "ollama", (None | Some "ollama") -> Some Ollama
       | Some "messages", Some "anthropic" -> Some Anthropic
       | Some "messages", Some "kimi" -> Some Kimi
       | _ -> None in
@@ -117,6 +131,16 @@ let parse_page protocol body =
     Ok (List.rev reversed, next)
   | _ -> Error Invalid_response
   with Yojson.Json_error _ -> Error Invalid_response
+let wire_of_connection (connection : connection) =
+  let fallback = match connection.protocol with
+    | Openai -> Llm_provider.Provider_kind.OpenAI_compat
+    | Anthropic -> Anthropic | Kimi -> Kimi | Ollama -> Ollama in
+  match connection.provider with
+  | Anonymous_endpoint -> fallback
+  | Named_provider provider_id ->
+    (match Agent_core.Provider_runtime_binding.find provider_id, connection.protocol with
+     | Some {kind = Llm_provider.Provider_kind.Glm; _}, Openai -> Llm_provider.Provider_kind.Glm
+     | Some _, _ | None, _ -> fallback)
 let with_catalog_image_input (connection : connection) (model : model) =
   match model.supports_image_input, connection.provider with
   | Some _, _ | None, Anonymous_endpoint -> model
@@ -126,9 +150,7 @@ let with_catalog_image_input (connection : connection) (model : model) =
       match Llm_provider.Model_catalog.global (),
             Llm_provider.Model_identifiers.Model_id.of_string model.id with
       | Some catalog, Ok model_id ->
-        let wire = match connection.protocol with
-          | Openai -> Llm_provider.Provider_kind.OpenAI_compat
-          | Anthropic -> Anthropic | Kimi -> Kimi | Ollama -> Ollama in
+        let wire = wire_of_connection connection in
         Llm_provider.Capabilities.declared_image_input_for_provider_model
           ~catalog ~wire:(Some wire) ~provider ~model_id
       | None, _ | Some _, Error _ -> None
@@ -176,9 +198,7 @@ let resolve_credential connection =
 
 let discover ~sw ~net connection =
   let* api_key = resolve_credential connection in
-  let kind = match connection.protocol with
-    | Openai -> Llm_provider.Provider_config.OpenAI_compat
-    | Anthropic -> Anthropic | Kimi -> Kimi | Ollama -> Ollama in
+  let kind = wire_of_connection connection in
   let headers = Llm_provider.Provider_config.auth_headers_for_kind_and_key
     ~kind ~api_key:(Llm_provider.Secret.header_value api_key) in
   let headers = match connection.protocol with

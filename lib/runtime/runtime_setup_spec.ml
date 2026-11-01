@@ -304,7 +304,15 @@ let same_connection left right =
       && account_home_matches left.choice a.account_home b.account_home
     | Http _,Client _ | Client _,Http _ -> false
 let same_selection left right =
-  left.canonical_spec=right.canonical_spec && left.named_provider=right.named_provider
+  let same_named_selection left right =
+    match left, right with
+    | None, None -> true
+    | Some a, Some b ->
+      a.id=b.id && a.display_name=b.display_name && a.model_key=b.model_key
+      && a.reasoning_effort=b.reasoning_effort && a.wizard_default=b.wizard_default
+    | None, Some _ | Some _, None -> false
+  in
+  left.canonical_spec=right.canonical_spec && same_named_selection left.named_provider right.named_provider
   && left.existing_inline=right.existing_inline
 let connection_matches spec (provider : Runtime_schema.provider) =
   let credential_matches expected = match spec.existing_inline, expected, provider.credentials with
@@ -350,7 +358,12 @@ let reuse_refusal = function
   | Interactive_cli -> "CLI provider must declare is-non-interactive = true"
 let for_provider spec (provider : Runtime_schema.provider) =
   if reuse_eligibility provider = Eligible && connection_matches spec provider
-  then Some {spec with declared_provider_id=Some provider.id} else None
+  then
+    let named_provider = match spec.named_provider with
+      | Some named -> Some {named with origin=Existing_named_provider}
+      | None -> None in
+    Some {spec with declared_provider_id=Some provider.id; named_provider}
+  else None
 let for_existing_inline_provider spec (provider : Runtime_schema.provider) =
   match spec.transport, spec.existing_inline, provider.credentials with
   | Http {credential=None; _}, None, Some (Runtime_schema.Inline original)
@@ -483,11 +496,41 @@ let matches_existing_selection spec (config:Runtime_schema.config) =
         Runtime_schema.binding_key binding=runtime_id) config.bindings with
      | None -> true
      | Some binding ->
+       let provider =
+         List.find_opt (fun (p:Runtime_schema.provider) -> p.id=binding.provider_id)
+           config.providers
+       in
        (match List.find_opt (fun (model:Runtime_schema.model_spec) -> model.id=binding.model_id) config.models with
         | None -> false
         | Some model ->
+          let catalog_context =
+            match Llm_provider.Model_catalog.global (),
+                  Llm_provider.Model_identifiers.Model_id.of_string model.api_name with
+            | Some catalog, Ok model_id ->
+              (match Llm_provider.Model_catalog.lookup_model_for_provider catalog
+                       ~provider:(Llm_provider.Model_catalog.Declared_provider binding.provider_id)
+                       ~model_id with
+               | Some entry ->
+                 (match entry.max_context_tokens with
+                  | Some cap when cap > 0 -> Some cap
+                  | Some _ | None -> None)
+               | None -> None)
+            | None, _ | Some _, Error _ -> None
+          in
+          let declared_context =
+            match binding.max_context, Option.bind provider (fun p -> p.Runtime_schema.max_context), model.max_context with
+            | Some tokens, _, _ | None, Some tokens, _ | None, None, Some tokens -> Some tokens
+            | None, None, None -> None
+          in
+          let effective_context =
+            match declared_context, catalog_context with
+            | Some tokens, Some cap when tokens > cap -> Some cap
+            | Some tokens, _ -> Some tokens
+            | None, Some cap -> Some cap
+            | None, None -> None
+          in
           binding.enabled && binding.provider_id=provider_id spec
-          && binding.max_context=Some spec.context
+          && effective_context=Some spec.context
           && (spec.choice<>Ollama || binding.num_ctx=Some spec.context)
           && model.api_name=spec.model && model.tools_support=spec.tools
           && model.streaming=spec.streaming

@@ -32732,7 +32732,8 @@ and is loaded on demand through keeper_skill.
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->
            Masc_tui_home.home_step state ~backwards:(key = "k" || key = "up")
        | Some ("p" | "P") when state.view = Overview ->
-           goto_surface state ~mailbox:async_messages Approvals
+           Masc_tui_home.open_approvals state
+             ~navigate:(goto_surface ~from_reference:true state ~mailbox:async_messages)
        | Some ("\r" | "\n" | "enter") when state.view = Overview ->
            (match Masc_tui_home.home_selected_action (Masc_tui_home.prepare state) with
             | None -> report_action state "system" "Selection changed; choose again"
@@ -32740,7 +32741,8 @@ and is loaded on demand through keeper_skill.
               state.home_selected <- Some action;
               (match action with
             | Home_approvals ->
-                goto_surface state ~mailbox:async_messages Approvals
+                Masc_tui_home.open_approvals state
+                  ~navigate:(goto_surface ~from_reference:true state ~mailbox:async_messages)
             | Home_request request ->
                 let navigate destination =
                   goto_surface ~from_reference:true state ~mailbox:async_messages destination;

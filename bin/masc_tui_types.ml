@@ -6094,6 +6094,10 @@ module Browser_lane_view = struct
     | Host_not_reported
     | Host_reported of Masc.Browser_bidi_host_status.report
     | Host_report_unreadable of { detail : string; message : string option }
+  (* The backend startup observation from the last successful discovery.
+     Pending and failed list reads retain it as dated recovery evidence;
+     every successful reply replaces it, including an absent/unreadable report.
+     It does not authorize a connection or a browser operation. *)
   type backend_unavailability =
     | Backends_not_reported
     | Backends_unavailable of Masc.Browser_addon_observation.unavailable list
@@ -6885,7 +6889,7 @@ module Browser_lane_view = struct
     | Bound_automatic | Bound_explicit ->
         if browser_choice_selected before choice then None else Some Read
   let withdraw_discovery t = { t with clients = None; bidi_host = Host_not_reported;
-    inventory_report = Inventory_not_reported; unavailable = Backends_not_reported; automatic = None }
+    inventory_report = Inventory_not_reported; automatic = None }
   let bind_recommendation recommendation t =
     match recommendation.lane, recommendation.client_id with
     | Live, Some id ->
@@ -6922,7 +6926,7 @@ module Browser_lane_view = struct
         (match result with
          | Error detail ->
              { t with clients = None; bidi_host = Host_not_reported;
-               inventory_report = Inventory_not_reported; unavailable = Backends_not_reported; automatic = None;
+               inventory_report = Inventory_not_reported; automatic = None;
                client_picker = Some 0; pending_open = false; load = Failed detail }, false
          | Ok { listed = clients; bidi_host; inventory_report; automatic; unavailable } ->
              let selected_client = Option.map (fun selected ->

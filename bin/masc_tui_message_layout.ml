@@ -380,6 +380,9 @@ let take_cells text cells =
    whether it moved. *)
 let split_at_cells text cells =
   if cells <= 0 then ("", text)
+  else if printable_ascii_range text 0 (String.length text) then
+    let cut = min cells (String.length text) in
+    (String.sub text 0 cut, String.sub text cut (String.length text - cut))
   else
     let rec walk used cut = function
       | [] -> cut
@@ -955,6 +958,15 @@ let take_last count values =
 
 let split_cells ~max_cells text =
   if String.equal text "" then [ "" ]
+  else if printable_ascii_range text 0 (String.length text) then
+    let limit = max 1 max_cells in
+    let rec chunks start rows =
+      if start >= String.length text then List.rev rows
+      else
+        let length = min limit (String.length text - start) in
+        chunks (start + length) (String.sub text start length :: rows)
+    in
+    chunks 0 []
   else
     let rec loop chunk_start chunk_end used_cells rows = function
       | [] ->
@@ -971,6 +983,47 @@ let split_cells ~max_cells text =
             (chunk :: rows) rest
     in
     loop 0 0 0 [] (display_pieces text)
+
+let split_cells_after_prefix ~prefix_cells ~max_cells text =
+  let length = String.length text in
+  let limit = max 1 max_cells in
+  if printable_ascii_range text 0 length then begin
+    let cut = min length (max 0 prefix_cells) in
+    let rec chunks start rows =
+      if start >= length then List.rev rows
+      else
+        let size = min limit (length - start) in
+        chunks (start + size) (String.sub text start size :: rows)
+    in
+    String.sub text 0 cut, chunks cut []
+  end else if not (String.is_valid_utf_8 text) then begin
+    (* A malformed prefix can make the original whole line use scalar
+       segmentation while its valid suffix uses grapheme segmentation. *)
+    let head, tail = split_at_cells text prefix_cells in
+    head, (if String.equal tail "" then [] else split_cells ~max_cells tail)
+  end else begin
+    let rec prefix used cut = function
+      | [] -> cut, []
+      | piece :: rest when piece.ansi || used + piece.cell_width <= prefix_cells ->
+          prefix (used + piece.cell_width) piece.end_offset rest
+      | pieces -> cut, pieces
+    in
+    let cut, remaining =
+      if prefix_cells <= 0 then 0, display_pieces text
+      else prefix 0 0 (display_pieces text) in
+    let rec chunks start stop used rows = function
+      | [] ->
+          if start = length then List.rev rows
+          else List.rev (String.sub text start (stop - start) :: rows)
+      | piece :: rest
+        when piece.ansi || used = 0 || used + piece.cell_width <= max_cells ->
+          chunks start piece.end_offset (used + piece.cell_width) rows rest
+      | piece :: rest ->
+          chunks piece.start_offset piece.end_offset piece.cell_width
+            (String.sub text start (stop - start) :: rows) rest
+    in
+    String.sub text 0 cut, chunks cut cut 0 [] remaining
+  end
 
 let split_styled_cells ~max_cells text =
   (* Replaying the preceding SGR commands restores the exact style at a

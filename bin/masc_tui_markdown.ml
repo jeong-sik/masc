@@ -601,18 +601,14 @@ let wrap_pieces ~max_cells pieces =
                next row whole. Cutting by cells here would give it up and pad
                its columns, which holds the alignment and loses the letter --
                and a wrapped line of Korean is where that shows. *)
-            let head, tail =
-              match Layout.split_at_cells text room with
-              | "", _ when !row = [] ->
+            let head, remaining =
+              match Layout.split_cells_after_prefix ~prefix_cells:room
+                      ~max_cells text with
+              | "", chunk :: rest when !row = [] ->
                   (* A grapheme wider than the row itself. [split_cells] takes
                      one piece whatever the width, which is the only rule that
                      ends here; a row one cell over beats never finishing. *)
-                  (match Layout.split_cells ~max_cells:room text with
-                   | chunk :: _ when String.length chunk > 0 ->
-                       ( chunk
-                       , String.sub text (String.length chunk)
-                           (String.length text - String.length chunk) )
-                   | _ -> (text, ""))
+                  (chunk, rest)
               | split -> split
             in
             if String.length head > 0 then row := (head, kind) :: !row;
@@ -629,8 +625,7 @@ let wrap_pieces ~max_cells pieces =
                   flush ();
                   place_chunks rest
             in
-            if String.length tail > 0 then
-              place_chunks (Layout.split_cells ~max_cells tail)
+            place_chunks remaining
           end
       in
       place text)
@@ -717,8 +712,6 @@ let styled_diff_mixed_rows ?on_row palette ~width kind pieces =
 let styled_code_rows ?on_row palette ~width pieces =
   let gutter = palette.code_gutter in
   let body_width = max 1 (width - Layout.display_width gutter) in
-  let plain = String.concat "" (List.map fst pieces) in
-  let cells = Layout.display_width plain in
   let source_byte = ref 0 in
   let mapped plain text =
     let length = String.length plain in
@@ -729,6 +722,8 @@ let styled_code_rows ?on_row palette ~width pieces =
   in
   match diff_row_span palette pieces with
   | Some span ->
+      let plain = String.concat "" (List.map fst pieces) in
+      let cells = Layout.display_width plain in
       let chunks =
         if cells <= body_width then [ plain ]
         else Layout.split_cells ~max_cells:body_width plain
@@ -751,6 +746,9 @@ let render_lexed_line_with_spans ~palette ~width pieces =
   let semantic_text = String.concat "" (List.map fst pieces) in
   {semantic_text; source_positions=Array.init (String.length semantic_text) (fun i -> Some i);
    mapped_rows=List.rev !mapped_rows}
+
+let render_lexed_line ~palette ~width pieces =
+  styled_code_rows palette ~width:(max 1 width) pieces
 
 let horizontal cells =
   String.concat "" (List.init (max 0 cells) (fun _ -> "\xe2\x94\x80"))

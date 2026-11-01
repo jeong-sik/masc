@@ -314,7 +314,8 @@ let fusion_markdown_block ~width ~indent text =
   let body_width = max 1 (width - Message_layout.display_width indent) in
   if String.equal (String.trim text) "" then [ Ansi.dim, indent ^ "(empty)" ]
   else
-    document_markdown ~width:body_width text
+    document_markdown ~width:body_width
+      (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
     |> List.map (fun line -> Ansi.reset, indent ^ line)
 
 let fusion_labeled_markdown ~width ~label text =

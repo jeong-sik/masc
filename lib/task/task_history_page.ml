@@ -181,6 +181,10 @@ type reader = {
   mutable block_from : int;
   mutable block_len : int;
   mutable block : string;
+  mutable top_block_from : int;
+  mutable top_block_len : int;
+  mutable top_block : string;
+  mutable retained_blocks : (int * int * string) list;
 }
 
 let matches_file_ownership (s : Fs_compat.owned_regular_file_snapshot) (st : Unix.stats) =
@@ -247,7 +251,19 @@ let ensure_reader_fd reader =
 
 let with_reader ~root file fn =
   let r =
-    { root; file; fd = None; parent_stat = None; block_from = -1; block_len = 0; block = "" }
+    {
+      root;
+      file;
+      fd = None;
+      parent_stat = None;
+      block_from = -1;
+      block_len = 0;
+      block = "";
+      top_block_from = -1;
+      top_block_len = 0;
+      top_block = "";
+      retained_blocks = [];
+    }
   in
   let close_quiet () =
     match r.fd with
@@ -266,6 +282,15 @@ let with_reader ~root file fn =
       (try Unix.close fd; Ok result with Unix.Unix_error _ -> Error Source_unavailable)
     | Some _, None -> Error Source_changed)
 
+let reset_reader_block_memo reader =
+  reader.block_from <- -1;
+  reader.block_len <- 0;
+  reader.block <- "";
+  reader.top_block_from <- -1;
+  reader.top_block_len <- 0;
+  reader.top_block <- "";
+  reader.retained_blocks <- []
+
 let rec read_exact fd bytes offset remaining =
   if remaining = 0 then Ok ()
   else
@@ -280,23 +305,43 @@ let load_block reader offset =
   else if offset>=reader.block_from && offset-reader.block_from<reader.block_len then Ok ()
   else
     let from=offset-(offset mod io_block_bytes) in
-    let length=min io_block_bytes (reader.file.snapshot.file_size-from) in
-    let* fd=ensure_reader_fd reader in
-    let* ()=
-      try if Unix.lseek fd from Unix.SEEK_SET=from then Ok () else Error Source_changed
-      with Unix.Unix_error _ -> Error Source_unavailable in
-    let bytes=Bytes.create length in
-    let* ()=read_exact fd bytes 0 length in
-    let* ()=
-      try
-        let st=Unix.fstat fd in
-        if not (matches_file_ownership reader.file.snapshot st) then Error Source_unavailable
-        else if matches_file_snapshot reader.file.snapshot st then Ok () else Error Source_changed
-      with Unix.Unix_error _ -> Error Source_unavailable in
-    reader.block_from<-from;
-    reader.block_len<-length;
-    reader.block<-Bytes.unsafe_to_string bytes;
-    Ok ()
+    if from=reader.top_block_from && offset-from<reader.top_block_len then (
+      reader.block_from<-reader.top_block_from;
+      reader.block_len<-reader.top_block_len;
+      reader.block<-reader.top_block;
+      Ok ()
+    ) else
+      match List.find_opt (fun (f, l, _) -> f=from && offset-f<l) reader.retained_blocks with
+      | Some (f, l, b) ->
+        reader.block_from<-f;
+        reader.block_len<-l;
+        reader.block<-b;
+        Ok ()
+      | None ->
+        let length=min io_block_bytes (reader.file.snapshot.file_size-from) in
+        let* fd=ensure_reader_fd reader in
+        let* ()=
+          try if Unix.lseek fd from Unix.SEEK_SET=from then Ok () else Error Source_changed
+          with Unix.Unix_error _ -> Error Source_unavailable in
+        let bytes=Bytes.create length in
+        let* ()=read_exact fd bytes 0 length in
+        let* ()=
+          try
+            let st=Unix.fstat fd in
+            if not (matches_file_ownership reader.file.snapshot st) then Error Source_unavailable
+            else if matches_file_snapshot reader.file.snapshot st then Ok () else Error Source_changed
+          with Unix.Unix_error _ -> Error Source_unavailable in
+        let block=Bytes.unsafe_to_string bytes in
+        reader.block_from<-from;
+        reader.block_len<-length;
+        reader.block<-block;
+        if reader.top_block_from<0 then (
+          reader.top_block_from<-from;
+          reader.top_block_len<-length;
+          reader.top_block<-block);
+        if reader.file.snapshot.file_size <= 8 * io_block_bytes then
+          reader.retained_blocks <- (from, length, block) :: reader.retained_blocks;
+        Ok ()
 
 let byte reader offset =
   let* ()=load_block reader offset in
@@ -596,7 +641,7 @@ let classify_row ~source line =
    input falls back to [classify_row] so Yojson parity is exact. *)
 let max_fast_depth = 32
 let max_fast_keys = 64
-let key_stride = max_fast_keys * 2
+let key_stride = max_fast_keys
 
 let rec skip_ws s stop i =
   if i >= stop then i
@@ -715,20 +760,29 @@ let rec slice_eq_slice_loop s off1 off2 len k =
 let slice_eq_slice s off1 len1 off2 len2 =
   len1 = len2 && slice_eq_slice_loop s off1 off2 len1 0
 
-let rec register_unique_key_loop s (key_buf : int array) base count k_off k_len j =
+let pack_key_fingerprint s k_off k_len =
+  let first_char = if k_len > 0 then Char.code (String.unsafe_get s k_off) else 0 in
+  (k_len lsl 40) lor (first_char lsl 32) lor k_off
+
+let rec register_unique_key_loop s (key_buf : int array) base count k_off k_len fp fp_tag j =
   if j = count then (
-    Array.unsafe_set key_buf (base + (count * 2)) k_off;
-    Array.unsafe_set key_buf (base + (count * 2) + 1) k_len;
+    Array.unsafe_set key_buf (base + count) fp;
     true)
   else
-    let prev_off = Array.unsafe_get key_buf (base + (j * 2)) in
-    let prev_len = Array.unsafe_get key_buf (base + (j * 2) + 1) in
-    if slice_eq_slice s k_off k_len prev_off prev_len then false
-    else register_unique_key_loop s key_buf base count k_off k_len (j + 1)
+    let prev_fp = Array.unsafe_get key_buf (base + j) in
+    if (prev_fp lsr 32) = fp_tag
+       && slice_eq_slice_loop s k_off (prev_fp land 0xffffffff) k_len 0
+    then false
+    else register_unique_key_loop s key_buf base count k_off k_len fp fp_tag (j + 1)
 
 let register_unique_key s (key_buf : int array) base count k_off k_len =
   count < max_fast_keys
-  && register_unique_key_loop s key_buf base count k_off k_len 0
+  && k_len <= 0xffff
+  && k_off <= 0x7fffffff
+  && (
+    let fp = pack_key_fingerprint s k_off k_len in
+    let fp_tag = fp lsr 32 in
+    register_unique_key_loop s key_buf base count k_off k_len fp fp_tag 0)
 
 let rec count_digits s stop i =
   if i < stop then
@@ -1122,16 +1176,23 @@ let rec scan_activity_loop s stop key_buf (state : int array) mask cur =
       else
         let v_start = colon + 1 in
         let bit =
-          if slice_eq_lit s k_off k_len "seq" then 1
-          else if slice_eq_lit s k_off k_len "ts_ms" then 2
-          else if slice_eq_lit s k_off k_len "ts_iso" then 4
-          else if slice_eq_lit s k_off k_len "kind" then 8
-          else if slice_eq_lit s k_off k_len "actor" then 16
-          else if slice_eq_lit s k_off k_len "subject" then 32
-          else if slice_eq_lit s k_off k_len "payload" then 64
-          else if slice_eq_lit s k_off k_len "tags" then 128
-          else if slice_eq_lit s k_off k_len "context" then 256
-          else 0
+          match k_len with
+          | 3 -> if slice_eq_lit_loop s k_off "seq" 3 0 then 1 else 0
+          | 4 ->
+            if slice_eq_lit_loop s k_off "kind" 4 0 then 8
+            else if slice_eq_lit_loop s k_off "tags" 4 0 then 128
+            else 0
+          | 5 ->
+            if slice_eq_lit_loop s k_off "ts_ms" 5 0 then 2
+            else if slice_eq_lit_loop s k_off "actor" 5 0 then 16
+            else 0
+          | 6 -> if slice_eq_lit_loop s k_off "ts_iso" 6 0 then 4 else 0
+          | 7 ->
+            if slice_eq_lit_loop s k_off "subject" 7 0 then 32
+            else if slice_eq_lit_loop s k_off "payload" 7 0 then 64
+            else if slice_eq_lit_loop s k_off "context" 7 0 then 256
+            else 0
+          | _ -> 0
         in
         if bit = 0 || (mask land bit) <> 0 then -1
         else
@@ -1239,44 +1300,82 @@ let scan_row_slice_fast ~source s ~pos ~len key_buf state =
   | Audit -> scan_audit_slice_fast s ~pos ~len key_buf state
 
 type task_bucket = {
+  hash : int;
   key : string;
   mutable rev_offsets : int list;
   mutable next : task_bucket option;
 }
 
-let slice_hash s off len =
-  if len = 0 then 0
-  else
-    let c0 = Char.code (String.unsafe_get s off) in
-    let c1 = Char.code (String.unsafe_get s (off + (len lsr 1))) in
-    let c2 = Char.code (String.unsafe_get s (off + len - 1)) in
-    let c3 = if len >= 2 then Char.code (String.unsafe_get s (off + len - 2)) else c0 in
-    ((len * 257) + (c0 * 31) + (c1 * 131) + (c2 * 17) + (c3 * 7)) land 255
+type task_table = {
+  mutable buckets : task_bucket option array;
+  mutable mask : int;
+  mutable size : int;
+}
 
-let rec add_slice_to_buckets_loop (buckets : task_bucket option array) h s off len offset = function
-  | Some b when slice_eq_lit s off len b.key ->
+let create_task_table () =
+  { buckets = Array.make 1024 None; mask = 1023; size = 0 }
+
+let full_slice_hash s off len =
+  let stop = off + len in
+  let rec loop h i =
+    if i >= stop then h land max_int
+    else
+      let c = Char.code (String.unsafe_get s i) in
+      loop (((h lxor c) * 16777619) + (h lsr 16)) (i + 1)
+  in
+  loop 2166136261 off
+
+let grow_task_table (t : task_table) =
+  let old_buckets = t.buckets in
+  let old_cap = Array.length old_buckets in
+  let new_cap = old_cap lsl 1 in
+  let new_mask = new_cap - 1 in
+  let new_buckets = Array.make new_cap None in
+  let rec reinsert = function
+    | None -> ()
+    | Some b ->
+      let next = b.next in
+      let idx = b.hash land new_mask in
+      b.next <- Array.unsafe_get new_buckets idx;
+      Array.unsafe_set new_buckets idx (Some b);
+      reinsert next
+  in
+  for i = 0 to old_cap - 1 do
+    reinsert (Array.unsafe_get old_buckets i)
+  done;
+  t.buckets <- new_buckets;
+  t.mask <- new_mask
+
+let rec add_slice_to_chain (t : task_table) idx h s off len offset = function
+  | Some b when b.hash = h && slice_eq_lit s off len b.key ->
     b.rev_offsets <- offset :: b.rev_offsets
-  | Some b -> add_slice_to_buckets_loop buckets h s off len offset b.next
+  | Some b -> add_slice_to_chain t idx h s off len offset b.next
   | None ->
     let key = String.sub s off len in
-    let b = { key; rev_offsets = [ offset ]; next = Array.unsafe_get buckets h } in
-    Array.unsafe_set buckets h (Some b)
+    let b = { hash = h; key; rev_offsets = [ offset ]; next = Array.unsafe_get t.buckets idx } in
+    Array.unsafe_set t.buckets idx (Some b);
+    t.size <- t.size + 1;
+    if t.size > t.mask then grow_task_table t
 
-let add_slice_to_buckets (buckets : task_bucket option array) s off len offset =
-  let h = slice_hash s off len in
-  add_slice_to_buckets_loop buckets h s off len offset (Array.unsafe_get buckets h)
+let add_slice_to_table (t : task_table) s off len offset =
+  let h = full_slice_hash s off len in
+  let idx = h land t.mask in
+  add_slice_to_chain t idx h s off len offset (Array.unsafe_get t.buckets idx)
 
-let rec add_string_to_buckets_loop (buckets : task_bucket option array) h key offset = function
-  | Some b when String.equal key b.key ->
+let rec add_string_to_chain (t : task_table) idx h key offset = function
+  | Some b when b.hash = h && String.equal key b.key ->
     b.rev_offsets <- offset :: b.rev_offsets
-  | Some b -> add_string_to_buckets_loop buckets h key offset b.next
+  | Some b -> add_string_to_chain t idx h key offset b.next
   | None ->
-    let b = { key; rev_offsets = [ offset ]; next = Array.unsafe_get buckets h } in
-    Array.unsafe_set buckets h (Some b)
+    let b = { hash = h; key; rev_offsets = [ offset ]; next = Array.unsafe_get t.buckets idx } in
+    Array.unsafe_set t.buckets idx (Some b);
+    t.size <- t.size + 1;
+    if t.size > t.mask then grow_task_table t
 
-let add_string_to_buckets (buckets : task_bucket option array) key offset =
-  let h = slice_hash key 0 (String.length key) in
-  add_string_to_buckets_loop buckets h key offset (Array.unsafe_get buckets h)
+let add_string_to_table (t : task_table) key offset =
+  let h = full_slice_hash key 0 (String.length key) in
+  let idx = h land t.mask in
+  add_string_to_chain t idx h key offset (Array.unsafe_get t.buckets idx)
 
 let rec fold_bucket_chain map = function
   | None -> map
@@ -1288,8 +1387,8 @@ let rec buckets_to_map_loop (buckets : task_bucket option array) i map =
   if i >= Array.length buckets then map
   else buckets_to_map_loop buckets (i + 1) (fold_bucket_chain map (Array.unsafe_get buckets i))
 
-let buckets_to_map (buckets : task_bucket option array) =
-  buckets_to_map_loop buckets 0 String_map.empty
+let task_table_to_map (t : task_table) =
+  buckets_to_map_loop t.buckets 0 String_map.empty
 
 let event_envelope ~file ~offset json =
   `Assoc [
@@ -1319,6 +1418,12 @@ let full_digest_max_bytes = 8 * io_block_bytes
 let cache_mutex = Stdlib.Mutex.create ()
 let cache_clock = ref 0
 let segment_cache : (string * string, cached_segment) Hashtbl.t = Hashtbl.create 64
+let file_scan_locks : Stdlib.Mutex.t array =
+  Array.init 64 (fun _ -> Stdlib.Mutex.create ())
+
+let with_file_scan_lock ~root ~relative fn =
+  let idx = Hashtbl.hash (root, relative) land 63 in
+  Stdlib.Mutex.protect file_scan_locks.(idx) fn
 
 let find_cached_segment ~root ~relative =
   Stdlib.Mutex.protect cache_mutex (fun () ->
@@ -1426,7 +1531,7 @@ let make_cached_segment reader ~scanned_from ~scanned_to ~row_count ~first_row_o
     last_used = 0;
   }
 
-let verify_cached_segment reader (cached : cached_segment) =
+let verify_cached_segment ~is_ceiling reader (cached : cached_segment) =
   let cur = reader.file.snapshot in
   if cached.device <> cur.device
      || cached.inode <> cur.inode
@@ -1440,7 +1545,8 @@ let verify_cached_segment reader (cached : cached_segment) =
      || (cur.file_size = cached.snapshot.file_size
          && not (Fs_compat.equal_owned_regular_file_snapshot cached.snapshot cur))
   then Ok false
-  else if cached.verified_settled
+  else if not is_ceiling
+          && cached.verified_settled
           && cur.file_size = cached.snapshot.file_size
           && Fs_compat.equal_owned_regular_file_snapshot cached.snapshot cur
   then Ok true
@@ -1501,7 +1607,7 @@ type range_scan_outcome =
 let scan_range_raw ~task_id ~file ~reader ~start_before ~stop_at ~max_events ~collected ~count =
   let key_buf = Array.make (max_fast_depth * key_stride) 0 in
   let state = Array.make 13 0 in
-  let buckets = Array.make 256 None in
+  let table = create_task_table () in
   let slice = { row_offset = 0; row_buf = ""; row_pos = 0; row_len = 0 } in
   let rec loop before row_count first_row_offset collected count rev_conflicting =
     if before <= stop_at then
@@ -1511,7 +1617,7 @@ let scan_range_raw ~task_id ~file ~reader ~start_before ~stop_at ~max_events ~co
         first_row_offset;
         collected;
         count;
-        by_task = buckets_to_map buckets;
+        by_task = task_table_to_map table;
         conflicting = String_map.map List.rev rev_conflicting;
       })
     else
@@ -1523,7 +1629,7 @@ let scan_range_raw ~task_id ~file ~reader ~start_before ~stop_at ~max_events ~co
           first_row_offset;
           collected;
           count;
-          by_task = buckets_to_map buckets;
+          by_task = task_table_to_map table;
           conflicting = String_map.map List.rev rev_conflicting;
         })
       else
@@ -1540,13 +1646,13 @@ let scan_range_raw ~task_id ~file ~reader ~start_before ~stop_at ~max_events ~co
             let id_off = Array.unsafe_get state 1 in
             let id_len = Array.unsafe_get state 2 in
             if not (slice_eq_lit slice.row_buf id_off id_len task_id) then (
-              add_slice_to_buckets buckets slice.row_buf id_off id_len offset;
+              add_slice_to_table table slice.row_buf id_off id_len offset;
               loop offset row_count first_row_offset collected count rev_conflicting)
             else
               let line = slice_to_string slice in
               (match classify_row ~source:file.source line with
                | Row_task { task_id = row_tid; json } when String.equal row_tid task_id ->
-                 add_string_to_buckets buckets row_tid offset;
+                 add_string_to_table table row_tid offset;
                  let event = event_envelope ~file ~offset json in
                  let collected = event :: collected in
                  let count = count + 1 in
@@ -1559,7 +1665,7 @@ let scan_range_raw ~task_id ~file ~reader ~start_before ~stop_at ~max_events ~co
                      first_row_offset;
                      anchor_line = line;
                      collected;
-                     by_task = buckets_to_map buckets;
+                     by_task = task_table_to_map table;
                      conflicting = String_map.map List.rev rev_conflicting;
                    })
                | Row_invalid | Row_unrelated | Row_conflicting _ | Row_task _ ->
@@ -1580,7 +1686,7 @@ let scan_range_raw ~task_id ~file ~reader ~start_before ~stop_at ~max_events ~co
               else
                 loop offset row_count first_row_offset collected count rev_conflicting
             | Row_task { task_id = row_tid; json } ->
-              add_string_to_buckets buckets row_tid offset;
+              add_string_to_table table row_tid offset;
               if not (String.equal row_tid task_id) then
                 loop offset row_count first_row_offset collected count rev_conflicting
               else
@@ -1596,7 +1702,7 @@ let scan_range_raw ~task_id ~file ~reader ~start_before ~stop_at ~max_events ~co
                     first_row_offset;
                     anchor_line = line;
                     collected;
-                    by_task = buckets_to_map buckets;
+                    by_task = task_table_to_map table;
                     conflicting = String_map.map List.rev rev_conflicting;
                   })
   in
@@ -1659,6 +1765,9 @@ let read ~config ~task_id ~max_events ?cursor () =
             }
         in
         let scan_one_file ~first ~file ~rest initial_collected initial_count =
+          let ceiling_opt = List.find_opt (fun (c : ceiling) -> c.file = file.relative) ceilings in
+          let is_ceiling = Option.is_some ceiling_opt in
+          with_file_scan_lock ~root ~relative:file.relative @@ fun () ->
           with_reader ~root file (fun reader ->
             let* initial_before =
               match first, cursor with
@@ -1666,7 +1775,7 @@ let read ~config ~task_id ~max_events ?cursor () =
                 let* () = anchor_matches reader cursor.position in
                 Ok cursor.position.before
               | false, _ | true, None ->
-                Ok (match List.find_opt (fun (c : ceiling) -> c.file = file.relative) ceilings with
+                Ok (match ceiling_opt with
                   | Some c -> c.size
                   | None -> file.snapshot.file_size)
             in
@@ -1674,6 +1783,7 @@ let read ~config ~task_id ~max_events ?cursor () =
             else
               let scan_cold_from_initial () =
                 invalidate_cached_segment ~root ~relative:file.relative;
+                reset_reader_block_memo reader;
                 let* outcome =
                   scan_range_raw ~task_id ~file ~reader ~start_before:initial_before
                     ~stop_at:0 ~max_events ~collected:initial_collected ~count:initial_count
@@ -1699,7 +1809,7 @@ let read ~config ~task_id ~max_events ?cursor () =
                 match find_cached_segment ~root ~relative:file.relative with
                 | None -> Ok None
                 | Some cached ->
-                  let* ok = verify_cached_segment reader cached in
+                  let* ok = verify_cached_segment ~is_ceiling reader cached in
                   if ok then Ok (Some cached)
                   else (
                     invalidate_cached_segment ~root ~relative:file.relative;

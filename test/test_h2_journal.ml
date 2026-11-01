@@ -1966,11 +1966,39 @@ let test_task_history_buffered_sources () = with_workspace (fun _env _sw base_pa
     match expect_ok, read_res, decode_res with
     | true, Ok p, Ok decoded ->
       check int ("parity valid count: " ^ label) 1 (List.length decoded);
-      check bool ("parity page decodes cleanly: " ^ label) true
-        (Result.is_ok (Decode.history ~task_id (`List p.events)))
+      (match Decode.history ~task_id (`List p.events) with
+       | Ok page_events ->
+         check int ("parity page event count: " ^ label) 2 (List.length page_events);
+         check bool ("parity page includes activity row: " ^ label) true
+           (List.exists
+              (fun (ev : Types.task_history_event) ->
+                ev.th_origin
+                = Some
+                    {
+                      Types.tho_source = Types.Task_activity;
+                      tho_file = "activity-events/2099-12/31.jsonl";
+                      tho_offset = 0;
+                    })
+              page_events)
+       | Error err -> fail ("parity page decode failed on " ^ label ^ ": " ^ err))
     | false, Error (History.Invalid_event {file="activity-events/2099-12/31.jsonl"; offset=0}), Error _ -> ()
     | _ -> fail ("validator parity mismatch on " ^ label)
-  ) parity_cases)
+  ) parity_cases;
+  (* High-cardinality task table resize (>1024 distinct task IDs with colliding suffixes) *)
+  let many_buf = Buffer.create (1300 * 64) in
+  for idx = 0 to 1299 do
+    Buffer.add_string many_buf
+      (Printf.sprintf {|{"type":"task_transition","task_id":"task-%04d","n":%d}|} idx idx);
+    Buffer.add_char many_buf '\n'
+  done;
+  write act_path "";
+  write path (Buffer.contents many_buf);
+  (match History.read ~config ~task_id:"task-0007" ~max_events:5 () with
+   | Ok p -> check int "task-0007 found in >1024 task table" 1 (List.length p.events)
+   | Error _ -> fail "failed reading from >1024 distinct task table");
+  (match History.read ~config ~task_id:"task-1297" ~max_events:5 () with
+   | Ok p -> check int "task-1297 found in warm >1024 task table" 1 (List.length p.events)
+   | Error _ -> fail "failed reading warm >1024 distinct task table"))
 
 let () = match Array.to_list Sys.argv with
   | [_; "--resume-child"; base_path; run_id] -> child_resume base_path run_id

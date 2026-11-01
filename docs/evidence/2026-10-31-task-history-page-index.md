@@ -121,6 +121,19 @@ Following the merge of PR #47004 (`5cfbb5bec3d2220b3720ae0847306f30833045d4`), p
 | **Round 2 candidate warm (cross-task)** | `task-2755` | 59 | 9 | **0.002952** | **2,679x** | **11.92x** | verified |
 | **Round 2 candidate warm (cross-task)** | `task-2774` | 59 | 59 | **0.003591** | **2,202x** | **9.80x** | verified |
 
+## Round 3 follow-up: Ceiling verification, resizable full-hash task table, singleflight file scan lock, and block digest memoization (2026-11-01)
+
+1. **Ceiling-aware `verify_cached_segment` (`~is_ceiling`)**:
+   - Because `inventory_hash` omits `file_size`, `modified_at`, and `changed_at` for ceiling files (`List.exists (fun c -> c.file = file.relative && c.size <= s.file_size) ceilings`), `verify_cached_segment` now requires `not is_ceiling` before taking the `verified_settled` digest-bypass fast path. The (at most 2) ceiling files always execute `verify_blocks`, which opens the descriptor via `ensure_reader_fd`, verifies SHA-256 block digests, and runs `verify_reader_current` at reader close.
+2. **Resizable full-slice-hash `task_table` (`create_task_table`, `full_slice_hash`, `grow_task_table`)**:
+   - Replaced the fixed 256-slot bucket array and 4-byte sampled hash (`slice_hash`) with a resizable `task_table` (initial 1024 buckets, doubling on `size > mask`) and a full-slice FNV-1a/avalanche hash over all `len` bytes (`full_slice_hash`), storing `hash : int` on each `task_bucket` so IDs sharing lengths and suffixes (e.g. `"task-2750"`..`"task-2759"`) distribute uniformly without bucket-chain degradation.
+3. **Per-file singleflight scan lock (`with_file_scan_lock`) & reader block memoization (`top_block`, `retained_blocks`)**:
+   - Striped 64-way per-file mutex around `scan_one_file` so concurrent TUI/HTTP history requests on a cold cache wait for the in-flight file scan and immediately hit the populated `cached_segment` instead of launching duplicate 442 MB cold scans (cutting 4-domain concurrent cold-scan CPU and disk I/O by 4x).
+   - Memoizes the initial `top_block` and small-file `retained_blocks` (`<= 512 KiB`) on `reader` so `compute_block_digests` hashes blocks already loaded during `scan_range_raw` without redundant `lseek`/`read`/`fstat` syscalls.
+   - Packed 1-int key fingerprint (`(k_len lsl 40) lor (first_char lsl 32) lor k_off`) in `register_unique_key` and `k_len`-dispatched key matching in `scan_activity_loop`.
+4. **Expanded validator parity & high-cardinality test assertions (`test/test_h2_journal.ml`)**:
+   - Asserts that `Decode.history ~task_id (`List p.events)` in `test_task_history_buffered_sources` decodes both the audit row and the `Task_activity` row at `activity-events/2099-12/31.jsonl:0`, plus a 1,300-task high-cardinality table resize and settled ceiling in-place corruption check.
+
 ## Validation scope
 
 - Standalone native compilation (`ocamlfind ocamlopt`) and execution of `test_validator_parity_and_fast_scanner_edge_cases`, `test_buffered_sources`, `test_current_and_incremental_sources`, and live `/Users/dancer/me/.masc` equivalence + timing harness passed (`[PASS]`). No full `dune build` was run.

@@ -296,12 +296,14 @@ describe('GoalTree', () => {
     fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'Completed target' } })
     await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(second.id))
     initial.unmount()
+    mocks.readGoalCandle.mockClear()
     mocks.route.value = { tab: 'workspace', params: { section: 'planning', goal: first.id }, postId: null }
     render(html`<${GoalTree} />`)
     await waitFor(() => expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id')).toBe(first.id))
     expect((screen.getByLabelText('목표 트리 필터') as HTMLInputElement).value).toBe('')
-    await waitFor(() => expect(mocks.readGoalCandle).toHaveBeenCalledWith(first.id,
-      { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }, 'fixture-a', expect.any(Function)))
+    await waitFor(() => expect(mocks.readGoalCandle.mock.calls.map(args => args.slice(0, 4))).toContainEqual([
+      first.id, { basePath: '/workspace-a', mascRoot: '/workspace-a/.masc' }, 'fixture-a', expect.any(Function),
+    ]))
     fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: 'no matching target' } })
     await waitFor(() => expect(screen.queryByTestId('goal-detail-panel')).toBeNull())
     fireEvent.input(screen.getByLabelText('목표 트리 필터'), { target: { value: '' } })

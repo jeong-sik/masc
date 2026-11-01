@@ -24,6 +24,16 @@ val posts_file : workspace_masc_dir:string -> string
 val posts_initialization_guard_file : workspace_masc_dir:string -> string
 (** Separate posts initialization marker; not a persisted payload family.
     This only derives a path and creates nothing. *)
+val workspace_masc_dir : Board_types.store -> string
+(** Derive the state path from the store's sole immutable BasePath binding.
+    This getter grants no filesystem authority. *)
+val check_workspace :
+  Board_types.store -> (unit, Board_workspace_binding.rejection) result
+(** Recheck the captured root and any retained actual state-directory witness.
+    Caller owns the persistence lock or a quiescent loader scope. *)
+val observe_workspace :
+  Board_types.store -> (Board_workspace_binding.observation, Board_workspace_binding.rejection) result
+(** Same check, retaining the actual observation for a later revalidation. *)
 val store_file_path : Board_types.store -> persisted_file -> string
 (** Every read and write uses the store's captured workspace. *)
 val persist_path : Board_types.store -> string
@@ -31,4 +41,6 @@ val comments_path : Board_types.store -> string
 val reactions_path : Board_types.store -> string
 val sub_boards_path : Board_types.store -> string
 val ensure_dir : string -> unit
-val ensure_masc_dir : Board_types.store -> unit
+val ensure_masc_dir :
+  Board_types.store -> (unit, Board_workspace_binding.rejection) result
+(** Check the binding before directory creation. Refusal creates nothing. *)

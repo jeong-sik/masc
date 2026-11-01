@@ -14,6 +14,7 @@ let fresh_test_base_path () =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-test-vote-ts-%06x" (Random.bits ()))
   in
+  Fs_compat.mkdir_p dir;
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 
@@ -24,7 +25,7 @@ let fresh_test_base_path () =
    existing per-file fixture convention (see [fresh_test_base_path] above). *)
 let with_blocked_board_masc_dir f =
   let store = Board.global () in
-  let masc_dir = store.Board.workspace_masc_dir in
+  let masc_dir = (Board.workspace_masc_dir store) in
   let backup = masc_dir ^ ".fixture-backup" in
   if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
   Fs_compat.mkdir_p (Filename.dirname masc_dir);
@@ -51,8 +52,7 @@ let with_eio f () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
@@ -259,8 +259,7 @@ let test_comment_vote_flips_and_duplicate_survive_restart () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   check_counts "restarted comment" 0 1;
   (match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
@@ -306,8 +305,7 @@ let test_restart_loads_only_current_vote_rows () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   let store =
     match Board_dispatch.backend () with
@@ -349,8 +347,7 @@ let test_namespaced_voter_survives_snapshot_and_restart () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   (match Board_dispatch.current_vote_for_post ~voter ~post_id with
    | Ok (Some Board.Up) -> ()
@@ -402,8 +399,7 @@ let test_restart_uses_last_vote_row_and_rebuilds_counts () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   (match
      Board_dispatch.current_vote_for_post
@@ -452,8 +448,7 @@ let test_missing_ledger_resets_persisted_vote_counts () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   match Board_dispatch.get_post ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
@@ -681,8 +676,7 @@ let test_flush_writes_only_changed_primary_table () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   (match Board_dispatch.get_post ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -746,8 +740,7 @@ let test_restart_keeps_a_vote_whose_post_is_absent () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   let store =
     match Board_dispatch.backend () with
@@ -796,8 +789,7 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   let store =
     match Board_dispatch.backend () with
@@ -886,8 +878,7 @@ let test_snapshot_waiting_after_edit_keeps_edited_post
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   match Board_dispatch.get_post ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)

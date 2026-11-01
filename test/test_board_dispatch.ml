@@ -33,18 +33,17 @@ let fresh_test_base_path () =
 let with_eio f () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  ignore (fresh_test_base_path ());
+  Fs_compat.mkdir_p (fresh_test_base_path ());
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
   f ()
 
 let with_blocked_board_masc_dir f =
   let store = Board.global () in
-  let masc_dir = store.Board.workspace_masc_dir in
+  let masc_dir = (Board.workspace_masc_dir store) in
   let backup = masc_dir ^ ".fixture-backup" in
   if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
   Fs_compat.mkdir_p (Filename.dirname masc_dir);
@@ -94,8 +93,7 @@ let seed_post_without_kind () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
   post_id
 
@@ -173,8 +171,7 @@ let test_content_update_time_survives_activity_and_reload () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
   same transferred.content_updated_at;
   let fields = match Board.post_to_yojson (read ()) with
@@ -613,8 +610,7 @@ let test_structured_post_roundtrip () =
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
       Result.get_ok (Board_dispatch.init_jsonl
-        ~workspace_masc_dir:(Common.masc_dir_from_base_path
-          ~base_path:(Env_config_core.base_path ()))
+        ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:every_name_declared ());
       match Board_dispatch.get_post ~post_id:pid with
       | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1147,8 +1143,7 @@ let test_comment_persists_post_reply_count () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
   match Board_dispatch.get_post ~post_id with
   | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1363,7 +1358,7 @@ let test_failed_flusher_start_clears_the_flag () =
       ~mono_clock:(Eio.Stdenv.mono_clock env)
       ~sw
       (fun () ->
-        ignore (fresh_test_base_path ());
+        Fs_compat.mkdir_p (fresh_test_base_path ());
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
         (* The flusher forks on whatever switch the context names; a finished
@@ -1371,8 +1366,7 @@ let test_failed_flusher_start_clears_the_flag () =
         let finished = Eio.Switch.run (fun inner -> inner) in
         Eio_context.with_turn_switch finished (fun () ->
           Result.get_ok (Board_dispatch.init_jsonl
-            ~workspace_masc_dir:(Common.masc_dir_from_base_path
-              ~base_path:(Env_config_core.base_path ()))
+            ~base_path:(Env_config_core.base_path ())
             ~recipient_lookup:every_name_declared ()));
         Alcotest.(check bool) "a failed start leaves no started flag" false
           (Board_dispatch.flusher_started_for_test ());
@@ -1391,12 +1385,11 @@ let test_vote_persisted_by_flusher_actor () =
       ~mono_clock:(Eio.Stdenv.mono_clock env)
       ~sw
       (fun () ->
-        ignore (fresh_test_base_path ());
+        Fs_compat.mkdir_p (fresh_test_base_path ());
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
         Result.get_ok (Board_dispatch.init_jsonl
-          ~workspace_masc_dir:(Common.masc_dir_from_base_path
-            ~base_path:(Env_config_core.base_path ()))
+          ~base_path:(Env_config_core.base_path ())
           ~recipient_lookup:every_name_declared ());
         let post_id =
           match
@@ -1421,8 +1414,7 @@ let test_vote_persisted_by_flusher_actor () =
         Board.reset_global_for_test ();
         Board_dispatch.reset_for_test ();
         Result.get_ok (Board_dispatch.init_jsonl
-          ~workspace_masc_dir:(Common.masc_dir_from_base_path
-            ~base_path:(Env_config_core.base_path ()))
+          ~base_path:(Env_config_core.base_path ())
           ~recipient_lookup:every_name_declared ());
         (match Board_dispatch.get_post ~post_id with
          | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1547,8 +1539,7 @@ let test_comment_reaction_survives_restart () =
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
       Result.get_ok (Board_dispatch.init_jsonl
-        ~workspace_masc_dir:(Common.masc_dir_from_base_path
-          ~base_path:(Env_config_core.base_path ()))
+        ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:every_name_declared ());
       match
         Board_dispatch.list_reactions ~target_type:Board.Reaction_comment
@@ -2066,8 +2057,7 @@ let test_set_pinned () =
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
       Result.get_ok (Board_dispatch.init_jsonl
-        ~workspace_masc_dir:(Common.masc_dir_from_base_path
-          ~base_path:(Env_config_core.base_path ()))
+        ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:every_name_declared ());
       (match Board_dispatch.get_post ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -2207,8 +2197,7 @@ let test_set_closed_and_reopen_round_trip () =
       Board.reset_global_for_test ();
       Board_dispatch.reset_for_test ();
       Result.get_ok (Board_dispatch.init_jsonl
-        ~workspace_masc_dir:(Common.masc_dir_from_base_path
-          ~base_path:(Env_config_core.base_path ()))
+        ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:every_name_declared ());
       (match Board_dispatch.get_post ~post_id:pid with
        | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -2610,8 +2599,7 @@ let test_post_audience_survives_edit_and_restart () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
   let reloaded = get (Board_dispatch.get_post ~post_id) in
   Alcotest.(check (list string)) "restart keeps exact edited audience" ["second-reader"]
@@ -2662,8 +2650,7 @@ let test_comment_audience_survives_restart () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
   let reloaded id =
     match List.find_opt (fun (c : Board.comment) ->
@@ -2997,8 +2984,7 @@ let test_sub_board_delete_clears_orphan_hearth () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:every_name_declared ());
   (match Board_dispatch.get_post ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -3055,18 +3041,31 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
                  let expected_root = Fs_compat.realpath_lenient
                      (Common.masc_dir_from_base_path ~base_path:absent_base) in
                  let original_cwd = Sys.getcwd () in
-                 let relative_root = Common.masc_dir_from_base_path
-                     ~base_path:(Filename.basename absent_base) in
+                 let relative_root = Filename.basename absent_base in
                  Fun.protect ~finally:(fun () -> Unix.chdir original_cwd) (fun () ->
                    Unix.chdir (Filename.dirname absent_base);
                    Alcotest.(check bool) "fresh initialization request is relative" true
                      (Filename.is_relative relative_root);
                    Alcotest.(check bool) "relative initialization target is absent at init" false
                      (Sys.file_exists relative_root);
-                   Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:relative_root
+                   (match Board_dispatch.init_jsonl ~base_path:relative_root
+                       ~recipient_lookup:every_name_declared () with
+                    | Error (Board_dispatch.Workspace_binding_refused
+                        (Board_workspace_binding.Base_path_missing _)) -> ()
+                    | Error (Board_dispatch.Workspace_mismatch _
+                        | Board_dispatch.Workspace_binding_refused _) | Ok () ->
+                      Alcotest.fail "absent BasePath must be refused before initialization");
+                   Alcotest.(check string) "missing root installs no backend" "uninitialized"
+                     (Board_dispatch.backend_name ());
+                   Alcotest.(check bool) "missing root starts no flusher" false
+                     (Board_dispatch.flusher_started_for_test ());
+                   Alcotest.(check bool) "missing root refusal creates nothing" false
+                     (Sys.file_exists absent_base);
+                   Fs_compat.mkdir_p absent_base;
+                   Result.get_ok (Board_dispatch.init_jsonl ~base_path:relative_root
                      ~recipient_lookup:every_name_declared ()));
                  Alcotest.(check string) "absent relative init captures the absolute workspace"
-                   expected_root (Board.global ()).Board.workspace_masc_dir;
+                   expected_root (Board.workspace_masc_dir (Board.global ()));
                  Alcotest.(check bool) "isolated initialization starts its scoped flusher" true
                    (Board_dispatch.flusher_started_for_test ());
                  Eio.Switch.fail init_sw Exit))
@@ -3074,16 +3073,18 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
         Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
           ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
           (fun () ->
-            (match Board_dispatch.init_jsonl ~workspace_masc_dir:""
+            (match Board_dispatch.init_jsonl ~base_path:""
                 ~recipient_lookup:every_name_declared () with
              | _ -> Alcotest.fail "empty initialization workspace must raise Invalid_argument"
              | exception Invalid_argument _ -> ());
             let base_a = fresh_test_base_path () in
+            Fs_compat.mkdir_p base_a;
             Board.reset_global_for_test ();
             Board_dispatch.reset_for_test ();
             let retained = Board.global () in
-            let root_a = retained.Board.workspace_masc_dir in
+            let root_a = (Board.workspace_masc_dir retained) in
             let base_b = fresh_test_base_path () in
+            Fs_compat.mkdir_p base_b;
             let root_b = Fs_compat.realpath_lenient
               (Common.masc_dir_from_base_path ~base_path:base_b) in
             let rejected_calls = ref 0 in
@@ -3094,10 +3095,12 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
                   {active_workspace_masc_dir; requested_workspace_masc_dir}) ->
                 Alcotest.(check string) (label ^ ": active") root_a active_workspace_masc_dir;
                 Alcotest.(check string) (label ^ ": requested") root_b requested_workspace_masc_dir
+              | Error (Board_dispatch.Workspace_binding_refused rejection) ->
+                Alcotest.fail (Board_workspace_binding.rejection_to_string rejection)
               | Ok () -> Alcotest.fail (label ^ ": expected typed workspace mismatch")
             in
             check_mismatch "early global A refuses init B"
-              (Board_dispatch.init_jsonl ~workspace_masc_dir:root_b
+              (Board_dispatch.init_jsonl ~base_path:base_b
                 ~recipient_lookup:rejected_lookup ());
             Alcotest.(check string) "failed init has no active backend" "uninitialized"
               (Board_dispatch.backend_name ());
@@ -3111,7 +3114,7 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
              | Board_dispatch.Jsonl active ->
                Alcotest.(check bool) "read-started backend retains A" true (active == retained));
             check_mismatch "read-started A refuses init B before lookup installation"
-              (Board_dispatch.init_jsonl ~workspace_masc_dir:root_b
+              (Board_dispatch.init_jsonl ~base_path:base_b
                 ~recipient_lookup:rejected_lookup ());
             Alcotest.(check bool) "read-started mismatch retains actual store" true
               (retained == Board.global ());
@@ -3127,12 +3130,12 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
               Unix.chdir (Filename.dirname base_a);
               Alcotest.(check bool) "initialization request is relative" true
                 (Filename.is_relative relative_root_a);
-              Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:relative_root_a
+              Result.get_ok (Board_dispatch.init_jsonl ~base_path:(Filename.basename base_a)
                 ~recipient_lookup:original_lookup ()));
             check_mismatch "active A refuses init B"
-              (Board_dispatch.init_jsonl ~workspace_masc_dir:root_b
+              (Board_dispatch.init_jsonl ~base_path:base_b
                 ~recipient_lookup:rejected_lookup ());
-            Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:root_a
+            Result.get_ok (Board_dispatch.init_jsonl ~base_path:base_a
               ~recipient_lookup:rejected_lookup ());
             let post = get_created (Board_dispatch.create_post ~author:"writer"
               ~content:"@alice retains the first lookup" ~post_kind:Board.Human_post ()) in
@@ -3157,9 +3160,11 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
 let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
   let original_base = Sys.getenv_opt "MASC_BASE_PATH" in
   let alias_path = ref None in
+  let base_alias_path = ref None in
   Fun.protect
     ~finally:(fun () ->
       Option.iter Unix.unlink !alias_path;
+      Option.iter Unix.unlink !base_alias_path;
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       Unix.putenv "MASC_BASE_PATH" (Option.value original_base ~default:""))
@@ -3172,14 +3177,15 @@ let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
           ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
           (fun () ->
             let base_a = fresh_test_base_path () in
+            Fs_compat.mkdir_p base_a;
             Board.reset_global_for_test ();
             Board_dispatch.reset_for_test ();
             let retained = Board.global () in
-            let root_a = retained.Board.workspace_masc_dir in
+            let root_a = (Board.workspace_masc_dir retained) in
             Fs_compat.mkdir_p root_a;
             ignore (Board_dispatch.backend ());
             if lookup_installed then
-              Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:root_a
+              Result.get_ok (Board_dispatch.init_jsonl ~base_path:base_a
                 ~recipient_lookup:every_name_declared ());
             let flusher_before = Board_dispatch.flusher_started_for_test () in
             let base_b = fresh_test_base_path () in
@@ -3191,7 +3197,7 @@ let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
             let foreign_lookup = Recipient_lookup.make (fun _ ->
               incr foreign_calls;
               Ok (Result.to_option (Board.Agent_id.parse "foreign-keeper"))) in
-            let initialization = Board_dispatch.init_jsonl ~workspace_masc_dir:root_b
+            let initialization = Board_dispatch.init_jsonl ~base_path:base_b
                 ~recipient_lookup:foreign_lookup () in
             let addressed = Board_dispatch.create_post ~author:"writer"
                 ~content:"@alice must stay in the captured workspace"
@@ -3221,7 +3227,7 @@ let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
                   | Board.Post_publication_failure.Raised exception_ ->
                     Alcotest.fail (Printexc.to_string exception_))
                | Ok _ -> Alcotest.fail "an uninstalled lookup must stay unavailable");
-              Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:root_a
+              Result.get_ok (Board_dispatch.init_jsonl ~base_path:base_a
                 ~recipient_lookup:every_name_declared ());
               ignore (get_created (Board_dispatch.create_post ~author:"writer"
                 ~content:"@alice after the original workspace initializes"
@@ -3231,6 +3237,13 @@ let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
             Alcotest.(check bool) "A remains the retained workspace"
               true (String.equal root_a (Fs_compat.realpath_lenient
                 (Common.masc_dir_from_base_path ~base_path:base_a)));
+            let base_alias = base_a ^ ".root-alias" in
+            Unix.symlink base_a base_alias;
+            base_alias_path := Some base_alias;
+            Result.get_ok (Board_dispatch.init_jsonl ~base_path:base_alias
+              ~recipient_lookup:foreign_lookup ());
+            Alcotest.(check int) "BasePath alias preserves the first installed lookup"
+              0 !foreign_calls;
             Eio.Switch.fail sw Exit)
       with Exit -> ())
 

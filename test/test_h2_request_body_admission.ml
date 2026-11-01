@@ -819,8 +819,7 @@ let test_board_reads_require_a_token_under_strict_auth () =
   Masc.Board.reset_global_for_test ();
   Masc.Board_dispatch.reset_for_test ();
   Result.get_ok (Masc.Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Masc.Recipient_lookup.none_declared ());
   Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" (Some "1")
   @@ fun () ->

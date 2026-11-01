@@ -22,9 +22,22 @@ let failure_to_board_error = function
       | Invalid_posts_row { line } -> Printf.sprintf "line %d: invalid persisted row schema" line) errors in
     Io_error (String.concat "; " detail)
   | Posts_transaction_failed error -> Io_error (Fs_compat.private_jsonl_transaction_error_to_string error)
-  | Posts_missing_after_observation _ -> Io_error "posts source disappeared after observation or refusal"
+  | Posts_missing_after_observation prior_settlement ->
+    let detail = "posts source disappeared after observation or refusal" in
+    Io_error (match prior_settlement with
+      | None -> detail
+      | Some error -> detail ^ "; read settlement: "
+          ^ Fs_compat.private_jsonl_transaction_error_to_string error)
   | Posts_source_binding_mismatch -> Io_error "posts source belongs to another captured workspace"
   | Posts_snapshot_stale -> Io_error "captured posts snapshot is stale"
+  | Posts_workspace_binding_refused { rejection; prior_settlement } ->
+    let detail = Board_workspace_binding.rejection_to_string rejection in
+    let detail = match prior_settlement with
+      | None -> detail
+      | Some error -> detail ^ "; prior read settlement: "
+          ^ Fs_compat.private_jsonl_transaction_error_to_string error
+    in
+    Io_error detail
   | Posts_raised { exception_; _ } -> Io_error (Printexc.to_string exception_)
 
 let require_readable store = match store.posts_source with
@@ -73,6 +86,10 @@ let propagate_reserved exception_ backtrace =
 let reserved_source_failure = function
   | Posts_transaction_failed error -> reserved_transaction error
   | Posts_raised { exception_; backtrace } -> reserved_exception (exception_, backtrace)
+  | Posts_workspace_binding_refused { rejection; prior_settlement } ->
+    (match Option.bind prior_settlement reserved_transaction with
+     | Some _ as first -> first
+     | None -> Option.bind (Board_workspace_binding.raised rejection) reserved_exception)
   | Posts_missing_after_observation diagnostic -> Option.bind diagnostic reserved_transaction
   | Posts_not_observed | Posts_rows_rejected _
   | Posts_source_binding_mismatch | Posts_snapshot_stale -> None
@@ -82,6 +99,9 @@ let finish_failure failure = raise_reserved (reserved_source_failure failure)
 let carry_reserved result = function
   | None -> ()
   | Some (exception_, backtrace) -> raise (Reserved_settlement { result; exception_; backtrace })
+
+let defer_reserved ~result exception_ backtrace =
+  carry_reserved result (reserved_exception (exception_, backtrace))
 
 let finish_diagnostic diagnostic =
   Option.iter (fun error -> match reserved_transaction error with
@@ -112,10 +132,37 @@ let refused store failure =
 let unsettled store failure =
   store.posts_source <- Posts_unsettled { last_observed = last_observed store.posts_source; failure }
 
+let workspace_failure ?(prior_settlement = None) rejection =
+  Posts_workspace_binding_refused { rejection; prior_settlement }
+
+let check_workspace store =
+  Result.map_error (fun rejection -> workspace_failure rejection)
+    (Board_paths.observe_workspace store)
+
+let finish_workspace_observation store before =
+  let binding = store.workspace_binding in
+  if Board_workspace_binding.workspace_directory_missing before then
+    match Board_workspace_binding.observe binding with
+    | Error _ as error -> error
+    | Ok after when Board_workspace_binding.workspace_directory_missing after ->
+      Error (Board_workspace_binding.Workspace_directory_changed
+        (Board_paths.workspace_masc_dir store))
+    | Ok after -> Ok after
+  else
+    Result.map (fun () -> before) (Board_workspace_binding.revalidate binding before)
+
+let check_observation store observation =
+  Result.map_error (fun rejection -> workspace_failure rejection)
+    (Board_workspace_binding.revalidate store.workspace_binding
+       observation.workspace_observation)
+
 let read store =
   match store.posts_source with
   | Posts_unsettled { failure; _ } -> Posts_unavailable failure
   | Posts_unobserved | Posts_readable _ | Posts_refused _ ->
+    match check_workspace store with
+    | Error failure -> Posts_unavailable failure
+    | Ok workspace_before ->
     let path = Board_paths.persist_path store in
     try
       let result = match store.posts_io_for_testing with
@@ -124,15 +171,20 @@ let read store =
       match Fs_compat.private_jsonl_snapshot_success_receipt result with
       | Error error -> Posts_unavailable (Posts_transaction_failed error)
       | Ok receipt ->
-        let observation = { source_path = path; snapshot = receipt.value } in
+        match finish_workspace_observation store workspace_before with
+        | Error rejection ->
+          Posts_unavailable (workspace_failure
+            ~prior_settlement:receipt.settlement_error rejection)
+        | Ok workspace_observation ->
+        let observation = { source_path = path; snapshot = receipt.value;
+                            workspace_observation } in
         let missing = Fs_compat.Private_jsonl_cursor.is_missing receipt.value.cursor in
         let missing_allowed = match store.posts_source with
           | Posts_unobserved -> true
           | Posts_readable { observation; _ } ->
             Fs_compat.Private_jsonl_cursor.is_missing observation.snapshot.cursor
           | Posts_refused _ | Posts_unsettled _ -> false in
-        if missing && not missing_allowed then
-          Posts_unavailable (Posts_missing_after_observation receipt.settlement_error)
+        if missing && not missing_allowed then Posts_unavailable (Posts_missing_after_observation receipt.settlement_error)
         else
           let posts = ref [] and errors = ref [] in
           String.split_on_char '\n' receipt.value.bytes |> List.iteri (fun index text ->
@@ -209,11 +261,12 @@ let rec contradicts_observation = function
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false
 
-let classify_write store ~bytes result =
+let classify_write store ~workspace_observation ~bytes result =
   match Fs_compat.private_jsonl_cursor_success_receipt result with
   | Ok receipt ->
     let observation = { source_path = Board_paths.persist_path store;
-                        snapshot = { Fs_compat.bytes = bytes; cursor = receipt.value } } in
+                        snapshot = { Fs_compat.bytes = bytes; cursor = receipt.value };
+                        workspace_observation } in
     store.posts_source <- Posts_readable { observation; settlement_diagnostic = receipt.settlement_error };
     Posts_written { settlement_diagnostic = receipt.settlement_error }
   | Error error ->
@@ -223,8 +276,8 @@ let classify_write store ~bytes result =
       Posts_not_written failure)
     else (unsettled store failure; Posts_write_unknown failure)
 
-let write store ~bytes perform =
-  try classify_write store ~bytes (perform ()) with exception_ ->
+let write store ~workspace_observation ~bytes perform =
+  try classify_write store ~workspace_observation ~bytes (perform ()) with exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
     unsettled store (Posts_raised { exception_; backtrace });
     Printexc.raise_with_backtrace exception_ backtrace
@@ -239,9 +292,13 @@ let expected store = match store.posts_source with
 let append store post = match expected store with
   | Error failure -> Posts_not_written failure
   | Ok observation ->
+    match check_observation store observation with
+    | Error failure -> Posts_not_written failure
+    | Ok () ->
     let suffix = Yojson.Safe.to_string (Board_content_json.post_to_yojson post) ^ "\n" in
     let bytes = observation.snapshot.bytes ^ suffix in
-    write store ~bytes (fun () -> match store.posts_io_for_testing with
+    write store ~workspace_observation:observation.workspace_observation ~bytes
+      (fun () -> match store.posts_io_for_testing with
       | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
           observation.source_path ~expected:observation.snapshot suffix
       | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
@@ -270,9 +327,15 @@ let rewrite store snapshot = match snapshot.expected, expected store with
     else if not (Fs_compat.Private_jsonl_cursor.equal captured.snapshot.cursor current.snapshot.cursor
                  && String.equal captured.snapshot.bytes current.snapshot.bytes)
     then Posts_not_written Posts_snapshot_stale
-    else write store ~bytes:snapshot.bytes (fun () -> match store.posts_io_for_testing with
-      | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
-          captured.source_path ~expected:captured.snapshot snapshot.bytes
-      | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
-          ~io ~before_sync_rewrite_parent:io.before_sync_parent
-          captured.source_path ~expected:captured.snapshot snapshot.bytes)
+    else
+      let validation = Result.bind (check_observation store captured)
+        (fun () -> check_observation store current) in
+      match validation with
+      | Error failure -> Posts_not_written failure
+      | Ok () -> write store ~workspace_observation:current.workspace_observation
+          ~bytes:snapshot.bytes (fun () -> match store.posts_io_for_testing with
+          | None -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_result
+              captured.source_path ~expected:captured.snapshot snapshot.bytes
+          | Some io -> Fs_compat.rewrite_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+              ~io ~before_sync_rewrite_parent:io.before_sync_parent
+              captured.source_path ~expected:captured.snapshot snapshot.bytes)

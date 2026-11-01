@@ -167,7 +167,8 @@ let test_missing_and_present_empty base =
 let actual_post_row base =
   let seed = Filename.concat base "producer" in
   in_eio (fun () ->
-    let store = Board.create_store ~workspace_masc_dir:(workspace seed) () in
+    Fs_compat.mkdir_p seed;
+    let store = Board.create_store ~base_path:seed () in
     (match Rows.load_persisted_posts store with
      | Ok 0 -> ()
      | Ok _ | Error _ -> Alcotest.fail "fresh producer did not load actual Missing");

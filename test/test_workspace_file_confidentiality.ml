@@ -867,16 +867,19 @@ let test_server_startup_refuses_retained_board_workspace () =
                (Masc.Board_dispatch.Workspace_mismatch
                  {active_workspace_masc_dir; requested_workspace_masc_dir}) ->
              check string "typed startup failure names retained A"
-               retained.workspace_masc_dir active_workspace_masc_dir;
+               (Masc.Board.workspace_masc_dir retained) active_workspace_masc_dir;
              check string "typed startup failure names resolved B"
-               expected requested_workspace_masc_dir);
+               expected requested_workspace_masc_dir
+           | exception Masc.Mcp_server.Board_initialization_failed
+               (Masc.Board_dispatch.Workspace_binding_refused rejection) ->
+             fail (Board_workspace_binding.rejection_to_string rejection));
           check bool "startup failure preserves original store" true
             (retained == Masc.Board.global ());
           check string "startup failure installs no Board backend" "uninitialized"
             (Masc.Board_dispatch.backend_name ());
           check bool "startup failure starts no Board flusher" false
             (Masc.Board_dispatch.flusher_started_for_test ());
-          let target = Masc.Board.create_store ~workspace_masc_dir:expected () in
+          let target = Masc.Board.create_store ~base_path:(requested.base_path) () in
           List.iter (fun path -> check bool "startup failure creates no B Board file" false
             (Sys.file_exists path))
             [ Masc.Board.persist_path target; Masc.Board.comments_path target

@@ -27,10 +27,11 @@ let protect f =
    state belonging to another config, nor expose its directory as a file root. *)
 let require_workspace config =
   let Board_dispatch.Jsonl store = Board_dispatch.backend () in
-  if String.equal store.Board.workspace_masc_dir
-      (Fs_compat.realpath_lenient (Workspace.masc_dir config))
-  then Ok ()
-  else Error (Access_denied "review workspace does not own the active Board store")
+  match Board_dispatch.check_store_workspace ~base_path:config.Workspace.base_path store with
+  | Ok () -> Ok ()
+  | Error (Board_dispatch.Workspace_mismatch _
+      | Board_dispatch.Workspace_binding_refused _) ->
+    Error (Access_denied "review workspace does not own the active Board store")
 
 let require_visible authority (post : Board.post) =
   match post.visibility, authority with

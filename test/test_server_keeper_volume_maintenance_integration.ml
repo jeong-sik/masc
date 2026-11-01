@@ -167,8 +167,7 @@ let test_running_sweep_does_not_mutate_volumes () =
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       Result.get_ok (Board_dispatch.init_jsonl
-        ~workspace_masc_dir:(Common.masc_dir_from_base_path
-          ~base_path:(Env_config_core.base_path ()))
+        ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:Recipient_lookup.none_declared ());
       Eio.Switch.run (fun owners_sw ->
         (match Keeper_owner_registry.install_from_store ~sw:owners_sw
@@ -215,8 +214,7 @@ let test_running_sweep_does_not_mutate_volumes () =
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
       Result.get_ok (Board_dispatch.init_jsonl
-        ~workspace_masc_dir:(Common.masc_dir_from_base_path
-          ~base_path:(Env_config_core.base_path ()))
+        ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:Recipient_lookup.none_declared ());
       check (list string) "damage notices survive a Board reload" recorded_ids
         (post_ids (Board_dispatch.list_posts ~limit:20 ()));

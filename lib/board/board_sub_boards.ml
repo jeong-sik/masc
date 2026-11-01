@@ -20,18 +20,20 @@ let sub_boards_jsonl_unlocked store =
 
 let save_sub_boards_jsonl store content =
   try
-    ensure_masc_dir store;
-    let path = sub_boards_path store in
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
+    match ensure_masc_dir store with
+    | Error _ -> () (* The checked gate already recorded the ordinary refusal. *)
+    | Ok () ->
+      let path = sub_boards_path store in
+      match Fs_compat.save_file_atomic path content with
+      | Ok () -> ()
+      | Error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_sub_boards" msg
 ;;
 
 let append_sub_board store (sb : sub_board) =
   try
-    ensure_masc_dir store;
+    let* () = ensure_masc_dir store in
     let path = sub_boards_path store in
     Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n");
     Ok ()

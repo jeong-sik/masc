@@ -103,9 +103,19 @@ let load_persisted_posts store =
     result)
 ;;
 
+let propagate_workspace_check = function
+  | Ok () -> ()
+  | Error rejection ->
+    Option.iter (fun (exception_, backtrace) ->
+      Board_posts_source.propagate_reserved exception_ backtrace)
+      (Board_workspace_binding.raised rejection)
+
 let load_persisted_comments store =
   let path = Board_paths.store_file_path store Board_paths.Comments in
-  let result = try
+  let workspace_check = Board_paths.check_workspace store in
+  let result = match workspace_check with
+    | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
+    | Ok () -> try
     if Fs_compat.exact_path_kind path = Fs_compat.Exact_missing then (
       replace_loaded_comments store []; Ok 0)
     else begin
@@ -136,5 +146,7 @@ let load_persisted_comments store =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Error (path, e)
   in
-  record_load_result (fun result -> store.comments_load_result <- result) result
+  let result = record_load_result (fun result -> store.comments_load_result <- result) result in
+  propagate_workspace_check workspace_check;
+  result
 ;;

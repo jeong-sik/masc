@@ -1062,13 +1062,17 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
       Runtime.verifier_exact_lane_slots;
     Atomic.set Task.Handlers.push_event_to_sessions_fn Subscriptions.push_event_to_sessions;
     match Board_dispatch.init_jsonl
-            ~workspace_masc_dir:(Workspace.masc_dir config)
+            ~base_path:(config.base_path)
             ~recipient_lookup:(Keeper_board_recipient_lookup.make ~config) () with
     | Ok () -> ()
     | Error (Board_dispatch.Workspace_mismatch
         { active_workspace_masc_dir; requested_workspace_masc_dir } as error) ->
       Log.Backend.error "Board workspace mismatch: active=%s requested=%s"
         active_workspace_masc_dir requested_workspace_masc_dir;
+      raise (Board_initialization_failed error)
+    | Error (Board_dispatch.Workspace_binding_refused rejection as error) ->
+      Log.Backend.error "Board workspace binding refused: %s"
+        (Board_workspace_binding.rejection_to_string rejection);
       raise (Board_initialization_failed error)
   end;
   (* Settle the shared mounted shim configuration before this state can be

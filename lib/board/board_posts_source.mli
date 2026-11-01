@@ -32,3 +32,8 @@ val definitely_not_written : Fs_compat.private_jsonl_transaction_error -> bool
 val propagate_reserved : exn -> Printexc.raw_backtrace -> unit
 (** Reraise an exception containing a reserved cause, including nested Eio
     multiple failures, with the original exception and backtrace intact. *)
+val defer_reserved :
+  result:(unit, board_error) result -> exn -> Printexc.raw_backtrace -> unit
+(** Carry an already-known primary result or actual requested-file precondition
+    refusal through enclosing Board locks. This creates no posts outcome or
+    operation-wide effect proof; outside locks use {!propagate_reserved}. *)

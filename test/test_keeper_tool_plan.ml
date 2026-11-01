@@ -270,8 +270,7 @@ let test_output_schema_and_consumer_input_are_enforced () =
     | Error _ -> fail "board stats plan was rejected"
   in
   let board_value = Masc.Board.(stats (create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Filename.concat (Filename.get_temp_dir_name ()) "keeper-tool-plan-board")) ())) in
+      ~base_path:(Filename.concat (Filename.get_temp_dir_name ()) "keeper-tool-plan-board") ())) in
   let board_run_id = Plan.Run_id.fresh () in
   (match Plan.validate_output board_plan ~run_id:board_run_id ~node_id:board_id board_value with
    | Ok _ -> ()

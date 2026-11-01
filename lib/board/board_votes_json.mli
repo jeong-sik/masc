@@ -55,3 +55,8 @@ val load_persisted_posts : store -> (int, string * exn) result
 
 val load_persisted_comments : store -> (int, string * exn) result
 (** See {!load_persisted_posts}. *)
+
+val propagate_workspace_check :
+  (unit, Board_workspace_binding.rejection) result -> unit
+(** After recording an auxiliary family's load refusal, propagate any original
+    reserved cause outside its broad file-read catch and Board locks. *)

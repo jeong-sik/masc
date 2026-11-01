@@ -23,6 +23,7 @@ let fresh_test_base_path () =
     Filename.concat (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-test-delete-rq-%06x" (Random.bits ()))
   in
+  Fs_compat.mkdir_p dir;
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 
@@ -32,7 +33,7 @@ let fresh_test_base_path () =
    convention. *)
 let with_blocked_board_masc_dir f =
   let store = Board.global () in
-  let masc_dir = store.Board.workspace_masc_dir in
+  let masc_dir = (Board.workspace_masc_dir store) in
   let backup = masc_dir ^ ".fixture-backup" in
   if Sys.file_exists backup then Alcotest.fail "workspace fixture backup already exists";
   Fs_compat.mkdir_p (Filename.dirname masc_dir);
@@ -59,8 +60,7 @@ let with_eio f () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   f ()
 
@@ -210,8 +210,7 @@ let test_individual_snapshot_failure path () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   let restored = store () in
   Alcotest.(check int) "restart has no deleted posts" 0 (Hashtbl.length restored.posts);
@@ -275,8 +274,7 @@ let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl
-    ~workspace_masc_dir:(Common.masc_dir_from_base_path
-      ~base_path:(Env_config_core.base_path ()))
+    ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   let restored = store () in
   Alcotest.(check int) "restart has no deleted posts" 0 (Hashtbl.length restored.posts);

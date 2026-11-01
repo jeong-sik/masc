@@ -82,7 +82,10 @@ let recalculate_vote_counts store =
 
 let load_persisted_votes store =
   let path = Board_paths.store_file_path store Board_paths.Votes in
-  let result =
+  let workspace_check = Board_paths.check_workspace store in
+  let result = match workspace_check with
+    | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
+    | Ok () ->
     if not (Fs_compat.file_exists path)
     then (
       recalculate_vote_counts store;
@@ -120,13 +123,17 @@ let load_persisted_votes store =
       | e -> Error (path, e)
     end
   in
-  Board_votes_json.record_load_result
-    (fun result -> store.votes_load_result <- result)
-    result
+  let result = Board_votes_json.record_load_result
+    (fun result -> store.votes_load_result <- result) result in
+  Board_votes_json.propagate_workspace_check workspace_check;
+  result
 
 let load_persisted_reactions store =
   let path = Board_paths.store_file_path store Board_paths.Reactions in
-  let result =
+  let workspace_check = Board_paths.check_workspace store in
+  let result = match workspace_check with
+    | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
+    | Ok () ->
     if not (Fs_compat.file_exists path) then Ok 0
     else begin
       try
@@ -156,13 +163,17 @@ let load_persisted_reactions store =
       | e -> Error (path, e)
     end
   in
-  Board_votes_json.record_load_result
-    (fun result -> store.reactions_load_result <- result)
-    result
+  let result = Board_votes_json.record_load_result
+    (fun result -> store.reactions_load_result <- result) result in
+  Board_votes_json.propagate_workspace_check workspace_check;
+  result
 
 let load_persisted_sub_boards store =
   let path = Board_paths.store_file_path store Board_paths.Sub_boards in
-  let result =
+  let workspace_check = Board_paths.check_workspace store in
+  let result = match workspace_check with
+    | Error rejection -> Error (path, Failure (Board_workspace_binding.rejection_to_string rejection))
+    | Ok () ->
     if not (Fs_compat.file_exists path) then Ok 0
     else begin
       try
@@ -186,6 +197,7 @@ let load_persisted_sub_boards store =
       | e -> Error (path, e)
     end
   in
-  Board_votes_json.record_load_result
-    (fun result -> store.sub_boards_load_result <- result)
-    result
+  let result = Board_votes_json.record_load_result
+    (fun result -> store.sub_boards_load_result <- result) result in
+  Board_votes_json.propagate_workspace_check workspace_check;
+  result

@@ -97,8 +97,7 @@ let test_sort_order_legacy_aliases_rejected () =
 
 let test_permanent_post () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   match
     create_post store ~author:"test-agent" ~content:"Permanent post"
@@ -110,8 +109,7 @@ let test_permanent_post () =
 
 let test_expiring_post () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   match
     create_post store ~author:"test-agent" ~content:"Expiring post"
@@ -123,8 +121,7 @@ let test_expiring_post () =
 
 let test_sweeper_skips_permanent () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   (match
      create_post store ~author:"test-agent" ~content:"Permanent"
@@ -138,8 +135,7 @@ let test_sweeper_skips_permanent () =
 (* A post and its dependent rows leave together, in the pass that expires it. *)
 let test_sweep_removes_the_rows_of_an_expired_target () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   let post_id =
     match
@@ -173,8 +169,7 @@ let test_sweep_removes_the_rows_of_an_expired_target () =
    tables to disk. *)
 let test_sweep_keeps_rows_whose_target_is_not_loaded () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   let post_id =
     match
@@ -203,8 +198,7 @@ let test_sweep_keeps_rows_whose_target_is_not_loaded () =
    listing never announces a reply no read can return. *)
 let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   let post_id =
     match
@@ -240,8 +234,7 @@ let test_sweep_takes_an_expired_reply_out_of_the_post_count () =
    post_id no read can reach. *)
 let test_sweep_cascades_an_expired_post_to_its_comments () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   let post_id =
     match
@@ -278,8 +271,7 @@ let test_sweep_cascades_an_expired_post_to_its_comments () =
 
 let test_sweep_drains_a_post_larger_than_two_comment_batches () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   let unwrap = function
     | Ok value -> value
@@ -474,8 +466,7 @@ let check_one_sweep_and_flush label messages =
 
 let test_maybe_sweep_updates_schedule_once () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   reset_sweep_schedule_for_test store;
   maybe_sweep_for_test store;
   let first_sweep, first_flush = sweep_schedule_timestamps_for_test store in
@@ -489,8 +480,7 @@ let test_maybe_sweep_updates_schedule_once () =
 
 let test_maybe_sweep_concurrent_schedules_once () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   reset_sweep_schedule_for_test store;
   let callers = List.init 32 Fun.id in
   let _ =
@@ -503,8 +493,7 @@ let test_maybe_sweep_concurrent_schedules_once () =
 
 let test_maybe_sweep_full_inbox_rolls_back_schedule () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   reset_sweep_schedule_for_test store;
   for _ = 1 to flusher_inbox_capacity_for_test do
     Eio.Stream.add store.flusher_inbox Flush
@@ -530,8 +519,7 @@ let test_maybe_sweep_full_inbox_rolls_back_schedule () =
 
 let test_post_kind_direct_default () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   match
     create_post store ~author:"test-agent" ~content:"Human post"
@@ -545,8 +533,7 @@ let test_post_kind_direct_default () =
 
 let test_post_kind_automation_contract () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   match
     create_post store ~author:"dashboard-harness-bot" ~content:"Harness post"
@@ -561,8 +548,7 @@ let test_post_kind_automation_contract () =
 
 let test_post_kind_system_contract () =
   let store = create_store
-      ~workspace_masc_dir:(Common.masc_dir_from_base_path
-        ~base_path:(Env_config_core.base_path ())) () in
+      ~base_path:(Env_config_core.base_path ()) () in
   load_posts_source store;
   match
     create_post store ~author:"operator" ~content:"System post"

@@ -35,8 +35,25 @@ let posts_file ~workspace_masc_dir = file_path ~workspace_masc_dir Posts
 let posts_initialization_guard_file ~workspace_masc_dir =
   Filename.concat workspace_masc_dir "board_posts.initialized.jsonl"
 
-let store_file_path (store : Board_types.store) file =
-  file_path ~workspace_masc_dir:store.workspace_masc_dir file
+let workspace_masc_dir (store : Board_types.store) =
+  Board_workspace_binding.workspace_masc_dir store.workspace_binding
+
+let observe_workspace (store : Board_types.store) =
+  let observed = match store.posts_source with
+    | Posts_unobserved -> None
+    | Posts_readable { observation; _ } -> Some observation
+    | Posts_refused { last_observed; _ } | Posts_unsettled { last_observed; _ } -> last_observed
+  in
+  match observed with
+  | None -> Board_workspace_binding.observe store.workspace_binding
+  | Some observation ->
+    Result.map (fun () -> observation.Board_types.workspace_observation)
+      (Board_workspace_binding.revalidate store.workspace_binding observation.workspace_observation)
+
+let check_workspace store = Result.map (fun _ -> ()) (observe_workspace store)
+
+let store_file_path store file =
+  file_path ~workspace_masc_dir:(workspace_masc_dir store) file
 
 let persist_path store = store_file_path store Posts
 let comments_path store = store_file_path store Comments
@@ -50,7 +67,10 @@ let ensure_dir path =
 ;;
 
 let ensure_masc_dir (store : Board_types.store) =
-  let dir = store.workspace_masc_dir in
+  let open Result.Syntax in
+  let* () = check_workspace store in
+  let dir = workspace_masc_dir store in
   ensure_dir (Filename.dirname dir);
-  ensure_dir dir
+  ensure_dir dir;
+  Ok ()
 ;;

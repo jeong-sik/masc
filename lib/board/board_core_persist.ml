@@ -4,6 +4,8 @@ include Board_core_payload
 
 module Post_publication_failure = Board_post_publication_failure
 
+open Result.Syntax
+
 module Expired_target_set = Set.Make (struct
   type t = [ `Post | `Comment ] * string
 
@@ -41,15 +43,15 @@ let persist_io_error ~where msg =
   Error (Io_error (Printf.sprintf "%s: %s" where msg))
 ;;
 
-let create_store_with_posts_io ~workspace_masc_dir posts_io_for_testing () =
-  let workspace_masc_dir = Board_paths.capture_workspace_masc_dir workspace_masc_dir in
+let create_store_with_posts_io ~base_path posts_io_for_testing () =
+  let workspace_binding = Board_workspace_binding.capture ~base_path in
   { posts_source = Posts_unobserved
   ; posts_io_for_testing
   ; comments_load_result = Ok ()
   ; votes_load_result = Ok ()
   ; reactions_load_result = Ok ()
   ; sub_boards_load_result = Ok ()
-  ; workspace_masc_dir
+  ; workspace_binding
   ; posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
   ; vote_log = Hashtbl.create 2048
@@ -78,10 +80,10 @@ let create_store_with_posts_io ~workspace_masc_dir posts_io_for_testing () =
   }
 ;;
 
-let create_store ~workspace_masc_dir () =
-  create_store_with_posts_io ~workspace_masc_dir None ()
-let create_store_with_posts_io_for_testing ~workspace_masc_dir ~io () =
-  create_store_with_posts_io ~workspace_masc_dir (Some io) ()
+let create_store ~base_path () =
+  create_store_with_posts_io ~base_path None ()
+let create_store_with_posts_io_for_testing ~base_path ~io () =
+  create_store_with_posts_io ~base_path (Some io) ()
 
 let require_persisted_snapshot_readable = function
   | Ok () -> Ok ()
@@ -543,12 +545,24 @@ let sweep_schedule_timestamps_for_test store =
 (** {1 Persistence Paths} *)
 let board_base_path = Board_paths.board_base_path
 let board_masc_dir = Board_paths.board_masc_dir
+let workspace_masc_dir = Board_paths.workspace_masc_dir
 let persist_path = Board_paths.persist_path
 let comments_path = Board_paths.comments_path
 let reactions_path = Board_paths.reactions_path
 let sub_boards_path = Board_paths.sub_boards_path
 let ensure_dir = Board_paths.ensure_dir
-let ensure_masc_dir = Board_paths.ensure_masc_dir
+let ensure_masc_dir store =
+  match Board_paths.ensure_masc_dir store with
+  | Ok () -> Ok ()
+  | Error rejection ->
+    let error = Board_posts_source.failure_to_board_error
+        (Posts_workspace_binding_refused { rejection; prior_settlement = None }) in
+    record_persist_error ~where:"workspace binding" (show_board_error error);
+    let result = Error error in
+    Option.iter (fun (exception_, backtrace) ->
+      Board_posts_source.defer_reserved ~result exception_ backtrace)
+      (Board_workspace_binding.raised rejection);
+    result
 include Board_core_json
 
 (** {1 Rewrite Helpers} *)
@@ -652,7 +666,7 @@ let save_comments_snapshot store content =
   | Error _ as refused -> refused
   | Ok () ->
     (try
-       ensure_masc_dir store;
+       let* () = ensure_masc_dir store in
        match Fs_compat.save_file_atomic (comments_path store) content with
        | Ok () -> Ok ()
        | Error msg -> persist_io_error ~where:"rewrite_comments" msg
@@ -685,7 +699,7 @@ let reactions_jsonl_unlocked store =
 ;;
 let save_reactions_jsonl_result store content =
   try
-    ensure_masc_dir store;
+    let* () = ensure_masc_dir store in
     let path = reactions_path store in
     match Fs_compat.save_file_atomic path content with
     | Ok () -> Ok ()
@@ -697,7 +711,7 @@ let save_reactions_jsonl_result store content =
 (** {1 Comments append helper. Posts use the stable source owner above.} *)
 let append_comment store (c : comment) =
   try
-    ensure_masc_dir store;
+    let* () = ensure_masc_dir store in
     let path = comments_path store in
     Fs_compat.append_file path (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
     Ok ()

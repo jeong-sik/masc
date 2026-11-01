@@ -6016,7 +6016,8 @@
 (test
  (name test_browser_addon_models)
  (modules test_browser_addon_models)
- (libraries masc_test_deps masc.browser_lane))
+ (libraries masc_test_deps masc.browser_lane)
+ (deps (source_tree %{workspace_root}/config/prompts)))
 
 (test
  (name test_browser_addon_locate)

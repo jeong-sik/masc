@@ -19,7 +19,7 @@ val frontier_ordinal : frontier -> int
 (** Dispatch one pipeline turn against the restored durable-execution scope under
     the identity {!resolve} produced: an in-progress turn/provider is resumed, an
     already-settled turn boundary is replayed ([tools_settled] for a completed
-    tool turn, [terminal] receiving the exact persisted response), and no
+    tool turn, [terminal] receiving the admitted persisted response), and no
     resume runs [fresh]. [tools_settled_before_checkpoint] repairs only the
     crash window where invocation results settled before the Agent checkpoint;
     its invocation and result authority comes exclusively from the journal.

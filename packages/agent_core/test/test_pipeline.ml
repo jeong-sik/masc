@@ -3823,7 +3823,7 @@ let test_active_terminal_resumes_committed_checkpoint
 
 type terminal_stop_window = Stop_provider_open | Stop_provider_closed | Stop_turn_closed
 
-let test_terminal_stop_reason_owns_tool_content ~stop_reason ~window entry () =
+let test_terminal_stop_reason_owns_tool_content ?(only_unregistered_tools=false) ~stop_reason ~window entry () =
   with_execution_test_dir "agent-core-terminal-tool-content-"
   @@ fun ~env ~sw ~runtime ~dir ->
   let scope_ok = function
@@ -3835,6 +3835,7 @@ let test_terminal_stop_reason_owns_tool_content ~stop_reason ~window entry () =
     | Types.RepetitionTruncation | Types.PauseTurn | Types.Compaction
     | Types.ContextWindowExceeded -> true in
   let effect_count = ref 0 and provider_calls = ref 0 and after_turns = ref 0 and on_stops = ref 0 in
+  let on_stop_responses = ref [] in
   let tool = Tool.create ~name:"must_not_execute" ~description:"Observe an unintended terminal effect"
       ~parameters:[] (fun _ -> incr effect_count;
         Ok {Types.content="unintended effect";content_blocks=None;_meta=None}) in
@@ -3843,18 +3844,33 @@ let test_terminal_stop_reason_owns_tool_content ~stop_reason ~window entry () =
   let provider_config = Provider_mock.to_provider_config () in
   let binding = match Internal_binding.of_provider_config ~transport:Internal_binding.Injected provider_config with
     | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let raw_content, admitted_content =
+    if only_unregistered_tools then
+      [Llm_provider.Types.Text "terminal with tool content";
+        ToolUse {id="dropped-unknown-tool";name="unregistered_terminal_tool";input=`Assoc []}],
+      [Llm_provider.Types.Text "terminal with tool content"]
+    else
+      [Llm_provider.Types.Text "terminal with tool content";
+        ToolUse {id="not-a-tool-turn";name="must_not_execute-1";input=`Assoc []};
+        ToolUse {id="dropped-unknown-tool";name="unregistered_terminal_tool";input=`Assoc []}],
+      [Llm_provider.Types.Text "terminal with tool content";
+        ToolUse {id="not-a-tool-turn";name="must_not_execute";input=`Assoc []}] in
   let response = {(Provider_mock.text_response "terminal with tool content" []) with
     Types.id="terminal-tool-content-seven";stop_reason;
-    content=[Llm_provider.Types.Text "terminal with tool content";
-      ToolUse {id="not-a-tool-turn";name="must_not_execute";input=`Assoc []}];
+    content=raw_content;
     usage=Some {Types.input_tokens=17;output_tokens=23;cache_creation_input_tokens=5;
       cache_read_input_tokens=7;cost_usd=Some 0.125}} in
+  let admitted_response = {response with content=admitted_content} in
   let next () = incr provider_calls; Ok response in
   let transport = Llm_provider.Llm_transport.custom
     {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
      complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
   let options = {Agent.default_options with transport=Some transport;provider_config=Some provider_config;
-    hooks={Hooks.empty with on_stop=Some (fun _->incr on_stops;Hooks.Continue);
+    hooks={Hooks.empty with
+      on_stop=Some (function
+        | Hooks.OnStop {response=stop_response;_} ->
+          incr on_stops; on_stop_responses := stop_response :: !on_stop_responses; Hooks.Continue
+        | _ -> Hooks.Continue);
       after_turn=Some (fun _->incr after_turns;Hooks.Continue)}} in
   let media_store = Agent_core.History.Memory_store.create () in
   let create () = Agent.create ~media_store ~net:env#net ~tools ~config ~options () in
@@ -3863,7 +3879,9 @@ let test_terminal_stop_reason_owns_tool_content ~stop_reason ~window entry () =
   (match Agent.run ~sw fresh "finish this request" with
    | Ok actual when accepted ->
      Alcotest.(check bool) "fresh output keeps terminal stop and admitted tool content" true
-       (actual.stop_reason=response.stop_reason && actual.content=response.content)
+       (actual=admitted_response);
+     Alcotest.(check bool) "fresh OnStop receives admitted response" true
+       (!on_stop_responses=[admitted_response])
    | Error (Error.Agent (UnrecognizedStopReason _)) when not accepted -> ()
    | Error error -> Alcotest.fail (Error.to_string error)
    | Ok _ -> Alcotest.fail "fresh output treated terminal content as a tool turn");
@@ -3871,12 +3889,11 @@ let test_terminal_stop_reason_owns_tool_content ~stop_reason ~window entry () =
   Alcotest.(check int) "fresh terminal content never invokes the registered tool" 0 !effect_count;
   Alcotest.(check int) "fresh output invokes OnStop only for accepted terminal reasons"
     (if accepted then 1 else 0) !on_stops;
-  provider_calls:=0;after_turns:=0;on_stops:=0;
+  provider_calls:=0;after_turns:=0;on_stops:=0;on_stop_responses:=[];
   let original = create () in
-  let content = History.of_wire_blocks media_store response.content |> Result.get_ok in
   let usage = Types.add_usage Types.empty_usage (Option.get response.usage) in
   Agent.set_state original {provider_binding=None;config;turn_count=8;usage;
-    messages=[Types.user_msg "finish this request";Types.make_message ~role:Types.Assistant content]};
+    messages=(Agent.state fresh).messages};
   let checkpoint = Agent.checkpoint original in
   let writer_runtime = match Internal_runtime.create ~sw ~domain_mgr:env#domain_mgr ~domain_count:1 with
     | Ok value -> value | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error) in
@@ -3916,8 +3933,8 @@ let test_terminal_stop_reason_owns_tool_content ~stop_reason ~window entry () =
        | Ok _ -> Alcotest.fail "terminal recovery changed the outcome kind"
        | Error error -> Error error) in
   (match result with
-   | Ok actual when accepted -> Alcotest.(check bool) "recovery returns the exact persisted response"
-       true (actual=response)
+   | Ok actual when accepted -> Alcotest.(check bool) "recovery returns the admitted persisted response"
+       true (actual=admitted_response)
    | Error (Error.Agent (UnrecognizedStopReason _)) when not accepted -> ()
    | Error error -> Alcotest.fail (Error.to_string error)
    | Ok _ -> Alcotest.fail "invalid terminal stop was accepted");
@@ -3926,6 +3943,8 @@ let test_terminal_stop_reason_owns_tool_content ~stop_reason ~window entry () =
   Alcotest.(check int) "recovery never repeats AfterTurn" 0 !after_turns;
   Alcotest.(check int) "only an active accepted provider runs pending OnStop"
     (match accepted,window with true,Stop_provider_open->1 | _->0) !on_stops;
+  Alcotest.(check bool) "active recovery passes admitted response to OnStop" true
+    (match accepted,window with true,Stop_provider_open-> !on_stop_responses=[admitted_response] | _-> !on_stop_responses=[]);
   Alcotest.(check int) "collected counter is unchanged" 8 (Agent.state agent).turn_count;
   Alcotest.(check bool) "collected usage is not charged twice" true ((Agent.state agent).usage=usage);
   let projection = Agent.open_execution_projection ~runtime ~dir locator |> Result.get_ok in
@@ -5279,7 +5298,24 @@ let () =
            "streaming active MaxTokens with tool content completes without effects", MaxTokens, Stop_provider_open, Resume_streaming;
            "Advanced active MaxTokens with tool content completes without effects", MaxTokens, Stop_provider_open, Resume_advanced;
            "unknown stop with tool content remains rejected", Unknown "unknown-stop", Stop_provider_open, Resume_regular;
-           "unmatched tool calls remain rejected with tool content", UnmatchedToolCalls, Stop_provider_open, Resume_regular])
+           "unmatched tool calls remain rejected with tool content", UnmatchedToolCalls, Stop_provider_open, Resume_regular]
+        @ [ Alcotest.test_case
+              "active Refusal with only unregistered tool content completes after admission"
+              `Quick
+              (test_terminal_stop_reason_owns_tool_content
+                 ~only_unregistered_tools:true
+                 ~stop_reason:Refusal
+                 ~window:Stop_provider_open
+                 Resume_regular)
+          ; Alcotest.test_case
+              "turn-closed Refusal with only unregistered tool content replays after admission"
+              `Quick
+              (test_terminal_stop_reason_owns_tool_content
+                 ~only_unregistered_tools:true
+                 ~stop_reason:Refusal
+                 ~window:Stop_turn_closed
+                 Resume_regular)
+          ])
     ; ( "mock_responses"
       , [ Alcotest.test_case "text response" `Quick test_mock_text_response
         ; Alcotest.test_case "tool use response" `Quick test_mock_tool_use_response

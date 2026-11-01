@@ -30,9 +30,10 @@ let runtime_error_to_core_error = function
          })
   | Runtime_antigravity.Result_not_completed evidence ->
     Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderReportedError
+      (Llm_provider.Error.ProviderTerminal
          { provider = "antigravity_cli"
-         ; error_type = Some (Runtime_antigravity.noncompletion_status_to_string evidence.status)
+         ; kind = Llm_provider.Http_client.Other
+             (Runtime_antigravity.noncompletion_status_to_string evidence.status)
          ; detail = Runtime_antigravity.noncompletion_result_to_json evidence |> Yojson.Safe.to_string
          })
   (* A file-table safety kill, not a spawn failure: refiring the same turn
@@ -191,6 +192,7 @@ type mcp_blocks =
   | Streaming
 
 let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~turn_count ~on_native_action ~on_usage_report
+    ~observe_effect_unavailable
     ~position ~receipts on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
@@ -277,6 +279,9 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                response that the runtime actually ended may close. *)
             Option.iter stop_content (Hashtbl.find_opt text_indexes (Some step_index))
           | Runtime_antigravity.Native_tool_started observation ->
+            (match observation.origin with
+             | Runtime_native_tools.Built_in -> observe_effect_unavailable ()
+             | Runtime_native_tools.Mcp_wrapper -> ());
             Option.iter
               (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
               on_native_action;
@@ -304,6 +309,9 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
                  ; tool_name = observation.tool_name
                  })
           | Runtime_antigravity.Native_tool_finished {observation; completion} ->
+            (match observation.origin with
+             | Runtime_native_tools.Built_in -> observe_effect_unavailable ()
+             | Runtime_native_tools.Mcp_wrapper -> ());
             Host.record_raw_native_tool
               ~keeper_name
               ~raw_trace_run
@@ -399,7 +407,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
     ~system_prompt ~tools ~loading_plan ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
-    ~observe_effect_attempted ~observe_result_not_completed
+    ~observe_effect_attempted ~observe_effect_unavailable
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion
     ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.antigravity_cli) =
   on_results_ready None;
@@ -471,6 +479,11 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
         ~client_label:"Antigravity"
         ~default:Runtime_native_tools.antigravity_default
         ~none_supported:(Runtime_execution.supports_native_none (Antigravity_cli config))
+    in
+    let observe_native_effect_unavailable () =
+      match native_posture with
+      | Runtime_native_tools.Native_full -> observe_effect_unavailable ()
+      | Runtime_native_tools.Native_none | Runtime_native_tools.Native_read -> ()
     in
     let runtime_root = Common.masc_dir_from_base_path ~base_path in
     let owner_leaf = Runtime_antigravity_home.keeper_owner_leaf
@@ -903,6 +916,7 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
       let stream =
         stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~turn_count ~on_native_action
           ~on_usage_report
+          ~observe_effect_unavailable:observe_native_effect_unavailable
           ~receipts
           ~position:
             (match conversation_mode with
@@ -1074,6 +1088,9 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
                       ~clock
                       ~cwd:process_cwd
                       ~on_conversation_ready:(fun ~conversation_id ->
+                        (* A validated admission permits native effects that
+                           the CLI need not report before exiting or timing out. *)
+                        observe_native_effect_unavailable ();
                         let* () =
                           update_session "active transition" (fun expected ->
                             Session_store.mark_active
@@ -1105,17 +1122,6 @@ let run_without_lifecycle ~result_scope ~input_source ~argument_source ~official
             client_result
             |> Result.map (fun turn -> `Completed turn)
             |> Result.map_error (fun error ->
-              (match error with
-               | Runtime_antigravity.Result_not_completed _ -> observe_result_not_completed ()
-               | Runtime_antigravity.Invalid_config _
-               | Runtime_antigravity.Spawn_failed _
-               | Runtime_antigravity.Protocol_error _
-               | Runtime_antigravity.State_callback_failed _
-               | Runtime_antigravity.Turn_failed _
-               | Runtime_antigravity.Process_exited _
-               | Runtime_antigravity.Unhandled_exception _
-               | Runtime_antigravity.Child_fd_ceiling_exceeded _
-               | Runtime_antigravity.Timeout _ -> ());
               recovery_failure := recovery_failure_of_runtime_error error;
               runtime_error_to_core_error error)
           | `Abort stop -> Ok (`Stopped stop))
@@ -1322,9 +1328,10 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
   let observe_effect_attempted () =
     Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
   in
-  let observe_result_not_completed () =
-    (* The CLI may have executed built-in tools outside the MCP observer. A
-       non-completed result cannot prove this attempt is safe to replay. *)
+  let observe_effect_unavailable () =
+    (* Built-in actions run outside the MCP effect observer. Record their
+       uncertainty before any caller observation can fail; a non-completed
+       result also cannot prove that no unobserved action ran. *)
     ignore (Atomic.compare_and_set effect_disposition
       Keeper_provider_attempt_effect.No_effect_observed
       Keeper_provider_attempt_effect.Observation_unavailable)
@@ -1361,7 +1368,7 @@ let run ~input_source ?argument_source ?official_task_reference ?composed_contex
         ~event_bus
         ~raw_trace
         ~on_event
-        ~observe_effect_attempted ~observe_result_not_completed
+        ~observe_effect_attempted ~observe_effect_unavailable
         ~config))
   in
   { result
@@ -1384,6 +1391,7 @@ module For_testing = struct
        ~turn_count
        ~on_native_action:None
        ~on_usage_report:(Some report)
+       ~observe_effect_unavailable:ignore
        ~position
        ~receipts:None
        None).on_runtime_event
@@ -1399,6 +1407,7 @@ module For_testing = struct
         ~turn_count:1
         ~on_native_action:None
         ~on_usage_report:None
+        ~observe_effect_unavailable:ignore
         ~position:Keeper_usage_resolution.Fresh
         ~receipts:None
         (Some (fun event -> emitted := event :: !emitted; Option.iter (fun observe -> observe event) on_event))
@@ -1426,6 +1435,7 @@ module For_testing = struct
         ~turn_count:1
         ~on_native_action:None
         ~on_usage_report:None
+        ~observe_effect_unavailable:ignore
         ~position:Keeper_usage_resolution.Fresh
         ~receipts:None
         (Some

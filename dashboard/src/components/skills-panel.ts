@@ -965,10 +965,20 @@ function SkillsObservationPanel({ owner, onMutation }: {
           ? html` · ${res.snapshot.rejections.length} rejected`
           : null}
       </div>
+      <div class="ss-muted my-2" data-testid="skill-usage-coverage">
+        Usage scope: exact revision · retained current Keeper sessions.
+        ${res.usage_coverage ? html`
+          ${res.usage_coverage.ledgers_loaded} ledgers read · ${res.usage_coverage.unavailable.length} unavailable.
+          ${res.usage_coverage.unavailable.length > 0 ? html`<details class="text-[var(--color-status-warn)]"><summary>Incomplete session coverage</summary>
+            ${res.usage_coverage.unavailable.map(detail => html`<div key=${detail}>${detail}</div>`)}
+          </details>` : null}
+        ` : html`Coverage unavailable; displayed users cannot establish fleet-wide usage.`}
+        Received counts invocations handed to a provider/client, including asynchronous results. Actions are counted per Skill invocation; one tool call may contribute to several invocations. An observed action does not imply completion.
+      </div>
       ${rows.length > 0 ? html`<table class="ss-table" data-testid="skills-table">
         <thead>
           <tr>
-            <th>skill</th><th>capability</th><th>context</th><th>current users</th><th>source</th>
+            <th>skill</th><th>capability</th><th>context</th><th>Session usage</th><th>source</th>
           </tr>
         </thead>
         <tbody>

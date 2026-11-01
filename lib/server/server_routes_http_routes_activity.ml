@@ -1450,55 +1450,15 @@ let add_routes ~sw ~clock router =
              let usage_for_reference reference =
                usage_ledgers
                |> List.filter_map (fun (keeper_name, ledger) ->
-                 let matching =
-                   Keeper_skill_activation_ledger.activations ledger
-                   |> List.filter
-                        (fun (activation : Keeper_skill_activation_ledger.activation) ->
-                     let observed =
-                       Skill_reference.make
-                         ~identity:activation.identity
-                         ~content_revision:activation.content_revision
-                     in
-                     Skill_reference.equal reference observed)
-                 in
-                 match matching with
-                 | [] -> None
-                 | first :: rest as activations ->
-                   let async_result_deliveries = Keeper_skill_activation_ledger.async_result_deliveries ledger in
-                   let async_actions = Keeper_skill_activation_ledger.async_actions ledger in
-                   let delivered, actions =
-                     List.fold_left (fun (delivered, actions) activation ->
-                       let summary = Keeper_skill_activation_summary.summarize
-                         ~activations:[activation] ~async_result_deliveries ~async_actions
-                         ~transition_rejections:[] in
-                       let delivery_boundaries = summary.instruction_provider_deliveries
-                         + summary.instruction_official_client_handoffs
-                         + summary.composition_provider_deliveries
-                         + summary.composition_official_client_handoffs in
-                       (* The catalog counts invocations received at either boundary,
-                          not repeated lookups or the number of receiving runtimes. *)
-                       delivered + (if delivery_boundaries > 0 then 1 else 0),
-                       actions + summary.instruction_actions_observed
-                         + summary.composition_actions_observed)
-                       (0, 0) activations
-                   in
-                   (* Activation codecs already validate these RFC3339 instants;
-                      offsets must be compared as time, not as wire text. *)
-                   let timestamp (activation : Keeper_skill_activation_ledger.activation) =
-                     Time_codec.parse_rfc3339 activation.activated_at |> Result.get_ok in
-                   let _, last_activation = List.fold_left (fun (last, previous) candidate ->
-                     let at = timestamp candidate in
-                     if at > last then at, candidate else last, previous)
-                     (timestamp first, first) rest in
-                   let last_used_at = last_activation.activated_at in
-                   Some
-                     (`Assoc
-                        [ "keeper", `String keeper_name
-                        ; "invocations", `Int (List.length activations)
-                        ; "deliveries", `Int delivered
-                        ; "actions", `Int actions
-                        ; "last_used_at", `String last_used_at
-                        ]))
+                 Keeper_skill_activation_ledger.usage_for_reference ledger reference
+                 |> Option.map (fun (usage : Keeper_skill_activation_ledger.catalog_usage) ->
+                   `Assoc
+                     [ "keeper", `String keeper_name
+                     ; "invocations", `Int usage.invocations
+                     ; "deliveries", `Int usage.received_invocations
+                     ; "actions", `Int usage.observed_actions
+                     ; "last_used_at", `String usage.last_activated_at
+                     ]))
              in
              let surface_profile_json reference skill =
                match

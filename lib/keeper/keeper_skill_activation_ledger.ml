@@ -329,6 +329,46 @@ let summarize ledger =
     ~transition_rejections:ledger.transition_rejections
 ;;
 
+type catalog_usage =
+  { invocations : int
+  ; received_invocations : int
+  ; observed_actions : int
+  ; last_activated_at : string
+  }
+
+let usage_for_reference ledger reference =
+  let matching = List.filter (fun (activation : activation) ->
+    Skill_reference.equal reference
+      (Skill_reference.make ~identity:activation.identity
+         ~content_revision:activation.content_revision)) ledger.activations in
+  match matching with
+  | [] -> None
+  | first :: rest ->
+    let received_invocations, observed_actions = List.fold_left
+      (fun (received, actions) activation ->
+        let summary = Keeper_skill_activation_summary.summarize
+          ~activations:[activation]
+          ~async_result_deliveries:ledger.async_result_deliveries
+          ~async_actions:ledger.async_actions ~transition_rejections:[] in
+        let boundaries = summary.instruction_provider_deliveries
+          + summary.instruction_official_client_handoffs
+          + summary.composition_provider_deliveries
+          + summary.composition_official_client_handoffs in
+        received + (if boundaries > 0 then 1 else 0),
+        actions + summary.instruction_actions_observed + summary.composition_actions_observed)
+      (0, 0) matching in
+    (* Constructors and decoders validate these instants before admitting
+       activations. Offsets must be compared as time, not as wire text. *)
+    let timestamp (activation : activation) =
+      Time_codec.parse_rfc3339 activation.activated_at |> Result.get_ok in
+    let _, latest = List.fold_left (fun (last, previous) candidate ->
+      let at = timestamp candidate in
+      if at > last then at, candidate else last, previous)
+      (timestamp first, first) rest in
+    Some { invocations = List.length matching; received_invocations; observed_actions
+         ; last_activated_at = latest.activated_at }
+;;
+
 let summarize_by_scope ledger =
   Keeper_skill_activation_summary.summarize_by_scope
     ~activations:ledger.activations

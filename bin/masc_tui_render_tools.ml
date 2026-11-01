@@ -1672,6 +1672,7 @@ let tools_display_lines ?(cols = 80) (state : state) =
                (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_deliveries) all_rows)
                (total (fun (row : Masc.Tui_decode_tools.skill_usage_row) -> row.su_actions) all_rows)
            ; Ansi.dim, "Scope: exact Skill revisions in current Keeper sessions · deliveries include async handoffs"
+           ; Ansi.dim, "ACTIONS: counted per Skill invocation; several invocations may share one tool call"
            ; Ansi.dim, Printf.sprintf "%d without retained invocation; this does not establish never used."
                (List.length sc_surfaces - List.length used)
            ] @ coverage_lines)

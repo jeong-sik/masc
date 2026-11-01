@@ -1041,6 +1041,31 @@ let test_action_before_delivery_is_durable_transition_evidence () =
   | _ -> fail "action-before-delivery rejection did not survive readback"
 ;;
 
+let test_catalog_usage_preserves_exact_reference_and_time () =
+  with_session @@ fun config trace_id _session_dir ->
+  let first = activation ~skill_tool_use_id:"usage-early"
+    ~activated_at:"2026-08-26T10:30:00+09:00" () in
+  let latest = activation ~skill_tool_use_id:"usage-late"
+    ~activated_at:"2026-08-26T02:00:00Z" () in
+  let foreign_revision = activation ~skill_tool_use_id:"foreign-revision"
+    ~revision:'b' ~activated_at:"2026-08-26T23:00:00Z" () in
+  let foreign_source = activation ~skill_tool_use_id:"foreign-source"
+    ~source:"user" ~activated_at:"2026-08-26T23:30:00Z" () in
+  List.iter (fun value -> Ledger.record ~config ~trace_id value |> Result.get_ok |> ignore)
+    [first; latest; foreign_revision; foreign_source];
+  let ledger = Ledger.load ~config ~trace_id |> Result.get_ok in
+  let reference = Skill_reference.make ~identity:first.identity ~content_revision:first.content_revision in
+  let usage = Ledger.usage_for_reference ledger reference |> Option.get in
+  check int "same name in another source/revision is outside the population" 2 usage.invocations;
+  check int "known invocations have no observed handoff" 0 usage.received_invocations;
+  check int "known invocations have no observed action" 0 usage.observed_actions;
+  check string "last activation compares instants despite differing offsets"
+    latest.activated_at usage.last_activated_at;
+  let unseen = Skill_reference.make ~identity:first.identity ~content_revision:(content_revision 'c') in
+  check bool "unobserved exact revision is absent, not a zero-usage row" true
+    (Option.is_none (Ledger.usage_for_reference ledger unseen))
+;;
+
 let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
   with_session @@ fun config trace_id _session_dir ->
   let first =
@@ -1354,6 +1379,15 @@ let test_shared_python_revision_fixture () =
       (Ledger.revision ledger |> Ledger.ledger_revision_to_string))
     [json; reverse_objects json];
   if String.equal path "fixtures/skill-ledger-async-delivery.json" then (
+    let ledger = Ledger.of_projection_yojson json |> Result.get_ok in
+    let original = List.hd (Ledger.activations ledger) in
+    let reference = Skill_reference.make ~identity:original.identity ~content_revision:original.content_revision in
+    let usage = Ledger.usage_for_reference ledger reference |> Option.get in
+    let summary = Ledger.summarize ledger in
+    check int "reference-only official handoff is not a second body delivery" 1
+      (summary.composition_provider_deliveries + summary.composition_official_client_handoffs);
+    check int "inline delivery is received while a manifest pointer contributes no receipt" 1 usage.received_invocations;
+    check int "repeated and reference-only handoffs never create invocations" 1 usage.invocations;
     let change_original mutate = match json with
       | `Assoc fields ->
         `Assoc (List.map (function
@@ -1530,6 +1564,8 @@ let () =
             test_conflicting_delivery_is_durable_transition_evidence
         ; test_case "action before delivery is durable evidence" `Quick
             test_action_before_delivery_is_durable_transition_evidence
+        ; test_case "catalog usage preserves exact reference and time" `Quick
+            test_catalog_usage_preserves_exact_reference_and_time
         ; test_case "scoped summaries preserve exact runtime and reference" `Quick
             test_scoped_summaries_do_not_mix_runtime_or_exact_reference
         ; test_case "corrupt payload is typed" `Quick test_corrupt_ledger_is_typed

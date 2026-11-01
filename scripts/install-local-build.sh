@@ -56,6 +56,7 @@
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
 #                                       [--keep-build] [--no-guest-shim]
 #                                       [--no-browser-addon]
+#                                       [--print-build-targets]
 #   --prefix        where masc, masc-tui, masc-browser-host, the browser Add-on
 #                   programs, SSH bootstrap and deployment preflight pair go (default
 #                   ~/.local/bin)
@@ -76,6 +77,8 @@
 #                   leave the workspace's browser Add-on package and declaration
 #                   as they are. Without the Add-on no browser route works.
 #   --no-guest-shim leave the workspace's guest exec shim as it is
+#   --print-build-targets print the exact Dune inputs for this install and exit
+#                   without locking, building, checking or changing a workspace
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
@@ -90,6 +93,7 @@ guest_shim=true
 browser_addon=true
 browser_addon_programs=(masc_native_addon_launcher masc_browser_addon_worker masc_browser_process_owner)
 custom_build_dir=false
+print_build_targets=false
 base_path=""
 workspace_root=""
 workspace_kind=""
@@ -109,11 +113,26 @@ while [ $# -gt 0 ]; do
     --no-guest-shim) guest_shim=false; shift ;;
     --no-browser-addon) browser_addon=false; shift ;;
     --skip-build) skip_build=true; shift ;;
+    --print-build-targets) print_build_targets=true; shift ;;
     --base-path) base_path=${2:?--base-path needs a directory}; shift 2 ;;
     -h|--help) sed -n '/^# Usage:/,/^set -euo pipefail/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "install-local-build: unknown option: $1" >&2; exit 2 ;;
   esac
 done
+
+# CI artifacts use the same target list as a default local install. Keep this
+# read-only query before the transaction lock and every workspace operation.
+build_targets=(./bin/main_eio.exe ./bin/masc_tui.exe ./bin/masc_browser_host.exe
+  ./bin/deployment_preflight_helper.exe ./bin/masc_exec_ssh_bootstrap.exe)
+if [ "$browser_addon" = true ]; then
+  for program in "${browser_addon_programs[@]}"; do
+    build_targets+=("./bin/$program.exe")
+  done
+fi
+if [ "$print_build_targets" = true ]; then
+  printf '%s\n' "${build_targets[@]}"
+  exit 0
+fi
 
 # Use the same lock as dune-local.sh for the complete installation transaction.
 # Releasing it after build permits another install's clean to remove our input
@@ -142,13 +161,6 @@ if [ "$skip_build" = false ]; then
   # went out on OCaml 5.5.0 after the repo moved to 5.5.1, and with an ocaml-dos
   # older than the pin. --root: a worktree under .worktrees sits inside the
   # parent checkout's dune project, which excludes that directory.
-  build_targets=(./bin/main_eio.exe ./bin/masc_tui.exe ./bin/masc_browser_host.exe
-    ./bin/deployment_preflight_helper.exe ./bin/masc_exec_ssh_bootstrap.exe)
-  if [ "$browser_addon" = true ]; then
-    for program in "${browser_addon_programs[@]}"; do
-      build_targets+=("./bin/$program.exe")
-    done
-  fi
   (cd "$repo" && scripts/dune-local.sh build --root "$repo" "${build_targets[@]}")
 fi
 

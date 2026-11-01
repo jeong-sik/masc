@@ -66,9 +66,15 @@ System suffix 하나로 확정할 수는 없다. 대기 간격, 모델·도구 �
    blob 비교를 추가한다. 실제 길이·SHA가 맞을 때만 공통 prefix를 계산한다. 누락된 해시끼리는
    같은 내용으로 세지 않고, 누적 사용량은 per-request 통계에 섞지 않는다.
 
-다음 구현 범위는 Anthropic의 고정 System prefix에 issuer가 지정한 경계를 전달하는 것이다.
-고정 지침과 변동 관측을 System 블록으로 유지하고 serializer와 signed-thinking prefix의
-블록 구조를 함께 맞춰야 한다. 이는 위 GLM 표본의 성능 개선 증거가 아니다.
+두 번째 스택 층에서는 Keeper가 알고 있는 고정 System을
+`Provider_config.system_prompt_cache_prefix`로 전달한다. Anthropic serializer는 캐싱이
+켜져 있고 그 값이 실제 System의 앞부분과 정확히 같을 때 두 System 블록을 만들고 양쪽에
+캐시 경계를 둔다. 고정 지침과 변동 관측의 System 권한을 유지하며, signed-thinking prefix도
+동일한 블록 구조로 계산한다. 도구·System 두 블록·자동 캐싱은 API의 네 경계 안에 들어간다.
+Kimi와 다른 wire의 직렬화는 바꾸지 않는다. 교체된 System이 prefix와 맞지 않으면 전체
+System을 그대로 한 블록에 둔다. 경계를 문구에서 추측하거나 별도 운영 설정을 만들지 않는다.
+프로토콜 검사는 System 내용 보존, 변동 suffix 앞의 고정 경계, 서명 구조 변경과 TTL 변경,
+Kimi의 기존 한 블록 표현을 다룬다. 이는 위 GLM 표본의 성능 개선 증거가 아니다.
 변동 관측을 이력 뒤로 옮기는 변경은 provider별 메시지 권한·순서 계약을 별도로 검증해야 한다.
 
 이번 단계는 소스 변경과 보존 기록의 재측정이다. 설치된 TUI의 화면 변경, 새 runtime의

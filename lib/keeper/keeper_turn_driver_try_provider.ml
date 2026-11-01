@@ -2403,6 +2403,10 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
           ; session_id = (input_trace_id ctx.request_input)
           ; cache_system_prompt = ctx.cache_system_prompt
+          ; provider_cfg =
+              { base_config.provider_cfg with
+                system_prompt_cache_prefix = Some ctx.system_prompt
+              }
           ; checkpoint_sink = Some checkpoint_sink
           ; context_injector = ctx.context_injector
           ; context = ctx.context

@@ -1362,6 +1362,326 @@ let test_operation_lifecycle_is_durable_and_projected () =
   | state -> fail ("terminal replay changed state: " ^ Chat_operation.state_to_string state)
 ;;
 
+let health_meta_reading =
+  Option.map (fun (meta : Keeper_meta_contract.keeper_meta) ->
+    meta.paused, Keeper_activation_mode.to_string meta.activation_mode,
+    Option.is_some meta.latched_reason, meta.updated_at)
+;;
+
+let test_health_observer_tracks_committed_metadata () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let stored = ref None in
+  let store : Owner.store =
+    { replace = (fun meta -> stored := Some meta; Ok ())
+    ; remove = (fun _ -> stored := None; Ok ()) }
+  in
+  let owner = owner_ok (start_owner ~sw ~store ~keeper_name:"health-meta" ~initial_meta:None) in
+  let readings = ref [] in
+  let observe () =
+    readings :=
+      (health_meta_reading (Owner.projection owner).meta, health_meta_reading !stored)
+      :: !readings
+  in
+  let apply command = ignore (owner_ok (Owner.apply_meta owner command)) in
+  with_state_change_observer observe (fun () ->
+    apply (Reducer.Create (make_meta "health-meta"));
+    check int "creation notifies" 1 (List.length !readings);
+    apply (assign_task "unpaused-task-update");
+    check int "unpaused task changes do not notify fleet health" 1 (List.length !readings);
+    let reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive } in
+    apply (Reducer.Pause { reason; updated_at = "pause-one" });
+    apply (Reducer.Pause { reason; updated_at = "pause-one" });
+    check int "same pause observation does not notify twice" 2 (List.length !readings);
+    apply (Reducer.Pause { reason; updated_at = "pause-two" });
+    check int "changed pause age origin notifies" 3 (List.length !readings);
+    apply (Reducer.Resume { updated_at = "resume" });
+    let current = Option.get (Owner.projection owner).meta in
+    let profile : Reducer.profile_update =
+      { instructions = current.instructions
+      ; sandbox_profile = current.sandbox_profile
+      ; sandbox_image = current.sandbox_image
+      ; microvm_backend = current.microvm_backend
+      ; microvm_memory = current.microvm_memory
+      ; microvm_cpus = current.microvm_cpus
+      ; network_mode = current.network_mode
+      ; mention_targets = current.mention_targets
+      ; board_interests = current.board_interests
+      ; max_context_override = current.max_context_override
+      ; input_policy = current.input_policy
+      ; activation_mode = Keeper_activation_mode.Autonomous
+      ; telemetry_feedback_enabled = current.telemetry_feedback_enabled
+      ; telemetry_feedback_window_hours = current.telemetry_feedback_window_hours
+      ; always_allow = current.always_allow
+      ; voice_always_allow = current.voice_always_allow
+      ; agent_core_env = current.agent_core_env
+      ; updated_at = "profile-update"
+      }
+    in
+    apply (Reducer.Update_profile profile);
+    check int "resume and activation mode change notify" 5 (List.length !readings);
+    let current = Option.get (Owner.projection owner).meta in
+    let stale_digest = Keeper_meta_json.Snapshot_digest.of_meta current in
+    apply (usage_commit current);
+    (match Owner.apply_meta owner (Reducer.Delete_if_snapshot stale_digest) with
+     | Error (Owner.Reducer_rejected Reducer.Snapshot_changed) -> ()
+     | _ -> fail "stale delete was not rejected");
+    check int "usage and rejected deletion do not notify" 5 (List.length !readings);
+    let digest = Keeper_meta_json.Snapshot_digest.of_meta
+        (Option.get (Owner.projection owner).meta) in
+    apply (Reducer.Delete_if_snapshot digest);
+    check int "committed deletion notifies" 6 (List.length !readings);
+    check bool "observer sees the committed Owner and store projections" true
+      (List.for_all (fun (owner, store) -> owner = store) !readings);
+    check bool "the final observation is a deletion" true
+      (List.hd !readings = (None, None)))
+;;
+
+let test_health_observer_wakes_for_uncertain_metadata_write () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let initial = make_meta "health-meta-failure" in
+  let stored = ref (Some initial) in
+  let store : Owner.store =
+    { replace = (fun meta -> stored := Some meta; Error "sync unconfirmed")
+    ; remove = (fun _ -> Error "sync unconfirmed") }
+  in
+  let owner = owner_ok
+      (start_owner ~sw ~store ~keeper_name:initial.name ~initial_meta:(Some initial)) in
+  let readings = ref [] in
+  let observe () =
+    readings :=
+      (Option.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused)
+         (Owner.projection owner).meta,
+       Option.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused) !stored)
+      :: !readings
+  in
+  with_state_change_observer observe (fun () ->
+    let pause = Reducer.Pause
+        { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
+        ; updated_at = "uncertain" } in
+    (match Owner.apply_meta owner pause with
+     | Error (Owner.Store_unavailable _) -> ()
+     | _ -> fail "uncertain metadata write was accepted");
+    check bool "uncertain file change is observed without publishing Owner metadata" true
+      (!readings = [ Some false, Some true ]);
+    (match Owner.apply_meta owner pause with
+     | Error (Owner.Store_unavailable _) -> ()
+     | _ -> fail "fenced metadata store accepted another write");
+    check int "the existing fence does not notify again" 1 (List.length !readings))
+;;
+
+let test_health_observer_tracks_pause_classification () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let initial = { (make_meta "health-pause-classification") with
+    paused = true; latched_reason = None; updated_at = "same-time" } in
+  let owner = owner_ok (start_owner ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~keeper_name:initial.name ~initial_meta:(Some initial)) in
+  let calls = ref 0 in
+  with_state_change_observer (fun () -> incr calls) (fun () ->
+    ignore (owner_ok (Owner.apply_meta owner (Reducer.Pause
+      { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
+      ; updated_at = "same-time" })));
+    check int "classifying the same paused reading notifies" 1 !calls;
+    check bool "the pause is classified" true
+      (Option.is_some (Option.get (Owner.projection owner).meta).latched_reason))
+;;
+
+let test_health_observer_wakes_for_uncertain_metadata_removal () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let initial = make_meta "health-meta-remove-failure" in
+  let stored = ref (Some initial) in
+  let owner = owner_ok (start_owner ~sw
+    ~store:{ replace = (fun meta -> stored := Some meta; Ok ())
+           ; remove = (fun _ -> stored := None; Error "remove sync unconfirmed") }
+    ~keeper_name:initial.name ~initial_meta:(Some initial)) in
+  let readings = ref [] in
+  with_state_change_observer
+    (fun () -> readings :=
+      (Option.is_some (Owner.projection owner).meta, Option.is_some !stored) :: !readings)
+    (fun () ->
+      let digest = Keeper_meta_json.Snapshot_digest.of_meta initial in
+      (match Owner.apply_meta owner (Reducer.Delete_if_snapshot digest) with
+       | Error (Owner.Store_unavailable _) -> ()
+       | _ -> fail "uncertain metadata removal was accepted");
+      check bool "uncertain removal wakes without deleting the Owner projection" true
+        (!readings = [ true, false ]))
+;;
+
+let test_health_observer_wakes_after_persistence_exception () =
+  Eio_main.run @@ fun _env ->
+  let initial = make_meta "health-meta-exception" in
+  let state = match Reducer.create ~keeper_name:initial.name (Some initial) with
+    | Ok state -> state | Error error -> fail (Reducer.error_to_string error) in
+  let transition command =
+    match Reducer.apply_meta state command with
+    | Ok transition -> transition | Error error -> fail (Reducer.error_to_string error)
+  in
+  let pause = transition (Reducer.Pause
+    { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
+    ; updated_at = "exception" }) in
+  let remove = transition (Reducer.Delete_if_snapshot
+    (Keeper_meta_json.Snapshot_digest.of_meta initial)) in
+  let stored = ref (Some initial) in
+  let observations = ref [] in
+  let cancel_observer = ref false in
+  let observe () =
+    observations := Option.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.paused)
+      !stored :: !observations;
+    if !cancel_observer then raise (Eio.Cancel.Cancelled Not_found)
+  in
+  with_state_change_observer observe (fun () ->
+    let cancelled = Eio.Cancel.Cancelled Exit in
+    let replace_store : Owner.store =
+      { replace = (fun meta -> stored := Some meta; raise cancelled)
+      ; remove = (fun _ -> fail "unexpected remove") }
+    in
+    (match Owner.For_testing.commit_metadata_transition
+       ~keeper_name:initial.name replace_store pause with
+     | _ -> fail "replace exception did not propagate"
+     | exception exn when exn == cancelled -> ()
+     | exception exn -> fail ("unexpected replace exception: " ^ Printexc.to_string exn));
+    check bool "replace effect was observed before its exception" true
+      (!observations = [ Some true ]);
+    let remove_error = Failure "uncertain removal" in
+    let remove_store : Owner.store =
+      { replace = (fun _ -> fail "unexpected replace")
+      ; remove = (fun _ -> stored := None; raise remove_error) }
+    in
+    cancel_observer := true;
+    (match Owner.For_testing.commit_metadata_transition
+       ~keeper_name:initial.name remove_store remove with
+     | _ -> fail "remove exception did not propagate"
+     | exception exn when exn == remove_error -> ()
+     | exception exn -> fail ("unexpected remove exception: " ^ Printexc.to_string exn));
+    check bool "remove effect was observed despite observer cancellation" true
+      (!observations = [ None; Some true ]);
+    cancel_observer := false;
+    let error_store : Owner.store =
+      { replace = (fun _ -> Error "returned error")
+      ; remove = (fun _ -> fail "unexpected remove") }
+    in
+    (match Owner.For_testing.commit_metadata_transition
+       ~keeper_name:initial.name error_store pause with
+     | Error (Owner.Store_unavailable _) -> ()
+     | _ -> fail "returned error did not remain a store error");
+    (match Owner.For_testing.commit_metadata_transition
+       ~keeper_name:initial.name error_store (Reducer.begin_stopping state) with
+     | Ok _ -> ()
+     | Error error -> fail (Owner.error_to_string error));
+    check int "returned errors and no-persistence transitions do not notify here" 2
+      (List.length !observations);
+    let scope_cancel = Failure "owner scope cancelled during persistence" in
+    let store_error = Failure "persistence already failed" in
+    stored := Some initial;
+    cancel_observer := true;
+    (match Eio.Cancel.sub (fun context ->
+       let store : Owner.store =
+         { replace = (fun meta ->
+             stored := Some meta;
+             Eio.Cancel.cancel context scope_cancel;
+             raise store_error)
+         ; remove = (fun _ -> fail "unexpected remove") }
+       in
+       Owner.For_testing.commit_metadata_transition ~keeper_name:initial.name store pause) with
+     | _ -> fail "persistence exception was lost during scope cancellation"
+     | exception exn when exn == store_error -> ()
+     | exception exn -> fail ("unexpected scope exception: " ^ Printexc.to_string exn));
+    check bool "the observer ran before preserving the persistence exception" true
+      (!observations = [ Some true; None; Some true ]))
+;;
+
+let test_health_observer_callback_cancellation_is_isolated () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let initial = make_meta "health-observer-cancel" in
+  let owner = owner_ok (start_owner ~sw
+    ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+    ~keeper_name:initial.name ~initial_meta:(Some initial)) in
+  let failing = make_meta "health-observer-cancel-failure" in
+  let fenced = owner_ok (start_owner ~sw
+    ~store:{ replace = (fun _ -> Error "unconfirmed"); remove = (fun _ -> Ok ()) }
+    ~keeper_name:failing.name ~initial_meta:(Some failing)) in
+  let calls = ref 0 in
+  with_state_change_observer
+    (fun () -> incr calls; raise (Eio.Cancel.Cancelled Exit))
+    (fun () ->
+      let pause = Reducer.Pause
+          { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
+          ; updated_at = "cancelled-callback" } in
+      ignore (owner_ok (Owner.apply_meta owner pause));
+      check bool "committed metadata remains visible" true
+        (Option.get (owner_ok (Owner.exact_projection owner)).meta).paused;
+      ignore (owner_ok (Owner.apply_meta owner (Reducer.Resume { updated_at = "resume" })));
+      let operation_id = operation_id "kmsg-health-observer-cancel" in
+      let accepted = owner_ok (Owner.submit_operation owner ~operation_id
+        ~source:operation_source ~input:(operation_input "observer failure")) in
+      check bool "operation remains accepted after observer cancellation" false accepted.existing;
+      check bool "accepted operation remains readable" true
+        (Option.is_some (owner_ok (Owner.exact_operation owner operation_id)));
+      (match Owner.apply_meta fenced pause with
+       | Error (Owner.Store_unavailable _) -> ()
+       | _ -> fail "metadata failure lost its store error");
+      (match Owner.apply_meta fenced pause with
+       | Error (Owner.Store_unavailable _) -> ()
+       | _ -> fail "fenced owner did not remain available");
+      check int "each changed observation called the observer" 4 !calls)
+;;
+
+let test_health_observer_propagates_owner_scope_cancellation () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let ready, resolve_ready = Eio.Promise.create () in
+  let finished, resolve_finished = Eio.Promise.create () in
+  let never, _ = Eio.Promise.create () in
+  let stored = ref None in
+  let scope_cancel = Failure "owner scope cancelled" in
+  Eio.Fiber.fork ~sw (fun () ->
+    let outcome =
+      try
+        Eio.Cancel.sub (fun context ->
+          Eio.Switch.run (fun owner_sw ->
+            let initial = make_meta "health-owner-scope-cancel" in
+            stored := Some initial;
+            let owner = owner_ok (start_owner ~sw:owner_sw
+              ~store:{ replace = (fun meta -> stored := Some meta; Ok ()); remove = (fun _ -> Ok ()) }
+              ~keeper_name:initial.name ~initial_meta:(Some initial)) in
+            Eio.Promise.resolve resolve_ready (owner, context);
+            Eio.Promise.await never));
+        `Returned
+      with
+      | Eio.Cancel.Cancelled cause -> `Cancelled cause
+      | exn -> `Raised exn
+    in
+    Eio.Promise.resolve resolve_finished outcome);
+  let owner, context = Eio.Promise.await ready in
+  with_state_change_observer
+    (fun () ->
+      Eio.Cancel.cancel context scope_cancel;
+      raise (Eio.Cancel.Cancelled Exit))
+    (fun () ->
+      let pause = Reducer.Pause
+          { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
+          ; updated_at = "scope-cancel" } in
+      Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
+        (match Owner.apply_meta owner pause with
+         | Error Owner.Owner_closed -> ()
+         | _ -> fail "cancelled Owner did not close its unanswered mailbox");
+        (match Eio.Promise.await finished with
+         | `Cancelled cause when cause == scope_cancel -> ()
+         | `Cancelled _ -> fail "observer cancellation replaced Owner scope cancellation"
+         | `Returned -> fail "Owner scope cancellation did not propagate"
+         | `Raised exn -> fail ("unexpected exception: " ^ Printexc.to_string exn));
+        check bool "committed metadata remains an observation" true
+          (Option.get !stored).paused;
+        (match Owner.exact_projection owner with
+         | Error Owner.Owner_closed -> ()
+         | _ -> fail "cancelled Owner remained available")))
+;;
+
 let test_health_state_change_observer_tracks_owner_projections () =
   let notifications = ref 0 in
   with_state_change_observer
@@ -6631,6 +6951,34 @@ let () =
             "health observer tracks Owner projection mutations"
             `Quick
             test_health_state_change_observer_tracks_owner_projections
+        ; test_case
+            "health observer tracks committed metadata"
+            `Quick
+            test_health_observer_tracks_committed_metadata
+        ; test_case
+            "health observer wakes for uncertain metadata write"
+            `Quick
+            test_health_observer_wakes_for_uncertain_metadata_write
+        ; test_case
+            "health observer tracks pause classification"
+            `Quick
+            test_health_observer_tracks_pause_classification
+        ; test_case
+            "health observer wakes for uncertain metadata removal"
+            `Quick
+            test_health_observer_wakes_for_uncertain_metadata_removal
+        ; test_case
+            "health observer wakes after persistence exceptions"
+            `Quick
+            test_health_observer_wakes_after_persistence_exception
+        ; test_case
+            "health observer isolates callback cancellation"
+            `Quick
+            test_health_observer_callback_cancellation_is_isolated
+        ; test_case
+            "health observer propagates Owner scope cancellation"
+            `Quick
+            test_health_observer_propagates_owner_scope_cancellation
         ; test_case
             "health observer failure is isolated"
             `Quick

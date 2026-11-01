@@ -10,13 +10,21 @@ let state_change_observer : (unit -> unit) Atomic.t = Atomic.make ignore
 let install_state_change_observer observer = Atomic.set state_change_observer observer
 
 let notify_state_change_observer ~keeper_name =
-  Cancel_safe.observe
-    ~on_exn:(fun exn ->
-      Log.Keeper.warn
-        "keeper Owner state-change observer failed keeper=%s: %s"
-        keeper_name
-        (Printexc.to_string exn))
-    (fun () -> (Atomic.get state_change_observer) ())
+  let report exn =
+    Log.Keeper.warn
+      "keeper Owner state-change observer failed keeper=%s: %s"
+      keeper_name
+      (Printexc.to_string exn)
+  in
+  match (Atomic.get state_change_observer) () with
+  | () -> ()
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+    (* The callback is non-yielding and runs on the Owner fiber. Preserve a
+       real scope cancellation, but a callback that raises its own Cancelled
+       must not turn an already committed command into Owner_closed. *)
+    Eio.Fiber.check ();
+    report exn
+  | exception exn -> report exn
 ;;
 
 type store =
@@ -854,7 +862,10 @@ let set_metadata_fault t detail =
   | None ->
     t.metadata_error := Some (Metadata_persistence_failure detail);
     Log.Keeper.error ~keeper_name:t.keeper_name
-      "keeper Owner metadata store fenced: %s" detail
+      "keeper Owner metadata store fenced: %s" detail;
+    (* A failed durable replace or remove can still have changed the file
+       before its durability became uncertain. Revalidate that observation. *)
+    notify_state_change_observer ~keeper_name:t.keeper_name
 ;;
 
 let set_operation_fault t fault =
@@ -872,21 +883,43 @@ let set_operation_fault t fault =
   | Some _, Some _ | None, None | Some _, None -> ()
 ;;
 
-let commit store transition =
+let commit ~on_uncertain store transition =
+  let attempt write =
+    match write () with
+    | result -> result
+    | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      (* A write or unlink can have taken effect before it raises. The
+         observation is advisory; it must not replace that exception. *)
+      (try on_uncertain () with _ -> ());
+      Printexc.raise_with_backtrace exn backtrace
+  in
   match transition.Keeper_owner_reducer.persistence with
   | Keeper_owner_reducer.No_persistence -> Ok transition.state
   | Replace_snapshot meta ->
-    (match store.replace meta with
+    (match attempt (fun () -> store.replace meta) with
      | Ok () -> Ok transition.state
      | Error detail -> Error (Store_unavailable detail))
   | Remove_snapshot meta ->
-    (match store.remove meta with
+    (match attempt (fun () -> store.remove meta) with
      | Ok () -> Ok transition.state
      | Error detail -> Error (Store_unavailable detail))
 ;;
 
+let health_metadata_equal before after =
+  Option.equal
+    (fun (left : Keeper_meta_contract.keeper_meta)
+         (right : Keeper_meta_contract.keeper_meta) ->
+      Bool.equal left.paused right.paused
+      && left.activation_mode = right.activation_mode
+      && left.latched_reason = right.latched_reason
+      && (not left.paused || String.equal left.updated_at right.updated_at))
+    before after
+;;
+
 let apply_transition t store old_state transition =
-  match commit store transition with
+  match commit ~on_uncertain:(fun () ->
+    notify_state_change_observer ~keeper_name:t.keeper_name) store transition with
   | Error (Store_unavailable detail as error) ->
     set_metadata_fault t detail;
     Error (old_state, error)
@@ -899,6 +932,8 @@ let apply_transition t store old_state transition =
     if pause_identity before <> pause_identity transition.projection.meta then
       Atomic.set t.chat_control_token (Random_id.uuid_v7 ());
     Atomic.set t.projection transition.projection;
+    if not (health_metadata_equal before transition.projection.meta) then
+      notify_state_change_observer ~keeper_name:t.keeper_name;
     Ok state
 ;;
 
@@ -3331,6 +3366,9 @@ let begin_stopping t = request t Begin_stopping
 module For_testing = struct
   let mailbox_depth t = Eio.Stream.length t.mailbox
   let enqueue_unless_closed = enqueue_unless_closed
+  let commit_metadata_transition ~keeper_name store transition =
+    commit ~on_uncertain:(fun () -> notify_state_change_observer ~keeper_name)
+      store transition
 
   let observe_state_changes ~sw observer =
     let previous = Atomic.get state_change_observer in

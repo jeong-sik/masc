@@ -190,6 +190,101 @@ let test_registry_membership_wakes_health () =
       unsubscribe ())
 ;;
 
+let test_owner_metadata_wakes_fleet_subscriber () =
+  let module Registry = Masc.Keeper_registry in
+  let module Owner = Masc.Keeper_owner in
+  let module Owners = Masc.Keeper_owner_registry in
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let previous_fs = Fs_compat.get_fs_opt () in
+  Fun.protect
+    ~finally:(fun () ->
+      Owner.install_state_change_observer ignore;
+      Registry.For_testing.clear ();
+      reset ();
+      Server_auth.For_testing.restore_server_state previous_state;
+      (match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ());
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+      let state = Masc.Mcp_server.For_testing.create_state ~base_path in
+      Server_auth.For_testing.restore_server_state (Some state);
+      Registry.For_testing.clear ();
+      Eio_main.run (fun env ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio.Switch.run (fun sw ->
+          let config = Masc.Mcp_server.workspace_config state in
+          ignore (Workspace_core.init config ~agent_name:(Some "test"));
+          (match Owners.install_from_store ~sw ~operation_runner:None
+             ~on_turn_slot_released:None config with
+           | Ok 0 -> ()
+           | Ok _ -> fail "expected an empty owner inventory"
+           | Error error -> fail (Owners.install_error_to_string error));
+          let meta =
+            match Masc_test_deps.meta_of_json_fixture
+              (`Assoc [ "name", `String "health-owner-meta"
+                      ; "trace_id", `String "trace-health-owner-meta"
+                      ; "activation_mode", `String "manual" ]) with
+            | Ok meta -> meta
+            | Error error -> fail error
+          in
+          (match Owners.create_meta ~base_path meta with
+           | Ok (Some _) -> ()
+           | Ok None -> fail "owner did not create metadata"
+           | Error error -> fail (Owners.command_error_to_string error));
+          ignore (Registry.For_testing.register ~base_path meta.name meta);
+          reset ();
+          let hub =
+            match Runtime.fleet_stream_hub_for_scope
+              ~state ~scope:(Masc.Mcp_server.workspace_scope state) with
+            | Some hub -> hub
+            | None -> fail "current workspace fleet hub was unavailable"
+          in
+          ignore (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+          let counts = ref [] in
+          let unsubscribe = Masc.Fleet_stream_hub.subscribe hub ~on_event:(function
+            | Masc.Fleet_stream.Snapshot { fleet; _ }
+            | Masc.Fleet_stream.Changed { fleet; _ } ->
+              counts := fleet.fs_paused_count :: !counts
+            | Masc.Fleet_stream.Unavailable_snapshot _ | Masc.Fleet_stream.Degraded _ -> ())
+          in
+          let refresh () =
+            Runtime.For_testing.run_full_health_refresh_worker ~sw ~compute:(fun () ->
+              Ok (Runtime.keeper_fleet_runtime_resolution_light_fields ()))
+          in
+          refresh ();
+          Owner.install_state_change_observer Runtime.invalidate_full_health_snapshot;
+          (* Calling the Owner directly leaves the registry's stored entry at
+             its initial value, so the fleet read must use the Owner overlay. *)
+          let owner =
+            match Owners.get ~base_path ~keeper_name:meta.name with
+            | Ok owner -> owner
+            | Error error -> fail (Owners.lookup_error_to_string error)
+          in
+          let apply command =
+            match Owner.apply_meta owner command with
+            | Ok (Some _) -> ()
+            | Ok None -> fail "owner metadata disappeared"
+            | Error error -> fail (Owner.error_to_string error)
+          in
+          apply (Masc.Keeper_owner_reducer.Pause
+            { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }
+            ; updated_at = "2026-11-02T00:00:00Z" });
+          check bool "registry health reads the paused Owner overlay" true
+            (List.mem meta.name (Server_routes_http_runtime_fleet_scan.registry_paused_keeper_names ()));
+          check bool "owner pause wakes the health worker" true
+            (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+          refresh ();
+          apply (Masc.Keeper_owner_reducer.Resume { updated_at = "2026-11-02T00:00:01Z" });
+          check bool "registry health reads the resumed Owner overlay" false
+            (List.mem meta.name (Server_routes_http_runtime_fleet_scan.registry_paused_keeper_names ()));
+          check bool "owner resume wakes the health worker" true
+            (Runtime.For_testing.take_full_health_wakeup_nonblocking ());
+          refresh ();
+          check (list int) "real owner changes reach the fleet subscriber" [ 0; 1; 0 ]
+            (List.rev !counts);
+          unsubscribe ())))
+;;
+
 let test_non_eio_wakes_coalesce_without_blocking () =
   Eio_main.run (fun env ->
     reset ();
@@ -283,5 +378,7 @@ let () =
             test_committed_registry_failure_wakes_health
         ; test_case "registry membership wakes health" `Quick
             test_registry_membership_wakes_health
+        ; test_case "owner metadata wakes fleet subscriber" `Quick
+            test_owner_metadata_wakes_fleet_subscriber
         ]
       ])

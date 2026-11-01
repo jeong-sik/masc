@@ -615,16 +615,12 @@ let protect_recovered_paste_for_current_keeper state =
    The spill is dropped whether or not its line was still there. An operator
    who deleted the placeholder meant to drop the paste, and a spill that
    outlived the draft would attach itself to the next message. *)
-let inline_spilled_paste state text =
-  match state.msg_spill with
-  | None -> text
-  | Some spill ->
-      Option.value ~default:text
-        (Masc_tui_paste_spill.substituted spill
-           ~replacement:spill.Masc_tui_paste_spill.text text)
+let inline_spilled_paste spill text =
+  expand_message_draft_spill spill text
 
-let materialise_spilled_paste state text =
-  let text = inline_spilled_paste state text in
+let materialise_spilled_paste state snapshot =
+  let text = inline_spilled_paste (message_spill_in_snapshot state snapshot)
+      (Masc_tui_message_input.snapshot_text snapshot) in
   state.msg_spill <- None;
   text
 
@@ -716,20 +712,13 @@ let write_file path contents =
    Every failure falls back to sending the text itself. A paste that reached
    the keeper as a large message is worse than one it can read off disk; a
    paste that reached it as neither is the thing this must not do. *)
-let place_spilled_paste state ~keeper_name ~staging_dir spill text =
+let place_spilled_paste state ~keeper_name ~staging_dir saved =
+  let spill = saved.sms_paste in
   let inline () =
-    Option.value ~default:text
-      (Masc_tui_paste_spill.substituted spill
-         ~replacement:spill.Masc_tui_paste_spill.text text)
+    Masc_tui_message_input.replace_owned saved.sms_view ~replacement:spill.text
   in
-  match Masc_tui_paste_spill.substituted spill
-          ~replacement:(Masc_tui_paste_spill.message_line spill) text
-  with
-  | None ->
-    (* The placeholder is gone: the operator deleted it, and there is
-       nothing to hand the keeper. *)
-    text
-  | Some pointed -> (
+  let pointed = Masc_tui_message_input.replace_owned saved.sms_view
+      ~replacement:(Masc_tui_paste_spill.message_line spill) in
     match staging_dir with
     | None ->
         report_action state "system"
@@ -770,31 +759,31 @@ let place_spilled_paste state ~keeper_name ~staging_dir spill text =
                       spill.Masc_tui_paste_spill.file_name
                       spill.Masc_tui_paste_spill.bytes
                       (Keeper_chat.terminal_safe_text keeper_name)));
-            pointed))
+            pointed)
 
 type prepared_spill = {
-  ps_spill : Masc_tui_paste_spill.t;
+  ps_spill : message_spill;
+  ps_source : saved_message_spill;
   ps_directory : (string * Keeper_sandbox_config.sandbox_profile) option;
 }
 
 (* Resolving a Keeper's sandbox may yield. Keep the composer and queue intact
    until the original owner and edit are still current after that read. *)
-let prepare_spilled_paste state ~base_path ~keeper_name ~still_allowed text =
-  match state.msg_spill with
-  | None -> Ok None
-  | Some spill ->
+let prepare_spilled_paste state ~base_path ~keeper_name ~still_allowed saved =
+  match saved, state.msg_spill with
+  | None, _ -> Ok None
+  | Some _, None -> Error "Input changed while preparing the paste; current draft retained"
+  | Some saved, Some spill ->
       let authority = state.workspace_authority in
       let workspace = chat_input_workspace state in
       let target = state.msg_target_keeper_name in
       let revision = Masc_tui_message_input.revision state.msg_input in
       let edit = current_recall_edit state in
       let control = keeper_chat_control_generation state keeper_name in
-      let directory =
-        match Masc_tui_paste_spill.substituted spill
-                ~replacement:(Masc_tui_paste_spill.message_line spill) text with
-        | None -> None
-        | Some _ -> keeper_staging_dir ~base_path ~keeper_name
-      in
+      if not (Masc_tui_message_input.owned_is_current state.msg_input saved.sms_view)
+      then Error "Input changed while preparing the paste; current draft retained"
+      else
+      let directory = keeper_staging_dir ~base_path ~keeper_name in
       if state.workspace_authority <> authority
          || chat_input_workspace state <> workspace
          || state.msg_target_keeper_name <> target
@@ -804,7 +793,7 @@ let prepare_spilled_paste state ~base_path ~keeper_name ~still_allowed text =
          || keeper_chat_control_generation state keeper_name <> control
          || not (still_allowed ()) then
         Error "Input changed while preparing the paste; current draft retained"
-      else Ok (Some {ps_spill = spill; ps_directory = directory})
+      else Ok (Some {ps_spill = spill; ps_source = saved; ps_directory = directory})
 
 let reset_message_file_changes state keeper_name =
   (* A late alpha response must not populate alpha after alpha -> beta ->
@@ -1164,7 +1153,7 @@ let recall_older (state : state) =
           (* A spill belongs to the draft being set aside, not to the
              recalled line that is about to replace the composer. *)
           let text = materialise_spilled_paste state
-              (Masc_tui_message_input.contents state.msg_input) in
+               (Masc_tui_message_input.snapshot state.msg_input) in
           0, (text, state.msg_attachments,
               state.msg_references, state.msg_attachments_since)
       | Some walk ->
@@ -1313,9 +1302,10 @@ let move_recall state ~drain_queue move =
    too. Named because two things end a draft this way -- the Enter key on this
    surface, and a voice capture that ends the sentence itself
    ([voice.stt].send_on_stop) -- and they have to be the same answer. *)
-let submit_chat_draft (state : state) ~(submit_message : string -> unit)
+let submit_chat_draft (state : state) ~(submit_message : Masc_tui_message_input.snapshot -> unit)
     ~(drain_queue : unit -> unit) =
-  let text = Masc_tui_message_input.contents state.msg_input in
+  let snapshot = Masc_tui_message_input.snapshot state.msg_input in
+  let text = Masc_tui_message_input.snapshot_text snapshot in
   if recovered_paste_send_locked state then
     report_action state "system"
       "Recovered draft protected; press Ctrl-G to enable Enter"
@@ -1324,7 +1314,7 @@ let submit_chat_draft (state : state) ~(submit_message : string -> unit)
        there, and staying scrolled back would hide the send. *)
     set_msg_scroll state 0;
     forget_recall state;
-    submit_message text;
+    submit_message snapshot;
     (* The composer is empty after a submit, so a line held only because the
        operator was mid-compose ([composing_for_keeper]) can dispatch now. When
        the submit folded onto that held line, this is what sends the merge. *)
@@ -1341,7 +1331,7 @@ let keeper_message_input_supported state =
       ~hidden:(roster_pane_hidden state) ~cols)
     ~status_rows:(keeper_message_support_status_rows state ~status_rows)
 
-let handle_message_key (state : state) ~(submit_message : string -> unit)
+let handle_message_key (state : state) ~(submit_message : Masc_tui_message_input.snapshot -> unit)
     ~(load_older : cursor:string option -> unit) ~(paste_image : unit -> unit)
     ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
     ~(inspect_queue : unit -> unit)
@@ -9628,13 +9618,13 @@ let publish_queued_message_history state receipt request =
 (* The queue owns the inline bytes before a file can become visible. Once a
    file is published, replace only that exact accepted payload; independent
    queue priority changes are preserved by [replace_recalled_request]. *)
-let stage_accepted_spill state ~keeper_name ~source_text ~prefix ~prepared
+let stage_accepted_spill state ~keeper_name ~prefix ~prepared
     (accepted : Chat_queue.item) =
   match prepared with
   | None -> Ok accepted
-  | Some {ps_spill = spill; ps_directory = staging_dir} ->
+  | Some {ps_spill = spill; ps_source = saved; ps_directory = staging_dir} ->
       state.msg_spill <- None;
-      let staged = place_spilled_paste state ~keeper_name ~staging_dir spill source_text in
+      let staged = place_spilled_paste state ~keeper_name ~staging_dir saved in
       let message = match prefix with None -> staged | Some prior -> prior ^ "\n" ^ staged in
       let request = {accepted.request with Keeper_chat.message} in
       let source = Chat_queue.source_for_staging accepted ~message in
@@ -9704,7 +9694,7 @@ let launch_waiting_keeper_input state ~mailbox ~keeper_name =
   end
 ;;
 
-let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
+let start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox text =
   let target =
     match keeper_name with
     | Some _ as named -> named
@@ -9731,7 +9721,6 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
           report_action state "error"
             "/steer needs a turn currently streaming for this Keeper"
       | Some active_request, Some _live ->
-          let source_text = text in
           (match prepare_spilled_paste state ~base_path ~keeper_name
               ~still_allowed:(fun () ->
                 state.workspace_identity = Workspace_identity_match
@@ -9739,10 +9728,10 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
                 && not (keeper_admission_pending state keeper_name)
                 && not (List.mem_assoc keeper_name state.keeper_chat_control_pending)
                 && Option.exists (( = ) active_request) (inflight_for state keeper_name)
-                && Option.is_some (live_for_keeper state keeper_name)) source_text with
+                 && Option.is_some (live_for_keeper state keeper_name)) spill with
            | Error detail -> report_action state "error" detail
            | Ok prepared ->
-          let text = inline_spilled_paste state text in
+          let text = inline_spilled_paste spill text in
           let request =
             let attachments, references = pending_attachments state in
             Keeper_chat.create_request ~attachments ~references
@@ -9758,7 +9747,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
              (match Chat_queue.find state.msg_queued ~request_id:request.request_id with
               | None -> report_action state "error" "Accepted steer is no longer in the local queue"
               | Some accepted ->
-               match stage_accepted_spill state ~keeper_name ~source_text
+               match stage_accepted_spill state ~keeper_name
                    ~prefix:None ~prepared accepted with
                | Error detail ->
                    (match Chat_queue.find state.msg_queued ~request_id:accepted.request.request_id with
@@ -9792,7 +9781,7 @@ let start_keeper_steer ?keeper_name state ~base_path ~mailbox text =
    The refusals here are about whether the message can be delivered at all: no
    keeper selected, a roster this build could not read, a keeper that is no
    longer registered. *)
-let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
+let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
   match
     match keeper_name with
     | Some _ -> keeper_name
@@ -9817,14 +9806,13 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
   | Some target -> (
       (* Admission borrows the whole paste inline. Its file is staged only
          after this Keeper's queue accepts the request. *)
-      let source_text = text in
       match prepare_spilled_paste state ~base_path ~keeper_name:target
           ~still_allowed:(fun () ->
             state.workspace_identity = Workspace_identity_match
-            && keeper_available_for_new_message state target) source_text with
+             && keeper_available_for_new_message state target) spill with
       | Error detail -> report_action state "error" detail
       | Ok prepared ->
-      let text = inline_spilled_paste state text in
+       let text = inline_spilled_paste spill text in
       match current_recall_edit state with
       | Some editing
         when String.equal editing.Chat_queue.request.Keeper_chat.keeper_name
@@ -9850,7 +9838,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
                 | None -> report_action state "error" "Accepted edit is no longer in the local queue"
                 | Some accepted ->
                  match stage_accepted_spill state ~keeper_name:target
-                     ~source_text ~prefix:None ~prepared accepted with
+                     ~prefix:None ~prepared accepted with
                  | Error detail ->
                      (match Chat_queue.find state.msg_queued ~request_id:accepted.request.request_id with
                       | Some current when current.request = accepted.request ->
@@ -9938,7 +9926,7 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
             | None -> report_action state "error" "Message staging changed before submission"
             | Some accepted ->
              match stage_accepted_spill state ~keeper_name:target
-                 ~source_text ~prefix ~prepared accepted with
+                 ~prefix ~prepared accepted with
              | Error detail ->
                  (match Chat_queue.find state.msg_queued ~request_id:accepted.request.request_id with
                   | Some current when current.request = accepted.request ->
@@ -12512,7 +12500,9 @@ let open_music () =
   | None -> Error "Music workbench requires an active terminal session"
   | Some launch -> launch ()
 
-let send_operator_text ?keeper_name state ~base_path ~mailbox text =
+let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
+  let text = Masc_tui_message_input.snapshot_text snapshot in
+  let spill = message_spill_in_snapshot state snapshot in
   let target =
     match keeper_name with
     | Some _ as named -> named
@@ -12523,11 +12513,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
      Peek only to recognize preset saves; all other commands keep their
      existing spill handling. Materialize the retained input before parsing
      or clearing it so the exact description survives a failed dispatch. *)
-  let candidate = match state.msg_spill with
-    | None -> text
-    | Some spill -> Option.value ~default:text
-        (Masc_tui_paste_spill.substituted spill
-           ~replacement:spill.Masc_tui_paste_spill.text text) in
+  let candidate = inline_spilled_paste spill text in
   let is_preset_save = match Masc_tui_command.parse candidate with
     | Masc_tui_command.Preset_save _ | Preset_save_missing_name -> true
     | Say _ | Task_for_keeper _ | Task_recover | Task_inspect | Task_missing_title | Help | Features
@@ -12548,7 +12534,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
     | Music_invalid_arguments | Open_score _ | Score_invalid_index | Open_images _ | List_images
     | Images_invalid_index | Unknown _ -> false in
   let text = if is_preset_save then begin
-    let materialized = materialise_spilled_paste state text in
+    let materialized = materialise_spilled_paste state snapshot in
     if not (String.equal materialized text)
        && String.equal (Masc_tui_message_input.contents state.msg_input) text then begin
       Masc_tui_message_input.clear state.msg_input;
@@ -12556,7 +12542,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
     end;
     materialized
   end else text in
-  let command = Masc_tui_command.parse text in
+  let command, ranges = Masc_tui_command.parse_with_message_source text in
+  let spill = Option.bind ranges (fun ranges ->
+      Option.bind spill (fun spill ->
+          Option.map (fun view -> { spill with sms_view = view })
+            (Masc_tui_message_input.project_owned spill.sms_view ranges))) in
   if
     Option.is_some (current_recall_edit state)
     && match command with
@@ -12588,7 +12578,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
       notice ~kind:Notice_failure
         "Recovered draft protected; press Ctrl-G to enable Enter"
   | Masc_tui_command.Say _ ->
-      start_keeper_message ?keeper_name state ~base_path ~mailbox text
+      start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text
   | Masc_tui_command.Task_missing_title ->
       report_action state "error" "/task needs a title on the same line"
   | Masc_tui_command.View_image_missing_path ->
@@ -13152,7 +13142,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.Steer_missing_message ->
       notice ~kind:Notice_failure "/steer needs replacement text on the same line"
   | Masc_tui_command.Steer_turn message ->
-      start_keeper_steer ?keeper_name state ~base_path ~mailbox message
+      start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox message
   | Masc_tui_command.Set_thinking mode ->
       Masc_tui_message_input.clear state.msg_input;
       state.msg_reasoning_visibility <-
@@ -14593,7 +14583,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.msg_journal_reads_refused <- false;
   (* Save the captured draft before releasing the spill. If an earlier
      withdrawal effect fails, the original composer still owns the paste. *)
-  save_message_draft_snapshot ~workspace:previous state ~text:draft;
+  save_message_draft_snapshot ~workspace:previous state ~snapshot:draft;
   state.msg_spill <- None;
   Masc_tui_message_input.clear state.msg_input;
   (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- []);
@@ -15169,8 +15159,8 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
          | None, _ | Some _, Workspace_identity_mismatch _ -> false
     in
     let target = state.msg_target_keeper_name in
-    let draft = Masc_tui_message_input.contents state.msg_input in
-    let spill = message_spill_in_text state draft in
+    let draft = Masc_tui_message_input.snapshot state.msg_input in
+    let spill = message_spill_in_snapshot state draft in
     let attachments = state.msg_attachments and references = state.msg_references in
     let since = state.msg_attachments_since and queue = state.msg_queued in
     let recall_walk = state.msg_recall_walk in
@@ -15228,7 +15218,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
       state.composer_focused <- focused;
       Masc_tui_message_input.clear state.msg_input;
       Masc_tui_message_input.insert state.msg_input
-        (expand_message_draft_spill spill draft);
+        (expand_message_draft_spill spill (Masc_tui_message_input.snapshot_text draft));
       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- attachments);
       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- references);
       state.msg_attachments_since <- since;
@@ -19003,7 +18993,8 @@ let handle_composer_key state ~base_path ~mailbox key =
         true
       end else begin
       state.composer_focused <- false;
-      let text = Masc_tui_message_input.contents state.msg_input in
+      let snapshot = Masc_tui_message_input.snapshot state.msg_input in
+      let text = Masc_tui_message_input.snapshot_text snapshot in
       (match Masc_tui_command.parse text with
        | Masc_tui_command.Say _ ->
            set_msg_scroll state 0;
@@ -19089,7 +19080,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in the session log. *)
            ());
-      send_operator_text ~keeper_name state ~base_path ~mailbox text;
+      send_operator_text ~keeper_name state ~base_path ~mailbox snapshot;
       true
       end
   | Composer.Edit ->
@@ -19228,9 +19219,9 @@ let handle_paste ?(protect_recovered = false) state ~base_path ~mailbox
             cannot read, and a draft they cannot read is a message they cannot
             check before sending. The text goes back in on the way out, so
             what the keeper receives is what was pasted. *)
-         state.msg_spill <- Some spill;
-         Masc_tui_message_input.insert state.msg_input
-           (Masc_tui_paste_spill.draft_line spill));
+          let owner = Masc_tui_message_input.insert_owned state.msg_input
+              (Masc_tui_paste_spill.draft_line spill) in
+          state.msg_spill <- Some { msp_paste = spill; msp_owner = owner });
     if paste.Masc_tui_paste.dropped > 0 then
       report_action state "error"
         (Printf.sprintf "Paste kept the first %d bytes; %d more were dropped"

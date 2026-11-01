@@ -3781,7 +3781,7 @@ let assert_typed_capacity_refusal_advances_once
   =
   let refused_id = label ^ "-refused" in
   let successor_id = label ^ "-successor" in
-  let ( (result, replay, advances, evidence, observed_advance, dispatches_before_replay)
+  let ( (result, replay, advances, evidence, observed_advance, initial_snapshot, dispatches_before_replay)
       , posts )
     =
     with_server
@@ -3797,13 +3797,17 @@ let assert_typed_capacity_refusal_advances_once
     let flow = start_flow (frozen_flow snapshot [ refused_id; successor_id ]) in
     let advances = ref 0 in
     let observed_advance = ref None in
+    let initial_snapshot = ref None in
     let result =
       execute_with_accepting_test_validator
         ~clock
         ~net
         ~on_measurement_terminal:(fun _ -> Ok ())
         ~before_measurement_dispatch:(fun _ -> Ok ())
-        ~before_dispatch:(fun _ -> Ok ())
+        ~before_dispatch:(fun candidate ->
+          if String.equal (candidate_id candidate) refused_id then
+            initial_snapshot := Some ((attempt_for (EO.flow_attempt_evidence flow) refused_id).receipt);
+          Ok ())
         ~before_advance:(fun ~failed ~next ->
           let failed_candidate, failure = flow_execution_failure failed in
           observed_advance
@@ -3830,6 +3834,7 @@ let assert_typed_capacity_refusal_advances_once
     , !advances
     , evidence
     , !observed_advance
+    , !initial_snapshot
     , dispatches_before_replay )
   in
   (match observed_advance with
@@ -3862,12 +3867,27 @@ let assert_typed_capacity_refusal_advances_once
     (refused_id ^ " dispatch count")
     1
     (EO.generation_receipt_snapshot_dispatch_count refused_attempt.receipt);
+  check
+    (option int)
+    (refused_id ^ " actual HTTP status")
+    (Some (Cohttp.Code.code_of_status (fst first_response)))
+    (EO.generation_receipt_snapshot_http_status refused_attempt.receipt);
+  (match initial_snapshot with
+   | Some snapshot ->
+     check (option int) (refused_id ^ " earlier snapshot remains without headers") None
+       (EO.generation_receipt_snapshot_http_status snapshot)
+   | None -> fail (label ^ " did not publish its initial snapshot"));
   let successor_attempt = attempt_for evidence successor_id in
   check
     int
     (successor_id ^ " dispatch count")
     1
     (EO.generation_receipt_snapshot_dispatch_count successor_attempt.receipt);
+  check
+    (option int)
+    (successor_id ^ " actual HTTP status")
+    (Some 200)
+    (EO.generation_receipt_snapshot_http_status successor_attempt.receipt);
   check int (label ^ " replay adds zero POSTs") 0 (posts - dispatches_before_replay);
   (match replay with
    | Error (EO.Flow_attempt_already_started _) -> ()
@@ -4006,6 +4026,12 @@ let test_network_failure_before_dispatch_is_every_binding_resting () =
        failf
          "a refused connection was not a network failure before dispatch: %s"
          (EO.execution_error_cause_to_string other));
+    let refused_attempt = attempt_for failure.evidence "unreachable-b" in
+    check
+      (option int)
+      "a connection failure has no captured HTTP status"
+      None
+      (EO.generation_receipt_snapshot_http_status refused_attempt.receipt);
     check
       bool
       "every visited binding is at rest"
@@ -4046,6 +4072,11 @@ let test_dropped_connection_after_dispatch_is_not_a_binding_at_rest () =
        failf
          "a dropped connection was not a completion failure after dispatch: %s"
          (EO.execution_error_cause_to_string other));
+    let dropped_attempt = attempt_for failure.evidence "dropped-b" in
+    check bool "the dropped attempt was dispatched" true
+      (EO.generation_receipt_snapshot_generation_dispatched dropped_attempt.receipt);
+    check (option int) "a dispatch can lack response headers" None
+      (EO.generation_receipt_snapshot_http_status dropped_attempt.receipt);
     check
       bool
       "a dropped connection after dispatch is not rest"
@@ -4084,6 +4115,19 @@ let test_rate_limited_429_refusal_advances_once_to_successor () =
       | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ } ->
         ()
       | _ -> fail "HTTP 429 lost its typed rate-limit cause")
+    ()
+;;
+
+(* The body can declare a provider condition even when the actual HTTP status
+   is 200. The retained snapshot must not confuse those separate facts. *)
+let test_http_200_provider_reported_429_keeps_actual_status () =
+  assert_typed_capacity_refusal_advances_once
+    ~refused_kind:"openai_compat"
+    ~label:"http-200-provider-429"
+    ~first_response:(`OK, {|{"error":{"code":429,"message":"rate limited"}}|})
+    ~assert_cause:(function
+      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited; _ } -> ()
+      | _ -> fail "the provider's declared 429 condition was not retained")
     ()
 ;;
 
@@ -4410,6 +4454,11 @@ let test_body_deadline_advances_after_settlement ~http_status ~settle () =
     (if settle then 2 else 1) posts;
   check (list string) "validator sees only a complete successor result"
     (if settle then [next_id] else []) validated_ids;
+  let timed_out = (attempt_for evidence first_id).receipt in
+  check bool "the snapshot retains the response-received phase" true
+    (EO.generation_receipt_snapshot_phase timed_out = EO.Response_received);
+  check (option int) "a partial body can still have a captured HTTP status" (Some http_status)
+    (EO.generation_receipt_snapshot_http_status timed_out);
   check int "only durable settlement records an advance"
     (if settle then 1 else 0) (List.length evidence.advances);
   (match replay with
@@ -5596,6 +5645,10 @@ let () =
             "HTTP 429 rate limit advances with one dispatch per candidate"
             `Quick
             test_rate_limited_429_refusal_advances_once_to_successor
+        ; test_case
+            "HTTP 200 and provider-declared 429 remain distinct"
+            `Quick
+            test_http_200_provider_reported_429_keeps_actual_status
         ; test_case
             "HTTP 429 keeps the provider's Retry-After"
             `Quick

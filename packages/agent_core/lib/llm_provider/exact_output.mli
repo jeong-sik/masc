@@ -658,6 +658,15 @@ val generation_receipt_snapshot_dispatch_count : generation_receipt_snapshot -> 
 val generation_receipt_snapshot_generation_dispatched : generation_receipt_snapshot -> bool
 (** Immutable actual generation-dispatch fact; never inferred from measurement
     activity, phase labels or billing assumptions. *)
+
+val generation_receipt_snapshot_http_status : generation_receipt_snapshot -> int option
+(** Actual HTTP response-header status observed for this visit, captured with
+    the snapshot's phase in one state read. [None] means no status was
+    captured; it does not establish whether a response or an execution
+    occurred. A status does not prove that the body completed or that the
+    provider's model turn has terminated. This in-memory snapshot alone is
+    not a durable execution proof. *)
+
 val generation_receipt_snapshot_call_id : generation_receipt_snapshot -> call_id
 val generation_receipt_snapshot_plan_fingerprint : generation_receipt_snapshot -> string
 

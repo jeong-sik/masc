@@ -29,6 +29,11 @@ let reserve slot = with_lock slot (fun () ->
 
 let withdraw_pending slot = with_lock slot (fun () -> slot.pending <- None)
 
+let withdraw slot admission = with_lock slot (fun () ->
+  match slot.pending with
+  | Some pending when pending == admission -> slot.pending <- None
+  | Some _ | None -> ())
+
 let run_reserved slot admission work =
   let admitted = with_lock slot (fun () ->
     match slot.pending with

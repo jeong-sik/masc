@@ -24,6 +24,8 @@ block hashes are never relabeled as the later changed bytes.
 `candidate.txt` is an ANSI/BOM-normalized line-selected derivative preserving
 all checkout, target, case and summary lines. Raw and retained byte digests are
 distinct. Raw capture metadata paths are repository-relative in this derivative.
+The selected_capture path names retained candidate.txt; original_selected_capture
+preserves the ignored capture's original profile-candidate.txt name.
 Case identity is source/group/index/fixture-SHA; display names may be ellipsized.
 Compact UTF-8 JSON of those keys plus one LF hashes to `cb51a43a423a033e4f0d9c4fd56b3f1850317c6e24366cb1e560f3ef836c541b`.
 

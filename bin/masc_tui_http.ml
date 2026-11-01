@@ -2971,28 +2971,46 @@ let fetch_board_hearths ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/board/hearths"
 
-(** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
-    shape -- first line is the title, the rest is the body -- and the server
-    stamps the author from the HTTP auth resolver. [attachments] are the
-    compose-staged files already uploaded to the artifact store; absent or
-    empty omits the field, so a plain post's payload is exactly what it was.
-    The response is the tools envelope [{ok, message}]; interpreting it
-    stays with the caller. *)
-let post_board_new ~expected_workspace ~(host : string) ~(port : int) ~(title : string)
-    ~(body : string) ?hearth ?(attachments = []) () : (Yojson.Safe.t, string) result =
+(** Bind the exact new-post payload after ordered attachment uploads. The
+    request keeps original draft/file identities separately from these wire
+    bytes. Empty attachments remain absent and hearth normalization retains
+    the existing payload policy. *)
+let prepare_board_new
+    (request : 'authority Masc_tui_board_publication.request) attachments =
+  match request.expected_workspace with
+  | None -> Error "Board workspace identity is unavailable"
+  | Some expected_workspace ->
   let hearth_field =
-    match hearth with
+    match request.hearth with
     | Some h when String.trim h <> "" -> [ ("hearth", `String (String.trim h)) ]
     | _ -> []
   in
   let payload =
     `Assoc
-      ([ expected_workspace_field expected_workspace; ("title", `String title); ("body", `String body) ]
+      ([ expected_workspace_field expected_workspace
+       ; ("title", `String request.title)
+       ; ("body", `String request.body) ]
       @ hearth_field
       @ Option.to_list (Masc_tui_types.board_outbound_attachments_field attachments))
   in
-  post_json ~host ~port ~path:"/api/v1/tools/masc_board_post"
-    ~body:(Yojson.Safe.to_string payload)
+  Ok
+    (Masc_tui_board_publication.bind_body request
+       ~body:(Yojson.Safe.to_string payload))
+
+(** Read producer-owned Board evidence before generic HTTP status reduction.
+    The existing transport preserves I/O-domain dispatch and one-time real401
+    credential refresh while reusing the identical prepared body. *)
+let post_board_new
+    (prepared : 'authority Masc_tui_board_publication.prepared) =
+  match
+    http_post ~headers:(auth_headers ())
+      ~host:prepared.request.host ~port:prepared.request.port
+      ~path:"/api/v1/tools/masc_board_post" ~body:prepared.body
+  with
+  | Error detail -> Masc_tui_board_publication.unanswered detail
+  | Ok (status_code, body) ->
+    Masc_tui_response_decode.run ~name:"http.json.decode_wait" (fun () ->
+      Masc_tui_board_publication.decode_response ~status_code ~body)
 
 (** POST /api/v1/artifacts: one staged file's bytes. The bearer and its
     one-time 401 refresh are the other write routes'; the response decodes

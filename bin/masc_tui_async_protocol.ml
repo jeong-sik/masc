@@ -598,10 +598,10 @@ type async_msg =
       * string
       * Masc_tui_keeper_control.action
       * (Masc_tui_keeper_control.outcome, string) result
-  | Board_new_post_done of {
-      reply_to : string option;
+  | Board_publication_done of workspace_authority Masc_tui_board_publication.outcome
+  | Board_comment_done of {
+      post_id : string;
       sent_draft : string;
-      sent_attachments : board_staged_attachment list;
       result : (string, string) result;
     }
   | Board_vote_done of board_vote_target * (string, string) result
@@ -1074,7 +1074,7 @@ let rec workspace_message_is_read = function
   | Keeper_deletion_retry_done _
   | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _
   | Keeper_action_done _
-  | Board_new_post_done _
+  | Board_publication_done _ | Board_comment_done _
   | (Board_vote_done _ | Artifact_check_changed _)
   | Goal_transition_done _
   | Goal_confirmation_submitted _
@@ -1164,7 +1164,7 @@ let rec message_matches_share_input ~resource_read ~recovery_loaded = function
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
   | Keeper_chat_dispatch_blocked _ | Keeper_logs_loaded _ | Keeper_settings_save_changed _
   | Runtime_form_save_changed _ | Keeper_creation_changed _ | Keeper_action_done _
-  | Board_new_post_done _ | Board_vote_done _ | Goal_transition_done _
+  | Board_publication_done _ | Board_comment_done _ | Board_vote_done _ | Goal_transition_done _
   | Goal_confirmation_submitted _ | Goal_confirmation_loaded _ | Schedules_loaded _
   | Schedule_wake_history_loaded _ | Keeper_schedules_loaded _ | System_logs_loaded _
   | Schedule_cancel_done _ | Verification_verdict_done _ | Harness_label_done _
@@ -1281,7 +1281,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Surface_tool_approval_answered (_, _, _, _, _)
     | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
     | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
-    | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _
+    | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_publication_done _ | Board_comment_done _
     | (Board_vote_done _ | Artifact_check_changed _) | Goal_transition_done _ | Goal_confirmation_submitted _
     | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
     | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)
@@ -1419,7 +1419,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Surface_tool_approval_answered (_, _, _, _, _)
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
   | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _)
-  | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_new_post_done _ | (Board_vote_done _ | Artifact_check_changed _)
+  | (Keeper_logs_loaded _ | Keeper_execute_loaded _ | Keeper_execute_streamed _) | Runtime_form_save_changed _ | Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Board_publication_done _ | Board_comment_done _ | (Board_vote_done _ | Artifact_check_changed _)
   | Goal_transition_done _ | Goal_confirmation_submitted _
   | Goal_confirmation_loaded (_, _) | Schedules_loaded (_, _)
   | Schedule_wake_history_loaded (_, _) | Keeper_schedules_loaded (_, _)

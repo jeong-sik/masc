@@ -429,12 +429,33 @@ let state_with staged_files =
 ;;
 
 let finish state ~reply_to ~sent_attachments result =
-  Masc_tui_board_updates.new_post_done state ~reply_to ~sent_draft:"title"
-    ~sent_attachments
-    ~report:(fun _ _ -> ())
-    ~refresh:(fun () -> ())
-    ~refresh_detail:(fun _ -> ())
-    result
+  match reply_to with
+  | Some post_id ->
+    state.board_write <- Board_commenting;
+    Masc_tui_board_updates.comment_done state ~post_id ~sent_draft:"title"
+      ~report:(fun _ _ -> ()) ~refresh:(fun () -> ())
+      ~refresh_detail:(fun _ -> ()) result
+  | None ->
+    let module Publication = Masc_tui_board_publication in
+    let request = Publication.capture ~authority:state.workspace_authority
+        ~host:"127.0.0.1" ~port:state.port ~expected_workspace:None
+        ~sent_draft:"title" ~staged:sent_attachments ~title:"title" ~body:"title"
+        ~hearth:None () in
+    state.board_write <- Board_posting request;
+    state.board_publications <- Publication.register state.board_publications request;
+    let outcome = match result with
+      | Error detail -> Publication.not_attempted request ~detail
+      | Ok _ ->
+        (* This existing update fixture supplies a canonical acknowledgement;
+           the separate request-outcome suite exercises the actual producer. *)
+        let canonical = Tool_result.make_ok ~tool_name:"masc_board_post"
+            ~start_time:(Tool_timing.start ()) ~data:(`Assoc ["id", `String "p-fixture"]) ()
+          |> Tool_result.to_json in
+        let body = Yojson.Safe.to_string (`Assoc ["result", canonical]) in
+        let prepared = Publication.bind_body request ~body:"{}" in
+        Publication.returned prepared (Publication.decode_response ~status_code:201 ~body) in
+    Masc_tui_board_updates.apply_publication state ~report:(fun _ _ -> ())
+      ~refresh:(fun () -> ()) outcome
 ;;
 
 let staged_names state =

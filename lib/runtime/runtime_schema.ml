@@ -221,6 +221,7 @@ type thinking_control_format =
   | Ollama_think
   | Reasoning_effort
   | Reasoning_effort_default_on
+  | Reasoning_enabled
 [@@deriving show, eq]
 
 type reasoning_streaming_format =

@@ -24,6 +24,7 @@ type toggle_wire =
   | Chat_template_token
   | Ollama_think
   | Reasoning_effort
+  | Reasoning_enabled
   | Anthropic_thinking
   | Gemini_thinking_config
 

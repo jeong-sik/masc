@@ -63,6 +63,8 @@ let test_valid_values_load_and_map_to_agent_core_variants () =
       ; "reasoning-effort", Reasoning_effort
       ; "reasoning_effort_default_on", Reasoning_effort_default_on
       ; "reasoning-effort-default-on", Reasoning_effort_default_on
+      ; "reasoning_enabled", Reasoning_enabled
+      ; "reasoning-enabled", Reasoning_enabled
       ]
   in
   List.iter

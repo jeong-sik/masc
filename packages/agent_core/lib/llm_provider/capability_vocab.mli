@@ -12,6 +12,9 @@ type thinking_control_format =
   | Reasoning_effort_default_on
   (** Categorical depth with reasoning enabled when effort is omitted.
       Explicit enable is already satisfied; disable still requires an accepted [none]. *)
+  | Reasoning_enabled
+  (** Boolean [reasoning.enabled] control without categorical depth selection.
+      Omission leaves the provider default unchanged. *)
 
 type preserve_thinking_control_format =
   | No_preserve_thinking_control

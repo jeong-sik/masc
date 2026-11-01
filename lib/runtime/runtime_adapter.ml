@@ -534,6 +534,7 @@ let agent_core_thinking_control_format = function
   | Runtime_schema.Reasoning_effort -> Llm_provider.Capabilities.Reasoning_effort
   | Runtime_schema.Reasoning_effort_default_on ->
     Llm_provider.Capabilities.Reasoning_effort_default_on
+  | Runtime_schema.Reasoning_enabled -> Llm_provider.Capabilities.Reasoning_enabled
 ;;
 
 (** A runtime [api-name] is an opaque deployment string, not automatically an

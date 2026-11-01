@@ -646,7 +646,8 @@ let wire_reasoning_effort (config : t) ~(caps : Capabilities.capabilities) =
   | Capabilities.Thinking_object_only
   | Capabilities.Chat_template_kwargs
   | Capabilities.Chat_template_token _
-  | Capabilities.Ollama_think -> config.reasoning_effort
+  | Capabilities.Ollama_think
+  | Capabilities.Reasoning_enabled -> config.reasoning_effort
 ;;
 
 let validate_reasoning_effort_request_typed (config : t) =
@@ -685,6 +686,7 @@ let validate_reasoning_effort_request_typed (config : t) =
           | Capabilities.Thinking_object
           | Capabilities.Thinking_object_adaptive
           | Capabilities.Thinking_object_only
+          | Capabilities.Reasoning_enabled
           | Capabilities.Chat_template_kwargs
           | Capabilities.Chat_template_token _
           | Capabilities.Ollama_think )

@@ -14,6 +14,7 @@ type toggle_wire =
   | Chat_template_token
   | Ollama_think
   | Reasoning_effort
+  | Reasoning_enabled
   | Anthropic_thinking
   | Gemini_thinking_config
 
@@ -223,6 +224,13 @@ let base_of_capabilities (caps : Capabilities.capabilities) =
     ; streaming = Delta_field "reasoning"
     ; output_wire
     }
+  | Reasoning_enabled ->
+    { default with
+      toggle_wire = Reasoning_enabled
+    ; preserve_wire
+    ; streaming = Delta_field "reasoning"
+    ; output_wire
+    }
 ;;
 
 let apply_replay_override caps dialect =
@@ -347,6 +355,7 @@ let validate_request_control_inputs request_wire dialect ~reasoning_effort =
       | Chat_template_kwargs
       | Chat_template_token
       | Ollama_think
+      | Reasoning_enabled
       | Anthropic_thinking
       | Gemini_thinking_config ) )
   | ( Some _
@@ -358,6 +367,7 @@ let validate_request_control_inputs request_wire dialect ~reasoning_effort =
       | Chat_template_kwargs
       | Chat_template_token
       | Ollama_think
+      | Reasoning_enabled
       | Anthropic_thinking
       | Gemini_thinking_config ) ) -> Error Reasoning_effort_unsupported
 ;;
@@ -398,6 +408,7 @@ let request_control_fields
     | Chat_template_kwargs
     | Chat_template_token
     | Ollama_think
+    | Reasoning_enabled
     | Anthropic_thinking
     | Gemini_thinking_config -> reasoning_effort
   in
@@ -437,6 +448,10 @@ let request_control_fields
        in
        let fields, explicit_enable_encoding =
          match request_wire, dialect.toggle_wire with
+         | (Chat_completions | Responses), Reasoning_enabled ->
+           let fields = bool_field "enabled" enable_thinking in
+           ( (match fields with [] -> [] | fields -> [ "reasoning", `Assoc fields ])
+           , explicit_field_encoding )
          | Responses, Reasoning_effort ->
            (match normalized_effort with
             | Some effort ->
@@ -542,7 +557,7 @@ let request_control_fields
             | Reasoning_effort, Enabled, None -> Explicit_enable_satisfied_by_default
             | (No_toggle | Thinking_object _ | Thinking_object_adaptive
               | Thinking_object_only | Chat_template_kwargs | Chat_template_token
-              | Ollama_think | Anthropic_thinking | Gemini_thinking_config), _, _
+              | Ollama_think | Reasoning_enabled | Anthropic_thinking | Gemini_thinking_config), _, _
             | Reasoning_effort, (Provider_default | Disabled), _
             | Reasoning_effort, Enabled, Some _ -> Explicit_enable_not_encoded)
          | Some false, _ | None, _ -> Explicit_enable_not_requested
@@ -730,6 +745,7 @@ let rotation_policy dialect : Reasoning_replay_contract.rotation_policy =
      | Chat_template_kwargs
      | Chat_template_token
      | Ollama_think
+     | Reasoning_enabled
      | Reasoning_effort -> Allow_endpoint_rotation)
 ;;
 
@@ -822,6 +838,7 @@ let toggle_wire_to_string = function
   | Chat_template_token -> "chat_template_token"
   | Ollama_think -> "ollama_think"
   | Reasoning_effort -> "reasoning_effort"
+  | Reasoning_enabled -> "reasoning_enabled"
   | Anthropic_thinking -> "anthropic_thinking"
   | Gemini_thinking_config -> "gemini_thinking_config"
 ;;

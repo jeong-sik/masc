@@ -1,8 +1,8 @@
 # Official client and provider continuity audit — 2026-11-01
 
-Eight client/provider contract defects were repaired and a Codex fixture guard was
-strengthened in eight draft PRs in Native Stack #47014,
-whose top layer is [PR #47030](https://github.com/jeong-sik/masc/pull/47030). The review followed current
+Client/provider contract repairs and protocol-fixture improvements are delivered
+in nine draft PRs in Native Stack #47014,
+whose top layer is [PR #47037](https://github.com/jeong-sik/masc/pull/47037). The review followed current
 source, installed client help/schema, primary documentation and read-only runtime
 evidence. It does not establish that every provider is free of bugs or that the
 repairs are installed.
@@ -18,6 +18,8 @@ repairs are installed.
 | [#47025](https://github.com/jeong-sik/masc/pull/47025) | GLM preservation with an omitted default-enabled thinking toggle lost history and omitted its requested wire field | Provider parser → stable provenance → disk checkpoint → effective default and explicit controls → next user request |
 | [#47026](https://github.com/jeong-sik/masc/pull/47026) | Antigravity rejected five documented non-completed states as unknown protocol strings | Exact status/init identity → ambiguous durable recovery; no successful turn ACK or candidate replay of uncertain native effects |
 | [#47030](https://github.com/jeong-sik/masc/pull/47030) | Codex fixture assertions could be logged and swallowed by production stream-observer isolation | Snapshot the first delta once, assert after cleanup and rethrow ordinary observer failures; preserve cancellation/interruption and final serial-order assertions |
+| [#47030](https://github.com/jeong-sik/masc/pull/47030) | OpenRouter catalog tests used an old model ID/output limit and incomplete probe inventory | Exact 25-ID inventory with historical declared ladders separated from the two October 28 measured-disable rows |
+| [#47037](https://github.com/jeong-sik/masc/pull/47037) | Two OpenRouter rows admitted unsupported reasoning depths; the Nemotron seed requested an unsupported depth and DeepSeek's enabled default was undeclared | Shipped runtime → scoped catalog → typed completion admission → request JSON; DeepSeek 1017 accepts none/low/high/max and its enabled default, Nemotron uses explicit reasoning.enabled booleans without a depth; omission keeps the provider default |
 
 The Kimi change deliberately uses the three shipped model bindings. It does not
 guess capabilities for arbitrary operator-created model IDs. Its six fixture
@@ -61,7 +63,7 @@ schemas. Claude Code 2.1.316 was checked against CLI/SDK session and compaction
 contracts. Antigravity 1.4.12 was checked against headless/resume documentation.
 OpenRouter structured reasoning details and Ollama Cloud's `/v1` wire were read
 separately from native Ollama's `/api/chat` wire. No additional P0–P2 was established
-in the inspected Codex, Claude, OpenRouter or Ollama paths. This is bounded source
+in the inspected Codex, Claude or Ollama adapter paths. This is bounded source
 coverage, not a live provider certification.
 
 Current Kimi primary references add the [model/endpoint contract](https://www.kimi.com/code/docs/en/kimi-code/models.html)
@@ -77,6 +79,24 @@ non-completed states retain partial responses as error evidence, never as a
 completed answer. Independent review caught that nonretryable provider errors
 could still trigger candidate fanout; the final repair marks unobserved native
 effects as unavailable before projection, while preserving known effects.
+
+OpenRouter's [per-model reasoning options](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#discovering-per-model-reasoning-options)
+define an explicit `supported_efforts` array as the accepted values, `null` as
+all gateway efforts, and omission as no effort selection. The [selected public
+metadata rows](../evidence/2026-11-01-official-client-audit/openrouter-models-selected.json)
+were fetched without authentication at 2026-11-01T01:57:36Z and checked against the
+retained raw response digest. Metadata-supported depths and the October 28 real
+`none` probes are separate evidence. The earlier 23 ladder assertions include
+historical declared/router policy; they are not all complete wire measurements.
+DeepSeek's explicit enabled default uses the existing default-on dialect.
+Nemotron's missing default fact stays unknown. Its shipped binding retains
+thinking support, removes the unsupported `high` depth, and uses the documented
+`reasoning.enabled` boolean. A distinct typed dialect encodes explicit true/false
+for Chat Completions and Responses, leaves an omitted toggle absent, and rejects
+all categorical depths. Regression fixtures materialize the actual shipped
+runtime through Keeper policy and admission to the request serializer, including
+fleet/global toggle precedence. The retained October 28 `none` probe is historical
+measurement; it is not relabeled as a fresh boolean-control generation.
 
 ## Verification boundaries
 
@@ -95,7 +115,9 @@ were replaced by one exhaustive handler shared by their direct consumers.
 on `f974b1d2241d07f92d9678a19fe27a0eafa5ad10` completed successfully: four GLM
 suites, 235 cases. Later lower-layer Muse repairs do not change those selected
 Agent Core source bytes. This remains targeted evidence for the stated SHA and
-scope. Other exact-head run IDs, selected suites, conclusions and review state
+scope. A later guard also rejects replay when a legacy catalog row explicitly
+declares `supports_reasoning = false`; the earlier run does not certify that new
+delta. Other exact-head run IDs, selected suites, conclusions and review state
 are recorded in the PR descriptions as they become available; a queued run is
 not a pass.
 
@@ -106,13 +128,21 @@ not a pass.
 | [41261288235](https://github.com/jeong-sik/masc/actions/runs/41261288235) | `5e3b61b848e1e9e4403b8ccf4a9768e547e712df` | SUCCESS: all 78 Muse cases after keeping adapter settlement separate and asserting caller rejection plus retained tool receipt. Production stop/effect guards are unchanged. |
 | [41260409586](https://github.com/jeong-sik/masc/actions/runs/41260409586) | `d7139136cf45c4744bf75228ee6eeedd3151cb1d` | FAILURE: two exact recorded-Memory wire cases failed; nine suites reported success, 500 cases (Kimi 6, reasoning 58, streaming 42, retention 20, outbox 12, Codex 196, Claude 103, Antigravity 23, session store 40). A Codex callback assertion was logged despite the suite's successful exit; that fixture cannot certify the affected assertion until repaired. |
 | [41261854222](https://github.com/jeong-sik/masc/actions/runs/41261854222) | `7cb26cc755ae4e801b390ca190373b1d7a334bbb` | FAILURE: four suites passed, 220 cases (Kimi replay/effort 9, provider config 142, reasoning replay 58, GLM coverage 11). Two OpenRouter catalog assertions failed. Native-test compilation then stopped at two new fixture references to the nonexistent Masc.Runtime_antigravity facade export; these were corrected to the directly linked Runtime_antigravity module. Unexecuted native suites are not passes. |
-| [41262679047](https://github.com/jeong-sik/masc/actions/runs/41262679047) | `a52c4d149a9f6545401c3e07becc5a5dc12420d3` | Requested the corrected Codex protocol suite, including observer-failure propagation and operator interruption. Conclusion is recorded in PR #47030. |
+| [41262679047](https://github.com/jeong-sik/masc/actions/runs/41262679047) | `a52c4d149a9f6545401c3e07becc5a5dc12420d3` | SUCCESS: corrected Codex protocol suite, 198 cases, including ordinary observer-failure propagation and operator interruption. The later direct stream-observer cancellation fixture is a separate untested delta at this boundary. |
+| [41263657342](https://github.com/jeong-sik/masc/actions/runs/41263657342) | `16e345622b08347a2aac9090b877f1f9ded488b1` | FAILURE: eight suites passed, 234 cases (catalog 28, Antigravity runtime 69, CLI 24, exact lane 5, Fusion 33, verification 22, checkpoint 29, GLM thinking 24). Two of 25 Keeper Antigravity cases failed during setup: dynamic tools lacked a shared context and the fallback runtime lacked its required timeout. Both fixture setup errors are repaired; assertions and production guards are retained. |
 
 Independent source reviews passed the integrated Muse head `5e3b61b848e1e9e4403b8ccf4a9768e547e712df`,
 the final Antigravity layer `7cb26cc755ae4e801b390ca190373b1d7a334bbb`,
 the Codex fixture delta `0ae2947cedf260bea4deab07db8aa8dbf43ed74f`,
 and the original GLM/Kimi/inline deltas. Those statements cover the recorded
 source differences, not compilation, formal GitHub approval or live execution.
+Review responses additionally preserve Muse quota-terminal recovery during
+cancellation, correct Kimi explicit-disable wire expectations, retain Antigravity
+partial responses and raw pre-init usage without admitting a session, and test
+the original cancellation reason through Codex's stream observer. These changes
+and the final OpenRouter dialect require a new exact-head CI run; earlier green
+runs are not promoted to evidence for the new source. The PR descriptions retain
+that run's exact SHA and observed status separately.
 
 The Codex warning was a pre-existing fixture mistake: its first delta opened the
 release gate correctly, but its later completion delta repeated a pre-settlement

@@ -26,6 +26,7 @@ let thinking_control_format_wire : Runtime_schema.thinking_control_format -> str
   | Runtime_schema.Ollama_think -> "ollama-think"
   | Runtime_schema.Reasoning_effort -> "reasoning-effort"
   | Runtime_schema.Reasoning_effort_default_on -> "reasoning-effort-default-on"
+  | Runtime_schema.Reasoning_enabled -> "reasoning-enabled"
 ;;
 
 let anthropic_thinking_control_wire : Runtime_schema.anthropic_thinking_control -> string = function

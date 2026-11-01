@@ -384,6 +384,8 @@ let validate_request_path (config : Provider_config.t) =
      [Reasoning_effort_default_on] additionally declares that omitted depth
      already reasons; its distinct receipt satisfies enable without inventing
      an effort value or claiming that a field was encoded.
+     [Reasoning_enabled] carries either explicit boolean without an effort;
+     an omitted toggle leaves the provider default unspecified.
 
    Absence remains absence: [enable_thinking = None] never invents a policy.
    Explicit disable on a non-reasoning model remains a satisfied no-op, except
@@ -456,7 +458,8 @@ let thinking_control_request_rejection
                   | Capabilities.Chat_template_token _
                   | Capabilities.Ollama_think
                   | Capabilities.Reasoning_effort
-                  | Capabilities.Reasoning_effort_default_on )
+                  | Capabilities.Reasoning_effort_default_on
+                  | Capabilities.Reasoning_enabled )
                 , (false | true) ) -> Some Enable_not_encodable)))
      | Provider_config.Anthropic
      | Provider_config.Kimi
@@ -513,7 +516,8 @@ let thinking_control_request_rejection
       | Capabilities.Thinking_object_only
       | Capabilities.Chat_template_kwargs
       | Capabilities.Chat_template_token _
-      | Capabilities.Ollama_think -> None)
+      | Capabilities.Ollama_think
+      | Capabilities.Reasoning_enabled -> None)
 ;;
 
 (* Operator-facing rejection reason for an unsatisfiable thinking-control

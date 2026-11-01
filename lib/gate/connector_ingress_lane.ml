@@ -23,10 +23,13 @@ type job =
   ; run : unit -> unit
   }
 
+(* Idle lanes are absent from [lanes]. Active starts when dispatch claims a
+   lane, and lasts through callbacks and yields until its FIFO is checked empty. *)
+type lane_phase = Scheduled | Active
+
 type lane_state =
   { jobs : job Queue.t
-  ; mutable scheduled : bool
-  ; mutable active : bool
+  ; mutable phase : lane_phase
   }
 
 type t =
@@ -93,7 +96,6 @@ let take_lane_job t lane state =
     match Queue.take_opt state.jobs with
     | Some job -> Some job
     | None ->
-      state.active <- false;
       Hashtbl.remove t.lanes lane;
       None)
 ;;
@@ -113,11 +115,13 @@ let take_ready_lane t =
     | None -> None
     | Some lane ->
       (match Hashtbl.find_opt t.lanes lane with
-       | Some state when state.scheduled && not state.active ->
-         state.scheduled <- false;
-         state.active <- true;
-         Some (lane, state)
-       | Some _ | None -> None))
+       | Some state ->
+         (match state.phase with
+          | Scheduled ->
+            state.phase <- Active;
+            Some (lane, state)
+          | Active -> None)
+       | None -> None))
 ;;
 
 let rec run_dispatcher t : [ `Stop_daemon ] =
@@ -184,26 +188,19 @@ let submit t ~lane ~event_id run =
       match t.lifecycle with
       | `Closed -> Error Owner_unavailable
       | `Open ->
-        let state =
-          match Hashtbl.find_opt t.lanes lane with
-          | Some state -> state
-          | None ->
-            let state =
-              { jobs = Queue.create (); scheduled = false; active = false }
-            in
-            Hashtbl.add t.lanes lane state;
-            state
-        in
-        Queue.add { event_id; run } state.jobs;
-        let notify =
-          if state.active || state.scheduled
-          then false
-          else (
-            state.scheduled <- true;
-            Queue.add lane t.ready;
-            true)
-        in
-        Ok notify)
+        let job = { event_id; run } in
+        (match Hashtbl.find_opt t.lanes lane with
+         | Some state ->
+           (* Scheduled lanes already have a ready key. Active lanes retain
+              their worker even when its callback has emptied the FIFO. *)
+           Queue.add job state.jobs;
+           Ok false
+         | None ->
+           let state = { jobs = Queue.create (); phase = Scheduled } in
+           Queue.add job state.jobs;
+           Hashtbl.add t.lanes lane state;
+           Queue.add lane t.ready;
+           Ok true))
   in
   match submission with
   | Error _ as error -> error

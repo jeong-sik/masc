@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-one are
 implemented as PRs; their source-review evidence is recorded on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -134,7 +134,10 @@ observations from immutable refresh ownership. S4 in
 refresh ownership and extracts its bounded execution module. S6 in
 [#47075](https://github.com/jeong-sik/masc/pull/47075) and
 [#47076](https://github.com/jeong-sik/masc/pull/47076) shares connector observations
-through HTTP aggregation and removes redundant TUI connector fields. Ten candidates remain queued; this ordering does not waive their coverage.
+through HTTP aggregation and removes redundant TUI connector fields. S7 in
+[#47080](https://github.com/jeong-sik/masc/pull/47080) replaces ingress scheduling
+flags with an explicit lane phase. Nine candidates remain queued; this ordering
+does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -158,7 +161,7 @@ through HTTP aggregation and removes redundant TUI connector fields. Ten candida
 | [S4](#s4) | investigate | implemented; execution unverified | Make provider-metrics cache refresh ownership explicit and cancellation-complete |
 | [S5](#s5) | later | implemented; execution unverified | Consolidate full-health refresh bookkeeping into an immutable owned state machine |
 | [S6](#s6) | later | implemented; execution unverified | Give connector status a common typed projection before JSON aggregation |
-| [S7](#s7) | later | candidate | Replace connector ingress scheduling flag combinations with explicit lane lifecycle |
+| [S7](#s7) | later | implemented; execution unverified | Replace connector ingress scheduling flag combinations with explicit lane lifecycle |
 | [S8](#s8) | next | in review | Separate durable provider-history decoding and daily projection from journal IO |
 | [R1](#r1) | later | candidate | Credential batch ownership projection |
 | [R2](#r2) | later | candidate | Fusion decision event ownership |
@@ -1600,7 +1603,7 @@ its mutable FIFO. submit, take_ready_lane, take_lane_job and close must preserve
 relationship between queue membership and these flags, including combinations the type
 permits but scheduling does not use.
 
-Change: Replace the flag product with a closed Scheduled/Running lane state (and only an
+Change: Replace the flag product with a closed Scheduled/Active lane state (and only an
 explicit idle state if genuinely required). Factor locked
 acceptance/dispatch/completion/close decisions so they return explicit
 notification/start/failure work; keep Queue, Eio condition/fibers, callback execution
@@ -1622,6 +1625,7 @@ Consumers:
 [lib/server/server_discord_in_process_gateway.ml](../../../lib/server/server_discord_in_process_gateway.ml).
 
 Scenarios:
+[test/test_discord_gateway_client.ml](../../../test/test_discord_gateway_client.ml),
 [test/test_server_slack_trigger_policy.ml](../../../test/test_server_slack_trigger_policy.ml),
 [test/test_server_discord_trigger_policy.ml](../../../test/test_server_discord_trigger_policy.ml).
 **Not executed in this audit.**
@@ -1630,6 +1634,26 @@ Ordering rationale: A narrow closed-state refactor removes invalid combinations 
 challenging legitimate mutable queue ownership. Existing connector-path tests verify
 durable accept and exact event identity; add FIFO/owner-release scenarios only where
 direct behavioral coverage is absent.
+
+Current-source continuation (2026-11-01, parent
+`fd04a7982d3f5cee765860047e29f14e00a69354`):
+[#47080](https://github.com/jeong-sik/masc/pull/47080) replaces the private boolean
+product with `Scheduled | Active`. An absent lane is idle. Dispatch claims a
+scheduled lane before forking its worker; active ownership persists while a
+callback runs or yields with an empty FIFO. Submissions to either tracked phase
+append without another ready key or notification. Only a new lane schedules work.
+FIFO queues, mutex, condition, fibers, callbacks and switch-release cleanup retain
+their existing ownership. Cancellation before release keeps the existing admission
+behavior; this is not a new switch-availability policy.
+
+The direct gateway suite already covers lane isolation/FIFO, callback failure and
+continuation, dispatcher lifetime and rejection after release. Its weak single-job
+release assertion is strengthened to block one active callback, enqueue three more
+jobs across two lanes, then cancel the owner before yielding. It requires one
+`Callback_cancelled` for the active event, one `Owner_released` per queued event,
+no queued execution, same-lane report FIFO and protected failure observers. It
+does not impose report ordering between lanes. Source review and syntax checks
+are recorded on the PR; typechecking and behavior execution remain unverified.
 
 ### S8
 

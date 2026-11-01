@@ -5,9 +5,9 @@ in [PR #47077](https://github.com/jeong-sik/masc/pull/47077), layer 6 of Native
 Stack #47016. The full caller/binding hard cut remains open.
 
 The old TOML projector dropped `supported_models`. Both raw and selected configs
-therefore lost an exact declared allow-list. A second projector used by selected
-bindings also let a provider-independent model without a preset inherit its
-provider's tool support, although the same bare lookup declared no such support.
+therefore lost an exact declared allow-list. Selected-binding resolution also
+let a provider-independent model without a preset inherit its provider's tool
+support, although the same bare lookup declared no such support.
 Four committed public-entry regressions reproduced these differences before
 production sources changed.
 

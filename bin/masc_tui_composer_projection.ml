@@ -42,12 +42,26 @@ let target_of_state (state : Masc_tui_types.state) =
 let focus_of_state (state : Masc_tui_types.state) =
   if state.composer_focused then Composer.Focused else Composer.Unfocused
 
+let draft_for_target (state : Masc_tui_types.state) = function
+  | Composer.No_target -> "", 0
+  | Composer.Ready keeper | Composer.Unreachable {keeper; _} ->
+      if state.msg_target_keeper_name = Some keeper then
+        Masc_tui_message_input.contents state.msg_input,
+        List.length state.msg_attachments
+      else
+        match List.assoc_opt
+            (Masc_tui_types.chat_input_workspace state, keeper) state.msg_drafts with
+        | None -> "", 0
+        | Some draft -> draft.kcd_text, List.length draft.kcd_attachments
+
 let of_state (state : Masc_tui_types.state) : Composer.t =
-  { Composer.target = target_of_state state
+  let target = target_of_state state in
+  let draft, staged_images = draft_for_target state target in
+  { Composer.target
   ; reading = source_reading state
   ; focus = focus_of_state state
-  ; draft = Masc_tui_message_input.contents state.msg_input
-  ; staged_images = List.length state.msg_attachments
+  ; draft
+  ; staged_images
   }
 
 let classify_key (state : Masc_tui_types.state) key =

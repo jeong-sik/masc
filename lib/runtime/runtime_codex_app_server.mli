@@ -555,4 +555,16 @@ val run_turn :
 (** [config.admission_timeout_s] finitely bounds initialization, account
     admission, thread preparation, and the complete [turn/start] write. The
     model's [config.timeout_s] takes authority only after that dispatch
-    succeeds. *)
+    succeeds.
+
+    Registered dynamic-tool workers settle before the turn returns, including
+    refusal at an already-closed terminal gate. Only handlers that crossed
+    that gate produce their original tool outcome; registration does not
+    grant permission for another effect after terminal closure. A peer
+    failure cannot be hidden by an earlier completed or deferred host stop.
+    Among host stops, failure takes priority over completion, then checkpoint
+    yield; an earlier non-host failure, including the outer protocol reader's
+    error before worker drain, remains authoritative. No tool effect
+    is replayed to make this decision. During a scheduling handoff, a sole
+    completed tool may leave the natural vendor turn running. Its completion
+    still participates if an admitted peer stops, whichever settles first. *)

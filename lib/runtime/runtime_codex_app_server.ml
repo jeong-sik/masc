@@ -1737,6 +1737,28 @@ let host_stop_of_error = function
   | Runtime_shutting_down | Process_exited _ | Timeout _ -> None
 ;;
 
+let prefer_tool_error ~previous next =
+  match host_stop_of_error previous, host_stop_of_error next with
+  | None, (None | Some _) -> previous
+  | Some previous_stop, Some next_stop ->
+    (match previous_stop, next_stop with
+     | Terminal_tool_boundary {outcome = Terminal_failed _; _},
+       (Repeated_tool_call _ | Terminal_tool_boundary _) -> previous
+     | (Repeated_tool_call _
+       | Terminal_tool_boundary {outcome = Terminal_completed | Durable_stimulus_deferred; _}),
+       Terminal_tool_boundary {outcome = Terminal_failed _; _} -> next
+     | Terminal_tool_boundary {outcome = Terminal_completed; _},
+       (Repeated_tool_call _
+       | Terminal_tool_boundary {outcome = Terminal_completed | Durable_stimulus_deferred; _}) -> previous
+     | (Repeated_tool_call _ | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}),
+       Terminal_tool_boundary {outcome = Terminal_completed; _} -> next
+     | (Repeated_tool_call _ | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}),
+       (Repeated_tool_call _ | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> previous)
+  | Some (Terminal_tool_boundary {outcome = Terminal_failed _; _}), None -> previous
+  | Some (Repeated_tool_call _
+         | Terminal_tool_boundary {outcome = Terminal_completed | Durable_stimulus_deferred; _}), None -> next
+;;
+
 (* Keep the RPC reader alive while tools execute. Codex's functions.exec can
    yield a cell and issue another dynamic call before the first one returns.
    Running a handler in the reader serialized even Concurrent tools, and a
@@ -1757,6 +1779,7 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
       let vendor_terminal = ref None in
       let vendor_closed = ref false in
       let stopped = ref None in
+      let handoff_completion = ref None in
       let close_delivery () =
         if not !vendor_closed then begin
           vendor_closed := true;
@@ -1902,8 +1925,18 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
              | Some (Terminal_tool_boundary
                  {outcome = Durable_stimulus_deferred | Terminal_failed _; _})
              | Some (Repeated_tool_call _) | None -> false in
-           if not scheduling_terminal && Option.is_none !stopped then
-             stopped := Some error
+           let previous = match !stopped with
+             | Some _ as stopped -> stopped
+             | None -> !handoff_completion in
+           let preferred = match previous with
+             | None -> error
+             | Some previous -> prefer_tool_error ~previous error in
+           if scheduling_terminal && Option.is_none !stopped then
+             (* The notice leaves queued input unclaimed. Preserve a sole
+                completion for arbitration without stopping the vendor's
+                progress reply; a later peer stop must still see it. *)
+             handoff_completion := Some preferred
+           else stopped := Some preferred
          | Ok () -> ())
       in
       let rec receive () =
@@ -1988,6 +2021,14 @@ let with_turn_dispatch io ~await_handoff ~handoff ~terminal_tools_closed
             receive ()
       in
       let result = run { io with receive } in
+      (* An outer protocol error precedes the remaining drain, but an
+         already-settled failure may precede that protocol error too. *)
+      (match result with
+       | Ok _ -> ()
+       | Error error ->
+         stopped := Some (match !stopped with
+           | None -> error
+           | Some previous -> prefer_tool_error ~previous error));
       (* Any protocol terminal can return from the outer consumer, including
          a malformed frame or unsupported request. Settle admitted workers
          before releasing their turn scope, retaining results on every such

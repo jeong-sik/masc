@@ -502,6 +502,190 @@ let test_concurrent_tool_does_not_block_status () =
           (List.rev !order))
 ;;
 
+let test_concurrent_tool_stops_keep_authoritative_outcome ?(scheduling_handoff = false) ~first ~second
+    ~(expected : Runtime_codex_app_server.host_stop option) () =
+  let second_started, signal_second_started = Eio.Promise.create () in
+  let first_written, signal_first_written = Eio.Promise.create () in
+  let handoff_ready, signal_handoff_ready = Eio.Promise.create () in
+  let effects = ref [] and responses = ref [] in
+  let tool = dispatch_tool
+    ~execution_mode:(fun _ -> Agent_core.Tool_contract.Concurrent)
+    ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+    (fun ~call_id _ ->
+      let stop =
+        if call_id = "call-1" then begin
+          Eio.Promise.await second_started;
+          if scheduling_handoff then Eio.Promise.await handoff_ready;
+          first
+        end else begin
+          Eio.Promise.resolve signal_second_started ();
+          Eio.Promise.await first_written;
+          second
+        end
+      in
+      effects := call_id :: !effects;
+      { (tool_response call_id) with
+        success = not (Option.exists Runtime_official_client_tool.host_stop_failed stop);
+        abort_turn = stop;
+        on_response_sent = Some (fun () ->
+          responses := call_id :: !responses;
+          if call_id = "call-1" then Eio.Promise.resolve signal_first_written ()) }) in
+  with_fixture ~await_dynamic_tools:false
+    [init_result; account_chatgpt; thread_result; turn_result;
+     dispatch_request 1 1; dispatch_request 2 2; item_completed; turn_completed]
+    (fun path ->
+      before_fixture_terminal path (if scheduling_handoff then 3 else 2);
+      let await_handoff = if not scheduling_handoff then None else Some (fun () ->
+        Eio.Promise.await second_started;
+        Eio.Promise.resolve signal_handoff_ready ();
+        true) in
+      let actual = run_fixture ?await_handoff ~dynamic_tools:[tool] path in
+      check (list string) "both admitted tool handlers run once" ["call-1"; "call-2"]
+        (List.rev !effects);
+      check (list string) "both original responses are written once" ["call-1"; "call-2"]
+        (List.rev !responses);
+      match expected, actual with
+      | None, Ok result -> check int "normal provider completion remains available" 2 result.dynamic_tool_calls
+      | Some expected, Error (Runtime_codex_app_server.Stopped_by_host actual) ->
+        (* This is the same consumer used by Keeper_codex_runtime's settled
+           host-stop branch, rather than a test-only outcome projection. *)
+        let consumed = Keeper_official_client_host.host_stop_result
+          ~runtime_id:"codex.fixture" ~model:"fixture" ~session_id:"thread-1"
+          ~turn_id:"turn-1" ~provider_turn_ordinal:1 ~turns_used:1
+          ~latency_ms:None ~request_context:None actual in
+        (match expected, consumed with
+         | Terminal_tool_boundary {outcome = Terminal_failed _; _}, Error _ -> ()
+         | Terminal_tool_boundary {outcome = Terminal_completed; _},
+           Ok {Runtime_agent.stop_reason = Completed _; _} -> ()
+         | Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _},
+           Ok {Runtime_agent.stop_reason = Yielded_to_durable_stimulus _; _} -> ()
+         | Repeated_tool_call _, Ok {Runtime_agent.stop_reason = Yielded_after_repeated_tool_call _; _} -> ()
+         | _ -> fail "the actual Keeper consumer received the wrong authoritative outcome");
+        check bool "the exact authoritative stop is preserved" true (actual = expected)
+      | _, Error error -> fail (Runtime_codex_app_server.error_to_string error)
+      | Some _, Ok _ -> fail "the provider completed instead of preserving the host outcome")
+;;
+
+let test_concurrent_tool_stop_orderings () =
+  let deferred : Runtime_codex_app_server.host_stop =
+    Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred} in
+  let completed : Runtime_codex_app_server.host_stop =
+    Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed} in
+  List.iter (fun effect_disposition ->
+    let failed : Runtime_codex_app_server.host_stop =
+      Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_failed
+        {failure_class=Tool_result.Runtime_failure;effect_disposition;
+         detail=Keeper_terminal_effect_detail.Tool_failed
+           {internal_tool_name="masc_probe";message="original peer failure"}}} in
+    List.iter (fun (first,second) ->
+      test_concurrent_tool_stops_keep_authoritative_outcome
+        ~first:(Some first) ~second:(Some second) ~expected:(Some failed) ())
+      [deferred,failed; failed,deferred; completed,failed; failed,completed])
+    [Tool_result.Proven_pre_effect; Proven_post_effect; Effect_outcome_unknown];
+  List.iter (fun (first,second,expected) ->
+    test_concurrent_tool_stops_keep_authoritative_outcome
+      ~first:(Some first) ~second:(Some second) ~expected:(Some expected) ())
+    [deferred,completed,completed; completed,deferred,completed; deferred,deferred,deferred];
+  test_concurrent_tool_stops_keep_authoritative_outcome ~first:None ~second:None ~expected:None ()
+;;
+
+let concurrent_handoff_stop_scenarios () =
+  let deferred : Runtime_codex_app_server.host_stop =
+    Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred} in
+  let completed : Runtime_codex_app_server.host_stop =
+    Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed} in
+  let repeated : Runtime_codex_app_server.host_stop =
+    Repeated_tool_call {tool_name="masc_probe";repeated_count=2} in
+  let scenario first second expected = Some first, Some second, Some expected in
+  [ scenario deferred completed completed; scenario completed deferred completed
+  ; scenario repeated completed completed; scenario completed repeated completed
+  ; scenario deferred deferred deferred
+  ; None, Some completed, None ]
+  @ List.concat_map (fun effect_disposition ->
+      let failed : Runtime_codex_app_server.host_stop =
+        Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_failed
+          {failure_class=Tool_result.Runtime_failure;effect_disposition;
+           detail=Keeper_terminal_effect_detail.Tool_failed
+             {internal_tool_name="masc_probe";message="original handoff peer failure"}}} in
+      [scenario completed failed failed; scenario failed completed failed])
+      [Tool_result.Proven_pre_effect; Proven_post_effect; Effect_outcome_unknown]
+;;
+
+let test_concurrent_handoff_stops_keep_authoritative_outcome () =
+  List.iter (fun (first, second, expected) ->
+    test_concurrent_tool_stops_keep_authoritative_outcome
+      ~scheduling_handoff:true ~first ~second ~expected ())
+    (concurrent_handoff_stop_scenarios ())
+;;
+
+let outer_protocol_drain_scenarios () =
+  let open Runtime_codex_app_server in
+  let stops : Runtime_codex_app_server.host_stop list =
+    [ Terminal_tool_boundary {tool_name="masc_probe";outcome=Terminal_completed}
+    ; Terminal_tool_boundary {tool_name="masc_probe";outcome=Durable_stimulus_deferred}
+    ; Repeated_tool_call {tool_name="masc_probe";repeated_count=2} ]
+    @ List.map (fun effect_disposition ->
+        Runtime_codex_app_server.Terminal_tool_boundary
+          {tool_name="masc_probe";outcome=Terminal_failed
+            {failure_class=Tool_result.Runtime_failure;effect_disposition;
+             detail=Keeper_terminal_effect_detail.Tool_failed
+               {internal_tool_name="masc_probe";message="peer settled after protocol failure"}}})
+        [Tool_result.Proven_pre_effect; Proven_post_effect; Effect_outcome_unknown] in
+  let failures =
+    [ {|{"id":"unsupported-request","method":"fixture/unsupported","params":{}}|},
+      Runtime_codex_app_server.Unsupported_server_request "fixture/unsupported"
+    ; {|{"id":99,"result":{}}|},
+      Runtime_codex_app_server.Protocol_error
+        {stage="turn";detail="received an unsolicited JSON-RPC response"} ] in
+  List.concat_map (fun (failure, expected) ->
+    List.map (fun stop -> failure, expected, stop) stops) failures
+;;
+
+let run_outer_protocol_error_survives_tool_drain ~failure ~expected ~stop () =
+    let started, signal_started = Eio.Promise.create () in
+    let closed, signal_closed = Eio.Promise.create () in
+    let handlers = ref 0 and response_writes = ref 0 and retained = ref [] in
+    let tool = dispatch_tool
+      ~execution_mode:(fun _ -> Agent_core.Tool_contract.Concurrent)
+      ~call_effect:(fun _ -> Agent_core.Tool.Effect_possible)
+      (fun ~call_id:_ _ ->
+        incr handlers;
+        Eio.Promise.resolve signal_started ();
+        Eio.Promise.await closed;
+        {(tool_response "original-after-protocol-failure") with abort_turn=Some stop;
+         success=not (Runtime_official_client_tool.host_stop_failed stop);
+         on_response_sent=Some (fun () -> incr response_writes)}) in
+    with_fixture ~await_dynamic_tools:false
+      [init_result; account_chatgpt; thread_result; turn_result;
+       dispatch_request 1 1; agent_message_delta; failure]
+      (fun path ->
+        let on_stream_event = function
+          | Runtime_codex_app_server.Text_delta _ -> Eio.Promise.await started
+          | Runtime_codex_app_server.Tool_delivery_closed _ -> Eio.Promise.resolve signal_closed ()
+          | _ -> () in
+        let result = run_fixture ~dynamic_tools:[tool] ~on_stream_event
+          ~on_undelivered_tool_result:(fun receipt -> retained := receipt :: !retained; Ok ()) path in
+        check int "original handler runs once before protocol failure" 1 !handlers;
+        check int "closed vendor receives no late response" 0 !response_writes;
+        (match !retained with
+         | [receipt] ->
+           check string "original identity retained once" "call-1"
+             receipt.Runtime_codex_app_server.call_id;
+           check string "original bytes retained after protocol failure" "original-after-protocol-failure"
+             Yojson.Safe.Util.(receipt.response |> member "result" |> member "contentItems"
+               |> to_list |> List.hd |> member "text" |> to_string)
+         | _ -> fail "protocol failure lost or duplicated the admitted result");
+        match result with
+        | Error actual -> check bool "earlier outer protocol error remains exact" true (actual = expected)
+        | Ok _ -> fail "protocol failure cannot become a successful turn")
+;;
+
+let test_outer_protocol_error_survives_tool_drain () =
+  List.iter (fun (failure, expected, stop) ->
+    run_outer_protocol_error_survives_tool_drain ~failure ~expected ~stop ())
+    (outer_protocol_drain_scenarios ())
+;;
+
 let test_serial_tool_fences_concurrent_calls () =
   let started, signal_started = Eio.Promise.create () in
   let release, signal_release = Eio.Promise.create () in
@@ -9850,6 +10034,12 @@ let () =
             (fun () -> test_dynamic_tool_callback ())
         ; test_case "concurrent status releases a pending read" `Quick
             test_concurrent_tool_does_not_block_status
+        ; test_case "concurrent peer stops preserve authoritative Keeper outcomes" `Quick
+            test_concurrent_tool_stop_orderings
+        ; test_case "handoff preserves completed peers in either settlement order" `Quick
+            test_concurrent_handoff_stops_keep_authoritative_outcome
+        ; test_case "outer protocol failure survives pending tool drain" `Quick
+            test_outer_protocol_error_survives_tool_drain
         ; test_case "serial tool fences concurrent calls" `Quick
             test_serial_tool_fences_concurrent_calls
         ; test_case "completed vendor turn retains pending tool receipt" `Quick

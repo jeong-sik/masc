@@ -193,31 +193,87 @@ let test_ingress_rejects_submission_after_owner_release () =
     | Ok () -> fail "released ingress accepted callback")
 
 let test_ingress_accounts_for_accepted_work_at_owner_release () =
+  let exception Owner_cancelled in
   Eio_main.run (fun _env ->
-    let executed = ref false in
+    let queued_runs = ref [] in
     let failures = ref [] in
-    Eio.Switch.run (fun sw ->
-      let ingress =
-        Ingress.create
-          ~sw
-          ~on_failure:(fun failure -> failures := failure :: !failures)
-          ()
-      in
-      submit_exn
-        ingress
-        ~lane:(Ingress.Keeper_lane "keeper-a")
-        ~event_id:{ source = "test"; opaque_id = "owner-release" }
-        (fun () -> executed := true));
-    let released =
-      List.exists
-        (fun failure ->
-           match failure.Ingress.reason with
-           | Ingress.Owner_released -> true
-           | Ingress.Callback_raised _ | Ingress.Callback_cancelled _ -> false)
-        !failures
+    let lane_a = Ingress.Keeper_lane "keeper-a" in
+    let lane_b = Ingress.Keeper_lane "keeper-b" in
+    let event opaque_id : Ingress.event_id = { source = "test"; opaque_id } in
+    let active_event = event "a1" in
+    let queued = [ lane_a, event "a2"; lane_a, event "a3"; lane_b, event "b1" ] in
+    let first_started, resolve_first_started = Eio.Promise.create () in
+    let blocked, _ = Eio.Promise.create () in
+    let owner_cancelled =
+      try
+        Eio.Switch.run (fun sw ->
+          let ingress =
+            Ingress.create
+              ~sw
+              ~on_failure:(fun failure ->
+                Eio.Fiber.check ();
+                failures := failure :: !failures)
+              ()
+          in
+          submit_exn ingress ~lane:lane_a ~event_id:active_event (fun () ->
+            Eio.Promise.resolve resolve_first_started ();
+            Eio.Promise.await blocked);
+          Eio.Promise.await first_started;
+          (* Submission only broadcasts to the run queue. Without yielding,
+             these jobs remain queued until the owner is cancelled. *)
+          List.iter
+            (fun (lane, event_id) ->
+               submit_exn ingress ~lane ~event_id (fun () ->
+                 queued_runs := event_id :: !queued_runs))
+            queued;
+          Eio.Switch.fail sw Owner_cancelled);
+        false
+      with Owner_cancelled -> true
     in
-    check bool "accepted work executed or received terminal failure" true
-      (!executed || released))
+    check bool "owner cancellation retains the original exception" true owner_cancelled;
+    check int "queued callbacks never execute" 0 (List.length !queued_runs);
+    let observed = List.rev !failures in
+    check int "every accepted event has exactly one failure" 4 (List.length observed);
+    let failure_for lane event_id =
+      let matching =
+        List.filter
+          (fun (failure : Ingress.failure) -> failure.event_id = event_id)
+          observed
+      in
+      match matching with
+      | [ failure ] ->
+        check bool "failure retains its Keeper lane" true (failure.lane = lane);
+        failure
+      | matches ->
+        failf
+          "expected one failure for %s, got %d"
+          (Ingress.event_id_to_string event_id)
+          (List.length matches)
+    in
+    check bool "active callback reports cancellation" true
+      (match (failure_for lane_a active_event).reason with
+       | Ingress.Callback_cancelled _ -> true
+       | Ingress.Callback_raised _ | Ingress.Owner_released -> false);
+    List.iter
+      (fun (lane, event_id) ->
+         check bool "queued callback reports owner release" true
+           (match (failure_for lane event_id).reason with
+            | Ingress.Owner_released -> true
+            | Ingress.Callback_raised _ | Ingress.Callback_cancelled _ -> false))
+      queued;
+    let released_a =
+      List.filter_map
+        (fun (failure : Ingress.failure) ->
+           match failure.reason with
+           | Ingress.Owner_released when failure.lane = lane_a ->
+             Some failure.event_id.opaque_id
+           | Ingress.Owner_released
+           | Ingress.Callback_raised _
+           | Ingress.Callback_cancelled _ -> None)
+        observed
+    in
+    check (list string) "queued failures preserve same-lane FIFO"
+      [ "a2"; "a3" ] released_a)
 
 (* -- the policy the step loop judges by -------------------------- *)
 

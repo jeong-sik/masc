@@ -4810,14 +4810,18 @@ let test_tools_prepared_selector_scope_and_keeper_contract () =
     Dashboard_snapshot.reset_for_test ();
     expect_json config None)
 
-let tools_h1_wire_response ~router ~headers target =
+let tools_h1_wire_response ?body ~router ~headers target =
   let output = Buffer.create 4096 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     Lib.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+  let method_name, meth, body, body_headers = match body with
+    | None -> "GET", `GET, "", []
+    | Some body -> "POST", `POST, body,
+      ["content-type", "application/json"; "content-length", string_of_int (String.length body)] in
   let request = Httpun.Request.create
-    ~headers:(Httpun.Headers.of_list (("host", "localhost:8935") :: headers)) `GET target in
-  let raw = Printf.sprintf "GET %s HTTP/1.1\r\n%s" target
-    (Httpun.Headers.to_string request.headers) in
+    ~headers:(Httpun.Headers.of_list (("host", "localhost:8935") :: (body_headers @ headers))) meth target in
+  let raw = Printf.sprintf "%s %s HTTP/1.1\r\n%s%s" method_name target
+    (Httpun.Headers.to_string request.headers) body in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in
   ignore (Httpun.Server_connection.read_eof connection input ~off:0 ~len:(Bigstringaf.length input));
   let rec drain () =
@@ -4841,6 +4845,42 @@ let tools_h1_wire_response ~router ~headers target =
     String.lowercase_ascii (String.sub line 0 colon),
     String.trim (String.sub line (colon + 1) (String.length line - colon - 1))) in
   status, headers, String.sub raw (boundary + 4) (String.length raw - boundary - 4)
+
+let test_new_skill_authoring_routes_are_read_only () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  Fun.protect ~finally:(fun () -> Server_auth.For_testing.restore_server_state previous_state) (fun () ->
+    let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
+    let config = Lib.Mcp_server.workspace_config state in
+    ignore (Workspace.init config ~agent_name:None);
+    Server_auth.For_testing.restore_server_state (Some state);
+    Auth.save_auth_config config.base_path
+      { Types.default_auth_config with enabled = true; require_token = true };
+    let token = match Auth.create_token config.base_path ~agent_name:"skill-author" ~role:Types.Admin with
+      | Ok (token, _) -> token | Error error -> fail (Types.masc_error_to_string error) in
+    let headers = ["authorization", "Bearer " ^ token; "accept-encoding", "identity"] in
+    let router = Server_routes_http_routes_dashboard.add_routes ~sw
+      ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
+    let tool_status, _, tool_body = tools_h1_wire_response ~router ~headers "/api/v1/skills/editor/tools" in
+    check int "operator can discover actual authoring contracts" 200 tool_status;
+    let open Yojson.Safe.Util in
+    let tools = Yojson.Safe.from_string tool_body |> member "tools" |> to_list in
+    check bool "canonical lane capability is discoverable" true
+      (List.exists (fun tool -> tool |> member "name" |> to_string = "keeper_lane_status") tools);
+    let source_text = "---\nname: new-draft\ndescription: Preview an unpublished procedure.\n---\n\nKeep the evidence.\n" in
+    let body = Yojson.Safe.to_string (`Assoc ["source_id", `String "workspace"; "kind", `String "instruction";
+      "package_id", `String "new-draft"; "source_text", `String source_text]) in
+    let status, _, payload = tools_h1_wire_response ~body ~router ~headers "/api/v1/skills/editor/preview-new" in
+    check int "preview does not require an existing package reference" 200 status;
+    let profile = Yojson.Safe.from_string payload |> member "preview" |> member "profile" in
+    check string "preview names the unpublished package" "new-draft"
+      (profile |> member "reference" |> member "identity" |> member "package_id" |> to_string);
+    let mismatched_body = Yojson.Safe.to_string (`Assoc ["source_id", `String "workspace";
+      "kind", `String "composition"; "package_id", `String "new-draft"; "source_text", `String source_text]) in
+    let mismatch, _, _ = tools_h1_wire_response ~body:mismatched_body ~router ~headers "/api/v1/skills/editor/preview-new" in
+    check int "HTTP preview enforces explicit authoring intent" 400 mismatch;
+    check bool "preview writes no candidate package" false
+      (Sys.file_exists (Filename.concat config.base_path "skills/new-draft")))
 
 let test_pause_status_route_preserves_invalid_state () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -8708,6 +8748,8 @@ let () =
             test_tools_prepared_selector_scope_and_keeper_contract;
           test_case "tools routes serve prepared encodings and conditional responses" `Quick
             test_tools_routes_serve_prepared_http_representations;
+          test_case "new Skill authoring routes preview without publication" `Quick
+            test_new_skill_authoring_routes_are_read_only;
           test_case "authenticated execution routes reuse prepared encodings" `Quick
             test_execution_routes_serve_prepared_http_representations;
           test_case "cached dashboard reads send the kept bytes" `Quick

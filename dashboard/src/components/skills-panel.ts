@@ -5,13 +5,13 @@ import { useSignal } from '@preact/signals'
 import { SkillSourceInspector } from './skill-source-inspector'
 import { SkillAsyncEvidenceView } from './skill-async-evidence-view'
 import { SkillNodeEvidenceView } from './skill-node-evidence-view'
+import { SkillFlowView } from './skill-flow-view'
+import { SkillCreateForm, createReceiptMessage } from './skill-create-form'
 import {
   classifySkillEditorError,
-  createSkill,
   fetchAsyncRequestObservation,
   fetchSkills,
   fetchSkillEvidence,
-  fetchWritableSkillSources,
   previewSkillSource,
   readSkillSource,
   saveSkillSource,
@@ -166,19 +166,6 @@ export function resourceReadBoundLabel(config: SkillSnapshotConfig): string {
   return `resource read max ${formatBytes(config.resource_read_max_bytes)}`
 }
 
-/** A shadowed create is written and published, but a package earlier in
- * the catalog holds the name, so Keepers listing by name see that one; the
- * line names it. */
-export function createReceiptMessage(receipt: SkillCreateReceipt): string {
-  switch (receipt.status) {
-    case 'created_and_published':
-      return 'created and published'
-    case 'created_but_shadowed':
-      return `created and published, but shadowed by ${receipt.winner.source_id}/${receipt.winner.package_id}: Keepers see that one by name`
-    case 'created_but_unpublished':
-      return `created but NOT published: ${receipt.reason}`
-  }
-}
 
 export function stateMessage(state: Exclude<SkillsResponse['state'], 'ready'>): string {
   switch (state) {
@@ -270,42 +257,6 @@ function SkillPerformanceView({ statistics, io }: {
   `
 }
 
-function SkillFlowView({ profile }: { profile: SkillSurfaceProfile }) {
-  const flow = profile.flow
-  if (!flow) {
-    return html`<div class="ss-muted">Instruction body → keeper_skill → model-orchestrated tools</div>`
-  }
-  return html`
-    <div class="mt-2 flex items-stretch gap-2 overflow-x-auto pb-2" data-testid="skill-flow">
-      ${flow.batches.map((batch, index) => html`
-        <div class="flex items-center gap-2" key=${batch.index}>
-          <div class="min-w-48 rounded border border-[var(--color-border)] bg-[var(--color-surface-raised)] p-2">
-            <div class="mb-2 text-3xs uppercase tracking-wide text-[var(--color-text-muted)]">
-              batch ${batch.index} · ${batch.execution_mode}
-            </div>
-            <div class="space-y-1">
-              ${batch.node_ids.map(nodeId => {
-                const node = flow.nodes.find(candidate => candidate.id === nodeId)
-                if (!node) return null
-                const dependency = node.dependencies.length === 0
-                  ? 'root'
-                  : node.dependencies.map(edge => `${edge.node_id}:${edge.kind}`).join(', ')
-                return html`
-                  <div class="rounded border border-[var(--color-border-subtle)] px-2 py-1" key=${node.id}>
-                    <div class="font-semibold">${node.id}</div>
-                    <div class="mono text-3xs">${node.tool_name}</div>
-                    <div class="ss-muted text-3xs">depends ${dependency}</div>
-                  </div>
-                `
-              })}
-            </div>
-          </div>
-          ${index < flow.batches.length - 1 ? html`<span class="text-lg text-[var(--color-accent)]">→</span>` : null}
-        </div>
-      `)}
-    </div>
-  `
-}
 
 function runField(run: Record<string, unknown>, name: string): string {
   const value = run[name]
@@ -718,11 +669,6 @@ export function SkillSourceEditor({ reference, onPublished, onMutation, observat
   `
 }
 
-function skillTemplate(kind: 'instruction' | 'composition', name: string, description: string, body: string): string {
-  const frontmatter = `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\n`
-  if (kind === 'instruction') return `${frontmatter}# ${name}\n\n${body}\n`
-  return `${frontmatter}# ${name}\n\n${body}\n\n\`\`\`toml composition\n[[compositions]]\nname = ${JSON.stringify(name)}\ndescription = ${JSON.stringify(description)}\nexecution = "inline"\n\n[[compositions.nodes]]\nid = "lane"\ntool = "keeper_lane_status"\n[compositions.nodes.input]\nkind = "literal"\nvalue = {}\n\`\`\`\n`
-}
 
 interface SkillsObservationOwner {
   readonly mount: number
@@ -819,13 +765,7 @@ function SkillsObservationPanel({ owner, onMutation }: {
   const asyncObservationError = useSignal<string | null>(null)
   const expanded = useSignal<string | null>(null)
   const createOpen = useSignal(false)
-  const createKind = useSignal<'instruction' | 'composition'>('instruction')
-  const createName = useSignal('')
-  const createDescription = useSignal('')
-  const createBody = useSignal('Write the repeatable procedure and success criteria here.')
-  const writableSources = useSignal<readonly { source_id: string }[]>([])
-  const createSource = useSignal('')
-  const createStatus = useSignal<string | null>(null)
+  const createMounted = useSignal(false)
   const editorNotice = useSignal<string | null>(null)
   const active = useRef(true)
   const catalogGeneration = useRef(0)
@@ -895,63 +835,16 @@ function SkillsObservationPanel({ owner, onMutation }: {
       ${error.value ? html`<div role="alert">Catalog refresh failed: ${error.value}</div>` : null}
       <div class="mb-3 flex items-center justify-between gap-2">
         <strong>Skill Studio</strong>
-        <button class="ss-btn" type="button" onClick=${async () => {
+        <button class="ss-btn" type="button" aria-expanded=${createOpen.value} onClick=${() => {
+          createMounted.value = true
           createOpen.value = !createOpen.value
-          if (createOpen.value && writableSources.value.length === 0) {
-            try {
-              const sources = await fetchWritableSkillSources()
-              if (!current()) return
-              writableSources.value = sources
-              createSource.value = writableSources.value[0]?.source_id ?? ''
-            } catch (cause) {
-              if (!current()) return
-              createStatus.value = cause instanceof Error ? cause.message : String(cause)
-            }
-          }
         }}>+ New Skill</button>
       </div>
-      ${createOpen.value ? html`
-        <form class="mb-4 grid gap-2 rounded border border-[var(--color-border)] p-3" data-testid="skill-create" onSubmit=${async (event: SubmitEvent) => {
-          event.preventDefault()
-          if (!current()) return
-          createStatus.value = 'Validating and publishing…'
-          let received = false
-          const requestedIdentity: SkillIdentity = { source_id: createSource.value, package_id: createName.value, name: createName.value }
-          try {
-            const sourceText = skillTemplate(createKind.value, createName.value, createDescription.value, createBody.value)
-            const receipt = await createSkill({
-              source_id: requestedIdentity.source_id,
-              package_id: requestedIdentity.package_id,
-              source_text: sourceText,
-            })
-            received = true
-            onMutation({ kind: 'created', identity: requestedIdentity, receipt })
-            if (!current()) return
-            createStatus.value = createReceiptMessage(receipt)
-            await load()
-          } catch (cause) {
-            if (!received) onMutation({ kind: 'request_error', request: { operation: 'create', identity: requestedIdentity },
-              detail: cause instanceof Error ? cause.message : String(cause) })
-            if (!current()) return
-            createStatus.value = cause instanceof Error ? cause.message : String(cause)
-          }
-        }}>
-          <div class="grid gap-2 md:grid-cols-3">
-            <select class="ss-input" value=${createSource.value} onChange=${(event: Event) => { createSource.value = (event.currentTarget as HTMLSelectElement).value }} required>
-              ${writableSources.value.map(source => html`<option value=${source.source_id}>${source.source_id}</option>`)}
-            </select>
-            <select class="ss-input" value=${createKind.value} onChange=${(event: Event) => { createKind.value = (event.currentTarget as HTMLSelectElement).value as 'instruction' | 'composition' }}>
-              <option value="instruction">Instruction · on demand</option>
-              <option value="composition">Composition · tool flow</option>
-            </select>
-            <input class="ss-input mono" value=${createName.value} placeholder="skill-name" onInput=${(event: Event) => { createName.value = (event.currentTarget as HTMLInputElement).value }} required />
-          </div>
-          <input class="ss-input" value=${createDescription.value} placeholder="When should an agent use this?" onInput=${(event: Event) => { createDescription.value = (event.currentTarget as HTMLInputElement).value }} required />
-          <textarea class="ss-input min-h-24" value=${createBody.value} onInput=${(event: Event) => { createBody.value = (event.currentTarget as HTMLTextAreaElement).value }} />
-          ${createKind.value === 'composition' ? html`<div class="ss-muted">Starter flow: keeper_lane_status. Create it, then use Edit to add validated nodes/dependencies or switch execution to async.</div>` : null}
-          <div class="flex items-center gap-2"><button class="ss-btn" type="submit" disabled=${!createSource.value}>Create + publish</button><span class="ss-muted">${createStatus.value}</span></div>
-        </form>
-      ` : null}
+      ${createMounted.value ? html`<div hidden=${!createOpen.value}>
+        <${SkillCreateForm} isCurrent=${current} onPublished=${load}
+          onReceipt=${(identity: SkillIdentity, receipt: SkillCreateReceipt) => onMutation({ kind: 'created', identity, receipt })}
+          onRequestError=${(identity: SkillIdentity, detail: string) => onMutation({ kind: 'request_error', request: { operation: 'create', identity }, detail })} />
+      </div>` : null}
       ${editorNotice.value ? html`
         <div class="mb-3 text-[var(--color-status-good)]" data-testid="skill-editor-notice">
           ${editorNotice.value}

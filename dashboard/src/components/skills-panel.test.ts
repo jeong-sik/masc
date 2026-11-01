@@ -1,3 +1,4 @@
+import { createReceiptMessage } from './skill-create-form'
 import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
@@ -38,7 +39,6 @@ import { decodeSkillsResponse, SkillsContractError } from '../api/dashboard-skil
 import { ApiRequestError, clearStoredToken, setStoredToken } from '../api/core'
 import {
   capabilityLabel,
-  createReceiptMessage,
   formatBytes,
   kindLabel,
   mergeSkillRows,
@@ -536,18 +536,19 @@ describe('SkillsPanel rejection observability', () => {
       fireEvent.input(view.getByPlaceholderText('When should an agent use this?'), {
         target: { value: 'When a task needs a reproducible check.' },
       })
-      fireEvent.input(view.getByDisplayValue('Write the repeatable procedure and success criteria here.'), {
+      fireEvent.input(view.getByLabelText('Skill instructions'), {
         target: { value: 'Run the focused check and keep its receipt.' },
       })
       fireEvent.click(view.getByRole('button', { name: 'Create + publish' }))
 
-      await view.findByText('created and published')
+      await waitFor(() => expect(view.getByTestId('skill-create-status').textContent).toContain('created and published'))
       expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/skills/editor/create', expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
+          kind: 'instruction',
           source_id: 'workspace',
           package_id: 'first-skill',
-          source_text: '---\nname: first-skill\ndescription: "When a task needs a reproducible check."\n---\n\n# first-skill\n\nRun the focused check and keep its receipt.\n',
+          source_text: '---\nname: \"first-skill\"\ndescription: "When a task needs a reproducible check."\n---\n\n# first-skill\n\nRun the focused check and keep its receipt.\n',
         }),
       }))
       await view.findByRole('button', { name: 'Read instructions for first-skill' })

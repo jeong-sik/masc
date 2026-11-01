@@ -571,7 +571,8 @@ let parse_skill_editor_body body_str =
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
 
 type skill_create_body =
-  { source_id : Skill_source_config.source_id
+  { expected_kind : Server_skill_editor.expected_kind
+  ; source_id : Skill_source_config.source_id
   ; package_id : string
   ; source_text : string
   }
@@ -595,6 +596,10 @@ let parse_skill_create_body body_str =
         |> Result.map_error (fun detail -> "invalid source_id: " ^ detail)
       in
       let* package_id = required "package_id" in
+      let* expected_kind = match Json_util.assoc_member_opt "kind" json with
+        | Some (`String "instruction") -> Ok Server_skill_editor.Instruction_kind
+        | Some (`String "composition") -> Ok Server_skill_editor.Composition_kind
+        | _ -> Error "kind must be instruction or composition" in
       let* source_text =
         match Json_util.assoc_member_opt "source_text" json with
         | Some (`String value) when not (String.equal value "") -> Ok value
@@ -602,7 +607,7 @@ let parse_skill_create_body body_str =
         | Some _ -> Error "source_text must be a string"
         | None -> Error "source_text required"
       in
-      Ok { source_id; package_id; source_text }
+      Ok { expected_kind; source_id; package_id; source_text }
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
@@ -2307,12 +2312,32 @@ let add_routes ~sw ~clock router =
              | _ -> `Assoc ["schema",`String "masc.async-request-status/v1";
                  "status",`String "rejected";"reason",`String "single_submitted_by_and_request_id_required"] in
            Http.Response.json_value ~compress:true ~request:req payload reqd)
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/editor/tools" (fun state _agent_name req reqd ->
+           match Server_skill_editor.authoring_descriptors
+             ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration with
+           | Error detail -> respond_dashboard_error ~status:`Service_unavailable ~request:req reqd detail
+           | Ok descriptors -> Http.Response.json_value ~compress:true ~request:req
+               (Server_skill_editor.authoring_tools_to_yojson descriptors) reqd)
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/editor/preview-new" (fun state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match parse_skill_create_body body_str with
+             | Error message -> respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+             | Ok { expected_kind; source_id; package_id; source_text } ->
+               (match Server_skill_editor.preview_new
+                 ~expected_kind:(Some expected_kind)
+                 ~descriptors:(Server_skill_editor.authoring_descriptors
+                   ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
+                 ~source_id ~package_id source_text with
+                | Error error -> respond_skill_editor_error ~request:req reqd error
+                | Ok preview -> Http.Response.json_value ~compress:true ~request:req
+                    (`Assoc [ "ok", `Bool true; "status", `String "valid"
+                            ; "preview", Server_skill_editor.preview_to_yojson preview ]) reqd)))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/editor/create" (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_skill_create_body body_str with
              | Error message ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd message
-             | Ok { source_id; package_id; source_text } ->
+             | Ok { expected_kind; source_id; package_id; source_text } ->
                let base_path = (Mcp_server.workspace_config state).base_path in
                let refresh () =
                  match Runtime.load_config_observation () with
@@ -2325,6 +2350,7 @@ let add_routes ~sw ~clock router =
                in
                (match
                   Server_skill_editor.create
+                    ~expected_kind:(Some expected_kind)
                     ~descriptors:(Server_skill_editor.authoring_descriptors
                       ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
                     ~base_path

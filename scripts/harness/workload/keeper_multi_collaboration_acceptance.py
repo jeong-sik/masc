@@ -1425,6 +1425,7 @@ def install_composition_fixtures(
         if not published:
             route = SKILL_EDITOR_CREATE_ROUTE
             payload: dict[str, Any] = {
+                "kind": "composition",
                 "source_id": source_id,
                 "package_id": package_id,
                 "source_text": source_text,

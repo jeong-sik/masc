@@ -101,7 +101,7 @@ let test_unavailable_authority_does_not_write () =
   let source_id = match Skill_source_config.source_id_of_string "workspace" with
     | Ok id -> id | Error detail -> fail detail in
   check bool "create fails closed" true
-    (Result.is_error (Editor.create ~descriptors ~base_path ~source_id ~package_id:"new-skill"
+    (Result.is_error (Editor.create ~expected_kind:None ~descriptors ~base_path ~source_id ~package_id:"new-skill"
       ~source_text:(named_skill_text "new-skill" "New skill" "Body") ~refresh));
   check string "existing source unchanged" original (In_channel.with_open_bin skill_path In_channel.input_all);
   check bool "new package was not created" false
@@ -224,7 +224,7 @@ let test_invalid_new_skill_is_never_created () =
     "---\nname: different-name\ndescription: The package and name disagree.\n---\nBody\n"
   in
   (match
-     Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
+     Editor.create ~expected_kind:None ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
        ~base_path
        ~source_id
        ~package_id:"not-created"
@@ -242,7 +242,7 @@ let test_invalid_new_skill_is_never_created () =
   ;
   let whitespace_package = "alpha " in
   (match
-     Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
+     Editor.create ~expected_kind:None ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
        ~base_path
        ~source_id
        ~package_id:whitespace_package
@@ -292,6 +292,70 @@ value = {}
        check string "flow node" "keeper_lane_status" node.tool_name;
        check string "flow batch" "concurrent" batch.execution_mode
      | _ -> fail "composition preview did not expose its validated flow")
+;;
+
+let test_new_preview_uses_public_plan_without_writing () =
+  with_workspace @@ fun base_path ->
+  let _, _, _, refresh = setup base_path ~access:"read-write" in
+  let source_id = Skill_source_config.source_id_of_string "workspace" |> Result.get_ok in
+  let descriptors = Ok (Masc.Keeper_tool_descriptor.all_descriptors ()) in
+  let node id after = `Assoc
+    [ "id", `String id; "tool", `String "keeper_lane_status"
+    ; "args", `Assoc []; "after", `List (List.map (fun value -> `String value) after) ] in
+  let source plan = Printf.sprintf
+    "---\nname: authored\ndescription: Inspect the lane twice.\n---\n\n```toml composition\n[[compositions]]\nname = \"authored\"\nexecution = \"async\"\nplan_json = %s\n```\n\n# Instructions\nAn unfinished example:\n```json\n{}\n"
+    (Yojson.Safe.to_string (`String (Yojson.Safe.to_string plan))) in
+  let valid = source (`Assoc
+    [ "nodes", `List [node "first" []; node "second" ["first"]]
+    ; "branch_failure_policy", `String "continue_independent"
+    ; "exports", `List [`Assoc ["name", `String "profile"; "node", `String "second"; "pointer", `String "/profile"]] ]) in
+  let preview = match Editor.preview_new ~expected_kind:(Some Editor.Composition_kind) ~descriptors ~source_id ~package_id:"authored" valid with
+    | Ok value -> value | Error error -> fail (Editor.error_to_string error) in
+  check int "canonical parser sees both authored steps" 2 preview.profile.node_count;
+  check bool "an unclosed instructions fence cannot hide the earlier composition" false
+    (is_instruction preview.profile);
+  check string "preview binds exact source bytes"
+    (Skill_reference.content_revision_to_string (Skill_reference.content_revision_of_source_text valid))
+    (Skill_reference.content_revision_to_string preview.profile.reference.content_revision);
+  check bool "preview does not create a package" false
+    (Sys.file_exists (Filename.concat base_path "skills/authored"));
+  (match Editor.create ~expected_kind:(Some Editor.Instruction_kind) ~descriptors
+      ~base_path ~source_id ~package_id:"authored" ~source_text:valid ~refresh with
+   | Error (Editor.Validation_failed _) -> ()
+   | Error error -> fail (Editor.error_to_string error)
+   | Ok _ -> fail "Instruction intent must not publish a composition");
+  check bool "intent mismatch refuses before creating a package" false
+    (Sys.file_exists (Filename.concat base_path "skills/authored"));
+  let escaped = named_skill_text "authored" "An escaped example, not an executable declaration."
+    ("~~~~markdown\n" ^ valid ^ "\n~~~~\n") in
+  (match Editor.preview_new ~expected_kind:(Some Editor.Instruction_kind)
+      ~descriptors ~source_id ~package_id:"authored" escaped with
+   | Ok value -> check bool "outer fences preserve literal examples as instructions" true (is_instruction value.profile)
+   | Error error -> fail (Editor.error_to_string error));
+  let cyclic = source (`Assoc ["nodes", `List [node "first" ["second"]; node "second" ["first"]]]) in
+  check bool "the existing compiler rejects dependency cycles" true
+    (Result.is_error (Editor.preview_new ~expected_kind:(Some Editor.Composition_kind) ~descriptors ~source_id ~package_id:"authored" cyclic));
+  check bool "descriptor failure cannot become a successful preview" true
+    (Result.is_error (Editor.preview_new ~expected_kind:(Some Editor.Composition_kind) ~descriptors:(Error "tool source unavailable") ~source_id ~package_id:"authored" valid));
+  (match Editor.create ~expected_kind:(Some Editor.Composition_kind) ~descriptors ~base_path ~source_id ~package_id:"authored" ~source_text:valid ~refresh with
+   | Ok (Editor.Created_and_published { preview = published; _ }) ->
+     check bool "create revalidates and publishes the exact previewed revision" true
+       (Skill_reference.equal published.profile.reference preview.profile.reference)
+   | Ok _ -> fail "authored composition was not published"
+   | Error error -> fail (Editor.error_to_string error))
+;;
+
+let test_authoring_tools_keep_canonical_names_and_contracts () =
+  let descriptors = Masc.Keeper_tool_descriptor.all_descriptors () in
+  let open Yojson.Safe.Util in
+  let tools = Editor.authoring_tools_to_yojson descriptors |> member "tools" |> to_list in
+  let lane = List.find (fun row -> row |> member "name" |> to_string = "keeper_lane_status") tools in
+  check string "declaration concurrency is visible" "concurrent" (lane |> member "execution" |> to_string);
+  check string "composable output is distinguished from opaque output" "json" (lane |> member "output" |> member "kind" |> to_string);
+  check string "input contract is an actual schema" "object" (lane |> member "input_schema" |> member "type" |> to_string);
+  let names = List.map (fun row -> row |> member "name" |> to_string) tools in
+  check bool "operator-only garbage collection is not suggested as a plan leaf" false
+    (List.mem "masc_gc" names)
 ;;
 
 let test_external_edit_causes_revision_conflict () =
@@ -416,7 +480,7 @@ let test_create_publishes_without_host_path_input () =
    | Ok _ -> fail "expected one writable source"
    | Error error -> fail (Editor.error_to_string error));
   (match
-     Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
+     Editor.create ~expected_kind:None ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
        ~base_path
        ~source_id
        ~package_id:"generated"
@@ -431,7 +495,7 @@ let test_create_publishes_without_host_path_input () =
   let persisted = Filename.concat base_path "skills/generated/SKILL.md" in
   check bool "created package" true (Sys.file_exists persisted);
   (match
-     Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
+     Editor.create ~expected_kind:None ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
        ~base_path
        ~source_id
        ~package_id:"generated"
@@ -493,7 +557,7 @@ let test_create_behind_an_earlier_source_names_the_winner () =
     | Error detail -> fail detail
   in
   let create package_id =
-    Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
+    Editor.create ~expected_kind:None ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
       ~base_path
       ~source_id
       ~package_id
@@ -617,7 +681,7 @@ let test_delete_removes_empty_package_and_id_is_reusable () =
   in
   let recreated = skill_text "Recreated." "# Recreated" in
   (match
-     Editor.create ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
+     Editor.create ~expected_kind:None ~descriptors:(Ok (Masc.Keeper_tool_descriptor.all_descriptors ()))
        ~base_path
        ~source_id
        ~package_id:"sample"
@@ -1284,6 +1348,10 @@ let () =
             test_invalid_new_skill_is_never_created
         ; test_case "composition preview exposes validated flow" `Quick
             test_composition_preview_exposes_validated_flow
+        ; test_case "new preview compiles without writing and create revalidates" `Quick
+            test_new_preview_uses_public_plan_without_writing
+        ; test_case "authoring tool discovery preserves canonical contracts" `Quick
+            test_authoring_tools_keep_canonical_names_and_contracts
         ; test_case "external edit conflicts" `Quick test_external_edit_causes_revision_conflict
         ; test_case "read-only source rejects save" `Quick test_read_only_source_rejects_save
         ; test_case "unreadable body is never written" `Quick

@@ -26281,6 +26281,7 @@ and is loaded on demand through keeper_skill.
                (match
                   Result.bind (check ()) (fun () ->
                     Masc_tui_http.post_skill_editor_create
+                      ~composition
                       ~host ~port ~source_id ~package_id ~source_text)
                 with
                 | Error detail -> report_action state "error" ("Skill create failed: " ^ detail)

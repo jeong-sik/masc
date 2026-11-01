@@ -7,7 +7,10 @@ import {
   decodeSkillEditorPreview,
   decodeSkillEditorSaveReceipt,
   decodeSkillEvidenceResponse,
+  createSkill,
+  fetchSkillAuthoringTools,
   fetchSkillEvidence,
+  previewNewSkillSource,
   previewSkillSource,
   readSkillSource,
   saveSkillSource,
@@ -25,6 +28,38 @@ afterEach(() => {
 // statuses; the old client defaulted anything else to 'created', a status
 // the server never sends, and dropped the not-published reason.
 describe('skill create receipt contract', () => {
+  it('reads canonical authoring contracts and previews a new package without a published reference', async () => {
+    const tool = { name: 'keeper_lane_status', description: 'Observe the lane.',
+      input_schema: { type: 'object' }, output: { kind: 'opaque' }, execution: 'concurrent' }
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json({ schema: 'masc.skill-authoring-tools/v1', tools: [tool] }))
+      .mockResolvedValueOnce(Response.json({ ok: true, status: 'valid', preview: editorPreview }))
+    vi.stubGlobal('fetch', fetch)
+    expect(await fetchSkillAuthoringTools()).toEqual([tool])
+    const input = { kind: 'instruction' as const, source_id: 'workspace', package_id: 'release-checklist', source_text: 'new document' }
+    await expect(previewNewSkillSource(input)).resolves.toEqual(editorPreview)
+    expect(fetch.mock.calls[1]).toEqual(['/api/v1/skills/editor/preview-new', expect.objectContaining({ method: 'POST', body: JSON.stringify(input) })])
+  })
+
+  it('rejects drifted authoring contracts', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ schema: 'masc.skill-authoring-tools/v1', tools: [
+      { name: 'tool', description: '', input_schema: {}, output: { kind: 'guess' }, execution: 'parallel' },
+    ] })))
+    await expect(fetchSkillAuthoringTools()).rejects.toThrow()
+  })
+
+  it('retains a durable create response beyond the ordinary POST timeout', async () => {
+    vi.useFakeTimers()
+    const fetch = vi.fn((_path: string, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      window.setTimeout(() => resolve(Response.json({ status: 'created_and_published' })), 31_000)
+    }))
+    vi.stubGlobal('fetch', fetch)
+    const created = createSkill({ kind: 'instruction', source_id: 'workspace', package_id: 'release-checklist', source_text: 'document' })
+    await vi.advanceTimersByTimeAsync(31_000)
+    await expect(created).resolves.toEqual({ status: 'created_and_published' })
+    expect(fetch.mock.calls[0]![1]?.signal).toBeUndefined()
+  })
+
   it('accepts the published receipt', () => {
     expect(decodeSkillCreateReceipt({ status: 'created_and_published', preview: {} }))
       .toEqual({ status: 'created_and_published' })

@@ -3779,7 +3779,7 @@ let fetch_skill_editor_sources ~host ~port =
   | Ok _ -> Error "Skill editor sources response must be an object"
 ;;
 
-let post_skill_editor_create ~host ~port ~source_id ~package_id ~source_text =
+let post_skill_editor_create ~host ~port ~composition ~source_id ~package_id ~source_text =
   post_json
     ~host
     ~port
@@ -3788,6 +3788,7 @@ let post_skill_editor_create ~host ~port ~source_id ~package_id ~source_text =
       (Yojson.Safe.to_string
          (`Assoc
            [ "source_id", `String source_id
+           ; "kind", `String (if composition then "composition" else "instruction")
            ; "package_id", `String package_id
            ; "source_text", `String source_text
            ]))

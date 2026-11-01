@@ -57,6 +57,7 @@ let publish ~refresh (config : Workspace.config) (request : Publish.request) =
   | Ok source_id ->
     (match
        Server_skill_editor.create
+         ~expected_kind:None
          ~descriptors:(Server_skill_editor.authoring_descriptors
            ~config ~access:(Lane_addon_sources.Keeper request.actor))
          ~base_path:config.base_path

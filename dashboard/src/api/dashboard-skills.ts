@@ -273,6 +273,21 @@ export interface SkillEvidenceResponse {
 
 export interface WritableSkillSource { source_id: string }
 
+export interface SkillCreateInput {
+  kind: 'instruction' | 'composition'
+  source_id: string
+  package_id: string
+  source_text: string
+}
+
+export interface SkillAuthoringTool {
+  name: string
+  description: string
+  input_schema: unknown
+  output: { kind: 'opaque' } | { kind: 'json'; schema: unknown }
+  execution: 'serial' | 'concurrent' | 'terminal'
+}
+
 export interface SkillEditorLoaded {
   status: 'ready'
   reference: SkillReference
@@ -825,6 +840,20 @@ const SkillSurfaceProfileSchema = Schema.Struct(SkillProfileDetailsFields)
 const SkillEditorPreviewSchema = Schema.Struct({
   profile: SkillProfileSchema,
   diagnostics: Schema.Array(Schema.String),
+})
+
+const SkillAuthoringToolsSchema = Schema.Struct({
+  schema: Schema.Literal('masc.skill-authoring-tools/v1'),
+  tools: Schema.Array(Schema.Struct({
+    name: Schema.NonEmptyString,
+    description: Schema.String,
+    input_schema: Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+    output: Schema.Union(
+      Schema.Struct({ kind: Schema.Literal('opaque') }),
+      Schema.Struct({ kind: Schema.Literal('json'), schema: Schema.Record({ key: Schema.String, value: Schema.Unknown }) }),
+    ),
+    execution: Schema.Literal('serial', 'concurrent', 'terminal'),
+  })),
 })
 
 const SkillEditorLoadedSchema = Schema.Struct({
@@ -1594,6 +1623,17 @@ export async function fetchWritableSkillSources(): Promise<readonly WritableSkil
   return response.sources
 }
 
+export async function fetchSkillAuthoringTools(): Promise<readonly SkillAuthoringTool[]> {
+  return decodeWithSchema(SkillAuthoringToolsSchema,
+    await get<unknown>('/api/v1/skills/editor/tools'), 'invalid_response').tools
+}
+
+export async function previewNewSkillSource(input: SkillCreateInput): Promise<SkillEditorPreview> {
+  return decodeSkillEditorPreview(
+    await post<unknown>('/api/v1/skills/editor/preview-new', input),
+  )
+}
+
 function skillEditorBody(reference: SkillReference, sourceText?: string): Record<string, unknown> {
   return sourceText === undefined
     ? { reference }
@@ -1694,12 +1734,8 @@ export function decodeSkillCreateReceipt(raw: unknown): SkillCreateReceipt {
   )
 }
 
-export async function createSkill(input: {
-  source_id: string
-  package_id: string
-  source_text: string
-}): Promise<SkillCreateReceipt> {
+export async function createSkill(input: SkillCreateInput): Promise<SkillCreateReceipt> {
   return decodeSkillCreateReceipt(
-    await post<Record<string, unknown>>('/api/v1/skills/editor/create', input),
+    await postControlPlane<unknown>('/api/v1/skills/editor/create', input),
   )
 }

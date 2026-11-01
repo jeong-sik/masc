@@ -4,4 +4,4 @@
 (test
  (name test_keeper_volume_ownership)
  (modules test_keeper_volume_ownership)
- (libraries alcotest masc yojson))
+ (libraries alcotest fmt masc yojson))

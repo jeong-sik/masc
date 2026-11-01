@@ -9,15 +9,14 @@ module Kvo = Masc.Keeper_volume_ownership
 
 let ownership_case =
   let open Alcotest in
-  let t =
-    of_pp (fun ppf -> function
-      | Kvo.Owned_by_this_workspace -> Fmt.string ppf "Owned_by_this_workspace"
-      | Kvo.Unverified reason ->
-        Fmt.pf ppf "Unverified(%s)" (Kvo.unverified_to_string reason)
-      | Kvo.Owned_by_another_workspace { Keeper_volume_ownership.recorded } ->
-        Fmt.pf ppf "Owned_by_another_workspace(%s)" recorded)
-  in
-  (t, fun a b -> Fmt.str "%a" t a = Fmt.str "%a" t b)
+  let pp ppf = function
+    | Kvo.Owned_by_this_workspace -> Fmt.string ppf "Owned_by_this_workspace"
+    | Kvo.Unverified reason ->
+      Fmt.pf ppf "Unverified(%s)" (Kvo.unverified_to_string reason)
+    | Kvo.Owned_by_another_workspace { recorded } ->
+      Fmt.pf ppf "Owned_by_another_workspace(%s)" recorded in
+  let t = of_pp pp in
+  (t, fun a b -> Fmt.str "%a" pp a = Fmt.str "%a" pp b)
 ;;
 
 let marker_json base_path =
@@ -25,19 +24,19 @@ let marker_json base_path =
 ;;
 
 let test_marker_roundtrip_preserves_the_workspace () =
-  let marker = { Keeper_volume_ownership.base_path = "/w/alpha"; written_at = 1.79e9 } in
+  let marker = { Masc.Keeper_volume_ownership.base_path = "/w/alpha"; written_at = 1.79e9 } in
   let json = Kvo.marker_to_yojson marker in
   (match Kvo.marker_of_yojson json with
    | Ok parsed ->
      Alcotest.(check string) "base path survives" marker.base_path parsed.base_path;
-     Alcotest.(check float) "timestamp survives" marker.written_at parsed.written_at
+     Alcotest.(check (float 0.)) "timestamp survives" marker.written_at parsed.written_at
    | Error detail -> Alcotest.failf "roundtrip rejected its own output: %s" detail)
 ;;
 
 let test_a_marker_naming_this_workspace_answers_owned () =
   let probed = "/w/alpha" in
   let verdict = Kvo.interpret_marker_bytes ~probed_base_path:probed (marker_json probed) in
-  Alcotest.(check ownership_case) "same base path is owned"
+  Alcotest.(check (fst ownership_case)) "same base path is owned"
     Kvo.Owned_by_this_workspace verdict
 ;;
 
@@ -45,7 +44,7 @@ let test_a_marker_naming_another_workspace_is_not_owned () =
   let verdict =
     Kvo.interpret_marker_bytes ~probed_base_path:"/w/alpha" (marker_json "/w/beta")
   in
-  Alcotest.(check ownership_case)
+  Alcotest.(check (fst ownership_case))
     "a different base path belongs to the other workspace"
     (Kvo.Owned_by_another_workspace { recorded = "/w/beta" })
     verdict
@@ -82,7 +81,7 @@ let test_not_json_at_all_is_unverified_not_a_guess () =
 ;;
 
 let test_a_missing_marker_is_a_legacy_volume () =
-  Alcotest.(check ownership_case)
+  Alcotest.(check (fst ownership_case))
     "no marker means the owner is unknown, not this workspace"
     (Kvo.Unverified Kvo.Unmarked)
     (Kvo.interpret_marker_absent ())

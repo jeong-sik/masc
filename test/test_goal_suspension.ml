@@ -295,9 +295,10 @@ let test_binding_unavailable_is_not_an_ended_request () = with_workspace @@ fun 
   List.iter (fun path ->
     let original = Fs_compat.load_file path in
     let corrupt = "{unavailable" in
-    Fun.protect ~finally:(fun () -> Fs_compat.save_file_atomic path original)
+    Fun.protect
+      ~finally:(fun () -> ignore (Fs_compat.save_file_atomic path original))
       (fun () ->
-        Fs_compat.save_file_atomic path corrupt;
+        ignore (Fs_compat.save_file_atomic path corrupt);
         (match Goal_verification.bind_review config ~goal_id:goal.id with
          | Error (Goal_verification.Binding_unavailable _) -> ()
          | Error (Goal_verification.No_current_review _) ->

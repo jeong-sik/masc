@@ -334,7 +334,7 @@ deepseek.chat
   check (option string) "multiline default scalar replaced cleanly"
     (Some "glm.flash") parsed_rewritten.Runtime_schema.default_runtime_id;
   check (list string) "multiline media_failover array replaced cleanly"
-    [ "glm.flash" ] parsed_rewritten.Runtime_schema.media_failover_runtime_ids;
+    [ "glm.flash" ] parsed_rewritten.Runtime_schema.media_failover;
   let cleared_runtime =
     Runtime_config_text.update_runtime_scalar_text multiline_runtime
       ~key:"default" ~runtime_id:None

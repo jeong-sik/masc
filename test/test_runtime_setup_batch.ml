@@ -546,7 +546,82 @@ let test_save_publishes_the_registry () = fixture (fun base _runtime binary spec
     let revision = get (Batch.observe ~base_path:base) in
     ignore (get (apply base binary [added] [id] revision false));
     Alcotest.check Alcotest.bool "the saved account is live in the published registry" true (List.mem id (ids (Runtime.get_runtimes ())))))
+let test_named_provider_conflicting_accounts_are_refused () = fixture (fun base runtime binary _spec original ->
+  fake base binary "pass";
+  let provider = Agent_core.Provider_runtime_binding.find "glm-coding" |> Option.get in
+  let selection key credential = Runtime_setup_spec.of_json (`Assoc [
+    "choice",`String "openai_compatible"; "provider_id",`String "glm-coding";
+    "provider_display_name",`String "Coding account"; "provider_declared",`Bool false;
+    "model_key",`String key; "model",`String "glm-5.3-flash";
+    "max_context",`Int 1000000; "tools",`Bool true; "streaming",`Bool true;
+    "supports_image_input",`Bool true; "endpoint",`String provider.base_url;
+    "api_key_env",`String credential]) |> Result.get_ok in
+  let first = selection "first-model" "FIRST_NAMED_ACCOUNT" in
+  let second = selection "second-model" "SECOND_NAMED_ACCOUNT" in
+  let specs = [first;second] in
+  let ids = List.map (fun spec -> (Runtime_setup_spec.render spec).runtime_id) specs in
+  let revision = get (Batch.observe ~base_path:base) in
+  (match apply base binary specs ids revision false with
+   | Error Batch.Invalid_selection -> ()
+   | Error error -> Alcotest.fail (Batch.error_message error)
+   | Ok _ -> Alcotest.fail "two account selections were collapsed onto the first provider");
+  Alcotest.(check string) "conflicting accounts leave the workspace untouched" original (text runtime);
+  Alcotest.(check bool) "rejection precedes child configuration or inference" false
+    (Sys.file_exists (Filename.concat base "selected.json")))
+
+let test_named_duplicate_runtime_requires_identical_selection () = fixture (fun base runtime binary _spec original ->
+  let previous_key = Sys.getenv_opt "DUPLICATE_NAMED_ACCOUNT" in
+  let registry = Runtime.For_testing.snapshot () in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore registry;
+    match previous_key with Some key -> Unix.putenv "DUPLICATE_NAMED_ACCOUNT" key
+      | None -> Unix.unsetenv "DUPLICATE_NAMED_ACCOUNT") (fun () ->
+    Unix.putenv "DUPLICATE_NAMED_ACCOUNT" "fixture-credential";
+    fake base binary "pass";
+    let provider = Agent_core.Provider_runtime_binding.find "glm-coding" |> Option.get in
+    let selection image = Runtime_setup_spec.of_json (`Assoc [
+      "choice",`String "openai_compatible"; "provider_id",`String "glm-coding";
+      "provider_display_name",`String "Coding account"; "provider_declared",`Bool false;
+      "model_key",`String "same-runtime"; "model",`String "glm-5.3-flash";
+      "max_context",`Int 1000000; "tools",`Bool true; "streaming",`Bool true;
+      "supports_image_input",`Bool image; "endpoint",`String provider.base_url;
+      "api_key_env",`String "DUPLICATE_NAMED_ACCOUNT"]) |> Result.get_ok in
+    let first = selection true in
+    let id = (Runtime_setup_spec.render first).runtime_id in
+    let revision = get (Batch.observe ~base_path:base) in
+    (match apply base binary [first;selection false] [id] revision false with
+     | Error Batch.Invalid_selection -> ()
+     | Error error -> Alcotest.fail (Batch.error_message error)
+     | Ok _ -> Alcotest.fail "conflicting image declarations were silently deduplicated");
+    Alcotest.(check string) "conflicting runtime selections leave configuration unchanged" original (text runtime);
+    Alcotest.(check bool) "conflict is refused before staging or inference" false
+      (Sys.file_exists (Filename.concat base "selected.json"));
+    ignore (get (apply base binary [first;selection true] [id] revision false));
+    let parsed = Runtime_toml.parse_file runtime |> Result.get_ok in
+    let bindings = List.filter (fun (binding:Runtime_schema.binding) -> binding.provider_id="glm-coding") parsed.bindings in
+    Alcotest.(check int) "identical selections produce one binding" 1 (List.length bindings);
+    let saved = text runtime in
+    let saved_revision = get (Batch.observe ~base_path:base) in
+    Sys.remove (Filename.concat base "selected.json");
+    (match apply base binary [selection false] [id] saved_revision false with
+     | Error Batch.Invalid_selection -> ()
+     | Error error -> Alcotest.fail (Batch.error_message error)
+     | Ok _ -> Alcotest.fail "a changed named selection was silently replaced by its saved ID");
+    Alcotest.(check string) "a saved-ID image conflict leaves the first save untouched" saved (text runtime);
+    Alcotest.(check bool) "saved-ID conflict starts no new child configuration" false
+      (Sys.file_exists (Filename.concat base "selected.json"));
+    ignore (get (apply base binary [] [id] saved_revision false));
+    let reused_revision = get (Batch.observe ~base_path:base) in
+    ignore (get (apply base binary [selection true] [id] reused_revision false));
+    let again = Runtime_toml.parse_file runtime |> Result.get_ok in
+    Alcotest.(check int) "identical resubmission reuses the saved binding" 1
+      (List.length (List.filter (fun (binding:Runtime_schema.binding) -> binding.provider_id="glm-coding") again.bindings));
+    Alcotest.(check bool) "the unverified save does not invoke a model" false
+      (Sys.file_exists (Filename.concat base "verified.jsonl"))))
+
 let () = Alcotest.run "runtime setup batch" ["workspace",[
+  Alcotest.test_case "repeated named runtime IDs require identical selections" `Quick test_named_duplicate_runtime_requires_identical_selection;
+  Alcotest.test_case "named provider cannot collapse different credential selections" `Quick test_named_provider_conflicting_accounts_are_refused;
   Alcotest.test_case "extending a provider preserves its wizard choice" `Quick test_existing_provider_wizard_default_survives_expansion;
   Alcotest.test_case "native batch reuses custom account" `Quick test_custom_account_new_model;
   Alcotest.test_case "an error summary is one line and names the signal" `Quick test_error_summary_is_one_line;

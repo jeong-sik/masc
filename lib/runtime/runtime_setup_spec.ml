@@ -5,10 +5,13 @@ type transport =
   | Http of {endpoint:string; credential:credential option;
       kind:http_kind; request_path:string option}
   | Client of {command:string; oauth:string option; timeout:float option; account_home:string option}
+type named_origin = Existing_named_provider | New_named_provider
+type named_provider = {id:string; display_name:string; model_key:string; origin:named_origin;
+  reasoning_effort:Llm_provider.Reasoning_effort.t option; wizard_default:bool option}
 type t = {choice:choice; model:string; context:int; tools:bool; streaming:bool;
   supports_image_input:bool option;
   transport:transport; canonical_spec:string; declared_provider_id:string option; requested_provider_id:string option;
-  existing_inline : (string * string) option}
+  existing_inline : (string * string) option; named_provider:named_provider option}
 type error = Invalid_spec of string
 let error_message (Invalid_spec field) = "Invalid runtime setup specification: " ^ field
 open Result.Syntax
@@ -61,6 +64,11 @@ let wire_kind_name = function
 let schema_kind = function
   | Openai_compat -> Runtime_schema.OpenAI_compat | Anthropic -> Anthropic
   | Kimi -> Kimi | Glm -> Glm | Ollama_kind -> Ollama
+let http_kind_of_catalog = function
+  | Llm_provider.Provider_kind.OpenAI_compat -> Some Openai_compat
+  | Anthropic -> Some Anthropic | Kimi -> Some Kimi
+  | Glm -> Some Glm | Ollama -> Some Ollama_kind
+  | Gemini -> None
 let effective_path ~endpoint ~kind request_path =
   let kind = schema_kind kind in
   match request_path with
@@ -102,13 +110,17 @@ let[@warning "+9"] transport_json transport =
 let[@warning "+9"] canonical_spec_of
       ({ choice; model; context; tools; streaming; supports_image_input; transport;
          canonical_spec = _; declared_provider_id = _; requested_provider_id = _;
-         existing_inline = _ } : t)
+         existing_inline = _; named_provider } : t)
   =
   Yojson.Safe.to_string (`Assoc ([
     "choice",`String (choice_name choice); "model",`String model;
     "max_context",`Int context; "tools",`Bool tools; "streaming",`Bool streaming;
     "transport", transport_json transport]
-    @ (match supports_image_input with None -> [] | Some value -> ["supports_image_input", `Bool value])))
+    @ (match supports_image_input with None -> [] | Some value -> ["supports_image_input", `Bool value])
+    @ (match named_provider with None -> [] | Some named -> ["provider_id", `String named.id;
+        "model_key", `String named.model_key;
+        "reasoning_effort", (match named.reasoning_effort with None -> `Null
+          | Some effort -> `String (Llm_provider.Reasoning_effort.to_string effort))])))
 
 let of_json ?home_dir = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) ->
@@ -119,13 +131,32 @@ let of_json ?home_dir = function
       | "claude_code" -> Ok Claude_code | "codex" -> Ok Codex | "antigravity" -> Ok Antigravity
       | "muse" -> Ok Muse
       | _ -> invalid "choice" in
+    let named = List.mem_assoc "provider_id" fields in
     let allowed = ["choice";"model";"max_context";"tools";"streaming";"supports_image_input";"existing_provider_id"]
+      @ (if named && http choice then ["provider_id";"provider_display_name";"model_key";
+          "provider_declared";"reasoning_effort";"wizard_default"] else [])
       @ (if http choice then ["endpoint";"api_key_env";"credential_file";"provider_kind";"request_path"] else ["command"])
       @ (match choice with
         | Claude_code | Codex | Muse -> ["account_home"]
         | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity -> [])
       @ (if choice = Antigravity then ["credential_file";"timeout_s"] else []) in
     let* () = if List.for_all (fun (key,_) -> List.mem key allowed) fields then Ok () else invalid "unexpected fields" in
+    let* named_provider = if not named then Ok None else (
+      let* () = if List.mem_assoc "existing_provider_id" fields then invalid "provider selection" else Ok () in
+      let* id = required fields "provider_id" in
+      let* display_name = required fields "provider_display_name" in
+      let* model_key = required fields "model_key" in
+      let* declared = bool fields "provider_declared" in
+      let* reasoning_effort = match List.assoc_opt "reasoning_effort" fields with
+        | None | Some `Null -> Ok None
+        | Some (`String value) -> (match Llm_provider.Reasoning_effort.of_string value with
+            | Some effort -> Ok (Some effort) | None -> invalid "reasoning_effort")
+        | Some _ -> invalid "reasoning_effort" in
+      let* wizard_default = match List.assoc_opt "wizard_default" fields with
+        | None -> Ok None | Some (`Bool value) -> Ok (Some value)
+        | Some _ -> invalid "wizard_default" in
+      Ok (Some {id;display_name;model_key;reasoning_effort;wizard_default;
+        origin=(if declared then Existing_named_provider else New_named_provider)})) in
     let* requested_provider_id = optional fields "existing_provider_id" in
     let* model = required fields "model" in
     let* context = match List.assoc_opt "max_context" fields with Some (`Int value) when value > 0 -> Ok value | _ -> invalid "max_context" in
@@ -144,6 +175,14 @@ let of_json ?home_dir = function
         | None,Some name when env_name name -> Ok (Some (Env_reference name))
         | None,None -> Ok None | _ -> invalid "credential reference" in
       let* kind = optional fields "provider_kind" in
+      let* kind = match kind,named_provider with
+        | Some _,_ | None,None -> Ok kind
+        | None,Some named ->
+          (match Agent_core.Provider_runtime_binding.find named.id with
+           | Some provider -> (match http_kind_of_catalog provider.kind with
+               | Some kind -> Ok (Some (wire_kind_name kind))
+               | None -> invalid "provider_kind")
+           | None -> Ok None) in
       let* kind = match choice,kind with
         | Ollama,(None | Some "ollama") -> Ok Ollama_kind
         | Messages,Some "anthropic" -> Ok Anthropic | Messages,Some "kimi" -> Ok Kimi
@@ -199,7 +238,7 @@ let of_json ?home_dir = function
           | _ -> invalid "timeout_s" in Ok (Some (reference_path path),Some timeout)) in
       Ok (Client {command;oauth;timeout;account_home})) in
     let parsed = {choice;model;context;tools;streaming;supports_image_input;transport;
-      canonical_spec="";declared_provider_id=None;requested_provider_id;existing_inline=None} in
+      canonical_spec="";declared_provider_id=None;requested_provider_id;existing_inline=None;named_provider} in
     Ok {parsed with canonical_spec = canonical_spec_of parsed}
   | _ -> invalid "object or duplicate fields"
 (* Mirrors the loader's rule: a protocol that already determines the dialect
@@ -234,9 +273,10 @@ let answers_hash_length = 8
 let answers_hash answers =
   String.sub Agent_core_sha256.(to_hex (digest_string answers)) 0 answers_hash_length
 let provider_id spec =
-  match spec.declared_provider_id with
-  | Some id -> id
-  | None ->
+  match spec.declared_provider_id, spec.named_provider with
+  | Some id,_ -> id
+  | None,Some named -> named.id
+  | None,None ->
     let identity = Yojson.Safe.to_string (`Assoc [
       "choice", `String (choice_name spec.choice);
       "transport", transport_json spec.transport]) in
@@ -247,6 +287,18 @@ let account_home_matches choice left right =
     | Codex -> Runtime_codex_app_server.effective_account_home
     | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages | Antigravity | Muse -> Fun.id in
   effective left = effective right
+let same_connection left right =
+  protocol left.choice=protocol right.choice && left.existing_inline=right.existing_inline
+  && match left.transport,right.transport with
+    | Http a,Http b -> a.endpoint=b.endpoint && a.kind=b.kind && a.credential=b.credential
+      && effective_path ~endpoint:a.endpoint ~kind:a.kind a.request_path
+         = effective_path ~endpoint:b.endpoint ~kind:b.kind b.request_path
+    | Client a,Client b -> a.command=b.command && a.oauth=b.oauth && a.timeout=b.timeout
+      && account_home_matches left.choice a.account_home b.account_home
+    | Http _,Client _ | Client _,Http _ -> false
+let same_selection left right =
+  left.canonical_spec=right.canonical_spec && left.named_provider=right.named_provider
+  && left.existing_inline=right.existing_inline
 let connection_matches spec (provider : Runtime_schema.provider) =
   let credential_matches expected = match spec.existing_inline, expected, provider.credentials with
     | Some (id, original), None, Some (Runtime_schema.Inline configured) ->
@@ -304,14 +356,37 @@ let for_existing_inline_provider spec (provider : Runtime_schema.provider) =
   | (Http { credential = Some _;_}, _, _) | (Client _, _, _)
   | (Http {credential=None; _ }, None, Some (Inline _)) -> None
 let resolve_provider spec providers =
+  let* () = match spec.named_provider with
+    | None -> Ok ()
+    | Some named ->
+      (match Llm_provider.Model_catalog.global (),Llm_provider.Model_identifiers.Model_id.of_string spec.model with
+       | Some catalog,Ok model_id ->
+         (match Llm_provider.Model_catalog.lookup_model_for_provider catalog
+             ~provider:(Llm_provider.Model_catalog.Declared_provider named.id) ~model_id with
+          | Some _ -> Ok () | None -> invalid "named model is not in the provider catalog")
+       | None,_ | Some _,Error _ -> invalid "named model is not in the provider catalog") in
   let selected = match spec.declared_provider_id with
-    | Some _ as selected -> selected | None -> spec.requested_provider_id in
+    | Some _ as selected -> selected
+    | None -> (match spec.named_provider with Some named -> Some named.id
+        | None -> spec.requested_provider_id) in
   match selected with
   | Some id ->
     (match List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) providers with
      | Some provider -> (match for_provider spec provider with
          | Some bound -> Ok bound | None -> invalid (reuse_refusal (reuse_eligibility provider)))
-     | None -> invalid "selected provider is absent")
+     | None ->
+       (match spec.named_provider with
+        | Some {origin=New_named_provider;id;_} ->
+          (match spec.transport,Agent_core.Provider_runtime_binding.find id with
+           | Http connection,Some provider ->
+             let kind = schema_kind connection.kind in
+             let expected_path = Runtime_adapter.normalize_http_request_path
+               ~kind:provider.kind ~base_url:provider.base_url ~request_path:provider.request_path in
+             if provider.kind=kind && provider.base_url=connection.endpoint
+                && expected_path=effective_path ~endpoint:connection.endpoint ~kind:connection.kind connection.request_path
+             then Ok spec else invalid "catalog provider connection changed"
+           | Client _,_ | Http _,None -> invalid "named provider is not in the catalog")
+        | Some {origin=Existing_named_provider;_} | None -> invalid "selected provider is absent"))
   | None ->
     let matches = List.filter (connection_matches spec) providers in
     let enabled = List.filter (fun provider -> reuse_eligibility provider = Eligible) matches in
@@ -342,15 +417,24 @@ let model_id_text model =
     end in
   copy 0;
   Buffer.contents text
-let render ?(include_provider=true) ?(wizard_default=true) spec =
+let render ?include_provider ?wizard_default spec =
+  let include_provider = match include_provider,spec.named_provider with
+    | Some value,_ -> value | None,Some {origin=Existing_named_provider;_} -> false
+    | None,(None | Some {origin=New_named_provider;_}) -> true in
+  let wizard_default = match wizard_default,spec.named_provider with
+    | Some value,_ -> value | None,None -> true
+    | None,Some named -> Option.value named.wizard_default ~default:false in
   let provider = provider_id spec in
   let hash = answers_hash (Yojson.Safe.to_string (`List [`String provider; `String spec.canonical_spec])) in
-  let model_key = model_id_text spec.model ^ "_" ^ hash in
+  let model_key = match spec.named_provider with
+    | None -> model_id_text spec.model ^ "_" ^ hash
+    | Some named -> provider ^ "-" ^ named.model_key in
   let runtime_id = provider ^ "." ^ model_key in
-  let fields = ["display-name",`String provider;"protocol",`String (protocol spec.choice)] in
+  let display_name = match spec.named_provider with None -> provider | Some named -> named.display_name in
+  let fields = ["display-name",`String display_name;"protocol",`String (protocol spec.choice)] in
   let transport_fields,credential = match spec.transport with
     | Http h ->
-      (if protocol_fixes_dialect spec.choice then [] else ["kind",`String (wire_kind_name h.kind)])
+      (if protocol_fixes_dialect spec.choice || Option.is_some spec.named_provider then [] else ["kind",`String (wire_kind_name h.kind)])
       @ (match h.request_path with None -> [] | Some path -> ["request-path", `String path])
       @ ["endpoint",`String h.endpoint;
          Runtime_schema.exact_body_timeout_s_key,`Float setup_exact_body_timeout_s],h.credential
@@ -365,19 +449,42 @@ let render ?(include_provider=true) ?(wizard_default=true) spec =
     | Some (File_reference path) -> table [Runtime_toml_namespace.(key Providers);provider;"credentials"] ["type",`String "file";"path",`String path]
     | Some (Env_reference name) -> table [Runtime_toml_namespace.(key Providers);provider;"credentials"] ["type",`String "env";"key",`String name]
     | None -> "") in
+  let reasoning = match spec.named_provider with
+    | Some {reasoning_effort=Some effort;_} -> ["thinking-support",`Bool true;
+        "reasoning-effort",`String (Llm_provider.Reasoning_effort.to_string effort)]
+    | None | Some {reasoning_effort=None;_} -> [] in
+  let model_fields = ["api-name",`String spec.model;"tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming]
+    @ (match spec.named_provider with None -> ["max-context",`Int spec.context] | Some _ -> []) @ reasoning in
+  let image_fields = match spec.supports_image_input with None -> [] | Some value -> ["supports-image-input", `Bool value] in
+  let capabilities = (match spec.named_provider with None -> ["reasoning-streaming-format",`String "none"] | Some _ -> []) @ image_fields in
   let runtime = (if include_provider && Option.is_none spec.existing_inline then runtime else "")
-    ^ table [Runtime_toml_namespace.(key Models);model_key] (["api-name",`String spec.model;"max-context",`Int spec.context;
-    "tools-support",`Bool spec.tools;"streaming",`Bool spec.streaming])
+    ^ table [Runtime_toml_namespace.(key Models);model_key] model_fields
     (* Setup declares model capabilities explicitly, including on connections
        with generated provider IDs that no catalog entry can name. Discovery
        has not verified a reasoning stream, so it is declared off. *)
-    ^ table [Runtime_toml_namespace.(key Models);model_key;"capabilities"]
-        (["reasoning-streaming-format",`String "none"]
-         @ (match spec.supports_image_input with None -> [] | Some value -> ["supports-image-input", `Bool value]))
+    ^ (match capabilities with [] -> "" | _ :: _ -> table [Runtime_toml_namespace.(key Models);model_key;"capabilities"] capabilities)
     ^ table [provider;model_key] (["max-context", `Int spec.context]
         @ (if wizard_default then ["wizard-default",`Bool true] else [])
         @ if spec.choice=Ollama then ["num-ctx",`Int spec.context] else []) in
   {runtime_id;runtime_toml=runtime}
+let matches_existing_selection spec (config:Runtime_schema.config) =
+  match spec.named_provider with
+  | None -> true
+  | Some named ->
+    let runtime_id = (render spec).runtime_id in
+    (match List.find_opt (fun (binding:Runtime_schema.binding) ->
+        Runtime_schema.binding_key binding=runtime_id) config.bindings with
+     | None -> true
+     | Some binding ->
+       (match List.find_opt (fun (model:Runtime_schema.model_spec) -> model.id=binding.model_id) config.models with
+        | None -> false
+        | Some model ->
+          binding.enabled && binding.provider_id=provider_id spec
+          && binding.max_context=Some spec.context
+          && (spec.choice<>Ollama || binding.num_ctx=Some spec.context)
+          && model.api_name=spec.model && model.tools_support=spec.tools
+          && model.streaming=spec.streaming && model.reasoning_effort=named.reasoning_effort
+          && Option.bind model.capabilities (fun caps -> caps.Runtime_schema.supports_image_input)=spec.supports_image_input))
 let render_json value = `Assoc ["runtime_id",`String value.runtime_id;"runtime_toml",`String value.runtime_toml]
 
 let model_id spec = spec.model

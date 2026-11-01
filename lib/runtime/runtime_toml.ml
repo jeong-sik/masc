@@ -1015,6 +1015,8 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
     reject_orphan_token Runtime_schema.Reasoning_effort
   | "reasoning-effort-default-on" | "reasoning_effort_default_on" ->
     reject_orphan_token Runtime_schema.Reasoning_effort_default_on
+  | "reasoning-enabled" | "reasoning_enabled" ->
+    reject_orphan_token Runtime_schema.Reasoning_enabled
   | other ->
     (* Unknown enum members fail the load, mirroring how this parser already
        rejects unknown protocols / credential types. A silent downgrade to

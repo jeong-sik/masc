@@ -551,6 +551,12 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
    binding test below already requires every seed runtime to resolve a
    catalog row; what this pins is the OpenRouter-specific half the generic
    check cannot see. *)
+let reasoning_enabled_in_request request =
+  let open Yojson.Safe.Util in
+  let reasoning = member "reasoning" request in
+  if reasoning = `Null then None else reasoning |> member "enabled" |> to_bool_option
+;;
+
 let openrouter_seed_runtimes =
   [ "openrouter.openrouter-claude-opus-5", "anthropic/claude-opus-5"
   ; "openrouter.openrouter-gpt-5-5", "openai/gpt-5.5"
@@ -589,28 +595,23 @@ let test_openrouter_seed_runtimes_are_dispatchable () =
          | None -> failf "expected OpenRouter runtime in seed: %s" runtime_id
          | Some runtime ->
            check string (runtime_id ^ " api name") api_name runtime.model.api_name;
-           (* These rows resolve to the reasoning_effort thinking dialect,
-              whose only wire control is the effort value itself. With no
-              effort declared an enable_thinking turn has nothing to encode
-              and is refused as Enable_not_encodable, so a silently absent
-              key here disables thinking for the whole runtime. Asserting the
-              key is present would not catch a break between runtime.toml and
-              the materialized Provider_config, so this builds the request the
-              dispatcher would send and reads the value off the wire. *)
+           (* Exercise admission as well as serialization: a body builder alone
+              cannot prove the binding reaches dispatch with its declared depth. *)
            let provider_config = agent_core_provider_config runtime in
+           let config = { provider_config with
+             Llm_provider.Provider_config.enable_thinking = runtime.model.thinking_support } in
+           check bool (runtime_id ^ " passes completion admission") true
+             (Result.is_ok (Llm_provider.Complete_common.validate_all config));
            let request =
              Llm_provider.Backend_openai.build_request_assoc
-               ~config:
-                 { provider_config with
-                   Llm_provider.Provider_config.enable_thinking = Some true
-                 }
+               ~config
                ~messages:[ Llm_provider.Types.user_msg "Explain the evidence." ]
                ()
            in
            check
              (option string)
              (runtime_id ^ " sends its declared effort on the wire")
-             (Some "high")
+             (Option.map Llm_provider.Reasoning_effort.to_string runtime.model.reasoning_effort)
              Yojson.Safe.Util.(request |> member "reasoning_effort" |> to_string_option);
            (* The provider-scoped row must answer, not the bare
               openai_chat_extended base: the base streams reasoning as plain
@@ -621,6 +622,10 @@ let test_openrouter_seed_runtimes_are_dispatchable () =
             with
             | None -> failf "%s resolves no AGENT_CORE capabilities" runtime_id
             | Some caps ->
+              check (option bool) (runtime_id ^ " encodes its declared boolean thinking policy")
+                (if caps.thinking_control_format = Llm_provider.Capabilities.Reasoning_enabled
+                 then runtime.model.thinking_support else None)
+                (reasoning_enabled_in_request request);
               check
                 bool
                 (runtime_id ^ " reads reasoning text and details together")
@@ -796,6 +801,51 @@ let test_unset_thinking_does_not_disable_reasoning_model () =
       check (option string) "explicit Kimi disable reaches the wire" (Some "none")
         (request |> member "reasoning_effort" |> to_string_option))
     ["", None; "false", Some false; "true", Some true]
+;;
+
+let test_nemotron_seed_uses_declared_boolean_thinking () =
+  with_deployment_agent_core_model_catalog @@ fun _catalog ->
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let env_name = "MASC_KEEPER_ENABLE_THINKING" in
+  let old_env = Sys.getenv_opt env_name in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    Unix.putenv env_name (Option.value old_env ~default:"")) @@ fun () ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  (match Runtime.init_default ~config_path:path with
+   | Ok () -> () | Error detail -> fail detail);
+  let runtime = match Runtime.get_runtime_by_id "openrouter.openrouter-free-nemotron-3-5-super-vl" with
+    | Some runtime -> runtime | None -> fail "Nemotron seed runtime is missing" in
+  check (option bool) "seed still requests thinking" (Some true) runtime.model.thinking_support;
+  check bool "seed declares no categorical depth" true (Option.is_none runtime.model.reasoning_effort);
+  let provider_config = agent_core_provider_config runtime in
+  List.iter (fun (raw, expected_fallback) ->
+    Unix.putenv env_name raw;
+    let fallback = Keeper_config.keeper_enable_thinking () in
+    check (option bool) "fleet thinking policy is read" expected_fallback fallback;
+    let policy = Keeper_turn_driver.For_testing.attempt_inference_policy
+      ~runtime_id:runtime.id ~fallback_enable_thinking:fallback () in
+    check (option bool) "named binding retains its explicit enable" (Some true) policy.attempt_enable_thinking;
+    let config = { provider_config with
+      Llm_provider.Provider_config.enable_thinking = policy.attempt_enable_thinking } in
+    check bool "named Nemotron request passes admission" true
+      (Result.is_ok (Llm_provider.Complete_common.validate_all config));
+    let request = Llm_provider.Backend_openai.build_request_assoc ~config ~messages:[] () in
+    check (option bool) "named binding enables reasoning on the wire" (Some true)
+      (reasoning_enabled_in_request request);
+    check bool "named binding sends no categorical effort" false
+      (List.mem_assoc "reasoning_effort" (Yojson.Safe.Util.to_assoc request)))
+    ["", None; "false", Some false; "true", Some true];
+  List.iter (fun enabled ->
+    let config = { provider_config with Llm_provider.Provider_config.enable_thinking = enabled } in
+    check bool "Nemotron omission and disable pass admission" true
+      (Result.is_ok (Llm_provider.Complete_common.validate_all config));
+    let request = Llm_provider.Backend_openai.build_request_assoc ~config ~messages:[] () in
+    check (option bool) "caller boolean policy is preserved" enabled
+      (reasoning_enabled_in_request request);
+    check bool "omission does not invent a reasoning object" (Option.is_some enabled)
+      (List.mem_assoc "reasoning" (Yojson.Safe.Util.to_assoc request)))
+    [None; Some false]
 ;;
 
 (* A lane slot names a runtime binding, so the slots a config declares are its
@@ -7414,6 +7464,8 @@ let () =
             `Quick test_repo_deepseek_nothinking_binding_requests_no_reasoning;
           test_case "unset thinking preserves provider defaults and explicit disable"
             `Quick test_unset_thinking_does_not_disable_reasoning_model;
+          test_case "Nemotron seed uses declared boolean thinking" `Quick
+            test_nemotron_seed_uses_declared_boolean_thinking;
           test_case
             "deployment AGENT_CORE catalog modality priority strings resolve"
             `Quick test_deployment_agent_core_model_catalog_modality_priorities_resolve;

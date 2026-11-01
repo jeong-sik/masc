@@ -24,6 +24,7 @@ type thinking_control_format = Capability_vocab.thinking_control_format =
   | Ollama_think
   | Reasoning_effort
   | Reasoning_effort_default_on
+  | Reasoning_enabled
 [@@deriving show, eq]
 
 let%test "thinking_control_format derives equal and show" =

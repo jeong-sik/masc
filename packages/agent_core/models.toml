@@ -4141,7 +4141,8 @@ supports_image_input = false
 # GET https://openrouter.ai/api/v1/models omits supported_efforts and
 # default_enabled for this id (checked 2026-11-01). The reasoning-token docs
 # define omitted supported_efforts as no effort selection. Retain only the
-# measured disable rung; absent effort still leaves the provider default alone.
+# documented reasoning.enabled boolean; omission leaves the provider default alone.
+# https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
 [[models]]
 model_id = "nvidia/nemotron-3.5-super-vl:free"
 provider_name = "openrouter"
@@ -4153,8 +4154,8 @@ output_per_million = 0.0
 reasoning_output_format = "split_reasoning_fields"
 reasoning_streaming_format = "delta_details:reasoning"
 reasoning_replay = "drop_without_tool"
-accepted_reasoning_efforts = ["none"]
-thinking_control_format = "reasoning_effort"
+accepted_reasoning_efforts = []
+thinking_control_format = "reasoning_enabled"
 supports_seed = true
 supports_parallel_tool_calls = false
 supports_top_k = false

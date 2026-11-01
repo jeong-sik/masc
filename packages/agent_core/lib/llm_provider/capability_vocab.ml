@@ -20,6 +20,7 @@ type thinking_control_format =
   | Ollama_think
   | Reasoning_effort
   | Reasoning_effort_default_on
+  | Reasoning_enabled
 
 type preserve_thinking_control_format =
   | No_preserve_thinking_control
@@ -176,6 +177,7 @@ let canonical_label_of_thinking_control_format = function
   | Ollama_think -> "ollama_think"
   | Reasoning_effort -> "reasoning_effort"
   | Reasoning_effort_default_on -> "reasoning_effort_default_on"
+  | Reasoning_enabled -> "reasoning_enabled"
 ;;
 
 (* These formats carry no companion token and can therefore serve directly as
@@ -190,6 +192,7 @@ let tokenless_thinking_control_formats =
   ; Ollama_think
   ; Reasoning_effort
   ; Reasoning_effort_default_on
+  ; Reasoning_enabled
   ]
 ;;
 
@@ -232,7 +235,8 @@ let token_of_thinking_control_format = function
   | Chat_template_kwargs
   | Ollama_think
   | Reasoning_effort
-  | Reasoning_effort_default_on -> None
+  | Reasoning_effort_default_on
+  | Reasoning_enabled -> None
 ;;
 
 let validate_thinking_control_token token =

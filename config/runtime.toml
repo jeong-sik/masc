@@ -2976,7 +2976,7 @@ api-name = "nvidia/nemotron-3.5-super-vl:free"
 tools-support = true
 thinking-support = true
 streaming = true
-reasoning-effort = "high"
+# The catalog encodes thinking through reasoning.enabled, without a depth.
 
 [models.openrouter-free-nemotron-3-5-super-vl.capabilities]
 supports-image-input = true

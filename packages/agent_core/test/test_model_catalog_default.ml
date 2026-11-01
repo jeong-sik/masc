@@ -1167,26 +1167,32 @@ let test_openrouter_rows_retain_effort_evidence () =
   List.iter
     (fun model_id ->
        let entry = openrouter_entry entries model_id in
-       check bool (model_id ^ " retains its measured disable rung") true
-         (Option.fold ~none:false ~some:(List.mem "none")
-            entry.accepted_reasoning_efforts))
+       check bool (model_id ^ " retains its disable control") true
+         (entry.thinking_control_format = Some Capabilities.Reasoning_enabled
+          || Option.fold ~none:false ~some:(List.mem "none")
+               entry.accepted_reasoning_efforts))
     openrouter_disable_probe_rows
 ;;
 
 (* GET /api/v1/models, checked 2026-11-01: DeepSeek 1017 exposes four accepted
    efforts and default_enabled=true. Nemotron exposes neither depth selection
-   nor a declared default; its retained 2026-10-28 probe verifies only disable.
-   Neither row needs a synthetic effort for omission. *)
+   nor a declared default. Its documented boolean control can enable or
+   disable reasoning without inventing a categorical depth or default. *)
 let test_openrouter_refreshed_efforts_reach_the_wire () =
   let module Config = Llm_provider.Provider_config in
   let module Effort = Llm_provider.Reasoning_effort in
+  let boolean_field request =
+    let open Yojson.Safe.Util in
+    let reasoning = member "reasoning" request in
+    if reasoning = `Null then None else reasoning |> member "enabled" |> to_bool_option
+  in
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"OpenRouter effort wire"
   in
   with_clean_model_catalog_override (fun () ->
     Model_catalog.set_global catalog;
     List.iter
-      (fun (model_id, accepted, default_enabled) ->
+      (fun (model_id, accepted, boolean_control) ->
          let config ?enable_thinking ?reasoning_effort () =
            Config.make ~kind:OpenAI_compat ~provider_id:"openrouter" ~model_id
              ~base_url:"https://openrouter.ai/api/v1" ~max_tokens:1024
@@ -1220,24 +1226,24 @@ let test_openrouter_refreshed_efforts_reach_the_wire () =
          let omitted = body (config ()) in
          check bool (model_id ^ " leaves omitted effort absent") false
            (List.mem_assoc "reasoning_effort" (Yojson.Safe.Util.to_assoc omitted));
-         let enabled = config ~enable_thinking:true () in
-         (if default_enabled then
-            let request = body enabled in
-            check bool (model_id ^ " enables through its default without a depth") false
-              (List.mem_assoc "reasoning_effort" (Yojson.Safe.Util.to_assoc request))
-          else begin
-            let caps, _ = Config.resolve_request_capabilities enabled in
-            check bool (model_id ^ " has no declared thinking default") true
-              (Llm_provider.Complete_common.thinking_control_request_rejection ~caps enabled
-               = Some Llm_provider.Complete_common.Enable_not_encodable);
-            check bool (model_id ^ " refuses enable without a declared depth or default") true
-              (Result.is_error (Llm_provider.Complete_common.validate_all enabled))
-          end);
-         let disabled = body (config ~enable_thinking:false ~reasoning_effort:Effort.High ()) in
-         check string (model_id ^ " explicit disable overrides depth") "none"
-           Yojson.Safe.Util.(disabled |> member "reasoning_effort" |> to_string))
-      [ "deepseek/deepseek-v4.1-flash-1017", [Effort.None_; Effort.Low; Effort.High; Effort.Max], true
-      ; "nvidia/nemotron-3.5-super-vl:free", [Effort.None_], false
+         check bool (model_id ^ " leaves omitted boolean control absent") false
+           (List.mem_assoc "reasoning" (Yojson.Safe.Util.to_assoc omitted));
+         let enabled = body (config ~enable_thinking:true ()) in
+         check bool (model_id ^ " enables without inventing a depth") false
+           (List.mem_assoc "reasoning_effort" (Yojson.Safe.Util.to_assoc enabled));
+         check (option bool) (model_id ^ " encodes explicit enable when required")
+           (if boolean_control then Some true else None)
+           (boolean_field enabled);
+         let disabled = body (config ~enable_thinking:false
+           ?reasoning_effort:(if boolean_control then None else Some Effort.High) ()) in
+         check (option string) (model_id ^ " uses a categorical disable only on that wire")
+           (if boolean_control then None else Some "none")
+           Yojson.Safe.Util.(disabled |> member "reasoning_effort" |> to_string_option);
+         check (option bool) (model_id ^ " encodes explicit boolean disable")
+           (if boolean_control then Some false else None)
+           (boolean_field disabled))
+      [ "deepseek/deepseek-v4.1-flash-1017", [Effort.None_; Effort.Low; Effort.High; Effort.Max], false
+      ; "nvidia/nemotron-3.5-super-vl:free", [], true
       ])
 ;;
 

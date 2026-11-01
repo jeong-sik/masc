@@ -440,6 +440,19 @@ let test_all_persistence_stays_in_captured_workspace () =
       Board.reset_global_for_test ();
       Unix.putenv "MASC_BASE_PATH" (Option.value original_base ~default:""))
     (fun () ->
+      (* Reset is quiescent; the selected root belongs to the first force. *)
+      Unix.putenv "MASC_BASE_PATH" base_a;
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      Alcotest.(check bool) "reset creates no selected workspace metadata" false
+        (Sys.file_exists root_a);
+      Unix.putenv "MASC_BASE_PATH" base_b;
+      let forced_b = Board.global () in
+      Alcotest.(check string) "first force captures the newly selected root"
+        (Unix.realpath root_b) forced_b.workspace_masc_dir;
+      Unix.putenv "MASC_BASE_PATH" base_a;
+      Alcotest.(check bool) "later root drift retains the same forced singleton" true
+        (Board.global () == forced_b);
       (* Seed B through real store producers, so redirecting any of the five
          files would overwrite independent accepted data rather than an empty fixture. *)
       let store_b = Board.create_store ~workspace_masc_dir:root_b () in

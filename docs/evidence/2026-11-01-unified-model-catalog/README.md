@@ -39,12 +39,13 @@ runs are not added together.
 | [41266932293](https://github.com/jeong-sik/masc/actions/runs/41266932293) | 05e6e0232c17324bcf1c69b74376bca0078058bc | fix/unified-model-catalog-20261101 | Failure, **498 PASS / 7 FAIL** in eleven focused suites. All eleven composition cases passed. |
 | [41267009494](https://github.com/jeong-sik/masc/actions/runs/41267009494) | 27a4e3337466de8272e2055fd4035795f7ceebe8 | fix/terminal-resume-frontier-20261101 | Failure, **48 PASS / 3 FAIL**; parent reproduces the same thinking-control failures. |
 | [41267187007](https://github.com/jeong-sik/masc/actions/runs/41267187007) | 27a4e3337466de8272e2055fd4035795f7ceebe8 | fix/terminal-resume-frontier-20261101 | Failure, **46 PASS / 4 FAIL**; parent reproduces the same two catalog and two serialization failures. |
+| [41267419419](https://github.com/jeong-sik/masc/actions/runs/41267419419) | c895615a9bfe6b885cb47a27b9ea80b095d80242 | fix/unified-model-catalog-20261101 | Success, **681 actual PASS / 0 FAIL**: 507 Core cases and 174 MASC runtime-config cases in twelve focused suites. |
 
-Candidate `c895615a9bfe6b885cb47a27b9ea80b095d80242` requests Test
-[41267419419](https://github.com/jeong-sik/masc/actions/runs/41267419419) on ref
-`fix/unified-model-catalog-20261101`: the same eleven core suites plus the
-changed MASC `test_runtime_config_validity` consumer. Its result is pending in
-this working record and is not a success claim.
+The final run includes the same eleven core suites plus the changed MASC
+`test_runtime_config_validity` consumer. All requested suites executed and
+passed. The seven parent fixture failures are included in that success; the
+serialization suite also executes two new caller-boundary cases. The original
+four catalog regressions remain in the eleven-case composition suite.
 
 The explicit core selection is:
 

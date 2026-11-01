@@ -146,10 +146,70 @@
         "2026-11-01T02:58:35.2147084Z 2 failures! in 0.587s. 27 tests run.",
         "2026-11-01T02:58:36.6448488Z 2 failures! in 0.030s. 23 tests run."
       ]
+    },
+    {
+      "name": "final",
+      "workflow": "Test",
+      "run_id": 41267419419,
+      "job_id": 124733021921,
+      "url": "https://github.com/jeong-sik/masc/actions/runs/41267419419",
+      "head": "c895615a9bfe6b885cb47a27b9ea80b095d80242",
+      "ref": "fix/unified-model-catalog-20261101",
+      "conclusion": "success",
+      "status": "completed",
+      "event": "workflow_dispatch",
+      "created_at": "2026-11-01T03:00:31Z",
+      "updated_at": "2026-11-01T03:06:15Z",
+      "raw_capture": "artifacts/issues-oldest-20261101/unified-model-catalog/final.log",
+      "raw_bytes": 466532,
+      "raw_sha256": "9f3066cae991dc809044dce4a2a86fd7d1812075b779c05a951097b400179d36",
+      "selected_capture": "final.txt",
+      "selected_bytes": 325423,
+      "selected_sha256": "10336b68425d095a0547c048746bba24d8baf3bec82f1b9f46302036e19ee717",
+      "actual_pass": 681,
+      "actual_fail": 0,
+      "suite_cases": {
+        "packages/agent_core/test/test_model_catalog_composition": 11,
+        "packages/agent_core/test/test_capabilities": 124,
+        "packages/agent_core/test/test_provider_config": 142,
+        "packages/agent_core/test/test_thinking_control_dialects": 51,
+        "packages/agent_core/test/test_model_catalog_default": 27,
+        "packages/agent_core/test/test_backend_gemini": 55,
+        "packages/agent_core/test/test_snapshot_provider_serialization": 25,
+        "packages/agent_core/test/test_provider_runtime_binding": 34,
+        "packages/agent_core/test/test_exact_output_resolver_snapshot": 17,
+        "packages/agent_core/test/test_responses_reasoning_content": 16,
+        "packages/agent_core/test/test_cohere_schema_wire": 5,
+        "test/test_runtime_config_validity": 174
+      },
+      "summaries": [
+        "2026-11-01T03:02:36.6070166Z Test Successful in 0.026s. 11 tests run.",
+        "2026-11-01T03:02:38.3160286Z Test Successful in 0.044s. 124 tests run.",
+        "2026-11-01T03:02:41.0398562Z Test Successful in 0.686s. 142 tests run.",
+        "2026-11-01T03:02:42.5672440Z Test Successful in 0.030s. 51 tests run.",
+        "2026-11-01T03:02:44.6296303Z Test Successful in 0.551s. 27 tests run.",
+        "2026-11-01T03:02:46.0983417Z Test Successful in 0.027s. 55 tests run.",
+        "2026-11-01T03:02:47.4285444Z Test Successful in 0.027s. 25 tests run.",
+        "2026-11-01T03:02:49.0082828Z Test Successful in 0.077s. 34 tests run.",
+        "2026-11-01T03:06:07.9953498Z Test Successful in 0.047s. 17 tests run.",
+        "2026-11-01T03:06:08.0773875Z Test Successful in 0.031s. 16 tests run.",
+        "2026-11-01T03:06:08.1618818Z Test Successful in 0.011s. 5 tests run.",
+        "2026-11-01T03:06:10.5510426Z Test Successful in 2.203s. 174 tests run."
+      ]
     }
   ],
-  "recorded_at": "2026-11-01T03:06:00.785999+00:00",
-  "latest_requested_execution": {
+  "recorded_at": "2026-11-01T03:09:11.899701+00:00",
+  "final_execution": {
+    "workflow": "Test",
+    "run_id": 41267419419,
+    "head": "c895615a9bfe6b885cb47a27b9ea80b095d80242",
+    "ref": "fix/unified-model-catalog-20261101",
+    "conclusion": "success",
+    "actual_pass": 681,
+    "actual_fail": 0,
+    "scope": "eleven explicit core suites plus test_runtime_config_validity; minimal=true"
+  },
+  "previously_pending_execution": {
     "workflow": "Test",
     "run_id": 41267419419,
     "head": "c895615a9bfe6b885cb47a27b9ea80b095d80242",
@@ -158,5 +218,19 @@
     "conclusion_at_last_read": null,
     "scope": "eleven explicit core suites plus test_runtime_config_validity; minimal=true",
     "execution_outcome": "not yet inspected; no success claimed"
-  }
+  },
+  "requested_suites": [
+    "packages/agent_core/test/test_model_catalog_composition",
+    "packages/agent_core/test/test_capabilities",
+    "packages/agent_core/test/test_provider_config",
+    "packages/agent_core/test/test_thinking_control_dialects",
+    "packages/agent_core/test/test_model_catalog_default",
+    "packages/agent_core/test/test_backend_gemini",
+    "packages/agent_core/test/test_snapshot_provider_serialization",
+    "packages/agent_core/test/test_provider_runtime_binding",
+    "packages/agent_core/test/test_exact_output_resolver_snapshot",
+    "packages/agent_core/test/test_responses_reasoning_content",
+    "packages/agent_core/test/test_cohere_schema_wire",
+    "test/test_runtime_config_validity"
+  ]
 }

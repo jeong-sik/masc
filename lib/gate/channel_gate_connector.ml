@@ -7,10 +7,25 @@ type ready_info = {
   ready_at : string;
 }
 
+type snapshot = {
+  available : bool;
+  connected : bool;
+  stale : bool;
+  error : string;
+  binding_read : (Channel_gate_binding_store.binding list, string) result;
+  binding_store_path : string;
+  audit_path : string;
+  recent_audit : Yojson.Safe.t list;
+  updated_at : string;
+  details : (string * Yojson.Safe.t) list;
+  descriptor_details : (string * Yojson.Safe.t) list;
+}
+
 module type S = sig
   val connector_id : string
   val display_name : string
   val channel : string
+  val snapshot : ?audit_limit:int -> unit -> snapshot
   val status_json : ?audit_limit:int -> unit -> Yojson.Safe.t
   val connector_json :
     ?audit_limit:int ->
@@ -46,6 +61,38 @@ let connector_state_label ~available ~connected ~stale =
   else if connected then "connected"
   else "disconnected"
 
+let snapshot_fields snapshot =
+  let bindings, binding_store_read_ok, binding_store_error =
+    match snapshot.binding_read with
+    | Ok bindings -> bindings, true, ""
+    | Error error -> [], false, error
+  in
+  [ "available", `Bool snapshot.available
+  ; "connected", `Bool snapshot.connected
+  ; "status", `String (connector_state_label ~available:snapshot.available
+      ~connected:snapshot.connected ~stale:snapshot.stale)
+  ; "error", `String snapshot.error
+  ; "binding_store_path", `String snapshot.binding_store_path
+  ; "audit_path", `String snapshot.audit_path
+  ; "binding_source", `String "persisted"
+  ; "binding_store_read_ok", `Bool binding_store_read_ok
+  ; "binding_store_error", `String binding_store_error
+  ; "runtime_bindings_count", `Int (List.length bindings)
+  ; "configured_bindings", `List (List.map Channel_gate_binding_store.binding_json bindings)
+  ; "recent_audit", `List snapshot.recent_audit
+  ; "updated_at", `String snapshot.updated_at
+  ] @ snapshot.details
+
+let snapshot_status_json ~channel snapshot =
+  `Assoc (("channel", `String channel) :: snapshot_fields snapshot)
+
+let snapshot_connector_json ~connector_id ~display_name ~channel snapshot =
+  `Assoc
+    ([ "connector_id", `String connector_id
+     ; "display_name", `String display_name
+     ; "channel", `String channel
+     ] @ snapshot.descriptor_details @ snapshot_fields snapshot)
+
 (* Module-level registry: [register] runs during startup while [find]/[all]
    are also reachable from HTTP handlers and tests. Use Stdlib.Mutex because
    callers do not always have an Eio context, and keep the critical sections
@@ -69,20 +116,20 @@ let all () =
 
 let connectors_json ?(audit_limit = 10) () =
   let connectors = all () in
-  let connector_jsons =
+  let observations =
     List.map
       (fun (module C : S) ->
-        C.connector_json ~audit_limit ())
+        let snapshot = C.snapshot ~audit_limit () in
+        snapshot,
+        snapshot_connector_json ~connector_id:C.connector_id
+          ~display_name:C.display_name ~channel:C.channel snapshot)
       connectors
   in
+  let connector_jsons = List.map snd observations in
   let active_count =
     List.fold_left
-      (fun acc json ->
-        if Json_util.get_bool json "available"
-           |> Option.value ~default:false
-        then acc + 1
-        else acc)
-      0 connector_jsons
+      (fun count (snapshot, _) -> if snapshot.available then count + 1 else count)
+      0 observations
   in
   `Assoc
     [

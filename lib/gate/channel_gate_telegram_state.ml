@@ -15,33 +15,59 @@ let record_not_configured () = Atomic.set state Not_configured
 let record_error detail = Atomic.set state (Degraded detail)
 let record_poll_ok ~bot_user_id ~next_offset = Atomic.set state (Polling {bot_user_id;next_offset})
 let connected () = match Atomic.get state with Polling _ -> true | Not_configured | Starting | Degraded _ -> false
-let status_fields ~audit_limit =
-  let bindings=Store.read_bindings_result store in
-  let configured=Option.is_some(Env_config_telegram.bot_token_opt ()) in
-  let available=configured && Result.is_ok bindings in
-  let current=Atomic.get state in
-  let connected=match current with Polling _ -> available | Not_configured | Starting | Degraded _ -> false in
-  let poll_error=match current with Degraded detail -> detail | Not_configured -> "TELEGRAM_BOT_TOKEN is not configured" | Starting | Polling _ -> "" in
-  let binding_read_ok=Result.is_ok bindings in
-  let binding_error=match bindings with Ok _ -> "" | Error e -> Store.binding_store_error_to_string e in
-  let bindings,error=match bindings with Ok bs -> bs,poll_error | Error e -> [],Store.binding_store_error_to_string e in
-  let bot_user_id,next_offset=match current with
-    | Polling {bot_user_id;next_offset} -> `Intlit(Int64.to_string bot_user_id),Option.fold ~none:`Null ~some:(fun n -> `Intlit(Int64.to_string n)) next_offset
-    | Not_configured | Starting | Degraded _ -> `Null,`Null in
-  ["channel",`String channel;"capabilities",Channel_gate_connector_capability.all_json;
-    "available",`Bool available;"connected",`Bool connected;
-    "status",`String(Channel_gate_connector.connector_state_label ~available ~connected ~stale:false);
-    "status_source",`String "in_process_gateway";"error",`String error;
-    "bot_user_id",bot_user_id;"next_offset",next_offset;
-    "binding_store_path",`String(binding_store_path ());"audit_path",`String(binding_audit_path ());
-    "binding_source",`String "persisted";"binding_store_read_ok",`Bool binding_read_ok;
-    "binding_store_error",`String binding_error;
-    "runtime_bindings_count",`Int(List.length bindings);"configured_bindings",`List(List.map Store.binding_json bindings);
-    "recent_audit",`List(Store.read_recent_audit store ~limit:audit_limit);
-    "updated_at",`String(Gate_time_util.iso8601_of_unix(Unix.gettimeofday ()))]
-let status_json ?(audit_limit=10) () = `Assoc(status_fields ~audit_limit)
-let connector_json ?(audit_limit=10) () =
-  `Assoc(("connector_id",`String connector_id)::("display_name",`String display_name)::status_fields ~audit_limit)
+let snapshot ?(audit_limit = 10) () : Channel_gate_connector.snapshot =
+  let binding_read =
+    Store.read_bindings_result store
+    |> Result.map_error Store.binding_store_error_to_string
+  in
+  let configured = Option.is_some (Env_config_telegram.bot_token_opt ()) in
+  let available = configured && Result.is_ok binding_read in
+  let current = Atomic.get state in
+  let connected =
+    match current with
+    | Polling _ -> available
+    | Not_configured | Starting | Degraded _ -> false
+  in
+  let poll_error =
+    match current with
+    | Degraded detail -> detail
+    | Not_configured -> "TELEGRAM_BOT_TOKEN is not configured"
+    | Starting | Polling _ -> ""
+  in
+  let error = match binding_read with Ok _ -> poll_error | Error error -> error in
+  let bot_user_id, next_offset =
+    match current with
+    | Polling { bot_user_id; next_offset } ->
+        `Intlit (Int64.to_string bot_user_id),
+        Option.fold ~none:`Null
+          ~some:(fun n -> `Intlit (Int64.to_string n)) next_offset
+    | Not_configured | Starting | Degraded _ -> `Null, `Null
+  in
+  { available
+  ; connected
+  ; stale = false
+  ; error
+  ; binding_read
+  ; binding_store_path = binding_store_path ()
+  ; audit_path = binding_audit_path ()
+  ; recent_audit = Store.read_recent_audit store ~limit:audit_limit
+  ; updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
+  ; details =
+      [ "capabilities", Channel_gate_connector_capability.all_json
+      ; "status_source", `String "in_process_gateway"
+      ; "bot_user_id", bot_user_id
+      ; "next_offset", next_offset
+      ]
+  ; descriptor_details = []
+  }
+
+let status_json ?audit_limit () =
+  Channel_gate_connector.snapshot_status_json ~channel (snapshot ?audit_limit ())
+
+let connector_json ?audit_limit () =
+  Channel_gate_connector.snapshot_connector_json ~connector_id ~display_name ~channel
+    (snapshot ?audit_limit ())
+
 let resolve_keeper_for_channel_result ~channel_id =
   Result.map (fun bindings -> Option.map (fun (binding:Store.binding) -> binding.keeper_name)
     (Store.find_binding_by_channel_id bindings ~channel_id)) (Store.read_bindings_result store)

@@ -46,7 +46,6 @@ let binding_store =
     ~guild_id_field:Store.Omit
 
 let read_bindings_result () = Store.read_bindings_result binding_store
-let binding_json = Store.binding_json
 let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 
 (* The one definition of "the transport is live", used both by [status_json]
@@ -143,9 +142,7 @@ type status = {
   error : string;
   binding_store_path : string;
   audit_path : string;
-  binding_store_read_ok : bool;
-  binding_store_error : string;
-  configured_bindings : binding list;
+  binding_read : (binding list, string) result;
   recent_audit : Yojson.Safe.t list;
   bot_token_present : bool;
   app_token_present : bool;
@@ -160,12 +157,12 @@ let read_status ~audit_limit =
   let app_present = Option.is_some (app_token_opt ()) in
   (* Socket Mode needs the app token; without it the gateway never starts. *)
   let startup_ok = Option.is_none startup_error in
-  let configured_bindings_result = read_bindings_result () in
-  let binding_store_read_ok = Result.is_ok configured_bindings_result in
-  let configured_bindings, binding_store_error =
-    match configured_bindings_result with
-    | Ok bindings -> bindings, ""
-    | Error error -> [], Store.binding_store_error_to_string error
+  let binding_read =
+    read_bindings_result () |> Result.map_error Store.binding_store_error_to_string
+  in
+  let binding_store_read_ok = Result.is_ok binding_read in
+  let binding_error =
+    match binding_read with Ok _ -> None | Error error -> Some error
   in
   let credential_error =
     credential_error_of_presence ~app_present ~bot_present
@@ -183,7 +180,7 @@ let read_status ~audit_limit =
     match startup_error with
     | Some message -> message
     | None ->
-      [ (if binding_store_read_ok then None else Some binding_store_error)
+      [ binding_error
       ; (match gateway_state with
          | Failed msg -> Some msg
          | Disconnected | Awaiting_hello | Connected | Reconnect_pending _ ->
@@ -201,9 +198,7 @@ let read_status ~audit_limit =
     error;
     binding_store_path = binding_store_path ();
     audit_path = binding_audit_path ();
-    binding_store_read_ok;
-    binding_store_error;
-    configured_bindings;
+    binding_read;
     recent_audit;
     bot_token_present = bot_present;
     app_token_present = app_present;
@@ -211,58 +206,39 @@ let read_status ~audit_limit =
     last_ready = Atomic.get last_ready;
   }
 
-(* The fields both views share, written once so a field added to one view
-   is in the other too. *)
-let status_fields status =
-  [ ("channel", `String channel)
-  ; ("capabilities", Channel_gate_connector_capability.all_json)
-  ; ("trigger_policy",
-     `String (Slack_gateway_state.trigger_policy_to_string status.trigger_policy))
-  ; ("available", `Bool status.available)
-  ; ("connected", `Bool (gateway_connected status.gateway_state))
-  ; ("status",
-     `String
-       (* The gateway state machine is the liveness source; it has no
-          heartbeat file that could age out, so it is never stale. *)
-       (Channel_gate_connector.connector_state_label
-          ~available:status.available
-          ~connected:(gateway_connected status.gateway_state)
-          ~stale:false))
-  ; ("error", `String status.error)
-  ; ("status_source", `String "in_process_gateway")
-  ; ("gateway_state", `String (gateway_state_label status.gateway_state))
-  ; ("binding_store_path", `String status.binding_store_path)
-  ; ("audit_path", `String status.audit_path)
-  ; ("binding_source", `String "persisted")
-  ; ("binding_store_read_ok", `Bool status.binding_store_read_ok)
-  ; ("binding_store_error", `String status.binding_store_error)
-  ; ("runtime_bindings_count", `Int (List.length status.configured_bindings))
-  ; ("configured_bindings", `List (List.map binding_json status.configured_bindings))
-  ; ("recent_audit", `List status.recent_audit)
-  ; ("bot_token_present", `Bool status.bot_token_present)
-  ; ("app_token_present", `Bool status.app_token_present)
-  ; ("updated_at", `String status.updated_at)
-  ; ( "last_ready_at"
-    , `String
-        (match status.last_ready with
-         | Some r -> r.ready_at
-         | None -> "") )
-  ; ( "bot_user_id"
-    , `String
-        (match status.last_ready with
-         | Some r -> r.ready_bot_user_id
-         | None -> "") )
-  ; ("pid", `Int (if status.available then Unix.getpid () else 0))
-  ]
+let snapshot_of_status (status : status) : Channel_gate_connector.snapshot =
+  { available = status.available
+  ; connected = gateway_connected status.gateway_state
+  ; stale = false
+  ; error = status.error
+  ; binding_read = status.binding_read
+  ; binding_store_path = status.binding_store_path
+  ; audit_path = status.audit_path
+  ; recent_audit = status.recent_audit
+  ; updated_at = status.updated_at
+  ; details =
+      [ "capabilities", Channel_gate_connector_capability.all_json
+      ; "trigger_policy", `String (Slack_gateway_state.trigger_policy_to_string status.trigger_policy)
+      ; "status_source", `String "in_process_gateway"
+      ; "gateway_state", `String (gateway_state_label status.gateway_state)
+      ; "bot_token_present", `Bool status.bot_token_present
+      ; "app_token_present", `Bool status.app_token_present
+      ; "last_ready_at", `String (match status.last_ready with Some r -> r.ready_at | None -> "")
+      ; "bot_user_id", `String (match status.last_ready with Some r -> r.ready_bot_user_id | None -> "")
+      ; "pid", `Int (if status.available then Unix.getpid () else 0)
+      ]
+  ; descriptor_details = []
+  }
 
-let status_json ?(audit_limit = 10) () =
-  `Assoc (status_fields (read_status ~audit_limit))
+let snapshot ?(audit_limit = 10) () =
+  snapshot_of_status (read_status ~audit_limit)
 
-let connector_json ?(audit_limit = 10) () =
-  `Assoc
-    (("connector_id", `String connector_id)
-     :: ("display_name", `String display_name)
-     :: status_fields (read_status ~audit_limit))
+let status_json ?audit_limit () =
+  Channel_gate_connector.snapshot_status_json ~channel (snapshot ?audit_limit ())
+
+let connector_json ?audit_limit () =
+  Channel_gate_connector.snapshot_connector_json ~connector_id ~display_name ~channel
+    (snapshot ?audit_limit ())
 
 let bind ~channel_id ~keeper_name ~actor_name =
   Store.bind binding_store ~channel_id ~keeper_name ~actor_name

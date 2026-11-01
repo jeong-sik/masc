@@ -157,6 +157,7 @@ type stream_event =
       }
   | Subscription_usage_observed of Runtime_muse_msp.subscription_usage
   | Compaction_observed of Runtime_muse_msp.compaction
+  | View_gap_observed
   | Turn_terminal_received of Runtime_muse_msp.terminal
   | Model_call_reported of
       { session_id : string
@@ -1142,12 +1143,13 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
      | Msp.View_gap { session_id = sid; _ } ->
        if gap_applies ~session_id sid
        then
-         continue
+         (emit View_gap_observed;
+          continue
            { state with
              observed_usage = Usage_gap
            ; last_call_usage = None
            ; message_gap = true
-           }
+           })
        else continue state
      (* The session's selection is what MASC asked for; the model a call ran
         on is what the host names here. They differ only when the host ran
@@ -1426,7 +1428,9 @@ let run_protocol
   let* ack =
     match await_response
       ~on_view_gap:(fun sid ->
-        if gap_applies ~session_id sid then observed_usage := Usage_gap)
+        if gap_applies ~session_id sid then (
+          observed_usage := Usage_gap;
+          emit_stream_event on_stream_event View_gap_observed))
       ~on_model_usage:(fun ~session_id:sid ~turn_id ->
         if String.equal sid session_id then
           discarded_usage_turns := turn_id :: !discarded_usage_turns)

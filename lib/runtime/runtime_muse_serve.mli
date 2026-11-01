@@ -256,6 +256,10 @@ type stream_event =
           the model sees. An automatic compaction of a single oversized input
           reaches the model as a short summary, and the turn still
           completes, so this event is the only trace of that loss. *)
+  | View_gap_observed
+      (** Push delivery for the current session lost events, possibly including
+          a compaction. Emitted even before [turn/start] is acknowledged;
+          consumers can no longer certify the context held by that session. *)
   | Turn_terminal_received of Runtime_muse_msp.terminal
       (** The matching durable terminal has been decoded. Emitted
           before usage callbacks; [Turn_finished] still closes output afterward. *)

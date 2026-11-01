@@ -682,13 +682,20 @@ with open(os.path.join(HERE, mode + "-prompt.txt"), "w") as handle:
 with open(os.path.join(HERE, mode + "-turn-id.txt"), "w") as handle:
     handle.write(turn_id)
 
+def start_view_gap(timing):
+    if mode == "start" and FIXTURE.get("start_view_gap") == timing:
+        notify("view/gap", {"sessionId": FIXTURE.get("view_gap_session", SESSION),
+                            "after": "v:0", "next": "v:9"})
+
 def acknowledge(disposition="started"):
+    start_view_gap("before_ack")
     send({"jsonrpc": "2.0", "id": turn["id"], "result": {
         "commandId": turn_id, "status": "accepted", "turnId": turn_id,
         "startedNewTurn": disposition == "started", "disposition": disposition}})
     if disposition == "started":
         notify("turn/started", {"sessionId": SESSION, "turnId": turn_id,
                                 "commandId": turn_id})
+        start_view_gap("after_ack")
         if mode == "start" and ("start_compaction" in FIXTURE or "compaction_metadata" in FIXTURE):
             metadata = FIXTURE.get("compaction_metadata", {
                 "trigger": "auto", "outcome": FIXTURE.get("start_compaction")})
@@ -2252,10 +2259,10 @@ let test_compaction_trace_failure_preserves_provider_result () =
     ; "break", Sys.Break ]
 ;;
 
-let check_resume_recall_blocks ~compaction ~resend_after_start () =
+let check_resume_recall_blocks ?(fixture = []) ~compaction ~resend_after_start () =
   let fixture = match compaction with
-    | None -> []
-    | Some outcome -> [ "start_compaction", `String outcome ] in
+    | None -> fixture
+    | Some outcome -> ("start_compaction", `String outcome) :: fixture in
   with_scripted_host ~fixture (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
     List.iteri (fun index recall ->
@@ -2296,6 +2303,25 @@ let test_resume_restores_recall_after_compaction () =
 
 let test_resume_keeps_recall_after_noop_compaction () =
   check_resume_recall_blocks ~compaction:(Some "noop") ~resend_after_start:false ()
+;;
+
+let test_resume_restores_recall_after_view_gap () =
+  List.iter
+    (fun timing ->
+       check_resume_recall_blocks
+         ~fixture:["start_view_gap", `String timing]
+         ~compaction:None ~resend_after_start:true ())
+    ["before_ack"; "after_ack"]
+;;
+
+let test_other_session_view_gap_keeps_held_recall () =
+  List.iter
+    (fun timing ->
+       check_resume_recall_blocks
+         ~fixture:["start_view_gap", `String timing;
+                   "view_gap_session", `String "another-session"]
+         ~compaction:None ~resend_after_start:false ())
+    ["before_ack"; "after_ack"]
 ;;
 
 let test_call_usage_survives_missing_terminal_aggregate () =
@@ -3383,6 +3409,8 @@ let () =
         ; test_case "compaction trace failure preserves provider result" `Quick test_compaction_trace_failure_preserves_provider_result
         ; test_case "recall restored after host compaction" `Quick test_resume_restores_recall_after_compaction
         ; test_case "noop compaction preserves held recall" `Quick test_resume_keeps_recall_after_noop_compaction
+        ; test_case "view gap redelivers held recall" `Quick test_resume_restores_recall_after_view_gap
+        ; test_case "another session's view gap preserves held recall" `Quick test_other_session_view_gap_keeps_held_recall
         ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not
         ; test_case "per-call usage survives missing terminal aggregate" `Quick test_call_usage_survives_missing_terminal_aggregate
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh

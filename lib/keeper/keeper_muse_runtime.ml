@@ -699,6 +699,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
             quota_scope
         | Serve.Turn_terminal_received (Msp.Terminal_failed { quota = Some quota; _ }) ->
           Option.iter (fun scope -> Runtime_muse_usage.observe_quota ~scope quota) quota_scope
+        | Serve.View_gap_observed
         | Serve.Turn_terminal_received
             (Msp.Terminal_completed | Msp.Terminal_failed { quota = None; _ }
             | Msp.Terminal_host_died _ | Msp.Terminal_cancelled | Msp.Unrecognized_terminal _) -> ()
@@ -1509,6 +1510,10 @@ let run_without_lifecycle ~result_scope ~media_store ~input_source ~argument_sou
                           | Some (Msp.Compaction_compacted
                                  | Msp.Unrecognized_compaction_outcome _)
                           | None -> settled_held_context := [])
+                       | Serve.View_gap_observed ->
+                         (* A dropped compaction cannot certify the exact
+                            blocks retained by the vendor session. *)
+                         settled_held_context := []
                        | Serve.Turn_started _ | Serve.Text_delta _ | Serve.Text_completed _
                        | Serve.Native_tool_started _ | Serve.Native_tool_finished _
                        | Serve.Approval_decided _ | Serve.Subscription_usage_observed _

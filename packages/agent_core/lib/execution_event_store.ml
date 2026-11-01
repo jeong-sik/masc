@@ -241,8 +241,9 @@ let lock_name = ".writer.lock"
 let frame_magic = "MACE"
 let frame_version = 1
 
-(* Version 2 hard-cuts recursive work to exact tool attempts; WAL framing is unchanged. *)
-let store_format_version = 2
+(* Version 3 binds writer authority to the full actor lifetime, including
+   reconciliation epochs. Older authorities cannot prove that ownership rule. *)
+let store_format_version = 3
 let frame_header_size = 48
 
 module Active_path_map = Map.Make (String)
@@ -444,25 +445,21 @@ let is_reserved_exception = function
   | _ -> false
 ;;
 
-let release_acquired_resources ?file lock_file claim claim_hook =
+let release_resources resources release =
   let close failures operation resource =
     match Eio.Resource.close resource with
     | () -> failures
     | exception exn -> (operation, exn, Printexc.get_raw_backtrace ()) :: failures
   in
-  let failures =
-    match file with
-    | None -> []
-    | Some file -> close [] Close_wal file
-  in
-  let failures = close failures Close_writer_lock lock_file |> List.rev in
+  let failures = List.fold_left
+    (fun failures (operation, resource) -> close failures operation resource)
+    [] resources |> List.rev in
   (* A close failure leaves physical ownership uncertain. Keep the in-process
      claim attached to the switch so another writer cannot be admitted before
      the owning scope finishes its remaining cleanup. *)
   match failures with
   | [] ->
-    let (_ : bool) = Eio.Switch.try_remove_hook claim_hook in
-    release_writer_path claim;
+    release ();
     Ok ()
   | [ (_, cause, backtrace) ] when is_reserved_exception cause ->
     Printexc.raise_with_backtrace cause backtrace
@@ -486,6 +483,15 @@ let release_acquired_resources ?file lock_file claim claim_hook =
         failures
     in
     Error (Resource_cleanup_failed { operations })
+;;
+
+let release_acquired_resources ?file lock_file claim claim_hook =
+  let resources = match file with
+    | None -> [Close_writer_lock, lock_file]
+    | Some file -> [Close_wal, file; Close_writer_lock, lock_file] in
+  release_resources resources (fun () ->
+    let (_ : bool) = Eio.Switch.try_remove_hook claim_hook in
+    release_writer_path claim)
 ;;
 
 let combine_cleanup primary cleanup =
@@ -521,8 +527,7 @@ let () =
     | _ -> None)
 ;;
 
-let acquire_writer_lock ~sw dir =
-  let* writer_path =
+let resolve_writer_path dir =
     match Eio.Path.native dir with
     | None ->
       Error
@@ -534,16 +539,24 @@ let acquire_writer_lock ~sw dir =
       with_io "resolve writer path" (fun () ->
         Eio_unix.run_in_systhread ~label:"execution store realpath" (fun () ->
           Unix.realpath native))
-  in
+;;
+
+let acquire_writer_lock ~sw ~create dir =
+  let* writer_path = resolve_writer_path dir in
   match claim_writer_path writer_path with
   | None -> Error Writer_already_active
   | Some claim ->
     let claim_hook =
-      Eio.Switch.on_release_cancellable sw (fun () -> release_writer_path claim)
+      match Eio.Switch.on_release_cancellable sw (fun () -> release_writer_path claim) with
+      | hook -> hook
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        release_writer_path claim;
+        Printexc.raise_with_backtrace exn backtrace
     in
     (match
        with_io "open writer lock" (fun () ->
-         Eio.Path.open_out ~sw ~create:(`If_missing 0o600) (lock_path dir))
+         Eio.Path.open_out ~sw ~create (lock_path dir))
      with
      | Error error ->
        let (_ : bool) = Eio.Switch.try_remove_hook claim_hook in
@@ -573,6 +586,147 @@ let acquire_writer_lock ~sw dir =
            | exn -> fail (io_error "lock writer" exn))))
 ;;
 
+type 'a writer_observation =
+  | Writer_active
+  | Writer_absent of 'a
+
+let with_writer_absent ~dir read =
+  Eio.Switch.run (fun sw ->
+    (* A process lock is released by closing any descriptor for its inode.
+       acquire_writer_lock must reserve the canonical path before even opening
+       the existing lock file, including for competing read-only observers. *)
+    match acquire_writer_lock ~sw ~create:`Never dir with
+    | Error error when error = Writer_already_active -> Ok Writer_active
+    | Error error -> Error error
+    | Ok (lock_file, claim, claim_hook) ->
+      let cleanup () =
+        Eio.Cancel.protect (fun () ->
+          release_acquired_resources lock_file claim claim_hook)
+      in
+      match read () with
+      | value ->
+        let+ () = cleanup () in
+        Writer_absent value
+      | exception primary ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        (match cleanup () with
+         | Ok () -> Printexc.raise_with_backtrace primary backtrace
+         | Error cleanup ->
+           Printexc.raise_with_backtrace
+             (Cleanup_failed_after_exception (primary, cleanup))
+             backtrace
+         | exception cleanup_exn ->
+           let cleanup_backtrace = Printexc.get_raw_backtrace () in
+           Printexc.raise_with_backtrace
+             (Cleanup_raised_after_exception
+                ((primary, backtrace), (cleanup_exn, cleanup_backtrace)))
+             backtrace))
+;;
+
+type lease_phase =
+  | Lease_ready
+  | Lease_borrowed of unit ref
+  | Lease_released
+
+type writer_lease =
+  { claim : writer_claim
+  ; gate : Eio.Mutex.t
+  ; phase : lease_phase Atomic.t
+  }
+
+let acquire_writer_lease ~sw ~dir =
+  let+ _lock_file, claim, _claim_hook =
+    acquire_writer_lock ~sw ~create:(`If_missing 0o600) dir
+  in
+  let lease = {claim; gate=Eio.Mutex.create ();
+    phase=Atomic.make Lease_ready} in
+  Eio.Switch.on_release sw (fun () ->
+    Eio.Mutex.use_rw ~protect:true lease.gate (fun () ->
+      Atomic.set lease.phase Lease_released));
+  lease
+;;
+
+type store_lock =
+  | Owned_lock of
+      { lock_file : Eio.File.rw_ty Eio.Resource.t
+      ; claim : writer_claim
+      ; claim_hook : Eio.Switch.hook
+      }
+  | Borrowed_lock of
+      { lease : writer_lease
+      ; token : unit ref
+      ; borrow_hook : Eio.Switch.hook
+      }
+
+type writer_ownership = Self_owned | From_lease of writer_lease
+
+let rec release_borrow lease token =
+  let current = Atomic.get lease.phase in
+  match current with
+  | Lease_ready | Lease_released -> ()
+  | Lease_borrowed active when active != token -> ()
+  | Lease_borrowed _ ->
+    if not (Atomic.compare_and_set lease.phase current Lease_ready)
+    then release_borrow lease token
+;;
+
+let store_lock_available = function
+  | Owned_lock _ -> true
+  | Borrowed_lock {lease;token;_} ->
+    match Atomic.get lease.phase with
+    | Lease_borrowed active -> active == token
+    | Lease_ready | Lease_released -> false
+;;
+
+let with_store_lease lock f =
+  match lock with
+  | Owned_lock _ -> f ()
+  | Borrowed_lock {lease;_} ->
+    Eio.Mutex.use_ro lease.gate (fun () ->
+      if store_lock_available lock then f () else Error Store_released)
+;;
+
+let acquire_store_lock ~sw ~dir = function
+  | Self_owned ->
+    let+ lock_file, claim, claim_hook =
+      acquire_writer_lock ~sw ~create:(`If_missing 0o600) dir
+    in
+    Owned_lock {lock_file;claim;claim_hook}
+  | From_lease lease ->
+    let* path = resolve_writer_path dir in
+    if not (String.equal path lease.claim.path)
+    then Error (Identity_failure "writer lease belongs to another canonical directory")
+    else Eio.Mutex.use_ro lease.gate (fun () ->
+      let rec borrow () =
+        let current = Atomic.get lease.phase in
+        match current with
+        | Lease_released -> Error Store_released
+        | Lease_borrowed _ -> Error Writer_already_active
+        | Lease_ready ->
+          let token = ref () in
+          if not (Atomic.compare_and_set lease.phase current (Lease_borrowed token))
+          then borrow ()
+          else
+            match Eio.Switch.on_release_cancellable sw (fun () -> release_borrow lease token) with
+            | borrow_hook -> Ok (Borrowed_lock {lease;token;borrow_hook})
+            | exception exn ->
+              let backtrace = Printexc.get_raw_backtrace () in
+              release_borrow lease token;
+              Printexc.raise_with_backtrace exn backtrace
+      in
+      borrow ())
+;;
+
+let release_store_resources ?file = function
+  | Owned_lock {lock_file;claim;claim_hook} ->
+    release_acquired_resources ?file lock_file claim claim_hook
+  | Borrowed_lock {lease;token;borrow_hook} ->
+    let resources = match file with None -> [] | Some file -> [Close_wal, file] in
+    release_resources resources (fun () ->
+      let (_ : bool) = Eio.Switch.try_remove_hook borrow_hook in
+      release_borrow lease token)
+;;
+
 type frame_guard =
   { frame_offset : int64
   ; frame_kind : frame_kind
@@ -598,7 +752,7 @@ type committed_state =
   }
 
 type lifecycle =
-  | Unpublished of writer_claim
+  | Unpublished
   | Published
   | Releasing
   | Released
@@ -609,8 +763,7 @@ type t =
   ; codec : Codec.t
   ; dir : Eio.Fs.dir_ty Eio.Path.t
   ; file : Eio.File.rw_ty Eio.Resource.t
-  ; lock_file : Eio.File.rw_ty Eio.Resource.t
-  ; mutable claim_hook : Eio.Switch.hook
+  ; lock : store_lock
   ; mutable lifecycle_hook : Eio.Switch.hook
   ; writer_gate : Eio.Mutex.t
   ; mu : Eio.Mutex.t
@@ -639,7 +792,8 @@ let scope_id (store : t) = store.scope_id
 let correlation_id (store : t) = store.correlation_id
 let with_read store f = Eio.Mutex.use_ro store.mu f
 let with_state_write store f = Eio.Mutex.use_rw ~protect:true store.mu f
-let with_writer store f = Eio.Mutex.use_ro store.writer_gate f
+let with_writer store f =
+  with_store_lease store.lock (fun () -> Eio.Mutex.use_ro store.writer_gate f)
 
 let fence_store store error =
   with_state_write store (fun () ->
@@ -663,18 +817,19 @@ let require_reconciliation store error =
 ;;
 
 let lifecycle_available = function
-  | Unpublished _ | Published -> true
+  | Unpublished | Published -> true
   | Releasing | Released -> false
 ;;
 
 let require_available store =
   with_read store (fun () ->
-    if lifecycle_available store.lifecycle then Ok () else Error Store_released)
+    if lifecycle_available store.lifecycle && store_lock_available store.lock
+    then Ok () else Error Store_released)
 ;;
 
 let last_seq store =
   with_read store (fun () ->
-    if lifecycle_available store.lifecycle
+    if lifecycle_available store.lifecycle && store_lock_available store.lock
     then Ok store.committed.last_seq
     else Error Store_released)
 ;;
@@ -691,31 +846,30 @@ let release_unpublished store =
     match
       with_state_write store (fun () ->
         match store.lifecycle with
-        | Unpublished claim ->
+        | Unpublished ->
           store.lifecycle <- Releasing;
-          let claim_hook = store.claim_hook in
           let lifecycle_hook = store.lifecycle_hook in
-          store.claim_hook <- Eio.Switch.null_hook;
           store.lifecycle_hook <- Eio.Switch.null_hook;
-          Ok (Some (claim, claim_hook, lifecycle_hook))
+          Ok (Some lifecycle_hook)
         | Releasing | Released -> Ok None
         | Published -> Error Store_release_forbidden)
     with
     | Error _ as error -> error
     | Ok None -> Ok ()
-    | Ok (Some (claim, claim_hook, lifecycle_hook)) ->
+    | Ok (Some lifecycle_hook) ->
       let (_ : bool) = Eio.Switch.try_remove_hook lifecycle_hook in
       Fun.protect
         ~finally:(fun () ->
           with_state_write store (fun () -> store.lifecycle <- Released))
         (fun () ->
-           release_acquired_resources ~file:store.file store.lock_file claim claim_hook))
+           release_store_resources ~file:store.file store.lock))
 ;;
 
 let attach store =
   with_state_write store (fun () ->
+    if not (store_lock_available store.lock) then Error Store_released else
     match store.lifecycle with
-    | Unpublished _ ->
+    | Unpublished ->
       store.lifecycle <- Published;
       Ok { store }
     | Published -> Error Store_already_attached
@@ -1560,9 +1714,7 @@ let make_store
       ~codec
       ~dir
       ~file
-      ~lock_file
-      ~claim
-      ~claim_hook
+      ~lock
       ~locations
       ~last_seq
       ~committed_offset
@@ -1572,14 +1724,13 @@ let make_store
   ; codec
   ; dir
   ; file
-  ; lock_file
-  ; claim_hook
+  ; lock
   ; lifecycle_hook = Eio.Switch.null_hook
   ; writer_gate = Eio.Mutex.create ()
   ; mu = Eio.Mutex.create ()
   ; committed = { locations; last_seq; committed_offset }
   ; health = Writable
-  ; lifecycle = Unpublished claim
+  ; lifecycle = Unpublished
   }
 ;;
 
@@ -1592,15 +1743,15 @@ let bind_lifecycle_to_switch ~sw store =
   store
 ;;
 
-let protect_store_resources lock_file claim claim_hook opened_file f =
+let protect_store_resources lock opened_file f =
   match f () with
   | Ok _ as result -> result
   | Error primary ->
     combine_cleanup primary (fun () ->
-      release_acquired_resources ?file:!opened_file lock_file claim claim_hook)
+      release_store_resources ?file:!opened_file lock)
   | exception primary ->
     let backtrace = Printexc.get_raw_backtrace () in
-    (match release_acquired_resources ?file:!opened_file lock_file claim claim_hook with
+    (match release_store_resources ?file:!opened_file lock with
      | Ok () -> Printexc.raise_with_backtrace primary backtrace
      | Error cleanup ->
        Printexc.raise_with_backtrace
@@ -1614,14 +1765,14 @@ let protect_store_resources lock_file claim claim_hook opened_file f =
          backtrace)
 ;;
 
-let create ~sw ~codec ~dir ?correlation_id () =
+let create_with_ownership ~sw ~codec ~dir ~ownership ?correlation_id () =
   let* directory_exists =
     with_io "check store directory" (fun () -> Eio.Path.is_directory dir)
   in
   let* () = if directory_exists then Ok () else Error Store_not_found in
-  let* lock_file, claim, claim_hook = acquire_writer_lock ~sw dir in
+  let* lock = acquire_store_lock ~sw ~dir ownership in
   let opened_file = ref None in
-  protect_store_resources lock_file claim claim_hook opened_file (fun () ->
+  protect_store_resources lock opened_file (fun () -> with_store_lease lock (fun () ->
     let* wal_exists =
       with_io "check WAL existence" (fun () -> Eio.Path.is_file (wal_path dir))
     in
@@ -1719,25 +1870,31 @@ let create ~sw ~codec ~dir ?correlation_id () =
                ~codec
                ~dir
                ~file
-               ~lock_file
-               ~claim
-               ~claim_hook
+               ~lock
                ~locations:Sequence_map.empty
                ~last_seq:0
                ~committed_offset)
-        , initialization ))
+        , initialization )))
 ;;
 
-let open_existing ~sw ~codec ~dir =
+let create ~sw ~codec ~dir ?correlation_id () =
+  create_with_ownership ~sw ~codec ~dir ~ownership:Self_owned ?correlation_id ()
+;;
+
+let create_with_lease ~sw ~codec ~dir ~lease ?correlation_id () =
+  create_with_ownership ~sw ~codec ~dir ~ownership:(From_lease lease) ?correlation_id ()
+;;
+
+let open_existing_with_ownership ~sw ~codec ~dir ~ownership =
   let* directory_exists =
     with_io "check store directory" (fun () -> Eio.Path.is_directory dir)
   in
   if not directory_exists
   then Error Store_not_found
   else
-    let* lock_file, claim, claim_hook = acquire_writer_lock ~sw dir in
+    let* lock = acquire_store_lock ~sw ~dir ownership in
     let opened_file = ref None in
-    protect_store_resources lock_file claim claim_hook opened_file (fun () ->
+    protect_store_resources lock opened_file (fun () -> with_store_lease lock (fun () ->
       let* wal_exists =
         with_io "check WAL existence" (fun () -> Eio.Path.is_file (wal_path dir))
       in
@@ -1875,14 +2032,20 @@ let open_existing ~sw ~codec ~dir =
              ~codec
              ~dir
              ~file
-             ~lock_file
-             ~claim
-             ~claim_hook
+             ~lock
              ~locations
              ~last_seq
              ~committed_offset)
       in
-      Ok { store; recovery; replay_events })
+      Ok { store; recovery; replay_events }))
+;;
+
+let open_existing ~sw ~codec ~dir =
+  open_existing_with_ownership ~sw ~codec ~dir ~ownership:Self_owned
+;;
+
+let open_existing_with_lease ~sw ~codec ~dir ~lease =
+  open_existing_with_ownership ~sw ~codec ~dir ~ownership:(From_lease lease)
 ;;
 
 let validate_append (store : t) ~expected_next_seq events =
@@ -2004,6 +2167,7 @@ let corrupt_tail store offset detail =
 ;;
 
 let require_writable store =
+  let* () = require_available store in
   match with_read store (fun () -> store.health) with
   | Writable -> Ok ()
   | Fenced error -> Error error
@@ -2420,8 +2584,8 @@ let append_batch (writer : writer) ~expected_next_seq events =
     in
     match lifecycle, health with
     | (Releasing | Released), _ -> Error Store_released
-    | (Unpublished _ | Published), Fenced error -> Error error
-    | (Unpublished _ | Published), Writable ->
+    | (Unpublished | Published), Fenced error -> Error error
+    | (Unpublished | Published), Writable ->
       let* () = verify_write_fence_locked store in
       if expected_next_seq = committed_last + 1
       then append_new_batch store ~expected_next_seq ~count payloads
@@ -2456,8 +2620,8 @@ let read_page (store : t) ~(after : cursor) ?through ~limit () =
       with_read store (fun () ->
         match store.lifecycle, store.health with
         | (Releasing | Released), _ -> Error Store_released
-        | (Unpublished _ | Published), Fenced error -> Error error
-        | (Unpublished _ | Published), Writable ->
+        | (Unpublished | Published), Fenced error -> Error error
+        | (Unpublished | Published), Writable ->
           let committed = store.committed in
           let current = committed.last_seq in
           let high =

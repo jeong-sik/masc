@@ -2455,9 +2455,9 @@ let journal_writer_of_store ~replay_events store =
          bt)
 ;;
 
-let create_durable_writer ~sw ~codec ~dir ?correlation_id () =
+let create_durable_writer_from open_store =
   let* store, initialization =
-    match Store.create ~sw ~codec ~dir ?correlation_id () with
+    match open_store () with
     | Ok result -> Ok result
     | Error error -> Error (Persistence_failure error)
   in
@@ -2465,9 +2465,9 @@ let create_durable_writer ~sw ~codec ~dir ?correlation_id () =
   writer, initialization
 ;;
 
-let open_durable_writer ~sw ~codec ~dir =
+let open_durable_writer_from open_store =
   let* opened =
-    match Store.open_existing ~sw ~codec ~dir with
+    match open_store () with
     | Ok result -> Ok result
     | Error error -> Error (Persistence_failure error)
   in
@@ -2475,4 +2475,21 @@ let open_durable_writer ~sw ~codec ~dir =
     journal_writer_of_store ~replay_events:opened.replay_events opened.store
   in
   writer, opened.recovery
+;;
+
+let create_durable_writer ~sw ~codec ~dir ?correlation_id () =
+  create_durable_writer_from (fun () -> Store.create ~sw ~codec ~dir ?correlation_id ())
+;;
+
+let create_durable_writer_with_lease ~sw ~codec ~dir ~lease ?correlation_id () =
+  create_durable_writer_from (fun () ->
+    Store.create_with_lease ~sw ~codec ~dir ~lease ?correlation_id ())
+;;
+
+let open_durable_writer ~sw ~codec ~dir =
+  open_durable_writer_from (fun () -> Store.open_existing ~sw ~codec ~dir)
+;;
+
+let open_durable_writer_with_lease ~sw ~codec ~dir ~lease =
+  open_durable_writer_from (fun () -> Store.open_existing_with_lease ~sw ~codec ~dir ~lease)
 ;;

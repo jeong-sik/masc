@@ -160,11 +160,22 @@ let instance_header = "x-masc-sse-instance-id"
 let replay_header = "x-masc-sse-replay"
 let missed_through_header = "x-masc-sse-replay-missed-through"
 
-let header name headers =
-  List.find_map
+let headers_named name headers =
+  List.filter_map
     (fun (key, value) ->
       if String.equal (String.lowercase_ascii key) name then Some value else None)
     headers
+;;
+
+let valid_instance_id value =
+  not (String.equal value "")
+  && String.for_all
+       (function
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9'
+         | '!' | '#' | '$' | '%' | '&' | '\'' | '*' | '+' | '-' | '.'
+         | '^' | '_' | '`' | '|' | '~' -> true
+         | _ -> false)
+       value
 ;;
 
 let observer_cursor_headers = function
@@ -175,12 +186,12 @@ let observer_cursor_headers = function
 
 let negotiate_observer ~instance_id ~headers ~last_event_id =
   let replay, cursor =
-    match last_event_id, header instance_header headers with
+    match last_event_id, headers_named instance_header headers with
     | None, _ -> Fresh, None
-    | Some _, None -> Reset Unscoped_cursor, None
-    | Some event_id, Some requested when String.equal requested instance_id ->
+    | Some _, [] | Some _, _ :: _ :: _ -> Reset Unscoped_cursor, None
+    | Some event_id, [ requested ] when String.equal requested instance_id ->
       Resumed, Some event_id
-    | Some _, Some _ -> Reset Instance_changed, None
+    | Some _, [ _ ] -> Reset Instance_changed, None
   in
   { instance_id; replay }, cursor
 ;;
@@ -208,23 +219,59 @@ let observer_response_headers { instance_id; replay } =
 ;;
 
 let decode_observer_response headers =
-  match header instance_header headers, header replay_header headers with
-  | None, None -> Ok None
-  | Some instance_id, Some replay when not (String.equal instance_id "") ->
+  let instances = headers_named instance_header headers in
+  let replays = headers_named replay_header headers in
+  let gaps = headers_named missed_through_header headers in
+  match instances, replays, gaps with
+  | [], [], [] -> Ok None
+  | (_ :: _ :: _, _, _) | (_, _ :: _ :: _, _) | (_, _, _ :: _ :: _) ->
+    Error "Duplicate observer replay response header"
+  | [ instance_id ], [ replay ], gaps when valid_instance_id instance_id ->
     let replay =
-      match replay with
-      | "fresh" -> Ok Fresh
-      | "resumed" -> Ok Resumed
-      | "resumed-after-gap" ->
-        (match Option.bind (header missed_through_header headers) int_of_string_opt with
+      match replay, gaps with
+      | "fresh", [] -> Ok Fresh
+      | "resumed", [] -> Ok Resumed
+      | "resumed-after-gap", [ gap ] ->
+        (match int_of_string_opt gap with
          | Some missed_through when missed_through > 0 ->
            Ok (Resumed_after_gap { missed_through })
          | Some _ | None -> Error "Observer replay gap without a positive missed-through id")
-      | "reset-instance-changed" -> Ok (Reset Instance_changed)
-      | "reset-unscoped-cursor" -> Ok (Reset Unscoped_cursor)
+      | "reset-instance-changed", [] -> Ok (Reset Instance_changed)
+      | "reset-unscoped-cursor", [] -> Ok (Reset Unscoped_cursor)
+      | "resumed-after-gap", [] -> Error "Observer replay gap without a positive missed-through id"
+      | ("fresh" | "resumed" | "reset-instance-changed" | "reset-unscoped-cursor"), [ _ ] ->
+        Error "Unexpected observer replay gap"
       | _ -> Error "Unknown observer replay response"
     in
     Result.map (fun replay -> Some { instance_id; replay }) replay
-  | (None | Some _), (None | Some _) ->
+  | _ ->
     Error "Incomplete observer instance/replay response"
+;;
+
+let validate_observer_response ~(cursor : observer_cursor option) headers =
+  match decode_observer_response headers with
+  | Error _ as error -> error
+  | Ok None when Option.is_some cursor ->
+    Error "Observer peer did not advertise scoped replay; requested cursor retained for retry"
+  | Ok (Some { instance_id; replay = Resumed }) as response ->
+    (match cursor with
+     | Some requested when String.equal requested.instance_id instance_id -> response
+     | Some _ | None -> Error "Observer resumed without a matching cursor and replay range")
+  | Ok (Some { instance_id; replay = Resumed_after_gap { missed_through } }) as response ->
+    (match cursor with
+     | Some requested
+       when String.equal requested.instance_id instance_id && missed_through > requested.event_id ->
+       response
+     | Some _ | None -> Error "Observer resumed without a matching cursor and replay range")
+  | Ok (Some { replay = Fresh; _ }) as response ->
+    (match cursor with
+     | None -> response
+     | Some _ -> Error "Observer reported a fresh stream for a requested cursor")
+  | Ok (Some { instance_id; replay = Reset Instance_changed }) as response ->
+    (match cursor with
+     | Some requested when not (String.equal requested.instance_id instance_id) -> response
+     | Some _ | None -> Error "Observer reported an instance change without a changed requested instance")
+  | Ok (Some { replay = Reset Unscoped_cursor; _ }) ->
+    Error "Observer reported an unscoped cursor for a scoped request"
+  | Ok None as response -> response
 ;;

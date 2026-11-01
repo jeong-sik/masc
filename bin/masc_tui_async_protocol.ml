@@ -519,7 +519,6 @@ type async_msg =
   | Resource_diagram_ready of Masc_tui_resource_diagrams.request * string * (string, string) result
   | Sent_image_ready of {
       request : sent_image_read;
-      skill_reference : Skill_reference.t option;
       result : image_preparation;
     }
   | Image_render_ready of {

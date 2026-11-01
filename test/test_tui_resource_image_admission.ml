@@ -87,7 +87,53 @@ let pending state owner =
   { Types.sir_generation = state.Types.image_request_generation;
     sir_view = state.view; sir_keeper = state.msg_target_keeper_name;
     sir_name = "local.png"; sir_owner = owner; sir_resource = None;
+    sir_skill_reference = None;
     sir_purpose = Types.Open_image }
+
+let test_skill_image_owner () =
+  let module Tools=Masc.Tui_decode_tools in
+  let reference name revision =
+    Skill_reference.of_yojson (`Assoc [
+      "identity", `Assoc ["source_id", `String "workspace"; "package_id", `String "diagram";
+        "name", `String name];
+      "content_revision", `String (String.make 64 revision)]) |> Result.get_ok in
+  let original=reference "diagram" 'a' in
+  let profile esp_reference : Tools.effective_skill_profile = {
+    esp_reference; esp_name="diagram"; esp_kind="composition"; esp_execution="inline";
+    esp_body_bytes=0; esp_discovery_bytes=0; esp_load_reasons=[]; esp_node_count=0;
+    esp_batch_count=0; esp_max_parallelism=0; esp_flow=None; esp_io=Model_orchestrated } in
+  let inventory selected : Tools.tool_snapshot = {
+    ts_tools=[]; ts_count=0; ts_freshness=Settled; ts_skill_activations=None;
+    ts_effective=Some (Effective_surface_available {
+      ets_keeper_name="keeper"; ets_runtime_id="runtime"; ets_official_client_kind="client";
+      ets_tool_delivery=Effective_tools_delivered; ets_native_posture=None;
+      ets_skill_snapshot_revision="snapshot"; ets_skill_resource_read_max_bytes=None;
+      ets_instruction_skills=[]; ets_skills_left_out=[]; ets_unavailable_skill_names=[];
+      ets_composition_skills=[]; ets_skill_profiles=List.map profile selected;
+      ets_tool_surface_bytes=None; ets_skill_tool_surface_bytes=None; ets_skill_discovery_bytes=0;
+      ets_skill_body_bytes=None; ets_tools=[]; ets_tool_surface_sha256=None }) } in
+  let state=state () in
+  state.view <- Types.Tools;
+  let image={ (pending state (Types.Peer_image_read state.workspace_read_authority)) with
+    sir_skill_reference=Some original } in
+  let window : Masc_tui_image_viewport.window = {x=0;y=0;width=1;height=1;columns=1;rows=1} in
+  let inspection={image with sir_purpose=Inspect_image {identity=ref ();window}} in
+  state.tools_inventory <- Some (inventory [original]);
+  check bool "exact skill revision owns the open" true (Types.image_reading_is_current state image);
+  check bool "inspection retains that owner" true (Types.image_reading_is_current state inspection);
+  state.tools_inventory <- Some (inventory [reference "diagram" 'b']);
+  check bool "a replacement revision retires the open" false (Types.image_reading_is_current state image);
+  check bool "a replacement revision retires inspection" false (Types.image_reading_is_current state inspection);
+  state.tools_inventory <- Some (inventory [reference "other" 'a']);
+  check bool "a different skill retires the open" false (Types.image_reading_is_current state image);
+  state.tools_inventory <- None;
+  check bool "a missing skill retires the open" false (Types.image_reading_is_current state image);
+  let local=pending state (Types.Local_file_image_read state.workspace_authority) in
+  let draft=attachment () in
+  state.msg_attachments <- [draft];
+  let draft=pending state (Types.Draft_image_read (state.workspace_authority,draft)) in
+  check bool "local images do not require a skill" true (Types.image_reading_is_current state local);
+  check bool "draft images do not require a skill" true (Types.image_reading_is_current state draft)
 
 let test_local_peer_loss () =
   let state = state () and original = attachment () in
@@ -273,7 +319,7 @@ let test_image_preview_input_barrier () =
   let preview view =
     let request={ (pending state (Types.Local_file_image_read state.workspace_authority)) with
       sir_view=view } in
-    Protocol.Sent_image_ready {request;skill_reference=None;
+    Protocol.Sent_image_ready {request;
       result=Protocol.Image_prepared (Error "unavailable")} in
   let scoped message = Protocol.Workspace_scoped (Types.Workspace_authority 0,Some (ref ()),message) in
   let waits message = Protocol.message_waits_for_input ~resource_read:(fun _ -> false)
@@ -284,7 +330,7 @@ let test_image_preview_input_barrier () =
     (waits (scoped (preview Types.Resources)));
   let request=pending state (Types.Remote_url_image_read state.workspace_authority) in
   check bool "a busy inspection waits for pending input" true
-    (waits (Protocol.Sent_image_ready {request;skill_reference=None;result=Protocol.Image_worker_busy}));
+    (waits (Protocol.Sent_image_ready {request;result=Protocol.Image_worker_busy}));
   let remote=Protocol.Image_render_ready {request;title="image";caption=[];
     page_url="https://example.invalid";image_url="https://example.invalid/image";
     result=Error "unavailable"} in
@@ -539,6 +585,104 @@ let test_physical_inspection_worker () =
   check bool "shutdown prevents later inspections" true
     (Option.is_none (Work.try_run worker (fun () -> ())))
 
+let test_initial_vector_worker () =
+  let module Work=Masc_tui_board_preview_work in
+  let module Requests=Masc_tui_image_requests in
+  let worker=Work.create () and board=Work.create () in
+  let directory=Filename.temp_dir "tui vector admission " "" in
+  Fun.protect ~finally:(fun () -> Unix.rmdir directory) (fun () ->
+    let calls=ref 0 and blocked=ref false in
+    let run_vector _ =
+      incr calls;
+      blocked := Option.is_none (Work.reserve worker);
+      Unix.WEXITED 1 in
+    let board_calls=ref 0 in
+    let run_board _ = incr board_calls; Unix.WEXITED 1 in
+    let source=Requests.Generated (Masc_tui_image_preview.mermaid_source "graph TD; A-->B") in
+    let load ~board_worker ~vector_admission source = Requests.load
+        ~host:"127.0.0.1" ~port:0 ~cache_dir:(fun () -> directory)
+        ~diagram_width:100 ~diagram_height:100 ~diagram_font_size:12 ~diagram_colors:None
+        ~board_worker
+        ~admit_vector:(fun () -> match vector_admission with
+          | Some admission -> Ok admission | None -> Error "not admitted")
+        ~run:run_board ~vector_run:run_vector
+        ~display:Masc_tui_image_cache.Pixel_graphics source in
+    check bool "Mermaid is admitted as a vector" true (Requests.is_vector source);
+    let source_of = function
+      | Masc_tui_image_preview.Output_image {source;_} -> Requests.Generated source
+      | Named_path _ | Staged _ | Stored_attachment _ | Unavailable_image _ | No_image -> fail "missing image source" in
+    let svg=source_of (Masc_tui_image_preview.inline_svg ~name:"svg" "<svg xmlns='http://www.w3.org/2000/svg'/>") in
+    check bool "inline SVG is admitted as a vector" true (Requests.is_vector svg);
+    let raster=source_of (Masc_tui_image_preview.inline_payload ~name:"png"
+        (Masc_tui_image_payload.of_base64 ~mime_type:"image/png"
+           "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4nGNgAAEAAAUAAQ0KLbQAAAAASUVORK5CYII=")) in
+    check bool "raster image does not reserve Pele" false (Requests.is_vector raster);
+    check bool "raster preview still loads without a reservation" true
+      (Result.is_ok (load ~board_worker:None ~vector_admission:None raster));
+    let old=match Work.reserve worker with Some ticket -> ticket | None -> fail "old admission" in
+    Work.withdraw_pending worker;
+    let current=match Work.reserve worker with Some ticket -> ticket | None -> fail "current admission" in
+    check bool "withdrawn open cannot start Pele" true
+      (Result.is_error (load ~board_worker:None ~vector_admission:(Some (worker,old)) source));
+    Work.withdraw worker old;
+    check int "withdrawn open made no renderer call" 0 !calls;
+    check bool "current admission reaches its renderer" true
+      (Result.is_error (load ~board_worker:None ~vector_admission:(Some (worker,current)) source));
+    check int "only the current open entered Pele" 1 !calls;
+    check bool "initial render excludes a concurrent inspection" true !blocked;
+    check bool "the renderer released the physical slot" true
+      (Option.is_some (Work.try_run worker (fun () -> ())));
+    check bool "a vector without admission cannot start Pele" true
+      (Result.is_error (load ~board_worker:None ~vector_admission:None source));
+    check int "unadmitted vector made no renderer call" 1 !calls;
+    let invalid=Requests.Draft { (attachment ()) with mime_type="image/svg+xml"; data="?" } in
+    let decoding=match Work.reserve worker with Some ticket -> ticket | None -> fail "decode admission" in
+    check bool "invalid vector input fails during admitted preparation" true
+      (Result.is_error (load ~board_worker:None ~vector_admission:(Some (worker,decoding)) invalid));
+    check bool "failed decoding releases the physical worker" false (Work.is_busy worker);
+    let pending=match Work.reserve worker with Some ticket -> ticket | None -> fail "pending vector" in
+    ignore (load ~board_worker:(Some board) ~vector_admission:None source);
+    check int "Board keeps its separate renderer" 1 !board_calls;
+    check bool "Board did not consume the non-Board reservation" true
+      (Option.is_some (Work.run_reserved worker pending (fun () -> ()))))
+
+let test_vector_character_presentation_is_bounded () =
+  let module Work=Masc_tui_board_preview_work in
+  let module Requests=Masc_tui_image_requests in
+  let directory=Filename.temp_dir "tui vector character " "" in
+  let executable=Filename.concat directory "masc-pele" in
+  let png_path=Filename.concat directory "fixture.png" in
+  let previous=Option.value (Sys.getenv_opt "PATH") ~default:"" in
+  let png="\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001\b\006\
+    \000\000\000\031\021\196\137\000\000\000\nIDATx\156c\000\001\000\000\005\
+    \000\001\r\n-\180\000\000\000\000IEND\174B`\130" in
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv "PATH" previous;
+    Unix.unlink executable;
+    Unix.unlink png_path;
+    Unix.rmdir directory) (fun () ->
+      Out_channel.with_open_bin png_path (fun out -> Out_channel.output_string out png);
+      Out_channel.with_open_text executable (fun out ->
+        Printf.fprintf out "#!/bin/sh\ncat %s\n" (Filename.quote png_path));
+      Unix.chmod executable 0o700;
+      Unix.putenv "PATH" (directory ^ ":" ^ previous);
+      let worker=Work.create () in
+      let admission=match Work.reserve worker with Some ticket -> ticket | None -> fail "vector admission" in
+      let bounded_calls=ref 0 and unbounded_calls=ref 0 in
+      let vector_run command =
+        incr bounded_calls;
+        if !bounded_calls = 1 then Unix.system command else Unix.WEXITED 1 in
+      let run _ = incr unbounded_calls; Unix.WEXITED 1 in
+      let source=Requests.Generated (Masc_tui_image_preview.mermaid_source "graph TD; A-->B") in
+      let result=Requests.load ~host:"127.0.0.1" ~port:0 ~cache_dir:(fun () -> directory)
+          ~diagram_width:100 ~diagram_height:100 ~diagram_font_size:12 ~diagram_colors:None
+          ~board_worker:None ~admit_vector:(fun () -> Ok (worker,admission)) ~run ~vector_run
+          ~display:(Masc_tui_image_cache.Character_cells {columns=10;rows=5}) source in
+      check bool "character conversion failure is reported" true (Result.is_error result);
+      check int "Pele and character conversion use the bounded runner" 2 !bounded_calls;
+      check int "character conversion never uses the unbounded runner" 0 !unbounded_calls;
+      check bool "conversion failure releases the physical worker" false (Work.is_busy worker))
+
 let test_board_pele_deadline () =
   let directory=Filename.temp_dir "board pele test " "" in
   let executable=Filename.concat directory "masc-pele" in
@@ -696,6 +840,8 @@ let () =
   test_case "Board SVG and original-image reader" `Quick test_board_svg_and_original_reader;
   test_case "Board worker and PNG header boundary" `Quick test_board_worker_and_png_boundary;
   test_case "inspection worker stays owned until physical return" `Quick test_physical_inspection_worker;
+  test_case "initial vectors require their owned renderer" `Quick test_initial_vector_worker;
+  test_case "vector character conversion uses the bounded runner" `Quick test_vector_character_presentation_is_bounded;
   test_case "Board Pele deadline releases worker" `Quick test_board_pele_deadline;
   test_case "Board renderer shutdown reaps child" `Quick test_renderer_shutdown;
   test_case "workspace suspension retires diagram preparation" `Quick test_suspended_diagram_preparation;
@@ -704,6 +850,7 @@ let () =
   test_case "failed and detached completion" `Quick test_failed_read;
   test_case "new immutable observation" `Quick test_new_observation;
   test_case "local draft and peer withdrawal" `Quick test_local_peer_loss;
+  test_case "skill image ownership follows exact revision" `Quick test_skill_image_owner;
   test_case "local draft replacement and workspace" `Quick test_local_draft_replacement;
   test_case "peer resource owner" `Quick test_peer_resource_owner;
   test_case "remote URL workspace owner" `Quick test_remote_url_resource_independence;

@@ -8809,6 +8809,7 @@ type sent_image_read =
   ; sir_name : string
   ; sir_owner : image_read_owner
   ; sir_resource : (Masc_tui_resource_catalog.key * Masc_tui_mcp.resource_content list) option
+  ; sir_skill_reference : Skill_reference.t option
   ; sir_purpose : image_read_purpose
   }
 and image_read_purpose =
@@ -17582,6 +17583,13 @@ let image_keeper_is_current (state : state) ~view ~keeper_name =
    but never a workspace replacement. Peer images retain their exact reading.
    Completion, retirement and footer projection use this same admission. *)
 let image_reading_is_current (state : state) (pending : sent_image_read) =
+  let same_skill = match pending.sir_skill_reference with
+    | None -> true
+    | Some reference ->
+        (match selected_tools_skill_profile state with
+         | Some profile -> Skill_reference.equal reference profile.esp_reference
+         | None -> false) in
+  same_skill &&
   match pending.sir_owner with
   | Local_file_image_read authority -> authority = state.workspace_authority
   | Remote_url_image_read authority -> authority = state.workspace_authority

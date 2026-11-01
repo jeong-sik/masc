@@ -93,8 +93,11 @@ val handle_tool_execute_with_outcome :
   unit ->
   Keeper_tool_execution.t
 (** SSH validation refusals project location through the endpoint captured for
-    this call. A cwd outside that namespace retains its path refusal and null
-    location; it is not reported as an unresolved endpoint. *)
+    this call. A cwd outside that namespace retains its path refusal while the
+    location stays the captured endpoint's namespace: an
+    [execution_location] object with an unavailable scope, the namespace
+    resolution as its [reason], and null path and cwd fields — not a null
+    location and not an unresolved endpoint. *)
 
 module For_testing : sig
   val secret_files_for_source :

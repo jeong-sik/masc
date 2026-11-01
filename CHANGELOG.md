@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Repair three startup catalog fixtures to reach model admission and check HTTP
+  health/settings, optional-model exclusion and refusal to replace a rejected
+  default. A child startup failure now fails these cases instead of skipping
+  them (#27898).
+
 ## [0.66.0] - 2026-10-29
 
 ### Upgrade notes

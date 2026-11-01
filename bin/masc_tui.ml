@@ -16066,7 +16066,9 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
     | Keepers Keeper_detail, _, Some keeper ->
         launch_detail_tab_reading state ~mailbox keeper
     | Connectors, _, _ -> launch_connectors_load state ~mailbox
-    | Fusion, _, _ -> revalidate_visible_fusion state ~mailbox
+    (* Fusion's list and nested detail resume together with the surface read
+       below. A second change demand here would queue a duplicate reread. *)
+    | Fusion, _, _ -> ()
     | (Keepers (Keeper_detail), (Detail_info | (Detail_sandbox | (Detail_instructions | (Detail_secrets | (Detail_github | (Detail_identity | (Detail_channels | (Detail_automation | (Detail_runs | Detail_terminal))))))))), None)
     | (Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick)))), _, _)
     | ((Overview | (Acting | (Metrics | (Memory | (Lanes | (Clients | (Board | (Approvals | (Planning | (Schedules | (Verification | (Harness | (Repositories | (Code | (Changes | (Runtime | (Config | (Resources | (Tools | System_logs))))))))))))))))))), _, _) -> ()

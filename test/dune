@@ -5348,6 +5348,7 @@
 (include stanzas/test_tui_keeper_runs_view.inc)
 
 (include stanzas/test_tui_fusion_refresh.inc)
+(include stanzas/test_tui_fusion_recovery.inc)
 
 (include stanzas/test_tui_fusion_workspace.inc)
 

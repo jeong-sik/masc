@@ -1534,7 +1534,7 @@ default = "reloaded.reloaded"
 (* A bare HTTP catalog row cannot choose the effort of a selected Muse turn.
    Observe the actual MSP child after routing and hook preparation, including
    the difference between the explicit [none] tier and an omitted request. *)
-let test_routed_muse_effort_ignores_http_catalog ?(replace_in_hook = false) requested () =
+let test_routed_muse_effort_ignores_http_catalog ?(replace_in_hook = false) ?hook_effort requested () =
   with_scripted_host @@ fun ~base_path ->
   let effort_line = match requested with
     | None -> ""
@@ -1578,7 +1578,10 @@ default = "muse_fixture.fixture"
        | Some caps -> check bool "conflicting HTTP ladder is actually loaded" true
            (caps.accepted_reasoning_efforts = Some [Llm_provider.Reasoning_effort.Low])
        | None -> fail "the colliding bare catalog row is missing");
-      Agent_core.Hooks.Continue
+      (match hook_effort with
+       | None -> Agent_core.Hooks.Continue
+       | Some effort -> Agent_core.Hooks.AdjustParams
+           {current_params with reasoning_effort=Some effort})
     | _ -> fail "expected before_turn_params hook event") } in
   let observed = ref `Null in
   let tool = masc_probe_tool observed in
@@ -1590,7 +1593,7 @@ default = "muse_fixture.fixture"
       ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
       ~runtime_id ~keeper_name ~base_path
       ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
-      ~goal:"Call masc_probe once" ~system_prompt:"" ~hooks
+      ~goal:"Call masc_probe once" ~system_prompt:"MUSE_EFFORT_FIXTURE_SYSTEM" ~hooks
       ~tools:[tool] ~agent_core_tools:[tool]
       ~initial_messages:[user_message "MUSE_EFFORT_AUTHORITY"]
       ~context:(Agent_core.Context.create ()) ~sw ~net:(Eio.Stdenv.net env) ()) in
@@ -1598,7 +1601,8 @@ default = "muse_fixture.fixture"
    | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
   let params = Yojson.Safe.from_file (Filename.concat base_path "start-turn-params.json") in
   let fields = match params with `Assoc fields -> fields | _ -> fail "turn params are not an object" in
-  let expected = Option.map (fun effort -> `String (Llm_provider.Reasoning_effort.to_string effort)) requested in
+  let effective = match hook_effort with None -> requested | Some effort -> Some effort in
+  let expected = Option.map (fun effort -> `String (Llm_provider.Reasoning_effort.to_string effort)) effective in
   check (option string) "MSP receives the exact requested tier, or no member"
     (Option.map Yojson.Safe.to_string expected)
     (Option.map Yojson.Safe.to_string (List.assoc_opt "reasoningEffort" fields));
@@ -3745,7 +3749,11 @@ let () =
            Some Medium; Some High; Some XHigh; Some Max; Some Ultra]
         @ [test_case "hook catalog replacement cannot change the routed effort" `Quick
              (test_routed_muse_effort_ignores_http_catalog ~replace_in_hook:true
-               (Some Llm_provider.Reasoning_effort.Max))] )
+               (Some Llm_provider.Reasoning_effort.Max))
+          ; test_case "hook effort override reaches MSP without a catalog clamp" `Quick
+              (test_routed_muse_effort_ignores_http_catalog
+                ~hook_effort:Llm_provider.Reasoning_effort.Ultra
+                (Some Llm_provider.Reasoning_effort.High))] )
     ; ( "async result outbox"
       , [test_case "original result crosses checkpoint and fresh-session delivery" `Quick
            test_original_result_crosses_checkpoint_and_fresh_session

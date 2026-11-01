@@ -2968,6 +2968,118 @@ let test_next_task_number_includes_durable_event_history () =
       (Workspace.next_task_number config (Workspace.read_backlog config)))
 ;;
 
+let test_next_task_number_rejects_unreadable_or_broken_event_history () =
+  with_test_env (fun config ->
+    let seed_backlog : Masc_domain.backlog =
+      { tasks =
+          [ { id = "task-100"
+            ; title = "Restored high-water baseline"
+            ; description = "backlog only reaches 100"
+            ; task_status = Masc_domain.Todo
+            ; priority = 1
+            ; files = []
+            ; created_at = "2026-08-26T00:00:00Z"
+            ; created_by = None
+            ; predecessor_task_id = None
+            ; contract = None
+            ; handoff_context = None
+            ; cycle_count = 0
+            ; reclaim_policy = None
+            ; execution_links = Masc_domain.no_execution_links
+            ; do_not_reclaim_reason = None
+            ; skills = []
+            }
+          ]
+      ; last_updated = "2026-08-26T00:00:00Z"
+      ; version = 1
+      ; task_deletion_receipts = []
+      ; task_creation_receipts = []
+      }
+    in
+    Workspace.write_backlog config seed_backlog;
+    let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
+    let month_dir = Filename.concat events_dir "2026-08" in
+    Fs_compat.mkdir_p month_dir;
+    let path = Filename.concat month_dir "26.jsonl" in
+    let event_line =
+      Yojson.Safe.to_string
+        (`Assoc [ "type", `String "task_transition"; "task_id", `String "task-101" ])
+      ^ "\n"
+    in
+    Fs_compat.save_file path event_line;
+    (* Warm the per-file cache first so we also test that cached entries still
+       reject subsequent permission failures. *)
+    Alcotest.(check int)
+      "warm cache observes task-101 in event history"
+      102
+      (Workspace.next_task_number config (Workspace.read_backlog config));
+    Unix.chmod path 0o000;
+    Fun.protect
+      ~finally:(fun () ->
+        (try Unix.chmod path 0o644 with Unix.Unix_error _ -> ()))
+      (fun () ->
+        let raised_on_unreadable =
+          try
+            ignore (Workspace.next_task_number config (Workspace.read_backlog config));
+            false
+          with
+          | Unix.Unix_error _ | Sys_error _ -> true
+        in
+        Alcotest.(check bool)
+          "unreadable event file propagates error instead of returning 0"
+          true
+          raised_on_unreadable;
+        (match
+           Workspace.add_task_with_result
+             config
+             ~title:"Must not reuse task-101"
+             ~priority:1
+             ~description:"unreadable event history must abort task creation"
+         with
+         | Ok created ->
+           Alcotest.failf
+             "Expected task creation to fail on unreadable event file, got %s"
+             created.task_id
+         | Error _ -> ());
+        Alcotest.(check int)
+          "backlog unchanged after rejected task creation"
+          1
+          (List.length (Workspace.read_backlog config).tasks));
+    let broken_link = Filename.concat month_dir "27.jsonl" in
+    Unix.symlink (Filename.concat month_dir "missing-target.jsonl") broken_link;
+    Fun.protect
+      ~finally:(fun () ->
+        (try Unix.unlink broken_link with Unix.Unix_error _ -> ()))
+      (fun () ->
+        let raised_on_stat_failure =
+          try
+            ignore (Workspace.next_task_number config (Workspace.read_backlog config));
+            false
+          with
+          | Unix.Unix_error _ | Sys_error _ -> true
+        in
+        Alcotest.(check bool)
+          "stat failure on event file propagates error instead of returning 0"
+          true
+          raised_on_stat_failure;
+        (match
+           Workspace.add_task_with_result
+             config
+             ~title:"Must not ignore broken event stat"
+             ~priority:1
+             ~description:"stat failure in event history must abort task creation"
+         with
+         | Ok created ->
+           Alcotest.failf
+             "Expected task creation to fail on event stat error, got %s"
+             created.task_id
+         | Error _ -> ()));
+    Alcotest.(check int)
+      "after restoring readability and removing broken entry, high-water mark is 102"
+      102
+      (Workspace.next_task_number config (Workspace.read_backlog config)))
+;;
+
 (* ============================================================ *)
 (* Archive Task Tests                                            *)
 (* ============================================================ *)
@@ -4005,6 +4117,10 @@ let () =
             "durable history high-water mark"
             `Quick
             test_next_task_number_includes_durable_event_history
+        ; Alcotest.test_case
+            "durable history unreadable or broken file rejects id reuse"
+            `Quick
+            test_next_task_number_rejects_unreadable_or_broken_event_history
         ] )
     ; (* === Archive === *)
       ( "archive"

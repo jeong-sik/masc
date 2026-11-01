@@ -284,11 +284,14 @@ let same_event_file_stat (entry : cached_event_max_id) (st : Unix.stats) =
   && Float.equal entry.st_mtime st.st_mtime
   && Float.equal entry.st_ctime st.st_ctime
 
-let load_event_file_max_task_id ~verify_content path =
-  match Unix.stat path with
-  | exception Unix.Unix_error _ -> 0
-  | st when st.st_kind <> Unix.S_REG -> 0
-  | st ->
+let load_event_file_max_task_id ~verify_content (st : Unix.stats) path =
+  if st.st_kind = Unix.S_REG && st.st_perm land 0o444 = 0 then
+    raise (Unix.Unix_error (Unix.EACCES, "open", path));
+  Unix.access path [ Unix.R_OK ];
+  if st.st_kind <> Unix.S_REG then
+    let content = Fs_compat.load_file path in
+    scan_max_task_id_range content ~start_pos:0 ~end_pos:(String.length content) ~init:0
+  else
     let check_cached () =
       with_event_max_id_cache_lock (fun () ->
         match Hashtbl.find_opt event_max_id_cache path with
@@ -302,79 +305,78 @@ let load_event_file_max_task_id ~verify_content path =
     | Some entry when not should_verify && same_event_file_stat entry st ->
       entry.max_task_id
     | _ ->
-      (match Fs_compat.load_file path with
-       | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
-       | exception _ -> 0
-       | content ->
-         let cached_opt = check_cached () in
-         let len = String.length content in
-         let full_digest = Digest.string content in
-         let max_task_id, was_exact_digest_hit =
-           match cached_opt with
-           | Some entry
-             when entry.st_dev = st.st_dev
-                  && entry.st_ino = st.st_ino
-                  && entry.st_size = len
-                  && Digest.equal full_digest entry.prefix_digest ->
-             entry.max_task_id, true
-           | Some entry
-             when entry.st_dev = st.st_dev
-                  && entry.st_ino = st.st_ino
-                  && len > entry.st_size
-                  && entry.ended_with_newline
-                  && Digest.equal
-                       (Digest.substring content 0 entry.st_size)
-                       entry.prefix_digest ->
-             scan_max_task_id_range content ~start_pos:entry.st_size ~end_pos:len
-               ~init:entry.max_task_id,
-             false
-           | _ ->
-             scan_max_task_id_range content ~start_pos:0 ~end_pos:len ~init:0,
-             false
-         in
-         let stat_unchanged =
-           match cached_opt with
-           | Some entry -> same_event_file_stat entry st
-           | None -> false
-         in
-         if not (was_exact_digest_hit && stat_unchanged) then
-           (match Unix.stat path with
-            | st_after
-              when st_after.st_kind = Unix.S_REG
-                   && st_after.st_dev = st.st_dev
-                   && st_after.st_ino = st.st_ino
-                   && st_after.st_size = len
-                   && Float.equal st_after.st_mtime st.st_mtime
-                   && Float.equal st_after.st_ctime st.st_ctime ->
-              let ended_with_newline =
-                len > 0 && Char.equal content.[len - 1] '\n'
-              in
-              with_event_max_id_cache_lock (fun () ->
-                while Hashtbl.length event_max_id_cache >= max_cached_event_id_files
-                      && not (Hashtbl.mem event_max_id_cache path)
-                do
-                  evict_oldest_event_max_id_locked ()
-                done;
-                let tick = touch_event_max_id_tick () in
-                Hashtbl.replace event_max_id_cache path
-                  {
-                    st_dev = st.st_dev;
-                    st_ino = st.st_ino;
-                    st_size = len;
-                    st_mtime = st.st_mtime;
-                    st_ctime = st.st_ctime;
-                    ended_with_newline;
-                    prefix_digest = full_digest;
-                    max_task_id;
-                    last_access_tick = tick;
-                  })
-            | _ | exception Unix.Unix_error _ -> ());
-         max_task_id)
+      let content = Fs_compat.load_file path in
+      let cached_opt = check_cached () in
+      let len = String.length content in
+      let full_digest = Digest.string content in
+      let max_task_id, was_exact_digest_hit =
+        match cached_opt with
+        | Some entry
+          when entry.st_dev = st.st_dev
+               && entry.st_ino = st.st_ino
+               && entry.st_size = len
+               && Digest.equal full_digest entry.prefix_digest ->
+          entry.max_task_id, true
+        | Some entry
+          when entry.st_dev = st.st_dev
+               && entry.st_ino = st.st_ino
+               && len > entry.st_size
+               && entry.ended_with_newline
+               && Digest.equal
+                    (Digest.substring content 0 entry.st_size)
+                    entry.prefix_digest ->
+          scan_max_task_id_range content ~start_pos:entry.st_size ~end_pos:len
+            ~init:entry.max_task_id,
+          false
+        | _ ->
+          scan_max_task_id_range content ~start_pos:0 ~end_pos:len ~init:0,
+          false
+      in
+      let stat_unchanged =
+        match cached_opt with
+        | Some entry -> same_event_file_stat entry st
+        | None -> false
+      in
+      if not (was_exact_digest_hit && stat_unchanged) then
+        (match Unix.stat path with
+         | st_after
+           when st_after.st_kind = Unix.S_REG
+                && st_after.st_dev = st.st_dev
+                && st_after.st_ino = st.st_ino
+                && st_after.st_size = len
+                && Float.equal st_after.st_mtime st.st_mtime
+                && Float.equal st_after.st_ctime st.st_ctime ->
+           let ended_with_newline =
+             len > 0 && Char.equal content.[len - 1] '\n'
+           in
+           with_event_max_id_cache_lock (fun () ->
+             while Hashtbl.length event_max_id_cache >= max_cached_event_id_files
+                   && not (Hashtbl.mem event_max_id_cache path)
+             do
+               evict_oldest_event_max_id_locked ()
+             done;
+             let tick = touch_event_max_id_tick () in
+             Hashtbl.replace event_max_id_cache path
+               {
+                 st_dev = st.st_dev;
+                 st_ino = st.st_ino;
+                 st_size = len;
+                 st_mtime = st.st_mtime;
+                 st_ctime = st.st_ctime;
+                 ended_with_newline;
+                 prefix_digest = full_digest;
+                 max_task_id;
+                 last_access_tick = tick;
+               })
+         | _ | exception Unix.Unix_error _ -> ());
+      max_task_id
 
 let event_history_max_task_id config =
   let events_dir = Filename.concat (masc_dir config) "events" in
-  if not (Sys.file_exists events_dir) then 0
-  else
+  match Unix.stat events_dir with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> 0
+  | st when st.st_kind <> Unix.S_DIR -> 0
+  | _ ->
     let month_dirs =
       Sys.readdir events_dir
       |> Array.to_list
@@ -383,23 +385,24 @@ let event_history_max_task_id config =
     let is_first_file = ref true in
     let max_id = ref 0 in
     let visit_file path =
-      if Sys.file_exists path && not (Sys.is_directory path) then begin
+      let st = Unix.stat path in
+      if st.st_kind <> Unix.S_DIR then begin
         let verify_content = !is_first_file in
         is_first_file := false;
-        let file_max = load_event_file_max_task_id ~verify_content path in
+        let file_max = load_event_file_max_task_id ~verify_content st path in
         if file_max > !max_id then max_id := file_max
       end
     in
     List.iter
       (fun month ->
          let month_path = Filename.concat events_dir month in
-         if Sys.file_exists month_path then
-           if Sys.is_directory month_path then
-             Sys.readdir month_path
-             |> Array.to_list
-             |> List.sort (fun a b -> String.compare b a)
-             |> List.iter (fun file -> visit_file (Filename.concat month_path file))
-           else visit_file month_path)
+         let st = Unix.stat month_path in
+         if st.st_kind = Unix.S_DIR then
+           Sys.readdir month_path
+           |> Array.to_list
+           |> List.sort (fun a b -> String.compare b a)
+           |> List.iter (fun file -> visit_file (Filename.concat month_path file))
+         else visit_file month_path)
       month_dirs;
     !max_id
 

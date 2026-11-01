@@ -18,7 +18,8 @@ let parse = Event.parse
 
 let validate_source ~run_id (post : Board.post) =
   match post.origin with
-  | Some {source=Some "fusion"; fusion_run_id=Some actual; _} when actual=run_id -> Ok post
+  | Some {source=Some "fusion"; fusion_run_id=Some actual; fusion_producer=Some producer; _}
+    when actual=run_id && String.trim producer <> "" -> Ok post
   | _ -> Error (Rejected "source is not exact Fusion evidence")
 
 let source_in_workspace ~run_id =
@@ -26,9 +27,16 @@ let source_in_workspace ~run_id =
   | Some post -> validate_source ~run_id post
   | None -> Error (Rejected "Fusion run has no durable deliberation evidence")
 
+let source_owned_by ~keeper (post : Board.post) =
+  match post.origin with
+  | Some {fusion_producer=Some producer; _} when String.trim producer <> "" ->
+    String.equal producer keeper
+  | Some _ | None ->
+    String.equal (Board.Agent_id.to_string post.author) keeper
+
 let source ~keeper ~run_id =
   match Board_dispatch.find_post_by_run_id ~run_id with
-  | Some post when Board.Agent_id.to_string post.author = keeper ->
+  | Some post when source_owned_by ~keeper post ->
     validate_source ~run_id post
   (* A run owned by another Keeper and a run that does not exist answer with the
      same sentence. Two sentences let a Keeper walk run ids and learn which ones
@@ -55,10 +63,14 @@ let protect f = try f () with
 let read_events ~config ~run_id = protect (fun () ->
   let root = events_root config in
   let rows = ref [] in
-  if Sys.file_exists root then
+  if Sys.file_exists root then (
+    let months = Sys.readdir root in
+    Array.sort String.compare months;
     Array.iter (fun month ->
       let directory = Filename.concat root month in
-      if Sys.is_directory directory then
+      if Sys.is_directory directory then (
+        let files = Sys.readdir directory in
+        Array.sort String.compare files;
         Array.iter (fun name ->
           if Filename.check_suffix name ".jsonl" then
             Fs_compat.load_file (Filename.concat directory name)
@@ -68,8 +80,8 @@ let read_events ~config ~run_id = protect (fun () ->
               match Event.select_for_run ~run_id json with
               | Ok None -> ()
               | Ok (Some event) -> rows := event :: !rows
-              | Error detail -> raise (Yojson.Json_error detail))) (Sys.readdir directory)) (Sys.readdir root);
-  Ok (List.sort (fun a b -> String.compare (Event.timestamp a) (Event.timestamp b)) !rows))
+              | Error detail -> raise (Yojson.Json_error detail))) files)) months);
+  Ok (List.stable_sort (fun a b -> String.compare (Event.timestamp a) (Event.timestamp b)) (List.rev !rows)))
 
 let read ~config ~run_id =
   Result.map (List.map Event.to_yojson) (read_events ~config ~run_id)

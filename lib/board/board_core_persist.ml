@@ -855,6 +855,7 @@ let create_post_once_by_fusion_run_id
     option_equal Ids.Turn_ref.equal left.turn_ref right.turn_ref
     && option_equal String.equal left.source right.source
     && option_equal String.equal left.fusion_run_id right.fusion_run_id
+    && option_equal String.equal left.fusion_producer right.fusion_producer
   in
   let post_kind_equal left right =
     match left, right with

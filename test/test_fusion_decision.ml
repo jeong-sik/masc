@@ -147,8 +147,8 @@ let test_generated_decision_note_is_read_without_rewriting_history () =
     let decisions = Fusion_decision.read ~config ~run_id:"run-advice"
       |> require "read historical decision" in
     check int "both immutable decision rows remain readable" 2 (List.length decisions);
-    check bool "read preserves both original journal shapes" true
-      (List.mem recorded.event decisions && List.mem historical decisions))
+    check bool "read preserves chronological journal append order and original shapes" true
+      (decisions = [recorded.event; historical]))
 
 let test_historical_turn_spelling_preserves_conflict_and_retry () =
   with_fixture (fun config task_id _ ->
@@ -240,7 +240,25 @@ let test_read_source_ownership_and_no_adoption () = with_fixture (fun config _ _
       (result |> member "evidence" |> member "state" |> to_string);
     check bool "unowned source does not expose post or panel content" true
       (result |> member "evidence" |> member "post" = `Null))
-    ["foreign", "run-advice"; "fusion-keeper", "unknown-run"])
+    ["foreign", "run-advice"; "fusion-keeper", "unknown-run"];
+  let _transferred =
+    Board_dispatch.update_post
+      ~post_id:(Board.Post_id.to_string workspace_source.id)
+      ~new_author:"peer" ()
+    |> Result.map_error Board.show_board_error
+    |> require "transfer source author"
+  in
+  let _still_owned =
+    Fusion_decision.source ~keeper:"fusion-keeper" ~run_id:"run-advice"
+    |> require "original fusion_producer retains ownership after author transfer"
+  in
+  rejected (Fusion_decision.source ~keeper:"peer" ~run_id:"run-advice");
+  let after_transfer_own = invoke "fusion-keeper" "run-advice" in
+  check bool "fusion_producer status remains found after author transfer" true
+    (after_transfer_own |> member "found" |> to_bool);
+  let after_transfer_peer = invoke "peer" "run-advice" in
+  check bool "new mutable author cannot read fusion status" false
+    (after_transfer_peer |> member "found" |> to_bool))
 
 let test_request_context_snapshot () = with_fixture (fun config task_id goal_id ->
   let args = `Assoc ["prompt", `String "Choose A or B"; "task_id", `String task_id;

@@ -91,13 +91,22 @@ let run_job t lane job =
       }
 ;;
 
+let owner_available t =
+  match t.lifecycle, Eio.Switch.get_error t.sw with
+  | `Open, None -> true
+  | `Closed, _ | `Open, Some _ -> false
+;;
+
 let take_lane_job t lane state =
   with_lock t (fun () ->
-    match Queue.take_opt state.jobs with
-    | Some job -> Some job
-    | None ->
-      Hashtbl.remove t.lanes lane;
-      None)
+    if not (owner_available t)
+    then None
+    else
+      match Queue.take_opt state.jobs with
+      | Some job -> Some job
+      | None ->
+        Hashtbl.remove t.lanes lane;
+        None)
 ;;
 
 let rec run_lane t lane state =
@@ -111,17 +120,20 @@ let rec run_lane t lane state =
 
 let take_ready_lane t =
   with_lock t (fun () ->
-    match Queue.take_opt t.ready with
-    | None -> None
-    | Some lane ->
-      (match Hashtbl.find_opt t.lanes lane with
-       | Some state ->
-         (match state.phase with
-          | Scheduled ->
-            state.phase <- Active;
-            Some (lane, state)
-          | Active -> None)
-       | None -> None))
+    if not (owner_available t)
+    then None
+    else
+      match Queue.take_opt t.ready with
+      | None -> None
+      | Some lane ->
+        (match Hashtbl.find_opt t.lanes lane with
+         | Some state ->
+           (match state.phase with
+            | Scheduled ->
+              state.phase <- Active;
+              Some (lane, state)
+            | Active -> None)
+         | None -> None))
 ;;
 
 let rec run_dispatcher t : [ `Stop_daemon ] =
@@ -149,6 +161,7 @@ let close t =
                    state.jobs
                  |> List.rev
                in
+               Queue.clear state.jobs;
                jobs :: acc)
             t.lanes
             []
@@ -185,9 +198,9 @@ let create ~sw ~on_failure () =
 let submit t ~lane ~event_id run =
   let submission =
     with_lock t (fun () ->
-      match t.lifecycle with
-      | `Closed -> Error Owner_unavailable
-      | `Open ->
+      if not (owner_available t)
+      then Error Owner_unavailable
+      else
         let job = { event_id; run } in
         (match Hashtbl.find_opt t.lanes lane with
          | Some state ->

@@ -697,12 +697,9 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
           Option.iter (fun scope ->
             Runtime_muse_usage.observe ~scope Runtime_muse_usage.Usage_changed usage)
             quota_scope
-        | Serve.Turn_terminal_received (Msp.Terminal_failed { quota = Some quota; _ }) ->
-          Option.iter (fun scope -> Runtime_muse_usage.observe_quota ~scope quota) quota_scope
-        | Serve.View_gap_observed
-        | Serve.Turn_terminal_received
-            (Msp.Terminal_completed | Msp.Terminal_failed { quota = None; _ }
-            | Msp.Terminal_host_died _ | Msp.Terminal_cancelled | Msp.Unrecognized_terminal _) -> ()
+        | Serve.Turn_terminal_received terminal ->
+          Option.iter (fun scope -> Runtime_muse_usage.observe_terminal ~scope terminal) quota_scope
+        | Serve.View_gap_observed -> ()
         (* The usage this turn reports belongs to the model its calls ran
            on, when the host names it, rather than the session's selection. *)
         | Serve.Model_call_reported { model; _ } -> reported_model := model

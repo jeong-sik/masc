@@ -7,9 +7,15 @@ type origin =
   | Usage_changed
   | Usage_read
 
-let observe_quota ~scope (quota : Runtime_muse_msp.quota_detail) =
-  Runtime_quota_window.note_exhausted ~scope
-    ~resets_at:(float_of_int quota.resets_at_ms /. 1000.)
+let observe_terminal ~scope = function
+  | Runtime_muse_msp.Terminal_failed { quota = Some quota; _ } ->
+    Runtime_quota_window.note_exhausted ~scope
+      ~resets_at:(float_of_int quota.resets_at_ms /. 1000.)
+  | Runtime_muse_msp.Terminal_failed { quota = None; _ }
+  | Runtime_muse_msp.Terminal_completed
+  | Runtime_muse_msp.Terminal_host_died _
+  | Runtime_muse_msp.Terminal_cancelled
+  | Runtime_muse_msp.Unrecognized_terminal _ -> ()
 ;;
 
 let method_name = function

@@ -91,38 +91,50 @@ let render_payload payload =
   | Ok text -> "\n\n" ^ text
   | Error _ -> "\n\nShared memory host retrieval could not be rendered; availability is unknown."
 
-(* A rendered projection belongs to its payload. Commit the pair only after
-   rendering succeeds; this cell does not synchronize yielding callbacks. *)
+(* A rendered projection belongs to its payload. Each observation retains
+   the exact pair it checked while validation and persistence can yield. *)
 type projection = { payload : Yojson.Safe.t; text : string }
 
 type prepared =
-  { mutable projection : projection
+  { projection : projection Atomic.t
   ; validate : Yojson.Safe.t -> (unit,string) result
   ; retain : reason:string -> payload:Yojson.Safe.t -> (unit,string) result
   }
 
 let make_prepared ~payload ~validate ~retain =
-  {projection={payload;text=render_payload payload};validate;retain}
+  {projection=Atomic.make {payload;text=render_payload payload};validate;retain}
 
 let unavailable_payload payload reason = `Assoc
   ["status",`String "unavailable";"reason",`String reason;
    "selection_id",Yojson.Safe.Util.member "selection_id" payload]
 
+let projection_changed_text =
+  "\n\nShared memory selection changed during revalidation; this host-selected projection is unavailable."
+
 let render_prepared prepared =
-  match prepared.validate prepared.projection.payload with
-  | Ok () -> prepared.projection.text
+  let current = Atomic.get prepared.projection in
+  match prepared.validate current.payload with
+  | Ok () ->
+    if Atomic.get prepared.projection == current then current.text
+    else projection_changed_text
   | Error reason ->
-    let payload = unavailable_payload prepared.projection.payload reason in
-    let payload = match prepared.retain ~reason:"source_revalidation_failed" ~payload with
-      | Ok () -> payload
-      | Error _ -> unavailable_payload payload "source revalidation and projection receipt unavailable" in
-    let projection = {payload;text=render_payload payload} in
-    prepared.projection <- projection;
-    projection.text
+    if Atomic.get prepared.projection != current then projection_changed_text
+    else
+      let payload = unavailable_payload current.payload reason in
+      let payload = match prepared.retain ~reason:"source_revalidation_failed" ~payload with
+        | Ok () -> payload
+        | Error _ -> unavailable_payload payload "source revalidation and projection receipt unavailable" in
+      let projection = {payload;text=render_payload payload} in
+      if Atomic.compare_and_set prepared.projection current projection then projection.text
+      else projection_changed_text
 
 let defer_for_capacity prepared ~refusal =
   let open Keeper_memory_delivery_reprojection in
-  match prepared.projection.payload with
+  let current = Atomic.get prepared.projection in
+  let changed = "shared memory projection changed during capacity reduction" in
+  let unchanged () =
+    if Atomic.get prepared.projection == current then Ok Unchanged else Error changed in
+  match current.payload with
   | `Assoc fields ->
     (match List.assoc_opt "selected" fields with
      | Some (`List (_ :: _ as rows)) ->
@@ -137,15 +149,17 @@ let defer_for_capacity prepared ~refusal =
              "selected",`List kept;
              "capacity_deferred_count",`Int (previous_deferred + List.length rows - keep)]) in
          let text = render_payload payload in
-         if String.length text < String.length prepared.projection.text then (
-           let* () = prepared.retain
-             ~reason:(Agent_core.Error.to_string refusal) ~payload in
-           prepared.projection <- {payload;text};
-           Ok Reprojected)
-         else if keep=0 then Ok Unchanged else smaller (keep / 2) in
+         if String.length text < String.length current.text then (
+           if Atomic.get prepared.projection != current then Error changed
+           else
+             let* () = prepared.retain
+               ~reason:(Agent_core.Error.to_string refusal) ~payload in
+             if Atomic.compare_and_set prepared.projection current {payload;text}
+             then Ok Reprojected else Error changed)
+         else if keep=0 then unchanged () else smaller (keep / 2) in
        smaller (List.length rows / 2)
-     | Some _ | None -> Ok Unchanged)
-  | _ -> Ok Unchanged
+     | Some _ | None -> unchanged ())
+  | _ -> unchanged ()
 
 let prepare_available ~config ~keeper_id ~purpose =
   let result,adapter =
@@ -211,7 +225,7 @@ let prepare_available ~config ~keeper_id ~purpose =
   make_prepared ~payload ~validate ~retain
 
 let prepare ~config ~keeper_id ~purpose =
-  let empty text = {projection={payload=`Null;text};validate=(fun _ -> Ok ());
+  let empty text = {projection=Atomic.make {payload=`Null;text};validate=(fun _ -> Ok ());
     retain=(fun ~reason:_ ~payload:_ -> Error "no selected memory")} in
   match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     Workspace_memory_ledger.observe ~base_path:config.Workspace.base_path) with

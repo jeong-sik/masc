@@ -111,6 +111,8 @@ let test_idle_recipient_owns_its_draft () =
     (Masc_tui_message_input.contents state.msg_input);
   check (option string) "preview does not retarget" (Some other.k_name)
     state.msg_target_keeper_name;
+  state.keepers <- [keeper;other];
+  state.keeper_cursor <- 0;
   state.composer_focused <- true;
   let focused = Projection.of_state state in
   check target_testable "focused owner stays bound" (Composer.Ready other.k_name) focused.target;

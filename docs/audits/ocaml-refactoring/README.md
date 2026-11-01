@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Eighteen are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Nineteen are
 implemented as PRs; their source-review evidence is recorded on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -128,7 +128,10 @@ restart planning; D5 in [#47057](https://github.com/jeong-sik/masc/pull/47057) s
 immutable Board vote transitions. S5 in
 [#47068](https://github.com/jeong-sik/masc/pull/47068) and
 [#47069](https://github.com/jeong-sik/masc/pull/47069) separates full-health
-observations from immutable refresh ownership. Twelve candidates remain queued; this ordering does not waive their coverage.
+observations from immutable refresh ownership. S4 in
+[#47070](https://github.com/jeong-sik/masc/pull/47070) and
+[#47071](https://github.com/jeong-sik/masc/pull/47071) repairs dashboard cache
+refresh ownership and extracts its bounded execution module. Eleven candidates remain queued; this ordering does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
 | --- | --- | --- | --- |
@@ -149,7 +152,7 @@ observations from immutable refresh ownership. Twelve candidates remain queued; 
 | [S1](#s1) | next | in review | Extract the provider usage acceptance/revocation reducer from the shared observation store |
 | [S2](#s2) | next | in review | Move lane edit decisions into a pure declared-configuration planner |
 | [S3](#s3) | later | candidate | Separate Antigravity protocol transitions from persistence and stream callbacks |
-| [S4](#s4) | investigate | candidate | Make provider-metrics cache refresh ownership explicit and cancellation-complete |
+| [S4](#s4) | investigate | implemented; execution unverified | Make provider-metrics cache refresh ownership explicit and cancellation-complete |
 | [S5](#s5) | later | implemented; execution unverified | Consolidate full-health refresh bookkeeping into an immutable owned state machine |
 | [S6](#s6) | later | candidate | Give connector status a common typed projection before JSON aggregation |
 | [S7](#s7) | later | candidate | Replace connector ingress scheduling flag combinations with explicit lane lifecycle |
@@ -1418,7 +1421,17 @@ Cleanup uses only synchronous mutex/table operations. New existing-surface
 scenarios cover cancelled cold `sync_first` recovery and a rejected cancelled
 async switch followed by recovery. These scenarios were added, not executed.
 Source review and syntax parsing do not establish runtime reproduction or fix
-verification. The bounded shared cache module extraction follows in the next layer.
+verification.
+
+[#47071](https://github.com/jeong-sik/masc/pull/47071) moves the table, lock,
+eviction policy, metadata projection and executor/fork shell into the opaque
+`Server_dashboard_json_cache` API. All eight route caches call that module;
+the route's helper exports and test-only facade are removed. Tests exercise
+the real library API, including an evicted-key incarnation with a held old
+worker that settles after a replacement. The scenario uses the production
+capacity contract and awaits the worker's owning switch before checking the
+replacement. TTL/capacity, failure redaction, wire metadata and pool lanes
+retain their existing behavior. Builds and behavior suites remain unexecuted.
 
 ### S5
 

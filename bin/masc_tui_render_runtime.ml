@@ -1244,7 +1244,7 @@ let provider_history_lines ~cols ~rows (state : state) =
 let usage_lines ~cols ~rows (state : state) =
   let open Masc.Tui_decode_usage in
   let text = Overview_providers.text_for_viewport ~columns:(framed_inner_width cols) ~rows in
-  let scopes =
+  let scopes () =
     match Overview_providers.section_cards
             ~providers:(usage_providers_reading state) ~runtimes:state.overview_quota
             ~account_emails:state.overview_account_emails
@@ -1254,7 +1254,7 @@ let usage_lines ~cols ~rows (state : state) =
     (* [section] answers [None] only before the first read. *)
     | None -> [ " Plan usage · not observed" ]
   in
-  let keepers =
+  let keepers () =
     match state.keeper_usage with
     | Keeper_usage_unread -> [ " Keeper usage (24h) · not observed" ]
     | Keeper_usage_error reason ->
@@ -1420,7 +1420,7 @@ let usage_lines ~cols ~rows (state : state) =
         @ [""] in
   match state.usage_section with
   (* Plan cards already have a cell-sized border and wrapped contents. *)
-  | Usage_plan -> selection_lines @ wrap_evidence scopes
+  | Usage_plan -> selection_lines @ wrap_evidence (scopes ())
   | Usage_trend -> selection_lines @ wrap_evidence (provider_history_lines ~cols ~rows state)
   | Usage_keepers ->
       let currency = match Masc_tui_candle.summary_lines state.candle_observation with
@@ -1430,7 +1430,7 @@ let usage_lines ~cols ~rows (state : state) =
             @ List.map (fun line -> "   " ^ Terminal_text.single_line line) lines
             @ [ Theme.recede () ^ draw_hline (framed_inner_width cols) ^ Ansi.reset ]
       in
-      wrap_evidence (currency @ keepers)
+      wrap_evidence (currency @ keepers ())
 
 let render_metrics (state : state) =
   let terminal_rows, cols = get_terminal_size () in

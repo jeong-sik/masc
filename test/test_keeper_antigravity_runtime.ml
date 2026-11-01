@@ -1124,7 +1124,7 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
                      (Llm_provider.Error.ProviderReportedError { provider; error_type; _ }) as error) ->
                    check string "provider" "antigravity_cli" provider;
                    check (option string) "exact status projection" (Some result_status) error_type;
-                   check bool "partial reply never grants retry" false (Agent_core.Error.is_retryable error)
+                   check bool "core retry policy remains nonretryable" false (Agent_core.Error.is_retryable error)
                  | Error error -> fail (Agent_core.Error.to_string error)
                  | Ok _ -> failf "%s settled as a completed turn" result_status);
                 check int "effect ran exactly once" 1 !called;
@@ -1147,6 +1147,99 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
                     (recovery.failure = Transport_interrupted
                      && Keeper_official_client_session_store.failure_disposition recovery.failure = Ambiguous)
                 | _ -> fail "non-completed result did not retain recovery evidence")))))
+    [ "CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING" ]
+;;
+
+let test_noncompletion_without_mcp_cannot_rotate_candidates () =
+  List.iter (fun result_status ->
+    let base_path = temp_workspace () |> Unix.realpath in
+    let runtime_snapshot = Runtime.For_testing.snapshot () in
+    let modes = Keeper_tool_approval_mode.shared () in
+    let previous_mode = Keeper_tool_approval_mode.resolve modes ~keeper_name:"antigravity-fixture" in
+    Fun.protect
+      ~finally:(fun () ->
+        ignore (Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
+          ~keeper_name:"antigravity-fixture" previous_mode);
+        Runtime.For_testing.restore runtime_snapshot;
+        cleanup_tree base_path)
+      (fun () ->
+        Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+        Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None "antigravity-fixture";
+        Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
+          ~keeper_name:"antigravity-fixture" Keeper_tool_approval_mode.Yolo |> Result.get_ok |> ignore;
+        let oauth_source = Filename.concat base_path "operator-oauth-token" in
+        write_file ~mode:0o600 oauth_source
+          (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
+        let native_effect_path = Filename.concat base_path "native-effect-count" in
+        let fallback_path = Filename.concat base_path "fallback-dispatched" in
+        let fixture name status marker =
+          let path = Filename.concat base_path name in
+          let script = Printf.sprintf {|#!/usr/bin/env python3
+import json, os, pathlib, sys
+sys.stdin.read()
+cwd = os.getcwd()
+settings = json.loads((pathlib.Path(os.environ["HOME"]) / ".gemini/antigravity-cli/settings.json").read_text())
+assert "write_file(" + cwd + ")" in settings["permissions"]["allow"]
+def emit(event, value):
+    print(json.dumps({"event": event, event: value}) if event != "init" else json.dumps({"event": "init", "conversation_id": "builtin-conversation", "init": value}), flush=True)
+emit("init", {"model": "gemini-fixture", "cwd": cwd, "tools": ["write_file"], "permission_mode": "always-proceed"})
+emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": "ACTIVE", "step_type": "tool", "tool_name": "write_file"})
+# A built-in tool effect, with no call into MASC's MCP tool observer.
+pathlib.Path("native-effect.txt").write_text("native effect")
+with open(%s, "a") as output:
+    output.write("effect\n")
+emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": "DONE", "step_type": "tool", "tool_name": "write_file"})
+emit("result", {"conversation_id": "builtin-conversation", "status": %s, "response": "partial reply", "error": None, "num_turns": 1,
+    "usage": {"input_tokens": 1, "output_tokens": 1, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}})
+|} (Yojson.Safe.to_string (`String marker)) (Yojson.Safe.to_string (`String status)) in
+          write_file ~mode:0o700 path script;
+          path
+        in
+        let first_cli = fixture "first-agy" result_status native_effect_path in
+        let second_cli = fixture "fallback-agy" "SUCCESS" fallback_path in
+        let runtime_path = Filename.concat base_path "runtime.toml" in
+        let lane = Printf.sprintf {|
+[providers.antigravity_fallback]
+protocol = "antigravity-cli"
+command = %S
+is-non-interactive = true
+credentials = { type = "file", path = %S }
+[antigravity_fallback.gemini]
+[runtime.lanes.antigravity_incomplete]
+candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
+|} second_cli oauth_source in
+        write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path:first_cli ~oauth_source ^ lane);
+        Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+          Eio_context.set_env env;
+          Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+            (fun () ->
+              Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+              let attempted = ref [] in
+              let outcome = Keeper_turn_driver.run_named
+                  ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-native-incomplete" })
+                  ~walk_owner:Keeper_turn_driver.One_shot_walk ~runtime_id:"antigravity_incomplete"
+                  ~keeper_name:"antigravity-fixture" ~base_path
+                  ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+                  ~goal:"Run a native tool once" ~system_prompt:"native interruption fixture"
+                  ~required_native_posture:Runtime_native_tools.Native_full
+                  ~tools:[] ~agent_core_tools:[] ~raw_trace:None
+                  ~on_runtime_attempt:(fun (attempt : Keeper_turn_driver.runtime_attempt) ->
+                    attempted := attempt.runtime_id :: !attempted)
+                  ~sw ~net:(Eio.Stdenv.net env) () in
+              check (list string) "walk stops at the first candidate"
+                [ "antigravity.gemini" ] !attempted;
+              check string "native effect ran exactly once" "effect\n" (Fs_compat.load_file native_effect_path);
+              check bool "fallback never ran" false (Sys.file_exists fallback_path);
+              match outcome with
+              | Error error ->
+                (match Keeper_internal_error.classify_masc_internal_error error with
+                 | Some (Keeper_internal_error.Provider_attempt_effect_fenced
+                     { runtime_id = "antigravity.gemini"
+                     ; effect_disposition = Keeper_provider_attempt_effect.Observation_unavailable
+                     ; _ }) -> ()
+                 | _ -> fail (Agent_core.Error.to_string error))
+              | Ok _ -> fail "a non-completed native turn was replayed on the fallback")))))
     [ "CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING" ]
 ;;
 
@@ -2391,6 +2484,8 @@ let () =
               "noncompletion retains durable identity and effect fence"
               `Quick
               test_noncompletion_preserves_durable_identity_and_effect_fence
+          ; test_case "noncompletion without MCP cannot rotate candidates" `Quick
+              test_noncompletion_without_mcp_cannot_rotate_candidates
           ; test_case
               "spawn failure is pre-dispatch"
               `Quick

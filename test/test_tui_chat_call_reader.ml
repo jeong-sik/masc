@@ -104,7 +104,10 @@ let test_original_body_refresh () =
         check (option string) "initial failure still retains ledger preview"
           (Some "new preview") observed.kc_output
     | Absent | Loading | Stale _ | Failed _ -> fail "initial preview was lost")
-    [Decode.Original_pending;Original_unavailable "trace not retained";Original_failed "HTTP 503"]
+    [Decode.Original_pending;Original_unavailable "trace not retained";Original_failed "HTTP 503";
+     Original_body {source_id=String.make 64 'a';sha256=String.make 64 'b';
+       recorded_bytes=String.length content;content;
+       nested=Masc.Keeper_composition_observation.Invalid "manifest verification failed"}]
 let state () =
   let state=create_state ~workspace:"reader-test" ~port:0 ~refresh_interval:0. () in
   let workspace={Decode.sid_version="test";sid_binary_commit="test";

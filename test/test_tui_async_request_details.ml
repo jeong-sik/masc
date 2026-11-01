@@ -79,6 +79,25 @@ let scenario ok () = with_base @@ fun base_path -> Eio_main.run @@ fun _env -> E
     (Option.equal Detail.equal_target (Some target) state.tools_async_selection && state.tools_async_detail_open);
   let final=begin_read state ~force:true in complete_tools_async_detail state final (read ());
   check bool "terminal outcome retains its actual success or failure" true ((observed state target).phase=Detail.Done ok);
+  let module Nested = Masc.Keeper_composition_observation in
+  let terminal_snapshot=observed state target in
+  let ready={terminal_snapshot with Detail.nested=Nested.Observed []} in
+  let request=begin_read state ~force:true in
+  complete_tools_async_detail state request (Ok (Detail.Observed ready));
+  let request=begin_read state ~force:true in
+  let invalid={ready with Detail.nested=Nested.Invalid "retained manifest read failed"} in
+  complete_tools_async_detail state request (Ok (Detail.Observed invalid));
+  check bool "same-source child refresh failure keeps last good observation as stale" true
+    (match Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail ~key:target with
+     | Stale (Detail.Observed snapshot,_) -> snapshot.nested=ready.nested
+     | _ -> false);
+  let request=begin_read state ~force:true in
+  let changed={invalid with Detail.source={invalid.source with request_context=`Assoc ["changed",`Bool true]}} in
+  complete_tools_async_detail state request (Ok (Detail.Observed changed));
+  check bool "changed original source cannot retain another source's child results" true
+    (match Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail ~key:target with
+     | Ready (Detail.Observed snapshot) -> snapshot.source=changed.source && snapshot.nested=changed.nested
+     | _ -> false);
   let late=begin_read state ~force:true in
   withdraw_tools_async_details state;
   state.tools_async_selection <- Some target;state.tools_async_detail_open <- true;

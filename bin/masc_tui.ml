@@ -18677,10 +18677,11 @@ let start_goal_transition ?note ?retry_binding state ~mailbox ~(goal_id : string
       else begin
       let origin = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path
         ^ " (masc root " ^ Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root ^ ")" in
+      let action_context = " (action " ^ Goal_phase.Public_action.to_string action in
       let proof_context = match retry_binding with
-        | None -> ""
+        | None -> action_context ^ ")"
         | Some binding ->
-          " (criterion " ^ binding.Masc.Tui_decode.grb_criterion_revision
+          action_context ^ "; criterion " ^ binding.Masc.Tui_decode.grb_criterion_revision
           ^ "; proof request " ^ Option.value ~default:"none" binding.grb_request_id ^ ")" in
       let annotate_error error =
         "Goal request did not return a confirmed result; inspect the Goal before retrying: " ^ error ^ proof_context in

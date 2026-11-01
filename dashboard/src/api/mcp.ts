@@ -252,6 +252,24 @@ class McpProtocolError extends Error {
   }
 }
 
+class McpPreDispatchIdentityChangedError extends Error {
+  constructor() {
+    super('MCP authentication changed before dispatch; refresh the Goal before retrying')
+    this.name = 'McpPreDispatchIdentityChangedError'
+  }
+}
+
+class McpIdentityRefreshedAfterRefusalError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'McpIdentityRefreshedAfterRefusalError'
+  }
+}
+
+export function mcpIdentityRequiresGoalRefresh(error: unknown): boolean {
+  return error instanceof McpPreDispatchIdentityChangedError || error instanceof McpIdentityRefreshedAfterRefusalError
+}
+
 class McpToolCallError extends Error {
   readonly authErrorCode: unknown
   readonly structuredContent: unknown
@@ -274,6 +292,7 @@ export type McpCallFailureDisposition =
   | 'outcome_unknown'
 
 export function mcpCallFailureDisposition(error: unknown): McpCallFailureDisposition {
+  if (mcpIdentityRequiresGoalRefresh(error)) return 'known_pre_effect'
   if (error instanceof McpToolCallError) return 'known_tool_response'
   if (error instanceof McpProtocolError && error.code === -32001) {
     return 'known_pre_effect'
@@ -326,12 +345,17 @@ async function callMcpToolInternal(
   toolName: string,
   args: Record<string, unknown>,
   allowAuthRecovery = true,
+  expectedIdentity?: { revision: number; actor: string },
 ): Promise<string> {
   const requestId = randomUuid()
   synchronizeMcpAuthRevision()
   let explicitActor: string | null = null
   try {
     const binding = await ensureBinding()
+    if (expectedIdentity && (binding.authRevision !== expectedIdentity.revision
+      || (getStoredToken() === null && currentDashboardActor() !== expectedIdentity.actor))) {
+      throw new McpPreDispatchIdentityChangedError()
+    }
     // ensureBinding may install the loopback dev credential, so classify
     // identity authority only after it returns. Never let a caller-supplied
     // transport hint override the credential used by this request.
@@ -374,6 +398,11 @@ async function callMcpToolInternal(
       observedTokenRevision = currentStoredTokenRevision()
       return callMcpToolInternal(toolName, args, false)
     }
+    if (!allowAuthRecovery && expectedIdentity && explicitActor === null
+      && await refreshDevTokenAfterAuthError(authErrorCode)) {
+      observedTokenRevision = currentStoredTokenRevision()
+      throw new McpIdentityRefreshedAfterRefusalError('MCP authentication was refreshed after refusal; refresh the Goal before retrying')
+    }
     const message = errorToString(err)
     const failure = toolHostFailureObservation(err)
     if (failure) {
@@ -392,6 +421,15 @@ async function callMcpToolInternal(
 
 export async function callMcpTool(toolName: string, args: Record<string, unknown>): Promise<string> {
   return callMcpToolInternal(toolName, args)
+}
+
+/** Refuse before dispatch if token bootstrap would change the caller's actor. */
+export async function callMcpToolAtIdentity(
+  toolName: string,
+  args: Record<string, unknown>,
+  expectedIdentity: { revision: number; actor: string },
+): Promise<string> {
+  return callMcpToolInternal(toolName, args, false, expectedIdentity)
 }
 
 // --- MCP tools/list — fetch tool schemas with inputSchema ---

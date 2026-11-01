@@ -3661,6 +3661,101 @@ let test_settled_terminal_replay_refuses_invalid_or_missing_media () =
     ~forget_media:true ~expected:Refused_terminal_missing_media ()
 ;;
 
+type terminal_resume_entry = Resume_regular | Resume_streaming | Resume_advanced
+
+let test_active_terminal_resumes_committed_checkpoint entry () =
+  with_execution_test_dir "agent-core-active-terminal-"
+  @@ fun ~env ~sw ~runtime ~dir ->
+  let scope_ok = function
+    | Ok value -> value | Error error -> Alcotest.fail (Internal_scope.error_to_string error) in
+  let config = {(Types.default_config ~model:"test-model") with name="active-terminal"} in
+  let provider_config = Provider_mock.to_provider_config () in
+  let binding = match Internal_binding.of_provider_config ~transport:Internal_binding.Injected provider_config with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let response = {(Provider_mock.text_response "committed final answer" []) with
+    Types.id="active-terminal-seven";
+    usage=Some {Types.input_tokens=17;output_tokens=23;cache_creation_input_tokens=5;
+      cache_read_input_tokens=7;cost_usd=Some 0.125}} in
+  let provider_calls = ref 0 and after_turns = ref 0 in
+  let next () = incr provider_calls; Ok (Provider_mock.text_response "unexpected redispatch" []) in
+  let transport = Llm_provider.Llm_transport.custom
+    {complete_sync=(fun _->{Llm_provider.Llm_transport.response=next ();latency_ms=None});
+     complete_stream=(fun ?on_telemetry:_ ~on_event:_ _->next ())} in
+  let bus = Event_bus.create () in
+  let subscription = Event_bus.subscribe bus
+      ~config:(Result.get_ok (Event_bus.subscription_config ~capacity:16 ~overflow:Drop_newest)) in
+  let options = {Agent.default_options with transport=Some transport;provider_config=Some provider_config;
+    event_bus=Some bus;hooks={Hooks.empty with after_turn=Some (fun _->incr after_turns;Hooks.Continue)}} in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let original = Agent.create ~media_store ~net:env#net ~config ~options () in
+  let content = History.of_wire_blocks media_store response.content |> Result.get_ok in
+  let usage = Types.add_usage Types.empty_usage (Option.get response.usage) in
+  Agent.set_state original {provider_binding=None;config;turn_count=8;usage;
+    messages=[Types.user_msg "finish this request";Types.make_message ~role:Types.Assistant content]};
+  let checkpoint = Agent.checkpoint original in
+  let writer_runtime = match Internal_runtime.create ~sw ~domain_mgr:env#domain_mgr ~domain_count:1 with
+    | Ok value -> value | Error error -> Alcotest.fail (Internal_runtime.create_error_to_string error) in
+  let locator_json = ref None in
+  (match Internal_writer.run ~codec:(Internal_codec.of_runtime writer_runtime) ~dir (fun ~sw:_ writer ->
+    let scope = scope_ok (Internal_scope.start ~writer ~agent_name:config.name) in
+    locator_json:=Some (Internal_scope.scope_locator_to_yojson (Internal_scope.scope_locator scope));
+    let turn = scope_ok (Internal_scope.open_turn scope ~ordinal:7) in
+    let provider = scope_ok (Internal_scope.open_provider_attempt turn ~ordinal:0 binding) in
+    record_durable_provider_response provider response;
+    let fact = match Checkpoint_snapshot.create ~stage:After_assistant_collected checkpoint with
+      | Ok value -> value | Error error -> Alcotest.fail (Checkpoint_snapshot.error_to_string error) in
+    scope_ok (Internal_scope.record_checkpoint scope fact)) with
+   | Ok () -> () | Error error -> Alcotest.fail (Internal_writer.scope_failure_to_string error));
+  let locator = match Agent.execution_locator_of_yojson (Option.get !locator_json) with
+    | Ok value -> value | Error detail -> Alcotest.fail detail in
+  let open_projection () = match Agent.open_execution_projection ~runtime ~dir locator with
+    | Ok value -> value | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let snapshot = match Agent.Execution_projection.latest_checkpoint (open_projection ()) with
+    | Ok (Some value) -> value.snapshot
+    | Ok None -> Alcotest.fail "committed assistant checkpoint missing"
+    | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  let checkpoint = match Checkpoint_snapshot.checkpoint snapshot with
+    | Ok value -> value | Error error -> Alcotest.fail (Checkpoint_snapshot.error_to_string error) in
+  let agent = match Agent.resume ~media_store ~net:env#net ~checkpoint ~config ~options () with
+    | Ok value -> value | Error error -> Alcotest.fail (Agent.resume_error_to_string error) in
+  let store = Agent.execution_store ~runtime ~dir ~resume:locator () in
+  let result = match entry with
+    | Resume_regular -> Agent.run ~sw ~execution_store:store agent "finish this request"
+    | Resume_streaming -> Agent.run_stream ~sw ~execution_store:store ~on_event:(fun _->
+        Alcotest.fail "recovery invented a new provider stream") agent "finish this request"
+    | Resume_advanced ->
+      (match Agent.Advanced.run_blocks ~sw ~execution_store:store ~api_strategy:Agent.Sync
+          ~on_tool_boundary:(fun _->Alcotest.fail "terminal recovery reached a tool boundary")
+          agent [Types.Text "finish this request"] with
+       | Ok (Agent.Advanced.Completed completed) ->
+         Alcotest.(check int) "terminal recovery keeps canonical nonzero ordinal" 7 completed.provider_turn_ordinal;
+         Ok completed.response
+       | Ok (Agent.Advanced.Yielded _ | Agent.Advanced.Terminal_tool_completed _) ->
+         Alcotest.fail "terminal recovery changed outcome kind"
+       | Error error -> Error error) in
+  Alcotest.(check int) "terminal recovery does not redispatch provider" 0 !provider_calls;
+  Alcotest.(check int) "terminal recovery does not repeat AfterTurn" 0 !after_turns;
+  (match result with
+   | Ok restored -> Alcotest.(check bool) "response identity, content, model and usage are exact" true (restored=response)
+   | Error error -> Alcotest.fail (Error.to_string error));
+  Alcotest.(check int) "collected checkpoint counter is not advanced again" 8 (Agent.state agent).turn_count;
+  Alcotest.(check bool) "collected checkpoint usage is not charged twice" true ((Agent.state agent).usage=usage);
+  let projection = open_projection () in
+  (match Agent.read_execution_terminal projection with
+   | Ok (Some terminal) -> Alcotest.(check bool) "resumed root commits success" true
+       (terminal.disposition.outcome=Agent.Terminal_succeeded)
+   | Ok None -> Alcotest.fail "terminal recovery left root running"
+   | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error));
+  let completed = Event_bus.drain subscription |> List.filter (fun event ->
+    match event.Event_bus.payload with TurnCompleted {turn=7;_}->true | _->false) in
+  let page = match Agent.Execution_projection.read_bus_observations projection
+      ~after:(Agent.Execution_projection.beginning_cursor projection) ~limit:1024 () with
+    | Ok value -> value | Error error -> Alcotest.fail (Agent.Execution_projection.error_to_string error) in
+  Alcotest.(check int) "resumed turn emits one successful close" 1 (List.length completed);
+  List.iter (fun event -> Alcotest.(check bool) "completion keeps committed source envelope" true
+    (List.exists (fun (source:Agent.Execution_projection.bus_observation)->source.event=event) page.observations)) completed
+;;
+
 let test_agent_run_resumes_terminal_after_descriptor_drift () =
   test_agent_run_resumes_settled_closed_turn
     ~persisted_completion:
@@ -5129,6 +5224,15 @@ let () =
             "settled terminal replay refuses malformed and unavailable media"
             `Quick
             test_settled_terminal_replay_refuses_invalid_or_missing_media
+        ; Alcotest.test_case
+            "regular resumes collected terminal before provider close" `Quick
+            (test_active_terminal_resumes_committed_checkpoint Resume_regular)
+        ; Alcotest.test_case
+            "streaming resumes collected terminal before provider close" `Quick
+            (test_active_terminal_resumes_committed_checkpoint Resume_streaming)
+        ; Alcotest.test_case
+            "Advanced resumes collected terminal before provider close" `Quick
+            (test_active_terminal_resumes_committed_checkpoint Resume_advanced)
         ; Alcotest.test_case
             "terminal resume ignores current descriptor drift"
             `Quick

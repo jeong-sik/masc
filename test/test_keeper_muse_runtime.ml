@@ -2406,7 +2406,7 @@ let check_resume_recall_blocks ?(fixture = []) ?(seed_held = false) ~compaction 
         let frontier = List.assoc "context_frontier" fields |> Yojson.Safe.Util.to_assoc in
         let held = `Assoc ["context", `String "block";
           "block", `String (Prompt_block_id.to_string Prompt_block_id.Memory_os_recall);
-          "sha256", `String Digestif.SHA256.(to_hex (digest_string recall))] in
+          "sha256", `String Agent_core_sha256.(to_hex (digest_string recall))] in
         write_file ~mode:0o600 path (Yojson.Safe.to_string (`Assoc
           (("context_frontier", `Assoc (("held_context", `List [held])
             :: List.remove_assoc "held_context" frontier)) :: List.remove_assoc "context_frontier" fields)));

@@ -18,7 +18,8 @@ exception Host_request_withdrawn
 exception Action_persistence_failed of string
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
-type browser_service = {instance_id:string;owner:Lane_addon_tool_export.owner;backend:Browser_lane.Backend.t}
+type browser_service = {instance_id:string;owner:Lane_addon_tool_export.owner;
+  installation:Lane_addon_tool_request_owner.installation;backend:Browser_lane.Backend.t}
 type browser_service_status = Browser_ready of browser_service
   | Browser_refresh_needed of browser_service | Browser_unavailable | Browser_retired
 type tool_call_error = Unavailable of string | Outcome_unknown of string
@@ -319,13 +320,15 @@ let configuration_of_fields fields =
       let* fields = object_ value in
       let* id = text fields "id" in let* source_path = text fields "source_path" in
       let* revision = text fields "revision" in Ok (Some {id; source_path; revision})
+let installation_for ~instance_id = function
+  | Some (owner : configuration_owner) -> Lane_addon_tool_request_owner.Configuration owner.id
+  | None -> Lane_addon_tool_request_owner.Manual instance_id
 let state_owner_for ~store ~instance_id ~package_id ~configuration state_storage =
   match state_storage with
   | Ephemeral -> Ok None
   | Persistent ->
-      let installation_id = Lane_addon_tool_request_owner.installation_id (match configuration with
-        | Some (owner : configuration_owner) -> Lane_addon_tool_request_owner.Configuration owner.id
-        | None -> Lane_addon_tool_request_owner.Manual instance_id) in
+      let installation_id = Lane_addon_tool_request_owner.installation_id
+        (installation_for ~instance_id configuration) in
       offload (fun () -> Lane_addon_worker_state.create_owner
         ~workspace_root:(Lane_addon_store.root store) ~installation_id ~package_id)
       |> Result.map Option.some
@@ -2208,7 +2211,8 @@ type browser_reading = { services : browser_service list; unready : Lane_addon_u
    its export owner and the sources its package serves. *)
 let browser_service_of (e : entry) connection = match e.package.worker_service with
   | Mcp_tools -> None
-  | Browser_service backend -> Some {instance_id=e.instance_id;owner=connection.export_owner;backend}
+  | Browser_service backend -> Some {instance_id=e.instance_id;owner=connection.export_owner;
+      installation=installation_for ~instance_id:e.instance_id e.configuration;backend}
 let browser_reading (reading : live_reading) =
   let services = reading.ready |> List.filter_map (fun ((e : entry), connection) -> browser_service_of e connection) in
   let unready = reading.unready |> List.filter (fun (unready : Lane_addon_unready.t) ->

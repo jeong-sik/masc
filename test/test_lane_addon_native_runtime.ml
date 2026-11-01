@@ -695,7 +695,7 @@ hooks = ["validate_input", "validate_output"]
   let goal=match Goal_store.upsert_goal config ~title:"Worker-bound browser Goal"
       ~metric:"verified" ~target_value:"1" () with
     | Ok (goal,_) -> goal.id | Error error -> fail (Goal_store.write_error_to_string error) in
-  (match Browser_goal_space.bind config ~goal_id:goal ~addon_instance_id:other_id
+  (match Browser_goal_space.bind config ~goal_id:goal ~installation:(Lane_addon_tool_request_owner.Manual other_id)
       ~space:{id=51;name="Goal fixture"} ~actor:"goal-fixture" with
    | Ok _ -> () | Error error -> fail (Browser_goal_space.error_message error));
   (* A worker whose snapshot keeps failing stays in the inventory as an issue,
@@ -751,7 +751,7 @@ hooks = ["validate_input", "validate_output"]
     (goal_status Lane_addon_call_context.Operator |> Tool_result.data |> member "browserGoal"=`Null);
   check bool "unbinding a Goal without a binding removes nothing" true
     (unbind Lane_addon_call_context.Operator |> Tool_result.data |> member "removed"=`Null);
-  (match Browser_goal_space.bind config ~goal_id:goal ~addon_instance_id:other_id
+  (match Browser_goal_space.bind config ~goal_id:goal ~installation:(Lane_addon_tool_request_owner.Manual other_id)
       ~space:{id=52;name="Replacement Space"} ~actor:"goal-fixture" with
    | Ok committed -> check bool "after unbind the Goal accepts a different Space" true committed.created
    | Error error -> fail (Browser_goal_space.error_message error));

@@ -187,6 +187,13 @@ let served_for t gathered = function
 type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
 let goal_space t ~goal_id = Browser_goal_space.find t.config ~goal_id
+let goal_space_service t installation =
+  match List.filter (fun (served:served) -> served.service.installation=installation) t.services with
+  | [served] -> Ok served
+  | [] -> Error (Browser_goal_space.Unavailable
+      "the browser Add-on that published the Goal's Ego Space is not attached; no browser command was dispatched")
+  | _::_::_ -> Error (Browser_goal_space.Conflict
+      "multiple browser Add-ons publish the Goal's installation; no browser command was dispatched")
 (* The binding names the installation whose service lists the connection, so
    a Space is bound only through the one service that serves it. *)
 let bind_goal_space t ~goal_id ~client_id =
@@ -209,7 +216,8 @@ let bind_goal_space t ~goal_id ~client_id =
       |> Result.map_error (fun detail -> Browser_goal_space.Unavailable detail) in
     match holders with
       | [served] ->
-          Browser_goal_space.bind t.config ~goal_id ~addon_instance_id:served.service.instance_id
+          let* _ = goal_space_service t served.service.installation in
+          Browser_goal_space.bind t.config ~goal_id ~installation:served.service.installation
             ~space ~actor:(Lane_addon_call_context.actor_label t.principal)
       | [] -> Error (Browser_goal_space.Unavailable "no attached browser Add-on lists that browser client")
       | _::_::_ -> Error (Browser_goal_space.Conflict "more than one attached browser Add-on lists that browser client, so it is not used")
@@ -298,16 +306,14 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
       let* preference=match goal_space with
         | None -> Ok preference
         | Some (binding:Browser_goal_space.t) ->
-          let owner=List.find_opt (fun (served:served) ->
-            String.equal served.service.instance_id binding.addon_instance_id) t.services in
-          let listed=List.filter (fun (client:Browser_lane.client_info) ->
-            let id=Browser_lane.client_id_to_string client.client_id in
-            List.exists (fun (holder,(served:served)) -> String.equal holder id
-              && String.equal served.service.instance_id binding.addon_instance_id) gathered.holders) gathered.listed in
-          (match owner with
-           | None -> Error (Browser_goal_space.Unavailable
-               "the browser Add-on that published the Goal's Ego Space is not attached; no browser command was dispatched")
-           | Some (served:served) -> Browser_goal_space.resolve binding ~addon_instance_id:served.service.instance_id listed)
+          (let* owner=goal_space_service t binding.installation in
+           let listed=List.filter (fun (client:Browser_lane.client_info) ->
+             let id=Browser_lane.client_id_to_string client.client_id in
+             List.exists (fun (holder,(served:served)) -> String.equal holder id
+               && String.equal served.service.instance_id owner.service.instance_id
+               && Lane_addon_tool_export.equal_owner served.service.owner owner.service.owner)
+               gathered.holders) gathered.listed in
+           Browser_goal_space.resolve binding ~installation:owner.service.installation listed)
           |> Result.map (fun client_id -> Browser_selection.Exact (Browser_lane.Live_route (Some client_id)))
           |> Result.map_error (fun error -> Tool_result.make_err
               ~tool_name:Browser_addon_tool.definition.name ~start_time

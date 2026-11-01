@@ -4,6 +4,7 @@
  (name masc_board_handlers)
  (public_name masc.board_handlers)
  (wrapped true)
+ (private_modules board_vote_transition)
  (modules
   board
   board_audience
@@ -20,6 +21,7 @@
   board_sort
   board_sub_board_json
   board_vote_key
+  board_vote_transition
   board_votes
   board_votes_json
   recipient_lookup)

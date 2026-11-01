@@ -183,11 +183,12 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
           match Hashtbl.find_opt store.posts post_key with
           | None -> Error (Post_not_found post_id)
           | Some _post ->
-              match Hashtbl.find_opt store.vote_log vote_key with
-              | Some (prev, _prev_ts) when (=) prev direction ->
+              let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
+              match Board_vote_transition.decide ~previous ~direction with
+              | Board_vote_transition.Already_cast ->
                   Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
                     voter (vote_direction_to_string direction) post_id))
-              | Some _ | None -> Ok (Time_compat.now ()))
+              | Board_vote_transition.Cast _ -> Ok (Time_compat.now ()))
       in
       (match staged with
        | Error _ as e -> e
@@ -199,8 +200,9 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                 match Hashtbl.find_opt store.posts post_key with
                 | None -> Error (Post_not_found post_id)
                 | Some post ->
-                  match Hashtbl.find_opt store.vote_log vote_key with
-                  | Some (prev, _) when (=) prev direction ->
+                  let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
+                  match Board_vote_transition.decide ~previous ~direction with
+                  | Board_vote_transition.Already_cast ->
                       (* Another call for this exact voter+target committed
                          first while our append was in flight. Our append is
                          now an orphan row on disk; the winner's own
@@ -209,24 +211,13 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                          before a restart would ever replay it. *)
                       Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
                         voter (vote_direction_to_string direction) post_id))
-                  | Some (_opposite, _prev_ts) ->
-                      let flipped = match direction with
-                        | Up -> { post with votes_up = post.votes_up + 1;
-                                            votes_down = max 0 (post.votes_down - 1);
-                                            updated_at = ts }
-                        | Down -> { post with votes_down = post.votes_down + 1;
-                                              votes_up = max 0 (post.votes_up - 1);
-                                              updated_at = ts }
+                  | Board_vote_transition.Cast transition ->
+                      let votes_up, votes_down =
+                        Board_vote_transition.apply_counts transition
+                          ~votes_up:post.votes_up ~votes_down:post.votes_down
                       in
-                      Hashtbl.replace store.posts post_key flipped;
-                      Hashtbl.replace store.vote_log vote_key (direction, ts);
-                      mark_dirty_post store post_key;
-                      invalidate_post_caches store;
-                      Ok (flipped.votes_up - flipped.votes_down)
-                  | None ->
-                      let updated = match direction with
-                        | Up -> { post with votes_up = post.votes_up + 1; updated_at = ts }
-                        | Down -> { post with votes_down = post.votes_down + 1; updated_at = ts }
+                      let updated =
+                        { post with votes_up; votes_down; updated_at = ts }
                       in
                       Hashtbl.replace store.posts post_key updated;
                       Hashtbl.replace store.vote_log vote_key (direction, ts);
@@ -271,11 +262,12 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
           match Hashtbl.find_opt store.comments comment_key with
           | None -> Error (Comment_not_found comment_id)
           | Some _cmt ->
-              match Hashtbl.find_opt store.vote_log vote_key with
-              | Some (prev, _prev_ts) when (=) prev direction ->
+              let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
+              match Board_vote_transition.decide ~previous ~direction with
+              | Board_vote_transition.Already_cast ->
                   Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
                     voter (vote_direction_to_string direction) comment_id))
-              | Some _ | None -> Ok (Time_compat.now ()))
+              | Board_vote_transition.Cast _ -> Ok (Time_compat.now ()))
       in
       (match staged with
        | Error _ as e -> e
@@ -287,26 +279,18 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                 match Hashtbl.find_opt store.comments comment_key with
                 | None -> Error (Comment_not_found comment_id)
                 | Some cmt ->
-                  match Hashtbl.find_opt store.vote_log vote_key with
-                  | Some (prev, _) when (=) prev direction ->
+                  let previous = Option.map fst (Hashtbl.find_opt store.vote_log vote_key) in
+                  match Board_vote_transition.decide ~previous ~direction with
+                  | Board_vote_transition.Already_cast ->
                       Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
                         voter (vote_direction_to_string direction) comment_id))
-                  | Some (_opposite, _prev_ts) ->
-                      let flipped = match direction with
-                        | Up -> { cmt with votes_up = cmt.votes_up + 1;
-                                           votes_down = max 0 (cmt.votes_down - 1) }
-                        | Down -> { cmt with votes_down = cmt.votes_down + 1;
-                                             votes_up = max 0 (cmt.votes_up - 1) }
+                  | Board_vote_transition.Cast transition ->
+                      let votes_up, votes_down =
+                        Board_vote_transition.apply_counts transition
+                          ~votes_up:cmt.votes_up ~votes_down:cmt.votes_down
                       in
-                      Hashtbl.replace store.comments comment_key flipped;
-                      Hashtbl.replace store.vote_log vote_key (direction, ts);
-                      mark_dirty_comment store comment_key;
-                      invalidate_comment_caches store;
-                      Ok (flipped.votes_up - flipped.votes_down)
-                  | None ->
-                      let updated = match direction with
-                        | Up -> { cmt with votes_up = cmt.votes_up + 1 }
-                        | Down -> { cmt with votes_down = cmt.votes_down + 1 }
+                      let updated =
+                        { cmt with votes_up; votes_down }
                       in
                       Hashtbl.replace store.comments comment_key updated;
                       Hashtbl.replace store.vote_log vote_key (direction, ts);

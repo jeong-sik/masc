@@ -649,7 +649,101 @@ let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
     muse_zero_usage.cache_read_input_tokens;
   check string "muse explicit zero renders 0"
     "Provider usage (client turn total) · input 120 · cache read 0 · cache created 0"
-    (Inspector.provider_usage_summary muse_zero_usage)
+    (Inspector.provider_usage_summary muse_zero_usage);
+  let claude_turn ?cache_creation ?cache_read () : Runtime_claude_code.turn_result =
+    { session_id = "sess-claude"
+    ; turn_id = "turn-claude"
+    ; model = "claude-sonnet-4-6"
+    ; text = "ok"
+    ; dynamic_tool_calls = 0
+    ; subscription =
+        { logged_in = true
+        ; auth_method = Some "claude.ai"
+        ; subscription_type = Some "max"
+        ; api_provider = Some "firstParty"
+        }
+    ; rate_limit = None
+    ; resumed = false
+    ; usage =
+        { latest_request_input = None
+        ; turn_total =
+            Some
+              { input_tokens = 120
+              ; output_tokens = 30
+              ; cache_creation_input_tokens = Option.value cache_creation ~default:0
+              ; cache_read_input_tokens = Option.value cache_read ~default:0
+              ; reported_cache_creation_input_tokens = cache_creation
+              ; reported_cache_read_input_tokens = cache_read
+              }
+        }
+    }
+  in
+  let claude_unreported_resp =
+    Masc.Keeper_claude_code_runtime.For_testing.completed_turn_response
+      ~latency_ms:10
+      (claude_turn ())
+  in
+  let claude_unreported_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Turn_total
+      ~usage:(Option.get claude_unreported_resp.usage)
+      ~telemetry:claude_unreported_resp.telemetry
+  in
+  check (option int) "claude unreported cache read stays None" None
+    claude_unreported_usage.cache_read_input_tokens;
+  check string "claude unreported renders unreported without fabricated 0"
+    "Provider usage (client turn total) · input 120 · cache read unreported"
+    (Inspector.provider_usage_summary claude_unreported_usage);
+  let claude_zero_resp =
+    Masc.Keeper_claude_code_runtime.For_testing.completed_turn_response
+      ~latency_ms:10
+      (claude_turn ~cache_creation:0 ~cache_read:0 ())
+  in
+  let claude_zero_usage =
+    Turn_record.usage_of_reported_counts
+      ~scope:Runtime_usage_scope.Turn_total
+      ~usage:(Option.get claude_zero_resp.usage)
+      ~telemetry:claude_zero_resp.telemetry
+  in
+  check string "claude explicit zero renders 0"
+    "Provider usage (client turn total) · input 120 · cache read 0 · cache created 0"
+    (Inspector.provider_usage_summary claude_zero_usage);
+  let claude_request_input ?cache_creation ?cache_read ()
+    : Runtime_claude_code.request_input
+    =
+    { input_tokens = 120
+    ; cache_creation_input_tokens = Option.value cache_creation ~default:0
+    ; cache_read_input_tokens = Option.value cache_read ~default:0
+    ; reported_cache_creation_input_tokens = cache_creation
+    ; reported_cache_read_input_tokens = cache_read
+    }
+  in
+  let claude_unreported_ctx =
+    Masc.Keeper_claude_code_runtime.For_testing.request_context_of_request_input
+      (claude_request_input ())
+  in
+  check bool "claude assistant request without cache fields has cache = None" true
+    (Option.is_none claude_unreported_ctx.cache);
+  let claude_zero_ctx =
+    Masc.Keeper_claude_code_runtime.For_testing.request_context_of_request_input
+      (claude_request_input ~cache_creation:0 ~cache_read:0 ())
+  in
+  check (option int) "claude assistant explicit zero cache read stays Some 0"
+    (Some 0)
+    (Option.map
+       (fun (c : Runtime_observation.request_cache) -> c.cache_read_input_tokens)
+       claude_zero_ctx.cache);
+  let claude_pos_ctx =
+    Masc.Keeper_claude_code_runtime.For_testing.request_context_of_request_input
+      (claude_request_input ~cache_creation:10 ~cache_read:40 ())
+  in
+  check int "claude assistant positive cache inclusive input" 170
+    claude_pos_ctx.input_tokens;
+  check (option int) "claude assistant positive cache read is Some 40"
+    (Some 40)
+    (Option.map
+       (fun (c : Runtime_observation.request_cache) -> c.cache_read_input_tokens)
+       claude_pos_ctx.cache)
 
 let () =
   run "tui_context_inspector"

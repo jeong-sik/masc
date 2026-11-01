@@ -12,6 +12,7 @@ val discovery_scope : base_path:string -> keepers_dir:string -> keeper_id:string
 (** Physical roots and canonical Keeper only, so a missing/replaced epoch cannot
     hide old originals in a different scope. Addressing grants no authority. *)
 val scope : owner -> string
+val is_scope : string -> bool
 val keeper_id : owner -> string
 val base_path : owner -> string
 val keepers_dir : owner -> string
@@ -52,6 +53,12 @@ val create : ?predecessor:predecessor -> request_id:string -> owner:owner -> des
     complete inventory must establish known basis supersession before dispatch.
     Retention/restore performs no provider, Gate, Memory, source or cursor effect. *)
 val restore : owner:owner -> Lane_addon_tool_request_owner.retained -> (t, string) result
+val restore_payload : owner:owner -> Lane_addon_tool_request_owner.retained -> (t, string) result
+(** Current strict source/preparation/host-binding decode, using only captured
+    data. Unlike {!restore}, this does not inspect the live source root. It is
+    preflight evidence, never live execution or publication authority. Captured
+    source path aliases are preserved; {!restore} separately checks the actual
+    canonical path, device and inode against the captured physical owner. *)
 val confirm_record : t -> Lane_addon_tool_request_owner.retained -> (unit, string) result
 (** The record is this original's: same physical source root and host binding
     as {!restore} checks, and the digest of this request. Equal digests name
@@ -64,6 +71,12 @@ val confirm_predecessor : store:Lane_addon_store.t -> require_confirmed:bool -> 
 (** Blocking full parent read and immutable intent check. Retention may accept
     the exact pending intent; dispatch and retained delivery require its ACK.
     Offload the whole call. This performs no publication, ACK or provider work. *)
+val validate_predecessor_payload :
+  read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+  require_confirmed:bool -> t -> (unit, string) result
+(** Read-only predecessor-chain checks using the same immutable parent state
+    and publication intent rules as {!confirm_predecessor}. Restores only
+    captured payloads and rejects cycles; does not inspect live source roots. *)
 val to_json : t -> Yojson.Safe.t
 val request_id : t -> string
 val physical_owner : t -> owner

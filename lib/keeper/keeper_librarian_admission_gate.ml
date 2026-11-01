@@ -24,8 +24,9 @@ let inputs capture proposal : (Keeper_librarian_original_gate.inputs, string) re
 module Journal = Keeper_librarian_original_gate.Make (struct
   type owner = Capture.owner
   type t = Capture.t
+  let gate_scope_prefix = "keeper-librarian-admission-gate/"
   let gate_scope owner =
-    "keeper-librarian-admission-gate/" ^ Capture.scope_hash (Capture.scope_identity owner)
+    gate_scope_prefix ^ Capture.scope_hash (Capture.scope_identity owner)
   let gate_kind = "librarian-admission-gate"
   let scope = Capture.scope
   let keeper_id = Capture.keeper_id

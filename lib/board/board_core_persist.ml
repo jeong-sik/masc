@@ -641,6 +641,45 @@ type post_publication_phase =
   | Append_started
   | Post_committed of post_creation
 
+let validate_post_origin_for_author ~author_id (origin : post_origin option)
+  : (post_origin option, board_error) Result.t
+  =
+  match origin with
+  | None -> Ok None
+  | Some o ->
+    (match o.fusion_run_id, o.fusion_producer with
+     | None, None -> Ok (Some o)
+     | Some run_id, Some producer when String.trim run_id <> "" ->
+       (match Agent_id.of_string producer with
+        | Error _ as error -> error
+        | Ok producer_id ->
+          if not (String.equal (Agent_id.to_string author_id) (Agent_id.to_string producer_id))
+          then
+            Error
+              (Validation_error
+                 (Printf.sprintf
+                    "origin.fusion_producer %S must match post author %S"
+                    (Agent_id.to_string producer_id)
+                    (Agent_id.to_string author_id)))
+          else
+            Ok
+              (Some
+                 { o with
+                   fusion_producer = Some (Agent_id.to_string producer_id)
+                 }))
+     | Some _, None ->
+       Error
+         (Validation_error
+            "origin.fusion_run_id requires matching origin.fusion_producer")
+     | None, Some _ ->
+       Error
+         (Validation_error
+            "origin.fusion_producer requires non-empty origin.fusion_run_id")
+     | Some _, Some _ ->
+       Error
+         (Validation_error "origin.fusion_run_id must not be empty"))
+;;
+
 let create_post_with_audience
       store
       ~lookup
@@ -671,6 +710,9 @@ let create_post_with_audience
   match Agent_id.of_string author with
   | Error e -> Error e
   | Ok author_id ->
+    match validate_post_origin_for_author ~author_id origin with
+    | Error e -> Error e
+    | Ok origin ->
     if ttl_hours < 0
     then Error (Validation_error "ttl_hours must be non-negative")
     else
@@ -855,6 +897,7 @@ let create_post_once_by_fusion_run_id
     option_equal Ids.Turn_ref.equal left.turn_ref right.turn_ref
     && option_equal String.equal left.source right.source
     && option_equal String.equal left.fusion_run_id right.fusion_run_id
+    && option_equal String.equal left.fusion_producer right.fusion_producer
   in
   let post_kind_equal left right =
     match left, right with
@@ -881,20 +924,33 @@ let create_post_once_by_fusion_run_id
   else if ttl_hours < 0
   then pre_effect (Validation_error "ttl_hours must be non-negative")
   else
-    match origin.fusion_run_id with
-    | Some origin_run_id when String.equal origin_run_id fusion_run_id ->
+    match origin.fusion_run_id, origin.fusion_producer with
+    | Some origin_run_id, Some producer
+      when String.equal origin_run_id fusion_run_id && String.trim producer <> "" ->
       (match
          Agent_id.of_string author,
+         Agent_id.of_string producer,
          normalize_post_payload ~content ~post_kind ?meta_json ()
        with
-       | Error error, _ -> pre_effect error
-       | _, Error (Meta_not_assoc payload) ->
+       | Error error, _, _ -> pre_effect error
+       | _, Error error, _ -> pre_effect error
+       | _, _, Error (Meta_not_assoc payload) ->
          pre_effect
            (Validation_error
               (Printf.sprintf
                  "Malformed meta_json: expected JSON object, got %s"
                  (Yojson.Safe.to_string payload)))
-       | Ok author_id, Ok (title, body, post_kind, meta_json) ->
+       | Ok author_id, Ok producer_id, Ok (title, body, post_kind, meta_json) ->
+         if not (String.equal (Agent_id.to_string author_id) (Agent_id.to_string producer_id))
+         then
+           pre_effect
+             (Validation_error
+                (Printf.sprintf
+                   "origin.fusion_producer %S must match post author %S"
+                   (Agent_id.to_string producer_id)
+                   (Agent_id.to_string author_id)))
+         else
+         let origin = { origin with fusion_producer = Some (Agent_id.to_string producer_id) } in
          if String.equal body ""
          then pre_effect (Validation_error "Content cannot be empty")
          else
@@ -909,17 +965,19 @@ let create_post_once_by_fusion_run_id
              match existing_post with
              | Some post ->
                let exact_replay =
-                 String.equal (Agent_id.to_string post.author) (Agent_id.to_string author_id)
-                 && String.equal post.title title
+                 String.equal post.title title
                  && String.equal post.body body
                  && post_kind_equal post.post_kind post_kind
                  && option_equal Yojson.Safe.equal post.meta_json meta_json
                  && visibility_equal post.visibility visibility
                  && option_equal origin_equal post.origin (Some origin)
-                 (* [hearth]/[thread_id] are excluded: this creation path never
-                    sets them, so a post-*creation* hearth binding is out-of-band
-                    metadata and must not turn a legitimate replay into an
-                    [Already_exists] conflict. *)
+                 (* [author] is checked via [origin.fusion_producer] above so an
+                    idempotent sink replay still succeeds after post ownership is
+                    transferred via [update_post]. [hearth]/[thread_id] are also
+                    excluded: this creation path never sets them, so a
+                    post-*creation* hearth binding is out-of-band metadata and
+                    must not turn a legitimate replay into an [Already_exists]
+                    conflict. *)
                in
                if exact_replay
                then Ok (Post_already_present post)
@@ -933,14 +991,19 @@ let create_post_once_by_fusion_run_id
                create_post_with_audience store ~lookup ~author ~content ~post_kind
                  ?meta_json ~visibility ~ttl_hours ~origin ()
                |> Result.map (fun creation -> Post_created creation)))
-    | Some origin_run_id ->
+    | Some origin_run_id, (None | Some _)
+      when String.equal origin_run_id fusion_run_id ->
+      pre_effect
+        (Validation_error
+           "create_post_once_by_fusion_run_id requires non-empty origin.fusion_producer")
+    | Some origin_run_id, _ ->
       pre_effect
         (Validation_error
            (Printf.sprintf
               "fusion_run_id mismatch: argument=%S origin=%S"
               fusion_run_id
               origin_run_id))
-    | None ->
+    | None, _ ->
       pre_effect
         (Validation_error
            "create_post_once_by_fusion_run_id requires typed fusion origin")

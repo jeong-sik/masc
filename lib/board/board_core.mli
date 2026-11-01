@@ -290,8 +290,10 @@ val create_post_once_by_fusion_run_id
   -> origin:post_origin
   -> unit
   -> (create_post_once_result, Post_publication_failure.t) Result.t
-(** Exact typed-origin create. Replays return the existing normalized post;
-    conflicting payloads return [Already_exists]. *)
+(** Exact typed-origin create. Requires [origin.fusion_producer] to match
+    [author] at creation; replays match the immutable [origin] and return the
+    existing normalized post even after mutable [post.author] is transferred via
+    [update_post]. Conflicting payloads return [Already_exists]. *)
 
 val create_post_with_audience
   :  store

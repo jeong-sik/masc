@@ -125,8 +125,16 @@ let post_origin_of_yojson (json : Yojson.Safe.t) : post_origin option =
        then None
        else (match fusion_run_id, fusion_producer with
          | None, None -> Some {turn_ref; source; fusion_run_id; fusion_producer}
-         | Some _, Some producer when String.trim producer <> "" ->
-             Some {turn_ref; source; fusion_run_id; fusion_producer}
+         | Some _, Some producer ->
+             (match Agent_id.of_string producer with
+              | Ok producer_id ->
+                  Some
+                    { turn_ref
+                    ; source
+                    ; fusion_run_id
+                    ; fusion_producer = Some (Agent_id.to_string producer_id)
+                    }
+              | Error _ -> None)
          | _ -> None)
      | Error (), _, _, _ | _, Error (), _, _ | _, _, Error (), _ | _, _, _, Error () -> None)
   | _ -> None

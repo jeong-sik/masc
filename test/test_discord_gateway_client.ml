@@ -226,7 +226,18 @@ let test_ingress_accounts_for_accepted_work_at_owner_release () =
                submit_exn ingress ~lane ~event_id (fun () ->
                  queued_runs := event_id :: !queued_runs))
             queued;
-          Eio.Switch.fail sw Owner_cancelled);
+          Eio.Switch.fail sw Owner_cancelled;
+          Eio.Cancel.protect (fun () ->
+            (match
+               Ingress.submit
+                 ingress
+                 ~lane:lane_b
+                 ~event_id:(event "b-after-fail")
+                 (fun () -> queued_runs := event "b-after-fail" :: !queued_runs)
+             with
+             | Error Ingress.Owner_unavailable -> ()
+             | Ok () -> fail "failed owner switch accepted new ingress work");
+            Eio.Fiber.yield ()));
         false
       with Owner_cancelled -> true
     in

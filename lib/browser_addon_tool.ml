@@ -64,11 +64,11 @@ let transferable verb upload_id = match verb,upload_id with
   | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
   | Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
   | Page_act (B.Action.Open_tab _|Open_window _|Control _)
-  | Page_act (B.Action.On_tab {interaction=(Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_})
+  | Page_act (B.Action.On_tab {interaction=(Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_})
   | Page_context _|Page_instruct _|Page_locate _|Page_extract _),None -> Ok ()
   | (Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _|Page_act (Open_tab _|Open_window _|Control _
-      |On_tab {interaction=Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
+      |On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
     |Page_context _|Page_instruct _|Page_locate _|Page_extract _),Some _ -> Error "uploadId applies only to an upload command"
 let result ~start_time ~failed ~disposition data message : S.tool_result =
   let result=if failed then Tool_result.make_err ~tool_name:definition.name ~start_time

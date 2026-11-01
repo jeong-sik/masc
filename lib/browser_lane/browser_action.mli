@@ -37,7 +37,13 @@ type interaction =
           changed in their place. *)
   | Unblock_requests
   | Accept_dialog of string option | Dismiss_dialog
-  | Back | Forward | Reload | Close_tab
+  | Back | Forward | Reload
+  | Stop_loading
+      (** Native Ego recovery through the selected managed Page's CDP session
+          without first reading that Page. The result acknowledges command
+          return, not document readiness, URL identity or input release.
+          Other backends refuse it. *)
+  | Close_tab
 (** Who holds an ego task space. [Hand_off] gives the whole space to the
     operator for a step only a person can take, such as a sign-in or a
     captcha; [Take_over] takes it back, once the operator has said they are

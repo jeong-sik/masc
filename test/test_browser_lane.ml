@@ -247,7 +247,8 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Viewport_resize -> interact (Set_viewport (Fit {width=800;height=600}))
   | Touch_input -> interact (Tap_at {point;viewport})
   | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
-      | Browser_zoom -> interact (Set_zoom {factor=1.5})
+  | Browser_zoom -> interact (Set_zoom {factor=1.5})
+  | Page_recovery -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Stop_loading})
   | Tab_history -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Back})
   | Tab_closing -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Close_tab})
   | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 2}
@@ -267,9 +268,9 @@ let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
   check (list capability) "the extension has no pointer the browser trusts"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer; Frame_read; Operator_handoff; Page_management; Download_listing; File_upload] (unserved Lane.Web_extension);
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_answer; Frame_read; Operator_handoff; Page_management; Download_listing; File_upload] (unserved Lane.Web_extension);
   check (list capability) "the BiDi peer has no ego snapshot, browser zoom, hand-off, download list or upload"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Browser_zoom; Operator_handoff; Page_management; Download_listing; File_upload] (unserved Lane.Webdriver_bidi);
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Browser_zoom; Operator_handoff; Page_management; Download_listing; File_upload] (unserved Lane.Webdriver_bidi);
   check (list capability) "the ego connection has no document source, touch, zoom, resize or frame reads"
     Lane.[Document_source; Touch_input; Browser_zoom; Viewport_resize; Frame_read]
     (unserved Lane.Ego_task_space);

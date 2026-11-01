@@ -1,0 +1,3 @@
+ego-browser 0.6.2.5
+  chromium 156.0.8078.74
+  node v24.22.1

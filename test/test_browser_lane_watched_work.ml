@@ -238,7 +238,8 @@ let test_only_native_ego_inputs_delegate_waits () =
     verify Lane.Webdriver_bidi verb Lane.Reply_window)
     [Lane.Page_goto {url="https://example.test/";tab_id=Some 1};
      Lane.Page_act (Lane.Action.Open_tab "https://example.test/");
-     Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload})];
+     Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload});
+     Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Stop_loading})];
   verify Lane.Ego_task_space (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back})) Lane.Reply_window;
   verify Lane.Ego_task_space native_click Lane.Executor_owned;
   verify Lane.Web_extension native_click Lane.Reply_window;

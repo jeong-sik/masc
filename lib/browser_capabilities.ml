@@ -2,7 +2,7 @@ type backend = Connected of Browser_lane.live_transport | Owned_gecko
   | Owned_chromium | Safari_unavailable
 type operation =
   | List_tabs | Open_tab | Close_tab | Activate_tab | List_windows | Create_window | Close_window
-  | Navigate | Follow_link | Back | Forward | Reload | Session_lifecycle
+  | Navigate | Follow_link | Back | Forward | Reload | Stop_loading | Session_lifecycle
   | Read_text | Read_html | Read_elements | Read_scene | Read_regions | Read_snapshot | Screenshot
   | Native_workflow
   | Click_snapshot_target | Fill_snapshot_target | Hover_snapshot_target | Double_click_snapshot_target
@@ -152,6 +152,13 @@ let support backend operation = match backend with
         | Connected Browser_lane.Ego_task_space -> conditional ~action:"reload" Act
           [observed;"A failed load is answered with where the tab is now; a stopped run leaves the result unknown: inspect the same tab.";ego_agent_pages]
         | Connected Browser_lane.Web_extension | Safari_unavailable -> missing)
+    | Stop_loading -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"stop_loading" Act
+          ["Requires the exact observed live clientId and managed tabId. Uses the native Page.stopLoading CDP command without Page reads, so it can recover a navigation that has not committed.";
+           "The receipt acknowledges the native command's return on that Page, not document readiness, expected URL, or key/button release. Re-read the same Page before further work.";
+           "Requires a native managed Page, including an explicitly adopted unknown-origin Page. A tab the operator opened must first be explicitly adopted in this same Space; recovery neither adopts it nor changes its origin."]
+      | Connected (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi) | Owned_gecko | Owned_chromium | Safari_unavailable ->
+          Unsupported "Native stop_loading recovery requires an ego connection.")
     | Session_lifecycle -> (match backend with
       | Owned_gecko | Owned_chromium -> conditional Session
           ["Actions open/status/close apply to the selected owned browser."]
@@ -419,7 +426,7 @@ let operation_name = function
   | List_tabs -> "list_tabs" | Open_tab -> "open_tab" | Close_tab -> "close_tab"
   | Activate_tab -> "activate_tab" | List_windows -> "list_windows" | Create_window -> "create_window" | Close_window -> "close_window"
   | Navigate -> "navigate" | Follow_link -> "follow_link" | Back -> "back" | Forward -> "forward"
-  | Reload -> "reload" | Session_lifecycle -> "session_lifecycle" | Read_text -> "read_text"
+  | Reload -> "reload" | Stop_loading -> "stop_loading" | Session_lifecycle -> "session_lifecycle" | Read_text -> "read_text"
   | Read_html -> "read_html" | Read_elements -> "read_elements" | Read_scene -> "read_scene"
   | Read_regions -> "read_regions" | Read_snapshot -> "read_snapshot" | Screenshot -> "screenshot"
   | Native_workflow -> "native_workflow"

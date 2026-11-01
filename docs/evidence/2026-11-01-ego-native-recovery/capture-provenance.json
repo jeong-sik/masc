@@ -1,0 +1,67 @@
+{
+  "source_head_at_capture": "a906aff2bfec5587ff62496863f913532832a63b",
+  "source_implementation_sha256": "aef4b6387d27b072b2f47ce1c9b3753174ef07994724cec228d6c28756d2cf4e",
+  "extracted_helper_script_sha256": "3bb0ac7340b735b11d0cc6865677226bff47f57148a32eeba3fb480b6f48ec84",
+  "probe_script_sha256": "b9fa99253dd5b278d8416ca39864223b3ddeab2eda4afcba01393b094c2832ff",
+  "installed_masc_commit": "61b4d5531d44cb780dff64158fdbf7d641f1658f",
+  "installed_masc_executable_sha256": "6be190ba2ad77923b0ac90089214f300e6477d2aaf931f39d398fe97b0d5da6e",
+  "runtime_instance_id": "01a194d5-74c9-7000-81cc-267357111935",
+  "runtime_same_instance_during_capture": true,
+  "captured_at": "2026-11-01T02:17:28.945598+00:00",
+  "sdk_version": "ego-browser 0.6.2.5\n  chromium 156.0.8078.74\n  node v24.22.1\n",
+  "scope": "Exact production JS recovery helper on installed Ego SDK only; no OCaml/Add-on/MASC installed-candidate claim",
+  "raw_bundle_location": "masc-ego-native-parity-20261101/artifacts/ego-recovery-native-20261101 (local generated evidence; contains private unrelated snapshot prefix, intentionally not retained here)",
+  "raw_capture_manifest": {
+    "stderr.log": {
+      "sha256": "2ec930fc4a2eaa31123cbacbb511c1a9c17ba838ec4cb14c39f7dac7157f5c22",
+      "bytes": 2793
+    },
+    "fixture-ledger.json": {
+      "sha256": "04f63e06d4ae667a4c19509404d58de88064a2e87134f7dc56efb4328249190c",
+      "bytes": 237
+    },
+    "result.json": {
+      "sha256": "dbb2c4fe6c86fdbbb2636e08b8d22075803b3aebef5fee1cc65f37fe2734b66a",
+      "bytes": 3039
+    },
+    "sanitized-summary.json": {
+      "sha256": "80b5d0c6f0b58a6f79deacf1ff120222c386cee94c0f1b2da7df4b7dbcdf9d82",
+      "bytes": 3321
+    },
+    "metadata.json": {
+      "sha256": "54e2d249591f1d4ec6abc0992b05f100ecf45004b41d85a929d38c38db2fc186",
+      "bytes": 1578
+    },
+    "stdout.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "README.md": {
+      "sha256": "b9672005e4dc1124537c2e54e83fc66b5dc57e7920383e33ebefadebf9246050",
+      "bytes": 1545
+    },
+    "installed-version.txt": {
+      "sha256": "0bd9a969952b05cd10c62660730e6e832e4482d9ce53dc8c4a84ddf13f6bbac7",
+      "bytes": 61
+    },
+    "helper-source.ml": {
+      "sha256": "aef4b6387d27b072b2f47ce1c9b3753174ef07994724cec228d6c28756d2cf4e",
+      "bytes": 2246
+    },
+    "identity-after.json": {
+      "sha256": "059d00e073edefc6c7dc31acb8879092f8c180eb5e3169b058087f329f1db1bc",
+      "bytes": 1183
+    },
+    "probe.js": {
+      "sha256": "b9fa99253dd5b278d8416ca39864223b3ddeab2eda4afcba01393b094c2832ff",
+      "bytes": 4399
+    },
+    "helper.js": {
+      "sha256": "3bb0ac7340b735b11d0cc6865677226bff47f57148a32eeba3fb480b6f48ec84",
+      "bytes": 1140
+    }
+  },
+  "source_helper_matches_head": true,
+  "source_worktree_git_status_short_at_capture": "",
+  "source_head_helper_sha256": "aef4b6387d27b072b2f47ce1c9b3753174ef07994724cec228d6c28756d2cf4e"
+}

@@ -145,7 +145,7 @@ let reply_policy = function
         | Action.Upload _ -> Executor_owned
         | Action.Set_cookie _ | Action.Delete_cookie _ | Action.Set_emulation _ | Action.Clear_emulation
         | Action.Block_requests _ | Action.Unblock_requests | Action.Accept_dialog _ | Action.Dismiss_dialog
-        | Action.Back | Action.Forward | Action.Reload | Action.Close_tab -> Reply_window))
+        | Action.Back | Action.Forward | Action.Reload | Action.Stop_loading | Action.Close_tab -> Reply_window))
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Session_open _ | Session_close | Session_status
   | Page_goto _ | Page_elements _ | Page_context _ | Page_instruct _ | Page_locate _ | Page_extract _ -> Reply_window
@@ -158,7 +158,7 @@ let ego_reply_policy = function
   | Page_act action ->
     (match action with
      | Action.Open_tab _ -> Executor_owned
-     | Action.On_tab {interaction=Action.Reload;_} -> Executor_owned
+     | Action.On_tab {interaction=(Action.Reload|Action.Stop_loading);_} -> Executor_owned
      | (Action.Open_window _ | Action.Control _
        | Action.On_tab {interaction=(Action.Upload _ | Action.Set_cookie _ | Action.Delete_cookie _
          | Action.Set_emulation _ | Action.Clear_emulation | Action.Block_requests _
@@ -485,6 +485,7 @@ type live_capability =
   | Accessibility_snapshot
   | Snapshot_target_input
   | Native_workflow
+  | Page_recovery
   | Dom_interaction
   | Point_click
   | Point_scroll
@@ -519,6 +520,7 @@ let live_capability_to_wire = function
   | Accessibility_snapshot -> "accessibility_snapshot"
   | Snapshot_target_input -> "snapshot_target_input"
   | Native_workflow -> "native_workflow"
+  | Page_recovery -> "page_recovery"
   | Operator_handoff -> "operator_handoff"
   | Page_management -> "page_management"
   | Dom_interaction -> "dom_interaction"
@@ -580,6 +582,7 @@ let live_capability = function
   | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Space_status | Action.Finish_space _ | Action.Wait_for_control _)) -> Some Operator_handoff
   | Page_act (Action.Control (Action.Adopt_tab _|Action.Release_tab _)) -> Some Page_management
   | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Some Tab_history
+  | Page_act (Action.On_tab {interaction = Action.Stop_loading; _}) -> Some Page_recovery
   | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Some Tab_closing
   | Page_goto _ -> Some Tab_navigation
   | Page_act (Action.On_tab {interaction = (Action.Accept_dialog _ | Action.Dismiss_dialog); _}) -> Some Dialog_answer
@@ -636,6 +639,7 @@ let verb_allowed_on_stagehand = function
   | Page_act (Action.On_tab {frame_path;interaction;_}) ->
     (match interaction with
      | Action.Back | Forward | Reload | Close_tab -> frame_path = []
+     | Action.Stop_loading -> false
      | Action.Upload _ | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation
      | Block_requests _ | Unblock_requests -> false)
   | Page_document _ | Page_context _ | Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _
@@ -742,18 +746,18 @@ let live_transport_serves transport capability =
   | Web_extension, Browser_zoom -> true
   | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input | Native_workflow
+                    | Tab_closing | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery
                     | Operator_handoff | Page_management | Download_listing | File_upload) -> false
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read) -> true
-  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Operator_handoff | Page_management | Download_listing
+  | Webdriver_bidi, (Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing
                     | File_upload) -> false
   | Ego_task_space, (Tab_listing | Text_read | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_answer
-                    | Snapshot_target_input | Native_workflow | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation) -> true
+                    | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation) -> true
   | Ego_task_space, (Document_source | Touch_input | Browser_zoom | Viewport_resize
                     | Frame_read) -> false
 ;;

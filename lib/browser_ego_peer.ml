@@ -816,6 +816,20 @@ let goto t args =
       moved_page_answer;
       "  }" ]))
 
+(* Recovery must not enter unblocked_managed_page: its Page.info preflight
+   cannot answer while navigation has not committed. The native Space inventory
+   and managed Page properties retain identity without observing that document.
+   This command does not enter, release, or reset the input-holding state. *)
+let stop_loading t id =
+  let* label = label_of t id in
+  let unknown = "native stop_loading may have taken effect; inspect the same Space and Page before further work; never replay recovery automatically" in
+  match run_native_step t ~step:"page.stop_loading" ~args:(obj ["label",str label])
+      (String.concat "\n" [Browser_ego_recovery.script;
+        "    emit(await stopNativeLoading(task,args));"]) with
+  | Error failure -> Error (effect_failure ~unknown failure)
+  | Ok value -> Browser_ego_recovery.receipt ~space_id:t.space.id ~tab_id:id ~label value
+      |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown))
+
 let tab_window id interaction =
   window_s (Browser_lane.Page_act (Browser_lane.Action.On_tab {tab_id = id; frame_path = []; interaction}))
 
@@ -1682,6 +1696,7 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.On_tab {frame_path = _ :: _; _}) ->
     Error (Live.Before_effect frame_upload_refused)
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Close_tab}) -> close_tab t tab_id
+  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Stop_loading}) -> stop_loading t tab_id
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Reload}) -> reload t tab_id
   | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Back as interaction}) ->
     traverse t tab_id ~action:"back" ~delta:(-1) ~side:"earlier" interaction
@@ -1698,7 +1713,7 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.On_tab {frame_path = []; interaction = (Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests); _}) ->
-    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, accept_dialog, dismiss_dialog, upload, hand_off, take_over, space_status, finish_space, wait_for_control, adopt_tab and release_tab only")
+    Error (Live.Before_effect "an ego connection's page.act serves open_tab, close_tab, back, forward, reload, stop_loading, accept_dialog, dismiss_dialog, upload, hand_off, take_over, space_status, finish_space, wait_for_control, adopt_tab and release_tab only")
 
 let workflow ?actor t args =
   let pre result = Result.map_error (fun detail -> Live.Before_effect detail) result in

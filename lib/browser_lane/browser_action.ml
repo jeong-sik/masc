@@ -20,7 +20,7 @@ type interaction =
   | Block_requests of string list
   | Unblock_requests
   | Accept_dialog of string option | Dismiss_dialog
-  | Back | Forward | Reload | Close_tab
+  | Back | Forward | Reload | Stop_loading | Close_tab
 type control_wait = { interval_ms : float option; timeout_ms : float option }
 type keep_pages = Keep_all | Keep_labels of string list
 let keep_pages_to_json = function
@@ -178,9 +178,9 @@ let parse = function
       let* () = exact ("tabId" :: "framePath" :: allowed) in
       let* frame_path = parse_frame_path (`Assoc fields) in
       let* () = match interaction, frame_path with
-        | (Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation
+        | (Back | Forward | Reload | Stop_loading | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation
           | Block_requests _ | Unblock_requests), _ :: _ -> Error "this action operates on the top-level tab"
-        | ((Back | Forward | Reload | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation
+        | ((Back | Forward | Reload | Stop_loading | Close_tab | Accept_dialog _ | Dismiss_dialog | Set_cookie _ | Delete_cookie _ | Set_emulation _ | Clear_emulation
            | Block_requests _ | Unblock_requests), [])
         | Upload _, _ -> Ok () in
       let* tab_id = integer "tabId" in
@@ -249,6 +249,7 @@ let parse = function
        on_tab ["cookieName"] (Delete_cookie name)
      | "dismiss_dialog" -> on_tab [] Dismiss_dialog
      | "back" -> on_tab [] Back | "forward" -> on_tab [] Forward
+     | "stop_loading" -> on_tab [] Stop_loading
      | "reload" -> on_tab [] Reload | "close_tab" -> on_tab [] Close_tab
      | _ -> Error "unknown browser action")
   | _ -> Error "browser action must be an object"
@@ -290,6 +291,6 @@ let to_json = function
           "cookieSecure",`Bool secure;"cookieHttpOnly",`Bool http_only]
           @ Option.to_list (Option.map (fun site -> "cookieSameSite",`String (same_site_wire site)) same_site)
           @ Option.to_list (Option.map (fun n -> "cookieMaxAgeSec",`Int n) max_age_sec)
-      | Back -> "back", [] | Forward -> "forward", [] | Reload -> "reload", [] | Close_tab -> "close_tab", [] in
+      | Back -> "back", [] | Forward -> "forward", [] | Reload -> "reload", [] | Stop_loading -> "stop_loading", [] | Close_tab -> "close_tab", [] in
     `Assoc (["action",`String action;"tabId",`Int tab_id] @
       (if frame_path = [] then [] else ["framePath",`List (List.map (fun s -> `String s) frame_path)]) @ args)

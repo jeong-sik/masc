@@ -1476,6 +1476,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Touch_input -> interact (Swipe {from=point;to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0})
       | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
       | Browser_zoom -> interact (Set_zoom {factor=1.5})
+      | Page_recovery -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Stop_loading})
       | Tab_history -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Back})
       | Tab_closing -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Close_tab})
       | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 2}

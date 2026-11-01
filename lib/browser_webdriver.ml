@@ -373,6 +373,7 @@ let interact t session ~perform_effect ~started = function
     Ok (`Assoc ["name",`String name])
   | Browser_lane.Action.Back -> perform_effect `POST "/back" (Some (`Assoc []))
   | Browser_lane.Action.Forward -> perform_effect `POST "/forward" (Some (`Assoc []))
+  | Browser_lane.Action.Stop_loading -> Error (Protocol "native stop_loading recovery requires an ego connection")
   | Browser_lane.Action.Reload -> perform_effect `POST "/refresh" (Some (`Assoc []))
   | Browser_lane.Action.Close_tab -> perform_effect `DELETE "/window" None
 type effect_phase = Not_started | Started
@@ -384,6 +385,8 @@ let execute_action t action =
   let result = match action with
   | Browser_lane.Action.Control (Browser_lane.Action.Hand_off | Browser_lane.Action.Take_over | Browser_lane.Action.Space_status | Browser_lane.Action.Finish_space _ | Browser_lane.Action.Wait_for_control _ | Browser_lane.Action.Adopt_tab _ | Browser_lane.Action.Release_tab _) ->
     Error (Protocol Browser_lane.handoff_refused)
+  | Browser_lane.Action.On_tab {interaction=Browser_lane.Action.Stop_loading;_} ->
+    Error (Protocol "native stop_loading recovery requires an ego connection")
   | (Browser_lane.Action.Open_tab url | Browser_lane.Action.Open_window url) as opening ->
     let kind = match opening with
       | Browser_lane.Action.Open_window _ -> "window"
@@ -412,7 +415,14 @@ let execute_action t action =
        Ok (`Assoc ["tabId",`Int id;"navigation",`String "blocked_by_dialog";"requested_url",`String url])
      | Error ((Transport _ | Protocol _
               | Remote { code = Invalid_session_id | No_such_window | No_such_alert | Other _; _ }) as error) -> Error (error_at_tab id error))
-  | Browser_lane.Action.On_tab {tab_id=id;frame_path;interaction} ->
+  | Browser_lane.Action.On_tab {tab_id=id;frame_path;
+      interaction=(Browser_lane.Action.Upload _ | Browser_lane.Action.Set_cookie _
+        | Browser_lane.Action.Delete_cookie _ | Browser_lane.Action.Set_emulation _
+        | Browser_lane.Action.Clear_emulation | Browser_lane.Action.Block_requests _
+        | Browser_lane.Action.Unblock_requests | Browser_lane.Action.Accept_dialog _
+        | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back
+        | Browser_lane.Action.Forward | Browser_lane.Action.Reload
+        | Browser_lane.Action.Close_tab) as interaction} ->
     let* session = session t in
     with_tab t session (Some id) (fun () ->
       let* () = enter_frames t session frame_path in
@@ -423,7 +433,7 @@ let execute_action t action =
         (match result with `List [] -> t.session <- None; Atomic.set t.observed_session Browser_lane.Browser_closed; release_resources t session | _ -> ());
         Ok (`Assoc ["tabId",`Int id;"closed",`Bool true])
       | Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back | Browser_lane.Action.Forward
-      | Browser_lane.Action.Reload | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _
+      | Browser_lane.Action.Reload | Browser_lane.Action.Stop_loading | Browser_lane.Action.Upload _ | Browser_lane.Action.Accept_dialog _
       | Browser_lane.Action.Set_cookie _ | Browser_lane.Action.Delete_cookie _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation
       | Browser_lane.Action.Block_requests _ | Browser_lane.Action.Unblock_requests ->

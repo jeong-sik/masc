@@ -361,7 +361,7 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
     | Browser_lane.Page_act (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) -> Some paths
     | Tabs_list|Page_read _|Page_document _|Page_downloads _ | Page_console _ | Page_network _ | Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     |Session_open _|Session_close|Session_status|Page_goto _|Page_elements _
-    |Page_act (Open_tab _|Open_window _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
+    |Page_act (Open_tab _|Open_window _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
     |Page_context _|Page_instruct _|Page_locate _|Page_extract _ -> None in
   (* The grant is staged for the exact route the command goes to: the owned
      Gecko, or a live connection the worker runs, which the selection names. *)

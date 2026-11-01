@@ -82,7 +82,9 @@ val of_binding : config -> binding -> (t, drop_reason) result
     still excluded from the runtime list (fail-closed, RFC-0206 §2.1); this
     surfaces *why*, so [\[runtime\].default] / [\[runtime.assignments\]] / lane
     validation can report a dropped target's materialize failure instead of a
-    bare "not found among N runtimes" that points at a non-existent typo. *)
+    bare "not found among N runtimes" that points at a non-existent typo.
+    HTTP execution retains its selected model policy and pricing catalog;
+    replacing the active catalog does not rebind an existing runtime. *)
 
 
 val is_local_runtime : t -> bool
@@ -103,6 +105,8 @@ val resolve_max_context_of_runtime : t -> (int * max_context_source) option
     observes [None] here in practice. *)
 
 val capabilities_for_runtime : t -> Llm_provider.Capabilities.capabilities option
+(** Project the HTTP execution's captured model policy, preserving a captured
+    absence. Official-client executions have no AGENT_CORE model policy. *)
 val is_local_provider : provider -> bool
 val partition_bindings : config -> binding list -> t list * (string * drop_reason) list
 

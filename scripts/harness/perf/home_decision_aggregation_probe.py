@@ -36,10 +36,9 @@ let keeper_ask name id = Home_request (Home_question
   {Masc.Tui_decode_asks.ak_asker=Ask_keeper name;ak_id=id})
 let apply f rows =
   let count = List.length rows in
-  let a=count/5 and b=count*2/5 and c=count*3/5 and d=count*4/5 in
+  let a=count/4 and b=count*2/4 and c=count*3/4 in
   f (List.take a rows) (List.take (b-a) (List.drop a rows))
-    (List.take (c-b) (List.drop b rows)) (List.take (d-c) (List.drop c rows))
-    (List.drop d rows)
+    (List.take (c-b) (List.drop b rows)) (List.drop c rows)
 let check name rows =
   let previous=apply before rows and candidate=apply after rows in
   if previous<>candidate then failwith ("aggregation changed: "^name);
@@ -57,7 +56,6 @@ let () =
     Home_request(Home_gate_request "same"),"gate";
     Home_request(Home_operator_request "same"),"operator";
     Home_request(Home_goal_confirmation "same"),"goal";
-    Home_request(Home_operator_task "same"),"task";
     Home_request(Home_gate_request "same"),"gate ignored"];
   check "ask identities and structural title behavior" [
     installation "one" "a" "id","a";installation "two" "b" "id","b";
@@ -65,7 +63,7 @@ let () =
     keeper_ask "a" "id","keeper";keeper_ask "b" "id","keeper b"];
   Random.init 724;
   let identities=Array.of_list [Home_agenda;Home_approvals;Home_choose_keeper;
-    Home_request(Home_gate_request "x");Home_request(Home_operator_task "x");
+    Home_request(Home_gate_request "x");Home_request(Home_goal_confirmation "x");
     installation "one" "a" "id";installation "two" "b" "id"] in
   for round=1 to 100 do
     check ("mixed-"^string_of_int round)
@@ -85,16 +83,15 @@ let () =
       action,"request-"^id) in
     check ("scale-"^string_of_int n) rows;
     let count=List.length rows in
-    let a=count/5 and b=count*2/5 and c=count*3/5 and d=count*4/5 in
+    let a=count/4 and b=count*2/4 and c=count*3/4 in
     let p=List.take a rows and q=List.take (b-a) (List.drop a rows)
-    and r=List.take (c-b) (List.drop b rows) and s=List.take (d-c) (List.drop c rows)
-    and t=List.drop d rows in
+    and r=List.take (c-b) (List.drop b rows) and s=List.drop c rows in
     let iterations=if n<=30 then 1000 else if n<=300 then 100 else 3 in
     let measure round (name,f) =
       Gc.compact ();
       let allocated=Gc.allocated_bytes () in
       let started=Mtime_clock.elapsed_ns () in
-      for _=1 to iterations do ignore(Sys.opaque_identity(f p q r s t)) done;
+      for _=1 to iterations do ignore(Sys.opaque_identity(f p q r s)) done;
       let elapsed=Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) started) /. 1e9 in
       let bytes=Gc.allocated_bytes()-.allocated in
       Printf.printf "%d,%d,%s,%d,%.9f,%.3f\n%!" n round name iterations
@@ -151,6 +148,8 @@ def main():
             parser.error("baseline and candidate action type declarations differ")
         asker, ask_key, home_types = declarations(after)
         old = aggregation(before[HOME])
+        old_helper = (extract(before[HOME], "module Action_table =", "\n(* Current successes survive")
+                      if "ordered_decision_rows" in old else "")
         helper = extract(after[HOME], "module Action_table =", "\n(* Current successes survive")
         new = aggregation(after[HOME])
         mtime = Path(subprocess.check_output([ocamlfind, "query", "mtime"], text=True).strip())
@@ -162,10 +161,10 @@ def main():
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.error(str(error))
     probe = ("module Masc = struct module Tui_decode_asks = struct\n"
-             + asker + "\n" + ask_key + "\nend end\n" + home_types
-             + "\nlet before approval_rows questions goals tasks approvals =\n" + old
+             + asker + "\n" + ask_key + "\nend end\n" + home_types + "\n" + old_helper
+             + "\nlet before approval_rows questions goals approvals =\n" + old
              + "\n" + helper
-             + "\nlet after approval_rows questions goals tasks approvals =\n" + new
+             + "\nlet after approval_rows questions goals approvals =\n" + new
              + "\n" + BENCHMARK)
     args.output_dir.mkdir(parents=True, exist_ok=False)
     out = args.output_dir.resolve()
@@ -182,6 +181,7 @@ def main():
         "type_shim": "Only enclosing Masc.Tui_decode_asks module recreated; declarations copied exactly",
         "before_files_sha256": {name: digest(value) for name, value in before.items()},
         "after_files_sha256": {name: digest(value) for name, value in after.items()},
+        "before_helper_sha256": digest(old_helper),
         "before_aggregation_sha256": digest(old),
         "after_helper_sha256": digest(helper), "after_aggregation_sha256": digest(new),
         "probe_sha256": digest(probe), "runner_sha256": digest(Path(__file__).read_text()),

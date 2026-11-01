@@ -1501,11 +1501,19 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                 Server_utils.int_query_param httpun_request "limit" ~default:50
                 |> Server_utils.clamp ~min_v:1 ~max_v:200
               in
-              let json =
-                Task.Tool.task_history_events_json (Mcp_server.workspace_config state)
-                  ~task_id ~limit
+              let config = Mcp_server.workspace_config state in
+              let cache_key =
+                Printf.sprintf "task_history:%s:%s:%d"
+                  config.base_path task_id limit
               in
-              h2_respond_json_value h2_reqd json
+              let payload =
+                Dashboard_cache.get_or_compute_payload cache_key
+                  ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
+                  (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+                     Task.Tool.task_history_events_json config
+                       ~task_id ~limit))
+              in
+              h2_respond_cached_payload h2_reqd payload
                 ~extra_headers:cors)
 
       | `GET, "/api/v1/repositories/pulls" ->

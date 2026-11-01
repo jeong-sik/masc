@@ -3398,6 +3398,65 @@ let () = test "task_history_counts_matches_not_lines" (fun () ->
   assert (List.length busy = 5)
 )
 
+let () = test "task_history_events_json_cache_append_and_inplace_edit" (fun () ->
+  let ctx = make_test_ctx () in
+  let rec mkdir_p path =
+    if path = "" || path = "." || path = "/" then ()
+    else if Sys.file_exists path then ()
+    else begin
+      mkdir_p (Filename.dirname path);
+      Unix.mkdir path 0o755
+    end
+  in
+  let events_dir = Filename.concat (Workspace.masc_dir ctx.config) "events" in
+  let month_dir = Filename.concat events_dir "2026-10" in
+  let log_file = Filename.concat month_dir "31.jsonl" in
+  mkdir_p month_dir;
+  let line_for task_field task_id action =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ (task_field, `String task_id)
+        ; ("action", `String action)
+        ])
+    ^ "\n"
+  in
+  Fs_compat.save_file log_file
+    (line_for "task" "task-101" "claim"
+     ^ line_for "task_id" "task-101" "start"
+     ^ Yojson.Safe.to_string
+         (`Assoc
+           [ ("task", `String "task-101")
+           ; ("task_id", `String "task-101")
+           ; ("action", `String "both-same")
+           ])
+       ^ "\n");
+  let actions_of task_id =
+    match Task.Tool.task_history_events_json ctx.config ~task_id ~limit:10 with
+    | `List rows ->
+      List.map
+        (fun row -> Yojson.Safe.Util.(row |> member "action" |> to_string))
+        rows
+    | _ -> failwith "expected JSON list"
+  in
+  (* Newest-first within the file, and dual task/task_id with identical value
+     is indexed once rather than duplicated. *)
+  assert (actions_of "task-101" = [ "both-same"; "start"; "claim" ]);
+  (* Incremental append updates the cached file index and preserves newest-first
+     ordering. *)
+  Fs_compat.append_file log_file (line_for "task_id" "task-101" "done");
+  assert (actions_of "task-101" = [ "done"; "both-same"; "start"; "claim" ]);
+  (* Same-size in-place edit on the active file invalidates the cached digest
+     even if size and coarse timestamps match. *)
+  let current = Fs_compat.load_file log_file in
+  let edited =
+    Str.global_replace (Str.regexp_string "task-101") "task-202" current
+  in
+  assert (String.length current = String.length edited);
+  Fs_compat.save_file log_file edited;
+  assert (actions_of "task-101" = []);
+  assert (actions_of "task-202" = [ "done"; "both-same"; "start"; "claim" ])
+)
+
 let () =
   ensure_test_runtime ();
   Alcotest.run "Task.Tool"

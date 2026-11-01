@@ -476,78 +476,294 @@ let handle_tasks ~tool_name ~start_time ctx args =
              "creation_receipt",`Assoc ["state",`String state;
                "task_ids",`List (List.map (fun id -> `String id) ids)]]) ())
 
-(* Walks newest-first and stops once [limit] events satisfy [keep], so [limit]
+(* Walks newest-first and stops once [limit] events match [task_id], so [limit]
    counts the events a caller asked for. Counting raw lines instead made the
    caller filter afterwards, and no line budget expresses "this task's newest
    N": the budget fills with whatever the workspace last did, and a task whose
    events sit further back drops out of its own history entirely.
 
-   Parsing happens here because [keep] asks about fields, and deciding on the
-   raw line would mean matching an id as a substring of unparsed JSON —
-   a different event's payload can carry that text. Malformed lines are skipped
-   rather than counted: they are not events the caller asked for. *)
-let read_matching_events config ~limit ~keep =
-  let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
-  if not (Sys.file_exists events_dir) then []
+   Each file is parsed once and indexed by its top-level ["task"] and
+   ["task_id"] fields because deciding on the raw line would mean matching an
+   id as a substring of unparsed JSON — a different event's payload can carry
+   that text. Malformed lines are skipped rather than counted: they are not
+   events the caller asked for. *)
+type cached_events_file = {
+  st_dev : int;
+  st_ino : int;
+  st_size : int;
+  st_mtime : float;
+  st_ctime : float;
+  ended_with_newline : bool;
+  prefix_digest : Digest.t;
+  bytes : int;
+  by_task : (string, Yojson.Safe.t list) Hashtbl.t;
+  mutable last_access_tick : int;
+}
+
+let max_cached_event_files = 256
+(* A file-count bound alone does not bound memory: one entry retains the
+   parsed events of a whole file. Keep the retained working set under this
+   many bytes as well, evicting least-recently-touched files first. *)
+let max_cached_event_bytes = 64 * 1024 * 1024
+let events_file_cache : (string, cached_events_file) Hashtbl.t =
+  Hashtbl.create 64
+let events_file_cache_mutex = Mutex.create ()
+let events_file_cache_tick = ref 0
+let events_file_cache_retained_bytes = ref 0
+
+let with_events_cache_lock f =
+  Mutex.lock events_file_cache_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock events_file_cache_mutex) f
+
+let touch_events_cache_tick () =
+  incr events_file_cache_tick;
+  !events_file_cache_tick
+
+(* The caller holds the cache lock. *)
+let evict_oldest_events_file () =
+  let oldest_key = ref None in
+  let oldest_tick = ref max_int in
+  Hashtbl.iter
+    (fun key (entry : cached_events_file) ->
+       if entry.last_access_tick < !oldest_tick then begin
+         oldest_tick := entry.last_access_tick;
+         oldest_key := Some key
+       end)
+    events_file_cache;
+  match !oldest_key with
+  | Some key ->
+    (match Hashtbl.find_opt events_file_cache key with
+     | Some (entry : cached_events_file) ->
+       events_file_cache_retained_bytes :=
+         !events_file_cache_retained_bytes - entry.bytes
+     | None -> ());
+    Hashtbl.remove events_file_cache key
+  | None -> ()
+
+(* The caller holds the cache lock. *)
+let evict_events_file_cache_if_needed () =
+  while Hashtbl.length events_file_cache >= max_cached_event_files
+        || !events_file_cache_retained_bytes > max_cached_event_bytes
+  do
+    if Hashtbl.length events_file_cache = 0 then ()
+    else evict_oldest_events_file ()
+  done
+
+let add_event_for_task_key by_task key json =
+  let existing = Option.value ~default:[] (Hashtbl.find_opt by_task key) in
+  Hashtbl.replace by_task key (json :: existing)
+
+let index_event_json by_task json =
+  let task = Json_util.get_string json "task" in
+  let task_id_field = Json_util.get_string json "task_id" in
+  match task, task_id_field with
+  | Some t1, Some t2 when String.equal t1 t2 ->
+    add_event_for_task_key by_task t1 json
+  | Some t1, Some t2 ->
+    add_event_for_task_key by_task t1 json;
+    add_event_for_task_key by_task t2 json
+  | Some t1, None ->
+    add_event_for_task_key by_task t1 json
+  | None, Some t2 ->
+    add_event_for_task_key by_task t2 json
+  | None, None -> ()
+
+(* Scan [content] forward from [start_pos] to [end_pos]. Because each matched
+   event is prepended onto its per-task list in [by_task], the resulting list
+   for each task is ordered newest-to-oldest within the file, matching the
+   reverse-line traversal of the uncached implementation without allocating an
+   intermediate list of all lines. *)
+let index_events_content_range by_task content ~start_pos ~end_pos =
+  let rec loop line_start =
+    if line_start >= end_pos then ()
+    else
+      let line_end =
+        match String.index_from_opt content line_start '\n' with
+        | Some idx when idx < end_pos -> idx
+        | _ -> end_pos
+      in
+      let line_len = line_end - line_start in
+      if line_len > 0 then begin
+        let line = String.sub content line_start line_len in
+        match Yojson.Safe.from_string line with
+        | json -> index_event_json by_task json
+        | exception Yojson.Json_error _ -> ()
+      end;
+      loop (line_end + 1)
+  in
+  loop start_pos
+
+let same_stat_identity (entry : cached_events_file) (st : Unix.stats) =
+  entry.st_dev = st.st_dev
+  && entry.st_ino = st.st_ino
+  && entry.st_size = st.st_size
+  && Float.equal entry.st_mtime st.st_mtime
+  && Float.equal entry.st_ctime st.st_ctime
+
+let load_events_file_index ~verify_content path =
+  match Unix.stat path with
+  | exception Unix.Unix_error _ -> None
+  | st when st.st_kind <> Unix.S_REG -> None
+  | st ->
+    let check_stat_hit () =
+      with_events_cache_lock (fun () ->
+        match Hashtbl.find_opt events_file_cache path with
+        | Some entry ->
+          entry.last_access_tick <- touch_events_cache_tick ();
+          Some entry
+        | None -> None)
+    in
+    let should_verify = verify_content && st.st_size <= 262_144 in
+    match check_stat_hit () with
+    | Some entry when not should_verify && same_stat_identity entry st ->
+      Some entry.by_task
+    | _ ->
+      (* No stripe lock across the scan: reads, digests and index builds run
+         unlocked so a large scan cannot block another worker domain that
+         hashes to the same stripe. Concurrent first scans duplicate work and
+         the last publication wins — both idempotent. Cancellation must
+         propagate: the loader checks the cancel context after its systhread
+         read, so swallowing every exception here would convert a cancel into
+         a silent miss. *)
+      (match Fs_compat.load_file path with
+       | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+       | exception _ -> None
+       | content ->
+         let cached_opt =
+           with_events_cache_lock (fun () ->
+             match Hashtbl.find_opt events_file_cache path with
+             | Some entry ->
+               entry.last_access_tick <- touch_events_cache_tick ();
+               Some entry
+             | None -> None)
+         in
+         let len = String.length content in
+         let full_digest = Digest.string content in
+         let by_task, was_exact_digest_hit =
+           match cached_opt with
+           | Some entry
+             when entry.st_dev = st.st_dev
+                  && entry.st_ino = st.st_ino
+                  && entry.st_size = len
+                  && Digest.equal full_digest entry.prefix_digest ->
+             entry.by_task, true
+           | Some entry
+             when entry.st_dev = st.st_dev
+                  && entry.st_ino = st.st_ino
+                  && len > entry.st_size
+                  && entry.ended_with_newline
+                  && Digest.equal
+                       (Digest.substring content 0 entry.st_size)
+                       entry.prefix_digest ->
+             let updated = Hashtbl.copy entry.by_task in
+             index_events_content_range updated content
+               ~start_pos:entry.st_size ~end_pos:len;
+             updated, false
+           | _ ->
+             let fresh = Hashtbl.create 64 in
+             index_events_content_range fresh content ~start_pos:0 ~end_pos:len;
+             fresh, false
+         in
+         let stat_unchanged =
+           match cached_opt with
+           | Some entry -> same_stat_identity entry st
+           | None -> false
+         in
+         if not (was_exact_digest_hit && stat_unchanged) then
+           (match Unix.stat path with
+            | st_after
+              when st_after.st_kind = Unix.S_REG
+                   && st_after.st_dev = st.st_dev
+                   && st_after.st_ino = st.st_ino
+                   && st_after.st_size = len
+                   && Float.equal st_after.st_mtime st.st_mtime
+                   && Float.equal st_after.st_ctime st.st_ctime ->
+              let ended_with_newline =
+                len > 0 && Char.equal content.[len - 1] '\n'
+              in
+              with_events_cache_lock (fun () ->
+                (match Hashtbl.find_opt events_file_cache path with
+                 | Some (entry : cached_events_file) ->
+                   events_file_cache_retained_bytes :=
+                     !events_file_cache_retained_bytes - entry.bytes
+                 | None -> ());
+                let tick = touch_events_cache_tick () in
+                Hashtbl.replace events_file_cache path
+                  {
+                    st_dev = st.st_dev;
+                    st_ino = st.st_ino;
+                    st_size = len;
+                    st_mtime = st.st_mtime;
+                    st_ctime = st.st_ctime;
+                    ended_with_newline;
+                    prefix_digest = full_digest;
+                    bytes = len;
+                    by_task;
+                    last_access_tick = tick;
+                  };
+                events_file_cache_retained_bytes :=
+                  !events_file_cache_retained_bytes + len;
+                evict_events_file_cache_if_needed ())
+            | _ | exception Unix.Unix_error _ -> ());
+         Some by_task)
+
+let read_matching_task_events config ~task_id ~limit =
+  if limit <= 0 then []
   else
-    let month_dirs =
-      Sys.readdir events_dir |> Array.to_list |> List.sort compare |> List.rev
-    in
-    let collected = ref [] in
-    let remaining = ref limit in
-    let read_lines path =
-      Fs_compat.load_file path
-      |> String.split_on_char '\n'
-      |> List.filter (fun s -> s <> "")
-    in
-    let add_lines path =
-      if !remaining <= 0 then ()
-      else
-        let rec take = function
-          | [] -> ()
-          | line :: rest ->
-            if !remaining > 0 then begin
-              (match Yojson.Safe.from_string line with
-               | json when keep json ->
-                 collected := json :: !collected;
-                 decr remaining
-               | _ -> ()
-               | exception Yojson.Json_error _ -> ());
-              take rest
-            end
-        in
-        take (List.rev (read_lines path))
-    in
-    List.iter
-      (fun month ->
-         if !remaining > 0 then
-           let month_path = Filename.concat events_dir month in
-           if Sys.file_exists month_path && Sys.is_directory month_path then
-             let files =
-               Sys.readdir month_path
-               |> Array.to_list
-               |> List.sort compare
-               |> List.rev
-             in
-             List.iter
-               (fun file ->
-                  if !remaining > 0 then
-                    let path = Filename.concat month_path file in
-                    if Sys.file_exists path then add_lines path)
-               files)
-      month_dirs;
-    List.rev !collected
+    let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
+    if not (Sys.file_exists events_dir) then []
+    else
+      let month_dirs =
+        Sys.readdir events_dir
+        |> Array.to_list
+        |> List.sort (fun a b -> String.compare b a)
+      in
+      let collected = ref [] in
+      let remaining = ref limit in
+      let is_first_file = ref true in
+      let add_file_events path =
+        if !remaining <= 0 then ()
+        else
+          let verify_content = !is_first_file in
+          is_first_file := false;
+          match load_events_file_index ~verify_content path with
+          | None -> ()
+          | Some by_task ->
+            (match Hashtbl.find_opt by_task task_id with
+             | None -> ()
+             | Some events ->
+               let rec take = function
+                 | [] -> ()
+                 | json :: rest ->
+                   if !remaining > 0 then begin
+                     collected := json :: !collected;
+                     decr remaining;
+                     take rest
+                   end
+               in
+               take events)
+      in
+      List.iter
+        (fun month ->
+           if !remaining > 0 then
+             let month_path = Filename.concat events_dir month in
+             if Sys.file_exists month_path && Sys.is_directory month_path then
+               let files =
+                 Sys.readdir month_path
+                 |> Array.to_list
+                 |> List.sort (fun a b -> String.compare b a)
+               in
+               List.iter
+                 (fun file ->
+                    if !remaining > 0 then
+                      let path = Filename.concat month_path file in
+                      if Sys.file_exists path then add_file_events path)
+                 files)
+        month_dirs;
+      List.rev !collected
 
 let task_history_events_json (config : Workspace.config) ~task_id ~limit =
-  let matches_task json =
-    let task = Json_util.get_string json "task" in
-    let task_id_field = Json_util.get_string json "task_id" in
-    match task, task_id_field with
-    | Some t, _ when String.equal t task_id -> true
-    | _, Some t when String.equal t task_id -> true
-    | _ -> false
-  in
-  `List (read_matching_events config ~limit ~keep:matches_task)
+  `List (read_matching_task_events config ~task_id ~limit)
 
 let handle_task_history ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in

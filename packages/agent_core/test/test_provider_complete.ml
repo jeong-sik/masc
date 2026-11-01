@@ -1797,8 +1797,8 @@ let test_annotate_response_cost () =
     ; telemetry = None
     }
   in
-  let source = Llm_provider.Pricing.of_catalog ~catalog:(Model_catalog.global ())
-      ~provider:(Model_catalog.Anonymous_wire Anthropic) in
+  let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Model_catalog.global ())
+      ~provider:(Llm_provider.Model_catalog.Anonymous_wire Anthropic) in
   match Llm_provider.Pricing.annotate_response_cost ~source response with
   | { usage = Some { cost_usd = Some cost; _ }; _ } ->
     Alcotest.(check bool) "annotated cost" true (cost > 0.0)
@@ -1822,8 +1822,8 @@ let test_annotate_response_cost_keeps_missing_scoped_rates () =
     ; telemetry = None
     }
   in
-  let source = Llm_provider.Pricing.of_catalog ~catalog:(Model_catalog.global ())
-      ~provider:(Model_catalog.Declared_provider "openai") in
+  let source = Llm_provider.Pricing.of_catalog ~catalog:(Llm_provider.Model_catalog.global ())
+      ~provider:(Llm_provider.Model_catalog.Declared_provider "openai") in
   match Llm_provider.Pricing.annotate_response_cost ~source response with
   | { usage = Some usage; _ } ->
     Alcotest.(check (option (float 0.001)))

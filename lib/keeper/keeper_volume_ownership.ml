@@ -49,21 +49,34 @@ let marker_to_yojson (m : owner_marker) =
 ;;
 
 let marker_of_yojson = function
-  | `Assoc fields
-    when List.exists (fun (k, _) -> String.equal k "base_path") fields
-         && List.exists (fun (k, _) -> String.equal k "schema") fields ->
-    (match List.assoc_opt "base_path" fields, List.assoc_opt "schema" fields with
-     | Some (`String base_path), Some (`Int 1) when base_path <> "" ->
-       Ok
-         { base_path
-         ; written_at =
-             (match List.assoc_opt "written_at" fields with
-              | Some (`Float at) -> at
-              | _ -> 0.0)
-         }
-     | Some (`String _), Some (`Int schema) ->
-       Error (Printf.sprintf "owner marker schema %d is not 1" schema)
-     | _ -> Error "owner marker lacks base_path")
+  | `Assoc fields ->
+    let keys = List.map fst fields in
+    if List.length keys <> List.length (List.sort_uniq String.compare keys) then
+      Error "owner marker contains duplicate fields"
+    else
+      (match List.assoc_opt "base_path" fields, List.assoc_opt "schema" fields with
+       | Some (`String base_path), Some (`Int 1)
+         when String.trim base_path <> "" ->
+         let written_at_result =
+           match List.assoc_opt "written_at" fields with
+           | None -> Ok 0.0
+           | Some (`Float at) when Float.is_finite at && at >= 0.0 -> Ok at
+           | Some (`Int at) when at >= 0 -> Ok (float_of_int at)
+           | Some _ ->
+             Error "owner marker written_at must be a non-negative finite number"
+         in
+         Result.map (fun written_at -> { base_path; written_at }) written_at_result
+       | Some (`String _), Some (`Int 1) ->
+         Error "owner marker lacks base_path"
+       | Some (`String _), Some (`Int schema) ->
+         Error (Printf.sprintf "owner marker schema %d is not 1" schema)
+       | Some (`String _), _ ->
+         Error "owner marker is not a schema'd object"
+       | _ ->
+         if List.mem_assoc "schema" fields then
+           Error "owner marker lacks base_path"
+         else
+           Error "owner marker is not a schema'd object")
   | _ -> Error "owner marker is not a schema'd object"
 ;;
 

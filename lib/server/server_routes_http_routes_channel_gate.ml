@@ -560,16 +560,24 @@ let handle_gate_keeper_kata_name ~config ~sw ~clock _state request reqd =
       respond_json_value_with_cors ~status:`Bad_request request reqd
         (Channel_gate.error_json "name is required")
     else
-      let status, body =
-        Server_dashboard_http_runtime_support.run_dashboard_compute
-          ~mode:Server_dashboard_http_runtime_support.Offloaded_readonly
-          ~sw ~clock ~config ~kind:sandbox_read_work_kind ~name:__FUNCTION__
-          (fun ~config ~sw:_ ->
-             match Keeper_status_detail.kata_name_observation_config ~config ~keeper_name:name
-                     ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()) with
-             | Ok json -> `OK, Yojson.Safe.to_string json
-             | Error detail -> `Bad_gateway, Yojson.Safe.to_string (Channel_gate.error_json detail)) in
-      respond_json_with_cors ~status request reqd body
+      match keeper_exists ~config name with
+      | Error err ->
+        respond_json_value_with_cors ~status:`Service_unavailable request reqd
+          (Channel_gate.error_json err)
+      | Ok false ->
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (Channel_gate.error_json ("unknown keeper: " ^ name))
+      | Ok true ->
+        let status, body =
+          Server_dashboard_http_runtime_support.run_dashboard_compute
+            ~mode:Server_dashboard_http_runtime_support.Offloaded_readonly
+            ~sw ~clock ~config ~kind:sandbox_read_work_kind ~name:__FUNCTION__
+            (fun ~config ~sw:_ ->
+               match Keeper_status_detail.kata_name_observation_config ~config ~keeper_name:name
+                       ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ()) with
+               | Ok json -> `OK, Yojson.Safe.to_string json
+               | Error detail -> `Bad_gateway, Yojson.Safe.to_string (Channel_gate.error_json detail)) in
+        respond_json_with_cors ~status request reqd body
 
 let capture_required_workspace state request =
   (* Capture once: workspace_scope is atomic and can switch while a read is

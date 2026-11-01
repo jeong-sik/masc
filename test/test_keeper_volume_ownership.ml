@@ -52,15 +52,26 @@ let test_a_marker_naming_another_workspace_is_not_owned () =
 ;;
 
 let test_malformed_marker_bytes_stay_unverified () =
-  let bytes = {|{"schema":1,"base_path":""}|} in
-  let verdict = Kvo.interpret_marker_bytes ~probed_base_path:"/w/alpha" bytes in
-  (match verdict with
-   | Kvo.Unverified (Kvo.Marker_unreadable _) -> ()
-   | other ->
-     Alcotest.failf "an empty base path must be unreadable, got: %s"
-       (match other with
-        | Kvo.Owned_by_this_workspace -> "owned"
-        | _ -> "other"))
+  List.iter
+    (fun (label, bytes) ->
+       let verdict = Kvo.interpret_marker_bytes ~probed_base_path:"/w/alpha" bytes in
+       match verdict with
+       | Kvo.Unverified (Kvo.Marker_unreadable _) -> ()
+       | other ->
+         Alcotest.failf "%s must be unreadable, got: %s" label
+           (match other with
+            | Kvo.Owned_by_this_workspace -> "owned"
+            | _ -> "other"))
+    [ ("empty base_path", {|{"schema":1,"base_path":""}|})
+    ; ("blank base_path", {|{"schema":1,"base_path":"   "}|})
+    ; ("duplicate base_path", {|{"schema":1,"base_path":"/w/alpha","base_path":"/w/beta"}|})
+    ; ("string written_at", {|{"schema":1,"base_path":"/w/alpha","written_at":"bad"}|})
+    ; ("negative written_at", {|{"schema":1,"base_path":"/w/alpha","written_at":-1.0}|})
+    ];
+  (match Kvo.marker_of_yojson (Yojson.Safe.from_string {|{"schema":1,"base_path":"/w/alpha","written_at":1790000000}|}) with
+   | Ok parsed ->
+     Alcotest.(check (float 0.0)) "integer written_at preserved" 1790000000.0 parsed.written_at
+   | Error detail -> Alcotest.failf "integer written_at rejected: %s" detail)
 ;;
 
 let test_not_json_at_all_is_unverified_not_a_guess () =

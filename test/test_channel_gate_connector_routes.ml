@@ -993,6 +993,15 @@ let test_keeper_status_http_200_valid_keeper () =
             (name |> U.member "host_environment_alignment" = `Null);
           check int "both independent routes preserve the operation bucket" quota_before
             (Masc.Rate_limit.remaining_agent_global ~key:quota_key);
+          let status_unknown_name, unknown_name_json =
+            parse_http_response
+              (dispatch_gate_route ~sw ~clock state token
+                 ("/api/v1/gate/keeper-kata-name?name=unregistered&" ^ binding))
+          in
+          check int "unknown keeper on kata-name returns 404" 404 status_unknown_name;
+          check string "unknown keeper error matches status route"
+            "unknown keeper: unregistered"
+            (unknown_name_json |> U.member "error" |> U.to_string);
           List.iter (fun route ->
             let status, _ = parse_http_response (dispatch_gate_route ~sw ~clock state token
                 (route ^ "?name=unregistered")) in

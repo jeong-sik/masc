@@ -46,6 +46,9 @@ type t = private { tab_id : int; expected_url : string; steps : step list;
 
 (** Strict decoder, with no fallback for unknown methods/fields. [maxChars]
     must be supplied after the caller applies its existing snapshot size policy.
+    Errors identify the workflow or the zero-based step index and its method
+    when unambiguous. Unknown/duplicate workflow and step keys, including
+    method-option keys, are named.
     [options] uses the native SDK names and is validated for the exact method.
     Omission preserves SDK defaults. Methods with no options reject that field.
     [selectionJson] carries the SDK's string/object/array/null selection form.

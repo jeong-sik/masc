@@ -264,9 +264,130 @@ let test_late_render_cannot_replace_current_pin () = with_store @@ fun ~base_pat
   check string "late render cannot overwrite newer current pin" !new_pin
     (Fs_compat.load_file current_pin)
 
+let librarian_pin ~base_path =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "keeper")
+    "librarian-recall-current.json"
+
+let sweep_blobs ~base_path =
+  List.iter (fun mode ->
+    match Tool_blob_maintenance.run ~base_path
+        ~board_posts_file:Masc_board_handlers.Board_paths.posts_file ~mode with
+    | Ok _ -> ()
+    | Error error -> fail (Tool_blob_maintenance.error_to_string error))
+    [Tool_blob_maintenance.Observe_only; Delete_previous_candidates]
+
+let expire_recall_history ~base_path =
+  let config = Workspace.default_config base_path in
+  let location = Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
+      ~keeper:"keeper" Memory_recall_artifacts in
+  let store = Dated_jsonl.open_store location in
+  let captured = Dated_jsonl.range_day_file_paths store
+      ~since:"1970-01-01" ~until:"9999-12-31" in
+  let bytes = String.concat "" (List.map Fs_compat.load_file captured) in
+  let expired = (Dated_jsonl.Store.dated_path location ~ts:1.).path in
+  (* Age the captured test history, then let the production retention owner
+     remove it. Current pins are outside that dated retention. *)
+  Fs_compat.mkdir_p (Filename.dirname expired);
+  ok (Fs_compat.save_file_atomic expired bytes);
+  List.iter (fun path -> if path <> expired then Sys.remove path) captured;
+  check bool "normal retention expires captured history" true
+    (Dated_jsonl.prune store ~days:1 > 0)
+
+let artifact_present ~base_path reference =
+  match Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+      ~sha256:reference.Tool_output.sha256 with
+  | Ok body -> Option.is_some body
+  | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
+
+let test_confirmed_empty_context_releases_current_pin () =
+  List.iter (fun remove_owner -> with_store @@ fun ~base_path ~keepers_dir ->
+    let first = commit ~keepers_dir ~previous:None "finished working context" in
+    ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
+    let reference = artifact_of_index ~keepers_dir in
+    if remove_owner then Sys.remove (Context.path ~keepers_dir ~keeper_id:"keeper")
+    else ignore (ok (Context.commit ~observed_sources:[] ~keepers_dir ~keeper_id:"keeper"
+      ~expected_version:(Some (Context.version first)) ~sources:[] []));
+    ignore (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+    check bool "confirmed empty authority retires the current publication" true
+      (Yojson.Safe.from_file (librarian_pin ~base_path) = `Null);
+    sweep_blobs ~base_path;
+    check bool "retirement preserves dated historical context" true
+      (artifact_present ~base_path reference);
+    expire_recall_history ~base_path;
+    sweep_blobs ~base_path;
+    check bool "expired retired context becomes collectable" false
+      (artifact_present ~base_path reference)) [false; true]
+
+let test_unavailable_context_preserves_current_pin () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let first = commit ~keepers_dir ~previous:None "recoverable working context" in
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
+  let pin = librarian_pin ~base_path in
+  let published = Fs_compat.load_file pin in
+  let reference = artifact_of_index ~keepers_dir in
+  ignore (Recall.render ~artifact_reader_available:false
+      ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+  check string "unavailable reader preserves the publication" published
+    (Fs_compat.load_file pin);
+  ok (Fs_compat.save_file_atomic (Context.path ~keepers_dir ~keeper_id:"keeper") "{");
+  ignore (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+  check string "unreadable authority preserves the publication" published
+    (Fs_compat.load_file pin);
+  expire_recall_history ~base_path;
+  sweep_blobs ~base_path;
+  check bool "unavailable authority keeps current context reachable" true
+    (artifact_present ~base_path reference)
+
+let test_late_empty_read_preserves_same_artifact_publication () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let first = commit ~keepers_dir ~previous:None "reopened working context" in
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
+  let reference = artifact_of_index ~keepers_dir in
+  let pin = librarian_pin ~base_path in
+  let original = Fs_compat.load_file pin in
+  let empty = ok (Context.commit ~observed_sources:[] ~keepers_dir ~keeper_id:"keeper"
+      ~expected_version:(Some (Context.version first)) ~sources:[] []) in
+  let newer = ref "" in
+  ignore (Recall.For_testing.render ~base_path ~keepers_dir ~keeper_name:"keeper"
+    ~before_retain:(fun () -> ()) ~before_retire:(fun () ->
+      let reopened = commit ~keepers_dir ~previous:(Some empty) "reopened working context" in
+      ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" reopened);
+      check string "new publication reuses the same artifact bytes" reference.sha256
+        (artifact_of_index ~keepers_dir).sha256;
+      newer := Fs_compat.load_file pin) ());
+  check bool "same artifact publication has a fresh generation" true
+    (original <> !newer);
+  check string "late empty read cannot retire the newer publication" !newer
+    (Fs_compat.load_file pin);
+  expire_recall_history ~base_path;
+  sweep_blobs ~base_path;
+  check bool "new current publication survives expired history" true
+    (artifact_present ~base_path reference)
+
+let test_invalid_pin_cannot_authorize_retirement () =
+  with_store @@ fun ~base_path ~keepers_dir ->
+  let first = commit ~keepers_dir ~previous:None "working context" in
+  ok (Recall.publish ~base_path ~keepers_dir ~keeper_name:"keeper" first);
+  ignore (ok (Context.commit ~observed_sources:[] ~keepers_dir ~keeper_id:"keeper"
+    ~expected_version:(Some (Context.version first)) ~sources:[] []));
+  let pin = librarian_pin ~base_path in
+  ok (Fs_compat.save_file_atomic pin "{");
+  ignore (Recall.render ~base_path ~keepers_dir ~keeper_name:"keeper" ());
+  check string "unreadable publication grants no retirement authority" "{"
+    (Fs_compat.load_file pin)
+
 
 let () = run "working context recall"
   ["progress", [test_case "failed publication recovers on recall" `Quick test_failed_publication_recovers_on_recall;
+    test_case "confirmed empty context releases current pin after history retention" `Quick
+      test_confirmed_empty_context_releases_current_pin;
+    test_case "unavailable context preserves the current pin" `Quick
+      test_unavailable_context_preserves_current_pin;
+    test_case "late empty read preserves a newer same-artifact publication" `Quick
+      test_late_empty_read_preserves_same_artifact_publication;
+    test_case "invalid pin cannot authorize retirement" `Quick
+      test_invalid_pin_cannot_authorize_retirement;
     test_case "late render cannot replace newer publication pin" `Quick test_late_render_cannot_replace_current_pin;
     test_case "published context survives GC and repairs missing or corrupt bytes" `Quick test_gc_and_missing_blob_repair;
     test_case "held recall follows empty unavailable and recovered context" `Quick test_recall_lifecycle_retires_and_restores_held_pointer;

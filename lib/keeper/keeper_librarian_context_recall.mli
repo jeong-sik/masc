@@ -16,6 +16,9 @@ val render : ?artifact_reader_available:bool -> base_path:string -> keepers_dir:
     current authoritative snapshot. An unavailable authority or failed repair
     emits a distinct stable unavailable notice. Both retire earlier artifact references
     as current context without granting authority or blocking original intake.
+    Confirmed absent or empty context also retires the exact current retention
+    pin observed before the authoritative read. Unavailable context preserves
+    that pin, and a later publication cannot be retired by an older read.
     The option is always [Some], including status notices, so persistent client
     sessions observe disappearance and can deduplicate an unchanged status.
     [artifact_reader_available] defaults to true; callers pass the observed
@@ -27,7 +30,9 @@ val render : ?artifact_reader_available:bool -> base_path:string -> keepers_dir:
     failed repair emits unavailable. Historical pins use dated Keeper retention. *)
 
 module For_testing : sig
-  val render : before_retain:(unit -> unit) -> ?artifact_reader_available:bool ->
+  val render : before_retain:(unit -> unit) -> ?before_retire:(unit -> unit) ->
+    ?artifact_reader_available:bool ->
     base_path:string -> keepers_dir:string -> keeper_name:string -> unit -> string option
-  (** Interleave an owner commit after observing the index and before retention. *)
+  (** Interleave a publication before retention or after confirming empty
+      authority and before retiring the previously observed pin. *)
 end

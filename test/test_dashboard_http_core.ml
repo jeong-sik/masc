@@ -8586,9 +8586,9 @@ let test_skill_evidence_joins_activation_and_composition () =
     Composition.save_latest config value |> Result.get_ok |> ignore;
     run_id in
   let tool_name = "keeper_compose_release-checklist" in
-  let completed_run = save 100. (completed tool_name (`Assoc [])) in
-  let _deferred_run = save 200. (Tool_result.make_deferred ~tool_name ~start_time:(Tool_timing.start ()) ()) in
-  let _failed_run = save 300. (Tool_result.make_err ~tool_name ~class_:Runtime_failure
+  let completed_run = save (-100.5) (completed tool_name (`Assoc [])) in
+  let _deferred_run = save 0. (Tool_result.make_deferred ~tool_name ~start_time:(Tool_timing.start ()) ()) in
+  let _failed_run = save 100.5 (Tool_result.make_err ~tool_name ~class_:Runtime_failure
     ~start_time:(Tool_timing.start ()) "result publication failed") in
   let observed = Server_skill_evidence.project ~config reference in
   check int "coverage counts all original retained runs" 3
@@ -8603,6 +8603,9 @@ let test_skill_evidence_joins_activation_and_composition () =
     (observed |> member "composition" |> member "result" |> member "disposition" |> to_string);
   check int "history is the same retained population" 3
     (observed |> member "composition_runs" |> to_list |> List.length);
+  check (float 0.00001) "negative record survives storage and projection" (-100.5)
+    (observed |> member "composition_statistics" |> member "recorded_window"
+     |> member "first_recorded_at" |> to_float);
   let selected = Server_skill_evidence.project ~composition_run_id:completed_run ~config reference in
   check string "an older run is selected by original identity" "completed"
     (selected |> member "composition" |> member "result" |> member "disposition" |> to_string);

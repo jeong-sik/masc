@@ -402,8 +402,17 @@ let test_duration_statistics () =
   Alcotest.(check (option (float 0.00001))) "p95 distinguishes tail from maximum" (Some 18.) tail.completed.p95_ms;
   Alcotest.(check (option (float 0.00001))) "outlier remains visible" (Some 1000.) tail.completed.max_ms;
   Alcotest.(check (option (float 0.00001))) "zero is measured" (Some 0.) tail.completed.min_ms;
-  let before_epoch = change ~disposition:"completed" ~duration:10. ~recorded_at:(-100.5) first
-    |> fun evidence -> E.statistics [evidence] in
+  let before_epoch_evidence = change ~disposition:"completed" ~duration:10. ~recorded_at:(-100.5) first in
+  let summary = E.run_summary before_epoch_evidence |> E.run_summary_to_yojson in
+  Alcotest.(check bool) "pre-epoch summary round-trips through its public codec" true
+    ((E.run_summary_of_yojson summary |> Result.map E.run_summary_to_yojson) = Ok summary);
+  List.iter (fun value ->
+    let fields = Yojson.Safe.Util.to_assoc summary in
+    Alcotest.(check bool) "nonfinite summary time is refused" true
+      (E.run_summary_of_yojson (`Assoc (("recorded_at", `Float value)
+        :: List.remove_assoc "recorded_at" fields)) |> Result.is_error))
+    [nan; infinity; neg_infinity];
+  let before_epoch = E.statistics [before_epoch_evidence] in
   Alcotest.(check (option (float 0.00001))) "finite pre-epoch record starts the window"
     (Some (-100.5)) before_epoch.first_recorded_at;
   Alcotest.(check (option (float 0.00001))) "finite pre-epoch record ends the window"

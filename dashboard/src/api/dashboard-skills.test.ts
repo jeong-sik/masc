@@ -499,6 +499,18 @@ describe('stored composition duration statistics', () => {
     }
     expect(decodeSkillEvidenceResponse(beforeEpoch).composition_statistics?.recorded_window)
       .toEqual({ first_recorded_at: -100.5, last_recorded_at: -100.5 })
+    const crossingEpoch = { ...raw,
+      composition_runs: raw.composition_runs.map((run, index) => ({ ...run,
+        recorded_at: index === 0 ? run.recorded_at : -100.5 })),
+      composition_statistics: { ...raw.composition_statistics,
+        recorded_window: { first_recorded_at: -100.5, last_recorded_at: raw.composition.recorded_at } },
+    }
+    expect(decodeSkillEvidenceResponse(crossingEpoch).composition_runs?.at(-1)?.recorded_at).toBe(-100.5)
+    for (const recorded_at of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(() => decodeSkillEvidenceResponse({ ...beforeEpoch,
+        composition_runs: beforeEpoch.composition_runs.map(run => ({ ...run, recorded_at })),
+      })).toThrow(SkillsContractError)
+    }
     const older = { ...compositionEvidence, composition_run_id: raw.composition_runs[1]!.composition_run_id,
       result: { ...compositionEvidence.result, duration_ms: 10 } }
     const exact = { ...raw, composition_selection: { mode: 'exact_run', composition_run_id: older.composition_run_id }, composition: older }

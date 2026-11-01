@@ -121,6 +121,10 @@ type failure =
 
 let ( let* ) = Result.bind
 
+type undrawn =
+  | Source_fragment of int * int
+  | Requires_source
+
 (* How a state diagram's source writes a start or an end. *)
 let pseudo_state_mark = "[*]"
 
@@ -332,8 +336,8 @@ let find_from text from needle =
   in
   go from
 
-(* The statements that style a diagram in a browser and change nothing on a
-   text canvas, and the two that fence a subgraph. Read and skipped. *)
+(* Browser styling and interaction are accepted but not drawn on the text
+   canvas; the caller can be told to preserve their source. *)
 type statement_kind =
   | Skipped
   | Statement
@@ -341,10 +345,8 @@ type statement_kind =
   | Group_close
   | Group_direction of string
 
-(* The skipped words are styling and interaction. This renderer draws rows
-   of box-drawing characters and carries no colour or click, so dropping
-   them loses nothing that the output could have shown. Grouping is not in
-   that class, which is why [subgraph] is read. *)
+(* The skipped words are styling and interaction. Grouping is not in that
+   class, which is why [subgraph] is read. *)
 let statement_kind line =
   let word, rest_start, rest =
     match String.index_opt line ' ' with
@@ -545,7 +547,7 @@ let parse_statement ~source_start ~edge_count text declared edges =
 (* (line number, line) with comments and blanks dropped. A graph splits
    each line on [;] afterwards; a sequence diagram keeps its lines whole,
    because a message's text may hold one. *)
-let source_lines text =
+let source_lines ?on_undrawn text =
   let offset = ref 0 in
   String.split_on_char '\n' text
   |> List.mapi (fun index raw ->
@@ -555,7 +557,9 @@ let source_lines text =
       | Some stop -> String.sub raw 0 stop | None -> raw in
     let base, line = trim_located base line in
     index + 1, base, line)
-  |> List.filter (fun (_, _, line) ->
+  |> List.filter (fun (_, start, line) ->
+    if String.starts_with ~prefix:"%%" line then
+      Option.iter (fun emit -> emit (Source_fragment (start, start + String.length line))) on_undrawn;
     line <> "" && not (String.starts_with ~prefix:"%%" line))
 
 let split_statements lines =
@@ -619,8 +623,9 @@ let sequence_arrow c =
       else Error "expected a message arrow"
     in
     let* head = head in
-    if starts c "+" || starts c "-" then c.pos <- c.pos + 1;
-    Ok (style, head)
+    let activation = starts c "+" || starts c "-" in
+    if activation then c.pos <- c.pos + 1;
+    Ok (style, head, activation)
 
 let parse_message ~source_start ~event_index line roster =
   let c = { text = line; pos = 0; base_byte=source_start; trace_sources=Option.is_some roster.on_participant } in
@@ -628,7 +633,7 @@ let parse_message ~source_start ~event_index line roster =
   if from = "" then Error "expected a participant"
   else
     let* () = (skip_spaces c; Ok ()) in
-    let* style, head = sequence_arrow c in
+    let* style, head, activation = sequence_arrow c in
     skip_spaces c;
     let target_start = c.pos in
     let target = read_while c is_id_char in
@@ -647,7 +652,7 @@ let parse_message ~source_start ~event_index line roster =
           String.trim raw)
         else ""
       in
-      Ok (Message { m_from = from; m_to = target; m_text = replace_breaks text; m_style = style; m_head = head })
+      Ok (Message { m_from = from; m_to = target; m_text = replace_breaks text; m_style = style; m_head = head }, activation)
     end
 
 let parse_note ~source_start ~event_index rest roster =
@@ -661,15 +666,15 @@ let parse_note ~source_start ~event_index rest roster =
   in
   let body =
     match after "over " with
-    | Some body -> Some body
+    | Some body -> Some (false, body)
     | None -> (
         match after "left of " with
-        | Some body -> Some body
-        | None -> after "right of ")
+        | Some body -> Some (true, body)
+        | None -> Option.map (fun body -> (true, body)) (after "right of "))
   in
   match body with
   | None -> Error "a note is over, left of or right of a participant"
-  | Some (body_start, body) -> (
+  | Some (undrawn_placement, (body_start, body)) -> (
       match String.index_opt body ':' with
       | None -> Error "a note needs a colon before its text"
       | Some colon ->
@@ -689,10 +694,11 @@ let parse_note ~source_start ~event_index rest roster =
             Option.iter (fun emit -> emit (Event_label event_index)
               (Some (text_at (body_start + colon + 1)
                 (String.sub body (colon + 1) (String.length body - colon - 1))))) roster.on_participant;
-            Ok (Note { n_over = List.map snd names; n_text = replace_breaks (rest_after_colon body) })
+            Ok (Note { n_over = List.map snd names; n_text = replace_breaks (rest_after_colon body) }, undrawn_placement)
           end)
 
-let parse_sequence_statement ~source_start ~event_index line roster =
+let parse_sequence_statement ?on_undrawn ~source_start ~event_index line roster =
+  let undrawn () = Option.iter (fun emit -> emit (Source_fragment (source_start, source_start + String.length line))) on_undrawn in
   let word, rest_start, rest = first_word_located source_start line in
   match word with
   | "participant" | "actor" ->
@@ -711,17 +717,21 @@ let parse_sequence_statement ~source_start ~event_index line roster =
             (String.sub c.text (c.pos + 3) (String.length c.text - c.pos - 3))
           else literal_at rest_start pid) roster.on_participant in
         enrol ?source roster pid ~alias ~explicit:true;
+        if word = "actor" then undrawn ();
         Ok None
       end
   | "note" ->
-      let* note = parse_note ~source_start:rest_start ~event_index rest roster in
+      let* note, undrawn_placement = parse_note ~source_start:rest_start ~event_index rest roster in
+      if undrawn_placement then undrawn ();
       Ok (Some note)
   | "loop" | "alt" | "opt" | "par" | "critical" | "break" | "rect" | "box" ->
+      if word = "box" then undrawn ();
       Option.iter (fun emit ->
         emit (Event_kind event_index) (Some (literal_at source_start word));
         emit (Event_label event_index) (Some (literal_at rest_start rest))) roster.on_participant;
       Ok (Some (Block_open { b_kind = word; b_label = rest }))
   | "else" | "and" | "option" ->
+      if word <> "else" then undrawn ();
       Option.iter (fun emit ->
         emit (Event_kind event_index) (Some (if word = "else" then literal_at source_start word
           else {label_text="else";
@@ -729,14 +739,16 @@ let parse_sequence_statement ~source_start ~event_index line roster =
         emit (Event_label event_index) (Some (literal_at rest_start rest))) roster.on_participant;
       Ok (Some (Block_else rest))
   | "end" -> Ok (Some Block_close)
-  | "autonumber" | "activate" | "deactivate" | "title" | "accTitle" | "accDescr" | "links"
+  | "autonumber" | "activate" | "deactivate" | "title" | "acctitle" | "accdescr" | "links"
   | "link" | "properties" | "details" ->
+      undrawn ();
       Ok None
   | _ ->
-      let* message = parse_message ~source_start ~event_index line roster in
+      let* message, activation = parse_message ~source_start ~event_index line roster in
+      if activation then undrawn ();
       Ok (Some message)
 
-let parse_sequence ?on_label lines =
+let parse_sequence ?on_label ?on_undrawn lines =
   let roster = { roster_order = []; roster_table = Hashtbl.create 8; on_participant=on_label } in
   let event_index = ref 0 in
   let events = ref [] in
@@ -744,7 +756,7 @@ let parse_sequence ?on_label lines =
   let rec go = function
     | [] -> Ok ()
     | (number, source_start, line) :: more -> (
-        match parse_sequence_statement ~source_start ~event_index:!event_index line roster with
+        match parse_sequence_statement ?on_undrawn ~source_start ~event_index:!event_index line roster with
         | Error what -> Error (Parse_error { line = number; what })
         | Ok None -> go more
         | Ok (Some event) ->
@@ -896,13 +908,17 @@ type state_step =
   | Read
   | Note_opened
 
-let parse_state_statement ~source_start ~edge_count stack homes line current_dir declared edges =
+let parse_state_statement ?on_undrawn ~source_start ~edge_count stack homes described_spans line current_dir declared edges =
+  let undrawn () = Option.iter (fun emit -> emit (Source_fragment (source_start, source_start + String.length line))) on_undrawn in
   let scope =
     match !stack with
     | [] -> Top_level
     | composite :: _ -> Inside composite.cs_id
   in
   let described ~source:(start, raw) id ~label ~shape =
+    Option.iter (fun spans ->
+      if Hashtbl.mem spans id then Option.iter (fun emit -> emit Requires_source) on_undrawn;
+      Hashtbl.replace spans id ()) described_spans;
     let source = Option.map (fun _ -> literal_at start raw) declared.on_label in
     declare ?source declared id ~label ~shape ~explicit:true;
     place !stack homes id
@@ -930,16 +946,16 @@ let parse_state_statement ~source_start ~edge_count stack homes line current_dir
   | "classdef" | "class" | "style" | "click" ->
       let targets, _ = first_word rest in
       if List.for_all (fun target -> Option.is_some (state_id target)) (String.split_on_char ',' targets)
-      then Ok Read
+      then (undrawn (); Ok Read)
       else Error ("not a styling statement: " ^ line)
   (* [hide empty description] and [scale N width] trim and size the boxes in
      a browser. A box here is one row whatever they say. *)
-  | "hide" when String.equal (String.lowercase_ascii rest) "empty description" -> Ok Read
+  | "hide" when String.equal (String.lowercase_ascii rest) "empty description" -> undrawn (); Ok Read
   | "scale" ->
       let number, measure = first_word rest in
       if number <> "" && String.for_all is_digit number
          && String.equal (String.lowercase_ascii measure) "width"
-      then Ok Read
+      then (undrawn (); Ok Read)
       else Error ("not a scale statement: " ^ line)
   (* The text of a note is not drawn. The state it is about is a state all
      the same, as Mermaid reads it. *)
@@ -952,7 +968,7 @@ let parse_state_statement ~source_start ~edge_count stack homes line current_dir
           mentioned ~source:(target_start, target) (Named id);
           Ok
             (match text with
-             | Some _ -> Read
+             | Some _ -> undrawn (); Read
              | None -> Note_opened)
       | _ -> Error ("a note is left of or right of one state: " ^ line))
   (* Before any arrow is looked for: a description in quotes may hold one. *)
@@ -1044,17 +1060,18 @@ let parse_state_statement ~source_start ~edge_count stack homes line current_dir
    and then the line that note opened on. *)
 type state_reading =
   | Statements
-  | Note_text of int
+  | Note_text of int * int
 
 let closes_note statement =
   let word, rest = first_word statement in
   String.equal word "end" && String.equal (String.lowercase_ascii rest) "note"
 
-let parse_state_diagram ?on_label ?(initial_dir = Top_down) lines =
+let parse_state_diagram ?on_label ?on_undrawn ?(initial_dir = Top_down) lines =
   let node_sources = Option.map (fun _ -> Hashtbl.create 16) on_label in
   let declared = { order = []; table = Hashtbl.create 16; on_label; node_sources } in
   let edges = ref [] in
   let edge_count = ref 0 in
+  let described_spans = Option.map (fun _ -> Hashtbl.create 16) on_undrawn in
   let current_dir = ref initial_dir in
   (* Every composite state by id, and the same records in the order each
      first opened, newest first. *)
@@ -1068,12 +1085,16 @@ let parse_state_diagram ?on_label ?(initial_dir = Top_down) lines =
     | [] -> (
         match reading with
         | Statements -> Ok ()
-        | Note_text opened ->
+        | Note_text (opened, _) ->
             Error (Parse_error { line = opened; what = "a note that no end note closes" }))
     | (number, source_start, statement) :: more -> (
         let fail what = Error (Parse_error { line = number; what }) in
         match reading with
-        | Note_text _ -> go (if closes_note statement then Statements else reading) more
+        | Note_text (_, start) ->
+            if closes_note statement then (
+              Option.iter (fun emit -> emit (Source_fragment (start, source_start + String.length statement))) on_undrawn;
+              go Statements more)
+            else go reading more
         | Statements -> (
             match composite_header ~source_start statement with
             | Some (header_start, header) -> (
@@ -1103,9 +1124,9 @@ let parse_state_diagram ?on_label ?(initial_dir = Top_down) lines =
                     stack := rest;
                     go Statements more)
             | None -> (
-                match parse_state_statement ~source_start ~edge_count stack homes statement current_dir declared edges with
+                match parse_state_statement ?on_undrawn ~source_start ~edge_count stack homes described_spans statement current_dir declared edges with
                 | Ok Read -> go Statements more
-                | Ok Note_opened -> go (Note_text number) more
+                | Ok Note_opened -> go (Note_text (number, source_start)) more
                 | Error what -> fail what)))
   in
   let* () = go Statements (split_statements lines) in
@@ -1179,8 +1200,8 @@ let parse_state_diagram ?on_label ?(initial_dir = Top_down) lines =
          ; nodes = List.filter_map (Hashtbl.find_opt declared.table) states
          ; edges = List.rev !edges; groups }
 
-let parse_internal ?on_label text =
-  match source_lines text with
+let parse_internal ?on_label ?on_undrawn text =
+  match source_lines ?on_undrawn text with
   | [] -> Error (Parse_error { line = 1; what = "empty diagram" })
   | (header_line, header_start, header) :: rest -> (
       let header, rest =
@@ -1225,7 +1246,9 @@ let parse_internal ?on_label text =
             | (number, source_start, statement) :: more -> (
                 let fail what = Error (Parse_error { line = number; what }) in
                 match statement_kind statement with
-                | Skipped -> statements more
+                | Skipped ->
+                    Option.iter (fun emit -> emit (Source_fragment (source_start, source_start + String.length statement))) on_undrawn;
+                    statements more
                 | Group_direction word -> (
                     (* Mermaid honours [direction] inside a subgraph and
                        ignores one at the top level, where the header
@@ -1301,10 +1324,10 @@ let parse_internal ?on_label text =
             (Graph
                { direction; nodes; edges = List.rev !edges; groups = List.rev !top_groups })
       | [ "sequenceDiagram" ] ->
-          let* sequence = parse_sequence ?on_label rest in
+          let* sequence = parse_sequence ?on_label ?on_undrawn rest in
           Ok (Sequence sequence)
       | [ ("stateDiagram" | "stateDiagram-v2") ] ->
-          let* graph = parse_state_diagram ?on_label ~initial_dir:Top_down rest in
+          let* graph = parse_state_diagram ?on_label ?on_undrawn ~initial_dir:Top_down rest in
           Ok (Graph graph)
       | [ ("stateDiagram" | "stateDiagram-v2"); dir_word ] ->
           let* initial_dir =
@@ -1312,7 +1335,7 @@ let parse_internal ?on_label text =
             | Some d -> Ok d
             | None -> Error (Unsupported ("stateDiagram direction " ^ dir_word))
           in
-          let* graph = parse_state_diagram ?on_label ~initial_dir rest in
+          let* graph = parse_state_diagram ?on_label ?on_undrawn ~initial_dir rest in
           Ok (Graph graph)
       | word :: _ -> Error (Unsupported word)
       | [] -> Error (Parse_error { line = header_line; what = "empty header" }))

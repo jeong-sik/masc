@@ -189,9 +189,12 @@ include
 
 let parse text = parse_internal text
 
-let parse_with_source_labels text =
+let parse_with_source_labels_internal text =
   let known = Hashtbl.create 16 in
-  let* diagram = parse_internal ~on_label:(fun identity source -> Hashtbl.replace known identity source) text in
+  let undrawn = ref [] in
+  let* diagram = parse_internal
+      ~on_label:(fun identity source -> Hashtbl.replace known identity source)
+      ~on_undrawn:(fun span -> undrawn := span :: !undrawn) text in
   let labels = ref [] in
   let add identity text = if text <> "" then labels := (identity, text) :: !labels in
   (match diagram with
@@ -223,7 +226,10 @@ let parse_with_source_labels text =
   let source_mapping = match missing with
     | [] -> Complete (List.rev mapped)
     | _ -> Incomplete {mapped=List.rev mapped; missing=List.rev missing} in
-  Ok {diagram; source_mapping}
+  Ok ({diagram; source_mapping}, List.rev !undrawn)
+
+let parse_with_source_labels text =
+  Result.map fst (parse_with_source_labels_internal text)
 
 (* ── Canvas ────────────────────────────────────────────────────────────── *)
 
@@ -1437,21 +1443,92 @@ let render_diagram_internal ~trace ~cols diagram =
   | Sequence sequence -> render_sequence_internal ~trace ~cols sequence
 
 
+type source_placement = Before_diagram | After_diagram
+type undrawn_source = { source_start : int; source_end : int; placement : source_placement }
+
+(* Source beside a drawing has to be wholly before or after its labels.
+   Otherwise search and scroll would give the two sections inconsistent
+   identities or reading order, so the full source is the safe fallback. *)
+let ordered_undrawn_sources text mapping spans =
+  match spans with
+  | [] -> Ok []
+  | _ ->
+      let* spans = List.fold_left (fun result span ->
+        let* accumulated = result in
+        match span with
+        | Source_fragment (start_byte, end_byte) -> Ok ((start_byte, end_byte) :: accumulated)
+        | Requires_source -> Error (Unsupported "some diagram content")) (Ok []) spans in
+      let* labels = match mapping with
+        | Complete labels -> Ok labels
+        | Incomplete _ -> Error (Unsupported "some diagram content") in
+      let first_label, last_label = List.fold_left (fun (first, last) (label : sourced_label) ->
+        Array.fold_left (fun (first, last) (range : label_source_range) ->
+          min first range.start_byte, max last range.end_byte) (first, last) label.ranges)
+          (max_int, 0) labels in
+      if List.exists (fun (start_byte, end_byte) ->
+        start_byte < 0 || end_byte < start_byte || end_byte > String.length text) spans
+      then Error (Unsupported "some diagram content")
+      else
+        let horizontal = function ' ' | '\t' -> true | _ -> false in
+        let extend (start_byte, end_byte) =
+          let rec left at = if at > 0 && horizontal text.[at-1] then left (at-1) else at in
+          let rec right at = if at < String.length text && horizontal text.[at] then right (at+1) else at in
+          let l = left start_byte and r = right end_byte in
+          let source_start = if l = 0 || text.[l-1] = '\n' then l else start_byte in
+          let source_end =
+            if r = String.length text || text.[r] = '\n'
+               || (text.[r] = '\r' && r+1 < String.length text && text.[r+1] = '\n')
+            then r else end_byte in
+          source_start, source_end in
+        let spans = List.map extend spans |> List.sort compare in
+        (match spans with
+         | [] -> Ok []
+         | (source_start, source_end) :: rest ->
+             (* Keep every byte between omissions. Deleting a separator or an
+                empty line would make the visible text and search disagree. *)
+             let source_end = List.fold_left (fun last (_, stop) -> max last stop) source_end rest in
+             let placement =
+               if first_label <> max_int && source_end <= first_label then Some Before_diagram
+               else if source_start >= last_label then Some After_diagram
+               else None in
+             (match placement with
+              | Some placement -> Ok [{source_start; source_end; placement}]
+              | None -> Error (Unsupported "some diagram content")))
+
+type rendered_with_status = {
+  rows : string list;
+  undrawn_sources : undrawn_source list;
+}
+
+let render_with_status ~cols text =
+  let undrawn = ref [] in
+  let* diagram = parse_internal ~on_undrawn:(fun span -> undrawn := span :: !undrawn) text in
+  let* rendered = render_diagram_internal ~trace:false ~cols diagram in
+  let* undrawn_sources = match !undrawn with
+    | [] -> Ok []
+    | spans when List.exists (function Requires_source -> true | Source_fragment _ -> false) spans ->
+        Error (Unsupported "some diagram content")
+    | _ ->
+        let* parsed, traced_undrawn = parse_with_source_labels_internal text in
+        ordered_undrawn_sources text parsed.source_mapping traced_undrawn in
+  Ok {rows=rendered.canvas_rows; undrawn_sources}
+
 let render ~cols text =
-  let* diagram = parse text in
-  Result.map (fun rendered -> rendered.canvas_rows)
-    (render_diagram_internal ~trace:false ~cols diagram)
+  Result.map (fun rendered -> rendered.rows) (render_with_status ~cols text)
 
 type rendered_with_sources = {
   rendered_rows : string list;
   rendered_positions : semantic_position option array array;
   labels : source_mapping;
+  undrawn_sources : undrawn_source list;
 }
 
 let render_with_source_labels ~cols text =
-  let* parsed = parse_with_source_labels text in
+  let* parsed, undrawn = parse_with_source_labels_internal text in
   let* rendered = render_diagram_internal ~trace:true ~cols parsed.diagram in
+  let* undrawn_sources = ordered_undrawn_sources text parsed.source_mapping undrawn in
   match rendered.canvas_sources with
   | None -> invalid_arg "Masc_tui_mermaid.render_with_source_labels: tracing disabled"
   | Some rendered_positions ->
-      Ok {rendered_rows=rendered.canvas_rows; rendered_positions; labels=parsed.source_mapping}
+      Ok {rendered_rows=rendered.canvas_rows; rendered_positions; labels=parsed.source_mapping;
+          undrawn_sources}

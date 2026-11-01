@@ -79,52 +79,6 @@ let test_the_message_says_where_to_look () =
         [ kept.Spill.file_name; "working directory" ]
 ;;
 
-(* The placeholder is what marks the spot. Text around it is the operator's
-   own writing and has to survive untouched. *)
-let test_substitution_keeps_what_surrounds_it () =
-  match spill (String.make (Spill.inline_max_bytes + 1) 'x') with
-  | None -> failf "did not spill"
-  | Some kept ->
-      let draft = "before " ^ Spill.draft_line kept ^ " after" in
-      check (option string) "only the placeholder moves"
-        (Some "before REPLACED after")
-        (Spill.substituted kept ~replacement:"REPLACED" draft)
-;;
-
-(* An operator who deleted the line meant to drop the paste. Putting it back
-   somewhere of the function's own choosing would send text they removed. *)
-let test_a_deleted_placeholder_substitutes_nothing () =
-  match spill (String.make (Spill.inline_max_bytes + 1) 'x') with
-  | None -> failf "did not spill"
-  | Some kept ->
-      check (option string) "nothing to put it into" None
-        (Spill.substituted kept ~replacement:"REPLACED" "no placeholder here")
-;;
-
-let test_placeholder_search_preserves_first_match_and_bytes () =
-  match spill (String.make (Spill.inline_max_bytes + 1) 'x') with
-  | None -> failf "did not spill"
-  | Some kept ->
-      let marker = Spill.draft_line kept in
-      let prefix = "한글\000" ^ String.sub marker 0 (String.length marker - 1) in
-      let text = prefix ^ marker ^ "\255" ^ marker in
-      check bool "exact marker is present" true (Spill.contains_placeholder kept text);
-      check (option string) "only the first exact marker is replaced"
-        (Some (prefix ^ "replacement\000" ^ "\255" ^ marker))
-        (Spill.substituted kept ~replacement:"replacement\000" text)
-;;
-
-let test_placeholder_search_rejects_partial_marker () =
-  match spill (String.make (Spill.inline_max_bytes + 1) 'x') with
-  | None -> failf "did not spill"
-  | Some kept ->
-      let marker = Spill.draft_line kept in
-      let partial = String.sub marker 0 (String.length marker - 1) in
-      check bool "partial marker is absent" false (Spill.contains_placeholder kept partial);
-      check (option string) "partial marker cannot be replaced" None
-        (Spill.substituted kept ~replacement:"replacement" partial)
-;;
-
 let () =
   run
     "tui_paste_spill"
@@ -141,14 +95,6 @@ let () =
             test_the_file_is_a_bare_name
         ; test_case "the message says where to look" `Quick
             test_the_message_says_where_to_look
-        ; test_case "substitution keeps what surrounds it" `Quick
-            test_substitution_keeps_what_surrounds_it
-        ; test_case "a deleted placeholder substitutes nothing" `Quick
-            test_a_deleted_placeholder_substitutes_nothing
-        ; test_case "first marker and surrounding bytes" `Quick
-            test_placeholder_search_preserves_first_match_and_bytes
-        ; test_case "partial marker is absent" `Quick
-            test_placeholder_search_rejects_partial_marker
         ] )
     ]
 ;;

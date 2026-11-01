@@ -8414,9 +8414,19 @@ type keeper_recall_walk = {
     * Masc_tui_keeper_chat_projection.image_reference list * image_observation option;
 }
 
+type message_spill = {
+  msp_paste : Masc_tui_paste_spill.t;
+  msp_owner : Masc_tui_message_input.owner;
+}
+
+type saved_message_spill = {
+  sms_paste : Masc_tui_paste_spill.t;
+  sms_view : Masc_tui_message_input.owned_view;
+}
+
 type keeper_composer_draft = {
   kcd_text : string;
-  kcd_spill : Masc_tui_paste_spill.t option;
+  kcd_spill : saved_message_spill option;
   kcd_attachments : Masc_tui_keeper_chat_projection.attachment list;
   kcd_references : Masc_tui_keeper_chat_projection.image_reference list;
   kcd_since : image_observation option;
@@ -10654,7 +10664,7 @@ type state = {
      it is; the text itself waits here and goes back into the message on the
      way out. Kept beside the draft rather than in it because the draft is
      what the operator reads, and five rows cannot hold four hundred lines. *)
-  mutable msg_spill: Masc_tui_paste_spill.t option;
+  mutable msg_spill: message_spill option;
   mutable msg_queued: Masc_tui_keeper_chat_queue.t;
   (* One request per keeper, not one per workspace. Dispatch used to be
      serialized on a single slot because the durable recovery fence held one
@@ -11083,19 +11093,20 @@ let clear_current_recall_edit (state : state) =
 
 (* The draft and the line set aside while walking recall are one workspace
    owned value. Saving either without the other loses the operator's text. *)
-let message_spill_in_text (state : state) text =
+let message_spill_in_snapshot (state : state) snapshot =
   match state.msg_spill with
-  | Some spill when Masc_tui_paste_spill.contains_placeholder spill text -> Some spill
-  | Some _ | None -> None
+  | Some spill ->
+      Option.map (fun view -> { sms_paste = spill.msp_paste; sms_view = view })
+        (Masc_tui_message_input.snapshot_owned_view snapshot spill.msp_owner)
+  | None -> None
 
 let expand_message_draft_spill spill text =
   match spill with
   | None -> text
   | Some spill ->
-      Option.value ~default:text
-        (Masc_tui_paste_spill.substituted spill ~replacement:spill.text text)
+      Masc_tui_message_input.replace_owned spill.sms_view ~replacement:spill.sms_paste.text
 
-let save_message_draft_snapshot ?workspace (state : state) ~text =
+let save_message_draft_snapshot ?workspace (state : state) ~snapshot =
   match state.msg_target_keeper_name with
   | None -> ()
   | Some keeper_name ->
@@ -11104,8 +11115,8 @@ let save_message_draft_snapshot ?workspace (state : state) ~text =
         | None -> chat_input_workspace state in
       let key = workspace, keeper_name in
       let others = List.remove_assoc key state.msg_drafts in
-      let draft = { kcd_text = text;
-        kcd_spill = message_spill_in_text state text;
+      let draft = { kcd_text = Masc_tui_message_input.snapshot_text snapshot;
+        kcd_spill = message_spill_in_snapshot state snapshot;
         kcd_attachments = state.msg_attachments;
         kcd_references = state.msg_references;
         kcd_since = state.msg_attachments_since;
@@ -11117,7 +11128,7 @@ let save_message_draft_snapshot ?workspace (state : state) ~text =
 
 let save_message_draft ?workspace (state : state) =
   save_message_draft_snapshot ?workspace state
-    ~text:(Masc_tui_message_input.contents state.msg_input)
+    ~snapshot:(Masc_tui_message_input.snapshot state.msg_input)
 
 let restore_message_draft (state : state) keeper_name =
   Masc_tui_message_input.clear state.msg_input;

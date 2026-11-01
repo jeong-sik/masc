@@ -1,0 +1,17 @@
+type live_tool_call = {local_id:int; value:int}
+type t = {mutable reversed_tool_calls:live_tool_call list}
+module Old = struct
+(* OLD *)
+end
+module Candidate = struct
+(* NEW *)
+end
+let () =
+  let input=[{local_id=0;value=1};{local_id=0;value=2}] in
+  let old={reversed_tool_calls=input} and newer={reversed_tool_calls=input} in
+  let increment call = {call with value=call.value+1} in
+  Old.update_local_call old 0 increment;
+  Candidate.update_local_call newer 0 increment;
+  let values t = List.map (fun call -> call.value) t.reversed_tool_calls in
+  if values old <> [2;3] || values newer <> [2;2] then failwith "expected duplicate mismatch absent";
+  print_endline "PASS: rejected candidate updates only the first duplicate; baseline updates both"

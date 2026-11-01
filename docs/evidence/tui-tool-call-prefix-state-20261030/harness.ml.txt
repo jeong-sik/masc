@@ -1,0 +1,76 @@
+type live_tool_call = { local_id : int; value : int }
+type t = { mutable reversed_tool_calls : live_tool_call list }
+module Old = struct
+(* OLD *)
+end
+module New = struct
+(* NEW *)
+end
+
+let fuzz () =
+  let random = Random.State.make [|2026;10;30;46886|] in
+  for iteration = 1 to 100_000 do
+    let length = Random.State.int random 100 in
+    let values = List.init length (fun n ->
+      {local_id=(if iteration mod 2=0 then n else Random.State.int random 12);
+       value=Random.State.int random 1000}) in
+    let id = Random.State.int random (if iteration mod 2=0 then length+1 else 13) in
+    let old = {reversed_tool_calls=values} and newer = {reversed_tool_calls=values} in
+    let old_calls = ref [] and new_calls = ref [] in
+    Old.update_local_call old id (fun call -> old_calls := call.value :: !old_calls; {call with value=call.value+1});
+    New.update_local_call newer id (fun call -> new_calls := call.value :: !new_calls; {call with value=call.value+1});
+    if old.reversed_tool_calls <> newer.reversed_tool_calls || !old_calls <> !new_calls then
+      failwith (Printf.sprintf "different result or callback in case %d" iteration)
+  done;
+  let calls = [{local_id=0;value=1};{local_id=0;value=2}] in
+  let old={reversed_tool_calls=calls} and newer={reversed_tool_calls=calls} in
+  let old_trace = ref [] and new_trace = ref [] in
+  Old.update_local_call old 0 (fun call -> old_trace := call.value :: !old_trace; {call with value=call.value+1});
+  New.update_local_call newer 0 (fun call -> new_trace := call.value :: !new_trace; {call with value=call.value+1});
+  if old.reversed_tool_calls <> newer.reversed_tool_calls || !old_trace <> !new_trace then
+    failwith "duplicate IDs or callback order diverged";
+  let check_exn update =
+    let calls = [{local_id=0;value=0};{local_id=1;value=0}] in
+    let t={reversed_tool_calls=calls} in
+    (try update t 1 (fun _ -> raise Exit) with Exit -> ());
+    if t.reversed_tool_calls != calls then failwith "exception assigned a partial list"
+  in
+  check_exn Old.update_local_call; check_exn New.update_local_call;
+  let check_second_exn update =
+    let calls = [{local_id=0;value=1};{local_id=1;value=2};{local_id=0;value=3}] in
+    let t={reversed_tool_calls=calls} and trace=ref [] in
+    (try update t 0 (fun call -> trace := call.value :: !trace; if call.value=3 then raise Exit else call)
+     with Exit -> ());
+    if t.reversed_tool_calls != calls || !trace <> [3;1] then failwith "duplicate exception order changed"
+  in
+  check_second_exn Old.update_local_call; check_second_exn New.update_local_call;
+  let long = {reversed_tool_calls=List.init 500_000 (fun n -> {local_id=n;value=n})} in
+  New.update_local_call long 499_999 (fun call -> {call with value=call.value+1});
+  Printf.printf "PASS: 100,000 unique/duplicate-ID lists, callback order and exceptions; 500,000-node stack test\n%!"
+
+let sample csv size position iterations version =
+  let id = match position with "newest" -> 0 | "middle" -> size/2 | _ -> size-1 in
+  let t = {reversed_tool_calls=List.init size (fun n -> {local_id=n;value=0})} in
+  let update = if version="old" then Old.update_local_call else New.update_local_call in
+  Gc.full_major ();
+  let allocated = Gc.allocated_bytes () and cpu = Sys.time () and wall = Unix.gettimeofday () in
+  for _ = 1 to iterations do update t id (fun call -> {call with value=call.value+1}) done;
+  let wall = Unix.gettimeofday () -. wall and cpu = Sys.time () -. cpu in
+  let allocated = Gc.allocated_bytes () -. allocated in
+  ignore (Sys.opaque_identity t);
+  Printf.fprintf csv "%d,%s,%d,%s,%.9f,%.9f,%.0f\n%!" size position iterations version cpu wall allocated
+
+let benchmark path =
+  let csv = open_out path in
+  output_string csv "size,position,iterations,version,cpu_s,wall_s,allocated_bytes\n";
+  let cases = [1,"newest",100_000; 16,"newest",50_000; 16,"middle",50_000; 16,"oldest",50_000;
+               256,"newest",5_000; 256,"middle",5_000; 256,"oldest",5_000;
+               1024,"newest",1_000; 1024,"middle",1_000; 1024,"oldest",1_000] in
+  List.iter (fun (size,position,iterations) ->
+    for i = 0 to 6 do
+      if i mod 2=0 then (sample csv size position iterations "old"; sample csv size position iterations "new")
+      else (sample csv size position iterations "new"; sample csv size position iterations "old")
+    done) cases;
+  close_out csv
+
+let () = fuzz (); if Array.length Sys.argv=2 then benchmark Sys.argv.(1)

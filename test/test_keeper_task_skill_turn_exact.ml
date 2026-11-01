@@ -1534,7 +1534,7 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   let activation_trace = Keeper_id.Trace_id.of_string "skill-body-projection" |> Result.get_ok in
   Fs_compat.mkdir_p (Keeper_fs.keeper_session_dir activation_config (Keeper_id.Trace_id.to_string activation_trace));
   let recorder = Keeper_skill_activation_recorder.make ~trace_id:activation_trace
-      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string activation_trace) ~absolute_turn:0)
+      ~turn_ref:(Ids.Turn_ref.make ~trace_id:(Keeper_id.Trace_id.to_string activation_trace) ~absolute_turn:1)
       ~runtime_id:(fun () -> Some "fixture-runtime")
       ~snapshot_revision:(Snapshot.snapshot_revision captured_snapshot) ~task_selection:Selection.empty
       |> Result.get_ok in
@@ -1551,11 +1551,11 @@ let test_jev_advice_reaches_the_model_without_selecting_or_authorizing () =
   Fun.protect ~finally:install_overrides (fun () ->
     Prompt_registry.set_override Prompt_names.skill_applicability_projection "{{advice}}" |> Result.get_ok;
     let output = run_skill_tool projection_tool (Reference.to_yojson reference) in
+    check bool "the structural body projection is a successful Skill read" true
+      (Tool_result.is_success (Option.get !captured));
     check bool "an advice-only override still returns the complete frozen body" true
       (String.ends_with ~suffix:frozen_body output);
     let actual_body = String.sub output (String.length output - String.length frozen_body) (String.length frozen_body) in
-    check bool "the structural body projection is a successful Skill read" true
-      (Tool_result.is_success (Option.get !captured));
     let metadata = Tool_result.metadata (Option.get !captured) |> Option.get in
     check int "metadata describes the actual returned body bytes" (String.length actual_body)
       (metadata |> member "bytes" |> to_int);

@@ -3154,11 +3154,91 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
             Eio.Switch.fail sw Exit)
       with Exit -> ())
 
+let test_initialization_refuses_foreign_workspace_alias ~lookup_installed () =
+  let original_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let alias_path = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      Option.iter Unix.unlink !alias_path;
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      Unix.putenv "MASC_BASE_PATH" (Option.value original_base ~default:""))
+    (fun () ->
+      try
+        Eio_main.run @@ fun env ->
+        Eio.Switch.run @@ fun sw ->
+        Fs_compat.set_fs (Eio.Stdenv.fs env);
+        Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw
+          (fun () ->
+            let base_a = fresh_test_base_path () in
+            Board.reset_global_for_test ();
+            Board_dispatch.reset_for_test ();
+            let retained = Board.global () in
+            let root_a = retained.Board.workspace_masc_dir in
+            Fs_compat.mkdir_p root_a;
+            ignore (Board_dispatch.backend ());
+            if lookup_installed then
+              Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:root_a
+                ~recipient_lookup:every_name_declared ());
+            let flusher_before = Board_dispatch.flusher_started_for_test () in
+            let base_b = fresh_test_base_path () in
+            Fs_compat.mkdir_p base_b;
+            let root_b = Common.masc_dir_from_base_path ~base_path:base_b in
+            Unix.symlink root_a root_b;
+            alias_path := Some root_b;
+            let foreign_calls = ref 0 in
+            let foreign_lookup = Recipient_lookup.make (fun _ ->
+              incr foreign_calls;
+              Ok (Result.to_option (Board.Agent_id.parse "foreign-keeper"))) in
+            let initialization = Board_dispatch.init_jsonl ~workspace_masc_dir:root_b
+                ~recipient_lookup:foreign_lookup () in
+            let addressed = Board_dispatch.create_post ~author:"writer"
+                ~content:"@alice must stay in the captured workspace"
+                ~post_kind:Board.Human_post () in
+            Alcotest.(check int) "foreign lookup is never installed or invoked"
+              0 !foreign_calls;
+            Alcotest.(check bool) "foreign workspace alias is refused"
+              true (Result.is_error initialization);
+            Alcotest.(check bool) "refusal retains the original store"
+              true (retained == Board.global ());
+            Alcotest.(check bool) "refusal retains the scoped flusher"
+              flusher_before (Board_dispatch.flusher_started_for_test ());
+            if lookup_installed then
+              (match (get_created addressed).audience with
+               | Some (Board.Targets recipients) ->
+                 Alcotest.(check (list string)) "original lookup still resolves Alice"
+                   ["alice"] (List.map Board.Agent_id.to_string recipients)
+               | _ -> Alcotest.fail "original lookup must remain installed")
+            else (
+              (match addressed with
+               | Error failure ->
+                 (match Board.Post_publication_failure.cause failure with
+                  | Board.Recipient_lookup_failed _ -> ()
+                  | error -> Alcotest.fail (Board.show_board_error error))
+               | Ok _ -> Alcotest.fail "an uninstalled lookup must stay unavailable");
+              Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:root_a
+                ~recipient_lookup:every_name_declared ());
+              ignore (get_created (Board_dispatch.create_post ~author:"writer"
+                ~content:"@alice after the original workspace initializes"
+                ~post_kind:Board.Human_post ())));
+            Alcotest.(check string) "ambient B never rekeys the store"
+              base_b (Env_config_core.base_path ());
+            Alcotest.(check bool) "A remains the retained workspace"
+              true (String.equal root_a (Fs_compat.realpath_lenient
+                (Common.masc_dir_from_base_path ~base_path:base_a)));
+            Eio.Switch.fail sw Exit)
+      with Exit -> ())
+
 let () =
   Alcotest.run "Board_dispatch" [
     "backend", [
       Alcotest.test_case "initialization preserves captured workspace and lookup" `Quick
         test_initialization_preserves_captured_workspace_and_lookup;
+      Alcotest.test_case "read-started initialization refuses foreign workspace alias" `Quick
+        (test_initialization_refuses_foreign_workspace_alias ~lookup_installed:false);
+      Alcotest.test_case "active initialization refuses foreign workspace alias" `Quick
+        (test_initialization_refuses_foreign_workspace_alias ~lookup_installed:true);
       Alcotest.test_case "default backend" `Quick (with_eio test_default_backend);
       Alcotest.test_case "returns jsonl" `Quick (with_eio test_backend_returns_jsonl);
     ];

@@ -366,6 +366,37 @@ let display_width_for_wrapping text =
   | Some cells -> cells
   | None -> wrapping_pieces_width 0 (wrapping_pieces text)
 
+let iter_words_and_spaces text ~word ~space =
+  let word_start = ref 0 in
+  let separate offset =
+    if offset > !word_start then
+      word (String.sub text !word_start (offset - !word_start));
+    space ();
+    word_start := offset + 1
+  in
+  let piece start_offset end_offset _ ansi =
+    if not ansi && end_offset = start_offset + 1
+       && Char.equal text.[start_offset] ' ' then separate start_offset
+  in
+  let ascii start_offset end_offset =
+    let rec loop offset =
+      if offset < end_offset then begin
+        if Char.equal text.[offset] ' ' then separate offset;
+        loop (offset + 1)
+      end
+    in
+    loop start_offset
+  in
+  List.iter
+    (function
+      | Wrapping_piece (start_offset, end_offset, width, ansi) ->
+        piece start_offset end_offset width ansi
+      | Wrapping_ascii (start_offset, end_offset) ->
+        ascii start_offset end_offset)
+    (wrapping_pieces text);
+  if !word_start < String.length text then
+    word (String.sub text !word_start (String.length text - !word_start))
+
 let widest_grapheme_cells text =
   match ascii_display_width text with
   | Some cells -> min 1 cells

@@ -16,9 +16,10 @@ let is_vector = function
 
 let load ~host ~port ~cache_dir ~diagram_width ~diagram_height ~diagram_font_size
     ~diagram_colors ~board_worker ~admit_vector ~run ~vector_run ~display source =
-  (* Admission runs on the owning Eio fiber, immediately before dispatch to a
-     system thread. After admission, withdrawal only discards the result; the
-     physical worker owns its slot until it actually returns. *)
+  (* Non-Board vector admission runs on the owning Eio fiber immediately
+     before dispatch. Board work acquires its slot in the system thread.
+     After admission, withdrawal only discards the result; the physical worker
+     owns its slot until it actually returns. *)
   let in_thread ~label work = match board_worker, is_vector source with
     | Some slot, _ -> Eio_guard.run_in_systhread ~label (fun () ->
         Masc_tui_board_preview_work.run slot work)

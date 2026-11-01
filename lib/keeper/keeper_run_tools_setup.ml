@@ -547,6 +547,7 @@ let prepare_agent_setup
     }
     =
     Keeper_tools_agent_core_bundle.make_tool_bundle_for_capability_surface
+      ?clock:(Eio_context.get_clock_opt ())
       ~config
       ~meta
       ~publication_recovery

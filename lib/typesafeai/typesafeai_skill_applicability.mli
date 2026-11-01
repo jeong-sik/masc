@@ -12,11 +12,14 @@ val assess :
   body:string ->
   unit -> t
 (** Explicit TOML opt-in and keeper exclusions precede any HTTP request.
+    An enabled assessment with available input but no [clock] is an
+    advice-unavailable observation and sends no request. A supplied clock
+    carries the client's existing request/response deadline.
     Transport and response failures become advice-unavailable observations;
     cancellation propagates to the caller. *)
 
 val to_yojson : t -> Yojson.Safe.t
 val model_advice : t -> string option
-(** [None] when policy disables review or required input/question material is
+(** [None] when policy disables review or required input/question/clock material is
     unavailable before a request. Returned judgments and HTTP/response failures
     produce short advice without turning the assessment into a gate. *)

@@ -90,7 +90,10 @@ type agent_setup =
 (** [observation_token] is captured for registry callbacks. Omission disables
     registry turn observation; it never adopts a currently active turn.
     [answer_source_ids] are the answered Asks that woke this turn; every Tool
-    call record the turn writes carries them. Omitted, the records carry none. *)
+    call record the turn writes carries them. Omitted, the records carry none.
+    The tool bundle receives the initialized runtime clock when available.
+    Its absence does not refuse setup or replay; Skill applicability advice
+    without a clock is unavailable before any HTTP request. *)
 val prepare_agent_setup
   :  ?preview:Keeper_turn_preview.writer
   -> ?observation_token:Keeper_turn_observation_token.t

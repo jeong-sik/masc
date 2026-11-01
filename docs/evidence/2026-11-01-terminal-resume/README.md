@@ -88,3 +88,20 @@ this change does not install automatic checkpoint restoration or duplicate
 caller checkpoints into the Core journal. Full MASC checkpoint/Input/Native/Owner
 authority, remaining lifecycle/Raw_trace/Custom telemetry projections, explicit
 finite-run retention and complete process-restart proof remain issue scope.
+
+## Subsequent stop-reason recovery repair
+
+The executions above belong to their recorded historical source. A later source
+change at `e95d3c79f9e3f846cc174bbfa5e1a1f465346785` was independently rejected
+for two P2 defects: MaxTokens with ToolUse entered a validator requiring
+StopToolUse, and successfully closed terminal responses were still classified
+by message shape. Neither the old source-preservation receipt nor the external
+commit message establishes execution of this follow-up.
+
+Thirteen additional cases compare fresh output with persisted active,
+provider-closed and turn-closed recovery, including registered ToolUse under
+MaxTokens, Refusal and injected EndTurn, plus malformed-stop controls. They
+check exact recovery, zero effects/redispatch/AfterTurn, pending-only OnStop,
+unchanged usage/counter and no canonical tool observations. New execution
+receipts will retain their own heads and outcomes; no completed result is
+claimed here. Full regression and issue acceptance remain unverified.

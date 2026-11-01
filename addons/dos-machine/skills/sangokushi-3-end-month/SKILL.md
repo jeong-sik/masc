@@ -1,6 +1,6 @@
 ---
 name: sangokushi-3-end-month
-description: "Attempt the observed end-month sequence in 삼국지 III (0, enter, y) and inspect the resulting PNG. Use only at a <군주>님 …에 명령을(0-9)? prompt of your own ruler; settling does not guarantee completion."
+description: "Attempts the observed 삼국지 III end-month sequence (0, enter, y) and returns the resulting PNG. Use only while holding the controller at your own ruler's city-command (0-9)? prompt. Inspect keys_pressed and the PNG before continuing: settling or delivery of all keys does not prove the AI turns finished. If a transition remains visible, advance with masc_dos_step until_ready=false rather than replaying the keys. Use separate presses when intermediate prompts require a decision."
 ---
 
 # 삼국지 III: end the month
@@ -22,7 +22,7 @@ the `sangokushi-3` Skill; passing the controller to the next player is in
 ```toml composition
 [[compositions]]
 name = "sangokushi-3-end-month"
-description = "Send the observed end-month sequence (0, enter, y) and inspect the resulting screen."
+description = "Attempts the observed 삼국지 III end-month sequence (0, enter, y) and returns the resulting PNG. Use only while holding the controller at your own ruler's city-command (0-9)? prompt. Inspect keys_pressed and the PNG before continuing: settling or delivery of all keys does not prove the AI turns finished. If a transition remains visible, advance with masc_dos_step until_ready=false rather than replaying the keys. Use separate presses when intermediate prompts require a decision."
 execution = "inline"
 
 [[compositions.nodes]]

@@ -58,7 +58,10 @@ YAML description that contains `:`, `#`, or a leading backtick.
   lowercase letters, digits and single hyphens, at most 49 bytes (the tool name
   `keeper_compose_<name>` has a 64-byte limit).
 - Every node `tool` is a registered tool on the Keeper surface. Check each input field
-  name, type and enum against the tool's `config/tools/<tool>.toml`. Inputs are
+  name, type and enum against its current registered schema. Public names can differ
+  from schema filenames: `BrowserRead` maps to `config/tools/masc_browser_read.toml`
+  through `lib/keeper/keeper_tool_descriptor.ml`. Add-on tools use their installed
+  catalog; do not assume a `config/tools/<public-name>.toml` file exists. Inputs are
   validated when the composition is called, not when the Skill loads, so a misspelled
   field loads cleanly and fails on first use. An input made only of literals and
   params is checked before any node runs; an input that reads another node's output
@@ -112,7 +115,9 @@ equivalent explicitly on every node that has one.
   account names or a one-off stack size as universal prerequisites. For repository
   operations, point to the repository's current review and merge guide; do not
   freeze its API routes or approval policy from one historical run.
-- Keep `SKILL.md` under 500 lines. Put long material in `references/<file>.md`, one
+- Aim for a `SKILL.md` under 500 lines. MASC additionally rejects instruction bodies
+  over `Common.max_tool_result_wire_bytes`, so line count alone does not establish
+  that a body can be read. Put long material in `references/<file>.md`, one
   level below the Skill root, and say in the body when to read it. The Keeper reads
   it with `keeper_skill` and `file = "references/<file>.md"`.
 - Give one default way to do the job, with the exception that leaves it. A menu of
@@ -122,6 +127,10 @@ equivalent explicitly on every node that has one.
 - Keep a section of traps: what went wrong before and what to do instead.
 - Cut what the model already knows. Ask of each sentence whether the Keeper would get
   the job wrong without it.
+- Check a representative request, a nearby request outside the Skill's scope and
+  an ambiguous case. Compare the chosen actions and outputs with the prior version
+  when useful. Parser admission proves format validity, not correct selection or
+  task completion; evaluate external actions only within the user's authorization.
 
 ## 7. Creating and editing
 

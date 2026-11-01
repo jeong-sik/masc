@@ -1280,6 +1280,11 @@ type scan_mode =
   | Rebuild_durable_index
   | Read_only_events
 
+type committed_scan_accumulator =
+  { locations : event_location Sequence_map.t
+  ; events_rev : Event.t list
+  }
+
 let scan_committed_batches
       codec
       file
@@ -1289,13 +1294,18 @@ let scan_committed_batches
       ~committed_seq
       ~mode
   =
-  let locations = ref Sequence_map.empty in
-  let events_rev = ref [] in
-  let rec scan_batches offset committed_seq =
+  let initial : committed_scan_accumulator =
+    { locations = Sequence_map.empty; events_rev = [] }
+  in
+  let rec scan_batches offset committed_seq (accumulator : committed_scan_accumulator) =
     let* frame = decode_frame file ~file_size offset in
     match frame with
     | End_of_store ->
-      Ok (offset, committed_seq, !locations, reverse_cooperatively !events_rev)
+      Ok
+        ( offset
+        , committed_seq
+        , accumulator.locations
+        , reverse_cooperatively accumulator.events_rev )
     | Incomplete_frame ->
       Error
         (Corrupt_store { offset; detail = "committed batch begin frame is incomplete" })
@@ -1400,22 +1410,26 @@ let scan_committed_batches
         let* next_offset, last_seq, batch_locations, batch_events =
           scan_events next_offset 0 Sha256.empty [] []
         in
-        (match mode with
-         | Read_only_events -> ()
-         | Rebuild_durable_index ->
-           locations
-           := List.fold_left
-                (fun locations location ->
-                   Eio.Fiber.yield ();
-                   Sequence_map.add location.seq location locations)
-                !locations
-                batch_locations);
-        events_rev := reverse_append_cooperatively batch_events !events_rev;
-        scan_batches next_offset last_seq)
+        let locations =
+          match mode with
+          | Read_only_events -> accumulator.locations
+          | Rebuild_durable_index ->
+            List.fold_left
+              (fun locations location ->
+                 Eio.Fiber.yield ();
+                 Sequence_map.add location.seq location locations)
+              accumulator.locations
+              batch_locations
+        in
+        let events_rev =
+          reverse_append_cooperatively batch_events accumulator.events_rev
+        in
+        let next_accumulator : committed_scan_accumulator = { locations; events_rev } in
+        scan_batches next_offset last_seq next_accumulator)
     | Complete_frame { kind = Metadata | Event_record | Batch_commit; _ } ->
       Error (Corrupt_store { offset; detail = "expected a batch begin frame" })
   in
-  scan_batches first_offset committed_seq
+  scan_batches first_offset committed_seq initial
 ;;
 
 let scan_store codec file ~file_size ~mode =

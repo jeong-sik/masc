@@ -1,0 +1,43 @@
+{
+  "published_at": "2026-11-01T14:28:59.985489+00:00",
+  "members": 21,
+  "top_pr": 47317,
+  "head": "c9776cc2968353a1f66af2c127cf6b28f64ba49a",
+  "restored_core": "4c813413ee8d29cab59d4b8679912d3a5c195200",
+  "archived_external_merge": "2cbd919e52988c0c842672e6d71450246b368429",
+  "media_authored_delta_preserved_in_top_layer": true,
+  "atomic_old_head_leases": true,
+  "merge_submitted": false,
+  "transplant": {
+    "external_merge": "2cbd919e52988c0c842672e6d71450246b368429",
+    "first_parent": "4c813413ee8d29cab59d4b8679912d3a5c195200",
+    "selection_base": "c2aa90ab8b376b7b8c3d418083e3a389b00af355",
+    "preserved_paths": [
+      "packages/agent_core/lib/pipeline/pipeline_execution_resume.mli",
+      "packages/agent_core/lib/pipeline/pipeline_execution_resume.ml",
+      "packages/agent_core/test/test_pipeline.ml"
+    ],
+    "external_patch_sha256": "15e6935b41eb2aed9ef9577e79afe71f9da621b5bb4250725f2e00eee86bb79a",
+    "branch_pricing_fixture_not_overwritten": true,
+    "source_blobs": {
+      "packages/agent_core/lib/pipeline/pipeline_execution_resume.mli": {
+        "external_merge": "f8a273898019d5e198b57492d315595c8ddaad35",
+        "current": "f8a273898019d5e198b57492d315595c8ddaad35"
+      },
+      "packages/agent_core/lib/pipeline/pipeline_execution_resume.ml": {
+        "external_merge": "dc81762dc65d1a972f31d116060660a1bd929aa7",
+        "current": "dc81762dc65d1a972f31d116060660a1bd929aa7"
+      },
+      "packages/agent_core/test/test_pipeline.ml": {
+        "external_merge": "6ff3738ca892e1fee5540d341798aa234a6f3742",
+        "current": "d949d37ed1bf80b4ef2f16a09187a72cd59afd3e"
+      }
+    }
+  },
+  "original_parents": {
+    "first_parent": "4c813413ee8d29cab59d4b8679912d3a5c195200",
+    "main_parent": "8a894f84f8b30b864e1bd1663cd8d90d33400844"
+  },
+  "archive_ref": "refs/archive/issues-oldest-20261101/external-core-2cbd919e5298",
+  "pricing_delta_preserved_by_exact_added_removed_lines": true
+}

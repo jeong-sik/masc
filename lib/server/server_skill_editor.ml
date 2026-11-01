@@ -479,11 +479,12 @@ let authoring_tools_to_yojson descriptors =
   let tools = List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
     let output = match descriptor.composable_output with
       | Keeper_tool_descriptor.Opaque_output -> `Assoc [ "kind", `String "opaque" ]
-      | Json_output { schema } -> `Assoc [ "kind", `String "json"; "schema", schema ] in
+      | Keeper_tool_descriptor.Json_output { schema } ->
+        `Assoc [ "kind", `String "json"; "schema", schema ] in
     let execution = match descriptor.execution with
-      | Keeper_tool_descriptor.Ordinary Serial -> "serial"
-      | Ordinary Concurrent -> "concurrent"
-      | Terminal -> "terminal" in
+      | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial -> "serial"
+      | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent -> "concurrent"
+      | Keeper_tool_descriptor.Terminal -> "terminal" in
     Keeper_tool_descriptor.keeper_model_names descriptor
     |> List.map (fun name -> name, `Assoc
       [ "name", `String name
@@ -682,10 +683,10 @@ let preview_new ~expected_kind ~descriptors ~source_id ~package_id source_text =
   let* skill = validate_source ~descriptors ~directory:package_id source_text in
   let* () = match expected_kind, skill.surface with
     | None, _ | Some Instruction_kind, Keeper_skill_catalog.Instruction
-    | Some Composition_kind, Composition _ -> Ok ()
-    | Some Instruction_kind, Composition _ ->
+    | Some Composition_kind, Keeper_skill_catalog.Composition _ -> Ok ()
+    | Some Instruction_kind, Keeper_skill_catalog.Composition _ ->
       Error (Validation_failed "Instruction selected, but the document declares an executable composition. Escape examples in an outer code fence or select Composition.")
-    | Some Composition_kind, Instruction ->
+    | Some Composition_kind, Keeper_skill_catalog.Instruction ->
       Error (Validation_failed "Composition selected, but the document has no executable composition declaration.") in
   let identity =
     Skill_reference.make_identity

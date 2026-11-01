@@ -4468,7 +4468,9 @@ let test_anthropic_image_sources_on_http ~stream () =
     in
     let open Yojson.Safe.Util in
     let messages = body |> member "messages" |> to_list in
-    check int "history and merged tool followup retained" 5 (List.length messages);
+    check (list string) "history, tool result and caller followup retain their boundaries"
+      [ "user"; "assistant"; "user"; "assistant"; "user"; "user" ]
+      (List.map (fun message -> message |> member "role" |> to_string) messages);
     let check_json label expected actual =
       check bool label true (Yojson.Safe.equal expected actual)
     in
@@ -4477,17 +4479,19 @@ let test_anthropic_image_sources_on_http ~stream () =
     let tool_followup = List.nth messages 4 in
     check string "tool result becomes an Anthropic user message" "user"
       (tool_followup |> member "role" |> to_string);
-    check_json "tool images stay native and the followup remains after them"
+    check_json "tool images stay native without absorbing caller followup"
       (`List
         [ `Assoc
             [ "type", `String "tool_result"; "tool_use_id", `String "inspect-1"
             ; "content", `List
                 (`Assoc [ "type", `String "text"; "text", `String "image result" ]
                  :: expected_images)
-            ; "is_error", `Bool false ]
-        ; `Assoc [ "type", `String "text"
-                 ; "text", `String "Compare these with the earlier images." ] ])
+            ; "is_error", `Bool false ] ])
       (tool_followup |> member "content");
+    check_json "caller followup remains a separate user message after the tool result"
+      (`List [ `Assoc [ "type", `String "text"
+                     ; "text", `String "Compare these with the earlier images." ] ])
+      (List.nth messages 5 |> member "content");
     Eio.Switch.fail sw Exit
   with Exit -> ()
 ;;

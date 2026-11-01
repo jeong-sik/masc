@@ -2939,6 +2939,32 @@ let test_next_task_number_includes_durable_event_history () =
     Alcotest.(check int)
       "durable history high-water mark"
       539
+      (Workspace.next_task_number config (Workspace.read_backlog config));
+    let appended =
+      lines
+      ^ "\n"
+      ^ Yojson.Safe.to_string
+          (`Assoc [ "type", `String "task_transition"; "task_id", `String "task-612" ])
+      ^ "\n"
+    in
+    Fs_compat.save_file path appended;
+    Alcotest.(check int)
+      "durable history incremental append updates high-water mark"
+      613
+      (Workspace.next_task_number config (Workspace.read_backlog config));
+    let st_before = Unix.stat path in
+    let same_size_rewrite =
+      lines
+      ^ "\n"
+      ^ Yojson.Safe.to_string
+          (`Assoc [ "type", `String "task_transition"; "task_id", `String "task-912" ])
+      ^ "\n"
+    in
+    Fs_compat.save_file path same_size_rewrite;
+    Unix.utimes path st_before.Unix.st_atime st_before.Unix.st_mtime;
+    Alcotest.(check int)
+      "durable history same-size newest-file rewrite invalidates cache"
+      913
       (Workspace.next_task_number config (Workspace.read_backlog config)))
 ;;
 

@@ -204,40 +204,204 @@ let drop_archive_tasks config ~ids =
         |> Result.map_error (fun detail ->
              Printf.sprintf "tasks-archive.json could not be written: %s" detail))
 
-let task_ids_of_event_json json =
-  [ Json_util.get_string json "task"; Json_util.get_string json "task_id" ]
-  |> List.filter_map (function
-    | Some id -> task_id_to_int id
-    | None -> None)
+type cached_event_max_id = {
+  st_dev : int;
+  st_ino : int;
+  st_size : int;
+  st_mtime : float;
+  st_ctime : float;
+  ended_with_newline : bool;
+  prefix_digest : Digest.t;
+  max_task_id : int;
+  mutable last_access_tick : int;
+}
 
-let event_history_task_ids config =
+let max_cached_event_id_files = 256
+let event_max_id_cache : (string, cached_event_max_id) Hashtbl.t =
+  Hashtbl.create 64
+let event_max_id_cache_mutex = Mutex.create ()
+let event_max_id_cache_tick = ref 0
+
+let with_event_max_id_cache_lock f =
+  Mutex.lock event_max_id_cache_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock event_max_id_cache_mutex) f
+
+let touch_event_max_id_tick () =
+  incr event_max_id_cache_tick;
+  !event_max_id_cache_tick
+
+let evict_oldest_event_max_id_locked () =
+  let oldest_key = ref None in
+  let oldest_tick = ref max_int in
+  Hashtbl.iter
+    (fun key (entry : cached_event_max_id) ->
+       if entry.last_access_tick < !oldest_tick then begin
+         oldest_tick := entry.last_access_tick;
+         oldest_key := Some key
+       end)
+    event_max_id_cache;
+  match !oldest_key with
+  | Some key -> Hashtbl.remove event_max_id_cache key
+  | None -> ()
+
+let max_task_id_of_event_json acc json =
+  let check acc = function
+    | Some id ->
+      (match task_id_to_int id with
+       | Some n when n > acc -> n
+       | Some _ | None -> acc)
+    | None -> acc
+  in
+  let acc = check acc (Json_util.get_string json "task") in
+  check acc (Json_util.get_string json "task_id")
+
+let scan_max_task_id_range content ~start_pos ~end_pos ~init =
+  let rec loop line_start acc =
+    if line_start >= end_pos then acc
+    else
+      let line_end =
+        match String.index_from_opt content line_start '\n' with
+        | Some idx when idx < end_pos -> idx
+        | _ -> end_pos
+      in
+      let line_len = line_end - line_start in
+      let acc =
+        if line_len <= 0 then acc
+        else
+          let line = String.sub content line_start line_len in
+          match Yojson.Safe.from_string line with
+          | json -> max_task_id_of_event_json acc json
+          | exception Yojson.Json_error _ -> acc
+      in
+      loop (line_end + 1) acc
+  in
+  loop start_pos init
+
+let same_event_file_stat (entry : cached_event_max_id) (st : Unix.stats) =
+  entry.st_dev = st.st_dev
+  && entry.st_ino = st.st_ino
+  && entry.st_size = st.st_size
+  && Float.equal entry.st_mtime st.st_mtime
+  && Float.equal entry.st_ctime st.st_ctime
+
+let load_event_file_max_task_id ~verify_content path =
+  match Unix.stat path with
+  | exception Unix.Unix_error _ -> 0
+  | st when st.st_kind <> Unix.S_REG -> 0
+  | st ->
+    let check_cached () =
+      with_event_max_id_cache_lock (fun () ->
+        match Hashtbl.find_opt event_max_id_cache path with
+        | Some entry ->
+          entry.last_access_tick <- touch_event_max_id_tick ();
+          Some entry
+        | None -> None)
+    in
+    let should_verify = verify_content && st.st_size <= 262_144 in
+    match check_cached () with
+    | Some entry when not should_verify && same_event_file_stat entry st ->
+      entry.max_task_id
+    | _ ->
+      (match Fs_compat.load_file path with
+       | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled
+       | exception _ -> 0
+       | content ->
+         let cached_opt = check_cached () in
+         let len = String.length content in
+         let full_digest = Digest.string content in
+         let max_task_id, was_exact_digest_hit =
+           match cached_opt with
+           | Some entry
+             when entry.st_dev = st.st_dev
+                  && entry.st_ino = st.st_ino
+                  && entry.st_size = len
+                  && Digest.equal full_digest entry.prefix_digest ->
+             entry.max_task_id, true
+           | Some entry
+             when entry.st_dev = st.st_dev
+                  && entry.st_ino = st.st_ino
+                  && len > entry.st_size
+                  && entry.ended_with_newline
+                  && Digest.equal
+                       (Digest.substring content 0 entry.st_size)
+                       entry.prefix_digest ->
+             scan_max_task_id_range content ~start_pos:entry.st_size ~end_pos:len
+               ~init:entry.max_task_id,
+             false
+           | _ ->
+             scan_max_task_id_range content ~start_pos:0 ~end_pos:len ~init:0,
+             false
+         in
+         let stat_unchanged =
+           match cached_opt with
+           | Some entry -> same_event_file_stat entry st
+           | None -> false
+         in
+         if not (was_exact_digest_hit && stat_unchanged) then
+           (match Unix.stat path with
+            | st_after
+              when st_after.st_kind = Unix.S_REG
+                   && st_after.st_dev = st.st_dev
+                   && st_after.st_ino = st.st_ino
+                   && st_after.st_size = len
+                   && Float.equal st_after.st_mtime st.st_mtime
+                   && Float.equal st_after.st_ctime st.st_ctime ->
+              let ended_with_newline =
+                len > 0 && Char.equal content.[len - 1] '\n'
+              in
+              with_event_max_id_cache_lock (fun () ->
+                while Hashtbl.length event_max_id_cache >= max_cached_event_id_files
+                      && not (Hashtbl.mem event_max_id_cache path)
+                do
+                  evict_oldest_event_max_id_locked ()
+                done;
+                let tick = touch_event_max_id_tick () in
+                Hashtbl.replace event_max_id_cache path
+                  {
+                    st_dev = st.st_dev;
+                    st_ino = st.st_ino;
+                    st_size = len;
+                    st_mtime = st.st_mtime;
+                    st_ctime = st.st_ctime;
+                    ended_with_newline;
+                    prefix_digest = full_digest;
+                    max_task_id;
+                    last_access_tick = tick;
+                  })
+            | _ | exception Unix.Unix_error _ -> ());
+         max_task_id)
+
+let event_history_max_task_id config =
   let events_dir = Filename.concat (masc_dir config) "events" in
-  if not (Sys.file_exists events_dir) then []
+  if not (Sys.file_exists events_dir) then 0
   else
-    Sys.readdir events_dir
-    |> Array.to_list
-    |> List.sort String.compare
-    |> List.concat_map (fun month ->
-      let month_path = Filename.concat events_dir month in
-      if not (Sys.file_exists month_path) then []
-      else if Sys.is_directory month_path then
-        Sys.readdir month_path
-        |> Array.to_list
-        |> List.sort String.compare
-        |> List.map (Filename.concat month_path)
-      else [ month_path ])
-    |> List.concat_map (fun path ->
-      if Sys.file_exists path && not (Sys.is_directory path) then
-        Fs_compat.load_file path
-        |> String.split_on_char '\n'
-        |> List.filter_map (fun line ->
-          if String.equal line "" then None
-          else
-            match Yojson.Safe.from_string line with
-            | json -> Some (task_ids_of_event_json json)
-            | exception Yojson.Json_error _ -> None)
-        |> List.concat
-      else [])
+    let month_dirs =
+      Sys.readdir events_dir
+      |> Array.to_list
+      |> List.sort (fun a b -> String.compare b a)
+    in
+    let is_first_file = ref true in
+    let max_id = ref 0 in
+    let visit_file path =
+      if Sys.file_exists path && not (Sys.is_directory path) then begin
+        let verify_content = !is_first_file in
+        is_first_file := false;
+        let file_max = load_event_file_max_task_id ~verify_content path in
+        if file_max > !max_id then max_id := file_max
+      end
+    in
+    List.iter
+      (fun month ->
+         let month_path = Filename.concat events_dir month in
+         if Sys.file_exists month_path then
+           if Sys.is_directory month_path then
+             Sys.readdir month_path
+             |> Array.to_list
+             |> List.sort (fun a b -> String.compare b a)
+             |> List.iter (fun file -> visit_file (Filename.concat month_path file))
+           else visit_file month_path)
+      month_dirs;
+    !max_id
 
 let next_task_number config (backlog : backlog) =
   let backlog_ids = List.filter_map (fun (task : task) -> task_id_to_int task.id) backlog.tasks in
@@ -247,6 +411,13 @@ let next_task_number config (backlog : backlog) =
   (* Event history outlives both the live backlog and its archive after a
      workspace restore. Reusing an id that history still names aliases two
      unrelated task lifecycles in [masc_task_history]. *)
-  let event_ids = event_history_task_ids config in
-  let max_id = List.fold_left max 0 (backlog_ids @ receipt_ids @ creation_ids @ archive_ids @ event_ids) in
+  let event_max_id = event_history_max_task_id config in
+  let max_list acc l = List.fold_left max acc l in
+  let max_id =
+    event_max_id
+    |> Fun.flip max_list backlog_ids
+    |> Fun.flip max_list receipt_ids
+    |> Fun.flip max_list creation_ids
+    |> Fun.flip max_list archive_ids
+  in
   max_id + 1

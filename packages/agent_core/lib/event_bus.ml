@@ -198,6 +198,7 @@ type subscription =
   ; drained_total : int Atomic.t
   ; dropped_total : int Atomic.t
   ; deliver_mu : Eio.Mutex.t
+  ; available : Eio.Condition.t
   ; cancelled : bool Atomic.t
   }
 
@@ -328,6 +329,7 @@ let subscribe ~(config : subscription_config) ?(filter = accept_all) ?purpose bu
       ; drained_total = Atomic.make 0
       ; dropped_total = Atomic.make 0
       ; deliver_mu = Eio.Mutex.create ()
+      ; available = Eio.Condition.create ()
       ; cancelled = Atomic.make false
       }
     in
@@ -357,21 +359,39 @@ let drain_locked sub =
 ;;
 
 let unsubscribe bus sub =
-  Atomic.set sub.cancelled true;
-  remove_subscription bus sub;
-  Eio.Mutex.use_rw ~protect:true sub.deliver_mu (fun () ->
-    let rec discard_pending () =
-      match Eio.Stream.take_nonblocking sub.stream with
-      | Some _ -> discard_pending ()
-      | None -> ()
-    in
-    discard_pending ())
+  Eio.Cancel.protect (fun () ->
+    Atomic.set sub.cancelled true;
+    remove_subscription bus sub;
+    Eio.Mutex.use_rw ~protect:true sub.deliver_mu (fun () ->
+      let rec discard_pending () =
+        match Eio.Stream.take_nonblocking sub.stream with
+        | Some _ -> discard_pending ()
+        | None -> ()
+      in
+      discard_pending ();
+      Eio.Condition.broadcast sub.available));
+  Eio.Fiber.check ()
 ;;
 
 let unsubscribe_and_drain bus sub =
-  Atomic.set sub.cancelled true;
-  remove_subscription bus sub;
-  Eio.Mutex.use_rw ~protect:true sub.deliver_mu (fun () -> drain_locked sub)
+  Eio.Cancel.protect (fun () ->
+    (* Close and drain share the delivery lock. Publishers snapshot the hub
+       before acquiring this lock, so they never hold the inverse order. *)
+    Eio.Mutex.lock sub.deliver_mu;
+    match
+      Atomic.set sub.cancelled true;
+      remove_subscription bus sub;
+      Eio.Condition.broadcast sub.available
+    with
+    | () -> ()
+    | exception exn -> Eio.Mutex.unlock sub.deliver_mu; raise exn);
+  (* If cancellation arrived while closing, leave queued events in the
+     subscription for a later explicit drain rather than losing the return
+     value to an exception. Keep the delivery lock until the drain so another
+     reader cannot take the batch between close and ownership transfer. *)
+  Fun.protect ~finally:(fun () -> Eio.Mutex.unlock sub.deliver_mu) (fun () ->
+    Eio.Fiber.check ();
+    drain_locked sub)
 ;;
 
 (* ── Publish ──────────────────────────────────────────────────────── *)
@@ -380,7 +400,9 @@ let unless_cancelled sub f = if Atomic.get sub.cancelled then () else f ()
 
 let deliver_to_sub sub event =
   let add_unless_cancelled () =
-    unless_cancelled sub (fun () -> Eio.Stream.add sub.stream event)
+    unless_cancelled sub (fun () ->
+      Eio.Stream.add sub.stream event;
+      Eio.Condition.broadcast sub.available)
   in
   unless_cancelled sub (fun () ->
     Atomic.incr sub.published_total;
@@ -418,6 +440,31 @@ let publish bus event =
 (* ── Drain ────────────────────────────────────────────────────────── *)
 
 let drain sub = Eio.Mutex.use_rw ~protect:true sub.deliver_mu (fun () -> drain_locked sub)
+
+type awaited_batch =
+  | Events of event list
+  | Unsubscribed
+
+let await_batch sub =
+  (* Cancellation while awaiting is normal and leaves the queue consistent.
+     [use_rw] would poison the publisher's mutex when the wait is cancelled. *)
+  Eio.Mutex.use_ro sub.deliver_mu (fun () ->
+    let rec wait () =
+      (* A broadcast can win the condition race just before this fiber is
+         cancelled. Do not remove a batch whose result cannot be delivered. *)
+      Eio.Fiber.check ();
+      if Atomic.get sub.cancelled then Unsubscribed
+      else if Eio.Stream.length sub.stream > 0 then Events (drain_locked sub)
+      else (
+        Eio.Condition.await sub.available sub.deliver_mu;
+        wait ())
+    in
+    wait ())
+
+module For_testing = struct
+  let with_delivery_lock sub f = Eio.Mutex.use_ro sub.deliver_mu f
+  let with_hub_lock bus f = Eio.Mutex.use_ro bus.hub.mu f
+end
 
 (* ── Queries ──────────────────────────────────────────────────────── *)
 

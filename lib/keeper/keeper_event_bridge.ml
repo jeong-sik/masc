@@ -21,10 +21,8 @@
 open Keeper_event_bridge_inference
 open Keeper_event_bridge_error_json
 
-(** Drain interval: how often we poll the Event_bus subscription.
-    Lower default keeps the dashboard close to real-time, while staying
-    runtime-tunable for quieter deployments. *)
-let drain_interval_s () = Env_config.Agent_core_sse.drain_interval_sec
+(** Delay between failed relay attempts. Idle subscriptions wait for events. *)
+let retry_interval_s () = Env_config.Agent_core_sse.drain_interval_sec
 
 let payload_agent_name payload =
   (* Check [agent_name], [agent], then [keeper_name] for Custom events
@@ -616,10 +614,20 @@ let deliver_pending ?store_ref (pending : pending_relay) =
 
 let should_drain_subscription pending =
   (* Do not move new AGENT_CORE bus events into the local retry queue while
-     failed relays are still pending.  The AGENT_CORE subscriber stream is
-     bounded, so leaving it undrained applies publisher backpressure
-     instead of dropping the oldest local relay event. *)
+     failed relays are still pending. The bounded subscriber may drop its
+     oldest events during this wait; its next batch reports that loss. *)
   pending = []
+;;
+
+let report_subscription_loss = function
+  | Runtime_event_bus.Nothing_dropped -> ()
+  | Dropped count ->
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_agent_core_sse_relay_drops
+      ~labels:[ "stage", "queue" ] ~delta:(float_of_int count) ();
+    Log.Server.error
+      "keeper_event_bridge: subscriber queue dropped %d events before relay"
+      count
 ;;
 
 let prepare_pending_events events = List.filter_map prepare_pending_event events
@@ -681,11 +689,17 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
   update_relay_queue_depth !pending;
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
-      (try
+      let retry_iteration = ref false in
+      let continue =
+        try
          pending := process_pending ~store_ref:store [] !pending;
+         update_relay_queue_depth !pending;
          if should_drain_subscription !pending
          then (
-           let events = Runtime_event_bus.drain sub in
+           match Runtime_event_bus.await_reporting_drops sub with
+           | Unsubscribed -> false
+           | Batch { events; overflow_loss } ->
+           report_subscription_loss overflow_loss;
            (* A wake is optional, coalesced metadata. It never moves source
               bodies into this relay or waits for an Add-on to observe them. *)
            let compare_activity (a : Lane_addon_sources.activity) (b : Lane_addon_sources.activity) =
@@ -722,25 +736,34 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
              | Agent_core.Event_bus.InferenceTelemetry _ | Agent_core.Event_bus.Custom (_, _) -> None) events |> List.sort_uniq compare_activity in
            List.iter (fun activity -> Lane_addon_runtime.notify_activity ~config ~activity) activities;
            pending := prepare_pending_events events;
-           pending := process_pending ~store_ref:store [] !pending);
-         update_relay_queue_depth !pending
+           pending := process_pending ~store_ref:store [] !pending;
+           update_relay_queue_depth !pending;
+           true)
+         else (
+           update_relay_queue_depth !pending;
+           true)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Misc.warn
            "keeper_event_bridge: relay iteration failed: %s"
-           (Printexc.to_string exn));
-      Eio.Time.sleep clock interval_s;
-      loop ()
+           (Printexc.to_string exn);
+         retry_iteration := true;
+         true
+      in
+      if continue then (
+        if !retry_iteration || !pending <> [] then Eio.Time.sleep clock interval_s;
+        loop ())
     in
     loop ())
 ;;
 
 (** Background fiber: drain events and relay to SSE. *)
 let start ~sw ~clock ~(config : Workspace.config) ~bus =
-  start_impl ~interval_s:(drain_interval_s ()) ~sw ~clock ~config ~bus
+  start_impl ~interval_s:(retry_interval_s ()) ~sw ~clock ~config ~bus
 ;;
 
 module For_testing = struct
   let emit_native_event_log = emit_native_event_log
+  let start_with_retry_interval = start_impl
 end

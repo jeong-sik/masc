@@ -39,5 +39,14 @@ val drain_reporting_drops : handle -> batch
     handle and is claimed with a compare-and-set, so concurrent drains of one
     handle split the drops between them and no drop is reported twice. *)
 
+type awaited_batch =
+  | Batch of batch
+  | Unsubscribed
+
+val await_reporting_drops : handle -> awaited_batch
+(** Wait without polling for a non-empty batch or subscription cancellation.
+    Claims overflow losses like {!drain_reporting_drops}. Fiber cancellation
+    propagates and does not leave the subscription locked. *)
+
 val unsubscribe : Agent_core.Event_bus.t -> handle -> unit
 val publish : Agent_core.Event_bus.t -> Agent_core.Event_bus.event -> unit

@@ -949,7 +949,18 @@ If a verified image-capable runtime still rejects direct reading, inspect its
 resolved model capability declaration. Use the existing runtime configuration
 preview/save flow with its current source revision, then check
 `/api/v1/runtime/resolved`; a provider catalog entry alone does not enable a
-missing runtime declaration. This tool does not rewrite live runtime settings.
+missing runtime declaration. Each resolved runtime reports `supports_image_input`
+for actual admission and `declared_image_input` for the optional model setting.
+A null declaration means unreported; false means explicitly disabled. A true
+declaration can still be blocked by an execution transport that cannot carry
+images. This tool does not rewrite live runtime settings.
+
+New connections preserve the selected model's image declaration from the
+installed provider/client catalog or explicit model-list metadata. HTTP model
+lists may report `supports_image_input` or `architecture.input_modalities`.
+Unreported metadata leaves the setting undeclared. Account/model discovery and
+a successful text/tool check do not establish that an image was read; verify
+image delivery with an actual pixel-reading request on the selected connection.
 
 ## Publish a report as an artifact
 

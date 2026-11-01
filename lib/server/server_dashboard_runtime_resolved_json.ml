@@ -97,6 +97,10 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
          key. *)
     ; "provider_id", `String rt.provider.id
     ; "model", `String rt.model.api_name
+    ; "supports_image_input", `Bool (Runtime_agent.runtime_accepts_image_input ~runtime:rt)
+    ; ( "declared_image_input"
+      , Json_util.bool_opt_to_json
+          (Option.bind rt.model.capabilities (fun caps -> caps.Runtime_schema.supports_image_input)) )
     ; "exact_slot_group", string_opt_json exact_slot_group
       (* An exact HTTP slot on this runtime would be refused on save: its
          provider declares no exact-body-timeout-s (rule 3, #38779). The

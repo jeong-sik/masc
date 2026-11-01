@@ -1787,6 +1787,20 @@ max-concurrent = 4
 # One of several glm-coding bindings now, so the wizard's pick is named.
 wizard-default = true
 
+# GLM-5.3-Flash reads images on the coding-plan endpoint. The catalog declares
+# vision, and a direct PNG reading on this wire returned its text (2026-11-01).
+[models.glm-5-3-flash]
+api-name = "glm-5.3-flash"
+tools-support = true
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[models.glm-5-3-flash.capabilities]
+supports-image-input = true
+
+[glm-coding.glm-5-3-flash]
+
 # The rest of the coding plan's text models (GET /coding/paas/v4/models,
 # 2026-09-22). All answered a plain and a tool-call completion that day;
 # windows come from their glm-coding catalog rows. glm-5.3-flashx is listed
@@ -2681,6 +2695,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-claude-opus-5.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-claude-opus-5]
 
 [models.openrouter-gpt-5-5]
@@ -2689,6 +2706,9 @@ tools-support = true
 thinking-support = true
 streaming = true
 reasoning-effort = "high"
+
+[models.openrouter-gpt-5-5.capabilities]
+supports-image-input = true
 
 [openrouter.openrouter-gpt-5-5]
 
@@ -2699,6 +2719,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-gpt-5-6-sol.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-gpt-5-6-sol]
 
 [models.openrouter-gemini-3-8-flash]
@@ -2707,6 +2730,9 @@ tools-support = true
 thinking-support = true
 streaming = true
 reasoning-effort = "high"
+
+[models.openrouter-gemini-3-8-flash.capabilities]
+supports-image-input = true
 
 [openrouter.openrouter-gemini-3-8-flash]
 
@@ -2717,6 +2743,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-grok-4-6.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-grok-4-6]
 
 [models.openrouter-kimi-k3]
@@ -2726,6 +2755,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-kimi-k3.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-kimi-k3]
 
 [models.openrouter-glm-5-3-flash]
@@ -2734,6 +2766,10 @@ tools-support = true
 thinking-support = true
 streaming = true
 reasoning-effort = "high"
+
+[models.openrouter-glm-5-3-flash.capabilities]
+# OpenRouter /api/v1/models reports image input (2026-11-01).
+supports-image-input = true
 
 [openrouter.openrouter-glm-5-3-flash]
 
@@ -2769,6 +2805,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-deepseek-v4-1-flash.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-deepseek-v4-1-flash]
 
 [models.openrouter-deepseek-v4-pro]
@@ -2790,6 +2829,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-qwen3-8-max.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-qwen3-8-max]
 
 # More ids probed live on 2026-09-22 in the same shape as the twelve
@@ -2804,6 +2846,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-claude-fable-5-1.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-claude-fable-5-1]
 
 [models.openrouter-claude-haiku-4-5]
@@ -2812,6 +2857,9 @@ tools-support = true
 thinking-support = true
 streaming = true
 reasoning-effort = "high"
+
+[models.openrouter-claude-haiku-4-5.capabilities]
+supports-image-input = true
 
 [openrouter.openrouter-claude-haiku-4-5]
 
@@ -2822,6 +2870,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-gpt-6-astra.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-gpt-6-astra]
 
 [models.openrouter-gpt-5-6-terra]
@@ -2830,6 +2881,9 @@ tools-support = true
 thinking-support = true
 streaming = true
 reasoning-effort = "high"
+
+[models.openrouter-gpt-5-6-terra.capabilities]
+supports-image-input = true
 
 [openrouter.openrouter-gpt-5-6-terra]
 
@@ -2840,6 +2894,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-gpt-5-6-luna.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-gpt-5-6-luna]
 
 [models.openrouter-gemini-3-1-pro]
@@ -2848,6 +2905,9 @@ tools-support = true
 thinking-support = true
 streaming = true
 reasoning-effort = "high"
+
+[models.openrouter-gemini-3-1-pro.capabilities]
+supports-image-input = true
 
 [openrouter.openrouter-gemini-3-1-pro]
 
@@ -2858,6 +2918,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-grok-4-7.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-grok-4-7]
 
 [models.openrouter-qwen3-8-flash]
@@ -2867,6 +2930,9 @@ thinking-support = true
 streaming = true
 reasoning-effort = "high"
 
+[models.openrouter-qwen3-8-flash.capabilities]
+supports-image-input = true
+
 [openrouter.openrouter-qwen3-8-flash]
 
 [models.openrouter-glm-5-3-flashx]
@@ -2875,6 +2941,9 @@ tools-support = true
 thinking-support = true
 streaming = true
 reasoning-effort = "high"
+
+[models.openrouter-glm-5-3-flashx.capabilities]
+supports-image-input = true
 
 [openrouter.openrouter-glm-5-3-flashx]
 
@@ -2907,6 +2976,9 @@ tools-support = true
 thinking-support = true
 streaming = true
 reasoning-effort = "high"
+
+[models.openrouter-free-nemotron-3-5-super-vl.capabilities]
+supports-image-input = true
 
 [openrouter.openrouter-free-nemotron-3-5-super-vl]
 

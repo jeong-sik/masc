@@ -1,0 +1,19 @@
+{
+  "scope": "live setting changes; not a read proof for each model",
+  "repairs": [
+    {
+      "model_count": 1,
+      "before_revision": "3495dc2af1122c7303894d5ca35811aa557cee27620c6e5348983b5ae89d5fa2",
+      "after_revision": "d4c8be8a49573299916c7bddb64ea5eca0fc3cddced5ca8295df00f0644dfba0",
+      "readback_verified": true,
+      "observed_at": "2026-11-01T03:26:04Z"
+    },
+    {
+      "model_count": 24,
+      "before_revision": "1c1e1f6b8f67855b0664239c3a7a95b9ff1a5048133374f5d4ba0bc6ab677cf5",
+      "after_revision": "e63ae2c52c236354684e34f17527073bde6bf41a039d33ffa74e5750aa1b6d28",
+      "readback_verified": true,
+      "observed_at": "2026-11-01T03:31:04Z"
+    }
+  ]
+}

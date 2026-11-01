@@ -12,6 +12,10 @@ type model = {
   label : string;
   context : int option;
   tools : bool option;
+  supports_image_input : bool option;
+  (** Explicit model-list metadata, otherwise the exact named provider/model's
+      catalog capability. Anonymous endpoints borrow no catalog facts.
+      [None] means unreported, not unsupported. *)
   listed_at : Yojson.Safe.t option;
 }
 type error = Invalid_connection | Credential_unavailable | Request_failed

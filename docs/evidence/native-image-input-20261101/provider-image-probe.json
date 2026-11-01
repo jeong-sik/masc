@@ -1,0 +1,12 @@
+{
+  "scope": "direct provider call; not Keeper execution",
+  "model": "glm-5.3-flash",
+  "endpoint": "https://api.z.ai/api/coding/paas/v4",
+  "image_sha256": "0a1566f62d17bfc5d568e692f4209aed9771a71ae6af6bf94bbb2d50f96730d3",
+  "status": 200,
+  "elapsed_s": 1.46,
+  "response_text": "LIME 8472",
+  "expected_text": "LIME 8472",
+  "matched": true,
+  "binary_commit": "61b4d5531d44cb780dff64158fdbf7d641f1658f"
+}

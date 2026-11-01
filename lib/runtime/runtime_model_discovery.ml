@@ -3,7 +3,7 @@ type provider = Anonymous_endpoint | Named_provider of string
 type connection = { protocol : protocol; provider : provider; endpoint : string;
                     credential : Runtime_schema.credential option }
 type model = { id : string; label : string; context : int option; tools : bool option;
-               listed_at : Yojson.Safe.t option }
+               supports_image_input : bool option; listed_at : Yojson.Safe.t option }
 type error = Invalid_connection | Credential_unavailable | Request_failed
   | Http_error of int | Invalid_response | Repeated_page
 let error_message = function
@@ -28,6 +28,24 @@ let optional_reference fields key =
   | None -> Ok None
   | Some (`String value) when safe_text value -> Ok (Some value)
   | Some _ -> Error Invalid_connection
+let image_input_metadata fields =
+  let* explicit = match List.assoc_opt "supports_image_input" fields with
+    | None | Some `Null -> Ok None
+    | Some (`Bool value) -> Ok (Some value)
+    | Some _ -> Error Invalid_response in
+  let* modalities = match List.assoc_opt "architecture" fields with
+    | None | Some `Null -> Ok None
+    | Some (`Assoc architecture) ->
+      (match List.assoc_opt "input_modalities" architecture with
+       | None | Some `Null -> Ok None
+       | Some (`List values) when List.for_all (function `String _ -> true | _ -> false) values ->
+         Ok (Some (List.mem (`String "image") values))
+       | Some _ -> Error Invalid_response)
+    | Some _ -> Error Invalid_response in
+  match explicit, modalities with
+  | Some a, Some b when a <> b -> Error Invalid_response
+  | Some value, _ | None, Some value -> Ok (Some value)
+  | None, None -> Ok None
 let connection_of_json = function
   | `Assoc fields ->
     let keys = List.map fst fields in
@@ -78,7 +96,8 @@ let model protocol = function
          | _ -> None in
        let listed_at = match List.assoc_opt "created" fields with
          | Some ((`Int _ | `String _) as date) -> Some date | _ -> None in
-       Ok {id; label; context; tools; listed_at})
+       let* supports_image_input = image_input_metadata fields in
+       Ok {id; label; context; tools; supports_image_input; listed_at})
   | _ -> Error Invalid_response
 let parse_page protocol body =
   try match Yojson.Safe.from_string body with
@@ -98,6 +117,27 @@ let parse_page protocol body =
     Ok (List.rev reversed, next)
   | _ -> Error Invalid_response
   with Yojson.Json_error _ -> Error Invalid_response
+let with_catalog_image_input (connection : connection) (model : model) =
+  match model.supports_image_input, connection.provider with
+  | Some _, _ | None, Anonymous_endpoint -> model
+  | None, Named_provider provider_id ->
+    let catalog_capability =
+      let provider = Llm_provider.Model_catalog.Declared_provider provider_id in
+      match Llm_provider.Model_catalog.global (),
+            Llm_provider.Model_identifiers.Model_id.of_string model.id with
+      | Some catalog, Ok model_id ->
+        (* Require an exact permitted row before resolving its declared base
+           and overrides. A provider-wide fallback without a model row cannot
+           establish that an unknown model accepts images. *)
+        Option.bind
+          (Llm_provider.Model_catalog.lookup_model_for_provider catalog ~provider ~model_id)
+          (fun _ ->
+            Option.map (fun (caps : Llm_provider.Capabilities.capabilities) -> caps.supports_image_input)
+              (Llm_provider.Capabilities.for_provider_model_id
+                 ~wire:None ~provider ~model_id:model.id))
+      | None, _ | Some _, Error _ -> None
+    in
+    {model with supports_image_input = catalog_capability}
 let discover_with ~get connection =
   if not (endpoint_valid connection.endpoint) then Error Invalid_connection else
   let base = Uri.of_string connection.endpoint in
@@ -114,7 +154,7 @@ let discover_with ~get connection =
     let* models, next = parse_page connection.protocol body in
     let all = List.rev_append models all in
     match next with
-    | None -> Ok (List.rev all)
+    | None -> Ok (List.rev all |> List.map (with_catalog_image_input connection))
     | Some cursor when List.mem cursor seen -> Error Repeated_page
     | Some cursor -> pages (cursor :: seen) (Some cursor) all in
   pages [] None []
@@ -126,6 +166,7 @@ let to_json models =
       "id", `String model.id; "label", `String model.label;
       "context", optional (fun value -> `Int value) model.context;
       "tools", optional (fun value -> `Bool value) model.tools;
+      "supports_image_input", optional (fun value -> `Bool value) model.supports_image_input;
       "provider_listed_at", optional Fun.id model.listed_at;
       "release_date", `Null]) models)]
 let resolve_credential connection =

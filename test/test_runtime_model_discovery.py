@@ -17,6 +17,65 @@ if len(sys.argv) > 2 and sys.argv[1] == '--binary':
 
 @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
 class NativeDiscovery(unittest.TestCase):
+    def test_image_metadata_survives_http_model_discovery(self):
+        self.respond = lambda path: (200, {}, {'data': [
+            dict(id='vision', architecture=dict(input_modalities=['text', 'image'])),
+            dict(id='text', architecture=dict(input_modalities=['text'])),
+            dict(id='declared', supports_image_input=True),
+            dict(id='unknown')]})
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        models = {row['id']: row.get('supports_image_input') for row in json.loads(result.stdout)['models']}
+        self.assertEqual(models, dict(vision=True, text=False, declared=True, unknown=None))
+
+    def test_invalid_or_conflicting_image_metadata_is_refused(self):
+        for metadata in [dict(supports_image_input='true'),
+                         dict(architecture=dict(input_modalities=['text', 42])),
+                         dict(supports_image_input=False,
+                              architecture=dict(input_modalities=['image']))]:
+            with self.subTest(metadata=metadata):
+                self.respond = lambda path: (200, {}, {'data': [dict(id='selected', **metadata)]})
+                result = self.invoke()
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_provider_catalog_carries_exact_model_image_capability(self):
+        result = subprocess.run([BINARY, 'runtime-model-list', '--provider', 'glm-coding'],
+                                capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        models = {row['id']: row for row in json.loads(result.stdout)['models']}
+        self.assertIs(models['glm-5.3-flash'].get('supports_image_input'), True)
+
+    def test_named_provider_discovery_joins_only_its_exact_catalog_model(self):
+        self.respond = lambda path: (200, {}, {'data': [
+            dict(id='glm-5.3-flash'), dict(id='glm-5.3-flash-unknown'), dict(id='glm-5.3')]})
+        for provider in (None, 'glm-coding', 'unknown-provider'):
+            with self.subTest(provider=provider):
+                result = self.invoke(**({} if provider is None else dict(provider_id=provider)))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                models = {row['id']: row.get('supports_image_input')
+                          for row in json.loads(result.stdout)['models']}
+                self.assertEqual(models['glm-5.3-flash'], True if provider == 'glm-coding' else None)
+                self.assertIsNone(models['glm-5.3-flash-unknown'])
+                self.assertEqual(models['glm-5.3'], False if provider == 'glm-coding' else None)
+
+    def test_exact_native_provider_model_inherits_its_catalog_base(self):
+        self.respond = lambda path: (200, {}, {'data': [
+            dict(id='claude-sonnet-5-5'), dict(id='gpt-6.1-sol'), dict(id='unreported-model')]})
+        result = self.invoke(provider_id='claude')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        models = {row['id']: row.get('supports_image_input')
+                  for row in json.loads(result.stdout)['models']}
+        self.assertIs(models['claude-sonnet-5-5'], True)
+        self.assertIsNone(models['gpt-6.1-sol'])
+        self.assertIsNone(models['unreported-model'])
+
+    def test_explicit_endpoint_image_disable_survives_catalog_join(self):
+        self.respond = lambda path: (200, {}, {'data': [
+            dict(id='glm-5.3-flash', supports_image_input=False)]})
+        result = self.invoke(provider_id='glm-coding')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIs(json.loads(result.stdout)['models'][0]['supports_image_input'], False)
+
     def setUp(self):
         self.home = tempfile.TemporaryDirectory()
         self.addCleanup(self.home.cleanup)

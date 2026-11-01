@@ -240,7 +240,7 @@ def render(spec, binary=None, base_path=None):
         allowed = {'choice', 'model', 'max_context', 'tools', 'streaming',
                    'endpoint', 'api_key_env', 'credential_file', 'provider_kind',
                    'provider_id', 'provider_display_name', 'model_key', 'provider_declared',
-                   'reasoning_effort', 'wizard_default'}
+                   'reasoning_effort', 'wizard_default', 'supports_image_input'}
         if set(spec) - allowed:
             raise SetupError('unexpected setup fields: ' + ', '.join(sorted(set(spec) - allowed)))
         model = text(spec, 'model')
@@ -250,6 +250,8 @@ def render(spec, binary=None, base_path=None):
         for key in ('tools', 'streaming'):
             if type(spec.get(key)) is not bool:
                 raise SetupError(key + ' must be an explicitly declared boolean')
+        if 'supports_image_input' in spec and type(spec['supports_image_input']) is not bool:
+            raise SetupError('supports_image_input must be a boolean when declared')
         endpoint = text(spec, 'endpoint')
         try:
             url = urlsplit(endpoint)
@@ -282,6 +284,9 @@ def render(spec, binary=None, base_path=None):
         if spec.get('reasoning_effort'):
             model_fields.update(**{'thinking-support': True, 'reasoning-effort': text(spec, 'reasoning_effort')})
         runtime += table(('models', model_key), model_fields)
+        if 'supports_image_input' in spec:
+            runtime += table(('models', model_key, 'capabilities'),
+                             {'supports-image-input': spec['supports_image_input']})
         binding = {'wizard-default': True} if spec.get('wizard_default') is True else {}
         runtime += table((provider, model_key), binding)
         return provider + '.' + model_key, runtime.encode()
@@ -546,6 +551,8 @@ def select_model(binary, choice, endpoint='', api_key_env='', timeout=10):
             else:
                 print('Enter the documented token count using digits greater than zero, without commas or units; or q to cancel.', file=sys.stderr)
     result = dict(model=model, max_context=context)
+    if selected and type(selected.get('supports_image_input')) is bool:
+        result['supports_image_input'] = selected['supports_image_input']
     if choice == 'muse':
         # Automation keeps the account that reported the model: the Muse
         # specification requires its account_home, and the default account
@@ -1677,7 +1684,7 @@ def source_models(binary, source, timeout, refresh=False):
             curated_model = dict(id=row['id'], label=row.get('label') or row['id'],
                                  context=context, existing=None, catalog=row)
             if discovered is not None:
-                for key in ('supported_reasoning_efforts', 'default_reasoning_effort'):
+                for key in ('supported_reasoning_efforts', 'default_reasoning_effort', 'supports_image_input'):
                     if key in discovered:
                         curated_model[key] = discovered[key]
             rows.append(curated_model)
@@ -1750,6 +1757,11 @@ def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
                     provider_declared=source['catalog_provider'].get('declared') is True)
         if source.get('credential_file'):
             spec['credential_file'] = source['credential_file']
+        image_input = model.get('supports_image_input', catalog.get('supports_image_input'))
+        if image_input is None:
+            image_input = catalog.get('supports_image_input')
+        if type(image_input) is bool:
+            spec['supports_image_input'] = image_input
         if catalog.get('default_reasoning_effort'):
             spec['reasoning_effort'] = catalog['default_reasoning_effort']
         return render(spec, binary, base_path=base_path)[0], spec
@@ -1788,6 +1800,8 @@ def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
             context = int(answer) if answer.isascii() and answer.isdigit() else None
     spec = dict(choice=choice, model=model['id'], max_context=context, tools=True,
                 streaming=choice in ('claude_code', 'codex', 'antigravity', 'muse'))
+    if type(model.get('supports_image_input')) is bool:
+        spec['supports_image_input'] = model['supports_image_input']
     if choice in ('claude_code', 'codex') and binary:
         # Refresh may provide context without media metadata. Join only the
         # selected native client's exact model, leaving unknowns undeclared.

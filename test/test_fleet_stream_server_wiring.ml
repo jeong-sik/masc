@@ -66,6 +66,21 @@ let health_fields section : (string * Yojson.Safe.t) list =
   [ "overall_status", `String "ok"; "keeper_fleet_safety", section ]
 ;;
 
+let read_full_health () =
+  let authority =
+    match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+    | Ok authority -> authority
+    | Error `Malformed -> fail "invalid test authority"
+  in
+  Server_routes_http_runtime.make_health_response_json ~request_authority:authority
+    (Httpun.Request.create `GET "/health?full=1")
+;;
+
+let full_health_status () =
+  let open Yojson.Safe.Util in
+  read_full_health () |> member "full_health_snapshot" |> member "status" |> to_string
+;;
+
 (* What an event says, without the time the scan finished. *)
 let describe : F.event -> string = function
   | F.Unavailable_snapshot { revision; degradation } ->
@@ -316,6 +331,16 @@ let test_worker_begins_after_scope_replacement ?(early_timeout = false)
                { Proactive_refresh.label = "full_health_snapshot"
                ; phase = Proactive_refresh.Refresh
                ; timeout_s = 1.; elapsed_s = 1. });
+          if early_timeout then begin
+            check string "the new workspace records its own timeout" "timeout" (full_health_status ());
+            check int "the old timeout is excluded" 1 (Refresh.full_health_observation_failures ());
+            Refresh.mark_full_health_refresh_wait_failure
+              (Proactive_refresh.Timed_out
+                 { Proactive_refresh.label = "full_health_snapshot"
+                 ; phase = Proactive_refresh.Refresh
+                 ; timeout_s = 1.; elapsed_s = 1. });
+            check int "a repeated wait does not count twice" 1 (Refresh.full_health_observation_failures ())
+          end;
           (match Hub.current new_hub with
            | Some event -> check string "the new-scope timeout is visible"
                "unavailable r1 timed_out" (describe event)
@@ -323,10 +348,17 @@ let test_worker_begins_after_scope_replacement ?(early_timeout = false)
         end;
         Eio.Promise.resolve finish_ ();
         Eio.Promise.await done_;
+        if early_timeout && timeout then
+          check int "a successful new-scope scan recovers" 0 (Refresh.full_health_observation_failures ());
+        if early_timeout && not timeout then begin
+          check string "the new workspace records its own failure" "error" (full_health_status ());
+          check int "the new failure counts once" 1 (Refresh.full_health_observation_failures ())
+        end;
         if not timeout then
           match Hub.current new_hub with
           | Some event -> check string "the new-scope exception is visible"
-              "unavailable r1 failed" (describe event)
+              (if early_timeout then "unavailable r1 timed_out" else "unavailable r1 failed")
+              (describe event)
           | None -> fail "the new-scope exception was not published")))
 ;;
 
@@ -482,11 +514,273 @@ let test_worker_fails_before_scan ~timeout () =
           | None -> fail "pre-scan exception was not published")))
 ;;
 
+let test_full_health_cache_is_scoped_to_the_workspace_generation () =
+  with_server_state (fun state ->
+    Refresh.reset_full_health_snapshot ();
+    let original = Masc.Mcp_server.workspace_scope state in
+    let other_config =
+      { original.config with
+        workspace_path = Filename.concat original.config.workspace_path "other-workspace" }
+    in
+    let switch config =
+      match Masc.Mcp_server.set_workspace_config state config with
+      | Ok () -> ()
+      | Error error -> fail (Masc.Mcp_server.workspace_switch_error_to_string error)
+    in
+    let authority =
+      match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+      | Ok authority -> authority
+      | Error `Malformed -> fail "invalid test authority"
+    in
+    let read () =
+      Server_routes_http_runtime.make_health_response_json ~request_authority:authority
+        (Httpun.Request.create `GET "/health?full=1")
+    in
+    let field key json = Yojson.Safe.Util.member key json in
+    let status json = field "status" (field "full_health_snapshot" json) in
+    let fields marker =
+      ("scope_test_marker", `String marker) :: health_fields (fleet_section ~running:1)
+    in
+    Eio_main.run (fun _env ->
+      Eio.Switch.run (fun sw ->
+        let scan marker =
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () -> Ok (fields marker))
+        in
+        scan "A";
+        check bool "A is served in its own scope" true
+          (field "scope_test_marker" (read ()) = `String "A");
+        switch other_config;
+        let warming = read () in
+        check bool "B does not see A's fields" true (field "scope_test_marker" warming = `Null);
+        check bool "B starts warming" true (status warming = `String "warming");
+        Refresh.mark_full_health_snapshot_failure (Proactive_refresh.Raised (Failure "B failed"));
+        let failed = read () in
+        check bool "B's cold failure does not retain A" true
+          (field "scope_test_marker" failed = `Null);
+        check bool "B sees its own failure" true (status failed = `String "error");
+        scan "B";
+        check bool "B serves its own reading" true
+          (field "scope_test_marker" (read ()) = `String "B");
+        let started, start = Eio.Promise.create () in
+        let resume, release = Eio.Promise.create () in
+        let finished, finish = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () ->
+            Eio.Promise.resolve start ();
+            Eio.Promise.await resume;
+            Ok (fields "late-B"));
+          Eio.Promise.resolve finish ());
+        Eio.Promise.await started;
+        switch original.config;
+        let returned = read () in
+        check bool "returning to A starts a new generation" true
+          (field "scope_test_marker" returned = `Null && status returned = `String "warming");
+        Eio.Promise.resolve release ();
+        Eio.Promise.await finished;
+        let after_old_worker = read () in
+        check bool "late B worker cannot publish into the new A" true
+          (field "scope_test_marker" after_old_worker = `Null
+           && status after_old_worker = `String "warming");
+        scan "new-A";
+        check bool "new A serves its own reading" true
+          (field "scope_test_marker" (read ()) = `String "new-A");
+        let started, start = Eio.Promise.create () in
+        let resume, release = Eio.Promise.create () in
+        let finished, finish = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () ->
+            Eio.Promise.resolve start ();
+            Eio.Promise.await resume;
+            Ok (fields "server-removed"));
+          Eio.Promise.resolve finish ());
+        Eio.Promise.await started;
+        Server_auth.For_testing.restore_server_state None;
+        Eio.Promise.resolve release ();
+        Eio.Promise.await finished;
+        let without_server = read () in
+        check bool "a changed-to-absent scope is not an unscoped scan" true
+          (field "scope_test_marker" without_server = `Null
+           && status without_server = `String "warming");
+        Server_auth.For_testing.restore_server_state (Some state);
+        check bool "the interrupted scan did not replace A's good reading" true
+          (field "scope_test_marker" (read ()) = `String "new-A"))))
+;;
+
+let test_new_scope_health_request_survives_old_worker () =
+  with_server_state (fun state ->
+    Refresh.reset_full_health_snapshot ();
+    ignore (Refresh.take_full_health_wakeup_nonblocking ());
+    let old_scope = Masc.Mcp_server.workspace_scope state in
+    Eio_main.run (fun _env ->
+      Eio.Switch.run (fun sw ->
+        let started, start = Eio.Promise.create () in
+        let resume, release = Eio.Promise.create () in
+        let finished, finish = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () ->
+            Eio.Promise.resolve start ();
+            Eio.Promise.await resume;
+            Ok (health_fields (fleet_section ~running:1)));
+          Eio.Promise.resolve finish ());
+        Eio.Promise.await started;
+        (match Masc.Mcp_server.set_workspace_config state old_scope.config with
+         | Ok () -> ()
+         | Error error -> fail (Masc.Mcp_server.workspace_switch_error_to_string error));
+        check string "the new scope starts warming" "warming" (full_health_status ());
+        let _, _, _, _, _, requested = Refresh.full_health_refresh_worker_stats () in
+        check bool "the new scope requests a refresh" true requested;
+        check bool "the new-scope read wakes the worker" true
+          (Refresh.take_full_health_wakeup_nonblocking ());
+        Eio.Promise.resolve release ();
+        Eio.Promise.await finished;
+        let _, _, _, _, _, requested = Refresh.full_health_refresh_worker_stats () in
+        check bool "old completion retains the new request" true requested;
+        check bool "old completion wakes a successor" true
+          (Refresh.take_full_health_wakeup_nonblocking ());
+        Refresh.run_full_health_refresh_worker ~sw
+          ~compute:(fun () -> Ok (health_fields (fleet_section ~running:2)));
+        check string "the successor publishes for the new scope" "ready" (full_health_status ()))))
+;;
+
+let test_new_scope_first_health_read_wakes_after_old_worker () =
+  with_server_state (fun state ->
+    Refresh.reset_full_health_snapshot ();
+    ignore (Refresh.take_full_health_wakeup_nonblocking ());
+    let old_scope = Masc.Mcp_server.workspace_scope state in
+    Eio_main.run (fun _env ->
+      Eio.Switch.run (fun sw ->
+        let started, start = Eio.Promise.create () in
+        let resume, release = Eio.Promise.create () in
+        let finished, finish = Eio.Promise.create () in
+        Eio.Fiber.fork ~sw (fun () ->
+          Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () ->
+            Eio.Promise.resolve start ();
+            Eio.Promise.await resume;
+            Ok (health_fields (fleet_section ~running:1)));
+          Eio.Promise.resolve finish ());
+        Eio.Promise.await started;
+        (match Masc.Mcp_server.set_workspace_config state old_scope.config with
+         | Ok () -> ()
+         | Error error -> fail (Masc.Mcp_server.workspace_switch_error_to_string error));
+        Eio.Promise.resolve release ();
+        Eio.Promise.await finished;
+        ignore (Refresh.take_full_health_wakeup_nonblocking ());
+        check string "B starts warming after the old worker" "warming" (full_health_status ());
+        check bool "B's first read wakes its own refresh" true
+          (Refresh.take_full_health_wakeup_nonblocking ());
+        Refresh.run_full_health_refresh_worker ~sw
+          ~compute:(fun () -> Ok (health_fields (fleet_section ~running:2)));
+        check string "the new-scope scan publishes" "ready" (full_health_status ()))))
+;;
+
+let test_health_read_keeps_its_selected_snapshot () =
+  with_server_state (fun state ->
+    Refresh.reset_full_health_snapshot ();
+    ignore (Refresh.take_full_health_wakeup_nonblocking ());
+    let old_scope = Masc.Mcp_server.workspace_scope state in
+    let authority =
+      match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+      | Ok authority -> authority
+      | Error `Malformed -> fail "invalid test authority"
+    in
+    Eio_main.run (fun _env ->
+      Eio.Switch.run (fun sw ->
+        Refresh.run_full_health_refresh_worker ~sw
+          ~compute:(fun () -> Ok (("scope_test_marker", `String "A")
+                                  :: health_fields (fleet_section ~running:1)));
+        let result =
+          Refresh.make_cached_full_health_json_after_selection
+            ~after_selection:(fun () ->
+              match Masc.Mcp_server.set_workspace_config state old_scope.config with
+              | Ok () -> ()
+              | Error error -> fail (Masc.Mcp_server.workspace_switch_error_to_string error))
+            ~request_authority:authority (Httpun.Request.create `GET "/health?full=1")
+        in
+        let open Yojson.Safe.Util in
+        check bool "the in-flight read retains its selected A snapshot" true
+          (result |> member "scope_test_marker" = `String "A");
+        check string "the same selection supplies its metadata" "ready"
+          (result |> member "full_health_snapshot" |> member "status" |> to_string);
+        check string "the next read selects B" "warming" (full_health_status ());
+        check bool "the B read wakes its refresh" true
+          (Refresh.take_full_health_wakeup_nonblocking ());
+        Refresh.run_full_health_refresh_worker ~sw
+          ~compute:(fun () -> Ok (health_fields (fleet_section ~running:2)));
+        check string "B becomes ready" "ready" (full_health_status ()))))
+;;
+
+let test_new_scope_wakeup_runs_a_refresh_loop_successor () =
+  with_server_state (fun state ->
+    Refresh.reset_full_health_snapshot ();
+    ignore (Refresh.take_full_health_wakeup_nonblocking ());
+    let old_scope = Masc.Mcp_server.workspace_scope state in
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let started, start = Eio.Promise.create () in
+      let resume, release = Eio.Promise.create () in
+      let successor, finish_successor = Eio.Promise.create () in
+      let never, _ = Eio.Promise.create () in
+      let scans = ref 0 in
+      Eio.Time.with_timeout_exn clock 8. (fun () ->
+        Eio.Fiber.first
+          (fun () ->
+            Eio.Switch.run (fun sw ->
+              let config =
+                { (Proactive_refresh.default_config ~label:"fleet-health-scope-test"
+                     ~interval_s:60.) with
+                  timeout_s = 5.
+                ; wakeup = Some (Refresh.full_health_wakeup_stream ())
+                ; wakeup_coalesce_s = Refresh.full_health_refresh_wakeup_coalesce_sec ()
+                }
+              in
+              Proactive_refresh.start ~sw ~clock ~config ~on_result:Fun.id
+                ~compute:(fun () ->
+                  Refresh.run_full_health_refresh_worker ~sw ~compute:(fun () ->
+                    incr scans;
+                    if !scans = 1 then begin
+                      Eio.Promise.resolve start ();
+                      Eio.Promise.await resume;
+                      Ok (health_fields (fleet_section ~running:1))
+                    end else Ok (health_fields (fleet_section ~running:2)));
+                  if !scans >= 2 then ignore (Eio.Promise.try_resolve finish_successor ())) ;
+              Eio.Promise.await never))
+          (fun () ->
+            Eio.Promise.await started;
+            (match Masc.Mcp_server.set_workspace_config state old_scope.config with
+             | Ok () -> ()
+             | Error error -> fail (Masc.Mcp_server.workspace_switch_error_to_string error));
+            let _, joins_before, _, _, _, _ = Refresh.full_health_refresh_worker_stats () in
+            check string "B is warming while A runs" "warming" (full_health_status ());
+            let rec await_join () =
+              let _, joins, _, _, _, _ = Refresh.full_health_refresh_worker_stats () in
+              if joins <= joins_before then (Eio.Fiber.yield (); await_join ())
+            in
+            await_join ();
+            Eio.Promise.resolve release ();
+            Eio.Promise.await successor;
+            check string "the loop publishes B without waiting for the interval"
+              "ready" (full_health_status ());
+            let open Yojson.Safe.Util in
+            check int "the published fleet came from B's scan" 2
+              (read_full_health () |> member "keeper_fleet_safety"
+               |> member "running_keeper_fiber_count" |> to_int)))))
+;;
+
 let () =
   run "fleet_stream_server_wiring"
     [ ( "publishing"
       , [ test_case "the cached snapshot publishes to the hub" `Quick
             test_the_cached_snapshot_publishes_to_the_hub
+        ; test_case "full health cache belongs to one workspace generation" `Quick
+            test_full_health_cache_is_scoped_to_the_workspace_generation
+        ; test_case "new health demand survives the old worker" `Quick
+            test_new_scope_health_request_survives_old_worker
+        ; test_case "first new health read wakes after the old worker" `Quick
+            test_new_scope_first_health_read_wakes_after_old_worker
+        ; test_case "a health read keeps one selected snapshot" `Quick
+            test_health_read_keeps_its_selected_snapshot
+        ; test_case "refresh loop runs a successor for the new scope" `Quick
+            test_new_scope_wakeup_runs_a_refresh_loop_successor
         ; test_case "scope replacement rejects old scan and failure" `Quick
             test_scope_replacement_rejects_old_scan_and_failure
         ; test_case "a new-scope scan reports its timeout" `Quick
@@ -498,6 +792,8 @@ let () =
                ~subscribe_after_start:true ~timeout:true)
         ; test_case "a new-scope scan reports its exception" `Quick
             (test_worker_begins_after_scope_replacement ~timeout:false)
+        ; test_case "a new-scope exception follows the old wait timeout" `Quick
+            (test_worker_begins_after_scope_replacement ~early_timeout:true ~timeout:false)
         ; test_case "a same-scope pre-scan wait reports timeout" `Quick
             (test_worker_fails_before_scan ~timeout:true)
         ; test_case "a same-scope pre-scan exception is visible" `Quick

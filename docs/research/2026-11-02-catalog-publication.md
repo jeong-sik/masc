@@ -34,12 +34,23 @@ model lookup, selected request-policy projection and response observations.
 runtime construction read that same mapping. The previous config path helper
 is removed and all callers use the wire module.
 
-The extracted types/defaults/projection and preset blocks retain their source
-bytes, including the inline controls. The two fresh nominal types are explicitly
-re-exported with equality, preserving record/constructor identity for parser and
-policy callers. No profile has a model lookup, credential read, mutable catalog
-or execution config dependency. Parsing behavior and policy values are unchanged.
-Dependency-source analysis is not a build or typecheck result.
+The extracted types/defaults/projection and sampling alias retain their source
+bytes. The preset block keeps its expressions and inline controls; its comments
+are updated for the new module's purpose and a stale variant count is corrected.
+The two fresh nominal types are explicitly re-exported with equality, preserving
+record/constructor identity for parser and policy callers. No profile has a model
+lookup, credential read, mutable catalog or execution config dependency. Parsing
+behavior and policy values are unchanged. Dependency-source analysis is not a
+build or typecheck result.
+
+The two derived `show_`/`pp_` debug printers move with their type definitions.
+The installed `ppx_deriving.show` defaults to `with_path=true`, so their
+module-qualified diagnostic prefixes follow `Capability_profile` rather than
+`Capabilities`. This is a diagnostic-output change, separate from policy values,
+parsing and type equality; it is not a claim of identical behavior for every
+public observation. No repository consumer of those exact printer strings was
+found during source review. The prefix behavior is established by inspecting the
+deriver, not a new execution of its output.
 
 ## Required next change
 

@@ -739,14 +739,9 @@ let gemini_capabilities =
   |> with_declared_image_input true
 ;;
 
-(* CLI subprocess transports have been removed; CLI-specific capability
-   records deleted. See PR #1809. *)
-
-(* ── Model-specific overrides (lookup table) ─────────── *)
-
 (** Capabilities preset for a canonical {!Provider_kind.t}.
 
-    Typed counterpart of {!capabilities_for_provider_label}: maps the 7 closed
+    Typed counterpart of {!capabilities_for_provider_label}: maps the closed
     variants directly to their presets without serialising the kind to a string
     and re-parsing it. Adding a new variant to {!Provider_kind.t} forces a
     compile error here, instead of silently falling through the [_ -> None] arm

@@ -285,7 +285,7 @@ val capabilities_for_provider_label : string -> capabilities option
 
 (** Capabilities preset for a canonical {!Provider_kind.t}.
 
-    Maps the 7 closed variants directly to their presets without serialising
+    Maps the closed variants directly to their presets without serialising
     the kind to a string and re-parsing it. Use this when the caller already
     holds a typed {!Provider_kind.t}; {!capabilities_for_provider_label}
     delegates canonical labels here and only keeps string-only presets (e.g.

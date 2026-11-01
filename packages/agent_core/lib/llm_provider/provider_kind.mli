@@ -27,7 +27,7 @@ val all : t list
     Exhaustive — adding a new variant forces a compile error. *)
 val to_string : t -> string
 
-(** Tolerant configuration/CLI parser for the 7 known forms. Matching is
+(** Tolerant configuration/CLI parser for the declared forms. Matching is
     case-insensitive and ignores leading/trailing whitespace. Durable codecs
     must use {!of_canonical_string}. *)
 val of_string : string -> t option

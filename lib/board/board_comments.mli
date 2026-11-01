@@ -35,7 +35,9 @@ val add_comment_with_audience :
 
 val read_comments :
   store -> post_id:string -> (comment list, board_read_error) result
-(** A valid missing post has the same empty result as a post without comments. *)
+(** Reads indexed comments for the parsed post ID without checking whether
+    the post exists. No indexed rows yields [Ok []]; retained orphan rows
+    remain readable under their recorded post ID. *)
 
 val get_comment :
   store -> comment_id:string -> (comment, board_error) result

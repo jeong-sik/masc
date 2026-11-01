@@ -445,8 +445,8 @@ val add_comment_with_audience
     comment id among comments with the same [created_at], so every read of an
     unchanged thread returns the same order. *)
 val read_comments : store -> post_id:string -> (comment list, board_read_error) Result.t
-(** A post that does not exist answers [Ok []], the same as a post with no
-    comments. *)
+(** No indexed rows answers [Ok []]. This lookup does not check post
+    existence; retained orphan comments remain readable by their post ID. *)
 
 
 (** Returns one comment by id. *)

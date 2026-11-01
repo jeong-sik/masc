@@ -116,9 +116,22 @@ let update_keeper acc name f =
 
 let non_negative_int n = if n < 0 then 0 else n
 
+let saturating_add_int a b =
+  let a = non_negative_int a in
+  let b = non_negative_int b in
+  if a > max_int - b then max_int else a + b
+;;
+
 let non_negative_finite_float v =
-  if Float.is_nan v || v = infinity || v = neg_infinity || v < 0.0 then 0.0
+  if Float.is_nan v || not (Float.is_finite v) || v < 0.0 then 0.0
   else v
+;;
+
+let saturating_add_float a b =
+  let sum = non_negative_finite_float a +. non_negative_finite_float b in
+  if Float.is_nan sum || sum < 0.0 then 0.0
+  else if not (Float.is_finite sum) then Float.max_float
+  else sum
 ;;
 
 let fold_cost_row acc json =
@@ -131,7 +144,8 @@ let fold_cost_row acc json =
       if Hashtbl.mem acc.turn_ids key then acc
       else begin
         Hashtbl.add acc.turn_ids key ();
-        update_keeper acc agent (fun k -> { k with turns = k.turns + 1 });
+        update_keeper acc agent (fun k ->
+            { k with turns = saturating_add_int k.turns 1 });
         acc
       end
     in
@@ -153,9 +167,9 @@ let fold_cost_row acc json =
          let cost_usd = non_negative_finite_float reported.cost_usd in
          update_keeper acc agent (fun k ->
              { k with
-               input_tokens = k.input_tokens + input_tokens
-             ; output_tokens = k.output_tokens + output_tokens
-             ; cost_usd = k.cost_usd +. cost_usd
+               input_tokens = saturating_add_int k.input_tokens input_tokens
+             ; output_tokens = saturating_add_int k.output_tokens output_tokens
+             ; cost_usd = saturating_add_float k.cost_usd cost_usd
              });
          acc)
 ;;
@@ -191,8 +205,7 @@ let non_neg_finite_float_member fields name =
   match float_member fields name with
   | Some value
     when not (Float.is_nan value)
-         && value <> infinity
-         && value <> neg_infinity
+         && Float.is_finite value
          && value >= 0.0 ->
     Some value
   | _ -> None
@@ -228,13 +241,20 @@ let fold_tool_row (acc : day_acc) (json : Yojson.Safe.t) : day_acc =
           | None -> 0.0
         in
         update_keeper acc keeper (fun k ->
-            let k = { k with calls = k.calls + 1; tool_ms = k.tool_ms +. duration } in
+            let k =
+              { k with
+                calls = saturating_add_int k.calls 1
+              ; tool_ms = saturating_add_float k.tool_ms duration
+              }
+            in
             match string_member fields "disposition" with
             | Some disposition ->
               (match Tool_result.unit_disposition_of_string disposition with
                | Ok (Tool_result.Completed ()) -> k
-               | Ok (Tool_result.Deferred ()) -> { k with deferred = k.deferred + 1 }
-               | Ok (Tool_result.Failed ()) -> { k with failed = k.failed + 1 }
+               | Ok (Tool_result.Deferred ()) ->
+                 { k with deferred = saturating_add_int k.deferred 1 }
+               | Ok (Tool_result.Failed ()) ->
+                 { k with failed = saturating_add_int k.failed 1 }
                | Error _ -> k)
             | None -> k);
         acc
@@ -366,6 +386,45 @@ let keeper_has_tool_state (k : keeper_month) =
   k.calls > 0 || k.failed > 0 || k.deferred > 0 || k.tool_ms > 0.0
 ;;
 
+let turn_ids_consistent_with_keepers ~turn_ids ~(keepers : keeper_month list) =
+  let seen_keepers = Hashtbl.create (List.length keepers) in
+  let keepers_unique =
+    List.for_all
+      (fun (k : keeper_month) ->
+         if Hashtbl.mem seen_keepers k.keeper then false
+         else (
+           Hashtbl.add seen_keepers k.keeper ();
+           true))
+      keepers
+  in
+  if not keepers_unique then false
+  else
+    let seen_turns = Hashtbl.create (List.length turn_ids) in
+    let counts_by_agent = Hashtbl.create (List.length keepers) in
+    let turns_valid =
+      List.for_all
+        (fun ((agent, _turn) as key) ->
+           if not (Hashtbl.mem seen_keepers agent) || Hashtbl.mem seen_turns key
+           then false
+           else (
+             Hashtbl.add seen_turns key ();
+             let prev =
+               Option.value ~default:0 (Hashtbl.find_opt counts_by_agent agent)
+             in
+             Hashtbl.replace counts_by_agent agent (saturating_add_int prev 1);
+             true))
+        turn_ids
+    in
+    turns_valid
+    && List.for_all
+         (fun (k : keeper_month) ->
+            let expected =
+              Option.value ~default:0 (Hashtbl.find_opt counts_by_agent k.keeper)
+            in
+            Int.equal k.turns expected)
+         keepers
+;;
+
 let section_of_json day json =
   match json with
   | `Assoc fields ->
@@ -389,7 +448,8 @@ let section_of_json day json =
               turn_ids <> [] || List.exists keeper_has_cost_state keepers
             in
             let has_tool_state = List.exists keeper_has_tool_state keepers in
-            if (has_cost_state && not (has_positive_cursor costs_cursors))
+            if not (turn_ids_consistent_with_keepers ~turn_ids ~keepers)
+               || (has_cost_state && not (has_positive_cursor costs_cursors))
                || (has_tool_state && not (has_positive_cursor tool_cursors))
             then None
             else
@@ -657,24 +717,30 @@ let compute_month ~costs_store ~tool_store ~month ~cache =
 (* ------------------------------------------------------------------ *)
 (* Month view *)
 
+let add_keeper_months (a : keeper_month) (b : keeper_month) : keeper_month =
+  { keeper = b.keeper
+  ; turns = saturating_add_int a.turns b.turns
+  ; input_tokens = saturating_add_int a.input_tokens b.input_tokens
+  ; output_tokens = saturating_add_int a.output_tokens b.output_tokens
+  ; cost_usd = saturating_add_float a.cost_usd b.cost_usd
+  ; calls = saturating_add_int a.calls b.calls
+  ; failed = saturating_add_int a.failed b.failed
+  ; deferred = saturating_add_int a.deferred b.deferred
+  ; tool_ms = saturating_add_float a.tool_ms b.tool_ms
+  }
+
 let fleet_of keepers =
-  let turns = List.fold_left (fun sum (k : keeper_month) -> sum + k.turns) 0 keepers in
-  let per_turn total = if turns = 0 then 0.0 else total /. float_of_int turns in
   let totals =
-    List.fold_left
-      (fun acc (k : keeper_month) ->
-         { turns = acc.turns + k.turns
-         ; input_tokens = acc.input_tokens + k.input_tokens
-         ; output_tokens = acc.output_tokens + k.output_tokens
-         ; cost_usd = acc.cost_usd +. k.cost_usd
-         ; calls = acc.calls + k.calls
-         ; failed = acc.failed + k.failed
-         ; deferred = acc.deferred + k.deferred
-         ; tool_ms = acc.tool_ms +. k.tool_ms
-         ; keeper = ""
-         })
-      (zero_keeper "")
-      keepers
+    List.fold_left add_keeper_months (zero_keeper "") keepers
+  in
+  let turns = totals.turns in
+  let per_turn total =
+    if turns <= 0 then 0.0
+    else
+      let q = non_negative_finite_float total /. float_of_int turns in
+      if Float.is_nan q || q < 0.0 then 0.0
+      else if not (Float.is_finite q) then Float.max_float
+      else q
   in
   { turns_total = turns
   ; calls_per_turn = per_turn (float_of_int totals.calls)
@@ -684,18 +750,6 @@ let fleet_of keepers =
   ; cost_usd_per_turn = per_turn totals.cost_usd
   }
 ;;
-
-let add_keeper_months (a : keeper_month) (b : keeper_month) : keeper_month =
-  { keeper = b.keeper
-  ; turns = a.turns + b.turns
-  ; input_tokens = a.input_tokens + b.input_tokens
-  ; output_tokens = a.output_tokens + b.output_tokens
-  ; cost_usd = a.cost_usd +. b.cost_usd
-  ; calls = a.calls + b.calls
-  ; failed = a.failed + b.failed
-  ; deferred = a.deferred + b.deferred
-  ; tool_ms = a.tool_ms +. b.tool_ms
-  }
 
 let month_view_of_cache ~month ~generated_at (cache : month_cache) =
   let merged = Hashtbl.create 16 in

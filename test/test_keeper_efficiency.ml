@@ -258,8 +258,32 @@ let month_tests =
           check int "empty cost cursor with cost state does not double-count" 5
             row_after_missing_one.KE.input_tokens;
           check int "tool calls stay single-counted" 1
-            row_after_missing_one.KE.calls) )
-  ; ( "negative tool duration is clamped so TUI decoder accepts month_view_to_json"
+            row_after_missing_one.KE.calls;
+          (* A section with positive cost cursors and keepers[].turns = 1 whose
+             turn_ids were corrupted to [] must also be rejected and rebuilt so
+             a subsequent attempt for turn 1 does not double-count turns. *)
+          let cost_path = today_day_file (Filename.concat root "costs") in
+          let cost_size = (Unix.stat cost_path).Unix.st_size in
+          let empty_turn_ids_with_turn =
+            Printf.sprintf
+              {|{"schema":"masc.keeper-efficiency-cache/v1","month":%S,"days":[{"day":%d,"section":{"day":%d,"costs_cursors":[{"path":%S,"boundary":%d}],"tool_cursors":[{"path":%S,"boundary":%d}],"turn_ids":[],"keepers":[{"keeper":"polisher","turns":1,"input_tokens":5,"output_tokens":6,"cost_usd":0.25,"calls":1,"failed":0,"deferred":0,"tool_ms":10.0}]}}]}|}
+              (today_month ()) day_num day_num cost_path cost_size tool_path tool_size
+          in
+          Fs_compat.save_file cache empty_turn_ids_with_turn;
+          Dated_jsonl.append costs
+            (CL.to_json (cost_row ~agent:"polisher" ~turn:1 ~attempt:1
+                           ~input_tokens:3 ~output_tokens:4 ~cost_usd:0.15 Resolved));
+          let view_after_turn_id_mismatch =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_after_turn_id_mismatch =
+            keeper_row view_after_turn_id_mismatch "polisher" |> Option.get
+          in
+          check int "rebuilt turn_ids deduplicates same turn across attempts" 1
+            row_after_turn_id_mismatch.KE.turns;
+          check int "both attempts' input_tokens summed" 8
+            row_after_turn_id_mismatch.KE.input_tokens) )
+  ; ( "negative or overflowing tool duration is clamped so TUI decoder accepts month_view_to_json"
     , `Quick
     , fun () ->
       with_masc_root (fun root ->
@@ -270,7 +294,19 @@ let month_tests =
           near "negative duration clamped to 0" 0.0 row.KE.tool_ms;
           check bool "TUI decoder accepts view json" true
             (Result.is_ok
-               (Masc.Tui_decode_keeper_efficiency.of_json (KE.month_view_to_json view)))) )
+               (Masc.Tui_decode_keeper_efficiency.of_json (KE.month_view_to_json view)));
+          Dated_jsonl.append tools (tool_row ~keeper:"polisher" ~duration_ms:1e308 ());
+          Dated_jsonl.append tools (tool_row ~keeper:"polisher" ~duration_ms:1e308 ());
+          let view_overflow =
+            KE.read_month ~masc_root:root ~month:(today_month ()) |> Result.get_ok
+          in
+          let row_overflow = keeper_row view_overflow "polisher" |> Option.get in
+          check bool "overflowing tool_ms saturates to finite float" true
+            (Float.is_finite row_overflow.KE.tool_ms);
+          check bool "TUI decoder accepts saturated view json" true
+            (Result.is_ok
+               (Masc.Tui_decode_keeper_efficiency.of_json
+                  (KE.month_view_to_json view_overflow)))) )
   ; ( "invalid month is an error; empty ledgers are an empty view"
     , `Quick
     , fun () ->

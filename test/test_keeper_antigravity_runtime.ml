@@ -235,7 +235,7 @@ printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","
   path
 ;;
 
-let runtime_toml ~cli_path ~oauth_source =
+let runtime_toml_with_turn_timeout ~turn_timeout_s ~cli_path ~oauth_source =
   Printf.sprintf
     {|[providers.antigravity]
 protocol = "antigravity-cli"
@@ -250,6 +250,7 @@ path = %S
 [models.gemini]
 api-name = "gemini-fixture"
 max-context = 524288
+%s
 
 [antigravity.gemini]
 
@@ -258,6 +259,13 @@ default = "antigravity.gemini"
 |}
     cli_path
     oauth_source
+    (match turn_timeout_s with
+     | None -> ""
+     | Some seconds -> Printf.sprintf "turn-timeout-s = %g" seconds)
+;;
+
+let runtime_toml ~cli_path ~oauth_source =
+  runtime_toml_with_turn_timeout ~turn_timeout_s:None ~cli_path ~oauth_source
 ;;
 
 let keeper_response_text (result : Runtime_agent.run_result) =
@@ -1190,8 +1198,20 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
       [ "CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING" ])
 ;;
 
-let test_noncompletion_without_mcp_cannot_rotate_candidates () =
-  List.iter (fun result_status ->
+let run_native_effect_without_mcp_fixture ending =
+    let turn_timeout_s, terminal, expected_error =
+      match ending with
+      | `Result status ->
+        None,
+        Printf.sprintf {|emit("result", {"conversation_id": "builtin-conversation", "status": %s, "response": "partial reply", "error": None, "num_turns": 1,
+    "usage": {"input_tokens": 1, "output_tokens": 1, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}})
+|} (Yojson.Safe.to_string (`String status)),
+        None
+      | `Process_exit ->
+        None, "raise SystemExit(17)\n", Some (Runtime_antigravity.Process_exited "exit code 17")
+      | `Idle_timeout ->
+        Some 1.0, "import threading\nthreading.Event().wait()\n", Some (Runtime_antigravity.Timeout 1.0)
+    in
     let base_path = temp_workspace () |> Unix.realpath in
     let runtime_snapshot = Runtime.For_testing.snapshot () in
     let modes = Keeper_tool_approval_mode.shared () in
@@ -1212,7 +1232,7 @@ let test_noncompletion_without_mcp_cannot_rotate_candidates () =
           (Masc_test_deps.antigravity_oauth_fixture "operator-oauth-fixture");
         let native_effect_path = Filename.concat base_path "native-effect-count" in
         let fallback_path = Filename.concat base_path "fallback-dispatched" in
-        let fixture name status marker =
+        let fixture name terminal marker =
           let path = Filename.concat base_path name in
           let script = Printf.sprintf {|#!/usr/bin/env python3
 import json, os, pathlib, sys
@@ -1229,14 +1249,15 @@ pathlib.Path("native-effect.txt").write_text("native effect")
 with open(%s, "a") as output:
     output.write("effect\n")
 emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": "DONE", "step_type": "tool", "tool_name": "write_file"})
-emit("result", {"conversation_id": "builtin-conversation", "status": %s, "response": "partial reply", "error": None, "num_turns": 1,
-    "usage": {"input_tokens": 1, "output_tokens": 1, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}})
-|} (Yojson.Safe.to_string (`String marker)) (Yojson.Safe.to_string (`String status)) in
+%s|} (Yojson.Safe.to_string (`String marker)) terminal in
           write_file ~mode:0o700 path script;
           path
         in
-        let first_cli = fixture "first-agy" result_status native_effect_path in
-        let second_cli = fixture "fallback-agy" "SUCCESS" fallback_path in
+        let first_cli = fixture "first-agy" terminal native_effect_path in
+        let second_cli = fixture "fallback-agy"
+          {|emit("result", {"conversation_id": "builtin-conversation", "status": "SUCCESS", "response": "fallback reply", "error": None, "num_turns": 1,
+    "usage": {"input_tokens": 1, "output_tokens": 1, "thinking_tokens": 0, "cache_read_tokens": 0, "total_tokens": 2}})
+|} fallback_path in
         let runtime_path = Filename.concat base_path "runtime.toml" in
         let lane = Printf.sprintf {|
 [providers.antigravity_fallback]
@@ -1249,7 +1270,8 @@ credentials = { type = "file", path = %S }
 [runtime.lanes.antigravity_incomplete]
 candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
 |} second_cli oauth_source in
-        write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path:first_cli ~oauth_source ^ lane);
+        write_file ~mode:0o600 runtime_path
+          (runtime_toml_with_turn_timeout ~turn_timeout_s ~cli_path:first_cli ~oauth_source ^ lane);
         Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
           Eio_context.set_env env;
           Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
@@ -1258,6 +1280,8 @@ candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
               Runtime.init_default ~config_path:runtime_path
               |> Result.map_error (fun detail -> fail detail)
               |> Result.get_ok;
+              check (option (float 0.0)) "declared model idle timeout"
+                turn_timeout_s (Runtime.turn_timeout_s_of_runtime_id "antigravity.gemini");
               let attempted = ref [] in
               let outcome = Keeper_turn_driver.run_named
                   ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-native-incomplete" })
@@ -1280,10 +1304,35 @@ candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
                  | Some (Keeper_internal_error.Provider_attempt_effect_fenced
                      { runtime_id = "antigravity.gemini"
                      ; effect_disposition = Keeper_provider_attempt_effect.Observation_unavailable
-                     ; _ }) -> ()
+                     ; cause }) ->
+                   (match expected_error, cause with
+                    | None, (Keeper_internal_error.Fenced_core _ | Fenced_masc _) -> ()
+                    | Some expected, Keeper_internal_error.Fenced_core actual ->
+                      let expected =
+                        Keeper_antigravity_runtime.For_testing.runtime_error_to_core_error expected
+                        |> Keeper_request_failure_core.of_core_error
+                      in
+                      check string "original failure category is retained"
+                        (Keeper_request_failure_core.category_to_string expected.category)
+                        (Keeper_request_failure_core.category_to_string actual.category);
+                      check string "original failure is retained" expected.message actual.message
+                    | Some _, Keeper_internal_error.Fenced_masc _ ->
+                      fail "native process failure was replaced by a MASC error")
                  | _ -> fail (Agent_core.Error.to_string error))
-              | Ok _ -> fail "a non-completed native turn was replayed on the fallback")))))
+              | Ok _ -> fail "a failed native turn was replayed on the fallback"))))
+;;
+
+let test_noncompletion_without_mcp_cannot_rotate_candidates () =
+  List.iter (fun status -> run_native_effect_without_mcp_fixture (`Result status))
     [ "CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING" ]
+;;
+
+let test_native_effect_then_process_exit_cannot_rotate_candidates () =
+  run_native_effect_without_mcp_fixture `Process_exit
+;;
+
+let test_native_effect_then_idle_timeout_cannot_rotate_candidates () =
+  run_native_effect_without_mcp_fixture `Idle_timeout
 ;;
 
 let test_spawn_failure_is_pre_dispatch () =
@@ -2529,6 +2578,10 @@ let () =
               test_noncompletion_preserves_durable_identity_and_effect_fence
           ; test_case "noncompletion without MCP cannot rotate candidates" `Quick
               test_noncompletion_without_mcp_cannot_rotate_candidates
+          ; test_case "native effect then process exit cannot rotate candidates" `Quick
+              test_native_effect_then_process_exit_cannot_rotate_candidates
+          ; test_case "native effect then idle timeout cannot rotate candidates" `Quick
+              test_native_effect_then_idle_timeout_cannot_rotate_candidates
           ; test_case
               "spawn failure is pre-dispatch"
               `Quick

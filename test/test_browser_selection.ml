@@ -244,7 +244,7 @@ let test_goal_space_default () =
     let first=goal "first" and second=goal "second" in
     let ok=function Ok value -> value | Error e -> fail (G.error_message e) in
     let space : Lane.ego_space={id=51;name="observed Space"} in
-    let bind goal_id space=G.bind config ~goal_id ~addon_instance_id:"addon-one" ~space ~actor:"keeper:test" in
+    let bind goal_id space=G.bind config ~goal_id ~installation:(Masc.Lane_addon_tool_request_owner.Configuration "addon-one") ~space ~actor:"keeper:test" in
     check bool "existing Goal starts unbound" true (ok (G.find config ~goal_id:first)=None);
     let committed=ok (bind first space) in
     check bool "first assignment committed" true committed.created;
@@ -255,13 +255,16 @@ let test_goal_space_default () =
     let original={(client "1" Lane.Ego_task_space) with space=Some space} in
     let reconnected={original with client_id=(client "2" Lane.Ego_task_space).client_id} in
     check bool "reconnect resumes numeric Space through fresh UUID" true
-      (ok (G.resolve readback ~addon_instance_id:"addon-one" [reconnected])=reconnected.client_id);
+      (ok (G.resolve readback ~installation:(Masc.Lane_addon_tool_request_owner.Configuration "addon-one") [reconnected])=reconnected.client_id);
+    check bool "manual and configured owners with equal names stay distinct" true
+      (Result.is_error (G.resolve readback
+        ~installation:(Masc.Lane_addon_tool_request_owner.Manual "addon-one") [original]));
     check bool "missing Space does not choose unrelated browser" true
-      (Result.is_error (G.resolve readback ~addon_instance_id:"addon-one" [client "3" Lane.Webdriver_bidi]));
+      (Result.is_error (G.resolve readback ~installation:(Masc.Lane_addon_tool_request_owner.Configuration "addon-one") [client "3" Lane.Webdriver_bidi]));
     check bool "different installation cannot borrow pin" true
-      (Result.is_error (G.resolve readback ~addon_instance_id:"addon-two" [original]));
+      (Result.is_error (G.resolve readback ~installation:(Masc.Lane_addon_tool_request_owner.Configuration "addon-two") [original]));
     check bool "ambiguous same Space connections require choice" true
-      (Result.is_error (G.resolve readback ~addon_instance_id:"addon-one" [original;reconnected]));
+      (Result.is_error (G.resolve readback ~installation:(Masc.Lane_addon_tool_request_owner.Configuration "addon-one") [original;reconnected]));
     let store=Filename.concat (Masc.Workspace.masc_dir config) "browser_goal_spaces.json" in
     let before=Masc.Workspace.read_json_doc config store in
     check bool "missing Goal cannot create a pin" true (Result.is_error (bind "missing" {space with id=52}));
@@ -270,7 +273,17 @@ let test_goal_space_default () =
     Masc.Workspace.write_json config store corrupt;
     check bool "duplicate store is rejected on read" true (Result.is_error (G.find config ~goal_id:first));
     check bool "corrupt store never licenses a new assignment" true (Result.is_error (bind second {space with id=52}));
-    check bool "corrupt evidence remains" true (Masc.Workspace.read_json_doc config store=Ok (Some corrupt)))
+    check bool "corrupt evidence remains" true (Masc.Workspace.read_json_doc config store=Ok (Some corrupt));
+    let earlier=`Assoc ["bindings",`List [`Assoc [
+      "goalId",`String first;"addonInstanceId",`String "previous-runtime-instance";
+      "space",Lane.ego_space_to_json space;"actor",`String "keeper:test"]]] in
+    Masc.Workspace.write_json config store earlier;
+    check bool "earlier incarnation wire cannot be inferred as an installation" true
+      (Result.is_error (G.find config ~goal_id:first));
+    check bool "unbind does not delete a store its current decoder cannot read" true
+      (Result.is_error (G.unbind config ~goal_id:first));
+    check bool "hard-cut evidence remains for its operator" true
+      (Masc.Workspace.read_json_doc config store=Ok (Some earlier)))
 
 let test_multi_worker_inventory () =
   let module I=Masc.Browser_connection_inventory in

@@ -47,9 +47,10 @@ For a Keeper named `reviewer`:
 <base-path>/.masc/config/keepers/reviewer.toml
 ```
 
-There is no second file. The prompt lives in `keeper.instructions` inside this
-TOML, and a Keeper whose TOML has no non-empty `instructions` is rejected at
-load by `lib/keeper/keeper_types_profile.ml`, not started with an empty prompt.
+There is no separate per-Keeper prompt file. Its own instructions live in
+`keeper.instructions` inside this TOML. They are composed with the shared runtime
+prompt whose source is `config/prompts/keeper.md`. A Keeper whose TOML has no
+non-empty `instructions` is rejected at load by `lib/keeper/keeper_types_profile.ml`.
 
 ```toml
 [keeper]
@@ -72,7 +73,7 @@ Counted across the eleven Keepers on one live runtime, 2026-08-25:
 | Field | Used by | What it decides |
 |---|---:|---|
 | `activation_mode` | — | Manual start, on-demand owner, or autonomous periodic execution |
-| `instructions` | 11/11 | The Keeper's whole prompt; rejected if empty |
+| `instructions` | 11/11 | The Keeper's own instructions, composed with the shared runtime prompt; rejected if empty |
 | `sandbox_profile` | 11/11 | `docker`, `microvm`, or `remote_ssh`. A Keeper runs in one of them or not at all |
 | `mention_targets` | 7/11 | The names that route a board mention to it |
 | `network_mode` | 6/11 | Network reachability for its sandbox |
@@ -930,20 +931,34 @@ memory for that request; it does not turn on automatic prompt injection.
 
 ## Inspect images directly
 
+Read an image block already attached to the model-visible message directly.
+When only a Keeper-local image artifact handle or sandbox path is available,
+start with `keeper_image_read`; a handle alone does not mean the pixels have
+been read.
+
 `keeper_image_read` supplies original image pixels to the current model, without
-invoking a second model. Provide exactly one `artifact` handle from an image
-upload or browser screenshot, or a `path` in the Keeper's own sandbox. It uses
+invoking a second model. Provide exactly one `artifact` handle returned by a
+Keeper image/screenshot tool, or a `path` in the Keeper's own sandbox. Attachment
+IDs, tool-blob references and bare SHA-256 values are not these Keeper-local
+image handles; do not pass them as `artifact`. The tool uses
 the same path boundary as `Read`, verifies stored hashes and applies the existing
 image size and media-type limits. A successful read retains a rotating browser
 frame so its handle remains readable.
 
 The selected runtime must explicitly declare `supports-image-input = true`.
-An absent declaration remains disabled; the tool returns a model-visible
-rejection before reading pixels, and the turn can continue. Use
-`keeper_analyze_image` when the runtime cannot accept images or you deliberately
-want another model's text interpretation. That tool makes a separate inference
-through the configured media routes. Receiving an artifact handle alone does
-not mean the current model has seen its pixels.
+An absent declaration remains disabled. When image admission is unavailable,
+the normal tool surface excludes `keeper_image_read`, including deferred and
+discovery results. A defensive admission hook rejects any attempted read before
+reading pixels; a rejected call is not required to establish this normal exclusion.
+
+Use `keeper_analyze_image` when the current runtime capability and actual tool
+surface confirm that direct reading was excluded for unavailable image admission,
+after an explicit native admission rejection, or when you deliberately want
+another model's text interpretation. That tool makes a separate inference through
+the configured media routes. An unloaded schema or unsuccessful tool search alone
+does not establish unsupported image input. Neither do model/provider names,
+older skill instructions, file/artifact failures or account quota errors; diagnose
+those failures separately.
 
 If a verified image-capable runtime still rejects direct reading, inspect its
 resolved model capability declaration. Use the existing runtime configuration
@@ -961,6 +976,34 @@ lists may report `supports_image_input` or `architecture.input_modalities`.
 Unreported metadata leaves the setting undeclared. Account/model discovery and
 a successful text/tool check do not establish that an image was read; verify
 image delivery with an actual pixel-reading request on the selected connection.
+
+See the [recorded GLM/Codex attachment observations and Claude limits](evidence/keeper-native-image-input-20261101/README.md)
+for a bounded example. That record does not cover every runtime or the artifact
+reader's tool-result path.
+
+### Check which guidance is live
+
+Source edits, independent source review and observed live behavior are separate
+evidence. For an authorized change to the shared runtime prompt, read the
+`keeper` entry from `/api/v1/prompts`, preserve its effective text, then use the
+authenticated prompt API to set the override and read back its source and
+effective value. Do not edit managed prompt copies directly. Per-Keeper
+`keeper.instructions` remains a separate source.
+
+Installing a binary and restarting does not necessarily update existing built-in
+skills: startup leaves existing packages from another release in place and keeps
+local modifications. For an authorized package update, run the deployed binary's
+`masc init --skills-only --base-path BASE`
+and inspect each package's result. Kept operator changes need review before an
+explicit revision-pinned replacement; follow [builtin Skill updates](guides/builtin-skill-updates.md).
+Refresh the running catalog through the authenticated `/api/v1/skills/refresh`
+operation, then verify the selected source, skill reference, content revision and
+resource contents on a new invocation. Already-delivered instructions do not change.
+
+For tool descriptions, verify the deployed artifact and the model-visible
+description/schema. A source file change or prompt API readback does not establish
+that a selected skill or tool description changed, or that a model received image
+pixels. Record the specific runtime and actual pixel-reading result separately.
 
 ## Publish a report as an artifact
 

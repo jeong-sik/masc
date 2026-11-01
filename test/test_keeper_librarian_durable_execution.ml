@@ -1133,6 +1133,19 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       let child=io (fun () -> Capture.create
         ~predecessor:{request_id=original_record.request_id;request_digest=original_record.request_digest}
         ~request_id ~owner ~destination:(Capture.destination original) ~source:rebased ~preparation ()) |> get in
+      let read ~scope ~request_id = Owner.load ~store:fixture.store ~scope ~request_id
+        |> Result.map_error Owner.error_to_string in
+      let inspect ?(read=read) ~require_confirmed child = io (fun () ->
+        Capture.validate_predecessor_payload ~read ~require_confirmed child) in
+      check bool "preflight refuses a missing history predecessor" true
+        (Result.is_error (inspect ~read:(fun ~scope:_ ~request_id:_ -> Ok None) ~require_confirmed:false child));
+      let wrong_digest=io (fun () -> Capture.create
+        ~predecessor:{request_id=original_record.request_id;request_digest=String.make 64 '0'}
+        ~request_id ~owner ~destination:(Capture.destination original) ~source:rebased ~preparation ()) |> get in
+      check bool "preflight refuses a changed history predecessor digest" true
+        (Result.is_error (inspect ~require_confirmed:false wrong_digest));
+      check bool "preflight requires the parent's full replacement intent" true
+        (Result.is_error (inspect ~require_confirmed:false child));
       let intended:Progress.preparation_intent={request_id;request=Capture.to_json child} in
       let parent=io (fun () -> match Owner.advance ~store:fixture.store ~expected:parked
           ~event:(Progress.Replacement_intended intended) with
@@ -1141,6 +1154,9 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
         | Error error -> fail (Owner.update_error_to_string error)) in
       check bool "full parent intent exists before any child retention" true
         (Option.is_some (Progress.replacement parent.progress));
+      inspect ~require_confirmed:false child |> get;
+      check bool "a pending history child cannot claim acknowledged publication" true
+        (Result.is_error (inspect ~require_confirmed:true child));
       let package=Lane_addon_manifest.load ~path:"../addons/keeper-librarian/lane.toml"
         |> Result.map_error Lane_addon_manifest.error_to_string |> get in
       let authorize child=Server_librarian_addon_validation.authorize ~base_path:fixture.base_path
@@ -1157,6 +1173,7 @@ let test_changed_memory_rebases_original_source_without_unknown_retry ?(lose_chi
       (match Progress.replacement parent.progress with
        | Some (Preparation_confirmed successor) -> check string "Off recovery acknowledges the same child" request_id successor.request_id
        | None | Some (Preparation_pending _) -> fail "Off did not recover the original child publication");
+      inspect ~require_confirmed:true child |> get;
       (match authorize child with
        | Ok (Some authorization) -> check bool "Off still refuses actual dispatch after local ACK" true
            (Result.is_error (authorization.before_dispatch ()))

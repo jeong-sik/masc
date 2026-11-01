@@ -44,9 +44,11 @@ type decoder =
 type tool_request_reader = scope:string -> request_id:string ->
   (Lane_addon_tool_request_owner.retained option, string) result
 type request_body_reader = scope:string -> request_digest:string -> (Yojson.Safe.t, string) result
-type payload_validator = read:tool_request_reader -> read_body:request_body_reader ->
+type tool_request_scope_reader = scope:string ->
+  (Lane_addon_tool_request_owner.retained list, string) result
+type payload_validator = read:tool_request_reader -> read_scope:tool_request_scope_reader -> read_body:request_body_reader ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result
-(** Explicit read-only parent/body ports. Every returned original passes the
+(** Explicit read-only parent, scope inventory and body ports. Every returned original passes the
     same record identity, canonical body and digest checks as the scanned one. *)
 
 val decoder_name : decoder -> string

@@ -6,5 +6,6 @@
     completed consumption. *)
 val validate :
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+  read_scope:(scope:string -> (Lane_addon_tool_request_owner.retained list, string) result) ->
   read_body:(scope:string -> request_digest:string -> (Yojson.Safe.t, string) result) ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result

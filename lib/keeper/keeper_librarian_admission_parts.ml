@@ -530,13 +530,11 @@ let validate_execution_inventory ~store ~owner inventory =
   let parents=List.map Capture.parent_part_id captures in
   require (List.length parents=List.length (List.sort_uniq String.compare parents))
     "Multiple original executions claim the same immutable candidate part"
-let validate_forest ~store ~owner ~restore_gate inventory =
+let validate_forest_structure inventory =
   let* ()=List.map (fun (partition:partition_record) ->
     let* parent=find inventory ~part_id:partition.parent_id in
     let* ()=eligible inventory [] parent in
     let* ()=check_children parent partition in
-    let* actual=check_size ~store ~owner ~inventory ~parent ~restore_gate partition.evidence.source in
-    let* ()=equal actual.proof partition.evidence.proof "Original subdivision proof changed" in
     let* ()=List.map (fun (expected:part) -> match List.find_opt (fun (p:part) -> p.id=expected.id) inventory.parts with
       | None -> require (not (acknowledged partition)) "Acknowledged original partition child is missing"
       | Some actual ->
@@ -558,10 +556,6 @@ let validate_forest ~store ~owner ~restore_gate inventory =
   let all_ids=List.map (fun (p:part) -> p.id) inventory.parts @ List.map (fun (p:partition_record) -> p.id) inventory.partitions in
   let* ()=require (unique all_ids) "Original part and transaction identities collide" in
   let* ()=validate_root_lineage inventory in
-  let* ()=validate_execution_inventory ~store ~owner inventory in
-  let* _=traverse (fun (part:part) -> match part.supersession with
-    | None -> Ok ()
-    | Some proof -> validate_replacement ~store ~owner ~restore_gate ~inventory proof) (all_roots inventory) in
   let rec root_ids seen = function
     | [] -> Ok ()
     | (part:part)::rest ->
@@ -571,6 +565,22 @@ let validate_forest ~store ~owner ~restore_gate inventory =
       let* ()=require (not (List.exists conflict ids)) "Original roots overlap candidate ownership" in
       root_ids (ids@seen) rest in
   root_ids [] (roots inventory)
+let validate_payload_forest ~read_scope ~owner =
+  let* raw_parts=read_scope ~scope:(scope owner) in
+  let* parts=traverse (decode_record ~owner) raw_parts in
+  let* raw_partitions=read_scope ~scope:(partition_scope owner) in
+  let* partitions=traverse (decode_partition ~owner) raw_partitions in
+  validate_forest_structure {parts;partitions}
+let validate_forest ~store ~owner ~restore_gate inventory =
+  let* ()=validate_forest_structure inventory in
+  let* _=traverse (fun (partition:partition_record) ->
+    let* parent=find inventory ~part_id:partition.parent_id in
+    let* actual=check_size ~store ~owner ~inventory ~parent ~restore_gate partition.evidence.source in
+    equal actual.proof partition.evidence.proof "Original subdivision proof changed") inventory.partitions in
+  let* ()=validate_execution_inventory ~store ~owner inventory in
+  let+ _=traverse (fun (part:part) -> match part.supersession with
+    | None -> Ok ()
+    | Some proof -> validate_replacement ~store ~owner ~restore_gate ~inventory proof) (all_roots inventory) in ()
 let check_current_owner owner =
   let* current=Capture.observe_owner ~base_path:(Capture.base_path owner)
     ~keepers_dir:(Capture.keepers_dir owner) ~keeper_id:(Capture.keeper_id owner) in

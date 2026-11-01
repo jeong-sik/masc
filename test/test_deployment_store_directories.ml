@@ -601,6 +601,37 @@ let test_librarian_source_parent exe () = with_librarian_payload (fun fixture ->
   let record=replace_original_request fixture.root fixture.store fixture.parent
     (fixture.parent.request |> replace_member "parent_part_id" (`String "missing-original-part")) in
   assert_domain_refusal exe fixture record "Original parent record is absent")
+let original_part fixture =
+  Original.load ~store:fixture.store ~scope:(Keeper_librarian_admission_parts.scope fixture.owner)
+    ~request_id:"part" |> original_result |> Option.get
+let retain_part_payload fixture ~scope ~request_id request =
+  Original.retain ~store:fixture.store ~scope ~request_id
+    ~installation_id:fixture.parent.installation_id ~package_id:fixture.parent.package_id
+    ~tool:fixture.parent.tool ~summary:`Null ~request |> original_result;
+  Original.load ~store:fixture.store ~scope ~request_id |> original_result |> Option.get
+let test_orphan_librarian_child exe () = with_librarian_payload (fun fixture ->
+  let scope=Keeper_librarian_admission_parts.scope fixture.owner in
+  let request=(original_part fixture).request |> replace_member "part_id" (`String "orphan-child")
+    |> replace_member "predecessor" (`String "missing-partition") in
+  let record=retain_part_payload fixture ~scope ~request_id:"orphan-child" request in
+  assert_domain_refusal exe fixture record "Original predecessor partition is missing")
+let test_orphan_librarian_partition exe () = with_librarian_payload (fun fixture ->
+  let part=(original_part fixture).request in
+  let child id=part |> replace_member "part_id" (`String id)
+    |> replace_member "predecessor" (`String "orphan-partition") in
+  let request=`Assoc ["schema",`Int 1;"kind",`String "two_child_partition";
+    "partition_id",`String "orphan-partition";"owner",Admission.owner_to_json fixture.owner;
+    "parent_part_id",`String "missing-part";"source",`Assoc ["kind",`String "exact";
+      "execution_id",`String fixture.parent.request_id];"proof",`Null;
+    "left",child "left";"right",child "right"] in
+  let record=retain_part_payload fixture ~scope:(Keeper_librarian_admission_parts.partition_scope fixture.owner)
+    ~request_id:"orphan-partition" request in
+  assert_domain_refusal exe fixture record "Original candidate part is missing")
+let test_overlapping_librarian_roots exe () = with_librarian_payload (fun fixture ->
+  let request=(original_part fixture).request |> replace_member "part_id" (`String "another-root") in
+  let record=retain_part_payload fixture ~scope:(Keeper_librarian_admission_parts.scope fixture.owner)
+    ~request_id:"another-root" request in
+  assert_domain_refusal exe fixture record "Overlapping roots have no original terminal supersession lineage")
 let test_librarian_host_binding exe () = with_librarian_payload (fun fixture ->
   let record=replace_original_request fixture.root fixture.store fixture.parent
     (fixture.parent.request |> replace_member "request_id" (`String (Admission.fresh_request_id fixture.owner))) in
@@ -687,18 +718,23 @@ let test_unacknowledged_retry_child exe () = with_librarian_payload (fun fixture
   let child=advance_original fixture.store child [Progress.Dispatch_intended] in
   assert_domain_refusal exe fixture child "Unacknowledged original gate child has execution progress")
 let test_historical_gate_namespaces exe () =
-  List.iter (fun (namespace,kind) -> with_librarian_payload (fun fixture ->
+  with_librarian_payload (fun fixture ->
+  let module History=Keeper_librarian_durable_request in
+  let admission_owner=Admission.owner_to_json fixture.owner |> Yojson.Safe.Util.to_assoc in
+  let owner=`Assoc (("runtime",List.assoc "workspace" admission_owner)
+    :: List.remove_assoc "queue_generation" admission_owner) |> History.owner_of_json |> require in
+  List.iter (fun (scope,kind) ->
     let request_id="historical-gate" in
-    let scope=namespace ^ Lane_addon_store.digest "captured-history" in
     let request=fixture.gate_request |> replace_member "version" (`Int 2)
-      |> replace_member "kind" (`String kind) |> replace_member "request_id" (`String request_id) in
+      |> replace_member "kind" (`String kind) |> replace_member "request_id" (`String request_id)
+      |> replace_member "owner" (History.owner_to_json owner) in
     Original.retain ~store:fixture.store ~scope ~request_id
-      ~installation_id:fixture.parent.installation_id ~package_id:fixture.parent.package_id ~tool:fixture.parent.tool
+      ~installation_id:fixture.parent.installation_id ~package_id:History.package_id ~tool:History.tool
       ~summary:`Null ~request |> original_result;
     let record=Original.load ~store:fixture.store ~scope ~request_id |> original_result |> Option.get in
-    assert_domain_refusal exe fixture record "Original gate request is not version 3"))
-    ["keeper-librarian-durable-gate/","librarian-durable-gate";
-     "keeper-librarian-floor-step-gate/","librarian-floor-step-gate"]
+    assert_domain_refusal exe fixture record "Original gate request is not version 3")
+    [Keeper_librarian_durable_gate.scope owner,"librarian-durable-gate";
+     Keeper_librarian_floor_step_gate.scope owner,"librarian-floor-step-gate"])
 let test_old_gate_successor_body exe () = with_librarian_payload (fun fixture ->
   let gate=publish_gate fixture fixture.gate_request in
   let request_id="unpublished-retry" in
@@ -745,6 +781,9 @@ let () =
       test_case "old execution payload refuses deployment" `Quick (test_old_librarian_execution exe);
       test_case "absent captured policy is not reconstructed" `Quick (test_missing_librarian_policy exe);
       test_case "the original part source must exist" `Quick (test_librarian_source_parent exe);
+      test_case "an orphan candidate child refuses deployment" `Quick (test_orphan_librarian_child exe);
+      test_case "an orphan partition refuses deployment" `Quick (test_orphan_librarian_partition exe);
+      test_case "overlapping roots need replacement lineage" `Quick (test_overlapping_librarian_roots exe);
       test_case "captured request identity must match its host record" `Quick (test_librarian_host_binding exe);
       test_case "old gate payload refuses deployment" `Quick (test_old_librarian_gate exe);
       test_case "old unpublished gate preparation refuses deployment" `Quick (test_old_gate_preparation exe);

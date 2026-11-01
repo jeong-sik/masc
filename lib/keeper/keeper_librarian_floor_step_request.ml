@@ -198,6 +198,23 @@ let restore ~owner (record:Owner.retained) =
   let* step=decode ~owner ~digest:(Some record.request_digest) record.request in
   let* ()=binds step record in
   let+ ()=equal record.request (to_json step) "Original floor step request encoding differs" in step
+let validate_ancestry_payload ~read (step:t) =
+  let load ~scope (link:link) =
+    let* record=read ~scope ~request_id:link.request_id in
+    let* record=Option.to_result ~none:"Original floor chain predecessor is absent" record in
+    let+ ()=require (record.Owner.request_digest=link.request_digest)
+      "Original floor chain predecessor digest changed" in record in
+  let rec visit seen (current:t) =
+    let* ()=require (not (List.mem current.id seen)) "Original floor chain ancestry contains a cycle" in
+    match current.previous with
+    | None -> Ok ()
+    | Some link ->
+      let* record=load ~scope:(scope step.owner) link in
+      let* previous=restore ~owner:step.owner record in
+      let* ()=require (previous.range=current.range && previous.transaction_id=current.transaction_id
+        && previous.position=current.position-1) "Original floor chain predecessor belongs to another chain or position" in
+      visit (current.id::seen) previous in
+  visit [] step
 let observe_record_owner ~base_path ~keepers_dir (record:Owner.retained) =
   let* f=fields header_fields record.request in
   let* original=Durable.owner_of_json (value "owner" f) in

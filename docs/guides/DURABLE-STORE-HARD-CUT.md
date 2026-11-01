@@ -107,7 +107,11 @@ files in that store. The check includes historical gate records, full gate
 preparations retained by execution parents, and digest-only retry bodies that
 have not yet acquired a child owner record. It checks current payload, source
 and host bindings through read-only ports, including reciprocal root/retry
-IDs and digests, ancestry cycles and unacknowledged child progress. It does
+IDs and digests, ancestry cycles and unacknowledged child progress. It also
+checks the captured candidate forest's partition ancestry, child ownership,
+replacement lineage and active-root overlap, history replacement parents and
+their full publication intents, and floor steps' previous IDs/digests,
+transaction/range identity and consecutive positions. These structural checks do
 not observe or initialize
 today's Memory epoch, run parts discovery or publication recovery, replay a
 provider, save Memory, or acknowledge input.

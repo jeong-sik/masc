@@ -28,46 +28,58 @@ let history_owner record = let* json=owner_json record in History.owner_of_json 
 let parent ~read ~scope ~request_id =
   let* record=read ~scope ~request_id in
   Option.to_result ~none:("Original Librarian source parent is absent: " ^ request_id) record
-let admission_capture ~read ~owner record =
+let admission_capture ~read ~read_scope ~owner record =
+  let* ()=Parts.validate_payload_forest ~read_scope ~owner in
   Admission.restore ~owner ~load_parent:(Parts.load_parent_payload ~read ~owner) record
+let history_capture ~read ~owner (record:Owner.retained) =
+  let* capture=History.restore_payload ~owner record in
+  let+ ()=History.validate_predecessor_payload ~read
+    ~require_confirmed:(Lane_addon_request_progress.events record.progress<>[]) capture in capture
+let floor_capture ~read ~owner record =
+  let* capture=Floor.restore ~owner record in
+  let+ ()=Floor.validate_ancestry_payload ~read capture in capture
 
-let validate ~read ~read_body (record:Owner.retained) =
+let validate ~read ~read_scope ~read_body (record:Owner.retained) =
   match purpose record.scope with
   | None -> Ok ()
   | Some Admission_execution ->
     let* owner=admission_owner record in
-    let* capture=admission_capture ~read ~owner record in
+    let* capture=admission_capture ~read ~read_scope ~owner record in
     Keeper_librarian_admission_gate.validate_preparation_payload ~read ~read_body ~owner ~capture ~parent:record
   | Some Admission_part ->
-    let* owner=admission_owner record in Parts.validate_part_payload ~owner record
+    let* owner=admission_owner record in
+    let* ()=Parts.validate_part_payload ~owner record in
+    Parts.validate_payload_forest ~read_scope ~owner
   | Some Admission_partition ->
-    let* owner=admission_owner record in Parts.validate_partition_payload ~owner record
+    let* owner=admission_owner record in
+    let* ()=Parts.validate_partition_payload ~owner record in
+    Parts.validate_payload_forest ~read_scope ~owner
   | Some History_execution ->
     let* owner=history_owner record in
-    let* capture=History.restore_payload ~owner record in
+    let* capture=history_capture ~read ~owner record in
     Keeper_librarian_durable_gate.validate_preparation_payload ~read ~read_body ~owner ~capture ~parent:record
   | Some Floor_execution ->
     let* owner=history_owner record in
-    let* capture=Floor.restore ~owner record in
+    let* capture=floor_capture ~read ~owner record in
     Keeper_librarian_floor_step_gate.validate_preparation_payload ~read ~read_body ~owner ~capture ~parent:record
   | Some Admission_gate ->
     let module Gate=Keeper_librarian_admission_gate in
     let* request_id=Gate.parent_execution_id record in
     let* owner=admission_owner record in
     let* parent=parent ~read ~scope:(Admission.scope owner) ~request_id in
-    let* capture=admission_capture ~read ~owner parent in
+    let* capture=admission_capture ~read ~read_scope ~owner parent in
     Gate.validate_payload ~read ~read_body ~owner ~capture ~parent ~record
   | Some History_gate ->
     let module Gate=Keeper_librarian_durable_gate in
     let* request_id=Gate.parent_execution_id record in
     let* owner=history_owner record in
     let* parent=parent ~read ~scope:(History.scope owner) ~request_id in
-    let* capture=History.restore_payload ~owner parent in
+    let* capture=history_capture ~read ~owner parent in
     Gate.validate_payload ~read ~read_body ~owner ~capture ~parent ~record
   | Some Floor_gate ->
     let module Gate=Keeper_librarian_floor_step_gate in
     let* request_id=Gate.parent_execution_id record in
     let* owner=history_owner record in
     let* parent=parent ~read ~scope:(Floor.scope owner) ~request_id in
-    let* capture=Floor.restore ~owner parent in
+    let* capture=floor_capture ~read ~owner parent in
     Gate.validate_payload ~read ~read_body ~owner ~capture ~parent ~record

@@ -47,6 +47,12 @@ val restore : owner:Keeper_librarian_durable_request.owner -> Lane_addon_tool_re
     resolutions and its own input, and check that the prompt is the one the
     host was sent. The record must be this owner's step scope with the host
     binding the request names. *)
+val validate_ancestry_payload :
+  read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+  t -> (unit, string) result
+(** Read-only previous-step links: each digest, physical owner,
+    transaction and consecutive position must agree, down to the first step.
+    Uses captured payloads only, with no source observation or chain execution. *)
 val matches_question : Keeper_librarian_message_floor.Machine.question -> t -> (unit, string) result
 (** The step is the question the floor asks now: the same position and sources,
     the same carried working state and unread messages, and the same input. *)

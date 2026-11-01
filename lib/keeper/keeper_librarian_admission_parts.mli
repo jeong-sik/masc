@@ -49,6 +49,13 @@ val validate_part_payload : owner:Keeper_librarian_admission_capture.owner ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result
 val validate_partition_payload : owner:Keeper_librarian_admission_capture.owner ->
   Lane_addon_tool_request_owner.retained -> (unit, string) result
+val validate_payload_forest :
+  read_scope:(scope:string -> (Lane_addon_tool_request_owner.retained list, string) result) ->
+  owner:Keeper_librarian_admission_capture.owner -> (unit, string) result
+(** The runtime's structural forest checks over verified captured inventories:
+    partition ancestry, children and pending publication shape, unique
+    ownership, replacement lineage and disjoint active roots. Does not read
+    Current, execution receipts or live owner state, or recover publication. *)
 val load_parent_payload :
   read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   owner:Keeper_librarian_admission_capture.owner -> request_id:string ->

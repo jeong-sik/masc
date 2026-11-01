@@ -423,6 +423,37 @@ let test_a_step_answer_needs_a_working_state () =
      | Error _ -> false);
   expect_error "an answer without a working state" ~mentioning:"" (Step.validate_proposal chain.first_step (answer `Null))
 
+let test_preflight_checks_previous_step_links () =
+  with_fixture @@ fun ~owner ~other_owner:_ ~fresh_store ->
+  let chain = chain ~owner in
+  let store = fresh_store () in
+  let first = retain ~store chain.first_step (Step.to_json chain.first_step) in
+  let validate records record =
+    Masc.Keeper_librarian_store_preflight.validate record
+      ~read:(fun ~scope ~request_id -> Ok (List.find_opt (fun (record:Owner.retained) ->
+        record.scope=scope && record.request_id=request_id) records))
+      ~read_scope:(fun ~scope:_ -> fail "floor preflight read an unrelated scope inventory")
+      ~read_body:(fun ~scope:_ ~request_digest:_ -> fail "captured steps have no gate retry body") in
+  let second = retain ~store chain.second_step (Step.to_json chain.second_step) in
+  validate [first] second |> ok;
+  expect_error "a missing predecessor" ~mentioning:"predecessor is absent" (validate [] second);
+  let altered store name value =
+    retain ~store chain.second_step (Step.to_json chain.second_step |> replace_field name (fun _ -> value)) in
+  let wrong_digest = altered (fresh_store ()) "previous"
+    (`Assoc ["request_id",`String first.request_id;"request_digest",`String (sha_hex '0')]) in
+  expect_error "a changed predecessor body" ~mentioning:"predecessor digest changed"
+    (validate [first] wrong_digest);
+  let wrong_transaction = altered (fresh_store ()) "transaction_id" (`String "another-transaction") in
+  expect_error "another chain's predecessor" ~mentioning:"another chain or position"
+    (validate [first] wrong_transaction);
+  let wrong_range = altered (fresh_store ()) "range"
+    (`Assoc ["request_id",`String (Durable.fresh_request_id owner);"request_digest",`String (sha_hex 'a')]) in
+  expect_error "another range's predecessor" ~mentioning:"another chain or position"
+    (validate [first] wrong_range);
+  let skipped_position = altered (fresh_store ()) "position" (`Int 2) in
+  expect_error "a gap in the retained chain" ~mentioning:"another chain or position"
+    (validate [first] skipped_position)
+
 let () =
   run "keeper_librarian_floor_step_request"
     [ ( "step request"
@@ -438,5 +469,6 @@ let () =
         ; test_case "a record of another step is not this step's" `Quick
             test_a_record_of_another_step_is_not_this_steps
         ; test_case "an answer needs a working state" `Quick test_a_step_answer_needs_a_working_state
+        ; test_case "preflight follows previous-step links" `Quick test_preflight_checks_previous_step_links
         ] )
     ]

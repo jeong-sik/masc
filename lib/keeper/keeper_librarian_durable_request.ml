@@ -250,17 +250,16 @@ let confirm_record capture (record:Owner.retained) =
     && record.tool=destination.tool) "Original history host binding differs" in
   require (String.equal record.request_digest capture.digest)
     "Original history record names another request"
-let confirm_predecessor ~store ~require_confirmed capture =
+let check_predecessor ~read ~restore_parent ~require_confirmed capture =
   match capture.predecessor with
   | None -> Ok ()
   | Some predecessor ->
     let owner=capture.owner in
-    let* parent=Owner.load ~store ~scope:(scope owner) ~request_id:predecessor.request_id
-      |> Result.map_error Owner.error_to_string in
-    let* parent=Option.to_result ~none:"History replacement predecessor is absent" parent in
+    let* parent=read ~scope:(scope owner) ~request_id:predecessor.request_id in
+    let* (parent:Owner.retained)=Option.to_result ~none:"History replacement predecessor is absent" parent in
     let* ()=require (parent.request_digest=predecessor.request_digest)
       "History replacement predecessor digest changed" in
-    let* _=restore ~owner parent in
+    let* ()=restore_parent ~owner parent in
     let* ()=match Progress.phase parent.progress with
       | Progress.Conflicted _ -> Ok ()
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
@@ -274,6 +273,19 @@ let confirm_predecessor ~store ~require_confirmed capture =
     let* ()=require (intended.request_id=capture.id)
       "History replacement predecessor names another child" in
     equal intended.request (to_json capture) "History replacement differs from its full original parent intent"
+let confirm_predecessor ~store ~require_confirmed capture =
+  check_predecessor ~require_confirmed capture
+    ~read:(fun ~scope ~request_id -> Owner.load ~store ~scope ~request_id
+      |> Result.map_error Owner.error_to_string)
+    ~restore_parent:(fun ~owner parent -> restore ~owner parent |> Result.map (fun _ -> ()))
+let validate_predecessor_payload ~read ~require_confirmed capture =
+  let rec visit seen ~require_confirmed capture =
+    let* ()=require (not (List.mem capture.id seen)) "History replacement ancestry contains a cycle" in
+    check_predecessor ~read ~require_confirmed capture
+      ~restore_parent:(fun ~owner parent ->
+        let* parent=restore_payload ~owner parent in
+        visit (capture.id::seen) ~require_confirmed:true parent) in
+  visit [] ~require_confirmed capture
 let observe_record_owner ~base_path ~keepers_dir (record:Owner.retained) =
   let* f=header_fields record.request in
   let* original=owner_of_json (value "owner" f) in

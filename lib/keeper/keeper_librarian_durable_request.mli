@@ -69,6 +69,12 @@ val confirm_predecessor : store:Lane_addon_store.t -> require_confirmed:bool -> 
 (** Blocking full parent read and immutable intent check. Retention may accept
     the exact pending intent; dispatch and retained delivery require its ACK.
     Offload the whole call. This performs no publication, ACK or provider work. *)
+val validate_predecessor_payload :
+  read:(scope:string -> request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
+  require_confirmed:bool -> t -> (unit, string) result
+(** Read-only predecessor-chain checks using the same immutable parent state
+    and publication intent rules as {!confirm_predecessor}. Restores only
+    captured payloads and rejects cycles; does not inspect live source roots. *)
 val to_json : t -> Yojson.Safe.t
 val request_id : t -> string
 val physical_owner : t -> owner

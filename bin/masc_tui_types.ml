@@ -17254,6 +17254,20 @@ let usage_providers_reading (state : state) =
       Providers_read {reading with puws_accounts=List.filter (fun account ->
         String.equal account.Masc.Tui_decode_usage.pua_scope_id scope_id) reading.puws_accounts}
 
+(* A period change is an explicit read demand on the same surface. Its
+   dataset ticket must supersede the previous period even when cycling back
+   to the same number of days; the surface-needs delta cannot express this. *)
+let cycle_usage_history_window (state : state) =
+  state.usage_section <- Usage_trend;
+  state.provider_history_days <-
+    (match state.provider_history_days with
+     | 1 -> 7
+     | 7 -> 14
+     | 14 | _ -> 1);
+  state.provider_history <- Provider_history_unread;
+  state.metrics_scroll <- 0;
+  { nothing with needs_provider_history = true }
+
 let usage_history_reading (state : state) =
   match state.usage_scope_id, state.provider_history with
   | None, reading -> reading

@@ -71,8 +71,41 @@ let test_email_search_keeps_exact_target () =
     (List.exists (fun (_,action) -> action=Masc_tui_palette.Palette_usage_scope (Some "B"))
        (Masc_tui_palette.palette_matches state))
 
+let test_window_change_replaces_only_its_history_request () =
+  let state = state () in
+  let module Order = Surface_read_order in
+  state.view <- Metrics;
+  let initial_needs = { nothing with needs_provider_history=true; needs_keeper_usage=true } in
+  let reads, original = Order.dispatch ~kind:Order.Full ~needs:initial_needs
+      ~started_ns:0L Order.initial in
+  let advance reads =
+    let needs = cycle_usage_history_window state in
+    Order.dispatch ~kind:Order.Navigation ~needs ~started_ns:1L reads
+  in
+  let reads, first = advance reads in
+  check int "select the next period" 1 state.provider_history_days;
+  check (option string) "period change retains the chosen account" (Some "B") state.usage_scope_id;
+  check bool "only the new history is pending" true
+    (Order.pending_scoped ~needs:initial_needs reads = [Order.Provider_history]);
+  check bool "old history cannot populate the new period" false
+    (Order.owns_dataset reads original Order.Provider_history_data);
+  check bool "unrelated usage keeps its original request" true
+    (Order.owns_dataset reads original Order.Keeper_usage_data);
+  let reads, _ = advance reads in
+  let reads, latest = advance reads in
+  check int "cycling returns to the original period" 14 state.provider_history_days;
+  check bool "same days do not revive an old request" false
+    (Order.owns_dataset reads original Order.Provider_history_data);
+  check bool "the intermediate period is superseded" false
+    (Order.owns_dataset reads first Order.Provider_history_data);
+  let reads, accepted = Order.take_dataset reads latest Order.Provider_history_data in
+  check bool "the selected period's request can settle" true accepted;
+  let _, accepted = Order.take_dataset reads latest Order.Provider_history_data in
+  check bool "that result cannot settle twice" false accepted
+
 let () = run "usage account continuity"
   ["scope", [test_case "exact source identity" `Quick test_exact_scope_filters_both_sources;
              test_case "refresh and window continuity" `Quick test_refresh_does_not_choose_another_account;
              test_case "source failures" `Quick test_failed_and_unread_sources_stay_failed_and_unread;
-             test_case "email search target" `Quick test_email_search_keeps_exact_target]]
+             test_case "email search target" `Quick test_email_search_keeps_exact_target;
+             test_case "period change requests its own history" `Quick test_window_change_replaces_only_its_history_request]]

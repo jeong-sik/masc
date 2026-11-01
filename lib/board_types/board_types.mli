@@ -578,9 +578,11 @@ type store = {
   mutable votes_load_result : (unit, string) result;
   mutable reactions_load_result : (unit, string) result;
   mutable sub_boards_load_result : (unit, string) result;
-  workspace_binding : Board_workspace_binding.t;
-  (** One immutable explicit BasePath capture attempt. Path projection creates
-      nothing and does not grant physical or loaded-source authority. *)
+  mutable workspace_binding : Board_workspace_binding.t;
+  (** One explicit BasePath capture attempt, refined with actual Present
+      state-directory observations under persist_mutex or quiescent loading.
+      Each binding value is immutable; refinement cannot heal a failed capture.
+      Path projection creates nothing and grants no loaded-source authority. *)
   posts : (string, post) Hashtbl.t;
   comments : (string, comment) Hashtbl.t;
   vote_log : (string, vote_direction * float) Hashtbl.t;

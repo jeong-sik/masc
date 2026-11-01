@@ -168,6 +168,40 @@ let test_directory_replacement_stays_refused ~replace_root base_path workspace =
   load_posts store 0;
   ignore (require_post (create store "restored physical identity remains usable"))
 
+let test_sub_board_only_retains_created_directory base_path workspace =
+  let store = make_store base_path in
+  let create_topic slug = Board.create_sub_board store ~slug ~name:slug
+      ~description:"actual sub-board-only publication" ~owner:"source-writer" () in
+  ignore (require_board (create_topic "first"));
+  (match store.Board.posts_source with
+   | Board.Posts_unobserved -> ()
+   | Posts_readable _ | Posts_refused _ | Posts_unsettled _ ->
+     Alcotest.fail "sub-board-only fixture must not manufacture a posts observation");
+  let path = Board.sub_boards_path store in
+  let original_bytes = read_bytes path in
+  let backup = workspace ^ ".sub-board-backup" in
+  Unix.rename workspace backup;
+  Unix.mkdir workspace 0o700;
+  Fun.protect
+    ~finally:(fun () -> remove_tree workspace; Unix.rename backup workspace)
+    (fun () ->
+      require_io_refusal (create_topic "second");
+      Alcotest.(check int) "replacement remains empty without posts loading" 0
+        (Array.length (Sys.readdir workspace));
+      Alcotest.(check int) "refused sub-board was not published in memory" 1
+        (List.length (Board.list_sub_boards store));
+      Alcotest.(check string) "refused publication preserves the original actual rows"
+        original_bytes (read_bytes (Filename.concat backup (Filename.basename path))));
+  ignore (require_board (create_topic "second"));
+  Alcotest.(check int) "restoring the actual directory permits a new publication" 2
+    (List.length (Board.list_sub_boards store));
+  let slugs = read_bytes path |> String.split_on_char '\n'
+    |> List.filter (fun line -> not (String.equal line ""))
+    |> List.map (fun line -> Yojson.Safe.(Util.(from_string line |> member "slug" |> to_string)))
+    |> List.sort String.compare in
+  Alcotest.(check (list string)) "both actual sub-board rows survive restoration"
+    ["first"; "second"] slugs
+
 let test_base_path_alias base_path _workspace =
   let alias = Filename.concat base_path "root-alias" in
   Unix.symlink base_path alias;
@@ -840,6 +874,8 @@ let () =
             (test_directory_replacement_stays_refused ~replace_root:true)
         ; case "replaced state directory cannot rearm a store"
             (test_directory_replacement_stays_refused ~replace_root:false)
+        ; case "sub-board-only stores retain the created directory"
+            test_sub_board_only_retains_created_directory
         ; case "BasePath aliases preserve actual source identity" test_base_path_alias
         ; case "two Missing observations cannot auto-adopt" test_two_missing_observations
         ; case "Missing cannot replace a later dangling source" test_missing_then_dangling_source

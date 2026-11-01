@@ -33,7 +33,9 @@ val check_workspace :
     Caller owns the persistence lock or a quiescent loader scope. *)
 val observe_workspace :
   Board_types.store -> (Board_workspace_binding.observation, Board_workspace_binding.rejection) result
-(** Same check, retaining the actual observation for a later revalidation. *)
+(** Same check, retaining an actual Present directory in the store's sole
+    binding via an immutable refinement. Caller owns the persistence lock or
+    a quiescent loader scope, including when no posts have been loaded. *)
 val store_file_path : Board_types.store -> persisted_file -> string
 (** Every read and write uses the store's captured workspace. *)
 val persist_path : Board_types.store -> string
@@ -43,4 +45,6 @@ val sub_boards_path : Board_types.store -> string
 val ensure_dir : string -> unit
 val ensure_masc_dir :
   Board_types.store -> (unit, Board_workspace_binding.rejection) result
-(** Check the binding before directory creation. Refusal creates nothing. *)
+(** Check before directory creation and retain an actual Present observation
+    afterward, before payload I/O. A later refusal can follow directory creation;
+    it is not a claim that all filesystem effects were absent. *)

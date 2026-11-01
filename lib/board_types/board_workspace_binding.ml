@@ -121,6 +121,13 @@ let revalidate binding observation =
       Error (Workspace_directory_changed binding.workspace_path)
     else Ok ()
 
+let retain binding observation =
+  let open Result.Syntax in
+  let* () = revalidate binding observation in
+  match observation.workspace_identity with
+  | None -> Error (Workspace_directory_changed binding.workspace_path)
+  | Some _ -> Ok { binding with captured = Ok observation }
+
 let rejection_to_string = function
   | Base_path_missing path -> Printf.sprintf "Board BasePath is missing: %s" path
   | Base_path_not_directory path ->

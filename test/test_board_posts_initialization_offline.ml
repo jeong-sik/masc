@@ -75,7 +75,7 @@ let producer_wire root =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     Fun.protect ~finally:Fs_compat.clear_fs (fun () ->
       let producer_base = Filename.concat root "producer" in
-      Masc.Fs_compat.mkdir_p producer_base;
+      Fs_compat.mkdir_p producer_base;
       let store = Masc.Board.create_store ~base_path:producer_base () in
       (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
        | Ok 0 -> () | Ok _ | Error _ -> fail "actual producer did not load Missing");

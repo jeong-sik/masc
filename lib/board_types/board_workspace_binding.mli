@@ -38,6 +38,12 @@ val revalidate : t -> observation -> (unit, rejection) result
 (** Recheck the root and state-directory identities represented by this actual
     observation. No Board mutex or lifetime lease is acquired. *)
 
+val retain : t -> observation -> (t, rejection) result
+(** Revalidate an actual Present state-directory observation and return an
+    immutable refinement retaining it. Failed captures cannot heal, and a
+    Missing observation cannot establish a directory identity. The caller owns
+    storage of this refinement; no Board state is changed here. *)
+
 val same_root : observation -> observation -> bool
 (** Compare canonical BasePath and physical root identities. This does not
     compare payloads or establish atomicity across filesystem operations. *)

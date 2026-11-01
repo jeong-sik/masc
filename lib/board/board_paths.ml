@@ -39,16 +39,24 @@ let workspace_masc_dir (store : Board_types.store) =
   Board_workspace_binding.workspace_masc_dir store.workspace_binding
 
 let observe_workspace (store : Board_types.store) =
+  let open Result.Syntax in
+  let binding = store.workspace_binding in
   let observed = match store.posts_source with
     | Posts_unobserved -> None
     | Posts_readable { observation; _ } -> Some observation
     | Posts_refused { last_observed; _ } | Posts_unsettled { last_observed; _ } -> last_observed
   in
-  match observed with
-  | None -> Board_workspace_binding.observe store.workspace_binding
+  let* observation = match observed with
+  | None -> Board_workspace_binding.observe binding
   | Some observation ->
     Result.map (fun () -> observation.Board_types.workspace_observation)
-      (Board_workspace_binding.revalidate store.workspace_binding observation.workspace_observation)
+      (Board_workspace_binding.revalidate binding observation.workspace_observation)
+  in
+  if Board_workspace_binding.workspace_directory_missing observation then Ok observation
+  else
+    let* retained = Board_workspace_binding.retain binding observation in
+    store.workspace_binding <- retained;
+    Ok observation
 
 let check_workspace store = Result.map (fun _ -> ()) (observe_workspace store)
 
@@ -72,5 +80,8 @@ let ensure_masc_dir (store : Board_types.store) =
   let dir = workspace_masc_dir store in
   ensure_dir (Filename.dirname dir);
   ensure_dir dir;
-  Ok ()
+  let* observation = observe_workspace store in
+  if Board_workspace_binding.workspace_directory_missing observation then
+    Error (Board_workspace_binding.Workspace_directory_changed dir)
+  else Ok ()
 ;;

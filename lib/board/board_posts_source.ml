@@ -142,7 +142,7 @@ let check_workspace store =
 let finish_workspace_observation store before =
   let binding = store.workspace_binding in
   if Board_workspace_binding.workspace_directory_missing before then
-    match Board_workspace_binding.observe binding with
+    match Board_paths.observe_workspace store with
     | Error _ as error -> error
     | Ok after when Board_workspace_binding.workspace_directory_missing after ->
       Error (Board_workspace_binding.Workspace_directory_changed

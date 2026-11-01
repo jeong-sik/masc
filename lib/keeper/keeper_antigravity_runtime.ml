@@ -30,9 +30,10 @@ let runtime_error_to_core_error = function
          })
   | Runtime_antigravity.Result_not_completed evidence ->
     Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderReportedError
+      (Llm_provider.Error.ProviderTerminal
          { provider = "antigravity_cli"
-         ; error_type = Some (Runtime_antigravity.noncompletion_status_to_string evidence.status)
+         ; kind = Llm_provider.Http_client.Other
+             (Runtime_antigravity.noncompletion_status_to_string evidence.status)
          ; detail = Runtime_antigravity.noncompletion_result_to_json evidence |> Yojson.Safe.to_string
          })
   (* A file-table safety kill, not a spawn failure: refiring the same turn

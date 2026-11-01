@@ -1143,9 +1143,10 @@ let test_noncompletion_preserves_durable_identity_and_effect_fence () =
                 in
                 (match attempt.result with
                  | Error (Agent_core.Error.Provider
-                     (Llm_provider.Error.ProviderReportedError { provider; error_type; detail }) as error) ->
+                     (Llm_provider.Error.ProviderTerminal
+                        { provider; kind = Llm_provider.Http_client.Other status; detail }) as error) ->
                    check string "provider" "antigravity_cli" provider;
-                   check (option string) "exact status projection" (Some result_status) error_type;
+                   check string "exact status projection" result_status status;
                    failure_detail := Some (Agent_core.Error.to_string error);
                    let evidence = Yojson.Safe.from_string detail in
                    let open Yojson.Safe.Util in
@@ -1205,13 +1206,16 @@ let run_native_effect_without_mcp_fixture ?(step_delivery = `Active_done)
       | `Full -> Runtime_native_tools.Native_full, "write_file",
         {|assert "write_file(" + cwd + ")" in settings["permissions"]["allow"]|},
         {|pathlib.Path("native-effect.txt").write_text("native effect")|}, "effect\n"
-      | `Read -> Runtime_native_tools.Native_read, "read_file",
+      | `Read | `Declared_none -> Runtime_native_tools.Native_read, "read_file",
         {|assert "read_file(" + cwd + ")" in settings["permissions"]["allow"]
 assert "write_file(*)" in settings["permissions"]["deny"]
 assert "command(*)" in settings["permissions"]["deny"]|},
         {|list(pathlib.Path(cwd).iterdir())
 assert not pathlib.Path("native-effect.txt").exists()|}, "read\n"
     in
+    let required_native_posture = match posture with
+      | `Full | `Read -> Some native_posture
+      | `Declared_none -> None in
     let step state = Printf.sprintf
         {|emit("step_update", {"conversation_id": "builtin-conversation", "step_index": 1, "state": %s, "step_type": "tool", "tool_name": %s})
 |} (Yojson.Safe.to_string (`String state)) (Yojson.Safe.to_string (`String tool_name)) in
@@ -1247,7 +1251,16 @@ assert not pathlib.Path("native-effect.txt").exists()|}, "read\n"
         cleanup_tree base_path)
       (fun () ->
         Unix.mkdir (Filename.concat base_path ".masc") 0o700;
-        Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None "antigravity-fixture";
+        Masc_test_deps.declare_fixture_keeper ~base_path
+          ~sandbox_profile:(if posture = `Declared_none then Some Keeper_types_profile_sandbox.Docker else None)
+          "antigravity-fixture";
+        if posture = `Declared_none then (
+          (* Antigravity cannot honor none: the real declared-profile path
+             resolves it to the supported read floor, checked by the CLI. *)
+          let path = Config_dir_resolver.keeper_toml_path_for_base_path
+              ~base_path "antigravity-fixture" in
+          write_file ~mode:0o600 path
+            (Fs_compat.load_file path ^ "\n[keeper.tools]\nnative = \"none\"\n"));
         Keeper_tool_approval_mode.set modes ~base_path ~actor:"test"
           ~keeper_name:"antigravity-fixture" Keeper_tool_approval_mode.Yolo |> Result.get_ok |> ignore;
         let oauth_source = Filename.concat base_path "operator-oauth-token" in
@@ -1312,46 +1325,29 @@ candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
               check (option (float 0.0)) "declared model idle timeout"
                 turn_timeout_s (Runtime.turn_timeout_s_of_runtime_id "antigravity.gemini");
               let attempted = ref [] in
-              let direct_noncompletion = match ending with
-                | `Result _ -> posture = `Read || not admitted
+              let unfenced_noncompletion = match ending with
+                | `Result _ -> posture <> `Full || not admitted
                 | `Process_exit | `Idle_timeout -> false in
-              let outcome = if direct_noncompletion then (
-                let runtime = Runtime.get_runtime_by_id "antigravity.gemini" |> Option.get in
-                let config = match runtime.Runtime_instance.execution with
-                  | Runtime_execution.Antigravity_cli config -> config
-                  | _ -> fail "Antigravity runtime fixture did not resolve" in
-                let attempt = Keeper_antigravity_runtime.run
-                    ~input_source:(Keeper_request_source.Keeper_history {trace_id="read-noncompletion"})
-                    ~turn_start:(Keeper_carried_front.Turn_boundary {end_atom=0})
-                    ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input ~runtime)
-                    ~pre_tool_rejects:(ref []) ~runtime_id:"antigravity.gemini"
-                    ~keeper_name:"antigravity-fixture" ~base_path ~required_native_posture:native_posture
-                    ~goal:"Read once" ~goal_blocks:None ~system_prompt:"native read fixture"
-                    ~tools:[] ~initial_messages:[] ~model_input_projection:None
-                    ~on_transmitted_model_input:(fun _ -> ()) ~hooks:None ~context_injector:None
-                    ~context:None ~event_bus:None ~raw_trace:None ~on_event:None ~config () in
-                check bool "unadmitted or read-only noncompletion has no native effect uncertainty" true
-                  (attempt.effect_disposition = Keeper_provider_attempt_effect.No_effect_observed);
-                check bool "the effect boundary permits a safe retry" true
-                  (Keeper_provider_attempt_effect.allows_same_turn_retry attempt.effect_disposition);
-                attempt.result
-              ) else (Keeper_turn_driver.run_named
+              let events = ref [] in
+              let outcome = Keeper_turn_driver.run_named
                   ~input_source:(Keeper_request_source.Keeper_history { trace_id = "antigravity-native-incomplete" })
                   ~walk_owner:Keeper_turn_driver.One_shot_walk ~runtime_id:"antigravity_incomplete"
                   ~keeper_name:"antigravity-fixture" ~base_path
                   ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
                   ~goal:"Run a native tool once" ~system_prompt:"native interruption fixture"
-                  ~required_native_posture:native_posture
+                  ?required_native_posture
                   ~tools:[] ~agent_core_tools:[] ~raw_trace:None
+                  ~on_event:(fun event -> events := event :: !events)
+                  ~attempt_continuation:(fun ~dispatch:_ _ -> Runtime_attempt_dispatch.Next_may_dispatch)
                   ~on_runtime_attempt:(fun (attempt : Keeper_turn_driver.runtime_attempt) ->
                     attempted := attempt.runtime_id :: !attempted)
                   ~sw ~net:(Eio.Stdenv.net env) ()
-                |> Result.map (fun selected -> selected.Keeper_turn_driver.run_result)) in
+                |> Result.map (fun selected -> selected.Keeper_turn_driver.run_result) in
               let retries = match ending with
                 | `Result _ -> false
-                | `Process_exit | `Idle_timeout -> posture = `Read || not admitted in
+                | `Process_exit | `Idle_timeout -> posture <> `Full || not admitted in
               check (list string) "candidate walk follows native effect eligibility"
-                (if direct_noncompletion then [] else if retries then
+                (if retries then
                    ["antigravity_fallback.gemini"; "antigravity.gemini"] else ["antigravity.gemini"]) !attempted;
               check bool "only an admitted first client runs its native operation" admitted
                 (Sys.file_exists native_effect_path);
@@ -1364,11 +1360,41 @@ candidates = ["antigravity.gemini", "antigravity_fallback.gemini"]
                 match outcome with
                 | Ok result -> check string "fallback completes the request" "fallback reply" (keeper_response_text result)
                 | Error error -> fail (Agent_core.Error.to_string error)
-              ) else if direct_noncompletion then (
+              ) else if unfenced_noncompletion then (
                 match outcome, ending with
-                | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError {error_type; _}) as error), `Result status ->
-                  check (option string) "provider terminal status remains exact" (Some status) error_type;
-                  check bool "provider terminal policy remains nonretryable" false (Agent_core.Error.is_retryable error)
+                | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderTerminal
+                    {kind = Llm_provider.Http_client.Other actual; detail; _}) as error), `Result status ->
+                  check string "provider terminal status remains exact" status actual;
+                  check bool "provider terminal policy remains nonretryable" false (Agent_core.Error.is_retryable error);
+                  let evidence = Yojson.Safe.from_string detail in
+                  let open Yojson.Safe.Util in
+                  check string "walk preserves the reported status" status (evidence |> member "status" |> to_string);
+                  check string "walk preserves the partial response" "partial reply"
+                    (evidence |> member "partial_response" |> to_string);
+                  check string "walk preserves the reported identity" "builtin-conversation"
+                    (evidence |> member "conversation_id" |> to_string);
+                  check bool "walk retains noncompletion evidence" false
+                    (evidence |> member "completed" |> to_bool);
+                  check int "walk preserves the reported turn count" 1
+                    (evidence |> member "reported_num_turns" |> to_int);
+                  let usage = evidence |> member "reported_usage" in
+                  check (list int) "walk preserves raw usage" [1; 1; 0; 0; 2]
+                    (List.map (fun key -> usage |> member key |> to_int)
+                      ["input_tokens"; "output_tokens"; "thinking_tokens";
+                       "cache_read_tokens"; "total_tokens"]);
+                  check bool "noncompletion cannot emit EndTurn" false
+                    (List.exists (function
+                      | Agent_core.Types.MessageDelta { stop_reason = Some EndTurn; _ } -> true
+                      | _ -> false) !events);
+                  let session = Keeper_official_client_session_store.load
+                      ~base_path ~keeper_name:"antigravity-fixture"
+                    |> Result.get_ok |> Option.get in
+                  (match session.phase with
+                   | Keeper_official_client_session_store.Recovery_required recovery ->
+                     check (option string) "only init admits a durable identity"
+                       (if admitted then Some "builtin-conversation" else None)
+                       recovery.observed_session_id
+                   | _ -> fail "a noncompleted candidate settled its session")
                 | Error error, (`Result _ | `Process_exit | `Idle_timeout) -> fail (Agent_core.Error.to_string error)
                 | Ok _, (`Result _ | `Process_exit | `Idle_timeout) ->
                   fail "read noncompletion lost its typed terminal"
@@ -1421,14 +1447,17 @@ let test_unreported_native_effect_cannot_rotate_candidates () =
 ;;
 
 let test_read_only_native_transport_failure_rotates_candidates () =
-  List.iter (fun step_delivery ->
-    List.iter (run_native_effect_without_mcp_fixture ~posture:`Read ~step_delivery)
-      [`Process_exit; `Idle_timeout]) [`Active_done; `Done_only; `Error_only; `Unreported]
+  List.iter (fun posture -> List.iter (fun step_delivery ->
+    List.iter (run_native_effect_without_mcp_fixture ~posture ~step_delivery)
+      [`Process_exit; `Idle_timeout]) [`Active_done; `Done_only; `Error_only; `Unreported])
+    [`Read; `Declared_none]
 ;;
 
-let test_read_only_noncompletion_keeps_native_effects_observed () =
-  List.iter (fun status -> run_native_effect_without_mcp_fixture ~posture:`Read (`Result status))
-    ["CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING"]
+let test_effect_free_noncompletion_stops_candidate_walk () =
+  List.iter (fun posture -> List.iter (fun admitted -> List.iter (fun status ->
+    run_native_effect_without_mcp_fixture ~posture ~admitted (`Result status))
+    ["CANCELED"; "INTERRUPTED"; "INVALID"; "WAITING"; "RUNNING"])
+    [true; false]) [`Read; `Declared_none]
 ;;
 
 let test_unadmitted_full_native_failure_rotates_candidates () =
@@ -2694,8 +2723,8 @@ let () =
               test_unreported_native_effect_cannot_rotate_candidates
           ; test_case "read-only native transport failure rotates candidates" `Quick
               test_read_only_native_transport_failure_rotates_candidates
-          ; test_case "read-only noncompletion keeps native effects observed" `Quick
-              test_read_only_noncompletion_keeps_native_effects_observed
+          ; test_case "effect-free noncompletion stops the candidate walk" `Quick
+              test_effect_free_noncompletion_stops_candidate_walk
           ; test_case "unadmitted full native failure rotates candidates" `Quick
               test_unadmitted_full_native_failure_rotates_candidates
           ; test_case "unadmitted full native noncompletion has no effect uncertainty" `Quick

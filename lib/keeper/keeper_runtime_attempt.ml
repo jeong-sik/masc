@@ -28,9 +28,8 @@ let provider_error_to_http_error = function
     http_error ~code ~body:detail
   | Llm_provider.Error.InvalidRequest { reason; _ } ->
     http_error ~code:400 ~body:reason
-  (* [Error.ProviderTerminal] is built only from [Http_client.ProviderTerminal]
-     ([Error.of_http_error]): a session conflict, or a protocol / unknown-variant
-     failure that [ParseError] and [UnknownVariant] below also fold into.
+  (* Structured provider terminals come from HTTP or native client results;
+     [ParseError] and [UnknownVariant] below also fold into this terminal class.
      Carrying it back as the same transport value keeps the walk where
      [Runtime_attempt_fsm.should_try_next] puts every provider terminal, and
      where the failure route puts it ([Provider_integration]). *)

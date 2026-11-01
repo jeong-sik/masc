@@ -53,14 +53,13 @@ val prepare_with :
     is not judged reads no facts, sends nothing and gets [None], so its turn is
     the one it had before the feature.
 
-    [None] also when there is nothing to say: the Keeper has no facts, or a
-    judgment was not made. Three causes are defects and are logged at warn
-    instead of worded: the facts could not be read, a request could not be
-    built (two facts with one id), and something raised. The turn goes on
-    without the texts, because a failure here reaches the turn through the hook
-    and would end it. A cancellation is the turn's own and is raised again. A
-    Keeper whose facts cannot be read still gets the older recall notice, which
-    reads the store itself and says when its own read fails.
+    [None] also when the Keeper has no facts or the judgment is off. Failed
+    fact reads, request construction and non-cancellation exceptions return
+    a status-only failure with no memory body or invented judgment coverage.
+    Each failure increments the preparation-failure counter by bounded reason;
+    its diagnostic detail stays in the warning log. The turn continues. A
+    cancellation is the turn's own and is raised again without a failure
+    status or preparation-failure counter.
 
     The facts are read once per call and the judgment may be one the turn
     kept from an earlier call, so the body is made from the facts of this call
@@ -81,6 +80,7 @@ val prepare :
 
     The time limit of a request comes from the clock of the Eio context
     ({!Eio_context.get_clock_opt}), because the client arms it only with a
-    clock. With none, a judged Keeper gets [None] and a warning: a judgment
-    without a limit could wait on a stalled destination until the turn's stall
-    watchdog cuts the attempt. *)
+    clock. With none, a judged Keeper gets a status-only failure, a warning and
+    a [clock_unavailable] preparation-failure counter. No store is read and no
+    request is sent. A judgment without a limit could wait on a stalled
+    destination until the turn's stall watchdog cuts the attempt. *)

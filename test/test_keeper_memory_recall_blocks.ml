@@ -97,6 +97,27 @@ let some_or_fail = function
   | Some blocks -> blocks
   | None -> Alcotest.fail "expected texts"
 
+let preparation_failures reason =
+  Option.value ~default:0.0
+    (Otel_metric_store.get_metric_value
+       Keeper_metrics.(to_string MemoryRecallPreparationFailures)
+       ~labels:["keeper",keeper_id;"reason",reason] ())
+
+let total_preparation_failures () =
+  List.fold_left (fun total reason -> total +. preparation_failures reason) 0.
+    ["facts_unreadable";"request_not_built";"preparation_raised";"clock_unavailable"]
+
+let check_status_only ~reason result =
+  let blocks = some_or_fail result in
+  Alcotest.(check (option string)) "failed preparation carries no memory" None blocks.Blocks.body;
+  match Blocks.prompt_blocks blocks with
+  | [(Prompt_block_id.Recalled_memory_status,status)] ->
+    Alcotest.(check bool) "failure belongs to the current turn" true
+      (contains status (Ids.Turn_ref.to_string turn_ref));
+    Alcotest.(check bool) "status exposes the bounded failure reason" true
+      (contains status reason)
+  | _ -> Alcotest.fail "failed preparation must carry only its status block"
+
 (* ---- who gets the texts ---- *)
 
 let test_a_keeper_that_is_not_judged_reads_nothing_and_asks_nothing () =
@@ -104,12 +125,15 @@ let test_a_keeper_that_is_not_judged_reads_nothing_and_asks_nothing () =
     (fun (label, policy) ->
       with_policy policy (fun () ->
         let p = probe () in
+        let before = total_preparation_failures () in
         let result =
           prepare ~probe:p ~facts_result:(Ok facts) ~answer:(Ok (Turn.Judged carrying_the_first)) ()
         in
         Alcotest.(check bool) (label ^ ": no texts") true (Option.is_none result);
         Alcotest.(check int) (label ^ ": no read") 0 !(p.reads);
-        Alcotest.(check int) (label ^ ": no judgment") 0 !(p.judgments)))
+        Alcotest.(check int) (label ^ ": no judgment") 0 !(p.judgments);
+        Alcotest.(check (float 0.)) (label ^ ": no preparation failure") before
+          (total_preparation_failures ())))
     [ "switch off", Runtime_schema.default_typesafeai
     ; "scope names others", recall (Runtime_schema.Listed_keepers ("someone-else", []))
     ]
@@ -142,6 +166,7 @@ let test_the_recall_kill_switch_stops_the_judged_texts () =
 let test_a_judged_keeper_gets_the_status_and_the_body_the_renderer_makes () =
   with_policy (recall Runtime_schema.All_keepers) (fun () ->
     let p = probe () in
+    let before = total_preparation_failures () in
     let blocks =
       prepare ~probe:p ~facts_result:(Ok facts) ~answer:(Ok (Turn.Judged carrying_the_first)) ()
       |> some_or_fail
@@ -157,7 +182,9 @@ let test_a_judged_keeper_gets_the_status_and_the_body_the_renderer_makes () =
     Alcotest.(check (list string)) "the judgment saw every fact, in the store's order"
       (List.map id facts) !(p.candidates_seen);
     Alcotest.(check int) "one read" 1 !(p.reads);
-    Alcotest.(check int) "one judgment" 1 !(p.judgments))
+    Alcotest.(check int) "one judgment" 1 !(p.judgments);
+    Alcotest.(check (float 0.)) "successful judgment is not a preparation failure"
+      before (total_preparation_failures ()))
 
 let test_a_judgment_that_carried_nothing_has_a_status_and_no_body () =
   with_policy (recall Runtime_schema.All_keepers) (fun () ->
@@ -210,49 +237,77 @@ let test_nothing_to_judge_and_a_judgment_that_is_off_give_no_texts () =
       ; "off", Ok (Turn.Off Typesafeai_config.Memory_recall_disabled)
       ])
 
-let test_facts_that_cannot_be_read_give_no_texts_and_no_judgment () =
+let test_facts_that_cannot_be_read_give_status_and_no_judgment () =
   with_policy (recall Runtime_schema.All_keepers) (fun () ->
     let p = probe () in
+    let before = preparation_failures "facts_unreadable" in
     let result =
-      prepare ~probe:p ~facts_result:(Error "unreadable") ~answer:(Ok (Turn.Judged carrying_the_first)) ()
+      prepare ~probe:p ~facts_result:(Error "private unreadable path")
+        ~answer:(Ok (Turn.Judged carrying_the_first)) ()
     in
-    Alcotest.(check bool) "no texts" true (Option.is_none result);
+    check_status_only ~reason:"facts_unreadable" result;
+    Alcotest.(check bool) "store detail stays out of the status" false
+      (contains (some_or_fail result).Blocks.status "private unreadable path");
+    Alcotest.(check (float 0.)) "one read failure is recorded"
+      (before +. 1.) (preparation_failures "facts_unreadable");
     Alcotest.(check int) "it read" 1 !(p.reads);
     Alcotest.(check int) "and asked nothing" 0 !(p.judgments))
 
-let test_a_request_that_cannot_be_built_gives_no_texts () =
+let test_preparation_failure_respects_search_tool_availability () =
   with_policy (recall Runtime_schema.All_keepers) (fun () ->
-    let result =
-      prepare ~probe:(probe ()) ~facts_result:(Ok facts)
-        ~answer:(Error (Codec.Duplicate_candidate_id (id first))) ()
-    in
-    Alcotest.(check bool) "no texts" true (Option.is_none result))
+    List.iter (fun memory_search_available ->
+      let result = prepare ~memory_search_available ~probe:(probe ())
+          ~facts_result:(Error "unavailable") ~answer:(Ok Turn.Nothing_to_judge) () in
+      check_status_only ~reason:"facts_unreadable" result;
+      Alcotest.(check bool) "failure offers only an available search route"
+        memory_search_available
+        (contains (some_or_fail result).Blocks.status "keeper_memory_search"))
+      [false;true])
+
+let test_a_request_that_cannot_be_built_gives_status_only () =
+  with_policy (recall Runtime_schema.All_keepers) (fun () ->
+    List.iter (fun error ->
+      let before = preparation_failures "request_not_built" in
+      let result = prepare ~probe:(probe ()) ~facts_result:(Ok facts) ~answer:(Error error) () in
+      check_status_only ~reason:"request_not_built" result;
+      Alcotest.(check bool) "raw request detail stays out of the status" false
+        (contains (some_or_fail result).Blocks.status "private construction detail");
+      Alcotest.(check (float 0.)) "one construction failure is recorded"
+        (before +. 1.) (preparation_failures "request_not_built"))
+      [Codec.Duplicate_candidate_id "private construction detail";
+       Codec.Choice_set_invalid "private construction detail"])
 
 (* The recall must not end the turn it is meant to help: whatever raises in it
-   is logged and the Keeper goes on without the texts. *)
+   is logged and the Keeper gets its unavailable status. *)
 let prepare_raising ?(judge = fun _ -> Ok Turn.Nothing_to_judge) ~read_facts () =
   Blocks.prepare_with ~judge ~read_facts ~keeper_id ~turn_ref ~memory_search_available:true
 
-let test_something_that_raises_gives_no_texts_and_does_not_end_the_turn () =
+let test_something_that_raises_gives_status_and_does_not_end_the_turn () =
   with_policy (recall Runtime_schema.All_keepers) (fun () ->
-    Alcotest.(check bool) "the read raises" true
-      (Option.is_none (prepare_raising ~read_facts:(fun () -> failwith "lock timeout") ()));
-    Alcotest.(check bool) "the judgment raises" true
-      (Option.is_none
-         (prepare_raising
-            ~judge:(fun _ -> failwith "client crashed")
-            ~read_facts:(fun () -> Ok facts)
-            ())))
+    List.iter (fun prepare ->
+      let before = preparation_failures "preparation_raised" in
+      let result = prepare () in
+      check_status_only ~reason:"preparation_raised" result;
+      Alcotest.(check bool) "exception detail stays out of the status" false
+        (contains (some_or_fail result).Blocks.status "private failure detail");
+      Alcotest.(check (float 0.)) "one raised failure is recorded"
+        (before +. 1.) (preparation_failures "preparation_raised"))
+      [(fun () -> prepare_raising ~read_facts:(fun () -> failwith "private failure detail") ());
+       (fun () -> prepare_raising ~judge:(fun _ -> failwith "private failure detail")
+          ~read_facts:(fun () -> Ok facts) ())])
 
 (* A cancellation belongs to the turn that is being stopped; swallowing it
    would keep a stopped turn running. *)
 let test_a_cancellation_is_the_turns_own_and_is_raised_again () =
   with_policy (recall Runtime_schema.All_keepers) (fun () ->
+    let before = total_preparation_failures () in
     let cancelled = Eio.Cancel.Cancelled (Failure "turn stopped") in
     Alcotest.check_raises "from the read" cancelled (fun () ->
       ignore (prepare_raising ~read_facts:(fun () -> raise cancelled) ()));
     Alcotest.check_raises "from the judgment" cancelled (fun () ->
-      ignore (prepare_raising ~judge:(fun _ -> raise cancelled) ~read_facts:(fun () -> Ok facts) ())))
+      ignore (prepare_raising ~judge:(fun _ -> raise cancelled) ~read_facts:(fun () -> Ok facts) ()));
+    Alcotest.(check (float 0.)) "cancellation is not a preparation failure"
+      before (total_preparation_failures ()))
 
 (* ---- the prompt blocks ---- *)
 
@@ -450,12 +505,13 @@ let test_a_judged_turn_asks_once_and_a_retry_gets_the_same_status_from_the_facts
 (* The client puts a time limit on a request only with a clock, so a judged
    Keeper with none sends nothing. This test runs outside the server, where the
    Eio context holds no clock. *)
-let test_a_judged_keeper_without_a_clock_gets_no_texts () =
+let test_a_judged_keeper_without_a_clock_gets_status_only () =
   with_policy (recall Runtime_schema.All_keepers) (fun () ->
     with_directories (fun config keepers_dir ->
       Alcotest.(check bool) "the test has no ambient clock" true
         (Option.is_none (Eio_context.get_clock_opt ()));
       store ~keepers_dir facts;
+      let before = preparation_failures "clock_unavailable" in
       let result =
         Blocks.prepare
           ~memo:(Turn.create_memo ())
@@ -466,7 +522,9 @@ let test_a_judged_keeper_without_a_clock_gets_no_texts () =
           ~purpose:(Blocks.purpose ~current_input:"review" ~keeper_instructions:"be brief" ~turn_ref)
           ~memory_search_available:true
       in
-      Alcotest.(check bool) "no texts" true (Option.is_none result)))
+      check_status_only ~reason:"clock_unavailable" result;
+      Alcotest.(check (float 0.)) "missing clock is recorded without dispatch"
+        (before +. 1.) (preparation_failures "clock_unavailable")))
 
 let () =
   Alcotest.run "keeper_memory_recall_blocks"
@@ -491,12 +549,14 @@ let () =
     ; ( "when there is nothing to say"
       , [ Alcotest.test_case "nothing to judge and a judgment that is off give no texts" `Quick
             test_nothing_to_judge_and_a_judgment_that_is_off_give_no_texts
-        ; Alcotest.test_case "facts that cannot be read give no texts and no judgment" `Quick
-            test_facts_that_cannot_be_read_give_no_texts_and_no_judgment
-        ; Alcotest.test_case "a request that cannot be built gives no texts" `Quick
-            test_a_request_that_cannot_be_built_gives_no_texts
-        ; Alcotest.test_case "something that raises gives no texts and does not end the turn" `Quick
-            test_something_that_raises_gives_no_texts_and_does_not_end_the_turn
+        ; Alcotest.test_case "facts that cannot be read give status and no judgment" `Quick
+            test_facts_that_cannot_be_read_give_status_and_no_judgment
+        ; Alcotest.test_case "preparation failure respects search tool availability" `Quick
+            test_preparation_failure_respects_search_tool_availability
+        ; Alcotest.test_case "a request that cannot be built gives status only" `Quick
+            test_a_request_that_cannot_be_built_gives_status_only
+        ; Alcotest.test_case "something that raises gives status and does not end the turn" `Quick
+            test_something_that_raises_gives_status_and_does_not_end_the_turn
         ; Alcotest.test_case "a cancellation is the turn's own and is raised again" `Quick
             test_a_cancellation_is_the_turns_own_and_is_raised_again
         ] )
@@ -513,7 +573,7 @@ let () =
     ; ( "the whole path"
       , [ Alcotest.test_case "a judged turn asks once and a retry gets the same status from the facts it reads" `Quick
             test_a_judged_turn_asks_once_and_a_retry_gets_the_same_status_from_the_facts_it_reads
-        ; Alcotest.test_case "a judged keeper without a clock gets no texts" `Quick
-            test_a_judged_keeper_without_a_clock_gets_no_texts
+        ; Alcotest.test_case "a judged keeper without a clock gets status only" `Quick
+            test_a_judged_keeper_without_a_clock_gets_status_only
         ] )
     ]

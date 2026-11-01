@@ -80,6 +80,13 @@ let status ~memory_search_available ~turn_ref (judged : Flow.judged) =
   | None -> sentences
   | Some ids -> sentences ^ "\n" ^ ids
 
+let unavailable_status ~memory_search_available ~turn_ref ~reason =
+  let main = fragment Prompt_names.keeper_recall_status_unavailable
+      ["turn_ref", Ids.Turn_ref.to_string turn_ref; "reason", reason] in
+  if memory_search_available
+  then main ^ " " ^ fragment Prompt_names.keeper_recall_status_search_hint_unavailable []
+  else main
+
 (* ---- the body ---- *)
 
 (* What an item writes for a time no date can be made of. *)

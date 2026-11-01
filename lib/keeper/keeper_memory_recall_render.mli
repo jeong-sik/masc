@@ -36,6 +36,15 @@ val status :
     [none_found] with an unanswered turn question: that is a defect of the
     caller's judgment, not a state to word. *)
 
+val unavailable_status :
+  memory_search_available:bool ->
+  turn_ref:Ids.Turn_ref.t ->
+  reason:string ->
+  string
+(** A status-only failure before a judgment exists. [reason] is the caller's
+    bounded failure token, never raw exception or store content. This names
+    the turn and optional search route without inventing candidate coverage. *)
+
 val unknown_day : string
 (** What a body item writes for a time that is not a representable date. *)
 

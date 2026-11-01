@@ -1466,7 +1466,7 @@ claim. The coding session runs no local Dune build/typecheck/tests.
 
 The source/peer audit found #47026 still open at
 `81f5d78578378deabf5447de961dae483b400312` over
-`df076a53d3fc05065b2e078b2b29e6a9dfe8965a`, Native Stack47014 position7/13, in its
+`df076a53d3fc05065b2e078b2b29e6a9dfe8965a`, Native Stack #47014 position 7/13, in its
 2026-11-01 07:38:42 UTC snapshot. That peer changes non-completion Result policy in
 the same types/result/finalizer hunks; it does not supply this extraction. No peer
 code was imported. Future integration must put its new canonical variants/evidence
@@ -1474,7 +1474,7 @@ in this owner and preserve unbound pre-init observations, admitted identity and
 usage, and the peer's recovery fencing. This is an integration obligation, not an
 approval of that peer or a claim that its changes reached main.
 
-This brings the initial queue to29 implemented candidates; T1's authoritative
+This brings the initial queue to 29 implemented candidates; T1's authoritative
 unknown-acknowledgement contract remains open. The whole-repository semantic audit
 and broader improvement objective remain active. The historical investigation below
 retains its original source revision.
@@ -2205,7 +2205,7 @@ T1 remains open: ordinary Board creation still lacks a persisted client operatio
 identity and authoritative unknown-acknowledgement reconciliation. Session history
 does not survive restart, and unchanged-draft protection compares bytes rather than
 composer revisions. No text matching, automatic retry, timeout or global Board
-blocker substitutes for the missing contract. The queue now has29 implemented
+blocker substitutes for the missing contract. The queue now has 29 implemented
 candidates following the S3 layer above; T1 stays open. Exact-head independent source review and selected
 remote execution are recorded on each layer PR; syntax parsing is not type checking
 or execution, and no installed-runtime or full regression result is implied. No

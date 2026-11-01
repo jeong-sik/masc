@@ -1,0 +1,44 @@
+{
+  "metadata_derivative": "Dispatch facts added and raw path made repository-relative; original byte digests preserved.",
+  "run": {
+    "name": "profile-candidate",
+    "workflow": "Test",
+    "run_id": 41323090017,
+    "job_id": 124897263937,
+    "url": "https://github.com/jeong-sik/masc/actions/runs/41323090017",
+    "head": "d6ce437549da7cbe303922879b2468c65820fbfd",
+    "ref": "refactor/catalog-pure-profiles-20261102",
+    "status": "completed",
+    "conclusion": "success",
+    "checkout_head": "d6ce437549da7cbe303922879b2468c65820fbfd",
+    "raw_capture": "artifacts/issues-oldest-20261101/catalog-publication-20261102/profile-candidate-124897263937.raw.log",
+    "raw_bytes": 327200,
+    "raw_sha256": "9cf7a2b8cd22146843c37fd5e8a9dbb7f50d86af96d5bcf34b366cc9c67de83e",
+    "selected_capture": "profile-candidate.txt",
+    "selected_bytes": 52896,
+    "selected_sha256": "21479b237da451c271b512a1b1a3972840ad2f05890f0b9c96c55e21d795ab55",
+    "actual_pass": 461,
+    "actual_fail": 0,
+    "retained_case_pass": 461,
+    "retained_case_fail": 0,
+    "summaries": [
+      "2026-11-01T15:50:44.7396823Z Test Successful in 0.046s. 124 tests run.",
+      "2026-11-01T15:50:45.9784672Z Test Successful in 0.003s. 17 tests run.",
+      "2026-11-01T15:50:48.8568671Z Test Successful in 0.752s. 142 tests run.",
+      "2026-11-01T15:54:37.1912275Z Test Successful in 2.330s. 178 tests run."
+    ],
+    "dispatch": {
+      "minimal": true,
+      "suite": "packages/agent_core/test/test_capabilities,packages/agent_core/test/test_provider_catalog_coverage,packages/agent_core/test/test_provider_config,test/test_runtime_config_validity",
+      "suite_timeout_sec": 600,
+      "requested_at": "2026-11-01T15:48:34.815799+00:00"
+    }
+  },
+  "per_suite": {
+    "packages/agent_core/test/test_provider_catalog_coverage.ml": 17,
+    "packages/agent_core/test/test_provider_config.ml": 142,
+    "packages/agent_core/test/test_capabilities.ml": 124,
+    "test/test_runtime_config_validity.ml": 178
+  },
+  "case_key_sha256": "cb51a43a423a033e4f0d9c4fd56b3f1850317c6e24366cb1e560f3ef836c541b"
+}

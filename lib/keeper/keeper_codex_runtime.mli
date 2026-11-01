@@ -33,6 +33,8 @@ val run :
   ?official_client_continuation:Keeper_semantic_execution.official_client_checkpoint ->
   runtime_id:string ->
   context_window:int option ->
+  configured_reasoning_effort:Llm_provider.Reasoning_effort.t option ->
+  turn_timeout_s:float option ->
   keeper_name:string ->
   pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
@@ -75,8 +77,13 @@ val run :
   config:Runtime_execution.codex_app_server ->
   unit ->
   attempt_outcome
-(** [context_window] comes from the selected runtime snapshot; [None] keeps
-    the account default. The adapter does not re-resolve it from the catalog.
+(** [context_window], [configured_reasoning_effort] and [turn_timeout_s] come
+    from the selected runtime snapshot, without catalog re-resolution.
+    An absent window keeps the account default. Absent effort leaves native
+    defaults; [Some None_] explicitly requests no reasoning. Turn hooks may
+    replace that effort before the native account's model admission.
+    An absent timeout keeps [config.timeout_s]; zero removes the model's
+    protocol-idle bound. The admission timeout remains [config.timeout_s].
 
     [on_model_input_window_observation] receives how much of the offered
     history a [Start] carried. Without it the turn record is written with no

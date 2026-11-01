@@ -195,6 +195,8 @@ default = "codex.%s"
     Keeper_codex_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "context-fixture" })
       ?argument_source
       ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
+      ~configured_reasoning_effort:runtime.model.reasoning_effort
+      ~turn_timeout_s:runtime.model.turn_timeout_s
       ~composed_context:(fun () -> !composed_context)
         ~accepts_image_input:(Runtime_agent.runtime_accepts_image_input
           ~runtime) ~runtime_id:"codex.context" ~keeper_name:"context-fixture"
@@ -297,6 +299,54 @@ let test_selected_unbounded_idle_window_survives_catalog_reload () =
   check int "fresh delayed turn completed" 1 (count_method "thread/start");
   check int "resumed delayed turn completed" 1 (count_method "thread/resume");
   check int "no timeout retry or substituted turn" 2 (count_method "turn/start")
+
+let test_routed_codex_uses_the_selected_model_after_attempt_callback () =
+  with_fixture ~reasoning_effort:(Some High) @@ fun ~run:_ ~capture ~reports:_ ->
+  let base_path = Filename.dirname capture in
+  let replacement_path = Filename.concat base_path "replacement.toml" in
+  write replacement_path (Printf.sprintf {|
+[providers.codex]
+protocol = "codex-app-server"
+command = %S
+is-non-interactive = true
+[models.context]
+api-name = "context-fixture"
+max-context = 400000
+reasoning-effort = "low"
+[codex.context]
+[runtime]
+default = "codex.context"
+|} (Filename.concat base_path "codex-fixture"));
+  let attempts = ref 0 in
+  let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
+    incr attempts;
+    check string "the callback follows selection of this runtime"
+      "codex.context" attempt.runtime_id;
+    Runtime.init_default ~config_path:replacement_path |> require;
+    check bool "the callback installed a conflicting live declaration" true
+      (Runtime.reasoning_effort_of_runtime_id "codex.context" = Some Low)
+  in
+  let env = match Eio_context.get_env_opt () with
+    | Some env -> env | None -> fail "fixture Eio environment is missing" in
+  let result = Eio.Switch.run (fun sw ->
+    Keeper_turn_driver.run_named
+      ~input_source:(Keeper_request_source.Keeper_history {trace_id="context-fixture"})
+      ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk
+      ~runtime_id:"codex.context" ~keeper_name:"context-fixture" ~base_path
+      ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+      ~goal:"Return the fixture marker." ~system_prompt:"Keep the selected Codex intent."
+      ~tools:[] ~agent_core_tools:[]
+      ~initial_messages:[Agent_core.Types.user_msg "Continue the selected turn."]
+      ~context:(Agent_core.Context.create ()) ~on_runtime_attempt ~sw ~net:env#net ()) in
+  (match result with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+  check int "the public driver dispatched one selected candidate" 1 !attempts;
+  let turns = read_requests capture |> List.filter_map (fun request ->
+    if member "method" request = `String "turn/start" then Some (member "params" request)
+    else None) in
+  match turns with
+  | [params] -> check string "public driver preserves the selected high on the wire"
+      "high" (params |> member "effort" |> text)
+  | _ -> fail "expected one routed native turn/start"
 
 let test_operator_interrupt_preserves_previous_native_settlement () =
   with_fixture ~hold_first_resume:true @@ fun ~run ~capture ~reports:_ ->
@@ -1432,6 +1482,8 @@ let () = run "Keeper current Codex context" ["native requests",[
   test_case "native account metadata still admits the selected effort" `Quick
     (test_selected_reasoning_survives_catalog_reload ~accepted_efforts:["low"]
        ~selected:(Some High) ~replacement:(Some High) ~expected:(Some "low"));
+  test_case "public driver preserves selected effort across its attempt callback" `Quick
+    test_routed_codex_uses_the_selected_model_after_attempt_callback;
   test_case "completed arguments cross Start and held Resume" `Quick
     (test_completed_arguments_cross_start_resume_and_reseed ~overflow_resume:false);
   test_case "fresh overflow retry materializes its own Start" `Quick

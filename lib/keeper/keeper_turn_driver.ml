@@ -2610,6 +2610,8 @@ let run_named
             ?on_memory_capacity_refusal
             ?on_tool_execution
             ~context_window:(Some (Runtime_instance.max_context_of_runtime runtime))
+            ~configured_reasoning_effort:runtime.model.reasoning_effort
+            ~turn_timeout_s:runtime.model.turn_timeout_s
             ?composed_context:official_client_composed_context
             ~accepts_image_input
             ?required_native_posture

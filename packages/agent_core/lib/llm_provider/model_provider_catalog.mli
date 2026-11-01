@@ -1,5 +1,14 @@
 (** Provider identity rows embedded in the model catalog TOML. *)
 
+type capability_policy =
+  | Models_only
+  | Provider_defaults of
+      { base : Capability_preset.t
+      ; by_identity_kind : (Provider_kind.t * Capability_preset.t) list
+      }
+(** A model-only provider cannot carry a wire-wide preset, including when a
+    caller constructs a typed declaration or a private catalog lookup view. *)
+
 type entry =
   { id : string
   ; aliases : string list
@@ -12,11 +21,9 @@ type entry =
   ; discovery_timeout_s : float option
     (** Caller-declared total deadline for one discovery HTTP request.
         [None] declares no deadline; it never grants an implicit unbounded one. *)
-  ; capabilities_base : Capability_preset.declaration
-  ; capabilities_base_by_identity_kind : (Provider_kind.t * Capability_preset.t) list
-    (** Wire-specific capability bases. Keys must also appear in
-        [identity_kinds]; absent keys inherit [capabilities_base]. A
-        [Models_only] declaration cannot carry provider-wide wire overrides. *)
+  ; capability_policy : capability_policy
+    (** Wire overrides, when present in [Provider_defaults], have keys from
+        [identity_kinds]; absent keys inherit the declared [base]. *)
   ; supports_parallel_tool_suppression : bool
     (** The provider documents a request control that limits a response to at
         most one tool call. Missing declarations are false; this is separate

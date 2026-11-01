@@ -11,6 +11,13 @@ end
 
 open Result_syntax
 
+type capability_policy =
+  | Models_only
+  | Provider_defaults of
+      { base : Capability_preset.t
+      ; by_identity_kind : (Provider_kind.t * Capability_preset.t) list
+      }
+
 type entry =
   { id : string
   ; aliases : string list
@@ -21,8 +28,7 @@ type entry =
   ; requires_api_key : bool
   ; default_model : string option
   ; discovery_timeout_s : float option
-  ; capabilities_base : Capability_preset.declaration
-  ; capabilities_base_by_identity_kind : (Provider_kind.t * Capability_preset.t) list
+  ; capability_policy : capability_policy
   ; supports_parallel_tool_suppression : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
@@ -294,21 +300,20 @@ let parse_entry provider_toml =
     positive_finite_float_field ~entry_id:id "discovery_timeout_s" provider_toml
   in
   let* raw_capabilities_base = required_string ~entry_id:id "capabilities_base" provider_toml in
-  let* capabilities_base =
-    match Capability_preset.declaration_of_string raw_capabilities_base with
-    | Some declaration -> Ok declaration
-    | None -> Error (Printf.sprintf
-        "provider entry %S field \"capabilities_base\" has unknown value %S; expected models_only or a declared preset"
-        id raw_capabilities_base)
-  in
-  let* capabilities_base_by_identity_kind =
+  let* by_identity_kind =
     capabilities_base_by_identity_kind_field ~entry_id:id ~identity_kinds provider_toml
   in
-  let* () = match capabilities_base, capabilities_base_by_identity_kind with
-    | Capability_preset.Models_only, _ :: _ ->
-      Error (Printf.sprintf
+  let* capability_policy =
+    match String.lowercase_ascii raw_capabilities_base, by_identity_kind with
+    | "models_only", [] -> Ok Models_only
+    | "models_only", _ :: _ -> Error (Printf.sprintf
         "provider entry %S declares models_only and cannot grant provider-wide wire capability overrides" id)
-    | Capability_preset.Models_only, [] | Preset _, _ -> Ok ()
+    | _, by_identity_kind ->
+      (match Capability_preset.of_string raw_capabilities_base with
+       | Some base -> Ok (Provider_defaults {base;by_identity_kind})
+       | None -> Error (Printf.sprintf
+           "provider entry %S field \"capabilities_base\" has unknown value %S; expected models_only or a declared preset"
+           id raw_capabilities_base))
   in
   let* supports_parallel_tool_suppression =
     match Otoml.find_opt provider_toml Otoml.get_boolean
@@ -343,8 +348,7 @@ let parse_entry provider_toml =
     ; requires_api_key
     ; default_model
     ; discovery_timeout_s
-    ; capabilities_base
-    ; capabilities_base_by_identity_kind
+    ; capability_policy
     ; supports_parallel_tool_suppression
     ; serves_bare_models
     }

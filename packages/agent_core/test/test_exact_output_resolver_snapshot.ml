@@ -79,6 +79,7 @@ let target_catalog
   =
   Printf.sprintf
     "[[providers]]\n\
+     capabilities_base = \"models_only\"\n\
      id = %S\n\
      %skind = %S\n\
      base_url = %S\n\

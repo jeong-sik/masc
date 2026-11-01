@@ -241,6 +241,7 @@ let target_fixture_toml
   in
   Printf.sprintf
     "[[providers]]\n\
+     capabilities_base = \"models_only\"\n\
      id = %S\n\
      kind = %S\n\
      base_url = %S\n\

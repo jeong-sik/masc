@@ -422,12 +422,19 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   }
 ;;
 
+let provider_wire_preset ~wire (provider : Model_catalog.provider_entry) =
+  match provider.capability_policy, wire with
+  | Model_provider_catalog.Models_only, _ | Provider_defaults _, None -> None
+  | Provider_defaults {base=_;by_identity_kind}, Some wire ->
+    List.assoc_opt wire by_identity_kind
+;;
+
 let provider_preset ~wire (provider : Model_catalog.provider_entry) =
-  match Option.bind wire (fun kind -> List.assoc_opt kind provider.capabilities_base_by_identity_kind) with
-  | Some _ as preset -> preset
-  | None -> (match provider.capabilities_base with
-      | Capability_preset.Models_only -> None
-      | Preset preset -> Some preset)
+  match provider.capability_policy with
+  | Model_provider_catalog.Models_only -> None
+  | Provider_defaults {base;by_identity_kind} ->
+    Some (match Option.bind wire (fun kind -> List.assoc_opt kind by_identity_kind) with
+      | Some preset -> preset | None -> base)
 ;;
 
 let apply_catalog_entry ?base ~provider_entry ~wire
@@ -436,10 +443,7 @@ let apply_catalog_entry ?base ~provider_entry ~wire
     | None -> None, None, None
     | Some _ -> base, provider_entry, wire in
   let overrides = overrides_of_catalog_entry entry in
-  let wire_base = Option.bind provider_entry
-    (fun (provider : Model_catalog.provider_entry) ->
-      Option.bind wire (fun kind ->
-        List.assoc_opt kind provider.capabilities_base_by_identity_kind))
+  let wire_base = Option.bind provider_entry (provider_wire_preset ~wire)
     |> Option.map capabilities_of_preset in
   let base, base_label = match wire_base, overrides.base_label with
     | Some capabilities, _ -> Some capabilities, None
@@ -546,7 +550,7 @@ let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
 let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provider_entry)
     ~capabilities ~model_id =
   let pricing_source = Pricing.of_provider_entry ~catalog ~provider in
-  let capabilities = match List.assoc_opt wire provider.capabilities_base_by_identity_kind with
+  let capabilities = match provider_wire_preset ~wire:(Some wire) provider with
     | Some preset -> Some (capabilities_of_preset preset)
     | None -> capabilities in
   let row = match Model_identifiers.Model_id.of_string model_id with

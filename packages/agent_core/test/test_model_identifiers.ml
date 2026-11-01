@@ -338,6 +338,7 @@ let test_scoped_lookup_retries_under_the_canonical_provider () =
   let catalog =
     catalog_of_toml ~source:"scoped lookup provider alias"
       "[[providers]]\n\
+       capabilities_base = \"models_only\"\n\
        id = \"alias-fixture\"\n\
        aliases = [\"alias-fixture-old\"]\n\
        kind = \"openai_compat\"\n\
@@ -490,7 +491,7 @@ let test_retired_prefix_keys_and_invalid_client_tags_are_rejected () =
     [ "[[models]]\nid_prefix = \"legacy\"\n"
     ; "[[models]]\nmodel_id = \"m\"\nsuggested_clients = [\"unknown\"]\n"
     ; "[[models]]\nmodel_id = \"m\"\nsuggested_clients = [\"codex\", \"codex\"]\n"
-    ; "[[providers]]\nid=\"owner\"\nkind=\"anthropic\"\nbase_url=\"https://example.invalid\"\nrequest_path=\"/v1/messages\"\nauth=\"none\"\nserves_bare_rows=[\"family\"]\n"
+    ; "[[providers]]\ncapabilities_base = \"models_only\"\nid=\"owner\"\nkind=\"anthropic\"\nbase_url=\"https://example.invalid\"\nrequest_path=\"/v1/messages\"\nauth=\"none\"\nserves_bare_rows=[\"family\"]\n"
     ]
 ;;
 

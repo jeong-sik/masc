@@ -39,9 +39,10 @@ let normalize s = String.trim s |> String.lowercase_ascii
 open Result.Syntax
 
 let of_model_entry (entry : Model_catalog.provider_entry) =
-  let capabilities = match entry.capabilities_base with
-    | Capability_preset.Models_only -> None
-    | Preset preset -> Some (Capability_profile.capabilities_of_preset preset) in
+  let capabilities = match entry.capability_policy with
+    | Model_provider_catalog.Models_only -> None
+    | Provider_defaults {base;by_identity_kind=_} ->
+      Some (Capability_profile.capabilities_of_preset base) in
   { id=entry.id;aliases=entry.aliases;
     kind=entry.kind;base_url=entry.base_url;request_path=entry.request_path;
     authentication=(if entry.requires_api_key then Caller_api_key else No_auth);
@@ -95,7 +96,7 @@ let of_catalogs ~models ~providers =
       ; requires_api_key=(match entry.authentication with No_auth -> false
           | Caller_api_key | Api_key_env _ | Setup_token_env _ -> true)
       ; default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
-        capabilities_base=Capability_preset.Models_only;capabilities_base_by_identity_kind=[]
+        capability_policy=Model_provider_catalog.Models_only
       ; supports_parallel_tool_suppression=false;serves_bare_models=[] } in
     Ids.add (normalize entry.id) provider index) policy_providers overlay in
   let rec project acc = function

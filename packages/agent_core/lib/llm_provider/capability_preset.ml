@@ -54,14 +54,3 @@ let to_string = function
   | Ollama_cloud -> "ollama_cloud"
   | Ollama_cloud_v1 -> "ollama_cloud_v1"
   | Nvidia -> "nvidia"
-
-type declaration = Models_only | Preset of t
-
-let declaration_of_string raw =
-  if String.equal (String.trim raw |> String.lowercase_ascii) "models_only"
-  then Some Models_only
-  else Option.map (fun preset -> Preset preset) (of_string raw)
-
-let declaration_to_string = function
-  | Models_only -> "models_only"
-  | Preset preset -> to_string preset

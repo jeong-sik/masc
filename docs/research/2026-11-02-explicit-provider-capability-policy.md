@@ -14,8 +14,10 @@ nevertheless derived a preset from its `openai` id. Raw observation and selected
 binding could therefore disagree about unknown-model policy.
 
 `Capability_preset` now owns one closed preset vocabulary and its accepted input
-spellings. Provider declarations carry `Models_only` or `Preset of t`, including
-typed wire-specific presets. The TOML parser requires the capability field in
+spellings. A provider has one `capability_policy`: `Models_only` or
+`Provider_defaults {base; by_identity_kind}`. Only the latter carries typed wire
+presets. A typed record or `Model_catalog.with_provider_entry` cannot retain
+hidden wire overrides when switching to `Models_only`. The TOML parser requires the capability field in
 addition to the existing required id/kind/endpoint/path/auth fields. Missing,
 empty, padded, mistyped or unknown declarations fail before snapshot admission.
 `models_only` cannot simultaneously grant a provider-wide wire override.
@@ -33,20 +35,33 @@ labels retain their existing parse boundary, but provider preset resolution no
 longer serializes a provider id or wire kind into a label. The accepted preset
 spelling list is shared with model/manifest validation instead of duplicating
 an allowlist and resolver. Exact-output catalog evidence renders the typed
-declaration canonically; equivalent provider preset aliases now have the same
-rendering. That evidence identity change is not an execution result.
+policy canonically, including sorted wire overrides; equivalent preset aliases
+now have the same rendering. That evidence identity change is not an execution
+result.
 
-Four positive fixture rows require migration: three identity/lookup rows state
-`models_only`, retaining their former raw absence, and the isolated per-keeper
-Ollama Cloud fixture explicitly states its intended provider contract instead
-of relying on the old id inference. Existing rejected-input controls now reject
+Twelve positive producer rows require migration. Identity, exact-output,
+browser, HITL and probe rows state `models_only`, retaining model-owned facts
+and their former raw absence. The isolated per-keeper Ollama Cloud fixture
+states its intended provider contract instead of relying on old id inference.
+A legacy-key negative row also supplies the new required field, so that its
+rejection still depends on the retired key. Existing rejected-input controls now reject
 missing policy during decoding, before an opaque invalid selection can exist.
 They do not claim to force an invalid current snapshot.
+
+The first complete source review found eight missing producers and a typed
+record bypass. The initial AST inventory recognized only one of the parser's
+two string-literal print formats and missed ordinary escaped strings. The
+corrected inventory includes both formats and `bin/`, rather than treating
+that incomplete inventory as proof. The bypass is repaired structurally by
+putting wire overrides inside the `Provider_defaults` constructor.
 
 Public controls cover all six required field omissions, malformed capability
 declarations, refusal of a model-only wire override, raw and selected unknown
 models, discoverability without fabricated provider capabilities, exact model
 policy/pricing, and the packaged OpenAI known-versus-unlisted model boundary.
+A public typed-view control starts with a real wire preset, switches its
+declaration to `Models_only`, admits that view, and checks absent unknown-model
+policy on both wires. The snapshot suite has 29 registered cases.
 The three startup fixtures also explicitly clear `AGENT_CORE_MODEL_CATALOG`,
 addressing the parent fixture review's environment-isolation P3. Their embedded
 catalog premise cannot be replaced by an inherited external file.

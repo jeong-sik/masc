@@ -587,6 +587,35 @@ capabilities_base_by_identity_kind = { ollama = "ollama" }
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "models-only provider admitted a provider-wide wire preset"
 
+let test_typed_view_cannot_retain_wire_policy_after_models_only () =
+  let catalog = models {|[[providers]]
+id = "typed-view"
+kind = "anthropic"
+identity_kinds = ["anthropic", "openai_compat"]
+base_url = "https://typed-view.example.invalid"
+request_path = "/v1/messages"
+auth = "none"
+capabilities_base = "anthropic"
+capabilities_base_by_identity_kind = { openai_compat = "openai_chat_extended" }
+|} in
+  let admit catalog = D.of_catalogs ~models:(Some catalog) ~providers:None |> admitted in
+  let policy snapshot wire = Capabilities.resolve_snapshot_request_policy
+    ~snapshot ~wire ~provider_id:"typed-view" ~model_id:"unknown-model"
+    |> Capabilities.request_policy_capabilities in
+  Alcotest.(check bool) "explicit wire default is a real positive control" true
+    (Option.is_some (policy (admit catalog) Provider_kind.OpenAI_compat));
+  let provider = match Model_catalog.provider_entries catalog with
+    | [provider] -> provider | _ -> Alcotest.fail "expected one typed provider" in
+  let models_only = {provider with
+    capability_policy=Model_provider_catalog.Models_only} in
+  let view = Model_catalog.with_provider_entry catalog models_only in
+  let snapshot = admit view in
+  Alcotest.(check bool) "typed view exposes no provider-wide record" true
+    ((entry snapshot "typed-view").capabilities = None);
+  List.iter (fun wire ->
+    Alcotest.(check bool) "typed models-only state retains no hidden wire preset" true
+      (policy snapshot wire = None)) [Provider_kind.Anthropic;OpenAI_compat]
+
 let () = Alcotest.run "catalog snapshot"
   ["admission",[
     "exact overlay replacement",`Quick,test_exact_replacement;
@@ -596,6 +625,7 @@ let () = Alcotest.run "catalog snapshot"
     "missing capability base",`Quick,test_missing_preset_fails_closed;
     "provider fields require explicit declarations",`Quick,test_provider_required_fields;
     "models-only forbids provider-wide wire policy",`Quick,test_models_only_refuses_provider_wide_wire_override;
+    "typed view cannot retain wire policy in models-only state",`Quick,test_typed_view_cannot_retain_wire_policy_after_models_only;
     "invalid complete pair retains prior publication",`Quick,test_admission_rejects_invalid_combination];
    "consumers",[
     "immutable captured selection",`Quick,test_snapshot_survives_source_replacement;

@@ -772,8 +772,8 @@ let capabilities_for_provider_label label =
 ;;
 
 let%test "capabilities_of_kind aliases the same presets as the label classifier" =
-  (* SSOT guard: the label path delegates canonical kinds to the typed variant
-     path, so the resolved preset must be the exact same record. *)
+  (* Both label decoding and typed wire baselines resolve through the same
+     closed preset, so these native presets share the exact same record. *)
   List.for_all
     (fun (kind, label) ->
        let via_kind = capabilities_of_kind kind in

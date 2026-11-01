@@ -4770,12 +4770,13 @@ let context_exact_input_summary ~width ~scale
               (max 0 (22 - Message_layout.display_width key))
               ' '
         in
-        Printf.sprintf "  %s%s %s%s %s%3d %s%s  \xe2\x89\x88%6s tok  %6s"
+        Printf.sprintf "  %s%s %s%s %s%3d %s%s  %9s  \xe2\x89\x88%6s tok  %6s"
           (context_source_style source)
           (context_source_glyph source)
           label Ansi.reset Ansi.dim count
           (if count = 1 then "item " else "items")
           Ansi.reset
+          (Masc_tui_context_inspector.format_bytes bytes)
           (Masc_tui_context_inspector.format_tokens
              (Masc_tui_token_scale.estimate scale bytes))
           share_text)
@@ -4955,6 +4956,9 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
            ]
          else [])
         @ [ Ansi.dim ^ "  " ^ Masc_tui_token_scale.note scale ^ Ansi.reset ]
+        @ (Context_bars.wrap ~width
+             "Item token estimates can change with this ratio even when their bytes and SHA-256 stay identical."
+           |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
       in
       (* What came back for this exact request, to the extent the turn
          record observed it. The response text lives in the chat store and
@@ -4984,15 +4988,55 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
             | _ ->
                 [ Printf.sprintf "  Response  ·  %s" (String.concat "  ·  " parts) ]
       in
+      (* Usage belongs to the last reported request in the turn. A retained
+         pre-dispatch snapshot can instead name a later failed attempt; the
+         record has no response-to-capture ID, so do not label this as a hit
+         on the prepared request above. All counts here are provider-reported,
+         independent of the byte-to-token scale used for individual items. *)
+      let cache_lines =
+        match response with
+        | None -> [ Ansi.dim ^ "  Provider cache usage unavailable" ^ Ansi.reset ]
+        | Some (record : Turn_record.t) ->
+            let scope = match record.usage.scope with
+              | Runtime_usage_scope.Per_request -> "last reported request in this turn"
+              | Runtime_usage_scope.Turn_total -> "client turn total"
+              | Runtime_usage_scope.Conversation_cumulative -> "conversation cumulative"
+              | Runtime_usage_scope.Usage_scope_unavailable -> "scope unknown"
+            in
+            let read = match record.usage.cache_read_input_tokens with
+              | None -> "cache read unreported"
+              | Some n -> "cache read " ^ Inspector.format_tokens n
+            in
+            let ratio = match record.usage.scope, record.usage.input_tokens,
+                              record.usage.cache_read_input_tokens with
+              | Runtime_usage_scope.Per_request, Some input, Some read
+                when input > 0 && read >= 0 && read <= input ->
+                  Printf.sprintf " (%.1f%% of input)" (float read /. float input *. 100.)
+              | (Runtime_usage_scope.Per_request | Runtime_usage_scope.Turn_total
+                | Runtime_usage_scope.Conversation_cumulative
+                | Runtime_usage_scope.Usage_scope_unavailable), _, _ -> ""
+            in
+            let parts = List.filter_map Fun.id
+                [ Option.map (fun n -> "input " ^ Inspector.format_tokens n)
+                    record.usage.input_tokens
+                ; Some (read ^ ratio)
+                ; Option.map (fun n -> "cache created " ^ Inspector.format_tokens n)
+                    record.usage.cache_creation_input_tokens
+                ] in
+            Context_bars.wrap ~width
+              (Printf.sprintf "Provider usage (%s) · %s" scope (String.concat " · " parts))
+            |> List.map (fun line -> "  " ^ line)
+      in
       let common =
-        [ identity; wire ] @ response_line @ [ "" ] @ summary @ against_wire
+        [ identity; wire ] @ response_line @ cache_lines @ [ "" ] @ summary @ against_wire
         @ [ context_response_summary response_parts; "" ]
       in
       (* One letter per row says where the item stands in the assembly. The
          wire is append-only, so the last message is this turn's newest
          addition and every earlier message is history the window carried
-         forward; the prompt and the schemas are the fixed parts that ride
-         every turn. The letter states a position on the wire, not a join
+         forward. The system prompt can include changing turn observations;
+         its position alone does not establish cacheability. The letter
+         states a position on the wire, not a join
          the pane would have to invent. *)
       let last_message_index =
         List.fold_left
@@ -5005,7 +5049,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
       in
       let kind_letter index (item : Inspector.exact_input_item) =
         match item.kind with
-        | Inspector.System_prompt -> "F"
+        | Inspector.System_prompt -> "P"
         | Inspector.Tool_schema _ -> "S"
         | Inspector.Message _ ->
             if Some index = last_message_index then "N" else "H"
@@ -5040,7 +5084,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
       let legend =
         ("  " ^ context_source_legend)
         :: (Context_bars.wrap ~width
-              "F fixed prompt · H history · N new this turn · S schema"
+              "P system prompt (may include turn observations) · H history · N new this turn · S schema"
            |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset))
       in
       let common = common @ legend @ [ "" ] in

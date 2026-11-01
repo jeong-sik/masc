@@ -266,6 +266,16 @@ packet. Read back the Board post or use `masc_keeper_delegate_status` with the
 original target and operation ID, and record the target and receipt.
 Acceptance or `queued` state proves submission, not review completion or approval.
 
+For Broadcast, inspect and record the structured response's `request_id`, `seq`,
+`mention`, `mention_delivery` and `fanout_state`. One broadcast routes one mention;
+other `@` text does not prove delivery to every named Keeper. Count only the exact
+target with `mention_delivery.kind=accepted` or `already_accepted` as accepted.
+Keep passive, pending, deferred and rejected outcomes distinct; `ok=true` or
+`fanout_state=finished` alone does not prove individual acceptance. When using a
+broadcast as a common announcement, confirm each Keeper's request through a direct
+message operation and its readback. Check existing effects before resending an
+uncertain request.
+
 GitHub user/team review requests also record account assignments; they do not
 replace delivery to the intended Keepers or prove work has started or finished.
 Use `scripts/review/review-worklist.py` with an explicit `--reviewer LOGIN` pool

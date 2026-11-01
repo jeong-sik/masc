@@ -231,10 +231,31 @@ Dispatch에는 저장소 권한이 필요하며 fork 기여자는 maintainer에�
 ## 5. 리뷰하고 통합하기
 
 작업 선택은 [리뷰 라우팅](../../config/prompts/pr-review-routing.md)을 따릅니다.
-GitHub 사용자·팀 리뷰 요청을 공통 배정 기록으로 쓰며 실행·리뷰·승인 완료로 세지 않습니다.
-`scripts/review/review-worklist.py`에 `--reviewer LOGIN`을 반복해 누락된 요청을 계획하고,
-`--request`를 명시한 실행만 게시합니다. 직접 메시지로 받은 PR도 아직 열려 있는지 먼저
-확인합니다. head가 바뀐 CR은 실제 작성 계정으로 재검토를 요청합니다.
+MASC 리뷰 요청은 현재 코드 리뷰 전문 Keeper의 이름과 역할을 확인한 뒤 각 대상에게
+MASC 내부 Board·Broadcast 또는 호출자가 사용할 수 있는 직접 메시지로 전달합니다.
+Keeper 호출자는 `masc_keeper_delegate`의 `target={kind:"keeper",name:"<Keeper>"}`와
+`prompt`를 사용합니다. 운영자·외부 클라이언트는 자신의 도구 표면에 노출된 경우에만
+`masc_keeper_msg`의 `name`과 `message`를 사용합니다. 현재 호출자의 도구 권한을 확인하세요.
+요청에는 PR 링크, 현재 head/base와 Native Stack 범위, 맡길 관점, 검증 근거와 미검증 범위를
+적습니다. 공통 Board 게시물에 범위를 모아도 되지만 대상에게 전달됐는지 미확인이면 사용
+가능한 직접 메시지로 각 Keeper에게 게시물을 참조해 요청합니다. Board 본문을 재조회하거나
+`masc_keeper_delegate_status`에 원래 target과 operation ID를 넣어 읽고 대상과 영수증을
+기록합니다. 접수나 `queued`는 제출 사실이며 리뷰 완료나 공식 승인이 아닙니다.
+
+Broadcast는 구조화된 응답의 `request_id`, `seq`, `mention`, `mention_delivery`,
+`fanout_state`를 읽고 기록합니다. 한 Broadcast가 라우팅하는 mention은 한 대상이므로
+다른 `@` 표기까지 각 Keeper에게 전달됐다고 세지 않습니다. 정확한 대상과 mention이
+일치하고 `mention_delivery.kind`가 `accepted` 또는 `already_accepted`일 때만 접수로
+기록합니다. passive·pending·deferred·rejected는 구분하며 `ok=true`나
+`fanout_state=finished`만으로 개별 접수를 확정하지 않습니다. 공통 안내로 Broadcast를
+쓴다면 각 Keeper의 요청은 직접 메시지 operation과 재조회로 확인합니다. 결과가 불확실한
+요청을 다시 보내기 전에는 기존 효과부터 확인하세요.
+
+GitHub 사용자·팀 리뷰 요청도 계정 배정 기록으로 쓰지만 Keeper 내부 전달이나 실행·리뷰·승인
+완료를 대신하지 않습니다. `scripts/review/review-worklist.py`에 `--reviewer LOGIN`을
+반복해 누락된 계정 요청을 계획하고 `--request`를 명시한 실행만 게시합니다. 직접 메시지로
+받은 PR도 아직 열려 있는지 먼저 확인합니다. head가 바뀐 CR은 계정을 공유하더라도 실제
+작성 Keeper에게 재검토를 요청합니다.
 
 리뷰어는 계약과 현재 head의 diff를 기능·논리·코드 청결도 관점에서 독립적으로 검토합니다.
 P0/P1/P2가 없으면 승인하고 P3는 모아서 나중에 처리합니다. 일반 리뷰에는 CI run이 필요하지

@@ -403,6 +403,28 @@ let test_grant_off_and_disabled () =
     | Error error -> fail ("wrong refusal: " ^ Candle_grant.error_to_string error))
 ;;
 
+let test_grant_recovery_failure_is_unavailable_until_repaired () =
+  with_workspace (fun config ->
+    let base_path = config.Workspace.base_path in
+    let path = Candle_ledger.path ~base_path in
+    Fs_compat.save_file path "not a row\n";
+    let grant () = Candle_grant.grant
+        ~now:fixed_now ~base_path ~keeper:(keeper "alpha")
+        ~amount_milli:10 ~reason:"welcome gift" in
+    (match grant () with
+     | Error (Candle_grant.Ledger_unavailable _) -> ()
+     | Error error -> fail ("wrong refusal: " ^ Candle_grant.error_to_string error)
+     | Ok _ -> fail "grant accepted an unreadable ledger");
+    check string "failed recovery preserves the original bytes" "not a row\n"
+      (In_channel.with_open_bin path In_channel.input_all);
+    Fs_compat.save_file path "";
+    ignore (ok_grant (grant ()));
+    let events = Candle_ledger.events (ok_ledger (Candle_ledger.read ~base_path)) in
+    match events with
+    | { body = E.Half_life_set Candle_decay.Off; _ } :: { body = E.Granted _; _ } :: [] -> ()
+    | _ -> fail "repair and retry must leave one grant")
+;;
+
 let test_grant_invalid_history () =
   with_workspace (fun config ->
     let base_path = config.Workspace.base_path in
@@ -567,6 +589,8 @@ let () =
         ; test_case "trims reason" `Quick test_grant_trims_reason
         ; test_case "first row is policy" `Quick test_grant_first_row_is_policy
         ; test_case "off and disabled" `Quick test_grant_off_and_disabled
+        ; test_case "recovery failure is unavailable until repaired" `Quick
+            test_grant_recovery_failure_is_unavailable_until_repaired
         ; test_case "invalid history" `Quick test_grant_invalid_history
         ; test_case "overflow op" `Quick test_grant_overflow_op
         ; test_case "invalid time" `Quick test_grant_invalid_time

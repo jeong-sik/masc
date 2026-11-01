@@ -34,9 +34,10 @@ let error_to_string = function
    check. Settlement still waits for its lane. *)
 let policy ~base_path =
   match Candle_status.for_recording ~base_path with
-  | Candle_config.Off -> Error Off
-  | Candle_config.Disabled { reason } -> Error (Disabled reason)
-  | Candle_config.Enabled policy -> Ok policy
+  | Candle_status.Recording_off -> Error Off
+  | Candle_status.Recording_disabled { reason } -> Error (Disabled reason)
+  | Candle_status.Recording_unavailable { reason } -> Error (Ledger_unavailable reason)
+  | Candle_status.Recording_enabled policy -> Ok policy
 ;;
 
 let grant ~now ~base_path ~keeper ~amount_milli ~reason =

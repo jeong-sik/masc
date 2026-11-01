@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.parse import urlencode
 
@@ -30,15 +31,46 @@ opener = build_opener(NoRedirect)
 base_url = a.url.rstrip('/')
 
 
+def contains_credential(value):
+    if isinstance(value, str):
+        return token in value
+    if isinstance(value, dict):
+        return any(contains_credential(key) or contains_credential(item) for key, item in value.items())
+    if isinstance(value, list):
+        return any(contains_credential(item) for item in value)
+    return False
+
+
+def terminal_safe(value):
+    return ''.join(char if char.isprintable() else char.encode('unicode_escape').decode('ascii')
+                   for char in value)
+
+
 def read_json(path, body=None):
     request = Request(base_url + path, data=body,
         headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
-    with opener.open(request) as response:
-        raw = response.read().decode()
-        headers = response.headers
+    try:
+        with opener.open(request) as response:
+            raw = response.read().decode()
+            headers = response.headers
+    except HTTPError as error:
+        try:
+            raw = error.read().decode()
+            payload = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError, OSError):
+            raise ValueError(f'Server returned HTTP {error.code}; error detail unavailable') from None
+        detail = payload.get('error') if isinstance(payload, dict) else None
+        if token in raw or (isinstance(detail, str) and token in detail):
+            raise ValueError('Credential echo withheld') from None
+        if not isinstance(detail, str) or not detail.strip():
+            raise ValueError(f'Server returned HTTP {error.code}; error detail unavailable') from None
+        raise ValueError(f'Server returned HTTP {error.code}: {terminal_safe(detail)}') from None
     if token in raw:
         raise ValueError('Credential echo withheld')
-    return json.loads(raw), headers
+    payload = json.loads(raw)
+    if contains_credential(payload):
+        raise ValueError('Credential echo withheld')
+    return payload, headers
 
 
 def read_bound(goal_id, expected):

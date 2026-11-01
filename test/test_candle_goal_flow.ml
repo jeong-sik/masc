@@ -438,6 +438,76 @@ let test_a_pass_from_before_candle_owes_nothing () =
   check bool "no ledger" false (Sys.file_exists (ledger_path config))
 ;;
 
+let test_invalid_config_preserves_the_pending_verifier_commit () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  let goal_id = goal_in_verifying config in
+  let request_id, criterion =
+    match Goal_verification.get_record_authoritative config ~goal_id with
+    | Ok (Some { Goal_verification.completion = Goal_verification.Proof_pending pending; _ }) ->
+      pending.request_id, pending.criterion
+    | Ok _ | Error _ -> fail "expected a pending verification"
+  in
+  let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc "invalid = true\n");
+  let refused = Workspace_goals.commit_verifier_decision
+      ~before_proof_commit:(Candle_snapshot.before_proof_commit config)
+      ~tool_name:"goal_verifier_commit" ~start_time:(Tool_timing.start ()) config
+      ~goal_id ~request_id ~criterion ~verification_run_id:"goal-verifier-test-run"
+      ~decision:Workspace_goals.Proof_proven ~evidence:"observed by the test verifier" in
+  check bool "invalid config refuses the commit" false (Tool_result.is_success refused);
+  check string "Goal still verifies" "verifying" (phase config goal_id);
+  (match Goal_verification.get_record_authoritative config ~goal_id with
+   | Ok (Some { Goal_verification.completion = Goal_verification.Proof_pending pending; _ }) ->
+     check string "same request remains pending" request_id pending.request_id
+   | Ok _ | Error _ -> fail "the pending request was lost");
+  enable_candle config;
+  pass config goal_id;
+  let verdict = current_verdict config goal_id in
+  check string "the original request commits" request_id verdict.request_id;
+  check string "the original run commits" "goal-verifier-test-run" verdict.verification_run_id;
+  check string "Goal awaits confirmation" "awaiting_confirmation" (phase config goal_id);
+  check int "one Snapshot" 1 (count_kind config "snapshot")
+;;
+
+let test_invalid_config_after_human_confirmation_can_be_retried () =
+  with_workspace
+  @@ fun config ->
+  enable_candle config;
+  let goal_id = goal_in_verifying config in
+  pass config goal_id;
+  let path = Config_dir_resolver.candle_toml_path_for_base_path ~base_path:config.base_path in
+  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc "invalid = true\n");
+  (match confirm config goal_id with
+   | Ok _ -> fail "confirmation must report the invalid Candle config"
+   | Error error ->
+     let detail = Route.For_testing.confirmation_error_to_string error in
+     check bool "explains the possibly retained confirmation" true
+       (String_util.contains_substring detail "human confirmation may already be recorded");
+     check bool "explains how to retry" true
+       (String_util.contains_substring detail "inspect the same proof and confirm again"));
+  check string "Goal still awaits completion" "awaiting_confirmation" (phase config goal_id);
+  let original_confirmation =
+    match Goal_verification.get_record_authoritative config ~goal_id with
+    | Ok (Some { Goal_verification.completion = Goal_verification.Human_confirmed (_, confirmation); _ }) ->
+      confirmation
+    | Ok _ | Error _ -> fail "the first human confirmation must remain durable"
+  in
+  check string "first confirmer is retained" "operator-a" original_confirmation.operator_id;
+  check int "no payout debt yet" 0 (count_kind config "payout_owed");
+  enable_candle config;
+  confirmed config goal_id;
+  confirmed config goal_id;
+  check string "retry completes the Goal" "completed" (phase config goal_id);
+  (match List.rev (ledger_events config) with
+   | { Candle_event.body = Candle_event.Payout_owed owed; _ } :: _ ->
+     check string "debt keeps first confirmation time" original_confirmation.confirmed_at
+       (Candle_time.to_rfc3339 owed.confirmed_at)
+   | _ -> fail "the original confirmation needs one owed fact");
+  check int "exactly one payout debt" 1 (count_kind config "payout_owed")
+;;
+
 (* Runs [f] with the ledger path turned into a directory, so that every write to
    it fails, and puts the ledger back as it was afterwards. *)
 let with_unwritable_ledger config f =
@@ -848,6 +918,10 @@ let () =
             "a pass from before candle owes nothing"
             `Quick
             test_a_pass_from_before_candle_owes_nothing
+        ; test_case "invalid config preserves the pending verifier commit" `Quick
+            test_invalid_config_preserves_the_pending_verifier_commit
+        ; test_case "invalid config after human confirmation can be retried" `Quick
+            test_invalid_config_after_human_confirmation_can_be_retried
         ; test_case
             "a payout that cannot be written refuses the confirmation"
             `Quick

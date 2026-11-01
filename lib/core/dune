@@ -36,6 +36,7 @@
   executable_path
   safe_identifier
   keeper_runtime_root_entry
+  keeper_official_client_paths
   list_util
   set_util
   read_drop_reason

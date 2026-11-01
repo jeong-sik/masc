@@ -349,14 +349,21 @@ let child_reference_scan_context context fields payload_fields key =
   }
 ;;
 
-let outbox_payload_fields ~path json =
-  match Keeper_client_tool_outbox_codec.validate ~path json with
-  | Ok () -> ["arguments"; "response"]
-  | Error _ -> []
+let outbox_payload_fields ~outbox_source json =
+  match outbox_source with
+  | None -> []
+  | Some source ->
+    (match Keeper_client_tool_outbox_codec.validate
+        ~path:(Keeper_official_client_paths.outbox_source_path source) json with
+     | Ok () -> ["arguments"; "response"]
+     | Error _ -> [])
 ;;
 
+(* A source token qualifies only this whole-file node. Recursive values and
+   JSONL rows intentionally receive no token. *)
 let rec references_in_json
           ?(context = durable_context)
+          ?outbox_source
           ~path
           ~line
           references
@@ -388,7 +395,7 @@ let rec references_in_json
          if not context.history_media then []
          else history_tool_payload_fields fields @ captured_tool_payload_fields fields
               @ tool_receipt_payload_fields fields
-              @ outbox_payload_fields ~path json
+              @ outbox_payload_fields ~outbox_source json
               @ (match context.official with
                  | Official_blocks when official_tool_result fields -> ["structured_content"]
                  | Other_value | Official_message | Official_blocks -> []) in
@@ -439,11 +446,15 @@ let references_in_file ~ownership_root path =
          { path; reason = "durable source disappeared during scan" })
   | Ok (Some payload) ->
     try
+      let json = Yojson.Safe.from_string payload in
+      let outbox_source = Keeper_official_client_paths.outbox_source
+          ~base_path:ownership_root ~path in
       references_in_json
+        ?outbox_source
         ~path
         ~line:1
         Live_reference_set.empty
-        (Yojson.Safe.from_string payload)
+        json
     with
     | Yojson.Json_error _ ->
       payload

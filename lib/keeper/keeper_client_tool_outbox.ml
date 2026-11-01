@@ -21,9 +21,7 @@ type host_producer =
   ; outbox_directory : string; delivery : delivery_frontier Atomic.t }
 type host_delivery = { producer : host_producer; entry : entry }
 
-let directory ~base_path ~keeper_name =
-  let* session_path = Keeper_official_client_session_store.path ~base_path ~keeper_name in
-  Ok (Filename.concat (Filename.dirname session_path) "undelivered-tools")
+let directory = Keeper_official_client_paths.outbox_dir
 
 let lease_directory ~base_path ~keeper_name =
   let* directory = directory ~base_path ~keeper_name in

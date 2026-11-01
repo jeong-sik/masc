@@ -193,7 +193,6 @@ type claim_error =
 open Result.Syntax
 let schema = "masc.keeper.official-client-session.v2"
 let filename = "session.json"
-let state_dirname = "official-client-runtime"
 let recovery_rng = Random.State.make_self_init ()
 let recovery_rng_mutex = Stdlib.Mutex.create ()
 
@@ -205,17 +204,7 @@ let fresh_recovery_id () =
 let process_epoch_value = lazy (fresh_recovery_id ())
 let process_epoch () = Lazy.force process_epoch_value
 
-let state_dir ~base_path ~keeper_name =
-  if not (Safe_identifier.is_portable_name keeper_name)
-  then Error (Printf.sprintf "invalid official-client Keeper name %S" keeper_name)
-  else
-    Ok
-      (Filename.concat
-         (Filename.concat
-            (Common.keepers_runtime_dir_of_base ~base_path)
-            keeper_name)
-         state_dirname)
-;;
+let state_dir = Keeper_official_client_paths.state_dir
 
 let path ~base_path ~keeper_name =
   Result.map

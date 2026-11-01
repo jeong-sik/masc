@@ -1321,6 +1321,8 @@ let test_maintenance_outbox_payloads_are_tool_data () =
       `String (O.encode_for_agent_core (O.Stored marker))]] in
     require (Outbox.retain ~base_path ~keeper_name:"reviewer"
       (outbox_vendor_receipt payload payload));
+    require (Outbox.retain ~base_path ~keeper_name:"another-keeper"
+      (outbox_vendor_receipt payload payload));
     let producer = require (Outbox.host_producer ~base_path ~keeper_name:"reviewer"
         ~runtime_label:"host fixture" ~turn_count:1) in
     require (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
@@ -1408,6 +1410,71 @@ let test_maintenance_outbox_payloads_preserve_reserved_reference_failures () =
     Alcotest.(check string) "reserved reference failure preserves candidates" before (snapshot ());
     Alcotest.(check (option string)) "reserved reference failure preserves bytes"
       (Some "retain until reserved refs are valid") (fetch_ok store ~sha256:survivor.sha256))) [false;true]
+;;
+
+let test_maintenance_receipt_shaped_messages_keep_history_ownership () =
+  List.iter (fun host -> with_temp_dir (fun base_path ->
+    let module Outbox = Masc.Keeper_client_tool_outbox in
+    let require = function Ok value -> value | Error detail -> Alcotest.fail detail in
+    let store = B.create ~base_path in
+    let raw = "sole media owner is a receipt-shaped message" in
+    let media = media_put_ok (Tool_blob_media_store.create store) ~media_type:"image/png" ~raw in
+    let payload = Agent_core.History.stored_source_to_json ~media_type:"image/png" media in
+    if host then (
+      let producer = require (Outbox.host_producer ~base_path ~keeper_name:"reviewer"
+          ~runtime_label:"host fixture" ~turn_count:1) in
+      require (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
+        ~tool_name:"fixture" ~arguments:payload ~response:payload))
+    else require (Outbox.retain ~base_path ~keeper_name:"reviewer"
+      (outbox_vendor_receipt payload payload));
+    let snapshot = require (Outbox.load ~base_path ~keeper_name:"reviewer") in
+    let receipt_id = match Outbox.receipt_ids snapshot with
+      | [id] -> id | _ -> Alcotest.fail "one retained receipt required" in
+    let directory = require (Keeper_official_client_paths.outbox_dir ~base_path ~keeper_name:"reviewer") in
+    let filename = receipt_id ^ ".json" in
+    let json = Yojson.Safe.from_file (Filename.concat directory filename) in
+    ignore (save_maintenance_source base_path ("messages/" ^ filename) json);
+    require (Outbox.acknowledge snapshot);
+    ignore (maintenance_ok ~base_path ~mode:M.Delete_previous_candidates);
+    let second = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+    Alcotest.(check int) "receipt-shaped message is still a generic media owner" 0 second.deleted;
+    Alcotest.(check (option string)) "source location prevents losing the sole owner"
+      (Some raw) (fetch_ok store ~sha256:media.sha256))) [false;true]
+;;
+
+let test_maintenance_outbox_source_authority_is_exact_and_top_level () =
+  let module Codec = Keeper_client_tool_outbox_codec in
+  List.iter (fun shape -> with_temp_dir (fun base_path ->
+    let store = B.create ~base_path in
+    let raw = "generic ownership survives a false outbox source" in
+    let media = media_put_ok (Tool_blob_media_store.create store) ~media_type:"image/png" ~raw in
+    let payload = Agent_core.History.stored_source_to_json ~media_type:"image/png" media in
+    let json = Codec.to_json {thread_id="thread";turn_id="turn";call_id="call";
+      tool_name="fixture";arguments=payload;response=`Null} in
+    let filename = Codec.filename json in
+    let directory = match shape with
+      | `Wrong_root -> "messages/reviewer/official-client-runtime/undelivered-tools/"
+      | `Invalid_keeper -> "keepers/not portable/official-client-runtime/undelivered-tools/"
+      | `Nested_keeper -> "keepers/outer/reviewer/official-client-runtime/undelivered-tools/"
+      | `Wrong_runtime -> "keepers/reviewer/official-client-runtime-copy/undelivered-tools/"
+      | `Wrong_outbox -> "keepers/reviewer/official-client-runtime/other/"
+      | `Nested_outbox -> "keepers/reviewer/official-client-runtime/undelivered-tools/nested/"
+      | `Wrong_filename | `Nested_json | `Jsonl ->
+          "keepers/reviewer/official-client-runtime/undelivered-tools/" in
+    let filename = match shape with `Wrong_filename -> "unbound.json" | _ -> filename in
+    let value = match shape with `Nested_json -> `List [json] | _ -> json in
+    let path = save_maintenance_source base_path (directory ^ filename) value in
+    (match shape with
+     | `Jsonl -> Fs_compat.save_file path
+         (Yojson.Safe.to_string json ^ "\n" ^ Yojson.Safe.to_string json ^ "\n")
+     | _ -> ());
+    ignore (maintenance_ok ~base_path ~mode:M.Delete_previous_candidates);
+    let second = maintenance_ok ~base_path ~mode:M.Delete_previous_candidates in
+    Alcotest.(check int) "only a whole receipt at its actual source may become opaque" 0 second.deleted;
+    Alcotest.(check (option string)) "generic reference remains live after two scans"
+      (Some raw) (fetch_ok store ~sha256:media.sha256)))
+    [`Wrong_root;`Invalid_keeper;`Nested_keeper;`Wrong_runtime;`Wrong_outbox;
+     `Nested_outbox;`Wrong_filename;`Nested_json;`Jsonl]
 ;;
 
 let media_error =
@@ -2758,6 +2825,10 @@ let () =
             test_maintenance_outbox_opacity_requires_complete_receipt_authority;
           Alcotest.test_case "maintenance opaque outbox payloads preserve reserved reference failures" `Quick
             test_maintenance_outbox_payloads_preserve_reserved_reference_failures;
+          Alcotest.test_case "maintenance keeps generic ownership in receipt-shaped messages" `Quick
+            test_maintenance_receipt_shaped_messages_keep_history_ownership;
+          Alcotest.test_case "maintenance outbox source authority is exact and top level" `Quick
+            test_maintenance_outbox_source_authority_is_exact_and_top_level;
           Alcotest.test_case "media store reads back what it put" `Quick
             test_media_store_reads_back_what_it_put;
           Alcotest.test_case "media store reports missing and mismatched bytes" `Quick

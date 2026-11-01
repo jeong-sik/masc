@@ -4247,7 +4247,7 @@ let use_board_read state ~mailbox ~action =
       ~deliver:(fun result ->
         let result=match attempt,result with
           | Some attempt,Error error -> Ok (Board_image_open_failed (attempt,error))
-          | (Some _ | None),_ -> result in
+          | Some _,Ok _ | None,(Ok _ | Error _) -> result in
         Board_attachment_saved (request,result))
       (fun () -> Eio_unix.run_in_systhread (fun () ->
         let prepare () =
@@ -11777,21 +11777,31 @@ let image_notice (state : state) ~view ~keeper_name ~kind text =
 
 let board_image_source_reader state ~message subject =
   match subject with
-  | Board_attachment_image {post_id;attachment={ba_kind=Ak_image;
-      ba_source=As_artifact {sha256;bytes};ba_name}} ->
-      close_board_reader state;
-      let key = {Masc_tui_board_reader.post_id;sha256;bytes;name=ba_name} in
-      state.board_reader <- Masc_tui_board_reader.offer_image ~key ~message state.board_reader;
-      state.board_reader_owner <- Some (state.workspace_authority,state.workspace_read_authority,Ak_image);
-      true
-  | Board_diagram _ | Board_attachment_image _ -> false
+  | Board_diagram _ -> false
+  | Board_attachment_image {post_id;attachment={ba_kind;ba_source;ba_name}} ->
+      if ba_kind <> Ak_image then false else
+      match ba_source with
+      | As_url _ -> false
+      | As_artifact {sha256;bytes} ->
+          close_board_reader state;
+          let key = {Masc_tui_board_reader.post_id;sha256;bytes;name=ba_name} in
+          state.board_reader <- Masc_tui_board_reader.offer_image ~key ~message state.board_reader;
+          state.board_reader_owner <- Some (state.workspace_authority,state.workspace_read_authority,Ak_image);
+          true
 
 let cancel_board_image_read state =
   match state.sent_image_read with
-  | Some {sir_owner=Board_image_read (_,_,job);sir_purpose=Open_image;_} ->
-      Masc_tui_workspace_job.cancel_observation state ~key:job;
-      state.sent_image_read <- None
-  | Some _ | None -> ()
+  | Some pending ->
+      (match pending.sir_purpose with
+       | Inspect_image _ -> ()
+       | Open_image ->
+           (match pending.sir_owner with
+            | Board_image_read (_,_,job) ->
+                Masc_tui_workspace_job.cancel_observation state ~key:job;
+                state.sent_image_read <- None
+            | Local_file_image_read _ | Remote_url_image_read _
+            | Draft_image_read _ | Peer_image_read _ -> ()))
+  | None -> ()
 
 (* Settle the exact interrupted preview without replacing a newer selection. *)
 let settle_retired_sent_image state =
@@ -11811,15 +11821,24 @@ let settle_retired_sent_image state =
    their original authority envelope; both paths capture the UI generation
    and workspace/draft owner before forking and share completion admission. *)
 let board_image_source_matches subject source =
-  match subject, source with
-  | Board_diagram (Board_post_diagram {body;_} | Board_comment_diagram {body;_}),
-    Masc_tui_image_requests.Generated (Inline_mermaid diagram) ->
-      List.exists (String.equal diagram) (Masc_tui_markdown.mermaid_sources body)
-  | Board_attachment_image {post_id;attachment={ba_kind=Ak_image;
-      ba_source=As_artifact {sha256;bytes};ba_name}}, Board_artifact key ->
-      key.post_id = post_id && key.sha256 = sha256 && key.bytes = bytes && key.name = ba_name
-  | (Board_diagram _ | Board_attachment_image _),
-    (Local_file _ | Draft _ | Retained _ | Board_artifact _ | Generated _) -> false
+  match subject with
+  | Board_diagram subject ->
+      let body = match subject with
+        | Board_post_diagram {body;_} | Board_comment_diagram {body;_} -> body in
+      (match source with
+       | Masc_tui_image_requests.Generated (Inline_mermaid diagram) ->
+           List.exists (String.equal diagram) (Masc_tui_markdown.mermaid_sources body)
+       | Generated (Inline_data _ | Inline_svg _ | Server_path _ | Remote_uri _)
+       | Local_file _ | Draft _ | Retained _ | Board_artifact _ -> false)
+  | Board_attachment_image {post_id;attachment={ba_kind;ba_source;ba_name}} ->
+      if ba_kind <> Ak_image then false else
+      (match ba_source with
+       | As_url _ -> false
+       | As_artifact {sha256;bytes} ->
+           match source with
+           | Board_artifact key ->
+               key.post_id = post_id && key.sha256 = sha256 && key.bytes = bytes && key.name = ba_name
+           | Local_file _ | Draft _ | Retained _ | Generated _ -> false)
 
 let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~name source =
   cancel_board_image_read state;
@@ -21087,7 +21106,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
              state.board_reader <- Masc_tui_board_reader.finish_original_open state.board_reader request attempt in
            if Option.is_some (current_board_reader state)
               && Masc_tui_board_reader.owns_original_open state.board_reader request attempt
-              && (match state.board_reader_owner with Some (_,_,Ak_image) -> true | _ -> false) then
+              && Option.exists (fun (_,_,kind) -> kind = Ak_image) state.board_reader_owner then
              (match Masc_tui_attachment_action.external_file prepared, Eio_context.get_switch_opt () with
               | Some (name,path), Some sw ->
                   if not (Masc_tui_board_preview_work.try_acquire board_image_open_worker) then begin
@@ -24437,7 +24456,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
            | Observed _ -> "observed" | Not_started _ -> "not_started" | Unobserved _ -> "unobserved"));
         true
   in
-  let share_input_sensitive message = board_preview_waits_for_input message || message_matches_share_input
+  let share_input_sensitive message = message_waits_for_input
     ~resource_read:(fun request ->
       Option.exists (fun pending -> pending.Masc_tui_resource_catalog.owner == request.Masc_tui_resource_catalog.owner)
         state.resource_copy_pending)
@@ -30834,9 +30853,8 @@ Use relative paths for resources already held in the package. -->
                 | Error error -> report_action state "error" error)
             | "s" -> use_board_read state ~mailbox:async_messages ~action:Save_board_original
             | "o" ->
-                (match state.board_reader_owner with
-                 | Some (_,_,Ak_image) -> use_board_read state ~mailbox:async_messages ~action:Open_board_image
-                 | Some _ | None -> ())
+                if Option.exists (fun (_,_,kind) -> kind = Ak_image) state.board_reader_owner then
+                  use_board_read state ~mailbox:async_messages ~action:Open_board_image
             | "j" | "down" | "wheel-down" | "k" | "up" | "wheel-up"
             | "pagedown" | "pageup" | "home" | "g" | "end" | "G" ->
                 let movement=match k with

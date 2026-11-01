@@ -218,7 +218,8 @@ let midi_path = function
 
 let external_file = function
   | Prepared_file {name;path;action=Open_external;_} when allows_external_open ~name -> Some (name,path)
-  | Prepared_file _ | Prepared_url _ -> None
+  | Prepared_file {action=(Play_midi | Play_local | Open_external | Save_only);_}
+  | Prepared_url _ -> None
 
 let perform ?(open_url=Masc_tui_browser.open_url) prepared ~midi_soundfont =
   match prepared with

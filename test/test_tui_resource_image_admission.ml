@@ -272,10 +272,12 @@ let test_board_preview_input_barrier () =
   let preview view = Protocol.Sent_image_ready {generation=1;view;keeper_name=None;
     name="preview";skill_reference=None;result=Error "unavailable"} in
   let scoped message = Protocol.Workspace_scoped (Types.Workspace_authority 0,Some (ref ()),message) in
+  let waits message = Protocol.message_waits_for_input ~resource_read:(fun _ -> false)
+      ~recovery_loaded:(fun _ -> false) message in
   check bool "Board completion waits for pending input" true
-    (Protocol.board_preview_waits_for_input (scoped (preview Types.Board)));
+    (waits (scoped (preview Types.Board)));
   check bool "other image surfaces retain their existing policy" false
-    (Protocol.board_preview_waits_for_input (scoped (preview Types.Resources)));
+    (waits (scoped (preview Types.Resources)));
   let key : Masc_tui_board_reader.key =
     {post_id="post";sha256=String.make 64 'a';bytes=0;name=None} in
   let _,request=Masc_tui_board_reader.open_read ~key Masc_tui_board_reader.initial in
@@ -287,10 +289,10 @@ let test_board_preview_input_barrier () =
   let attempt=ref () in
   let open_ready=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_ready (attempt,prepared))) in
   check bool "external open waits for pending input" true
-    (Protocol.board_preview_waits_for_input (scoped (Protocol.Workspace_operation open_ready)));
+    (waits (scoped (Protocol.Workspace_operation open_ready)));
   let retry=Protocol.Board_attachment_saved (request, Ok (Protocol.Board_image_open_retry {attempt;prepared;opener="open"})) in
   check bool "fallback opener also waits for pending input" true
-    (Protocol.board_preview_waits_for_input (scoped retry))
+    (waits (scoped retry))
 
 let test_board_svg_and_original_reader () =
   let module Payload = Masc_tui_image_payload in

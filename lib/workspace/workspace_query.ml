@@ -261,14 +261,15 @@ let active_runtime_agents config =
   , failure )
 
 let merge_agents primary secondary =
-  let seen = Hashtbl.create (List.length primary + List.length secondary) in
-  let add_if_new acc (agent : Masc_domain.agent) =
-    if Hashtbl.mem seen agent.name then acc
-    else (
-      Hashtbl.add seen agent.name ();
-      agent :: acc)
+  let module Agent_name_set = Set.Make (String) in
+  let add_if_new (seen, acc) (agent : Masc_domain.agent) =
+    if Agent_name_set.mem agent.name seen
+    then seen, acc
+    else Agent_name_set.add agent.name seen, agent :: acc
   in
-  List.rev (List.fold_left add_if_new (List.fold_left add_if_new [] primary) secondary)
+  let seen, acc = List.fold_left add_if_new (Agent_name_set.empty, []) primary in
+  let _seen, acc = List.fold_left add_if_new (seen, acc) secondary in
+  List.rev acc
 
 (** Get raw agent list (for orchestrator).
     Includes inactive agents. Requires initialization. *)

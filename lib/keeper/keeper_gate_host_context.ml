@@ -269,7 +269,7 @@ let task_link_json (entry : pending_approval) =
         ~agent_name:entry.keeper_name
         backlog
     in
-    let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
+    let task_goal_map = Workspace_goal_index.build_task_goal_map_for_config config in
     let linked_goal_ids =
       let task_ids =
         match entry.task_id with
@@ -278,7 +278,7 @@ let task_link_json (entry : pending_approval) =
       in
       task_ids
       |> List.concat_map (fun task_id ->
-           Option.value (Hashtbl.find_opt task_goal_index task_id) ~default:[])
+           Workspace_goal_index.goals_for_task_in_map task_goal_map ~task_id)
     in
     let goal_ids =
       (match entry.goal_id with

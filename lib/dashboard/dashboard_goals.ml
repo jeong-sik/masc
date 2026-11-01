@@ -7,6 +7,9 @@
 (* Types + task helpers moved to Dashboard_goals_types. *)
 include Dashboard_goals_types
 
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
 (* receipt_* / trust_* / iso_max helpers moved to Dashboard_goals_types. *)
 
 
@@ -47,33 +50,50 @@ let build_forest_with_trust_reader
            | Ok (Some meta) -> Some meta
            | Ok None | Error _ -> None)
   in
+  let keeper_metas_by_name =
+    List.fold_left
+      (fun acc (meta : Keeper_meta_contract.keeper_meta) ->
+         String_map.update
+           meta.name
+           (function
+            | Some _ as existing -> existing
+            | None -> Some meta)
+           acc)
+      String_map.empty
+      keeper_metas
+  in
+  let assigned_keeper_names =
+    List.fold_left
+      (fun acc (task : Masc_domain.task) ->
+         match task_assignee task with
+         | Some assignee when String_map.mem assignee keeper_metas_by_name ->
+           String_set.add assignee acc
+         | Some _ | None -> acc)
+      String_set.empty
+      tasks
+    |> String_set.elements
+  in
   let latest_receipts =
-    keeper_metas
-    |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
-    |> Keeper_execution_receipt.latest_json_by_keeper config
+    Keeper_execution_receipt.latest_json_by_keeper config assigned_keeper_names
   in
   let goal_task_index = Workspace_goal_index.build_task_goal_index ~goal_task_links () in
   (* A goal reads the runtime trust of the Keepers its tasks are assigned to,
      and nothing else. Computing every Keeper's snapshot up front cost the
      whole tree: on 2026-10-28 the 40 snapshots took 7.3 s of a 7.5 s tree,
      and the 19 Keepers any goal names took 2.0 s of them. Each snapshot is
-     computed the first time a goal asks for it and kept for this build. *)
+     computed the first time a goal asks for it and kept in an immutable map
+     for this build. *)
   let runtime_trust_of =
-    let computed = Hashtbl.create 16 in
+    let computed = Atomic.make String_map.empty in
     fun keeper_name ->
-      match Hashtbl.find_opt computed keeper_name with
+      match String_map.find_opt keeper_name (Atomic.get computed) with
       | Some trust -> Some trust
       | None ->
-        match
-          List.find_opt
-            (fun (meta : Keeper_meta_contract.keeper_meta) ->
-               String.equal meta.name keeper_name)
-            keeper_metas
-        with
+        match String_map.find_opt keeper_name keeper_metas_by_name with
         | None -> None
         | Some meta ->
           let trust = read_trust ~config ~meta in
-          Hashtbl.replace computed keeper_name trust;
+          Atomic.set computed (String_map.add keeper_name trust (Atomic.get computed));
           Some trust
   in
   let context =
@@ -95,6 +115,7 @@ let build_forest =
 
 
 let build_goal_events_projection ~(config : Workspace.config) goals =
+  ignore goals;
   let goal_events =
     let path =
       Filename.concat (Workspace_utils.masc_dir config) "goal_events.jsonl"
@@ -104,19 +125,28 @@ let build_goal_events_projection ~(config : Workspace.config) goals =
     else
       []
   in
-  let events_table = Hashtbl.create (max 16 (List.length goals)) in
-  List.iter
-    (fun json ->
-      match Json_util.get_string json "goal_id" with
-      | Some goal_id ->
-          let existing =
-            Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]
-          in
-          Hashtbl.replace events_table goal_id (existing @ [ json ])
-      | None -> ())
-    goal_events;
+  let events_by_goal_id =
+    let rev_map =
+      List.fold_left
+        (fun acc json ->
+           match Json_util.get_string json "goal_id" with
+           | Some goal_id ->
+             let existing =
+               Option.value
+                 (Goal_store.Goal_id_map.find_opt goal_id acc)
+                 ~default:[]
+             in
+             Goal_store.Goal_id_map.add goal_id (json :: existing) acc
+           | None -> acc)
+        Goal_store.Goal_id_map.empty
+        goal_events
+    in
+    Goal_store.Goal_id_map.map List.rev rev_map
+  in
   fun goal_id ->
-    Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]
+    Option.value
+      (Goal_store.Goal_id_map.find_opt goal_id events_by_goal_id)
+      ~default:[]
 
 (* One goal as the event log remembers it. Local to this reader: the JSON is the
    contract, and putting the record in the interface would invite a second
@@ -158,14 +188,8 @@ let empty_goal_history_entry =
    rows are a fact about the log, not a number to tidy. Rows this reader does
    not recognise are counted and named under [coverage] instead of dropped. *)
 let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
-  let table = Hashtbl.create 16 in
-  let rows_without_goal_id = ref 0 in
-  let unordered_snapshot_rows = ref 0 in
-  let unrecognised = ref [] in
-  let note_unrecognised name =
-    if not (List.mem name !unrecognised) then unrecognised := name :: !unrecognised
-  in
-  let snapshot_title current payload =
+  let listed_set = String_set.of_list listed in
+  let snapshot_title ~unordered_snapshot_rows current payload =
     match payload with
     | `Assoc fields ->
         (match List.filter (fun (key, _) -> String.equal key "store_version") fields,
@@ -181,51 +205,88 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
                  when version = previous.version && not (String.equal title previous.title) ->
                    Conflicting_title version
                | Committed_title _ | Conflicting_title _ -> current.gh_title in
-             {current with gh_title}
+             unordered_snapshot_rows, {current with gh_title}
          | _ ->
-             incr unordered_snapshot_rows;
-             {current with gh_unordered_snapshot = true})
+             unordered_snapshot_rows + 1, {current with gh_unordered_snapshot = true})
     | _ ->
-        incr unordered_snapshot_rows;
-        {current with gh_unordered_snapshot = true}
+        unordered_snapshot_rows + 1, {current with gh_unordered_snapshot = true}
   in
-  List.iter
-    (fun json ->
-      match Json_util.get_string json "goal_id" with
-      | None -> incr rows_without_goal_id
-      | Some goal_id when List.mem goal_id listed -> ()
-      | Some goal_id ->
-        let ts = Json_util.get_string json "ts" in
-        let payload = Yojson.Safe.Util.member "payload" json in
-        let current =
-          match Hashtbl.find_opt table goal_id with
-          | Some entry -> entry
-          | None -> empty_goal_history_entry
-        in
-        let updated =
-          match Json_util.get_string json "event_type" with
-          | Some "goal_created" ->
-            let snapshot = snapshot_title current payload in
-            { snapshot with gh_opened_at = ts }
-          | Some "goal_updated" ->
-            snapshot_title current payload
-          | Some "goal_phase" ->
-            { current with
-              gh_last_phase = Json_util.get_string payload "phase";
-              gh_last_phase_at = ts }
-          | Some "goal_edited" ->
-            (* A due date or priority edit changes neither when the goal opened
-               nor the phase it reached. *)
-            current
-          | Some other ->
-            note_unrecognised other;
-            current
-          | None ->
-            note_unrecognised "(no event_type)";
-            current
-        in
-        Hashtbl.replace table goal_id updated)
-    rows;
+  let note_unrecognised (seen, rev_names) name =
+    if String_set.mem name seen
+    then seen, rev_names
+    else String_set.add name seen, name :: rev_names
+  in
+  let ( entries_by_goal_id
+      , rows_without_goal_id
+      , unordered_snapshot_rows
+      , (_unrecognised_seen, unrecognised_rev) )
+    =
+    List.fold_left
+      (fun ( entries
+           , rows_without_goal_id
+           , unordered_snapshot_rows
+           , unrecognised_state )
+           json ->
+         match Json_util.get_string json "goal_id" with
+         | None ->
+           ( entries
+           , rows_without_goal_id + 1
+           , unordered_snapshot_rows
+           , unrecognised_state )
+         | Some goal_id when String_set.mem goal_id listed_set ->
+           ( entries
+           , rows_without_goal_id
+           , unordered_snapshot_rows
+           , unrecognised_state )
+         | Some goal_id ->
+           let ts = Json_util.get_string json "ts" in
+           let payload = Yojson.Safe.Util.member "payload" json in
+           let current =
+             match Goal_store.Goal_id_map.find_opt goal_id entries with
+             | Some entry -> entry
+             | None -> empty_goal_history_entry
+           in
+           let unordered_snapshot_rows, unrecognised_state, updated =
+             match Json_util.get_string json "event_type" with
+             | Some "goal_created" ->
+               let unordered_snapshot_rows, snapshot =
+                 snapshot_title ~unordered_snapshot_rows current payload
+               in
+               ( unordered_snapshot_rows
+               , unrecognised_state
+               , { snapshot with gh_opened_at = ts } )
+             | Some "goal_updated" ->
+               let unordered_snapshot_rows, snapshot =
+                 snapshot_title ~unordered_snapshot_rows current payload
+               in
+               unordered_snapshot_rows, unrecognised_state, snapshot
+             | Some "goal_phase" ->
+               ( unordered_snapshot_rows
+               , unrecognised_state
+               , { current with
+                   gh_last_phase = Json_util.get_string payload "phase"
+                 ; gh_last_phase_at = ts
+                 } )
+             | Some "goal_edited" ->
+               (* A due date or priority edit changes neither when the goal opened
+                  nor the phase it reached. *)
+               unordered_snapshot_rows, unrecognised_state, current
+             | Some other ->
+               ( unordered_snapshot_rows
+               , note_unrecognised unrecognised_state other
+               , current )
+             | None ->
+               ( unordered_snapshot_rows
+               , note_unrecognised unrecognised_state "(no event_type)"
+               , current )
+           in
+           ( Goal_store.Goal_id_map.add goal_id updated entries
+           , rows_without_goal_id
+           , unordered_snapshot_rows
+           , unrecognised_state ))
+      (Goal_store.Goal_id_map.empty, 0, 0, (String_set.empty, []))
+      rows
+  in
   let lifetime_hours opened closed =
     match opened, closed with
     | Some opened, Some closed -> (
@@ -269,22 +330,18 @@ let unlisted_goal_history_of_rows ~listed ~rows ~malformed_lines =
           | None -> `Null )
       ]
   in
-  (* Folded out of the table and sorted by id rather than tracked in a second
-     list of insertion order: a hash table's own traversal order is not stable,
-     and sorting is what makes two reads of one log agree. *)
-  let ordered =
-    Hashtbl.fold (fun goal_id entry acc -> (goal_id, entry) :: acc) table []
-    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
-  in
+  (* [Goal_id_map.bindings] yields entries ordered by [goal_id] directly without
+     a secondary sort pass. *)
+  let ordered = Goal_store.Goal_id_map.bindings entries_by_goal_id in
   `Assoc
     [ "unlisted", `List (List.map entry_json ordered)
     ; ( "coverage"
       , `Assoc
-          [ "unordered_snapshot_rows", `Int !unordered_snapshot_rows
+          [ "unordered_snapshot_rows", `Int unordered_snapshot_rows
           ; "malformed_event_lines", `Int malformed_lines
-          ; "rows_without_goal_id", `Int !rows_without_goal_id
+          ; "rows_without_goal_id", `Int rows_without_goal_id
           ; ( "unrecognised_event_types"
-            , `List (List.rev_map (fun name -> `String name) !unrecognised) )
+            , `List (List.rev_map (fun name -> `String name) unrecognised_rev) )
           ] )
     ]
 
@@ -305,14 +362,15 @@ let unlisted_goal_history_json ~(config : Workspace.config) ~goals =
     ~malformed_lines
 
 let verification_projection ~config =
-  let records = Goal_verification.load_records_authoritative config in
+  let records_by_goal_id =
+    Goal_verification.load_records_by_goal_id_authoritative config
+  in
   fun (goal : Goal_store.goal) ->
-    match records with
+    match records_by_goal_id with
     | Error detail -> Goal_verification.ledger_error_to_yojson detail
-    | Ok records ->
+    | Ok records_by_goal_id ->
         let record =
-          match List.find_opt
-            (fun (record : Goal_verification.record) -> String.equal record.goal_id goal.id) records with
+          match Goal_store.Goal_id_map.find_opt goal.id records_by_goal_id with
           | Some record -> record
           | None ->
               (* The primary ledger decoded successfully and contains no row
@@ -412,6 +470,21 @@ let goal_detail_json_ready ~(config : Workspace.config)
   match List.find_opt (fun (node : tree_node) -> String.equal node.goal.id goal_id) all_nodes with
   | None -> Error (Printf.sprintf "Goal %s not found" goal_id)
   | Some node ->
+      let linked_keeper_set = String_set.of_list node.linked_keeper_names in
+      let latest_receipts_by_keeper =
+        Keeper_execution_receipt.latest_json_by_keeper
+          config
+          node.linked_keeper_names
+        |> List.fold_left
+             (fun acc (keeper_name, receipt) ->
+                String_map.update
+                  keeper_name
+                  (function
+                   | Some _ as existing -> existing
+                   | None -> Some receipt)
+                  acc)
+             String_map.empty
+      in
       let keeper_details =
         (match Keeper_meta_store.keeper_names_result config with
          | Ok names -> names
@@ -420,11 +493,9 @@ let goal_detail_json_ready ~(config : Workspace.config)
            [])
         |> List.filter_map (fun keeper_name ->
                match Keeper_meta_store.read_meta config keeper_name with
-               | Ok (Some meta) when List.mem meta.name node.linked_keeper_names ->
+               | Ok (Some meta) when String_set.mem meta.name linked_keeper_set ->
                    let latest_receipt =
-                     List.assoc_opt meta.name
-                       (Keeper_execution_receipt.latest_json_by_keeper
-                          config node.linked_keeper_names)
+                     String_map.find_opt meta.name latest_receipts_by_keeper
                    in
                    let runtime_trust =
                      keeper_runtime_trust_snapshot_json ~config ~meta

@@ -1051,16 +1051,18 @@ let schedule_wake_counts_json
       (schedules : Schedule_domain.schedule_request list)
       (state : Schedule_store.state)
   =
-  let selected = Hashtbl.create 16 in
-  List.iter
-    (fun (request : Schedule_domain.schedule_request) ->
-       Hashtbl.replace selected request.schedule_id ())
-    schedules;
+  let selected =
+    List.fold_left
+      (fun acc (request : Schedule_domain.schedule_request) ->
+         Schedule_store.Schedule_id_set.add request.schedule_id acc)
+      Schedule_store.Schedule_id_set.empty
+      schedules
+  in
   let retained, running, succeeded, failed =
     List.fold_left
       (fun (retained, running, succeeded, failed)
         (wake : Schedule_domain.wake_record) ->
-         if Hashtbl.mem selected wake.schedule_id
+         if Schedule_store.Schedule_id_set.mem wake.schedule_id selected
          then (
            match wake.status with
            | Schedule_domain.Wake_running ->
@@ -1458,12 +1460,7 @@ let scheduled_automation_exact_lookup_json config ~now ~schedule_id:raw_schedule
          Unavailable
          [ "reason", `String reason ]
      | Ok state ->
-       (match
-          List.find_opt
-            (fun (request : Schedule_domain.schedule_request) ->
-               String.equal request.schedule_id schedule_id)
-            state.schedules
-        with
+       (match Schedule_store.find_schedule state ~schedule_id with
         | None -> exact_lookup_json ~now ~schedule_id Not_found []
         | Some request ->
           let requests =

@@ -178,6 +178,14 @@ let non_immediate_urgency_of_witness (witness : projected_disposition_witness) =
   | Projected_cancel _ | Projected_transfer _ -> None
 ;;
 
+(* Reverse-chronological fallback when decoding a snapshot that predates an
+   explicit [last_non_immediate_served] field:
+   1. [transition_outbox] holds the newest transition applied to the queue
+      before outbox projection completes;
+   2. [last_transition] holds the most recently projected full receipt;
+   3. [projected_dispositions] holds newest-first displaced history ( whose
+      first element may be an Immediate transition even when an earlier
+      disposition served Normal or Low). *)
 let derived_last_non_immediate_served
       ~transition_outbox
       ~last_transition
@@ -558,6 +566,10 @@ let reconcile_pending ~first_admitted_at pending state =
       Keeper_event_queue.Stimulus_identity_map.empty
       state.pending_entries
   in
+  (* [Stimulus_identity_map] indexes by [stimulus_identity] (kind + post_id) in
+     O(log N), while [entry.source = source] inside the bucket preserves exact
+     snapshot equality (including urgency, created_at, and payload fields that
+     are not part of the deduplication key). *)
   let take_matching (source : Keeper_event_queue.stimulus) available_map =
     let key = Keeper_event_queue.stimulus_identity source in
     match Keeper_event_queue.Stimulus_identity_map.find_opt key available_map with

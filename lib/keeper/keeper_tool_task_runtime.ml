@@ -127,12 +127,10 @@ let no_eligible_exclusion_summary =
 
 
 let find_task_goal_id config task_id =
-  let index = Workspace_goal_index.build_task_goal_index_for_config config in
-  (* [Not_found] only covers the missing-key case. [List.hd] raises
-     [Failure "hd"], which this arm would not catch, so match the list
-     instead: the builder appends every goal id, but that invariant lives in
-     Workspace_goal_index and is not visible in the type here. *)
-  match Hashtbl.find_opt index task_id with
+  let index = Workspace_goal_index.build_task_goal_map_for_config config in
+  (* Match the list directly instead of [List.hd]: the builder appends every
+     goal id, and returning the first preserves persisted link order. *)
+  match Workspace_goal_index.Task_id_map.find_opt task_id index with
   | Some (goal_id :: _) -> Some goal_id
   | Some [] | None -> None
 ;;

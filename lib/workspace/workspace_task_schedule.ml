@@ -143,13 +143,14 @@ let claim_next_r
          it before the original owner had a chance to finish.  AwaitingVerification
          is still excluded: it is no longer active implementation work for
          the claimant. *)
-        let active_owned_task_ids =
+        let active_owned_task_id_set =
           Workspace_task.active_owned_task_ids_for_agent config ~agent_name backlog
+          |> Task_id_set.of_list
         in
         let previous_claim =
           List.find_opt
             (fun (t : Masc_domain.task) ->
-               List.mem t.id active_owned_task_ids)
+               Task_id_set.mem t.id active_owned_task_id_set)
             backlog.tasks
         in
         (match previous_claim with
@@ -277,17 +278,18 @@ let claim_next_r
              it. *)
           |> List.filter hard_filter
         in
-        let all_excluded = exclude_task_ids in
+        let all_excluded_set = Task_id_set.of_list exclude_task_ids in
+        let is_excluded task_id = Task_id_set.mem task_id all_excluded_set in
         let task_filter_excluded =
           List.filter
             (fun (t : task) ->
-               (not (List.mem t.id all_excluded)) && not (task_filter t))
+               (not (is_excluded t.id)) && not (task_filter t))
             unclaimed
         in
         let eligible_from candidates =
           List.filter
             (fun (t : task) ->
-               (not (List.mem t.id all_excluded)) && task_filter t)
+               (not (is_excluded t.id)) && task_filter t)
             candidates
         in
         let scoped_eligible = eligible_from unclaimed in
@@ -302,7 +304,7 @@ let claim_next_r
           | [] when allow_scope_fallback ->
             let widened =
               List.filter
-                (fun (t : task) -> not (List.mem t.id all_excluded))
+                (fun (t : task) -> not (is_excluded t.id))
                 unclaimed
             in
             (match widened with
@@ -312,7 +314,7 @@ let claim_next_r
         in
         let explicit_excluded_count = List.length exclude_task_ids in
         let no_eligible_excluded_count =
-          List.length all_excluded + List.length task_filter_excluded
+          explicit_excluded_count + List.length task_filter_excluded
         in
         (match eligible with
          | [] when unclaimed = [] ->

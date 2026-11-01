@@ -421,6 +421,13 @@ let test_goal_list_joins_the_ledger () =
      | Error msg -> fail msg);
   let listed = must_succeed "goal list" (dispatch ctx ~name:"masc_goal_list" []) in
   let goals = Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list in
+  (match
+     Goal_verification.load_records_by_goal_id_authoritative config
+   with
+   | Ok records_by_goal_id ->
+     check bool "authoritative goal_id map holds the pending proof" true
+       (Option.is_some (Goal_store.Goal_id_map.find_opt goal_id records_by_goal_id))
+   | Error msg -> fail msg);
   match goals with
   | [ goal_json ] ->
     check string "the request is observable" "proof_pending"

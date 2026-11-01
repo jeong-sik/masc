@@ -3003,7 +3003,7 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
                 ~recipient_lookup:every_name_declared () with
              | _ -> Alcotest.fail "empty initialization workspace must raise Invalid_argument"
              | exception Invalid_argument _ -> ());
-            ignore (fresh_test_base_path ());
+            let base_a = fresh_test_base_path () in
             Board.reset_global_for_test ();
             Board_dispatch.reset_for_test ();
             let retained = Board.global () in
@@ -3045,8 +3045,17 @@ let test_initialization_preserves_captured_workspace_and_lookup () =
               incr accepted_calls;
               Ok (Result.to_option (Board.Agent_id.parse
                 (Recipient_lookup.Candidate.to_string candidate)))) in
-            Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:root_a
-              ~recipient_lookup:original_lookup ());
+            let original_cwd = Sys.getcwd () in
+            let relative_root_a = Common.masc_dir_from_base_path
+                ~base_path:(Filename.basename base_a) in
+            Fun.protect ~finally:(fun () -> Unix.chdir original_cwd) (fun () ->
+              Unix.chdir (Filename.dirname base_a);
+              Alcotest.(check bool) "initialization request is relative" true
+                (Filename.is_relative relative_root_a);
+              Alcotest.(check bool) "relative initialization target is still absent" false
+                (Sys.file_exists relative_root_a);
+              Result.get_ok (Board_dispatch.init_jsonl ~workspace_masc_dir:relative_root_a
+                ~recipient_lookup:original_lookup ()));
             check_mismatch "active A refuses init B"
               (Board_dispatch.init_jsonl ~workspace_masc_dir:root_b
                 ~recipient_lookup:rejected_lookup ());

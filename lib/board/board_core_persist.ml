@@ -42,9 +42,7 @@ let persist_io_error ~where msg =
 ;;
 
 let create_store ~workspace_masc_dir () =
-  if String.equal workspace_masc_dir "" then
-    invalid_arg "Board.create_store: workspace_masc_dir must not be empty";
-  let workspace_masc_dir = Fs_compat.realpath_lenient workspace_masc_dir in
+  let workspace_masc_dir = Board_paths.capture_workspace_masc_dir workspace_masc_dir in
   { posts_load_result = Ok ()
   ; comments_load_result = Ok ()
   ; votes_load_result = Ok ()

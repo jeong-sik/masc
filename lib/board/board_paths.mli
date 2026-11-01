@@ -5,6 +5,15 @@
 
 val board_base_path : unit -> string
 val board_masc_dir : unit -> string
+val capture_workspace_masc_dir : string -> string
+(** Capture an explicit workspace directory. A relative input is anchored to
+    the current working directory synchronously before the single
+    [Fs_compat.realpath_lenient] call. Filesystem names are preserved without
+    trimming; no directory is created. This binds a path, not ongoing symlink
+    or resource identity.
+
+    @raise Invalid_argument if the input is exactly empty. *)
+
 type persisted_file = Posts | Comments | Reactions | Sub_boards | Votes
 val file_path : workspace_masc_dir:string -> persisted_file -> string
 val posts_file : workspace_masc_dir:string -> string

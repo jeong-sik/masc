@@ -274,9 +274,9 @@ let warn_comment_cap_once () =
   | None -> ()
 
 let init_jsonl ~workspace_masc_dir ~recipient_lookup () =
-  if String.equal workspace_masc_dir "" then
-    invalid_arg "Board_dispatch.init_jsonl: workspace_masc_dir must not be empty";
-  let requested_workspace_masc_dir = Fs_compat.realpath_lenient workspace_masc_dir in
+  let requested_workspace_masc_dir =
+    Board_paths.capture_workspace_masc_dir workspace_masc_dir
+  in
   let validate_workspace (store : Board.store) =
     if String.equal store.workspace_masc_dir requested_workspace_masc_dir
     then Ok ()

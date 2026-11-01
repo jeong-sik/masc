@@ -13,7 +13,9 @@ related: ["browser-live-ego"]
 
 운영자는 ego 공간이 "매번 사라졌다 아니었다 한다"고 본다. 측정값이 그 관찰을 뒷받침한다.
 
-2026-10-28 ~ 10-30, `~/.masc/tool_calls/2026-10/*.jsonl` 의 브라우저 영수증에서
+2026-10-28 ~ 10-30, `<base-path>/.masc/tool_calls/2026-10/*.jsonl` (실측 워크스페이스
+base path `/Users/dancer/me`, 즉 `/Users/dancer/me/.masc/tool_calls/2026-10/*.jsonl`;
+셸 홈 `~/.masc` 가 아님) 의 브라우저 영수증에서
 같은 이름 `masc-keepers` 의 실제 공간 numeric ID 를 뽑았다.
 
 | 날짜 | 공간 ID 변화 | 교체 수 |
@@ -87,16 +89,19 @@ ego-browser 0.6.1.13)로 추가로 확인한 사실:
    쓴다. 브라우저 접근에 Goal 조건을 붙이지 않는다.
 4. 연결 하나 = 공간 하나 = SDK 프로세스 하나는 그대로 둔다. Goal 공간마다
    ego 워커가 하나 뜬다.
-5. 공간 소실을 조용히 넘기지 않는다. 직전 관측 ID 와 새 ID 가 다르면
-   영수증에 대체 사실을 실는다.
-6. Goal 이 `completed` 나 `dropped` 로 전이하면 호스트가 그 공간을
-   `finish_space` 한다.
+5. 공간 소실을 조용히 넘기지 않는다. Goal 공간 워커(단일 연결)가 직전 관측 ID 와
+   새 ID 가 다름을 관측하면 영수증에 대체 사실을 실는다.
+6. Goal 이 `completed` 나 `dropped` 로 전이하면 호스트가 그 전이 epoch 와
+   관측된 numeric `spaceId` 에 결속된 정리 의도(cleanup intent)를 기록하고,
+   Goal 이 여전히 그 종착 상태이고 살아 있는 관측 클라이언트에서 해당 numeric
+   공간이 `agent` 소유임이 확인될 때만 `finish_space` 를 호출한다. `reopen`
+   으로 `executing` 에 복귀하면 미실행 정리 의도는 즉시 폐기한다.
 7. `bind_goal` / `goal_status` / `unbind_goal` 도구 액션과 `Browser_goal_space`,
    `browser_goal_spaces.json` 을 지운다. reader·converter 를 만들지 않는다.
 
-원칙: 새 게이트를 두지 않는다. 상태는 Goal 공간의 마지막 관측 ID 하나만
-추가하고 덮어쓴다. 재할당 거부·인스턴스 고정·승인 절차 같은 의례를
-만들지 않는다.
+원칙: 새 게이트를 두지 않는다. 런타임 관측 상태는 Goal 공간 워커당 마지막
+관측 numeric ID 하나와 종착 전이에 결속된 정리 의도 레코드만 둔다. 재할당
+거부·인스턴스 고정·승인 절차 같은 의례를 만들지 않는다.
 
 ## 4. 다른 길
 
@@ -128,6 +133,9 @@ ego-browser 0.6.1.13)로 추가로 확인한 사실:
 
 ### 소실 보고
 
+- Goal 공간마다 워커(연결)가 하나뿐이므로, 마지막 관측 numeric ID 의 갱신 주체도
+  그 Goal 공간 워커 하나로 고정된다. 여러 Keeper 가 같은 Goal 공간을 공유해도
+  직렬화된 단일 워커가 관측 ID 를 갱신하므로 연결 간 역전 경쟁이 생기지 않는다.
 - 호스트는 Goal 공간의 마지막 관측 numeric ID 를 들고 있다가(원장이 아닌
   메모리 관측값), 연 결과의 ID 가 다르면 영수증에 이전 ID 와 새 ID 를
   함께 실는다. Keeper 는 페이지가 사라졌음을 알고 재작업을 판단한다.
@@ -136,19 +144,59 @@ ego-browser 0.6.1.13)로 추가로 확인한 사실:
   이전 ID·새 ID 영수증은 같은 호스트 프로세스가 둘 다 관측한 경우에만
   보장한다(best-effort).
 
-### 완료
+### 완료와 재개(Reopen) 경계
 
-- Goal 이 `completed` 또는 `dropped` 로 전이하면 호스트가 `finish_space`
-  를 호출한다. keepPages 는 기본값(없음)이다.
-- `finish_space` 는 살아 있는 관측 클라이언트가 있어야만 부를 수 있다.
-  브라우저 호스트가 내려가 있거나 워커가 교체된 상태에서 전이가 일어나면
-  이 호출은 저절로 실행되지 않는다. 그래서 완료·중단 전이는
-  `Workspace_goals` 경로에 durable 하게 남고, 호스트는 다음 살아 있는
-  관측 클라이언트에서 `finish_space` 를 다시 시도한다(전이 이벤트를
-  durable 하게 소비하는 reconciler). 재시도는 기존 `finish_space`
-  규칙 — 재생 금지, 불확실 유지 — 을 그대로 따른다.
-- finish 가 불확실하면 기존 `finish_space` 규칙을 따른다. 재생하지 않고
-  파일을 보존한다.
+- Goal 이 종착 상태(`completed` — 증명 판정과 운영자 `confirm_completion` 이
+  끝난 상태 — 또는 `dropped`)로 전이하면, `Workspace_goals` 전이 경로는 단순
+  이름이 아니라 **`(goal_id, terminal_transition_seq, target_space_id)` 에
+  결속된 durable 정리 의도(cleanup intent)** 를 기록한다.
+  - `terminal_transition_seq` 는 해당 종착 전이의 단조 증가 revision/시각이다.
+  - `target_space_id` 는 그 Goal 주기가 종착되기 직전까지 관측된 실제 numeric
+    `spaceId` 다. 만약 해당 Goal 주기에서 브라우저 공간을 한 번도 열지 않아
+    관측된 `target_space_id` 가 없다면 닫을 공간도 없으므로 정리 의도는 즉시
+    `No_space_observed` 로 종결되며, 정리를 위해 `taskSpace("masc-<goal_id>")`
+    를 이름으로 열어 새 공간을 만드는 일은 절대 하지 않는다.
+- **권한·소유권·휴지(quiescence) 확인 (`RFC-browser-live-ego` §279–312 준수)**:
+  - `finish_space` 는 살아 있는 관측 클라이언트(`clientId`)와 그 클라이언트에
+    결속된 numeric `target_space_id` 가 있어야만 부를 수 있다.
+  - 호스트 reconciler 는 실행 직전에 Goal 전이/라우팅 잠금 아래에서 다음 네
+    가지를 원자적으로 재확인한다:
+    1. **권위 있는 Goal 상태 재확인**: `Workspace_goals` 의 현재 상태가 여전히
+       종착(`Completed` 또는 `Dropped`)이고 현재 전이 번호가 정리 의도의
+       `terminal_transition_seq` 와 일치해야 한다.
+    2. **워커 휴지(quiescence) 확인**: 같은 Goal 워커에서 진행 중인 Keeper
+       브라우저 명령이 없어야 한다(워커의 단일 명령 직렬화 큐에서 일반 명령과
+       같은 순서로 실행).
+    3. **네이티브 상태·소유권 확인 (`space_status`)**: 이름을 열지 않고
+       관측된 `clientId` 의 `space_status`(`listTaskSpaces` 의 numeric
+       `target_space_id` 조회)로 공간 존재와 네이티브 `ownership` 을 확인한다.
+       - 목록에 `target_space_id` 가 이미 없으면 `Already_absent` 로 종결하고
+         `finish_space` 를 부르지 않는다.
+       - `ownership` 이 `user` 이거나 운영자 위임/제어 대기 중이면 파괴적 정리를
+         수행하지 않고 `Skipped_non_agent_ownership` 으로 기록·보존한다.
+    4. **명시적 1회 호출**: 위 조건이 모두 맞을 때만 해당 `(clientId,
+       target_space_id)` 에 `finish_space`(`keepPages` 기본값 `[]`)를 정확히
+       한 번 호출한다.
+- **`Reopen` 경쟁 직렬화와 지연 정리 차단 (`lib/goal/goal_phase.ml:135–144`)**:
+  - `Completed` 와 `Dropped` 는 모두 `Reopen` 액션으로 다시 `Executing` 이 될 수
+    있다. 브라우저 호스트가 내려가 있거나 워커가 없는 동안 종착 전이가 일어났고,
+    정리가 실행되기 전에 Goal 이 `Reopen` 되어 Keeper 가 `masc-<goal_id>` 에서
+    작업을 재개한 경우, 뒤늦게 살아난 reconciler 가 예전 종착 이벤트를 보고
+    현재 작업 중인 공간을 닫으면 안 된다.
+  - 이를 막기 위해 `Workspace_goals` 의 `Reopen` 전이는 같은 Goal 잠금 아래에서
+    미결 정리 의도를 즉시 `Superseded_by_reopen` 으로 무효화(폐기)하고 전이
+    revision 을 올린다.
+  - 설령 reconciler 가 큐에 있던 옛 이벤트를 늦게 읽더라도, 실행 직전
+    `terminal_transition_seq` 및 현재 Goal phase(`Executing`) 재확인에서
+    불일치가 감지되어 `finish_space` 호출이 거부된다.
+  - 반대로 `finish_space` 호출이 이미 워커 큐에 들어가 실행 중일 때 `Reopen` 이
+    들어오면, 해당 RPC 경계가 끝난 뒤 새 실행 주기가 시작되며 이전
+    `target_space_id` 의 정리 의도는 새 주기에 재실행되지 않는다.
+- **불확실 결과 보존 (재생 금지)**:
+  - `finish_space` 호출이 타임아웃·연결 끊김·프로토콜 오류로 불확실하게 끝나면
+    기존 `RFC-browser-live-ego` 규칙대로 의도를 `Uncertain_preserved` 로 남기고
+    재시도(replay)하지 않으며 브로커 파일도 보존한다. 이후 Goal 이 `Reopen`
+    되더라도 불확실한 이전 `finish_space` 를 재생하지 않는다.
 
 ### 사용자 소유 이름 충돌
 
@@ -176,16 +224,27 @@ ego-browser 0.6.1.13)로 추가로 확인한 사실:
 
 1. 파생 라우팅: Task 의 Goal 링크가 1개·0개·여러 개일 때 각각 선택 경로.
 2. 소실 보고: 가짜 워커로 이전 ID 와 다른 ID 를 답하게 하고 영수증 확인.
-3. 완료 연결: Goal 이 종착(`completed` — 증명 판정과 운영자
-   `confirm_completion` 이 끝난 상태 — 또는 `dropped`)에 도달한 뒤
-   `finish_space` 호출과 영수증. `request_complete` 는 `verifying` 만
-   만들므로 완료 판정 기준이 아니다.
-4. 동시성: 서로 다른 두 Goal 공간에 동시 명령 — 2026-10-30 프로브로 확인
-   완료(`docs/evidence/2026-10-30-ego-goal-spaces-probes/`). 구현 뒤 워커
-   두 개가 같은 조건을 유지하는지 다시 잰다.
-5. 이름 경계: goal_id 로 만든 이름의 길이·문자가 ego 에서 받아들여지는지.
-6. 회수 주체: agent 공간만 사라지는 근거를 분당 관찰자(프로브 README)로
-   잡는다. 소실 보고 설계는 주체와 무관하게 들어간다.
+3. 완료 연결과 소유권 확인: Goal 이 종착(`completed` — 증명 판정과 운영자
+   `confirm_completion` 이 끝난 상태 — 또는 `dropped`)에 도달한 뒤, 관측된
+   `clientId` 와 numeric `target_space_id`, `ownership = agent` 를 확인해
+   `finish_space` 를 호출하고 영수증을 남기는지 검사한다. `request_complete` 는
+   `verifying` 만 만들므로 완료 판정 기준이 아니며, 관측된 공간이 없을 때 이름으로
+   새 공간을 열지 않는지도 함께 확인한다.
+4. 지연 완료 뒤 `Reopen` 경쟁 차단: 브라우저 호스트가 내려간 상태에서 Goal 이
+   `completed` 또는 `dropped` 가 되어 정리 의도가 기록된 뒤, 클라이언트가 복구되기
+   전에 `reopen`(`goal_phase.ml:139,144`)으로 `executing` 에 돌아와 Keeper 가
+   `masc-<goal_id>` 공간을 다시 쓰는 시나리오를 검사한다. 뒤늦게 클라이언트가
+   연결됐을 때 이전 정리 의도가 `Superseded_by_reopen` 및 phase/revision 불일치로
+   거부되어 활성 공간과 탭이 닫히지 않아야 한다. 또한 `finish_space` 가 불확실하게
+   끝난 뒤에는 재생되지 않음을 확인한다.
+5. 동시성: 서로 다른 두 Goal 공간에 동시 명령 — SDK 수준의 두 공간 간 비간섭은
+   2026-10-30 프로브로 확인 완료(`docs/evidence/2026-10-30-ego-goal-spaces-probes/`).
+   구현 뒤 MASC 호스트의 동적 워커 두 개가 같은 조건을 유지하는지 다시 잰다.
+6. 이름 경계: goal_id 로 만든 이름의 길이·문자가 ego 에서 받아들여지는지 구현 PR 의
+   단위/통합 시험으로 검증한다.
+7. 회수 주체와 성공 기준: agent 공간만 사라지는 근거를 분당 관찰자(프로브 README)로
+   잡는다. 소실 보고 설계는 주체와 무관하게 들어가며, 구현 뒤에는 Goal 공간 간
+   타 Keeper `close_tab` 간섭 0건과 공간 교체 시 영수증 보고 누락 0건을 확인한다.
 
 ## 9. 순서
 

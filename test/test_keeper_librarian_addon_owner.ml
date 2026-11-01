@@ -954,11 +954,12 @@ let test_missing_absorb_policy_refuses_before_preparation ()=List.iter (fun empt
   let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
   let record=memory_action fixture (fun () -> retain_judgment fixture record final) in
   with_absorb_gate_policy ~enabled:true ~excluded:false (fun () ->
+  let original_authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
   let intent=io (fun () -> Gate.prepare_root ~store:fixture.store ~owner ~capture ~parent:record
     ~proposal:(match final with Lane_addon_exact.Call_final (Answered {output;_}) -> Lane_addon_exact.checked_json output
       | _ -> fail "the fixture requires its original answer")
     ~request_id:(Random_id.uuid_v7 ())
-    ~authority:(Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name) |> get) in
+    ~authority:original_authority |> get) in
   with_absorb_guidance_gap ~empty (fun () ->
     let authority=Keeper_librarian_absorb_gate.resolve ~keeper_id:keeper_name in
     let missing_policy=match Keeper_librarian_absorb_gate.guidance_of_authority authority with

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure wasted tool round-trips in keeper tool-call logs.
 
-Reads one day of `<base-path>/tool_calls/YYYY-MM/DD.jsonl` and reports, per
+Reads one day and its rotated segments under `<base-path>/.masc/tool_calls/YYYY-MM/` and reports, per
 turn (keeper, keeper_turn_id, trace_id), how many round-trips were spent on
 consecutive calls to the same tool, classified by why the repeat happened:
 
@@ -426,7 +426,7 @@ def main() -> int:
     parser.add_argument(
         "--date",
         required=True,
-        help="Day to measure, as YYYY-MM-DD (selects <dir>/YYYY-MM/DD.jsonl)",
+        help="Day to measure, as YYYY-MM-DD (includes completed segments)",
     )
     parser.add_argument(
         "--top",
@@ -445,11 +445,22 @@ def main() -> int:
         / year_month
         / f"{day}.jsonl"
     )
-    if not log_path.is_file():
-        print(f"no such log file: {log_path}", file=sys.stderr)
+    segments: list[tuple[int, pathlib.Path]] = []
+    for path in log_path.parent.glob(f"{day}.*.jsonl"):
+        parts = path.name.split(".")
+        if len(parts) == 3 and parts[1].isascii() and parts[1].isdecimal():
+            sequence = int(parts[1])
+            if sequence > 0 and parts[1] == f"{sequence:03d}":
+                segments.append((sequence, path))
+    paths = [path for _, path in sorted(segments)]
+    if log_path.is_file():
+        paths.append(log_path)
+    if not paths:
+        print(f"no log files for day: {log_path}", file=sys.stderr)
         return 1
 
-    rows = load_rows(log_path)
+    rows = [row for path in paths for row in load_rows(path)]
+    rows.sort(key=lambda row: float(row.get("ts", 0.0)))
     print(render(rows, options.top))
     return 0
 

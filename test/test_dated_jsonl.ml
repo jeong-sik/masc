@@ -1393,6 +1393,37 @@ let test_append_rotating_range_reads_cross_segments () =
   in
   check (list int) "range read includes rotated segments" [ 1; 2; 3 ] values
 
+let test_append_rotating_reports_commit_before_failure () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let location = temp_store "dated_jsonl_rotating_commit" in
+  let store = Dated_jsonl.open_store location in
+  let committed = ref 0 in
+  ignore (Dated_jsonl.append_rotating
+    ~on_committed:(fun () -> incr committed)
+    store ~max_current_file_bytes:tiny_row_bytes (tiny_json 1)
+    : Dated_jsonl.append_outcome);
+  (match Dated_jsonl.append_rotating
+     ~on_committed:(fun () -> incr committed; raise After_commit)
+     store ~max_current_file_bytes:tiny_row_bytes (tiny_json 2) with
+   | _ -> fail "post-commit failure must propagate"
+   | exception After_commit -> ());
+  check int "each committed row is reported" 2 !committed;
+  check (list int) "both rows survive the post-rotation failure" [1; 2]
+    (List.map json_i (Dated_jsonl.read_recent store 10));
+  Fun.protect
+    ~finally:(fun () -> Dated_jsonl.set_append_guard (fun run -> run ()))
+    (fun () ->
+      Dated_jsonl.set_append_guard (fun _ -> ());
+      (match Dated_jsonl.append_rotating
+         ~on_committed:(fun () -> incr committed)
+         store ~max_current_file_bytes:tiny_row_bytes (tiny_json 3) with
+       | Dated_jsonl.Skipped_by_append_guard -> ()
+       | _ -> fail "guard must refuse the append");
+      check int "skipped row is not reported as committed" 2 !committed;
+      check (list int) "skipped row was not written" [1; 2]
+        (List.map json_i (Dated_jsonl.read_recent store 10)))
+
 let test_append_rotating_ring_prunes_oldest_segment () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1607,6 +1638,8 @@ let () =
             test_append_rotating_rotates_at_cap;
           test_case "range reads cross rotated segments" `Quick
             test_append_rotating_range_reads_cross_segments;
+          test_case "rotation reports committed rows before later failures" `Quick
+            test_append_rotating_reports_commit_before_failure;
           test_case "byte budget sheds the oldest segment first" `Quick
             test_append_rotating_ring_prunes_oldest_segment;
           test_case "oversized single row lands in an empty file" `Quick

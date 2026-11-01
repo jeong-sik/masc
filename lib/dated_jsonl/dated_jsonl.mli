@@ -114,6 +114,7 @@ type append_outcome =
       (** The installed {!set_append_guard} declined to run the append. *)
 
 val append_rotating :
+  ?on_committed:(unit -> unit) ->
   t -> max_current_file_bytes:int -> Yojson.Safe.t -> append_outcome
 (** Append [json] to today's current [DD.jsonl], rotating the file to a
     completed [DD.SEQUENCE.jsonl] segment first when the row would push it
@@ -130,7 +131,10 @@ val append_rotating :
     out would spin without ever accepting the row. The size check,
     rename, and append share the same internal mutex as {!append};
     retention and byte-budget pruning still run after a successful
-    append. *)
+    append. [on_committed] runs after the row is written, before pruning,
+    including when the append rotated the file. It never runs for a skipped
+    append. A failure after the callback leaves the row committed, as with
+    {!append_notifying_commit}. *)
 
 val set_append_guard : ((unit -> unit) -> unit) -> unit
 (** [set_append_guard guard] installs a process-wide wrapper around

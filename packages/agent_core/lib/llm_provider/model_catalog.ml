@@ -125,6 +125,7 @@ let make ~models ~providers =
 let empty = make ~models:[] ~providers:[]
 let model_entries t = t.models
 let provider_entries t = t.providers
+let without_providers t = { t with providers = [] }
 
 let with_model_overrides catalog declarations =
   let entries = Capability_manifest.entries declarations in

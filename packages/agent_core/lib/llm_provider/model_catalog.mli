@@ -108,6 +108,11 @@ val empty : t
 val model_entries : t -> model_entry list
 val provider_entries : t -> provider_entry list
 
+val without_providers : t -> t
+(** Retain every model row while removing provider declarations, aliases,
+    defaults and bare-row permissions. Exact scoped model rows still answer
+    for explicitly named custom providers. No global catalog is consulted. *)
+
 val with_model_overrides : t -> Capability_manifest.t -> t
 (** Compose a parsed JSON capability declaration into a new immutable catalog.
     Each exact bare model identity replaces its capability fields. Missing

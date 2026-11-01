@@ -131,7 +131,10 @@ let request_policy t ~wire ~provider_id ~model_id =
     Capabilities.resolve_bound_request_policy ~catalog:t.models ~wire ~provider
       ~capabilities:entry.capabilities ~model_id
   | None ->
-    Capabilities.resolve_request_policy_from_catalog ~catalog:t.models ~wire
+    (* This identity was not admitted. Keep exact custom-model rows, but do
+       not let a replaced seed's old aliases/defaults grant it authority. *)
+    let catalog = Option.map Model_catalog.without_providers t.models in
+    Capabilities.resolve_request_policy_from_catalog ~catalog ~wire
       ~provider:(Model_catalog.Declared_provider provider_id) ~model_id
 
 let supports_parallel_tool_suppression t ~provider_id =

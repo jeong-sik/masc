@@ -6,12 +6,12 @@ type skill_evidence_status =
   | Skill_evidence_not_observed_in_retained_coverage
 
 type skill_evidence_composition_scope =
-  | Skill_evidence_exact_reference_latest_completed
+  | Skill_evidence_exact_reference_retained_runs
   | Skill_evidence_composition_unavailable
 
 type skill_evidence_coverage =
   { sec_composition_scope : skill_evidence_composition_scope
-  ; sec_composition_records_read : int
+  ; sec_composition_runs_observed : int
   ; sec_composition_unavailable : string list
   ; sec_activation_scope : string
   ; sec_activation_sessions_inspected : int
@@ -39,12 +39,21 @@ type skill_evidence_activation =
   | Skill_evidence_most_recent_observed_timestamp_tie of
       skill_evidence_activation_item list
 
-type duration_statistics = { sds_samples : int; sds_mean_ms : float option }
+type duration_statistics =
+  { sds_samples : int
+  ; sds_mean_ms : float option
+  ; sds_min_ms : float option
+  ; sds_p50_ms : float option
+  ; sds_p95_ms : float option
+  ; sds_max_ms : float option
+  }
 type composition_statistics =
   { scst_records : int
   ; scst_completed : duration_statistics
   ; scst_failed : duration_statistics
   ; scst_deferred : int
+  ; scst_first_recorded_at : float option
+  ; scst_last_recorded_at : float option
   }
 
 type skill_evidence =

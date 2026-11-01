@@ -255,60 +255,25 @@ let test_same_reference_runs_do_not_overlap () =
          (loaded |> member "composition_run_id" |> to_string))
 ;;
 
-(* Records written by the pre-append layout (a single [<partition>.json] per
-   reference) must remain readable, and lose only to a strictly newer run. *)
-let test_legacy_single_file_remains_a_candidate () =
-  let base_path =
-    Filename.temp_file "masc_skill_composition_evidence" ""
-  in
-  Sys.remove base_path;
-  Unix.mkdir base_path 0o755;
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let config = Workspace.default_config base_path in
-       let reference = make_reference "legacy-proof" 'c' in
-       let settlements = settlements_fixture () in
-       let legacy_run = Keeper_tool_plan.Composition_run_id.fresh () in
-       let legacy =
-         make_evidence reference settlements legacy_run ~recorded_at:100.0
-       in
-       let evidence_json =
-         Keeper_skill_composition_evidence.to_yojson legacy
-         |> Yojson.Safe.to_string
-       in
-       Fs_compat.mkdir_p (store_dir config);
-       Out_channel.with_open_bin
-         (Filename.concat (store_dir config) (partition reference ^ ".json"))
-         (fun channel -> output_string channel evidence_json);
-       let load () =
-         Keeper_skill_composition_evidence.load_latest config reference
-         |> Result.get_ok
-         |> Option.get
-         |> Keeper_skill_composition_evidence.to_yojson
-       in
-       let open Yojson.Safe.Util in
-       Alcotest.(check string) "legacy record remains readable"
-         (Keeper_tool_plan.Composition_run_id.to_string legacy_run)
-         (load () |> member "composition_run_id" |> to_string);
-       let older_run = Keeper_tool_plan.Composition_run_id.fresh () in
-       (Keeper_skill_composition_evidence.save_latest
-          config
-          (make_evidence reference settlements older_run ~recorded_at:50.0)
-        |> Result.get_ok
-        |> ignore);
-       Alcotest.(check string) "legacy record still wins over a strictly older run"
-         (Keeper_tool_plan.Composition_run_id.to_string legacy_run)
-         (load () |> member "composition_run_id" |> to_string);
-       let newer_run = Keeper_tool_plan.Composition_run_id.fresh () in
-       (Keeper_skill_composition_evidence.save_latest
-          config
-          (make_evidence reference settlements newer_run ~recorded_at:150.0)
-        |> Result.get_ok
-        |> ignore);
-       Alcotest.(check string) "a strictly newer run wins over the legacy record"
-         (Keeper_tool_plan.Composition_run_id.to_string newer_run)
-         (load () |> member "composition_run_id" |> to_string))
+let test_only_run_partition_is_authoritative () =
+  let module E = Keeper_skill_composition_evidence in
+  let base = Filename.temp_dir "composition-partition-authority" "" in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let config = Workspace.default_config base in
+    let reference = make_reference "partition-proof" 'c' in
+    Fs_compat.mkdir_p (store_dir config);
+    Out_channel.with_open_bin
+      (Filename.concat (store_dir config) (partition reference ^ ".json"))
+      (fun channel -> output_string channel "obsolete invalid JSON");
+    let run = Keeper_tool_plan.Composition_run_id.fresh () in
+    let evidence = make_evidence reference (settlements_fixture ()) run ~recorded_at:100. in
+    E.save_latest config evidence |> Result.get_ok |> ignore;
+    let observed = E.load_observation config reference |> Result.get_ok in
+    Alcotest.(check int) "current partition remains readable" 1 observed.statistics.records;
+    Alcotest.(check string) "only the producer-owned run is selected"
+      (Keeper_tool_plan.Composition_run_id.to_string run)
+      (Option.get observed.latest |> E.to_yojson
+       |> Yojson.Safe.Util.member "composition_run_id" |> Yojson.Safe.Util.to_string))
 ;;
 
 let test_canonical_failed_results () =
@@ -407,10 +372,30 @@ let test_duration_statistics () =
   Alcotest.(check int) "original run counted once" 3 stats.records;
   Alcotest.(check int) "only completed samples" 2 stats.completed.samples;
   Alcotest.(check (option (float 0.00001))) "completed mean excludes old and deferred" (Some 20.) stats.completed.mean_ms;
+  Alcotest.(check (option (float 0.00001))) "deduplicated nearest-rank p50" (Some 10.) stats.completed.p50_ms;
+  Alcotest.(check (option (float 0.00001))) "deduplicated nearest-rank p95" (Some 30.) stats.completed.p95_ms;
+  Alcotest.(check (option (float 0.00001))) "window begins with selected result" (Some 200.) stats.first_recorded_at;
+  Alcotest.(check (option (float 0.00001))) "window includes deferred result" (Some 400.) stats.last_recorded_at;
   Alcotest.(check int) "deferred separately" 1 stats.deferred;
   Alcotest.(check (option (float 0.00001))) "missing failures are unknown" None stats.failed.mean_ms;
+  let tail = List.init 20 (fun index ->
+    let duration = if index = 19 then 1000. else float_of_int index in
+    make_evidence reference [] (Keeper_tool_plan.Composition_run_id.fresh ()) ~recorded_at:500.
+    |> change ~disposition:"completed" ~duration ~recorded_at:500.) |> E.statistics in
+  Alcotest.(check (option (float 0.00001))) "p50 retains sample distribution" (Some 9.) tail.completed.p50_ms;
+  Alcotest.(check (option (float 0.00001))) "p95 distinguishes tail from maximum" (Some 18.) tail.completed.p95_ms;
+  Alcotest.(check (option (float 0.00001))) "outlier remains visible" (Some 1000.) tail.completed.max_ms;
+  Alcotest.(check (option (float 0.00001))) "zero is measured" (Some 0.) tail.completed.min_ms;
+  let before_epoch = change ~disposition:"completed" ~duration:10. ~recorded_at:(-100.5) first
+    |> fun evidence -> E.statistics [evidence] in
+  Alcotest.(check (option (float 0.00001))) "finite pre-epoch record starts the window"
+    (Some (-100.5)) before_epoch.first_recorded_at;
+  Alcotest.(check (option (float 0.00001))) "finite pre-epoch record ends the window"
+    (Some (-100.5)) before_epoch.last_recorded_at;
   let empty = E.statistics [] in
-  Alcotest.(check (option (float 0.00001))) "empty mean is unknown, not zero" None empty.completed.mean_ms
+  List.iter (Alcotest.(check (option (float 0.00001))) "empty is unknown, not zero" None)
+    [empty.completed.mean_ms; empty.completed.min_ms; empty.completed.p50_ms;
+     empty.completed.p95_ms; empty.completed.max_ms; empty.first_recorded_at; empty.last_recorded_at]
 ;;
 
 let () =
@@ -430,9 +415,9 @@ let () =
             `Quick
             test_same_reference_runs_do_not_overlap
         ; Alcotest.test_case
-            "legacy single file remains a candidate"
+            "current run partition is authoritative"
             `Quick
-            test_legacy_single_file_remains_a_candidate
+            test_only_run_partition_is_authoritative
         ] )
     ]
 ;;

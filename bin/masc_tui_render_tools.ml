@@ -567,30 +567,36 @@ let skill_statistics_lines ~cols = function
       let rows =
         [ "completed", Theme.ok (), stats.Masc.Tui_decode_skill_evidence.scst_completed
         ; "failed", Theme.bad (), stats.scst_failed ] in
-      let peak = List.fold_left (fun peak (_, _, row) ->
-        match row.Masc.Tui_decode_skill_evidence.sds_mean_ms with
-        | None -> peak | Some value -> max peak value) 0. rows in
-      let bar_width = max 0 (Masc_tui_frame.inner_width ~cols - 43) in
+      let milliseconds = function
+        | None -> "—"
+        | Some value -> Printf.sprintf "%.1fms" value in
       let duration (name, style, row) =
-        match row.Masc.Tui_decode_skill_evidence.sds_mean_ms with
-        | None -> Ansi.dim, Printf.sprintf "%s   —  · n=%d (미관측)" name row.sds_samples
-        | Some value ->
-          let filled = if peak <= 0. then 0 else
-            min bar_width (max 0 (int_of_float (value /. peak *. float_of_int bar_width))) in
-          let repeat glyph count = String.concat "" (List.init count (fun _ -> glyph)) in
-          style, Printf.sprintf "%-9s %s%s  %.1fms · n=%d" name
-            (repeat "█" filled) (repeat "░" (bar_width - filled)) value row.sds_samples in
-      [ Theme.info (), Printf.sprintf "평균 executor 실행 시간 · 보존 실행 %d건" stats.scst_records ]
-      @ List.map duration rows
-      @ [ Ansi.dim, "막대: 0 → 관측된 최대 평균 · 동일 revision / 전체 Keepers"
-        ; Ansi.bold, "실행 결과 분포 · 전체 보존 실행 = 100%" ]
+        [ style, Printf.sprintf "%s · n=%d · 평균 %s · P50 %s · P95 %s"
+            name row.Masc.Tui_decode_skill_evidence.sds_samples
+            (milliseconds row.sds_mean_ms) (milliseconds row.sds_p50_ms)
+            (milliseconds row.sds_p95_ms)
+        ; Ansi.dim, Printf.sprintf "  최소 %s → 최대 %s"
+            (milliseconds row.sds_min_ms) (milliseconds row.sds_max_ms) ] in
+      let recorded_at value =
+        try Time_codec.rfc3339_of_unix value with
+        | Unix.Unix_error _ | Invalid_argument _ -> Printf.sprintf "%.3f Unix seconds" value in
+      let window = match stats.scst_first_recorded_at, stats.scst_last_recorded_at with
+        | Some first, Some last ->
+          "결과 기록 시각(UTC): " ^ recorded_at first
+          ^ " → " ^ recorded_at last
+        | _ -> "결과 기록 시각: 미관측" in
+      [ Theme.info (), Printf.sprintf "executor 실행 시간 · 보존된 원래 실행 %d건" stats.scst_records
+      ; Ansi.dim, "동일 revision / 전체 Keepers · P50/P95: nearest rank"
+      ; Ansi.dim, window ]
+      @ List.concat_map duration rows
+      @ [ Ansi.bold, "실행 결과 분포 · 분모는 보존된 원래 실행 수" ]
       @ (Masc_tui_chart.distribution_bars
            ~width:(max 1 (Masc_tui_frame.inner_width ~cols - 4))
            [ { name = "completed"; count = stats.scst_completed.sds_samples; style = Some Masc_tui_theme.Ok }
            ; { name = "failed"; count = stats.scst_failed.sds_samples; style = Some Masc_tui_theme.Bad }
            ; { name = "deferred"; count = stats.scst_deferred; style = Some Masc_tui_theme.Warn } ]
          |> List.map (fun line -> "", line))
-      @ [ Ansi.dim, "deferred는 평균에서 제외 · queue/의존 대기/model 시간은 별도" ]
+      @ [ Ansi.dim, "deferred는 실행 시간에서 제외 · queue/의존 대기/model 시간은 별도" ]
 ;;
 
 let skill_settlement_lines composition =
@@ -1065,8 +1071,8 @@ let tools_display_lines ?(cols = 80) (state : state) =
                  let coverage = evidence.Masc.Tui_decode_skill_evidence.se_coverage in
                  let composition_scope =
                    match coverage.sec_composition_scope with
-                   | Masc.Tui_decode_skill_evidence.Skill_evidence_exact_reference_latest_completed ->
-                     "latest_completed"
+                   | Masc.Tui_decode_skill_evidence.Skill_evidence_exact_reference_retained_runs ->
+                     "retained_runs"
                    | Masc.Tui_decode_skill_evidence.Skill_evidence_composition_unavailable ->
                      "unavailable"
                  in
@@ -1077,14 +1083,14 @@ let tools_display_lines ?(cols = 80) (state : state) =
                  in
                    [ Ansi.dim,
                      Printf.sprintf
-                       "       coverage retained_sessions=%d ledgers=%d activation=%s gaps=%d owner_gaps=%d exact_reference=%s records_read=%d"
+                       "       coverage retained_sessions=%d ledgers=%d activation=%s gaps=%d owner_gaps=%d exact_reference=%s runs_observed=%d"
                        coverage.sec_activation_sessions_inspected
                        coverage.sec_activation_ledgers_loaded
                        coverage.sec_activation_scope
                        coverage.sec_activation_gap_count
                        coverage.sec_activation_owner_gap_count
                        composition_scope
-                       coverage.sec_composition_records_read
+                       coverage.sec_composition_runs_observed
                    ]
                    @
                    (match unavailable with

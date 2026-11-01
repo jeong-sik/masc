@@ -12620,7 +12620,7 @@ let test_verification_evidence_defective_bodies_are_named () =
 
 let skill_evidence_fixture () =
   `Assoc
-    [ "schema", `String "masc.skill-evidence/v7"
+    [ "schema", `String "masc.skill-evidence/v8"
     ; "status", `String "not_observed_in_retained_coverage"
     ; ( "reference"
       , `Assoc
@@ -12637,8 +12637,8 @@ let skill_evidence_fixture () =
     ; "composition_statistics", `Null
     ; ( "coverage"
       , `Assoc
-          [ "composition_scope", `String "exact_reference_latest_completed"
-          ; "composition_records_read", `Int 0
+          [ "composition_scope", `String "exact_reference_retained_runs"
+          ; "composition_runs_observed", `Int 0
           ; "composition_unavailable", `List []
           ; "coverage_complete", `Bool false
           ; "activation_scope", `String "complete_retained_trace_snapshot"
@@ -12667,17 +12667,32 @@ let test_decode_skill_evidence_reads_exact_v7_coverage () =
   let with_statistics value = base
     |> replace "status" (`String "observed")
     |> replace "composition" composition
-    |> replace "coverage" (Tui_decode_fields.member "coverage" base |> replace "composition_records_read" (`Int 1))
+    |> replace "coverage" (Tui_decode_fields.member "coverage" base |> replace "composition_runs_observed" (`Int 2))
     |> replace "composition_statistics" value in
+  let duration samples value = `Assoc (List.map (fun name -> name, value)
+    ["mean_ms"; "min_ms"; "p50_ms"; "p95_ms"; "max_ms"] @ ["samples", `Int samples]) in
   let statistics samples mean = `Assoc [
     "scope", `String "exact_reference_retained_runs";
+    "percentile_method", `String "nearest_rank";
+    "recorded_window", `Assoc ["first_recorded_at", `Float 1.; "last_recorded_at", `Float 1.];
     "duration_scope", `String "stored_executor_result"; "records", `Int 2;
-    "completed", `Assoc ["samples", `Int samples; "mean_ms", mean];
-    "failed", `Assoc ["samples", `Int 0; "mean_ms", `Null]; "deferred", `Int 0] in
+    "completed", duration samples mean;
+    "failed", duration 0 `Null; "deferred", `Int 0] in
   (match Tui_decode_skill_evidence.decode_skill_evidence (with_statistics (statistics 2 (`Float 20.))) with
    | Ok { se_composition_statistics = Some stats; _ } ->
        Alcotest.(check (option (float 0.00001))) "recorded duration mean" (Some 20.) stats.scst_completed.sds_mean_ms
    | Ok _ -> Alcotest.fail "missing statistics"
+   | Error detail -> Alcotest.fail detail);
+  let before_epoch = with_statistics (statistics 2 (`Float 20.))
+    |> replace "composition" (composition |> replace "recorded_at" (`Float (-100.5)))
+    |> replace "composition_statistics" (statistics 2 (`Float 20.)
+      |> replace "recorded_window" (`Assoc [
+        "first_recorded_at", `Float (-100.5); "last_recorded_at", `Float (-100.5)])) in
+  (match Tui_decode_skill_evidence.decode_skill_evidence before_epoch with
+   | Ok { se_composition_statistics = Some stats; _ } ->
+       Alcotest.(check (option (float 0.00001))) "finite pre-epoch record is retained"
+         (Some (-100.5)) stats.scst_first_recorded_at
+   | Ok _ -> Alcotest.fail "missing pre-epoch statistics"
    | Error detail -> Alcotest.fail detail);
   let contradictory = base |> replace "composition_statistics" (statistics 2 (`Float 20.)) in
   Alcotest.(check bool) "positive samples require retained evidence" true
@@ -12748,8 +12763,8 @@ let test_decode_skill_evidence_accepts_declared_composition_scopes () =
            scope
            true
            (evidence.se_coverage.sec_composition_scope = expected))
-    [ ( "exact_reference_latest_completed"
-      , Tui_decode_skill_evidence.Skill_evidence_exact_reference_latest_completed )
+    [ ( "exact_reference_retained_runs"
+      , Tui_decode_skill_evidence.Skill_evidence_exact_reference_retained_runs )
     ; "unavailable", Tui_decode_skill_evidence.Skill_evidence_composition_unavailable
     ]
 ;;
@@ -12796,7 +12811,7 @@ let test_decode_skill_evidence_requires_observation_fields () =
 let test_decode_skill_evidence_requires_every_coverage_field () =
   let required =
     [ "composition_scope"
-    ; "composition_records_read"
+    ; "composition_runs_observed"
     ; "composition_unavailable"
     ; "coverage_complete"
     ; "activation_scope"

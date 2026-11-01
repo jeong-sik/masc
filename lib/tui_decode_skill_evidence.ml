@@ -8,12 +8,12 @@ type skill_evidence_status =
   | Skill_evidence_not_observed_in_retained_coverage
 
 type skill_evidence_composition_scope =
-  | Skill_evidence_exact_reference_latest_completed
+  | Skill_evidence_exact_reference_retained_runs
   | Skill_evidence_composition_unavailable
 
 type skill_evidence_coverage =
   { sec_composition_scope : skill_evidence_composition_scope
-  ; sec_composition_records_read : int
+  ; sec_composition_runs_observed : int
   ; sec_composition_unavailable : string list
   ; sec_activation_scope : string
   ; sec_activation_sessions_inspected : int
@@ -41,12 +41,21 @@ type skill_evidence_activation =
   | Skill_evidence_most_recent_observed_timestamp_tie of
       skill_evidence_activation_item list
 
-type duration_statistics = { sds_samples : int; sds_mean_ms : float option }
+type duration_statistics =
+  { sds_samples : int
+  ; sds_mean_ms : float option
+  ; sds_min_ms : float option
+  ; sds_p50_ms : float option
+  ; sds_p95_ms : float option
+  ; sds_max_ms : float option
+  }
 type composition_statistics =
   { scst_records : int
   ; scst_completed : duration_statistics
   ; scst_failed : duration_statistics
   ; scst_deferred : int
+  ; scst_first_recorded_at : float option
+  ; scst_last_recorded_at : float option
   }
 
 type skill_evidence =
@@ -374,15 +383,30 @@ let decode_composition_statistics json =
   let duration json =
     let* sds_samples = required_nonnegative_int_field json "samples" in
     let* sds_mean_ms = required_nullable_float_field json "mean_ms" in
-    match sds_samples, sds_mean_ms with
-    | 0, None -> Ok { sds_samples; sds_mean_ms }
-    | n, Some value when n > 0 && Float.is_finite value && value >= 0. ->
-        Ok { sds_samples; sds_mean_ms }
-    | _, _ -> Error "Skill duration mean disagrees with sample count"
+    let* sds_min_ms = required_nullable_float_field json "min_ms" in
+    let* sds_p50_ms = required_nullable_float_field json "p50_ms" in
+    let* sds_p95_ms = required_nullable_float_field json "p95_ms" in
+    let* sds_max_ms = required_nullable_float_field json "max_ms" in
+    let values = [sds_mean_ms; sds_min_ms; sds_p50_ms; sds_p95_ms; sds_max_ms] in
+    let valid =
+      if sds_samples = 0 then List.for_all Option.is_none values
+      else
+        match sds_mean_ms, sds_min_ms, sds_p50_ms, sds_p95_ms, sds_max_ms with
+        | Some mean, Some minimum, Some p50, Some p95, Some maximum ->
+          List.for_all (fun value -> Float.is_finite value && value >= 0.)
+            [mean; minimum; p50; p95; maximum]
+          && minimum <= mean && mean <= maximum
+          && minimum <= p50 && p50 <= p95 && p95 <= maximum
+        | _ -> false
+    in
+    if valid then Ok { sds_samples; sds_mean_ms; sds_min_ms; sds_p50_ms; sds_p95_ms; sds_max_ms }
+    else Error "Skill duration distribution disagrees with sample count or bounds"
   in
   let* scope = required_string_field json "scope" in
   let* duration_scope = required_string_field json "duration_scope" in
+  let* percentile_method = required_string_field json "percentile_method" in
   if scope <> "exact_reference_retained_runs" || duration_scope <> "stored_executor_result"
+     || percentile_method <> "nearest_rank"
   then Error "Skill duration scope is unsupported"
   else
     let* scst_records = required_nonnegative_int_field json "records" in
@@ -391,13 +415,23 @@ let decode_composition_statistics json =
     let* failed = required_object_field json "failed" in
     let* scst_failed = duration failed in
     let* scst_deferred = required_nonnegative_int_field json "deferred" in
+    let* window = required_object_field json "recorded_window" in
+    let* scst_first_recorded_at = required_nullable_float_field window "first_recorded_at" in
+    let* scst_last_recorded_at = required_nullable_float_field window "last_recorded_at" in
+    let valid_window = match scst_records, scst_first_recorded_at, scst_last_recorded_at with
+      | 0, None, None -> true
+      | n, Some first, Some last when n > 0 ->
+        Float.is_finite first && Float.is_finite last && first <= last
+      | _ -> false in
     if scst_completed.sds_samples + scst_failed.sds_samples + scst_deferred <> scst_records
     then Error "Skill duration sample counts disagree with records"
-    else Ok { scst_records; scst_completed; scst_failed; scst_deferred }
+    else if not valid_window then Error "Skill recorded window disagrees with records"
+    else Ok { scst_records; scst_completed; scst_failed; scst_deferred
+            ; scst_first_recorded_at; scst_last_recorded_at }
 ;;
 
 let decode_skill_evidence json =
-  if member "schema" json <> `String "masc.skill-evidence/v7"
+  if member "schema" json <> `String "masc.skill-evidence/v8"
   then Error "Skill evidence schema is unsupported"
   else
     let* reference =
@@ -452,14 +486,14 @@ let decode_skill_evidence json =
       in
       let* sec_composition_scope =
         match member "composition_scope" coverage with
-        | `String "exact_reference_latest_completed" ->
-          Ok Skill_evidence_exact_reference_latest_completed
+        | `String "exact_reference_retained_runs" ->
+          Ok Skill_evidence_exact_reference_retained_runs
         | `String "unavailable" -> Ok Skill_evidence_composition_unavailable
         | _ -> Error "Skill evidence composition scope is unsupported"
       in
-      let* sec_composition_records_read =
+      let* sec_composition_runs_observed =
         decode_skill_evidence_nonnegative_int
-          "composition_records_read"
+          "composition_runs_observed"
           coverage
       in
       let* sec_composition_unavailable =
@@ -488,17 +522,17 @@ let decode_skill_evidence json =
           coverage
       in
       let* () =
-        match sec_composition_scope, se_composition, sec_composition_records_read with
-        | Skill_evidence_exact_reference_latest_completed, Some _, 1
-          when sec_composition_unavailable = [] ->
+        match sec_composition_scope, se_composition, sec_composition_runs_observed with
+        | Skill_evidence_exact_reference_retained_runs, Some _, n
+          when n > 0 && sec_composition_unavailable = [] ->
           Ok ()
-        | Skill_evidence_exact_reference_latest_completed, None, 0
+        | Skill_evidence_exact_reference_retained_runs, None, 0
           when sec_composition_unavailable = [] ->
           Ok ()
         | Skill_evidence_composition_unavailable, None, 0
           when sec_composition_unavailable <> [] ->
           Ok ()
-        | ( Skill_evidence_exact_reference_latest_completed
+        | ( Skill_evidence_exact_reference_retained_runs
           | Skill_evidence_composition_unavailable ), (None | Some _), _ ->
           Error "Skill evidence composition coverage disagrees with its record"
       in
@@ -508,8 +542,14 @@ let decode_skill_evidence json =
             (match sec_composition_scope with
              | Skill_evidence_composition_unavailable ->
                  Error "Skill statistics cannot claim an unavailable composition partition"
-             | Skill_evidence_exact_reference_latest_completed ->
-                 if (statistics.scst_records > 0) = Option.is_some se_composition
+             | Skill_evidence_exact_reference_retained_runs ->
+                 let latest_recorded_at = Option.bind se_composition (fun value ->
+                   match member "recorded_at" value with
+                   | `Float value -> Some value
+                   | `Int value -> Some (float_of_int value)
+                   | _ -> None) in
+                 if statistics.scst_records = sec_composition_runs_observed
+                    && statistics.scst_last_recorded_at = latest_recorded_at
                  then Ok ()
                  else Error "Skill statistics disagree with retained composition evidence") in
       let owner_gap_count =
@@ -558,7 +598,7 @@ let decode_skill_evidence json =
         ; se_composition_statistics
         ; se_coverage =
             { sec_composition_scope
-            ; sec_composition_records_read
+            ; sec_composition_runs_observed
             ; sec_composition_unavailable
             ; sec_activation_scope
             ; sec_activation_sessions_inspected

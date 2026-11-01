@@ -580,9 +580,10 @@ let test_vote_comment_persistence_failure_leaves_nothing_committed () =
 
    [flush_dirty] clears the dirty flags before it writes, so a write that never
    happens would drop the snapshot with nothing scheduled to retry -- the
-   #26168 shape. [save_jsonl_snapshot_result] catches only [Sys_error], so an
-   exception would pass straight through it, and the caller in [main_stdio_eio]
-   swallows [Eio.Cancel.Cancelled] without a counter or a log line.
+   #26168 shape. The snapshot writers, including [save_reactions_jsonl_result],
+   catch [Sys_error] while cancellation propagates through the batch. The
+   caller in [main_stdio_eio] swallows [Eio.Cancel.Cancelled] without a counter
+   or a log line.
 
    The write survives anyway, because [with_persist_lock] holds its mutex with
    [~protect:true] and that covers the whole persist body. Nothing in

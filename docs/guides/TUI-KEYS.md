@@ -196,7 +196,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `p` | switch between quota and Keeper usage, and engine telemetry |
 | `f` | search quota accounts; selection follows Plan and Trend |
 | `a` | clear the quota account selection |
-| `x` | show or hide the accounts that cannot be used now |
+| `x` | on Plan: show or hide the group for reports at limit or observed exhaustion |
 | `v` | cycle the Usage reading |
 | `w` | on Usage: cycle the exact UTC day window for provider report history |
 | `1 / 2 / 3` | on Telemetry: Engine, Work, or Tools |
@@ -745,7 +745,7 @@ count is drawn beyond the available space.
 | `J/K` | in async runs, select an original request; otherwise select a published Skill |
 | `f` | outside async requests, select the next Composition and load its exact-revision performance charts |
 | `Ctrl-O` | outside async requests, preview the declared composition with Pele |
-| `[ / ]` | change the effective Keeper surface |
+| `[ / ]` | in Available, older/newer retained original run; in other panes, previous/next Keeper |
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
 | `Esc` | return from original Task to request, then request to list; otherwise back to the System surface it hangs off |

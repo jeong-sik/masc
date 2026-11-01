@@ -1286,8 +1286,7 @@ let messages_of_items ~stage ~notified = function
   | _ -> protocol_error stage "turn items must be an array"
 ;;
 
-(* Human prose and ad-hoc scalar fields are observational detail only; the
-   provider-owned classification is [codexErrorInfo], read below. *)
+(* Human prose and ad-hoc scalar fields are observational detail only. *)
 let turn_error_detail ~message error_fields =
   let annotation (name, value) =
     if String.equal name "message"
@@ -1311,7 +1310,32 @@ type codex_error_info_reading =
   | Context_window
   | Turn_failure of Codex_error_info.t
 
-let codex_error_info_of_json json =
+(* Codex can carry a Responses WebSocket error as a JSON-encoded [message]
+   with [codexErrorInfo=other]. Decode that provider envelope, not its prose,
+   so its context refusal reaches the same effect-aware recovery as the
+   official enum. An explicit classification other than [other] still wins. *)
+let wrapped_context_window_error message =
+  try
+    let json = Yojson.Safe.from_string message in
+    match validate_unique_object_keys ~stage:"Responses error" ~path:"$" json with
+    | Error _ -> false
+    | Ok () ->
+      (match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "type" fields, List.assoc_opt "status" fields,
+                List.assoc_opt "error" fields with
+          | Some (`String "error"), Some (`Int 400), Some (`Assoc error) ->
+            (match List.assoc_opt "type" error, List.assoc_opt "param" error,
+                   List.assoc_opt "code" error with
+             | Some (`String "invalid_request_error"), Some (`String "input"),
+               Some (`String "context_length_exceeded") -> true
+             | _ -> false)
+          | _ -> false)
+       | _ -> false)
+  with Yojson.Json_error _ -> false
+;;
+
+let codex_error_info_of_json ~message json =
   let open Codex_error_info in
   let unrecognized = Turn_failure (Unrecognized json) in
   let http_status_code fields =
@@ -1341,7 +1365,8 @@ let codex_error_info_of_json json =
   | `String "badRequest" -> Turn_failure Bad_request
   | `String "threadRollbackFailed" -> Turn_failure Thread_rollback_failed
   | `String "sandboxError" -> Turn_failure Sandbox_error
-  | `String "other" -> Turn_failure Other
+  | `String "other" ->
+    if wrapped_context_window_error message then Context_window else Turn_failure Other
   | `Assoc [ ("httpConnectionFailed", payload) ] ->
     with_status
       (fun http_status_code ->
@@ -1377,9 +1402,12 @@ let codex_error_info_of_json json =
 let turn_error_of_fields ~tool_effect_attempted ~message error_fields =
   let detail = turn_error_detail ~message error_fields in
   match List.assoc_opt "codexErrorInfo" error_fields with
-  | None | Some `Null -> Turn_failed { detail; codex_error_info = None }
+  | None | Some `Null ->
+    if wrapped_context_window_error message
+    then Context_window_exceeded { message; tool_effect_attempted }
+    else Turn_failed { detail; codex_error_info = None }
   | Some json ->
-    (match codex_error_info_of_json json with
+    (match codex_error_info_of_json ~message json with
      | Context_window -> Context_window_exceeded { message; tool_effect_attempted }
      | Turn_failure info -> Turn_failed { detail; codex_error_info = Some info })
 ;;

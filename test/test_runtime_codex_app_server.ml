@@ -66,6 +66,42 @@ let usage_limit_terminal =
   {|{"method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":false,"error":{"message":"You've hit your usage limit. Try again later.","codexErrorInfo":"usageLimitExceeded","additionalDetails":null}}}|}
 ;;
 
+let wrapped_context_error_body =
+  `Assoc
+    [ "type", `String "error"
+    ; "error", `Assoc
+        [ "message", `String "Your input exceeds the context window of this model."
+        ; "type", `String "invalid_request_error"
+        ; "param", `String "input"
+        ; "code", `String "context_length_exceeded"
+        ]
+    ; "status", `Int 400
+    ; "sequence_number", `Int 3
+    ]
+;;
+
+let failed_turn_terminal ~notification ~message ~info =
+  let error = `Assoc ([ "message", `String message ]
+    @ Option.to_list (Option.map (fun info -> "codexErrorInfo", info) info)) in
+  let method_, params =
+    if notification then
+      "error", `Assoc [ "threadId", `String "thread-1"; "turnId", `String "turn-1"
+                      ; "willRetry", `Bool false; "error", error ]
+    else
+      "turn/completed", `Assoc
+        [ "threadId", `String "thread-1"
+        ; "turn", `Assoc [ "id", `String "turn-1"; "items", `List []
+                         ; "status", `String "failed"; "error", error ] ]
+  in
+  Yojson.Safe.to_string (`Assoc [ "method", `String method_; "params", params ])
+;;
+
+let wrapped_context_terminal ~notification =
+  failed_turn_terminal ~notification
+    ~message:(Yojson.Safe.to_string wrapped_context_error_body)
+    ~info:(Some (`String "other"))
+;;
+
 (* Ours, with the breakdown missing two required counts. *)
 let truncated_token_usage_updated =
   {|{"method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"total":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80,"reasoningOutputTokens":30,"totalTokens":1280},"last":{"inputTokens":1200,"cachedInputTokens":1000,"outputTokens":80}}}}|}
@@ -1175,7 +1211,9 @@ let test_read_only_overflow_contract () =
          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
          | Ok _ -> fail "overflow unexpectedly succeeded"))
       [ Agent_core.Tool.Read_only, false; Agent_core.Tool.Effect_possible, true ])
-    [ completed_failure; notification_failure ]
+    [ completed_failure; notification_failure
+    ; wrapped_context_terminal ~notification:false
+    ; wrapped_context_terminal ~notification:true ]
 ;;
 
 let test_native_effect_before_overflow () =
@@ -2991,6 +3029,52 @@ let test_failed_turn_uses_official_context_error_enum () =
           message
       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
       | Ok _ -> fail "typed context overflow incorrectly reported as completed")
+;;
+
+let test_wrapped_context_error_reaches_overflow () =
+  let message = Yojson.Safe.to_string wrapped_context_error_body in
+  List.iter (fun notification ->
+    List.iter (fun info ->
+      let terminal = failed_turn_terminal ~notification ~message ~info in
+      with_fixture [ init_result; account_chatgpt; thread_result; turn_result; terminal ]
+        (fun path -> match run_fixture path with
+         | Error (Runtime_codex_app_server.Context_window_exceeded
+                    { message = observed; tool_effect_attempted = false }) ->
+           check string "original provider envelope survives" message observed
+         | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> fail "wrapped context refusal succeeded"))
+      [ None; Some `Null; Some (`String "other") ])
+    [ false; true ]
+;;
+
+let test_wrapped_context_error_requires_provider_envelope () =
+  let encoded = Yojson.Safe.to_string wrapped_context_error_body in
+  let replace key value = match wrapped_context_error_body with
+    | `Assoc fields -> Yojson.Safe.to_string (`Assoc ((key, value) :: List.remove_assoc key fields))
+    | _ -> assert false
+  in
+  let cases =
+    [ "human prose", "context_length_exceeded: input exceeds context window", Some (`String "other")
+    ; "malformed JSON", "{\"type\":\"error\"", Some (`String "other")
+    ; "different status", replace "status" (`Int 429), Some (`String "other")
+    ; "different event", replace "type" (`String "response.failed"), Some (`String "other")
+    ; "unrelated request error", replace "error"
+        (`Assoc [ "type", `String "invalid_request_error"; "param", `String "input"
+                ; "code", `String "invalid_prompt" ]), Some (`String "other")
+    ; "duplicate keys", "{\"type\":\"error\",\"status\":400,\"status\":429,\"error\":{\"type\":\"invalid_request_error\",\"param\":\"input\",\"code\":\"context_length_exceeded\"}}", Some (`String "other")
+    ; "explicit quota classification", encoded, Some (`String "usageLimitExceeded")
+    ; "unknown classification", encoded, Some (`String "futureError")
+    ]
+  in
+  List.iter (fun notification ->
+    List.iter (fun (label, message, info) ->
+      let terminal = failed_turn_terminal ~notification ~message ~info in
+      with_fixture [ init_result; account_chatgpt; thread_result; turn_result; terminal ]
+        (fun path -> match run_fixture path with
+         | Error (Runtime_codex_app_server.Turn_failed _) -> ()
+         | Error error -> failf "%s: %s" label (Runtime_codex_app_server.error_to_string error)
+         | Ok _ -> failf "%s: refusal succeeded" label)) cases)
+    [ false; true ]
 ;;
 
 (* A weekly usage limit arrives as a terminal [error] notification whose
@@ -5683,7 +5767,9 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
        | Ok _ -> fail "Keeper retried a context overflow after a tool effect")
 ;;
 
-let check_keeper_shrinks_history_after_typed_context_error ~read_only_tool () =
+let check_keeper_shrinks_history_after_typed_context_error
+    ?(overflow = {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|})
+    ~read_only_tool () =
   let capture_path = Filename.temp_file "masc-codex-shrink-requests-" ".jsonl" in
   Fun.protect
     ~finally:(fun () -> Sys.remove capture_path)
@@ -5691,9 +5777,6 @@ let check_keeper_shrinks_history_after_typed_context_error ~read_only_tool () =
        let injected = {|{"id":4,"result":{}}|} in
        let turn_after_injection =
          {|{"id":5,"result":{"turn":{"id":"turn-1"}}}|}
-       in
-       let overflow =
-         {|{"method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","items":[],"status":"failed","error":{"message":"context is full","codexErrorInfo":"contextWindowExceeded"}}}}|}
        in
        let initial_messages =
          List.init 64 (fun index ->
@@ -5778,6 +5861,13 @@ let test_keeper_shrinks_history_after_typed_context_error () =
 
 let test_keeper_shrinks_after_read_only_tool () =
   check_keeper_shrinks_history_after_typed_context_error ~read_only_tool:true ()
+;;
+
+let test_keeper_shrinks_wrapped_context_error () =
+  List.iter (fun notification ->
+    check_keeper_shrinks_history_after_typed_context_error
+      ~overflow:(wrapped_context_terminal ~notification) ~read_only_tool:false ())
+    [ false; true ]
 ;;
 
 let test_tool_completion_evidence_belongs_to_retry () =
@@ -9623,6 +9713,10 @@ let () =
             test_failed_turn_keeps_typed_error_fields
         ; test_case "failed turn uses official context error enum" `Quick
             test_failed_turn_uses_official_context_error_enum
+        ; test_case "wrapped Responses context error reaches overflow" `Quick
+            test_wrapped_context_error_reaches_overflow
+        ; test_case "wrapped context error requires a provider envelope" `Quick
+            test_wrapped_context_error_requires_provider_envelope
         ; test_case "error notification reads usage limit" `Quick
             test_error_notification_reads_usage_limit
         ; test_case "usage frames report the thread count before a usage limit ends the turn" `Quick
@@ -9875,6 +9969,8 @@ let () =
             test_keeper_shrinks_history_after_typed_context_error
         ; test_case "Keeper shrinks after a declared read-only tool" `Quick
             test_keeper_shrinks_after_read_only_tool
+        ; test_case "Keeper shrinks history after a wrapped Responses context error" `Quick
+            test_keeper_shrinks_wrapped_context_error
         ; test_case "tool completion evidence belongs to its retry" `Quick
             test_tool_completion_evidence_belongs_to_retry
         ; test_case

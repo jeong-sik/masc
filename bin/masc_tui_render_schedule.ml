@@ -1940,7 +1940,7 @@ module Terminal_size_cache = struct
     | Changed of (int * int)
     | Unchanged of (int * int)
 
-  type work_geometry = Current | Resize_pending | Resize_detected
+  type work_geometry = Current | Resize_interrupted | Resize_detected
 
   type t = {
     fallback : int * int;
@@ -1956,11 +1956,11 @@ module Terminal_size_cache = struct
 
   let valid (rows, cols) = rows > 0 && cols > 0
 
-  let verify_for_work ~cached ~resize_pending ~probe =
-    if resize_pending () then Resize_pending
+  let verify_for_work ~cached ~resize_changed ~probe =
+    if resize_changed () then Resize_interrupted
     else
       let physical = probe () in
-      if resize_pending () then Resize_pending
+      if resize_changed () then Resize_interrupted
       else match physical with
         | Some size when valid size && normalize size <> cached -> Resize_detected
         | Some _ | None -> Current

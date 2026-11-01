@@ -329,16 +329,6 @@ let agent_tool
     (Agent_core.Base.Tool.ignoring_execution_env gated)
 ;;
 
-let resolve_provider provider_id =
-  List.find_map
-    (function
-      | Keeper_oauth_declarations.Declared provider
-        when String.equal provider.Provider.id provider_id -> Some provider
-      | Keeper_oauth_declarations.Declared _
-      | Keeper_oauth_declarations.Unreadable _ -> None)
-    (Keeper_oauth_declarations.all ())
-;;
-
 let execution_of_call_result result =
   match result with
   | Ok (answer : Mcp_client.tool_result) ->
@@ -370,7 +360,7 @@ let replay_call_with_outcome
       ~gate_grant
       (call : replay_call)
   =
-  match resolve_provider call.provider_id with
+  match Keeper_oauth_declarations.find call.provider_id with
   | None ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Runtime_failure
@@ -378,7 +368,15 @@ let replay_call_with_outcome
       (Printf.sprintf
          "provider %s is no longer declared; the approved call cannot run"
          call.provider_id)
-  | Some provider ->
+  | Some (Keeper_oauth_declarations.Unreadable { id; problem }) ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      (Printf.sprintf
+         "provider %s declaration could not be read: %s; the approved call cannot run"
+         id
+         problem)
+  | Some (Keeper_oauth_declarations.Declared provider) ->
     (match validate_replay_provider ~provider call with
      | Error reason ->
        Keeper_tool_execution.failure

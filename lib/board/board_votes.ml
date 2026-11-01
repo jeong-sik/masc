@@ -751,17 +751,23 @@ let reactions_jsonl_snapshot store =
     store.reactions;
   Buffer.contents buf
 
-let save_jsonl_snapshot_result ~where ~path content =
-  try
-    ensure_masc_dir ();
-    match Fs_compat.save_file_atomic path content with
-    | Ok () -> Ok ()
-    | Error msg ->
-      record_persist_error ~where msg;
-      Error msg
-  with Sys_error msg ->
-    record_persist_error ~where msg;
-    Error msg
+module Snapshot_batch = Board_snapshot_batch
+
+(* Snapshot rendering updates the row caches, so callers hold the state lock. *)
+let capture_snapshot_batch store selection =
+  Snapshot_batch.capture selection ~read:(function
+    | Snapshot_batch.Posts -> posts_jsonl_snapshot store
+    | Snapshot_batch.Comments -> comments_jsonl_snapshot store
+    | Snapshot_batch.Votes -> vote_log_jsonl store
+    | Snapshot_batch.Reactions -> reactions_jsonl_snapshot store)
+;;
+
+(* Callers retain the persistence lock and release the state lock for writes. *)
+let write_snapshot store = function
+  | Snapshot_batch.Posts -> save_posts_snapshot store
+  | Snapshot_batch.Comments -> save_comments_snapshot store
+  | Snapshot_batch.Votes -> save_vote_log_jsonl
+  | Snapshot_batch.Reactions -> Board_core_persist.save_reactions_jsonl_result
 ;;
 
 (* Re-mark everything dirty after a failed snapshot write, so the next flush
@@ -777,6 +783,12 @@ let remark_all_comments_dirty store =
   Hashtbl.iter
     (fun key _ -> Hashtbl.replace store.dirty_comment_ids key ())
     store.comments
+;;
+
+(* Called under the state lock; never clear concurrent edits after capture. *)
+let remark_snapshot_retry store = function
+  | Snapshot_batch.Retry_posts -> remark_all_posts_dirty store
+  | Snapshot_batch.Retry_comments -> remark_all_comments_dirty store
 ;;
 
 type deletion_outcome =
@@ -850,42 +862,20 @@ let delete_post store ~post_id : (deletion_outcome, board_error) Result.t =
         Hashtbl.clear store.dirty_post_ids;
         Hashtbl.clear store.dirty_comment_ids;
         store.last_flush <- Time_compat.now ();
-        let posts_jsonl = posts_jsonl_snapshot store in
-        let comments_jsonl = comments_jsonl_snapshot store in
-        let votes_jsonl = vote_log_jsonl store in
-        let reactions_jsonl = reactions_jsonl_snapshot store in
-        Ok (posts_jsonl, comments_jsonl, votes_jsonl, reactions_jsonl))
+        Ok (capture_snapshot_batch store Snapshot_batch.for_delete))
     in
     (match snapshot with
      | Error _ as e -> e
-     | Ok (posts_jsonl, comments_jsonl, votes_jsonl, reactions_jsonl) ->
-       let posts_result, comments_result, votes_result, reactions_result =
-           let posts_result = save_posts_snapshot store posts_jsonl in
-           let comments_result = save_comments_snapshot store comments_jsonl in
-           let votes_result = save_vote_log_jsonl votes_jsonl in
-           let reactions_result =
-             save_jsonl_snapshot_result ~where:"rewrite_reactions"
-               ~path:(reactions_path ()) reactions_jsonl
-             |> Result.map_error (fun detail -> Io_error ("rewrite_reactions: " ^ detail))
-           in
-           (posts_result, comments_result, votes_result, reactions_result)
+     | Ok batch ->
+       let outcome =
+         Snapshot_batch.persist batch ~write:(write_snapshot store)
        in
        (* The snapshot cleared dirty flags while holding the state lock.
           Preserve failed writes for a later flush. *)
        with_lock store (fun () ->
-         (match posts_result, votes_result, reactions_result with
-          | Ok (), Ok (), Ok () -> ()
-          | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
-            remark_all_posts_dirty store);
-         match comments_result with
-         | Ok () -> ()
-         | Error _ -> remark_all_comments_dirty store);
+         List.iter (remark_snapshot_retry store) (Snapshot_batch.retries outcome));
        let failures =
-         List.filter_map
-           (function
-             | Ok () -> None
-             | Error error -> Some (show_board_error error))
-           [posts_result; comments_result; votes_result; reactions_result]
+         List.map show_board_error (Snapshot_batch.errors outcome)
        in
        match failures with
        | [] -> Ok Durable_deletion
@@ -946,79 +936,33 @@ let reset_global_for_test () =
     one line per id and atomic rewrite semantics. *)
 let flush_dirty store =
   with_persist_lock store (fun () ->
-  let posts_jsonl, comments_jsonl, vote_log, reactions_jsonl =
+  let batch =
     with_lock store (fun () ->
-      let had_dirty = store.dirty_posts || store.dirty_comments in
-      (* Each primary table owns its dirty flag. Comment creation and
-         removal mark both tables because they also change reply_count.
-         Votes/reactions retain the shared cycle below, including retry. *)
-      let posts_jsonl =
-        if store.dirty_posts then Some (posts_jsonl_snapshot store) else None
+      let selection =
+        Snapshot_batch.for_flush
+          ~dirty_posts:store.dirty_posts
+          ~dirty_comments:store.dirty_comments
+          ~votes_readable:(Result.is_ok store.votes_load_result)
+          ~reactions_readable:(Result.is_ok store.reactions_load_result)
       in
-      let comments_jsonl =
-        if store.dirty_comments then Some (comments_jsonl_snapshot store) else None
-      in
-      let vote_log =
-        if had_dirty && Result.is_ok store.votes_load_result
-        then Some (vote_log_jsonl store)
-        else None
-      in
-      let reactions_jsonl =
-        if had_dirty && Result.is_ok store.reactions_load_result
-        then Some (reactions_jsonl_snapshot store)
-        else None
-      in
+      let batch = capture_snapshot_batch store selection in
       Hashtbl.clear store.dirty_post_ids;
       Hashtbl.clear store.dirty_comment_ids;
       store.dirty_posts <- false;
       store.dirty_comments <- false;
       store.last_flush <- Time_compat.now ();
-      (posts_jsonl, comments_jsonl, vote_log, reactions_jsonl))
+      batch)
   in
-  (* The dirty flags were cleared above, before the write. A failed write used
-     to end there: the snapshot never reached disk and the change was no
-     longer scheduled for any later flush, so an in-memory post carried an
-     [updated_at] the file did not have until the next unrelated edit marked
-     it dirty again -- or forever, if none came (#26168). Re-marking on
-     failure puts the change back in the queue; the counter and the log line
-     stay, they just are not the whole response. *)
-  let remark_posts () = with_lock store (fun () -> remark_all_posts_dirty store) in
-  let remark_comments () =
-    with_lock store (fun () -> remark_all_comments_dirty store)
-  in
-    Option.iter
-      (fun content ->
-         match save_posts_snapshot store content with
-         | Ok () -> ()
-         | Error _ -> remark_posts ())
-      posts_jsonl;
-    Option.iter
-      (fun content ->
-         match save_comments_snapshot store content with
-         | Ok () -> ()
-         | Error _ -> remark_comments ())
-      comments_jsonl;
-    (* A vote marks its post dirty, so the vote log rides the same dirty cycle
-       as the posts snapshot and recovers the same way: re-marking puts the
-       write back in the queue for the next flush. Dropping the failure here
-       left the log missing the votes of this cycle with nothing scheduled to
-       write them, which is the shape the two writers above already fixed
-       (#26168). The counter and log line inside [save_vote_log_jsonl] stay. *)
-    Option.iter
-      (fun content ->
-         match save_vote_log_jsonl content with
-         | Ok () -> ()
-         | Error _ -> remark_posts ())
-      vote_log;
-    (* Sweeping a post/comment removes its reactions in the same dirty cycle.
-       Keep a failed snapshot scheduled, including an empty final snapshot. *)
-    Option.iter
-      (fun content ->
-         match save_jsonl_snapshot_result ~where:"rewrite_reactions"
-           ~path:(reactions_path ()) content with
-         | Ok () -> ()
-         | Error _ -> remark_posts ())
-      reactions_jsonl)
+  (* Flush requeues each failed write before attempting the next. Captured
+     empty snapshots still write, and later edits keep their own dirty flags. *)
+  ignore
+    (Snapshot_batch.persist batch ~write:(fun kind content ->
+       match write_snapshot store kind content with
+       | Ok () -> Ok ()
+       | Error _ as error ->
+         with_lock store (fun () ->
+           remark_snapshot_retry store (Snapshot_batch.retry_for_kind kind));
+         error)))
 
 
 (** {1 Karma & Flair - Reddit-style} *)

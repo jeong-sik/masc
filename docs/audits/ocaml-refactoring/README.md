@@ -93,7 +93,7 @@ runtime gates. Source-review completion alone leaves a Draft item in review.
 
 The queue now contains **30 concrete candidates**: 24 from the first semantic pass, A1
 from the Agent Core follow-up, T1 from the integrated TUI investigation, E1/E2 from
-Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-one are
+Exec, M1 from multimodal/media, and J1 from the Schedule investigation. Twenty-two are
 implemented as PRs; their source-review evidence is recorded on each PR: `S1` in
 [#43367](https://github.com/jeong-sik/masc/pull/43367) isolates provider usage
 acceptance; `K1` in [#43370](https://github.com/jeong-sik/masc/pull/43370) preserves
@@ -136,7 +136,9 @@ refresh ownership and extracts its bounded execution module. S6 in
 [#47076](https://github.com/jeong-sik/masc/pull/47076) shares connector observations
 through HTTP aggregation and removes redundant TUI connector fields. S7 in
 [#47080](https://github.com/jeong-sik/masc/pull/47080) replaces ingress scheduling
-flags with an explicit lane phase. Nine candidates remain queued; this ordering
+flags with an explicit lane phase. D6 in
+[#47083](https://github.com/jeong-sik/masc/pull/47083) shares immutable snapshot work
+and retry classification between Board deletion and flush. Eight candidates remain queued; this ordering
 does not waive their coverage.
 
 | ID | Priority | Status | Refactoring point |
@@ -153,7 +155,7 @@ does not waive their coverage.
 | [D3](#d3) | later | in review | Isolate the Goal document codec and schema rejection contract |
 | [D4](#d4) | investigate | candidate | Audit and retain typed Goal publication outcomes across the backend adapter |
 | [D5](#d5) | later | source reviewed; execution unverified | Extract the Board vote decision from post/comment mutation shells |
-| [D6](#d6) | later | candidate | Represent Board snapshot flush work and retry obligations explicitly |
+| [D6](#d6) | later | implemented; execution unverified | Represent Board snapshot flush work and retry obligations explicitly |
 | [D7](#d7) | next | in review | Preserve evidence transport decisions in the complete review request, then isolate snapshot projections |
 | [S1](#s1) | next | in review | Extract the provider usage acceptance/revocation reducer from the shared observation store |
 | [S2](#s2) | next | in review | Move lane edit decisions into a pure declared-configuration planner |
@@ -993,6 +995,27 @@ Scenarios:
 Ordering rationale: The important duplication is the durable retry protocol and
 dirty-state coupling, not the tuple syntax alone. Existing tests inject each snapshot
 failure, cancellation during flush, unreadable sources and competing edits.
+
+Current-source continuation (2026-11-01, parent
+`63b35d7bce645afa5b2edcd35873909ea6a6d634`):
+[#47083](https://github.com/jeong-sik/masc/pull/47083) gives private
+`Board_snapshot_batch` in `masc.board_handlers` ownership of closed snapshot kinds, immutable selections,
+captured contents, ordered write outcomes and retry classification. Opaque batches
+retain selected empty strings as work. Explicit caller-supplied read/write
+capabilities run each selected kind once in Posts, Comments, Votes, Reactions order;
+returned errors do not short-circuit later writes, and exceptions propagate.
+The existing reaction writer replaces a duplicate local file-write helper.
+
+Snapshot rendering, dirty clearing and timestamps retain their original state-lock
+boundaries; the protected persistence lock still covers capture through requeue.
+Deletion applies aggregate retries after all writes, while ordinary flush requeues
+each failure before the next write. Neither completion path clears newer dirty work.
+The new public-delete scenario blocks posts and votes together, verifies both
+failures and completed comments/reactions writes before repair, then flushes and
+restarts to verify deleted state stays absent. Existing empty-final, partial-load,
+selective-write, cancellation and competing-edit scenarios remain. Source review
+and syntax checks are recorded on the PR; builds, typechecking, behavior execution
+and integration remain unverified.
 
 ### D7
 

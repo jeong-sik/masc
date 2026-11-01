@@ -172,6 +172,55 @@ let test_individual_snapshot_failure path () =
   Alcotest.(check int) "restart has no deleted votes" 0 (Hashtbl.length restored.vote_log);
   Alcotest.(check int) "restart has no deleted reactions" 0 (Hashtbl.length restored.reactions)
 
+let test_multiple_snapshot_failures_keep_healthy_writes_and_retry () =
+  let doomed = create_post_exn ~content:"delete despite independent snapshot failures" in
+  let post_id = Board.Post_id.to_string doomed.id in
+  ignore
+    (require_ok
+       (Board_dispatch.add_comment ~post_id ~author:"comment-author"
+          ~content:"dependent reply" ()));
+  ignore (require_ok (Board_dispatch.vote ~post_id ~voter:"voter" ~direction:Board.Up));
+  ignore
+    (require_ok
+       (Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+          ~target_id:post_id ~user_id:"reactor" ~emoji:"👍"));
+  flush ();
+  Alcotest.(check int) "comment is on disk before deletion" 1
+    (List.length (Fs_compat.load_jsonl (Board.comments_path ())));
+  Alcotest.(check int) "reaction is on disk before deletion" 1
+    (List.length (Fs_compat.load_jsonl (Board.reactions_path ())));
+  let with_blocked_path path f =
+    let backup = path ^ ".before-delete" in
+    Unix.rename path backup;
+    Unix.mkdir path 0o700;
+    Fun.protect
+      ~finally:(fun () -> Unix.rmdir path; Unix.rename backup path)
+      f
+  in
+  with_blocked_path (Board.persist_path ()) (fun () ->
+    with_blocked_path (Board.vote_log_path ()) (fun () ->
+      let errors_before = Board.persist_error_count () in
+      (match Board_dispatch.delete_post ~post_id with
+       | Ok (Board.Deletion_persistence_pending _) -> ()
+       | Error error -> Alcotest.fail (Board.show_board_error error)
+       | Ok Board.Durable_deletion ->
+         Alcotest.fail "failed snapshots must leave deletion persistence pending");
+      Alcotest.(check int) "both failed writes are counted" 2
+        (Board.persist_error_count () - errors_before);
+      Alcotest.(check string) "comments are removed before repair" ""
+        (Fs_compat.load_file (Board.comments_path ()));
+      Alcotest.(check string) "reactions are removed before repair" ""
+        (Fs_compat.load_file (Board.reactions_path ()))));
+  flush ();
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ~recipient_lookup:Recipient_lookup.none_declared ();
+  let restored = store () in
+  Alcotest.(check int) "restart has no deleted posts" 0 (Hashtbl.length restored.posts);
+  Alcotest.(check int) "restart has no deleted replies" 0 (Hashtbl.length restored.comments);
+  Alcotest.(check int) "restart has no deleted votes" 0 (Hashtbl.length restored.vote_log);
+  Alcotest.(check int) "restart has no deleted reactions" 0 (Hashtbl.length restored.reactions)
+
 let test_unreadable_snapshot_refuses_before_transition () =
   let post = create_post_exn ~content:"unreadable source cannot authorize deletion" in
   let post_id = Board.Post_id.to_string post.id in
@@ -337,6 +386,8 @@ let () =
             (with_eio (test_individual_snapshot_failure Board.vote_log_path))
         ; Alcotest.test_case "reactions rewrite remains pending and retries" `Quick
             (with_eio (test_individual_snapshot_failure Board.reactions_path))
+        ; Alcotest.test_case "multiple failed snapshots preserve healthy writes and retry" `Quick
+            (with_eio test_multiple_snapshot_failures_keep_healthy_writes_and_retry)
         ; Alcotest.test_case "unreadable snapshot refuses without a transition" `Quick
             (with_eio test_unreadable_snapshot_refuses_before_transition)
         ; Alcotest.test_case "MCP pending deletion is a post-effect failure" `Quick

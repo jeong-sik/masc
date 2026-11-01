@@ -2234,7 +2234,8 @@ with fsynced commits, change sub-board snapshot-error reporting, or provide a
 durable operation receipt. Its focused producer scenarios and exact-head review
 and execution status belong to its PR evidence.
 
-The workspace-binding prerequisite gives every Board store a required immutable
+The workspace-binding prerequisite [#47192](https://github.com/jeong-sik/masc/pull/47192)
+gives every Board store a required immutable
 canonical state directory, captured once by its constructor. All five persistence
 families use that store for loads, append, snapshots, rollback, flush and deletion
 cascades. Explicit relative paths are anchored at construction; empty input is a

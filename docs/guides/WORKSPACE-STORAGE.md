@@ -71,7 +71,7 @@ including when the script is invoked from another working directory.
 Inspect tracked files, current script/configuration references and active use
 before removing a folder. An ignored path can still contain runtime state or
 unsubmitted work. In particular, repository `logs/` holds supervisor recovery
-records, and `.tmp/` can hold RFC caller context consumed by the checker.
+records.
 
 Remove known disposable caches and genuinely empty folders. Tools may recreate
 their caches. Preserve run records, source edits and old dashboard copies under

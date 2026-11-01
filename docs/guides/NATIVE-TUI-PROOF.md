@@ -232,6 +232,27 @@ artifact. A missing receipt, failed suite or partial artifact is not success.
 These are native executables with the dynamic libraries listed in the artifact;
 this is not a portable release package.
 
+Once the selected run has completed, inspect its conclusion and download the
+artifact for that source and run:
+
+```bash
+PROOF_DIR=artifacts/native-tui-proof-RUN_ID
+gh run view RUN_ID --repo jeong-sik/masc
+gh run download RUN_ID --repo jeong-sik/masc \
+  --name tui-macos-arm64-SOURCE_SHA-RUN_ID --dir "$PROOF_DIR"
+cat "$PROOF_DIR/receipt.json"
+cat "$PROOF_DIR/native-dependencies.txt"
+shasum -a 256 "$PROOF_DIR/masc-tui"
+chmod +x "$PROOF_DIR/masc-tui"
+"$PROOF_DIR/masc-tui" --build-commit
+```
+
+Replace `RUN_ID` and `SOURCE_SHA` with the selected identities. Compare the
+downloaded hash and embedded commit with the receipt and selected source. Inspect
+the dependency list and local loader result before using the executable;
+dependencies may refer to Homebrew paths or versions on the builder. Keep the
+original receipt and record subsequent workspace observations separately.
+
 ## Actual workspace behavior
 
 Use a separate workspace, port and terminal. Keep the operator's server,

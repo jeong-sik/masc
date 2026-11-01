@@ -1668,6 +1668,47 @@ type observer_error =
   | Http_refused of { status : int; detail : string }
   | Invalid_handshake of string
 
+exception Invalid_sse_response of string
+
+(* A comma outside a quoted parameter makes the field ambiguous: an HTTP
+   intermediary may have combined multiple Content-Type fields. *)
+let unambiguous_content_type value =
+  let quoted = ref false and escaped = ref false and valid = ref true in
+  String.iter (fun ch ->
+    if !escaped then escaped := false
+    else if !quoted && Char.equal ch '\\' then escaped := true
+    else if Char.equal ch '"' then quoted := not !quoted
+    else if not !quoted && Char.equal ch ',' then valid := false) value;
+  !valid && not !quoted && not !escaped
+;;
+
+let validate_sse_response ~status ~headers =
+  if status = 200 then
+    match List.filter_map (fun (name, value) ->
+      if String.equal (String.lowercase_ascii name) "content-type"
+      then Some value else None) headers with
+    | [ value ] when unambiguous_content_type value ->
+        let essence =
+          match String.index_opt value ';' with
+          | None -> value
+          | Some index -> String.sub value 0 index
+        in
+        if String.equal (String.lowercase_ascii (String.trim essence)) "text/event-stream"
+        then Ok ()
+        else Error "response is not text/event-stream"
+    | [] -> Error "response has no Content-Type"
+    | _ -> Error "response has ambiguous Content-Type"
+  else if Masc.Tui_decode.is_success_http_status status then
+    Error (Printf.sprintf "unexpected stream status %d" status)
+  else Ok ()
+;;
+
+let check_sse_response ~status ~headers =
+  match validate_sse_response ~status ~headers with
+  | Ok () -> ()
+  | Error detail -> raise (Invalid_sse_response detail)
+;;
+
 type execute_output_stream_error =
   | Execute_transport_failed of string
   | Execute_http_refused of { status : int; detail : string }
@@ -1686,18 +1727,18 @@ let observe_runtime_events ~clock ~(host : string) ~(port : int)
     :: auth_headers ()
     @ Sse_wire.observer_cursor_headers cursor
   in
-  let exception Bad_observer_handshake of string in
   let checked_response ~status ~headers =
+    check_sse_response ~status ~headers;
     if Masc.Tui_decode.is_success_http_status status then
       (match Sse_wire.validate_observer_response ~cursor headers with
-       | Error detail -> raise (Bad_observer_handshake detail)
+       | Error detail -> raise (Invalid_sse_response detail)
        | Ok handshake -> on_open handshake)
   in
   match
     Masc_http_client.get_stream ~clock ~idle_timeout_sec:keeper_chat_timeout_sec
       ~url ~headers ~on_response:checked_response ~on_chunk ()
   with
-  | exception Bad_observer_handshake detail -> Error (Invalid_handshake detail)
+  | exception Invalid_sse_response detail -> Error (Invalid_handshake detail)
   | Error detail -> Error (Transport_failed (report_err "observer stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })
@@ -1734,8 +1775,10 @@ let observe_fleet_stream ~clock ~(expected_workspace : Masc.Tui_decode.server_id
   let headers = ("Accept", "text/event-stream") :: auth_headers () in
   match
     Masc_http_client.get_stream ~clock
-      ~idle_timeout_sec:fleet_stream_idle_timeout_sec ~url ~headers ~on_chunk ()
+      ~idle_timeout_sec:fleet_stream_idle_timeout_sec ~url ~headers
+      ~on_response:check_sse_response ~on_chunk ()
   with
+  | exception Invalid_sse_response detail -> Error (Invalid_handshake detail)
   | Error detail -> Error (Transport_failed (report_err "fleet stream failed" detail))
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Http_refused { status; detail = body })

@@ -16650,7 +16650,7 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
            | Error (Masc_tui_http.Transport_failed detail) ->
                Log.Transport.warn "tui_fleet_stream_lost detail=%s" detail
            | Error (Masc_tui_http.Invalid_handshake detail) ->
-               Log.Transport.warn "tui_fleet_stream_invalid_handshake detail=%s" detail
+               Masc_tui_fleet_stream.invalid_response reader detail
            | Ok () -> Log.Transport.debug "tui_fleet_stream_ended");
           Masc_tui_fleet_stream.lost reader ~now:(Eio.Time.now clock);
           post ()
@@ -20755,7 +20755,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) state ~base_path
         | Error (Masc_tui_http.Transport_failed detail) -> detail
         | Error (Masc_tui_http.Invalid_handshake detail) ->
             state.observer_replay <- Observer_replay_rejected detail;
-            "observer replay handshake rejected: " ^ detail
+            "observer stream handshake rejected: " ^ detail
         | Error (Masc_tui_http.Http_refused { status; detail }) ->
             (* Explicit missing/conflicting MCP sessions can be reinitialized.
                EOF and transport errors never invalidate a session by count. *)

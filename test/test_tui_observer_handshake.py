@@ -25,7 +25,7 @@ from typing import Callable, Literal, cast
 SESSION = "fixture-session"
 INSTANCE = "fixture-instance"
 CURSORS = {"37", "38", "500", "501", "502"}
-Mode = Literal["invalid", "resumed", "ahead"]
+Mode = Literal["invalid", "resumed", "ahead", "media"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -52,7 +52,9 @@ class ObserverServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self.requests: list[StreamRequest] = []
         self.sent: list[int] = []
         # The final request is recorded but held until cleanup.
-        self.gates = [threading.Event() for _ in range(4 if mode == "resumed" else 3)]
+        self.gates = [
+            threading.Event() for _ in range(4 if mode in ("resumed", "media") else 3)
+        ]
 
     def snapshot(self) -> tuple[int, int, list[StreamRequest], list[int]]:
         with self.condition:
@@ -172,12 +174,22 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
         if index >= len(server.gates) or not server.gates[index].wait(30):
             self.respond(503, {"error": "fixture gate unavailable"})
             return
-        response_count = 3 if server.mode == "resumed" else 2
+        response_count = 3 if server.mode in ("resumed", "media") else 2
         if index >= response_count:
             self.respond(503, {"error": "fixture completed"})
             return
 
-        if server.mode == "resumed" and index < 2:
+        content_type = "text/event-stream"
+        if server.mode == "media":
+            replay = "fresh" if index == 0 else "resumed"
+            headers = (
+                f"x-masc-sse-instance-id: {INSTANCE}\r\nx-masc-sse-replay: {replay}\r\n"
+            )
+            event_id = (37, 500, 38)[index]
+            name = "fixture-rejected" if index == 1 else "fixture-control"
+            if index == 1:
+                content_type = "application/json"
+        elif server.mode == "resumed" and index < 2:
             replay = "fresh" if index == 0 else "resumed"
             headers = (
                 f"x-masc-sse-instance-id: {INSTANCE}\r\nx-masc-sse-replay: {replay}\r\n"
@@ -203,7 +215,7 @@ class ObserverHandler(http.server.BaseHTTPRequestHandler):
             name = "fixture-rejected"
         body = f'id: {event_id}\ndata: {{"type":"{name}"}}\n\n'.encode()
         wire = (
-            f"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n{headers}"
+            f"HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{headers}"
             f"Content-Length: {len(body)}\r\nConnection: close\r\n\r\n"
         ).encode() + body
         try:
@@ -312,6 +324,13 @@ class ObserverHandshakeTest(unittest.TestCase):
                         ("38", "fixture"),
                     ]
                     if mode == "resumed"
+                    else [
+                        (None, "missing"),
+                        ("37", "fixture"),
+                        ("37", "fixture"),
+                        ("38", "fixture"),
+                    ]
+                    if mode == "media"
                     else [(None, "missing"), ("500", "fixture"), ("38", "fixture")]
                     if mode == "ahead"
                     else [(None, "missing"), (None, "missing"), (None, "missing")]
@@ -360,6 +379,9 @@ class ObserverHandshakeTest(unittest.TestCase):
 
     def test_future_cursor_reset_accepts_lower_live_event(self) -> None:
         self.run_scenario(mode="ahead")
+
+    def test_wrong_media_keeps_cursor_then_recovers(self) -> None:
+        self.run_scenario(mode="media")
 
 
 if __name__ == "__main__":

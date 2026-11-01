@@ -3598,7 +3598,7 @@ type observer_replay_status =
 let observer_replay_description = function
   | Observer_replay_unobserved -> "Replay: not negotiated"
   | Observer_replay_unavailable detail -> "Replay unavailable (live only): " ^ detail
-  | Observer_replay_rejected detail -> "Replay handshake rejected: " ^ detail
+  | Observer_replay_rejected detail -> "Observer handshake rejected: " ^ detail
   | Observer_replay_scoped { replay = Sse_wire.Fresh; _ } ->
       "Replay: live from connection; earlier history not loaded"
   | Observer_replay_scoped { replay = Sse_wire.Resumed; _ } ->

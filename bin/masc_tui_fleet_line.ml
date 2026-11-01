@@ -50,6 +50,8 @@ let failure_text = function
   | Masc_tui_fleet_stream.Refused { status; detail } ->
       Printf.sprintf "fleet stream refused with %d: %s" status
         (Terminal_text.single_line detail)
+  | Invalid_response detail ->
+      "fleet stream response rejected: " ^ Terminal_text.single_line detail
   | Schema_mismatch { expected; received } ->
       Printf.sprintf "fleet stream is schema %d, this build reads %d" received expected
   | Frame_rejected detail ->

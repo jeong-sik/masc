@@ -8,6 +8,8 @@ import { SkillNodeEvidenceView } from './skill-node-evidence-view'
 import { SkillFlowView } from './skill-flow-view'
 import { SkillRunHistory } from './skill-run-history'
 import { SkillCreateForm, createReceiptMessage } from './skill-create-form'
+import { AsyncRequestDetails } from './composition-observation-view'
+import type { AsyncRequestIdentity } from '../api/composition-observation'
 import {
   classifySkillEditorError,
   fetchAsyncRequestObservation,
@@ -369,9 +371,11 @@ function SkillEvidenceView({ result, io }: { result: SkillEvidenceResponse | nul
 function AsyncRequestObservationView({
   observation,
   error,
+  onInspect,
 }: {
   observation: AsyncRequestObservation | null
   error: string | null
+  onInspect: (identity: AsyncRequestIdentity) => void
 }) {
   if (error) return html`<div class="text-[var(--color-status-error)]">Async broker unavailable: ${error}</div>`
   if (!observation) return html`<div class="ss-muted">Loading async broker observation…</div>`
@@ -391,10 +395,11 @@ function AsyncRequestObservationView({
       ${observation.requests.length > 0 ? html`
         <div class="mt-2 grid gap-1">
           ${observation.requests.map(request => html`
-            <div class="mono text-3xs" key=${request.request_id}>
+            <div class="mono text-3xs" key=${JSON.stringify([request.submitted_by, request.request_id, request.keeper_name])}>
               ${request.request_id} · ${request.keeper_name} · ${request.status}
               · ${request.elapsed_sec === undefined ? '?s' : `${request.elapsed_sec.toFixed(1)}s`}
               · ${request.worker_ownership}
+              <button type="button" class="ss-btn ml-2" onClick=${() => onInspect(request)}>Inspect exact request</button>
             </div>
           `)}
         </div>
@@ -778,6 +783,11 @@ function SkillsObservationPanel({ owner, onMutation }: {
   const error = useSignal<string | null>(null)
   const asyncObservation = useSignal<AsyncRequestObservation | null>(null)
   const asyncObservationError = useSignal<string | null>(null)
+  const asyncSubmitter = useSignal('')
+  const asyncKeeper = useSignal('')
+  const asyncRequestId = useSignal('')
+  const asyncSelection = useSignal<{ identity: AsyncRequestIdentity; visit: number } | null>(null)
+  const asyncVisits = useRef(0)
   const expanded = useSignal<string | null>(null)
   const search = useSignal('')
   const sourceFilter = useSignal('')
@@ -793,6 +803,15 @@ function SkillsObservationPanel({ owner, onMutation }: {
     && currentStoredTokenRevision() === owner.authRevision
     && executionWorkspaceAuthority.peek() === owner.authority
     && owner.authority !== null
+
+  const inspectAsync = (identity: AsyncRequestIdentity) => {
+    if (!current()) return
+    asyncSubmitter.value = identity.submitted_by
+    asyncKeeper.value = identity.keeper_name
+    asyncRequestId.value = identity.request_id
+    asyncSelection.value = { identity: { submitted_by: identity.submitted_by,
+      request_id: identity.request_id, keeper_name: identity.keeper_name }, visit: ++asyncVisits.current }
+  }
 
   const load = async (signal?: AbortSignal) => {
     if (!current()) return
@@ -888,7 +907,17 @@ function SkillsObservationPanel({ owner, onMutation }: {
           ${editorNotice.value}
         </div>
       ` : null}
-      <${AsyncRequestObservationView} observation=${asyncObservation.value} error=${asyncObservationError.value} />
+      <${AsyncRequestObservationView} observation=${asyncObservation.value} error=${asyncObservationError.value} onInspect=${inspectAsync} />
+      <form class="my-2 flex flex-wrap items-end gap-2" aria-label="Retained async request lookup" onSubmit=${(event: SubmitEvent) => {
+        event.preventDefault()
+        inspectAsync({ submitted_by: asyncSubmitter.value, keeper_name: asyncKeeper.value, request_id: asyncRequestId.value })
+      }}>
+        <label>Request submitter<input class="ss-input" required value=${asyncSubmitter.value} onInput=${(event: Event) => { asyncSubmitter.value = (event.currentTarget as HTMLInputElement).value }} /></label>
+        <label>Request Keeper<input class="ss-input" required value=${asyncKeeper.value} onInput=${(event: Event) => { asyncKeeper.value = (event.currentTarget as HTMLInputElement).value }} /></label>
+        <label>Request ID<input class="ss-input mono" required value=${asyncRequestId.value} onInput=${(event: Event) => { asyncRequestId.value = (event.currentTarget as HTMLInputElement).value }} /></label>
+        <button type="submit" class="ss-btn">Look up exact request</button>
+      </form>
+      ${asyncSelection.value ? html`<${AsyncRequestDetails} key=${asyncSelection.value.visit} identity=${asyncSelection.value.identity} isCurrent=${current} />` : null}
       <div class="ss-muted" data-testid="skills-revision">
         snapshot ${res.snapshot.snapshot_revision.slice(0, 12)} · catalog ${res.snapshot.catalog_revision.slice(0, 12)}
         · ${resourceReadBoundLabel(res.snapshot.config)}

@@ -9,7 +9,7 @@ import { parseStrictRfc3339, type Rfc3339Instant } from '../lib/rfc3339'
 import { nestedCompositionScopeIsValid } from './skill-activation-scope'
 import { validate as isUuid, version as uuidVersion } from 'uuid'
 import { ApiRequestError, get, post, postControlPlane, type GetOptions } from './core'
-import { decodeSkillActivationAsyncEvidence, type DashboardSkillAsyncAction,
+import { decodeSkillActivation, decodeSkillActivationAsyncEvidence, type DashboardSkillActivation, type DashboardSkillAsyncAction,
   type DashboardSkillAsyncResultDelivery } from './dashboard-tools-prompts'
 
 export interface SkillIdentity {
@@ -1467,6 +1467,22 @@ function activationPayloadIsValid(
     && invocationValid
     && hasUniqueStrings(actionKeys)
     && deliveryValid
+}
+
+export function decodeExactSkillReference(raw: unknown): SkillReference {
+  const reference = decodeWithSchema(SkillReferenceSchema, raw, 'invalid_response')
+  if (!skillIdentityIsValid(reference.identity) || !isLowerHexRevision(reference.content_revision)) {
+    contractError('invalid_response', 'invalid exact Skill reference')
+  }
+  return reference
+}
+
+/** Reuse the ledger payload and semantic checks for an original child receipt. */
+export function decodeSkillActivationPayload(raw: unknown): DashboardSkillActivation {
+  const activation = decodeWithSchema(SkillActivationPayloadSchema, raw, 'invalid_response')
+  const trace = activation.turn_ref.slice(0, activation.turn_ref.lastIndexOf('#'))
+  if (!activationPayloadIsValid(activation, trace)) contractError('invalid_response', 'invalid original Skill activation')
+  return decodeSkillActivation(raw)
 }
 
 export function decodeSkillEvidenceResponse(raw: unknown): SkillEvidenceResponse {

@@ -17,6 +17,7 @@ import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { parseToolBlobMarker, type ToolBlobMarker } from '../lib/tool-blob-marker'
 import { fetchToolBlob } from '../api/tool-blob'
 import { CopyIdButton } from './common/copy-id-button'
+import { OriginalToolResultInspector } from './composition-observation-view'
 import { TextInput } from './common/input'
 import { ringFocusClasses } from './common/ring'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
@@ -820,6 +821,9 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
             ariaLabel="도구 호출 입력 복사"
           />
           <${ToolCallOutputBlock} entry=${entry} />
+          ${entry.execution_id?.trim() ? html`<${OriginalToolResultInspector}
+            keeper=${entry.keeper} executionId=${entry.execution_id} />`
+            : html`<p class="text-3xs">Original result unavailable: this row has no canonical execution identity.</p>`}
         </div>
       ` : null}
     </div>

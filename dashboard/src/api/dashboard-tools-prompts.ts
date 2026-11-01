@@ -1362,7 +1362,7 @@ function decodeSkillActionIdentity(
   throw new Error(`skill_activations ${label}.kind is unsupported`)
 }
 
-function decodeSkillActivation(value: unknown, label: string): DashboardSkillActivation {
+export function decodeSkillActivation(value: unknown, label = 'activation'): DashboardSkillActivation {
   const record = exactSkillActivationObject(value, label, [
     'identity',
     'content_revision',
@@ -1828,6 +1828,11 @@ function validateAsyncOccurrenceFacts(asyncActions: readonly DashboardSkillAsync
 function asyncEvidenceHash(value: unknown): string {
   const bytes = new TextEncoder().encode(JSON.stringify(value).replaceAll('\u007f', '\\u007f'))
   return bytesToHex(sha256(bytes))
+}
+
+/** The canonical original frame excludes later delivery/action observations. */
+export function skillActivationFrameSha256(activation: DashboardSkillActivation): string {
+  return asyncEvidenceHash({ ...activation, delivery: null, actions: [] })
 }
 
 function requireAsyncActionDelivery(action: DashboardSkillAsyncAction, deliveries: ReadonlyMap<string, DashboardSkillAsyncResultDelivery>): DashboardSkillAsyncResultDelivery {

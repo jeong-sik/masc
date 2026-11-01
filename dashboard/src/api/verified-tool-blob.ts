@@ -7,7 +7,11 @@ export async function fetchVerifiedToolBlobText(ref: ToolBlobReference, signal?:
   const subtle = globalThis.crypto?.subtle
   if (!subtle) throw new Error('이 브라우저에서는 저장된 파일을 검증할 수 없습니다. HTTPS 또는 localhost에서 다시 열어 주세요.')
   const response = await fetchToolBlob(ref.sha256, { signal })
-  if (typeof response.content !== 'string') throw new Error('저장된 파일 응답에 텍스트가 없습니다.')
+  if (response === null || typeof response !== 'object'
+      || Object.keys(response).sort().join(',') !== 'bytes,content,mime,sha256'
+      || typeof response.content !== 'string' || typeof response.mime !== 'string') {
+    throw new Error('저장된 파일 응답에 유효한 텍스트와 원본 식별자가 없습니다.')
+  }
   const bytes = new TextEncoder().encode(response.content)
   const digest = await subtle.digest('SHA-256', bytes)
   const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')

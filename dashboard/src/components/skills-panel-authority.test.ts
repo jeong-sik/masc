@@ -7,6 +7,7 @@ import { executionWorkspaceAuthority, type ExecutionWorkspaceAuthority } from '.
 
 const api = vi.hoisted(() => ({ fetchSkills: vi.fn(), fetchAsyncRequestObservation: vi.fn(), fetchSkillEvidence: vi.fn(),
   fetchWritableSkillSources: vi.fn(), createSkill: vi.fn(), readSkillSource: vi.fn(), previewSkillSource: vi.fn(), saveSkillSource: vi.fn() }))
+const exactRequests = vi.hoisted(() => ({ fetchAsyncRequestStatus: vi.fn() }))
 const workspace = vi.hoisted(() => ({ current: null as unknown as Signal<ExecutionWorkspaceAuthority | null> }))
 vi.mock('../store', async () => {
   const { signal } = await import('@preact/signals')
@@ -14,6 +15,7 @@ vi.mock('../store', async () => {
   return { executionWorkspaceAuthority: workspace.current }
 })
 vi.mock('../api/dashboard-skills', async original => ({ ...await original<typeof import('../api/dashboard-skills')>(), ...api }))
+vi.mock('../api/composition-observation', async original => ({ ...await original<typeof import('../api/composition-observation')>(), ...exactRequests }))
 import { SkillsPanel } from './skills-panel'
 import { clearStoredToken, setStoredToken } from '../api/core'
 
@@ -50,6 +52,7 @@ const load = () => fireEvent.click(screen.getByRole('button', { name: 'Load' }))
 beforeEach(() => {
   expect(executionWorkspaceAuthority).toBe(workspace.current)
   for (const mock of Object.values(api)) mock.mockReset()
+  exactRequests.fetchAsyncRequestStatus.mockReset().mockResolvedValue({ status: 'absent' })
   workspace.current.value = authority()
   setStoredToken('credential-a')
   api.fetchSkills.mockResolvedValue(catalog())
@@ -85,6 +88,36 @@ async function startSave() {
 }
 
 describe('Skills observation owner', () => {
+  it('retains the selected exact request after its active inventory row disappears', async () => {
+    const timer = vi.spyOn(window, 'setInterval')
+    exactRequests.fetchAsyncRequestStatus.mockResolvedValue({ status: 'observed',
+      request: { request_id: 'current-request', submitted_by: 'operator', keeper_name: 'owner', request_context: null, status: 'done' }, nested: { kind: 'absent' } })
+    try {
+      render(html`<${SkillsPanel} />`)
+      fireEvent.click(await screen.findByRole('button', { name: 'Inspect exact request' }))
+      await screen.findByText('Request state: done')
+      api.fetchAsyncRequestObservation.mockResolvedValue({ schema: 'masc.async-request-observation/v1', status: 'ready',
+        summary: { active: 0, runtime_owned: 0, ownership_unknown: 0, record_errors: 0 }, record_errors: [], startup_recovery: null, requests: [] })
+      const refresh = timer.mock.calls[0]![0]
+      await act(async () => refresh())
+      await screen.findByText('No durable active requests.')
+      expect(screen.getByRole('region', { name: 'Exact async request' })).toBeTruthy()
+      expect(screen.getByText('Request state: done')).toBeTruthy()
+      expect(exactRequests.fetchAsyncRequestStatus).toHaveBeenCalledWith({ submitted_by: 'operator', keeper_name: 'owner', request_id: 'current-request' }, { signal: expect.any(AbortSignal) })
+    } finally { timer.mockRestore() }
+  })
+
+  it('can look up an exact retained request that was never in the active inventory', async () => {
+    render(html`<${SkillsPanel} />`)
+    await screen.findByTestId('skills-table')
+    fireEvent.input(screen.getByLabelText('Request submitter'), { target: { value: 'original-submitter' } })
+    fireEvent.input(screen.getByLabelText('Request Keeper'), { target: { value: 'original-keeper' } })
+    fireEvent.input(screen.getByLabelText('Request ID'), { target: { value: 'retained-only-id' } })
+    fireEvent.submit(screen.getByRole('form', { name: 'Retained async request lookup' }))
+    await screen.findByText('Request absent')
+    expect(exactRequests.fetchAsyncRequestStatus).toHaveBeenCalledWith({ submitted_by: 'original-submitter', keeper_name: 'original-keeper', request_id: 'retained-only-id' }, { signal: expect.any(AbortSignal) })
+  })
+
   it('waits without fetching when workspace observation authority is unknown', async () => {
     workspace.current.value = null
     render(html`<${SkillsPanel} />`)

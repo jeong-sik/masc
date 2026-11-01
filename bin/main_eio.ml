@@ -4669,7 +4669,9 @@ let workspace_upgrade_cmd =
      leaf "restore" "Restore original journal bytes only while installed journal and input evidence remain unchanged."
        Term.(const (fun installation -> Restore_journal_installation installation) $ installation)] in
   Cmd.group (Cmd.info "workspace-upgrade" ~doc:"Inspect configuration upgrades and manage offline journal recovery.")
-    ~default:Term.(const run_configuration $ base_path $ apply $ source_sha256 $ restore) [journal]
+    ~default:Term.(const run_configuration $ base_path $ apply $ source_sha256 $ restore)
+    [journal; Masc_cli_board_posts_initialization.cmd ~base_path
+      ~run:(fun request -> Masc_cli_board_posts_initialization.run request)]
 
 let antigravity_account_cmd =
   let cli_path = Arg.(value & opt string "agy" & info ["cli-path"] ~docv:"EXECUTABLE") in

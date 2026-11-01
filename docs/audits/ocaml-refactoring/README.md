@@ -1553,6 +1553,29 @@ duplicated state proof obligation. Start with common
 availability/connection/binding-read fields rather than inventing a universal connector
 framework; test requests/decoded decisions, not TUI labels or layouts.
 
+Current-source continuation (2026-11-01, parent
+`aca5e20a9b4524226ece62410fc4431c961e0157`):
+[#47075](https://github.com/jeong-sik/masc/pull/47075) adds an immutable common
+`Channel_gate_connector.snapshot` to the connector interface. Discord, Slack,
+iMessage and Telegram capture it once per observation. Registry descriptors
+and `active_count` consume that same value instead of serializing and parsing
+availability back out of JSON. Registered-module constants supply identity;
+transport extensions remain separate from common fields.
+
+Common serialization projects binding success/failure, counts and rows from
+one `Result`. The three larger transports also retain that result internally
+instead of separate read-ok, error and binding-list fields. Telegram's emitted
+connection remains availability-qualified; its raw transport `connected ()`
+contract is unchanged. Discord capabilities remain descriptor-only. Gateway
+failure text never becomes an availability heuristic.
+
+The aggregate scenario uses an alternating snapshot source and an included
+module with overridden identity: it requires one observation, correct identity,
+and counts matching the rendered descriptors. Existing binding-store and
+transport scenarios remain. Syntax parsing and independent source review are
+recorded on the PR; builds/typechecks/behavior suites are not claimed. TUI
+redundant-field removal follows in the next layer.
+
 ### S7
 
 **Replace connector ingress scheduling flag combinations with explicit lane lifecycle**

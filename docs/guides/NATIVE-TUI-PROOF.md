@@ -232,6 +232,41 @@ artifact. A missing receipt, failed suite or partial artifact is not success.
 These are native executables with the dynamic libraries listed in the artifact;
 this is not a portable release package.
 
+Once the selected run has completed, inspect its conclusion and download the
+artifact for that source and run:
+
+```bash
+PROOF_DIR=artifacts/native-tui-proof-RUN_ID
+gh run view RUN_ID --repo jeong-sik/masc
+gh run download RUN_ID --repo jeong-sik/masc \
+  --name tui-macos-arm64-SOURCE_SHA-RUN_ID --dir "$PROOF_DIR"
+cat "$PROOF_DIR/receipt.json"
+cat "$PROOF_DIR/native-dependencies.txt"
+shasum -a 256 "$PROOF_DIR/masc-tui"
+chmod +x "$PROOF_DIR/masc-tui"
+"$PROOF_DIR/masc-tui" --build-commit
+```
+
+Replace `RUN_ID` and `SOURCE_SHA` with the selected identities. Compare the
+downloaded hash and embedded commit with the receipt and selected source. Inspect
+the dependency list and local loader result before using the executable;
+dependencies may refer to Homebrew paths or versions on the builder. Keep the
+original receipt and record subsequent workspace observations separately.
+
+For a server-bearing scenario, also verify the packaged server before using it:
+
+```bash
+cat "$PROOF_DIR/server-native-dependencies.txt"
+shasum -a 256 "$PROOF_DIR/masc"
+chmod +x "$PROOF_DIR/masc"
+"$PROOF_DIR/masc" build-commit
+```
+
+Compare its hash with `receipt.json`'s `server_sha256` and its embedded commit
+with the selected `SOURCE_SHA`. Check its dependency list and local loader result
+as well. A missing server or server digest in a server-bearing scenario is an
+incomplete artifact. The default scenario packages only the TUI.
+
 ## Actual workspace behavior
 
 Use a separate workspace, port and terminal. Keep the operator's server,
@@ -239,6 +274,16 @@ installation and drafts intact. Verify downloaded hashes and embedded commits,
 then run the matching server and TUI against that same isolated workspace.
 Do not pair a new TUI with an older server lacking its workspace endpoint and
 call that a feature verdict.
+
+Once the verified matching server is running on the isolated workspace and port,
+launch the downloaded TUI in a separate terminal:
+
+```bash
+"$PROOF_DIR/masc-tui" --base-path BASE_PATH --port PORT
+```
+
+Replace `BASE_PATH` and `PORT` with that isolated server's workspace and port,
+then verify the connected workspace before exercising the changed behavior.
 
 For file discovery, observe Code Ctrl-P, filtering, selecting and opening a
 file outside the current directory, and returning through Code history. Include

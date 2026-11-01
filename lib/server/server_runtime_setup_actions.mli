@@ -40,6 +40,11 @@ val import_account : binary:string -> base_path:string -> Yojson.Safe.t -> (Yojs
     opaque reference and projected metadata. Original source auth is untouched. *)
 val save : binary:string -> base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t,error) result
 (** Ordered selections refer to existing IDs or connection/model indexes.
+    Within this request, identical strictly parsed sources (integration,
+    endpoint, API key and account reference) share one prepared connection and
+    private credential. Connection/model indexes and selection order are kept;
+    differing source fields remain separate. Pending credentials retain the
+    native batch commit/rollback lifetime and never enter a global cache.
     Optional [default_runtime_id] preserves the current named default lane,
     using the concrete selections as its candidate order; otherwise it must
     name a selected concrete binding. Omission selects the first binding.
